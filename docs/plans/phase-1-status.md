@@ -27,6 +27,7 @@
 | WP1.4d Default tenant and VRF at setup | FINAL, committed locally | `23d6be5` | `IpamService::ensure_defaults` through the planner's first-use path; called by `POST /setup` as the setup principal and by `tenko serve` at start when setup is closed; failures log a warning; 1 route test, 2 domain tests |
 | WP1.10b UI fixes from E2E | FINAL, committed locally | `5997eed` | Host form sends only changed custom values (`null` clears); import preview shows the outcome per sheet, pages every listable row in a grid, loads all rows before apply; 1,495 UI tests; first load 64.1 KB gzip |
 | WP1.5c Paged preview rows | FINAL, committed locally | `46037b2` | `GET /imports/{id}/rows?limit&cursor` from the stored, encrypted preview; 409 `import.preview.stale` on a mapping change; `CredentialNotice.reason` is a code, text in `detail`; 4 route tests |
+| WP1.10c Preview paging in the UI | FINAL, committed locally | see the commit "page the import preview rows through the rows endpoint" | Cursor paging through `GET /imports/{id}/rows`, walk to the end before apply, restart on `import.preview.stale`; 1,502 UI tests; first load 64.1 KB gzip |
 | Design spike | Done, committed locally | `4880d8c` | All 16 owner decisions applied; mockups served from `design/` |
 
 ## Slice 2 work packages
