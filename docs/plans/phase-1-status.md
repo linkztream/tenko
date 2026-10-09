@@ -24,6 +24,8 @@
 | WP1.9 UI shell, auth, setup | FINAL, committed locally | `4c3778c`, `0bebd53` | 552 tests in 26 files; first-load bundle 68.9 KB gzip; XLIFF 2.0 en/sv compiled at build; typed client from `docs/api/openapi.json` with drift check; msw mock API; the CI `ui` job now runs lint and test |
 | WP1.10 UI IPAM, import, audit | FINAL, committed locally | `fa95cae` | 1,485 tests in 67 files; first load 63.9 KB gzip with message packs per route; grid, IPAM, hosts, move preview, jobs, audit, dashboard, import wizard and export, CA root link, TOTP QR code (`uqr`, MIT); `data-testid` convention and layout in `ui/README.md` |
 | WP1.11 Acceptance and E2E | In progress | `crates/tenko/tests/acceptance_*.rs`, `ui/e2e/**`, `ui/playwright.config.ts` | Started 2026-10-09 night: E1, E3, the move flow, persistence and the CA root against the real binary; Playwright scenarios for the wizard, password with TOTP and passkey (virtual authenticator), IPAM, import, move, audit and language; an `e2e` CI job proposed to the lead; `/test` 1.64.0 (Apache-2.0) |
+| WP1.4d Default tenant and VRF at setup | In progress | `tenko-ipam`, `routes/setup.rs`, `serve/mod.rs` | Found by the E2E tests: a fresh installation had no tenant or VRF until the first write; `IpamService::ensure_defaults` at setup and at start |
+| WP1.10b UI fixes from E2E | In progress | `ui/src/hosts/HostForm.tsx`, `ui/src/import/**` | Host form clears custom values through `customPatch`; the import preview renders per-sheet outcomes and pages through every row |
 | Design spike | Done, committed locally | `4880d8c` | All 16 owner decisions applied; mockups served from `design/` |
 
 ## Slice 2 work packages
