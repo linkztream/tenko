@@ -13,7 +13,7 @@ One `.xlsx` with about ten sheets, no merged cells, no formulas, one table per s
 |---|---|---|
 | `Index` | Network list. No header row. `A` = CIDR (`192.0.2.0/24`) or a single address (`192.0.2.9`), `B` = free-text description (`Network gear, hypervisors`, `NAS`, `Alarm`, `Servers`, `Printers`, `DHCP`). Not every network with its own sheet appears here, and one listed network has an empty sheet | 7 |
 | `192.0.2.0` | **Pre-filled address list**: header `IP | Beteckning | Login | Pass`, then every address of the /24 in order (255 rows). Only about 20 rows carry a name; a few carry login or password. Empty name means a free address, not a host | 256 |
-| `203.0.113.0` | Same layout, 125 rows, sparse names (`dir01`, `dir02`, `files`), one text value in the `IP` column, one stray value in an unlabeled column `E` | 126 |
+| `203.0.113.0` | Same layout, 125 rows, sparse names (`dc-a1`, `dc-a2`, `store7`), one text value in the `IP` column, one stray value in an unlabeled column `E` | 126 |
 | `192.0.2.64` (sub-range) | Same header, five rows, all named, one row with login and password. The first data row uses the network address itself as a host address (`.64`) | 6 |
 | `198.51.100.0` | **Device-centric layout**: header `Enhet | Nic1 | Nic2 | Nic3 | Nic4 | login | pass` (lowercase credentials). One row per device, one address per NIC column, and one device whose four NICs sit in four different networks (`198.51.100.3`, `198.51.100.67`, `203.0.113.3`, `192.0.2.3` in the fixture) | 5 |
 | `192.0.2.128` (sub-range) | **No header row**: data starts in row 1 with `IP | label | login | pass` positions implied. Two rows, labels with spaces and a dash (`idrac - host1`) | 2 |
@@ -27,7 +27,7 @@ Header vocabulary seen (Swedish and English, mixed case): `IP`, `Beteckning` (de
 ## Value patterns
 
 - Addresses are plain IPv4, one per cell. No CIDR in address columns, no ranges, no IPv6. The fixture adds one `192.0.2.10-20` range cell and one `2001:db8::10` cell so the transforms are tested, and marks them as additions.
-- Names: short host names (`dir01`, `files`, `proxmox`), product names (`DS1819`, `ups86`), labels with spaces and underscores (`SW_Rack`, `idrac - host1`, `Unifi Cloud Key`), and a model string in the `Login` column for one switch (`HP v1810-48G`), which is a misplaced description, not a login.
+- Names: short host names (`dc-a1`, `store7`, `hyper3`), product names (`MX-9200`, `ups41`), labels with spaces and underscores (`SW_Attic`, `idrac - host1`, `Wifi Controller Hall`), and a model string in the `Login` column for one switch (`Acme SG-2448`), which is a misplaced description, not a login.
 - Credentials: a few rows have a login and a password in plain text; one password is a four-digit number (read as an integer by spreadsheet tools, so leading zeros may be lost).
 - Most rows in the pre-filled sheets are an address and nothing else.
 
