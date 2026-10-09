@@ -10,18 +10,54 @@
 
 use std::{collections::BTreeMap, fmt};
 
+#[cfg(feature = "server")]
 use axum::{
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use tenko_core::{Coded, CodedError, FieldError, error::codes};
+use tenko_core::{Coded, CodedError, FieldError, error::codes as core_codes};
 use utoipa::ToSchema;
 
 /// Media type of problem details.
 pub const PROBLEM_JSON: &str = "application/problem+json";
 
+/// Stable error codes of the API platform (WP1.7, namespace `sys`).
+///
+/// Codes are stable once merged (API-08); the UI translates them.
+pub mod codes {
+    /// 404: no API route matches the path.
+    pub const ROUTE_NOT_FOUND: &str = "sys.route_not_found";
+    /// 405: the path exists but not for this method.
+    pub const METHOD_NOT_ALLOWED: &str = "sys.method_not_allowed";
+    /// 400: a query parameter is missing, repeated or malformed.
+    pub const INVALID_QUERY: &str = "sys.invalid_query";
+    /// 400: the pagination cursor is malformed or belongs to another query.
+    pub const INVALID_CURSOR: &str = "sys.invalid_cursor";
+    /// 403: a state-changing request failed the `Origin` check (CSRF guard).
+    pub const CSRF_REJECTED: &str = "sys.csrf_rejected";
+    /// 429: a rate limit was exceeded; `Retry-After` says when to retry.
+    pub const RATE_LIMITED: &str = "sys.rate_limited";
+    /// 422: an `Idempotency-Key` was reused for a different request.
+    pub const IDEMPOTENCY_MISMATCH: &str = "sys.idempotency_mismatch";
+    /// 409: a request with the same `Idempotency-Key` is still being processed.
+    pub const IDEMPOTENCY_IN_FLIGHT: &str = "sys.idempotency_in_flight";
+    /// 413: the request body exceeds the limit.
+    pub const BODY_TOO_LARGE: &str = "sys.body_too_large";
+    /// 403: plain HTTP from a source that is not a trusted reverse proxy (TLS mode c).
+    pub const PROXY_ONLY: &str = "sys.proxy_only";
+    /// 503: the node is not ready to serve (readiness probe).
+    pub const NOT_READY: &str = "sys.not_ready";
+    /// 503: the server is shutting down.
+    pub const SHUTTING_DOWN: &str = "sys.shutting_down";
+    /// 404: no audit record has the sequence number.
+    pub const AUDIT_NOT_FOUND: &str = "sys.audit.not_found";
+    /// 400: an unknown event topic was requested.
+    pub const UNKNOWN_TOPIC: &str = "sys.events.unknown_topic";
+}
+
 /// Body sent when a problem document cannot be serialized, which should never happen.
+#[cfg(feature = "server")]
 const FALLBACK_BODY: &str = concat!(
     r#"{"type":"about:blank","status":500,"code":"sys.internal","#,
     r#""title":"Internal Server Error","#,
@@ -90,7 +126,7 @@ impl ApiError {
     pub fn not_implemented(method: &str, path: &str) -> Self {
         Self::from_coded_error(
             CodedError::new(
-                codes::NOT_IMPLEMENTED,
+                core_codes::NOT_IMPLEMENTED,
                 501,
                 format!("{method} {path} is not implemented yet"),
             )
@@ -99,11 +135,57 @@ impl ApiError {
         )
     }
 
+    /// A 400 `sys.invalid_query` naming the offending query parameter.
+    pub fn invalid_query(parameter: &str, reason: impl Into<String>) -> Self {
+        let reason = reason.into();
+        Self::from_coded_error(
+            CodedError::new(
+                codes::INVALID_QUERY,
+                400,
+                format!("query parameter `{parameter}`: {reason}"),
+            )
+            .with_param("parameter", parameter)
+            .with_field_error(FieldError::new(parameter.to_owned(), codes::INVALID_QUERY)),
+        )
+    }
+
+    /// An error with one of the platform's own codes, a status and an English detail.
+    pub fn new(code: &'static str, status: u16, detail: impl Into<String>) -> Self {
+        Self::from_coded_error(CodedError::new(code, status, detail))
+    }
+
+    /// Adds a named parameter for the UI's translated message.
+    #[must_use]
+    pub fn with_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.0.params.insert(key.into(), value.into());
+        self
+    }
+
     /// The captured error.
     pub fn coded_error(&self) -> &CodedError {
         &self.0
     }
+
+    /// The HTTP status of the error.
+    pub fn status(&self) -> u16 {
+        self.0.status
+    }
 }
+
+impl ProblemDetails {
+    /// Whether the document carries the given code.
+    pub fn is(&self, code: &str) -> bool {
+        self.code == code
+    }
+}
+
+impl fmt::Display for ProblemDetails {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({}): {}", self.code, self.status, self.detail)
+    }
+}
+
+impl std::error::Error for ProblemDetails {}
 
 impl<E: Coded> From<E> for ApiError {
     fn from(error: E) -> Self {
@@ -117,6 +199,7 @@ impl fmt::Display for ApiError {
     }
 }
 
+#[cfg(feature = "server")]
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let mut problem = ProblemDetails::from(*self.0);
@@ -139,7 +222,7 @@ impl IntoResponse for ApiError {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 mod tests {
     use axum::body::to_bytes;
     use serde_json::{Value, json};
@@ -277,7 +360,7 @@ mod tests {
     fn not_implemented_names_the_endpoint() {
         let error = ApiError::not_implemented("GET", "/api/v1/tags");
         let coded = error.coded_error();
-        assert_eq!(coded.code, codes::NOT_IMPLEMENTED);
+        assert_eq!(coded.code, core_codes::NOT_IMPLEMENTED);
         assert_eq!(coded.status, 501);
         assert_eq!(coded.title, "Not Implemented");
         assert_eq!(coded.detail, "GET /api/v1/tags is not implemented yet");
@@ -319,6 +402,6 @@ mod tests {
     fn fallback_body_is_valid_problem_details() {
         let problem: ProblemDetails = serde_json::from_str(FALLBACK_BODY).expect("fallback json");
         assert_eq!(problem.status, 500);
-        assert_eq!(problem.code, codes::INTERNAL);
+        assert_eq!(problem.code, core_codes::INTERNAL);
     }
 }

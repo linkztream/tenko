@@ -140,7 +140,9 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/hosts/{id}", "get_host"),
     ("PATCH", "/hosts/{id}", "update_host"),
     ("DELETE", "/hosts/{id}", "delete_host"),
+    ("GET", "/hosts/{id}/interfaces", "list_host_interfaces"),
     ("POST", "/hosts/{id}/interfaces", "create_interface"),
+    ("GET", "/interfaces/{id}", "get_interface"),
     ("PATCH", "/interfaces/{id}", "update_interface"),
     ("DELETE", "/interfaces/{id}", "delete_interface"),
     // common: history, restore and bulk of every collection
@@ -296,10 +298,17 @@ async fn every_endpoint_answers_with_the_expected_status() {
         }
 
         // Every endpoint of the table is routed. An implemented endpoint answers with its own
-        // status (the area's tests cover it); a stub answers 501 with the stub body.
+        // status (the area's tests cover it); a stub answers 501 with the stub body. Without
+        // the server's fallbacks an unrouted request gets axum's bare 404 or 405, while an
+        // implemented endpoint answers a missing object with a problem document.
         let status = response.status();
+        let problem = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .is_some_and(|value| value == PROBLEM_JSON);
         assert!(
-            status != StatusCode::NOT_FOUND && status != StatusCode::METHOD_NOT_ALLOWED,
+            problem
+                || (status != StatusCode::NOT_FOUND && status != StatusCode::METHOD_NOT_ALLOWED),
             "{label}: not routed ({status})"
         );
         if status != StatusCode::NOT_IMPLEMENTED {
@@ -462,7 +471,13 @@ async fn a_valid_idempotency_key_reaches_the_handler() {
         .oneshot(request)
         .await
         .expect("response");
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // The key passes the extractor; what the handler answers (a stub's 501, or 503 while
+    // the area's service is not wired into the bare router) is the area's business.
+    assert_ne!(response.status(), StatusCode::BAD_REQUEST);
+    if content_type(&response) == PROBLEM_JSON {
+        let body = body_json(response).await;
+        assert_ne!(body["code"], "sys.invalid_value");
+    }
 }
 
 #[tokio::test]
