@@ -797,7 +797,18 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Apply an import as a job */
+        /**
+         * Apply an import as a job
+         * @description Credential columns (login, password) are never IPAM fields: each host's login and
+         *     password become one operator secret of that host in the vault. Apply refuses them with
+         *     403 `import.credentials.vault_required` unless the server has a vault and the principal
+         *     passes both `Action::Create` and `Action::Reveal` on `ObjectKind::Secret` (in practice
+         *     an administrator with a password-or-stronger session, the IAM-07 threshold). The problem
+         *     carries the parameter `reason`, one of `vault_unavailable`, `step_up_required`,
+         *     `forbidden` or `unauthenticated`, and for a step-up `required`, the weakest session
+         *     strength that would do. Setting `options.credentials` to `skip` in the mapping leaves the
+         *     credential columns out and the rest of the import is applied.
+         */
         post: operations["apply_import"];
         delete?: never;
         options?: never;
@@ -829,7 +840,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Preview the changes of an import: summary, rows and loss report */
+        /**
+         * Preview the changes of an import: summary, rows and loss report
+         * @description Credential columns (login, password) are never IPAM fields: each host's login and
+         *     password would become one operator secret of that host in the vault. `credentials`
+         *     says how many secrets would be created, replaced or left as they are, whether this
+         *     account may store them (`allowed`) and, when it may not, why (`reason`); then
+         *     `import.credentials.vault_required` is among the `blockers`. Storing them needs a vault
+         *     on the server and a principal that passes both create and reveal on secrets, in practice
+         *     an administrator with a password-or-stronger session (IAM-07). Setting
+         *     `options.credentials` to `skip` in the mapping leaves them out.
+         */
         get: operations["preview_import"];
         put?: never;
         post?: never;
@@ -1918,6 +1939,18 @@ export interface components {
             /** @description Whether only an administrator should lift it early (Hardened). */
             until_unlock: boolean;
         };
+        /** @description How many items of a kind get one action. */
+        ActionCount: {
+            /** @description The action. */
+            action: components["schemas"]["ItemAction"];
+            /** @description How many. */
+            count: number;
+            /**
+             * @description The item kind: `tenant`, `vrf`, `site`, `vlan`, `prefix`, `host`, `interface`,
+             *     `address` or `credential`.
+             */
+            kind: string;
+        };
         /** @description An IP address object. */
         Address: {
             dns_name?: components["schemas"]["Fqdn"] | null;
@@ -2042,6 +2075,16 @@ export interface components {
         };
         /** Format: uuid */
         ApiTokenId: string;
+        /** @description The answer of `POST /imports/{id}/apply`. */
+        ApplyAccepted: {
+            /** @description The job that applies the import; follow it at `/jobs/{id}`. */
+            job_id: string;
+        };
+        /** @description The body of `POST /imports/{id}/apply`. */
+        ApplyRequest: {
+            /** @description Plan warning codes acknowledged in addition to the mapping options. */
+            acknowledge?: string[];
+        };
         /** @description The `response` member of an assertion (`AuthenticatorAssertionResponseJSON`). */
         AssertionResponse: {
             /** @description The authenticator data, base64url. */
@@ -2314,6 +2357,31 @@ export interface components {
             /** @description Short English summary. */
             title: string;
         };
+        /** @description What the analysis found in one column. */
+        ColumnAnalysis: {
+            /** @description The column letter. */
+            column: string;
+            /** @description The header text, if the sheet has a header row and the cell is not empty. */
+            header?: string | null;
+            /** @description Up to five distinct values (credential columns show [`HIDDEN_SAMPLE`]). */
+            samples: string[];
+            /** @description Shapes of the data values. */
+            shapes: components["schemas"]["ShapeCounts"];
+            /** @description The suggested target. */
+            suggested: components["schemas"]["Target"];
+        };
+        /** @description The target of one column. */
+        ColumnMapping: {
+            /** @description The column letter (`A`). */
+            column: string;
+            /**
+             * @description For one of several address columns: the interface the addresses go on (`nic1`,
+             *     from a `Nic1` header by default).
+             */
+            interface?: string | null;
+            /** @description What the column is imported as. */
+            target: components["schemas"]["Target"];
+        };
         /** @description Body of `POST /jobs/{id}/steps/{index}/complete`. The whole body is optional. */
         CompleteStepRequest: {
             /**
@@ -2322,6 +2390,11 @@ export interface components {
              */
             note?: string | null;
         };
+        /**
+         * @description What to do when the store already holds an object with different values.
+         * @enum {string}
+         */
+        ConflictPolicy: "update" | "skip" | "fail";
         /**
          * @description Which context-specific word a password contained.
          * @enum {string}
@@ -2395,6 +2468,23 @@ export interface components {
             label: string;
             last_used_at?: components["schemas"]["Timestamp"] | null;
         };
+        /** @description What happens to the credential columns, in plain words. */
+        CredentialNotice: {
+            /** @description Whether this account may store them now. */
+            allowed: boolean;
+            /** @description Secrets that would be replaced because the value changed. */
+            changed: number;
+            /** @description Hosts with a login or password in the source. */
+            hosts: number;
+            /** @description Secrets that would be created. */
+            new: number;
+            /** @description Why not, when not allowed. */
+            reason?: string | null;
+            /** @description The statement shown to the user (English; the UI translates by the counts). */
+            statement: string;
+            /** @description Secrets that are already stored with the same value. */
+            unchanged: number;
+        };
         /** @description An acceptable credential algorithm. */
         CredentialParameter: {
             /**
@@ -2405,6 +2495,11 @@ export interface components {
             /** @description Always `public-key`. */
             type: string;
         };
+        /**
+         * @description What to do with credential columns.
+         * @enum {string}
+         */
+        CredentialPolicy: "import" | "skip";
         /** @description Definition of a custom field (IPAM-08). */
         CustomFieldDef: {
             /** @description Object kinds the field applies to. */
@@ -2604,6 +2699,19 @@ export interface components {
         };
         /** @description Key of a custom field (IPAM-08): `[a-z][a-z0-9_]{0,63}`. */
         FieldKey: string;
+        /** @description An uploaded file. */
+        FileView: {
+            /** @description The detected format. */
+            format: components["schemas"]["SourceFormat"];
+            /** @description The name as uploaded. */
+            name: string;
+            /**
+             * Format: int64
+             * @description Size in bytes.
+             */
+            size: number;
+            text?: components["schemas"]["TextInfo"] | null;
+        };
         /** @description DNS name */
         Fqdn: string;
         /**
@@ -2711,13 +2819,94 @@ export interface components {
          *     cannot collide on the same key.
          */
         IdempotencyKey: string;
+        /** @description Options of the whole import. */
+        ImportOptions: {
+            /** @description Warning codes of the plan the user acknowledges (IPAM-06). */
+            acknowledge?: string[];
+            /** @description What to do with existing objects that differ. */
+            conflict?: components["schemas"]["ConflictPolicy"];
+            /** @description What to do with credential columns. */
+            credentials?: components["schemas"]["CredentialPolicy"];
+            /** @description Decisions on proposed prefixes; a proposal without a decision is accepted. */
+            proposals?: components["schemas"]["ProposalDecision"][];
+            /** @description Tenant of hosts that name none; the default tenant when absent. */
+            tenant?: string | null;
+            /** @description VRF of items that name none; the default VRF when absent. */
+            vrf?: string | null;
+        };
+        /** @description The preview of an import (`GET /imports/{id}/preview`). */
+        ImportPreview: {
+            /**
+             * Format: int64
+             * @description The store revision the preview was computed from.
+             */
+            base_revision: number;
+            /**
+             * @description Codes of what stops apply (`import.credentials.vault_required`,
+             *     `ipam.plan.unacknowledged`, `import.conflict.kept`, a plan error code).
+             */
+            blockers: string[];
+            /** @description Whether apply would be accepted now. */
+            can_apply: boolean;
+            /** @description The credential statement. */
+            credentials: components["schemas"]["CredentialNotice"];
+            /** @description The import. */
+            id: string;
+            /** @description The loss report by sheet, row and column. */
+            loss: components["schemas"]["SheetLoss"][];
+            plan_error?: components["schemas"]["PlanProblem"] | null;
+            /** @description Proposed prefixes for addresses outside every known network. */
+            proposals: components["schemas"]["Proposal"][];
+            /** @description The first rows (see `total_rows`). */
+            rows: components["schemas"]["PreviewRow"][];
+            /** @description Per sheet: what it was read as and its row counts. */
+            sheets: components["schemas"]["SheetOutcome"][];
+            /** @description Counts. */
+            summary: components["schemas"]["PreviewSummary"];
+            /** @description Rows with data in the whole import. */
+            total_rows: number;
+            /** @description Warnings of the IPAM plan; those with `requires_ack` must be acknowledged. */
+            warnings: components["schemas"]["PlanWarning"][];
+        };
+        /**
+         * @description Where an import stands.
+         * @enum {string}
+         */
+        ImportState: "uploaded" | "mapped" | "applying" | "applied" | "failed";
         /** @description The multipart form of `POST /imports`. */
         ImportUpload: {
             /**
-             * Format: binary
-             * @description The spreadsheet or CSV file. Uploads are staged for 24 hours and limited to 20 MB.
+             * @description The spreadsheet or CSV files of one import: repeat the part for several files (for
+             *     example the files of a CSV export). A part is a file when it has a `filename`. All
+             *     files together are limited to 20 MB, and an upload is staged for 24 hours.
              */
-            file: string;
+            files: string[];
+        };
+        /**
+         * @description An upload with its analysis and mapping (`GET /imports/{id}`, the answer of
+         *     `POST /imports` and `PUT /imports/{id}/mapping`).
+         */
+        ImportView: {
+            /** @description Upload time. */
+            created: string;
+            /** @description When the staged upload is discarded. */
+            expires: string;
+            /** @description The uploaded files. */
+            files: components["schemas"]["FileView"][];
+            /** @description The import. */
+            id: string;
+            /** @description The latest apply job. */
+            job_id?: string | null;
+            /** @description Whether `mapping` is the user's (`true`) or the suggestion. */
+            mapped: boolean;
+            /** @description The mapping in force: the user's, else the suggested one. */
+            mapping: components["schemas"]["Mapping"];
+            /** @description Every sheet with its columns, shapes, samples and suggestion. */
+            sheets: components["schemas"]["SheetAnalysis"][];
+            /** @description Where it stands. */
+            state: components["schemas"]["ImportState"];
+            /** @description The targets the mapping step offers (custom fields included). */
+            targets: components["schemas"]["TargetInfo"][];
         };
         /** @description A network interface of a host. */
         Interface: {
@@ -3020,6 +3209,54 @@ export interface components {
             /** @enum {string} */
             kind: "custom_field";
         };
+        /**
+         * @description What reconciling did to an item.
+         * @enum {string}
+         */
+        ItemAction: "create" | "update" | "unchanged" | "kept";
+        /** @description A model item, by natural key. */
+        ItemKey: {
+            /** @enum {string} */
+            kind: "vlan";
+            /** @description Site name, `None` for global. */
+            site?: string | null;
+            /**
+             * Format: int32
+             * @description VLAN id.
+             */
+            vid: number;
+        } | {
+            /** @description The network. */
+            cidr: string;
+            /** @enum {string} */
+            kind: "prefix";
+            /** @description VRF name (lowercase). */
+            vrf: string;
+        } | {
+            /** @enum {string} */
+            kind: "host";
+            /** @description Host name. */
+            name: string;
+        } | {
+            /** @description Host name. */
+            host: string;
+            /** @enum {string} */
+            kind: "interface";
+            /** @description Interface name. */
+            name: string;
+        } | {
+            /** @description The address. */
+            ip: string;
+            /** @enum {string} */
+            kind: "address";
+            /** @description VRF name (lowercase). */
+            vrf: string;
+        } | {
+            /** @description Host name. */
+            host: string;
+            /** @enum {string} */
+            kind: "credential";
+        };
         /** @description A job as stored and shown. */
         Job: {
             cancel_requested?: components["schemas"]["Stamp"] | null;
@@ -3218,6 +3455,31 @@ export interface components {
             /** @enum {string} */
             status: "second_factor";
         };
+        /** @description Loss report entries by severity. */
+        LossCounts: {
+            /** @description Errors (values or rows not imported). */
+            error: number;
+            /** @description Information. */
+            info: number;
+            /** @description Warnings. */
+            warning: number;
+        };
+        /** @description One loss report entry. */
+        LossItem: {
+            /** @description Stable code (`import.address.unparsable`). */
+            code: string;
+            /** @description Column letter, when the entry is about a column or cell. */
+            column?: string | null;
+            /** @description English explanation with the offending value. */
+            detail: string;
+            /**
+             * Format: int32
+             * @description Row number (1-based), when the entry is about a row or cell.
+             */
+            row?: number | null;
+            /** @description How serious it is. */
+            severity: components["schemas"]["Severity"];
+        };
         /** @description MAC address, lowercase and colon-separated (00:00:5e:00:53:01) */
         MacAddr: string;
         /** @description A task for a person, with translatable text. */
@@ -3230,6 +3492,18 @@ export interface components {
             instruction: components["schemas"]["MessageKey"];
             undo?: components["schemas"]["MessageKey"] | null;
         };
+        /** @description The mapping of an import: one entry per sheet, and the options. */
+        Mapping: {
+            /** @description Options. */
+            options?: components["schemas"]["ImportOptions"];
+            /** @description Sheet mappings, in upload order. */
+            sheets: components["schemas"]["SheetMapping"][];
+        };
+        /**
+         * @description Where the network of a sheet comes from.
+         * @enum {string}
+         */
+        MaskSource: "index" | "name" | "row_count" | "addresses" | "user";
         /** @description Namespaced message key */
         MessageKey: string;
         /** @description Metadata shared by every IPAM object (IPAM-08, IPAM-09). */
@@ -4069,6 +4343,22 @@ export interface components {
             /** @enum {string} */
             preset: "custom";
         });
+        /** @description A problem that stops the plan, as in problem details. */
+        PlanProblem: {
+            /** @description Stable code (`ipam.prefix.overlap`). */
+            code: string;
+            /** @description English explanation. */
+            detail: string;
+            /** @description Named parameters for the translated message. */
+            params?: {
+                [key: string]: string;
+            };
+            /**
+             * Format: int32
+             * @description HTTP status the code maps to.
+             */
+            status: number;
+        };
         /** @description A human summary of a plan: counts per kind and action, warnings, and English lines. */
         PlanSummary: {
             /** @description Counts per kind and action, ordered by kind and action. */
@@ -4271,6 +4561,29 @@ export interface components {
          * @enum {string}
          */
         PrefixRole: "supernet" | "network";
+        /** @description One source row of the preview. */
+        PreviewRow: {
+            /** @description What it creates, updates or leaves unchanged. */
+            items: components["schemas"]["RowItem"][];
+            /** @description Sheet and row. */
+            location: components["schemas"]["SourceLocation"];
+            /** @description What became of the row. */
+            status: components["schemas"]["RowStatus"];
+        };
+        /** @description The counts of a preview. */
+        PreviewSummary: {
+            /** @description Chunks the apply job will write. */
+            chunks: number;
+            /** @description Items per kind and action, ordered by kind and action. */
+            counts: components["schemas"]["ActionCount"][];
+            /** @description English lines such as `21 hosts created`. */
+            lines: string[];
+            /** @description Loss report entries by severity. */
+            loss: components["schemas"]["LossCounts"];
+            plan?: components["schemas"]["PlanSummary"] | null;
+            /** @description Source rows by outcome. */
+            rows: components["schemas"]["RowCounts"];
+        };
         /** @description Who performs an action. */
         Principal: {
             /** @description The user. */
@@ -4344,6 +4657,32 @@ export interface components {
             profile: components["schemas"]["Profile"];
             /** @description Its toggle values. */
             settings: components["schemas"]["SecuritySettings"];
+        };
+        /** @description A proposed prefix for addresses outside every known network (rule 4). */
+        Proposal: {
+            /** @description Whether it is created (the mapping options decide; accepted by default). */
+            accepted: boolean;
+            /** @description The addresses it would hold. */
+            addresses: string[];
+            /**
+             * @description The proposed network.
+             * @example 198.51.100.64/26
+             */
+            cidr: string;
+            /** @description Where the first of its addresses comes from. */
+            origin: components["schemas"]["SourceLocation"];
+            /** @description The VRF name; the import's target VRF when absent. */
+            vrf?: string | null;
+        };
+        /** @description The user's decision on a proposed prefix. */
+        ProposalDecision: {
+            /** @description Whether to create it (the default when no decision is given). */
+            accept: boolean;
+            /**
+             * @description The proposed network, as the preview listed it.
+             * @example 198.51.100.64/26
+             */
+            cidr: string;
         };
         /** @description A range of addresses inside a prefix. */
         Range: {
@@ -4521,6 +4860,29 @@ export interface components {
             /** @description The new roles. */
             roles: components["schemas"]["RoleName"][];
         };
+        /** @description Rows of the source by outcome. */
+        RowCounts: {
+            /** @description Address-only rows of pre-filled lists (free addresses). */
+            free: number;
+            /** @description Rows that produced something. */
+            imported: number;
+            /** @description Rows left out. */
+            skipped: number;
+            /** @description Rows with data. */
+            total: number;
+        };
+        /** @description One item of a preview row. */
+        RowItem: {
+            /** @description What happens to it. */
+            action: components["schemas"]["ItemAction"];
+            /** @description The item. */
+            key: components["schemas"]["ItemKey"];
+        };
+        /**
+         * @description What became of a source row.
+         * @enum {string}
+         */
+        RowStatus: "free" | "imported" | "skipped";
         /** @description The relying party as shown by the browser. */
         RpEntity: {
             /** @description The RP ID: the host name of the installation. */
@@ -4692,6 +5054,103 @@ export interface components {
             /** @description The profiles to choose from (while open). */
             profiles?: components["schemas"]["ProfileInfo"][];
         };
+        /**
+         * @description How serious a loss report entry is.
+         * @enum {string}
+         */
+        Severity: "info" | "warning" | "error";
+        /** @description How many values of a column have each shape. */
+        ShapeCounts: {
+            /** @description Addresses. */
+            address: number;
+            /** @description Networks and addresses with a prefix length. */
+            cidr: number;
+            /** @description DUIDs. */
+            duid: number;
+            /** @description Empty cells. */
+            empty: number;
+            /** @description MAC addresses. */
+            mac: number;
+            /** @description Numbers. */
+            number: number;
+            /** @description Address ranges. */
+            range: number;
+            /** @description Text. */
+            text: number;
+        };
+        /** @description What the analysis found in one sheet. */
+        SheetAnalysis: {
+            /** @description Columns. */
+            columns: components["schemas"]["ColumnAnalysis"][];
+            /** @description Rows after the header with at least one value. */
+            data_rows: number;
+            /** @description The file the sheet comes from. */
+            file: string;
+            /** @description Whether the `Index` sheet lists the sheet's network or address. */
+            listed_in_index: boolean;
+            mask_source?: components["schemas"]["MaskSource"] | null;
+            /**
+             * @description Where the column roles of a sheet without header come from: the sheet whose header
+             *     layout was borrowed.
+             */
+            roles_from?: string | null;
+            /** @description Rows up to the last non-empty one. */
+            rows: number;
+            /** @description The sheet name (unique within the import). */
+            sheet: string;
+            /** @description The suggested mapping of the sheet. */
+            suggested: components["schemas"]["SheetMapping"];
+            /** @description Columns up to the widest row. */
+            width: number;
+        };
+        /**
+         * @description What a sheet is.
+         * @enum {string}
+         */
+        SheetKind: "index" | "network" | "host" | "list" | "skip";
+        /** @description The loss report entries of one sheet. */
+        SheetLoss: {
+            /** @description Entries in source order. */
+            entries: components["schemas"]["LossItem"][];
+            /** @description The sheet; `None` for entries about the whole import. */
+            sheet?: string | null;
+        };
+        /** @description The mapping of one sheet. */
+        SheetMapping: {
+            /**
+             * @description The network of a [`SheetKind::Network`] sheet.
+             * @example 192.0.2.0/24
+             */
+            cidr?: string | null;
+            /** @description Column targets; columns not listed are ignored. */
+            columns?: components["schemas"]["ColumnMapping"][];
+            /**
+             * Format: int32
+             * @description The header row, 1-based; `None` when the data starts in row 1.
+             */
+            header_row?: number | null;
+            /** @description What the sheet is. */
+            kind: components["schemas"]["SheetKind"];
+            /** @description The sheet name (unique within the import). */
+            sheet: string;
+        };
+        /** @description What became of a sheet. */
+        SheetOutcome: {
+            /** @description Its network, for network sheets. */
+            cidr?: string | null;
+            /** @description Address-only rows of a pre-filled list (free addresses). */
+            free: number;
+            /** @description Rows that produced something. */
+            imported: number;
+            /** @description What it was read as. */
+            kind: components["schemas"]["SheetKind"];
+            /** @description Rows with data after the header. */
+            rows: number;
+            /** @description The sheet. */
+            sheet: string;
+            /** @description Rows left out (see the loss report). */
+            skipped: number;
+        };
         /** @description A site, optionally nested (IPAM-04). */
         Site: {
             /** @description Matching Active Directory site name, for migration and DNS later. */
@@ -4745,6 +5204,26 @@ export interface components {
          * @enum {string}
          */
         SortOrder: "asc" | "desc";
+        /**
+         * @description The format of an uploaded file.
+         * @enum {string}
+         */
+        SourceFormat: "csv" | "xlsx" | "xls" | "ods";
+        /**
+         * @description Where in the source an item came from: sheet, row and column for spreadsheets, a path or
+         *     object name for other sources.
+         */
+        SourceLocation: {
+            /** @description Column letter or header. */
+            column?: string | null;
+            /**
+             * Format: int32
+             * @description Row number, 1-based as shown by spreadsheet programs.
+             */
+            row?: number | null;
+            /** @description Sheet, file or object collection. */
+            sheet?: string | null;
+        };
         /** @description When and by whom something happened. */
         Stamp: {
             /** @description The time (the proposer's request time). */
@@ -4969,6 +5448,20 @@ export interface components {
             /** @description The tag. */
             tag: string;
         };
+        /**
+         * @description Import target: `ignore`, `address`, `prefix`, `mask`, `host`, `dns_name`, `description`, `status`, `mode`, `lock`, `mac`, `duid`, `client_id`, `interface`, `interfaces`, `vlan`, `vlan_name`, `site`, `vrf`, `tenant`, `role`, `alloc`, `alarm_warn`, `alarm_crit`, `tags`, `login`, `password` or `custom.<key>`
+         * @example address
+         */
+        Target: string;
+        /** @description A target the mapping step offers. */
+        TargetInfo: {
+            /** @description Whether values become operator secrets in the vault instead of IPAM fields. */
+            credential: boolean;
+            /** @description English label (the UI translates by `target`). */
+            label: string;
+            /** @description The target. */
+            target: components["schemas"]["Target"];
+        };
         /** @description A tenant (IPAM-01). */
         Tenant: {
             /** @description Identifier. */
@@ -5006,6 +5499,15 @@ export interface components {
             name?: string | null;
             /** @description Replaces the tags. */
             tags?: components["schemas"]["Tag"][] | null;
+        };
+        /** @description How a text file was decoded. */
+        TextInfo: {
+            /** @description Whether the file started with a byte order mark (always the case for UTF-16). */
+            bom: boolean;
+            /** @description The field delimiter: `,`, `;` or a tab. */
+            delimiter: string;
+            /** @description The encoding: `UTF-8`, `windows-1252`, `UTF-16LE` or `UTF-16BE`. */
+            encoding: string;
         };
         /**
          * Format: date-time
@@ -8374,15 +8876,49 @@ export interface operations {
     };
     export_addresses_csv: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Not implemented yet */
-            501: {
+            /** @description `addresses.csv`: UTF-8 with a byte order mark, comma separated, CRLF line ends */
+            200: {
+                headers: {
+                    /** @description `no-store` */
+                    "Cache-Control"?: string;
+                    /** @description `attachment; filename="addresses.csv"` */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description Unknown or malformed query parameter (`sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8394,15 +8930,49 @@ export interface operations {
     };
     export_hosts_csv: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Not implemented yet */
-            501: {
+            /** @description `hosts.csv`: UTF-8 with a byte order mark, comma separated, CRLF line ends */
+            200: {
+                headers: {
+                    /** @description `no-store` */
+                    "Cache-Control"?: string;
+                    /** @description `attachment; filename="hosts.csv"` */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description Unknown or malformed query parameter (`sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8414,15 +8984,49 @@ export interface operations {
     };
     export_prefixes_csv: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Not implemented yet */
-            501: {
+            /** @description `prefixes.csv`: UTF-8 with a byte order mark, comma separated, CRLF line ends */
+            200: {
+                headers: {
+                    /** @description `no-store` */
+                    "Cache-Control"?: string;
+                    /** @description `attachment; filename="prefixes.csv"` */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description Unknown or malformed query parameter (`sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9315,8 +9919,64 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Not implemented yet */
-            501: {
+            /** @description The upload with its sheets, columns and suggested mapping */
+            201: {
+                headers: {
+                    /** @description The URL of the new import */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportView"];
+                };
+            };
+            /** @description No file in the upload, or the multipart body is malformed (`import.upload.empty`, `import.upload.malformed`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The upload exceeds the size limit (`import.upload.too_large`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A file is not CSV or a workbook (`import.upload.unsupported`) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A file cannot be read (`import.upload.unreadable`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Import not configured (`import.unavailable`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9338,8 +9998,53 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Not implemented yet */
-            501: {
+            /** @description The upload with its analysis and mapping */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportView"];
+                };
+            };
+            /** @description The identifier is not a UUID (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such import (`import.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The upload expired or was lost in a restart (`import.expired`, `import.upload.lost`) */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Import not configured (`import.unavailable`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9361,8 +10066,60 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Not implemented yet */
-            501: {
+            /** @description The upload is discarded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The identifier is not a UUID (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such import (`import.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The import is being applied (`import.state.conflict`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The upload expired or was lost in a restart (`import.expired`, `import.upload.lost`) */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Import not configured (`import.unavailable`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9375,17 +10132,99 @@ export interface operations {
     apply_import: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Repeating a POST with the same key returns the first result (API-04). */
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 /** @description Import identifier */
                 id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        /** @description Optional; an empty body means no extra acknowledgements */
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ApplyRequest"] | null;
+            };
+        };
         responses: {
-            /** @description Not implemented yet */
-            501: {
+            /** @description The apply job was accepted; follow it at `/jobs/{id}` */
+            202: {
+                headers: {
+                    /** @description The URL of the job */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplyAccepted"];
+                };
+            };
+            /** @description The identifier is not a UUID, or the body is not valid JSON for an apply request (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`), or the credential columns cannot be stored (`import.credentials.vault_required`, parameter `reason`: `vault_unavailable`, `step_up_required`, `forbidden` or `unauthenticated`; parameter `required`: the weakest session strength for a step-up) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such import (`import.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The plan has warnings that need an acknowledgement or conflicts, or the import is busy (`import.plan.blocked`, `import.state.conflict`, or the plan's own error) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The upload expired or was lost in a restart (`import.expired`, `import.upload.lost`) */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is too large (`sys.body_too_large`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is not JSON (`sys.invalid_request`) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Import not configured (`import.unavailable`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9405,10 +10244,86 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Mapping"];
+            };
+        };
         responses: {
-            /** @description Not implemented yet */
-            501: {
+            /** @description The upload with the mapping in force (`mapped` is true) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportView"];
+                };
+            };
+            /** @description The identifier is not a UUID, or the body is not valid JSON for a mapping (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such import (`import.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The import is being applied (`import.state.conflict`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The upload expired or was lost in a restart (`import.expired`, `import.upload.lost`) */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is not JSON (`sys.invalid_request`) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The mapping does not fit the upload (`import.mapping.invalid`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Import not configured (`import.unavailable`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9420,7 +10335,10 @@ export interface operations {
     };
     preview_import: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description How many source rows to list, 1 to 1,000. The summary and the loss report always cover the whole import. */
+                rows?: number;
+            };
             header?: never;
             path: {
                 /** @description Import identifier */
@@ -9430,8 +10348,53 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Not implemented yet */
-            501: {
+            /** @description The preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportPreview"];
+                };
+            };
+            /** @description The identifier is not a UUID, or a query parameter is unknown or out of range (`sys.invalid_request`, `sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such import (`import.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The upload expired or was lost in a restart (`import.expired`, `import.upload.lost`) */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Import not configured (`import.unavailable`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

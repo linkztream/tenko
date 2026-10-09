@@ -3277,9 +3277,66 @@
         ],
         "summary": "Export addresses as CSV",
         "operationId": "export_addresses_csv",
+        "parameters": [
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least this store revision (read-your-writes after a write).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
-          "501": {
-            "description": "Not implemented yet",
+          "200": {
+            "description": "`addresses.csv`: UTF-8 with a byte order mark, comma separated, CRLF line ends",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`no-store`"
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`attachment; filename=\"addresses.csv\"`"
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown or malformed query parameter (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3298,9 +3355,66 @@
         ],
         "summary": "Export hosts as CSV",
         "operationId": "export_hosts_csv",
+        "parameters": [
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least this store revision (read-your-writes after a write).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
-          "501": {
-            "description": "Not implemented yet",
+          "200": {
+            "description": "`hosts.csv`: UTF-8 with a byte order mark, comma separated, CRLF line ends",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`no-store`"
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`attachment; filename=\"hosts.csv\"`"
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown or malformed query parameter (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3319,9 +3433,66 @@
         ],
         "summary": "Export prefixes as CSV",
         "operationId": "export_prefixes_csv",
+        "parameters": [
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least this store revision (read-your-writes after a write).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
-          "501": {
-            "description": "Not implemented yet",
+          "200": {
+            "description": "`prefixes.csv`: UTF-8 with a byte order mark, comma separated, CRLF line ends",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`no-store`"
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`attachment; filename=\"prefixes.csv\"`"
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown or malformed query parameter (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4639,8 +4810,76 @@
           "required": true
         },
         "responses": {
-          "501": {
-            "description": "Not implemented yet",
+          "201": {
+            "description": "The upload with its sheets, columns and suggested mapping",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The URL of the new import"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No file in the upload, or the multipart body is malformed (`import.upload.empty`, `import.upload.malformed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The upload exceeds the size limit (`import.upload.too_large`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "A file is not CSV or a workbook (`import.upload.unsupported`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A file cannot be read (`import.upload.unreadable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Import not configured (`import.unavailable`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4671,8 +4910,58 @@
           }
         ],
         "responses": {
-          "501": {
-            "description": "Not implemented yet",
+          "200": {
+            "description": "The upload with its analysis and mapping",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is not a UUID (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such import (`import.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The upload expired or was lost in a restart (`import.expired`, `import.upload.lost`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Import not configured (`import.unavailable`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4701,8 +4990,61 @@
           }
         ],
         "responses": {
-          "501": {
-            "description": "Not implemented yet",
+          "204": {
+            "description": "The upload is discarded"
+          },
+          "400": {
+            "description": "The identifier is not a UUID (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such import (`import.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The import is being applied (`import.state.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The upload expired or was lost in a restart (`import.expired`, `import.upload.lost`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Import not configured (`import.unavailable`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4720,6 +5062,7 @@
           "import"
         ],
         "summary": "Apply an import as a job",
+        "description": "Credential columns (login, password) are never IPAM fields: each host's login and\npassword become one operator secret of that host in the vault. Apply refuses them with\n403 `import.credentials.vault_required` unless the server has a vault and the principal\npasses both `Action::Create` and `Action::Reveal` on `ObjectKind::Secret` (in practice\nan administrator with a password-or-stronger session, the IAM-07 threshold). The problem\ncarries the parameter `reason`, one of `vault_unavailable`, `step_up_required`,\n`forbidden` or `unauthenticated`, and for a step-up `required`, the weakest session\nstrength that would do. Setting `options.credentials` to `skip` in the mapping leaves the\ncredential columns out and the rest of the import is applied.",
         "operationId": "apply_import",
         "parameters": [
           {
@@ -4730,11 +5073,128 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Repeating a POST with the same key returns the first result (API-04).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
+        "requestBody": {
+          "description": "Optional; an empty body means no extra acknowledgements",
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ApplyRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
         "responses": {
-          "501": {
-            "description": "Not implemented yet",
+          "202": {
+            "description": "The apply job was accepted; follow it at `/jobs/{id}`",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The URL of the job"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is not a UUID, or the body is not valid JSON for an apply request (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`), or the credential columns cannot be stored (`import.credentials.vault_required`, parameter `reason`: `vault_unavailable`, `step_up_required`, `forbidden` or `unauthenticated`; parameter `required`: the weakest session strength for a step-up)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such import (`import.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The plan has warnings that need an acknowledgement or conflicts, or the import is busy (`import.plan.blocked`, `import.state.conflict`, or the plan's own error)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The upload expired or was lost in a restart (`import.expired`, `import.upload.lost`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The body is too large (`sys.body_too_large`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Import not configured (`import.unavailable`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4764,9 +5224,99 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Mapping"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "501": {
-            "description": "Not implemented yet",
+          "200": {
+            "description": "The upload with the mapping in force (`mapped` is true)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is not a UUID, or the body is not valid JSON for a mapping (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such import (`import.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The import is being applied (`import.state.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The upload expired or was lost in a restart (`import.expired`, `import.upload.lost`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The mapping does not fit the upload (`import.mapping.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Import not configured (`import.unavailable`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4784,6 +5334,7 @@
           "import"
         ],
         "summary": "Preview the changes of an import: summary, rows and loss report",
+        "description": "Credential columns (login, password) are never IPAM fields: each host's login and\npassword would become one operator secret of that host in the vault. `credentials`\nsays how many secrets would be created, replaced or left as they are, whether this\naccount may store them (`allowed`) and, when it may not, why (`reason`); then\n`import.credentials.vault_required` is among the `blockers`. Storing them needs a vault\non the server and a principal that passes both create and reveal on secrets, in practice\nan administrator with a password-or-stronger session (IAM-07). Setting\n`options.credentials` to `skip` in the mapping leaves them out.",
         "operationId": "preview_import",
         "parameters": [
           {
@@ -4794,11 +5345,72 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "rows",
+            "in": "query",
+            "description": "How many source rows to list, 1 to 1,000. The summary and the loss report always cover the whole import.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
-          "501": {
-            "description": "Not implemented yet",
+          "200": {
+            "description": "The preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is not a UUID, or a query parameter is unknown or out of range (`sys.invalid_request`, `sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such import (`import.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The upload expired or was lost in a restart (`import.expired`, `import.upload.lost`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Import not configured (`import.unavailable`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13421,6 +14033,30 @@
           }
         }
       },
+      "ActionCount": {
+        "type": "object",
+        "description": "How many items of a kind get one action.",
+        "required": [
+          "kind",
+          "action",
+          "count"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ItemAction",
+            "description": "The action."
+          },
+          "count": {
+            "type": "integer",
+            "description": "How many.",
+            "minimum": 0
+          },
+          "kind": {
+            "type": "string",
+            "description": "The item kind: `tenant`, `vrf`, `site`, `vlan`, `prefix`, `host`, `interface`,\n`address` or `credential`."
+          }
+        }
+      },
       "Address": {
         "type": "object",
         "description": "An IP address object.",
@@ -13916,6 +14552,32 @@
       "ApiTokenId": {
         "type": "string",
         "format": "uuid"
+      },
+      "ApplyAccepted": {
+        "type": "object",
+        "description": "The answer of `POST /imports/{id}/apply`.",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "The job that applies the import; follow it at `/jobs/{id}`."
+          }
+        }
+      },
+      "ApplyRequest": {
+        "type": "object",
+        "description": "The body of `POST /imports/{id}/apply`.",
+        "properties": {
+          "acknowledge": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Plan warning codes acknowledged in addition to the mapping options."
+          }
+        }
       },
       "AssertionResponse": {
         "type": "object",
@@ -14655,6 +15317,69 @@
           }
         }
       },
+      "ColumnAnalysis": {
+        "type": "object",
+        "description": "What the analysis found in one column.",
+        "required": [
+          "column",
+          "shapes",
+          "samples",
+          "suggested"
+        ],
+        "properties": {
+          "column": {
+            "type": "string",
+            "description": "The column letter."
+          },
+          "header": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The header text, if the sheet has a header row and the cell is not empty."
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Up to five distinct values (credential columns show [`HIDDEN_SAMPLE`])."
+          },
+          "shapes": {
+            "$ref": "#/components/schemas/ShapeCounts",
+            "description": "Shapes of the data values."
+          },
+          "suggested": {
+            "$ref": "#/components/schemas/Target",
+            "description": "The suggested target."
+          }
+        }
+      },
+      "ColumnMapping": {
+        "type": "object",
+        "description": "The target of one column.",
+        "required": [
+          "column",
+          "target"
+        ],
+        "properties": {
+          "column": {
+            "type": "string",
+            "description": "The column letter (`A`)."
+          },
+          "interface": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For one of several address columns: the interface the addresses go on (`nic1`,\nfrom a `Nic1` header by default)."
+          },
+          "target": {
+            "$ref": "#/components/schemas/Target",
+            "description": "What the column is imported as."
+          }
+        }
+      },
       "CompleteStepRequest": {
         "type": "object",
         "description": "Body of `POST /jobs/{id}/steps/{index}/complete`. The whole body is optional.",
@@ -14668,6 +15393,15 @@
           }
         },
         "additionalProperties": false
+      },
+      "ConflictPolicy": {
+        "type": "string",
+        "description": "What to do when the store already holds an object with different values.",
+        "enum": [
+          "update",
+          "skip",
+          "fail"
+        ]
       },
       "ContextKind": {
         "type": "string",
@@ -14849,6 +15583,55 @@
           }
         }
       },
+      "CredentialNotice": {
+        "type": "object",
+        "description": "What happens to the credential columns, in plain words.",
+        "required": [
+          "hosts",
+          "new",
+          "changed",
+          "unchanged",
+          "statement",
+          "allowed"
+        ],
+        "properties": {
+          "allowed": {
+            "type": "boolean",
+            "description": "Whether this account may store them now."
+          },
+          "changed": {
+            "type": "integer",
+            "description": "Secrets that would be replaced because the value changed.",
+            "minimum": 0
+          },
+          "hosts": {
+            "type": "integer",
+            "description": "Hosts with a login or password in the source.",
+            "minimum": 0
+          },
+          "new": {
+            "type": "integer",
+            "description": "Secrets that would be created.",
+            "minimum": 0
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why not, when not allowed."
+          },
+          "statement": {
+            "type": "string",
+            "description": "The statement shown to the user (English; the UI translates by the counts)."
+          },
+          "unchanged": {
+            "type": "integer",
+            "description": "Secrets that are already stored with the same value.",
+            "minimum": 0
+          }
+        }
+      },
       "CredentialParameter": {
         "type": "object",
         "description": "An acceptable credential algorithm.",
@@ -14867,6 +15650,14 @@
             "description": "Always `public-key`."
           }
         }
+      },
+      "CredentialPolicy": {
+        "type": "string",
+        "description": "What to do with credential columns.",
+        "enum": [
+          "import",
+          "skip"
+        ]
       },
       "CustomFieldDef": {
         "type": "object",
@@ -15465,6 +16256,42 @@
         "type": "string",
         "description": "Key of a custom field (IPAM-08): `[a-z][a-z0-9_]{0,63}`."
       },
+      "FileView": {
+        "type": "object",
+        "description": "An uploaded file.",
+        "required": [
+          "name",
+          "format",
+          "size"
+        ],
+        "properties": {
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat",
+            "description": "The detected format."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name as uploaded."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size in bytes.",
+            "minimum": 0
+          },
+          "text": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TextInfo",
+                "description": "How a CSV file was decoded."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "Fqdn": {
         "type": "string",
         "description": "DNS name"
@@ -15797,17 +16624,243 @@
         "type": "string",
         "description": "A client-chosen idempotency key (`Idempotency-Key` header, API-04): 1 to 255 visible\nASCII characters.\n\nThe store scopes keys per principal subject (see `Principal::subject`), so two users\ncannot collide on the same key."
       },
+      "ImportOptions": {
+        "type": "object",
+        "description": "Options of the whole import.",
+        "properties": {
+          "acknowledge": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Warning codes of the plan the user acknowledges (IPAM-06).",
+            "uniqueItems": true
+          },
+          "conflict": {
+            "$ref": "#/components/schemas/ConflictPolicy",
+            "description": "What to do with existing objects that differ."
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/CredentialPolicy",
+            "description": "What to do with credential columns."
+          },
+          "proposals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProposalDecision"
+            },
+            "description": "Decisions on proposed prefixes; a proposal without a decision is accepted."
+          },
+          "tenant": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Tenant of hosts that name none; the default tenant when absent."
+          },
+          "vrf": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "VRF of items that name none; the default VRF when absent."
+          }
+        }
+      },
+      "ImportPreview": {
+        "type": "object",
+        "description": "The preview of an import (`GET /imports/{id}/preview`).",
+        "required": [
+          "id",
+          "base_revision",
+          "summary",
+          "sheets",
+          "rows",
+          "total_rows",
+          "loss",
+          "proposals",
+          "credentials",
+          "warnings",
+          "can_apply",
+          "blockers"
+        ],
+        "properties": {
+          "base_revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The store revision the preview was computed from.",
+            "minimum": 0
+          },
+          "blockers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Codes of what stops apply (`import.credentials.vault_required`,\n`ipam.plan.unacknowledged`, `import.conflict.kept`, a plan error code)."
+          },
+          "can_apply": {
+            "type": "boolean",
+            "description": "Whether apply would be accepted now."
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/CredentialNotice",
+            "description": "The credential statement."
+          },
+          "id": {
+            "type": "string",
+            "description": "The import."
+          },
+          "loss": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SheetLoss"
+            },
+            "description": "The loss report by sheet, row and column."
+          },
+          "plan_error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlanProblem",
+                "description": "The error that stops the plan, if any."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proposals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Proposal"
+            },
+            "description": "Proposed prefixes for addresses outside every known network."
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreviewRow"
+            },
+            "description": "The first rows (see `total_rows`)."
+          },
+          "sheets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SheetOutcome"
+            },
+            "description": "Per sheet: what it was read as and its row counts."
+          },
+          "summary": {
+            "$ref": "#/components/schemas/PreviewSummary",
+            "description": "Counts."
+          },
+          "total_rows": {
+            "type": "integer",
+            "description": "Rows with data in the whole import.",
+            "minimum": 0
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanWarning"
+            },
+            "description": "Warnings of the IPAM plan; those with `requires_ack` must be acknowledged."
+          }
+        }
+      },
+      "ImportState": {
+        "type": "string",
+        "description": "Where an import stands.",
+        "enum": [
+          "uploaded",
+          "mapped",
+          "applying",
+          "applied",
+          "failed"
+        ]
+      },
       "ImportUpload": {
         "type": "object",
         "description": "The multipart form of `POST /imports`.",
         "required": [
-          "file"
+          "files"
         ],
         "properties": {
-          "file": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "binary"
+            },
+            "description": "The spreadsheet or CSV files of one import: repeat the part for several files (for\nexample the files of a CSV export). A part is a file when it has a `filename`. All\nfiles together are limited to 20 MB, and an upload is staged for 24 hours."
+          }
+        }
+      },
+      "ImportView": {
+        "type": "object",
+        "description": "An upload with its analysis and mapping (`GET /imports/{id}`, the answer of\n`POST /imports` and `PUT /imports/{id}/mapping`).",
+        "required": [
+          "id",
+          "state",
+          "created",
+          "expires",
+          "files",
+          "sheets",
+          "mapping",
+          "mapped",
+          "targets"
+        ],
+        "properties": {
+          "created": {
             "type": "string",
-            "format": "binary",
-            "description": "The spreadsheet or CSV file. Uploads are staged for 24 hours and limited to 20 MB."
+            "description": "Upload time."
+          },
+          "expires": {
+            "type": "string",
+            "description": "When the staged upload is discarded."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileView"
+            },
+            "description": "The uploaded files."
+          },
+          "id": {
+            "type": "string",
+            "description": "The import."
+          },
+          "job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The latest apply job."
+          },
+          "mapped": {
+            "type": "boolean",
+            "description": "Whether `mapping` is the user's (`true`) or the suggestion."
+          },
+          "mapping": {
+            "$ref": "#/components/schemas/Mapping",
+            "description": "The mapping in force: the user's, else the suggested one."
+          },
+          "sheets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SheetAnalysis"
+            },
+            "description": "Every sheet with its columns, shapes, samples and suggestion."
+          },
+          "state": {
+            "$ref": "#/components/schemas/ImportState",
+            "description": "Where it stands."
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TargetInfo"
+            },
+            "description": "The targets the mapping step offers (custom fields included)."
           }
         }
       },
@@ -16891,6 +17944,165 @@
         ],
         "description": "Any IPAM object, tagged by kind.\n\nAdjacently tagged (`{\"kind\": \"prefix\", \"data\": {...}}`) because several variants\ncarry IP addresses (see the encoding rules in `tenko_core::codec`)."
       },
+      "ItemAction": {
+        "type": "string",
+        "description": "What reconciling did to an item.",
+        "enum": [
+          "create",
+          "update",
+          "unchanged",
+          "kept"
+        ]
+      },
+      "ItemKey": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A VLAN.",
+            "required": [
+              "vid",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "vlan"
+                ]
+              },
+              "site": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Site name, `None` for global."
+              },
+              "vid": {
+                "type": "integer",
+                "format": "int32",
+                "description": "VLAN id.",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A prefix.",
+            "required": [
+              "vrf",
+              "cidr",
+              "kind"
+            ],
+            "properties": {
+              "cidr": {
+                "type": "string",
+                "description": "The network."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "prefix"
+                ]
+              },
+              "vrf": {
+                "type": "string",
+                "description": "VRF name (lowercase)."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A host.",
+            "required": [
+              "name",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "host"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "description": "Host name."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An interface.",
+            "required": [
+              "host",
+              "name",
+              "kind"
+            ],
+            "properties": {
+              "host": {
+                "type": "string",
+                "description": "Host name."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "interface"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "description": "Interface name."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An address.",
+            "required": [
+              "vrf",
+              "ip",
+              "kind"
+            ],
+            "properties": {
+              "ip": {
+                "type": "string",
+                "description": "The address."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "address"
+                ]
+              },
+              "vrf": {
+                "type": "string",
+                "description": "VRF name (lowercase)."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The credential of a host.",
+            "required": [
+              "host",
+              "kind"
+            ],
+            "properties": {
+              "host": {
+                "type": "string",
+                "description": "Host name."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "credential"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "A model item, by natural key."
+      },
       "Job": {
         "type": "object",
         "description": "A job as stored and shown.",
@@ -17499,6 +18711,71 @@
         ],
         "description": "The answer of a login step."
       },
+      "LossCounts": {
+        "type": "object",
+        "description": "Loss report entries by severity.",
+        "required": [
+          "info",
+          "warning",
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "integer",
+            "description": "Errors (values or rows not imported).",
+            "minimum": 0
+          },
+          "info": {
+            "type": "integer",
+            "description": "Information.",
+            "minimum": 0
+          },
+          "warning": {
+            "type": "integer",
+            "description": "Warnings.",
+            "minimum": 0
+          }
+        }
+      },
+      "LossItem": {
+        "type": "object",
+        "description": "One loss report entry.",
+        "required": [
+          "code",
+          "severity",
+          "detail"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable code (`import.address.unparsable`)."
+          },
+          "column": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Column letter, when the entry is about a column or cell."
+          },
+          "detail": {
+            "type": "string",
+            "description": "English explanation with the offending value."
+          },
+          "row": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Row number (1-based), when the entry is about a row or cell.",
+            "minimum": 0
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity",
+            "description": "How serious it is."
+          }
+        }
+      },
       "MacAddr": {
         "type": "string",
         "description": "MAC address, lowercase and colon-separated (00:00:5e:00:53:01)"
@@ -17536,6 +18813,37 @@
             ]
           }
         }
+      },
+      "Mapping": {
+        "type": "object",
+        "description": "The mapping of an import: one entry per sheet, and the options.",
+        "required": [
+          "sheets"
+        ],
+        "properties": {
+          "options": {
+            "$ref": "#/components/schemas/ImportOptions",
+            "description": "Options."
+          },
+          "sheets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SheetMapping"
+            },
+            "description": "Sheet mappings, in upload order."
+          }
+        }
+      },
+      "MaskSource": {
+        "type": "string",
+        "description": "Where the network of a sheet comes from.",
+        "enum": [
+          "index",
+          "name",
+          "row_count",
+          "addresses",
+          "user"
+        ]
       },
       "MessageKey": {
         "type": "string",
@@ -19799,6 +21107,41 @@
         ],
         "description": "The password policy of a security profile (TGL-01).\n\nThe presets differ in length only. There are no composition rules (NIST SP 800-63B,\nsection 3.1.1.2); the Custom preset adds an operator-chosen pattern. Serialized as an\nobject tagged by `preset`: `{\"preset\": \"standard\"}`, or for Custom\n`{\"preset\": \"custom\", \"min_length\": 10, \"max_length\": 128, \"pattern\": \"...\"}`."
       },
+      "PlanProblem": {
+        "type": "object",
+        "description": "A problem that stops the plan, as in problem details.",
+        "required": [
+          "code",
+          "status",
+          "detail"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable code (`ipam.prefix.overlap`)."
+          },
+          "detail": {
+            "type": "string",
+            "description": "English explanation."
+          },
+          "params": {
+            "type": "object",
+            "description": "Named parameters for the translated message.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "description": "HTTP status the code maps to.",
+            "minimum": 0
+          }
+        }
+      },
       "PlanSummary": {
         "type": "object",
         "description": "A human summary of a plan: counts per kind and action, warnings, and English lines.",
@@ -20533,6 +21876,83 @@
           "network"
         ]
       },
+      "PreviewRow": {
+        "type": "object",
+        "description": "One source row of the preview.",
+        "required": [
+          "location",
+          "status",
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RowItem"
+            },
+            "description": "What it creates, updates or leaves unchanged."
+          },
+          "location": {
+            "$ref": "#/components/schemas/SourceLocation",
+            "description": "Sheet and row."
+          },
+          "status": {
+            "$ref": "#/components/schemas/RowStatus",
+            "description": "What became of the row."
+          }
+        }
+      },
+      "PreviewSummary": {
+        "type": "object",
+        "description": "The counts of a preview.",
+        "required": [
+          "counts",
+          "lines",
+          "rows",
+          "loss",
+          "chunks"
+        ],
+        "properties": {
+          "chunks": {
+            "type": "integer",
+            "description": "Chunks the apply job will write.",
+            "minimum": 0
+          },
+          "counts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionCount"
+            },
+            "description": "Items per kind and action, ordered by kind and action."
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "English lines such as `21 hosts created`."
+          },
+          "loss": {
+            "$ref": "#/components/schemas/LossCounts",
+            "description": "Loss report entries by severity."
+          },
+          "plan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlanSummary",
+                "description": "The IPAM plan's own summary (objects per kind and change, physical writes); absent\nwhen the plan failed."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rows": {
+            "$ref": "#/components/schemas/RowCounts",
+            "description": "Source rows by outcome."
+          }
+        }
+      },
       "Principal": {
         "oneOf": [
           {
@@ -20734,6 +22154,64 @@
           "settings": {
             "$ref": "#/components/schemas/SecuritySettings",
             "description": "Its toggle values."
+          }
+        }
+      },
+      "Proposal": {
+        "type": "object",
+        "description": "A proposed prefix for addresses outside every known network (rule 4).",
+        "required": [
+          "cidr",
+          "addresses",
+          "accepted",
+          "origin"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "description": "Whether it is created (the mapping options decide; accepted by default)."
+          },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses it would hold."
+          },
+          "cidr": {
+            "type": "string",
+            "description": "The proposed network.",
+            "example": "198.51.100.64/26"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/SourceLocation",
+            "description": "Where the first of its addresses comes from."
+          },
+          "vrf": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The VRF name; the import's target VRF when absent."
+          }
+        }
+      },
+      "ProposalDecision": {
+        "type": "object",
+        "description": "The user's decision on a proposed prefix.",
+        "required": [
+          "cidr",
+          "accept"
+        ],
+        "properties": {
+          "accept": {
+            "type": "boolean",
+            "description": "Whether to create it (the default when no decision is given)."
+          },
+          "cidr": {
+            "type": "string",
+            "description": "The proposed network, as the preview listed it.",
+            "example": "198.51.100.64/26"
           }
         }
       },
@@ -21176,6 +22654,65 @@
             "description": "The new roles."
           }
         }
+      },
+      "RowCounts": {
+        "type": "object",
+        "description": "Rows of the source by outcome.",
+        "required": [
+          "total",
+          "free",
+          "imported",
+          "skipped"
+        ],
+        "properties": {
+          "free": {
+            "type": "integer",
+            "description": "Address-only rows of pre-filled lists (free addresses).",
+            "minimum": 0
+          },
+          "imported": {
+            "type": "integer",
+            "description": "Rows that produced something.",
+            "minimum": 0
+          },
+          "skipped": {
+            "type": "integer",
+            "description": "Rows left out.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "description": "Rows with data.",
+            "minimum": 0
+          }
+        }
+      },
+      "RowItem": {
+        "type": "object",
+        "description": "One item of a preview row.",
+        "required": [
+          "key",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ItemAction",
+            "description": "What happens to it."
+          },
+          "key": {
+            "$ref": "#/components/schemas/ItemKey",
+            "description": "The item."
+          }
+        }
+      },
+      "RowStatus": {
+        "type": "string",
+        "description": "What became of a source row.",
+        "enum": [
+          "free",
+          "imported",
+          "skipped"
+        ]
       },
       "RpEntity": {
         "type": "object",
@@ -21666,6 +23203,268 @@
           }
         }
       },
+      "Severity": {
+        "type": "string",
+        "description": "How serious a loss report entry is.",
+        "enum": [
+          "info",
+          "warning",
+          "error"
+        ]
+      },
+      "ShapeCounts": {
+        "type": "object",
+        "description": "How many values of a column have each shape.",
+        "required": [
+          "empty",
+          "address",
+          "cidr",
+          "range",
+          "mac",
+          "duid",
+          "number",
+          "text"
+        ],
+        "properties": {
+          "address": {
+            "type": "integer",
+            "description": "Addresses.",
+            "minimum": 0
+          },
+          "cidr": {
+            "type": "integer",
+            "description": "Networks and addresses with a prefix length.",
+            "minimum": 0
+          },
+          "duid": {
+            "type": "integer",
+            "description": "DUIDs.",
+            "minimum": 0
+          },
+          "empty": {
+            "type": "integer",
+            "description": "Empty cells.",
+            "minimum": 0
+          },
+          "mac": {
+            "type": "integer",
+            "description": "MAC addresses.",
+            "minimum": 0
+          },
+          "number": {
+            "type": "integer",
+            "description": "Numbers.",
+            "minimum": 0
+          },
+          "range": {
+            "type": "integer",
+            "description": "Address ranges.",
+            "minimum": 0
+          },
+          "text": {
+            "type": "integer",
+            "description": "Text.",
+            "minimum": 0
+          }
+        }
+      },
+      "SheetAnalysis": {
+        "type": "object",
+        "description": "What the analysis found in one sheet.",
+        "required": [
+          "sheet",
+          "file",
+          "rows",
+          "data_rows",
+          "width",
+          "listed_in_index",
+          "columns",
+          "suggested"
+        ],
+        "properties": {
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ColumnAnalysis"
+            },
+            "description": "Columns."
+          },
+          "data_rows": {
+            "type": "integer",
+            "description": "Rows after the header with at least one value.",
+            "minimum": 0
+          },
+          "file": {
+            "type": "string",
+            "description": "The file the sheet comes from."
+          },
+          "listed_in_index": {
+            "type": "boolean",
+            "description": "Whether the `Index` sheet lists the sheet's network or address."
+          },
+          "mask_source": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MaskSource",
+                "description": "Where the suggested network of a network sheet comes from."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "roles_from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the column roles of a sheet without header come from: the sheet whose header\nlayout was borrowed."
+          },
+          "rows": {
+            "type": "integer",
+            "description": "Rows up to the last non-empty one.",
+            "minimum": 0
+          },
+          "sheet": {
+            "type": "string",
+            "description": "The sheet name (unique within the import)."
+          },
+          "suggested": {
+            "$ref": "#/components/schemas/SheetMapping",
+            "description": "The suggested mapping of the sheet."
+          },
+          "width": {
+            "type": "integer",
+            "description": "Columns up to the widest row.",
+            "minimum": 0
+          }
+        }
+      },
+      "SheetKind": {
+        "type": "string",
+        "description": "What a sheet is.",
+        "enum": [
+          "index",
+          "network",
+          "host",
+          "list",
+          "skip"
+        ]
+      },
+      "SheetLoss": {
+        "type": "object",
+        "description": "The loss report entries of one sheet.",
+        "required": [
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LossItem"
+            },
+            "description": "Entries in source order."
+          },
+          "sheet": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The sheet; `None` for entries about the whole import."
+          }
+        }
+      },
+      "SheetMapping": {
+        "type": "object",
+        "description": "The mapping of one sheet.",
+        "required": [
+          "sheet",
+          "kind"
+        ],
+        "properties": {
+          "cidr": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The network of a [`SheetKind::Network`] sheet.",
+            "example": "192.0.2.0/24"
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ColumnMapping"
+            },
+            "description": "Column targets; columns not listed are ignored."
+          },
+          "header_row": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The header row, 1-based; `None` when the data starts in row 1.",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SheetKind",
+            "description": "What the sheet is."
+          },
+          "sheet": {
+            "type": "string",
+            "description": "The sheet name (unique within the import)."
+          }
+        }
+      },
+      "SheetOutcome": {
+        "type": "object",
+        "description": "What became of a sheet.",
+        "required": [
+          "sheet",
+          "kind",
+          "rows",
+          "free",
+          "imported",
+          "skipped"
+        ],
+        "properties": {
+          "cidr": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its network, for network sheets."
+          },
+          "free": {
+            "type": "integer",
+            "description": "Address-only rows of a pre-filled list (free addresses).",
+            "minimum": 0
+          },
+          "imported": {
+            "type": "integer",
+            "description": "Rows that produced something.",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SheetKind",
+            "description": "What it was read as."
+          },
+          "rows": {
+            "type": "integer",
+            "description": "Rows with data after the header.",
+            "minimum": 0
+          },
+          "sheet": {
+            "type": "string",
+            "description": "The sheet."
+          },
+          "skipped": {
+            "type": "integer",
+            "description": "Rows left out (see the loss report).",
+            "minimum": 0
+          }
+        }
+      },
       "Site": {
         "type": "object",
         "description": "A site, optionally nested (IPAM-04).",
@@ -21846,6 +23645,45 @@
           "asc",
           "desc"
         ]
+      },
+      "SourceFormat": {
+        "type": "string",
+        "description": "The format of an uploaded file.",
+        "enum": [
+          "csv",
+          "xlsx",
+          "xls",
+          "ods"
+        ]
+      },
+      "SourceLocation": {
+        "type": "object",
+        "description": "Where in the source an item came from: sheet, row and column for spreadsheets, a path or\nobject name for other sources.",
+        "properties": {
+          "column": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Column letter or header."
+          },
+          "row": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Row number, 1-based as shown by spreadsheet programs.",
+            "minimum": 0
+          },
+          "sheet": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Sheet, file or object collection."
+          }
+        }
       },
       "Stamp": {
         "type": "object",
@@ -22504,6 +24342,36 @@
           }
         }
       },
+      "Target": {
+        "type": "string",
+        "description": "Import target: `ignore`, `address`, `prefix`, `mask`, `host`, `dns_name`, `description`, `status`, `mode`, `lock`, `mac`, `duid`, `client_id`, `interface`, `interfaces`, `vlan`, `vlan_name`, `site`, `vrf`, `tenant`, `role`, `alloc`, `alarm_warn`, `alarm_crit`, `tags`, `login`, `password` or `custom.<key>`",
+        "examples": [
+          "address"
+        ]
+      },
+      "TargetInfo": {
+        "type": "object",
+        "description": "A target the mapping step offers.",
+        "required": [
+          "target",
+          "label",
+          "credential"
+        ],
+        "properties": {
+          "credential": {
+            "type": "boolean",
+            "description": "Whether values become operator secrets in the vault instead of IPAM fields."
+          },
+          "label": {
+            "type": "string",
+            "description": "English label (the UI translates by `target`)."
+          },
+          "target": {
+            "$ref": "#/components/schemas/Target",
+            "description": "The target."
+          }
+        }
+      },
       "Tenant": {
         "type": "object",
         "description": "A tenant (IPAM-01).",
@@ -22626,6 +24494,29 @@
           }
         },
         "additionalProperties": false
+      },
+      "TextInfo": {
+        "type": "object",
+        "description": "How a text file was decoded.",
+        "required": [
+          "encoding",
+          "bom",
+          "delimiter"
+        ],
+        "properties": {
+          "bom": {
+            "type": "boolean",
+            "description": "Whether the file started with a byte order mark (always the case for UTF-16)."
+          },
+          "delimiter": {
+            "type": "string",
+            "description": "The field delimiter: `,`, `;` or a tab."
+          },
+          "encoding": {
+            "type": "string",
+            "description": "The encoding: `UTF-8`, `windows-1252`, `UTF-16LE` or `UTF-16BE`."
+          }
+        }
       },
       "Timestamp": {
         "type": "string",
