@@ -5431,6 +5431,118 @@
         }
       }
     },
+    "/api/v1/imports/{id}/rows": {
+      "get": {
+        "tags": [
+          "import"
+        ],
+        "summary": "List the rows of the latest preview of an import",
+        "operationId": "list_import_rows",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Import identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1,000 (default 200)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page's `next_cursor`",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of preview rows",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportRowsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is not a UUID, a parameter is unknown or out of range, or the cursor is malformed (`sys.invalid_request`, `sys.invalid_query`, `sys.invalid_cursor`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such import (`import.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No preview for the current mapping, or the mapping changed since the cursor was made (`import.preview.stale`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The upload expired or was lost in a restart (`import.expired`, `import.upload.lost`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Import not configured (`import.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/interfaces/bulk": {
       "post": {
         "tags": [
@@ -15848,6 +15960,13 @@
             "description": "Secrets that would be replaced because the value changed.",
             "minimum": 0
           },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The same in English, for logs and clients without translations."
+          },
           "hosts": {
             "type": "integer",
             "description": "Hosts with a login or password in the source.",
@@ -15863,7 +15982,7 @@
               "string",
               "null"
             ],
-            "description": "Why not, when not allowed."
+            "description": "Why not, when not allowed, as a code the UI translates: `forbidden`,\n`step_up_required`, `unauthenticated` or `vault_unavailable`."
           },
           "statement": {
             "type": "string",
@@ -17036,6 +17155,43 @@
               "$ref": "#/components/schemas/PlanWarning"
             },
             "description": "Warnings of the IPAM plan; those with `requires_ack` must be acknowledged."
+          }
+        }
+      },
+      "ImportRowsPage": {
+        "type": "object",
+        "description": "A page of the rows of the latest preview of an import.",
+        "required": [
+          "items",
+          "total_rows",
+          "base_revision"
+        ],
+        "properties": {
+          "base_revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The store revision the preview was computed from.",
+            "minimum": 0
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreviewRow"
+            },
+            "description": "The rows of the page, in source order."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The cursor of the next page; `null` after the last row."
+          },
+          "total_rows": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rows in the whole preview.",
+            "minimum": 0
           }
         }
       },

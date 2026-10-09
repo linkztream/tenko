@@ -72,6 +72,7 @@ export const apiOperations = [
   { id: "apply_import", method: "post", path: "/api/v1/imports/{id}/apply", tags: ["import"], summary: "Apply an import as a job" },
   { id: "set_import_mapping", method: "put", path: "/api/v1/imports/{id}/mapping", tags: ["import"], summary: "Set the column mapping, transforms and conflict policy" },
   { id: "preview_import", method: "get", path: "/api/v1/imports/{id}/preview", tags: ["import"], summary: "Preview the changes of an import: summary, rows and loss report" },
+  { id: "list_import_rows", method: "get", path: "/api/v1/imports/{id}/rows", tags: ["import"], summary: "List the rows of the latest preview of an import" },
   { id: "bulk_interfaces", method: "post", path: "/api/v1/interfaces/bulk", tags: ["common"], summary: "Change several interfaces in one request" },
   { id: "get_interface", method: "get", path: "/api/v1/interfaces/{id}", tags: ["hosts"], summary: "Get one interface" },
   { id: "update_interface", method: "patch", path: "/api/v1/interfaces/{id}", tags: ["hosts"], summary: "Update an interface" },

@@ -860,6 +860,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/imports/{id}/rows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the rows of the latest preview of an import */
+        get: operations["list_import_rows"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/interfaces/bulk": {
         parameters: {
             query?: never;
@@ -2520,11 +2537,16 @@ export interface components {
             allowed: boolean;
             /** @description Secrets that would be replaced because the value changed. */
             changed: number;
+            /** @description The same in English, for logs and clients without translations. */
+            detail?: string | null;
             /** @description Hosts with a login or password in the source. */
             hosts: number;
             /** @description Secrets that would be created. */
             new: number;
-            /** @description Why not, when not allowed. */
+            /**
+             * @description Why not, when not allowed, as a code the UI translates: `forbidden`,
+             *     `step_up_required`, `unauthenticated` or `vault_unavailable`.
+             */
             reason?: string | null;
             /** @description The statement shown to the user (English; the UI translates by the counts). */
             statement: string;
@@ -2924,6 +2946,23 @@ export interface components {
             total_rows: number;
             /** @description Warnings of the IPAM plan; those with `requires_ack` must be acknowledged. */
             warnings: components["schemas"]["PlanWarning"][];
+        };
+        /** @description A page of the rows of the latest preview of an import. */
+        ImportRowsPage: {
+            /**
+             * Format: int64
+             * @description The store revision the preview was computed from.
+             */
+            base_revision: number;
+            /** @description The rows of the page, in source order. */
+            items: components["schemas"]["PreviewRow"][];
+            /** @description The cursor of the next page; `null` after the last row. */
+            next_cursor?: string | null;
+            /**
+             * Format: int64
+             * @description Rows in the whole preview.
+             */
+            total_rows: number;
         };
         /**
          * @description Where an import stands.
@@ -10626,6 +10665,88 @@ export interface operations {
             };
             /** @description No such import (`import.not_found`) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The upload expired or was lost in a restart (`import.expired`, `import.upload.lost`) */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Import not configured (`import.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_import_rows: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 200) */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor` */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Import identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of preview rows */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportRowsPage"];
+                };
+            };
+            /** @description The identifier is not a UUID, a parameter is unknown or out of range, or the cursor is malformed (`sys.invalid_request`, `sys.invalid_query`, `sys.invalid_cursor`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such import (`import.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No preview for the current mapping, or the mapping changed since the cursor was made (`import.preview.stale`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
