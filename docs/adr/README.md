@@ -54,7 +54,7 @@ The date is the date the ADR was written or last changed status.
 | ADR | Title | Status | Date |
 |---|---|---|---|
 | [0001](0001-implementation-language.md) | Implementation language | Accepted | 2026-10-09 |
-| [0002](0002-storage-and-replication.md) | Storage and replication | Proposed (pending Spike A) | 2026-10-09 |
+| [0002](0002-storage-and-replication.md) | Storage and replication | Accepted with conditions (Spike A passed 2026-10-09) | 2026-10-09 |
 | [0003](0003-embedded-spa-ui.md) | Embedded single-page UI | Accepted (mechanism refined by ADR 0008) | 2026-10-09 |
 | [0004](0004-single-binary-roles.md) | Single binary with roles | Accepted | 2026-10-09 |
 | [0005](0005-ipam-intent-hub.md) | IPAM as the intent hub | Accepted | 2026-10-09 |

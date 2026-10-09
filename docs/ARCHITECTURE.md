@@ -116,13 +116,13 @@ Verification: in a 3-node cluster one controller is killed and the `dns` and `dh
 
 ## Storage and replication
 
-Status: **Proposed** (ADR 0002), pending the Spike A gate described below.
+Status: **Accepted with conditions** (ADR 0002). The Spike A gate passed on 2026-10-09; the measured result and the conditions are summarized below.
 
-The intended design is an embedded Raft store over an embedded KV store, conditional on holding more than 1 M records in a single zone. One Raft group carries configuration, IPAM, zones and policies. It is split into more groups if the Phase 0 measurement points that way. Four design choices are built in from the start.
+The design is an embedded Raft store (`openraft`) over an embedded KV store (`redb`), confirmed with more than 1 M records in a single zone. One Raft group carries configuration, IPAM, zones and policies. It is split into more groups only if later measurements point that way. Four design choices are built in from the start.
 
-1. **Raft replicates changes, not data.** State lives in an embedded KV store (`redb` or RocksDB). One million records occupy roughly 150 to 300 MB on disk. Serving uses an in-memory index per node, so the Raft log is never in the query path.
-2. **Bulk imports are batched.** An AXFR of 1 M records becomes about 100 log entries of 10k records, not 1 M entries. Snapshots are streamed in chunks to new nodes and the log is compacted behind the snapshot.
-3. **The write rate is low.** 100k AD clients re-registering every 24 h produce about 1.2 updates per second, while Raft in a LAN handles thousands per second.
+1. **Raft replicates changes, not data.** State lives in an embedded KV store (`redb`). Measured: 6 M RRsets are 862 MiB of raw key and value data, 2.0 GiB in `sm.redb` after an incremental load and 1.0 GiB after a snapshot re-seed. Serving uses an in-memory index per node (about 139 bytes per RRset), so the Raft log is never in the query path.
+2. **All writes are batched into Raft entries.** An AXFR of 1 M records becomes about 100 log entries of 10k records, not 1 M entries, and steady-state updates are coalesced too: openraft 0.9 awaits each log flush before the next client request, so one entry per update saturates at about 120 writes/s, while coalesced entries sustain 1,000 updates/s with p99 write latency around 200 ms. Snapshots are streamed in chunks to new nodes and the log is purged behind the snapshot.
+3. **The write rate is low.** 100k AD clients re-registering every 24 h produce about 1.2 updates per second, three orders of magnitude below what the coalesced write path sustained in Spike A.
 4. **DHCP leases do not go through global Raft.** They are hot, because every DORA is a write. They are synchronized between failover partners with the failover protocol (DHCP-12) and kept in a local WAL per node (DHCP-07).
 
 Precedent: etcd recommends staying under 8 GB per cluster, and TiKV and CockroachDB run terabytes through multi-Raft. DDI stays far below the etcd limit even with several zones of 1 M records.
@@ -131,27 +131,33 @@ Precedent: etcd recommends staying under 8 GB per cluster, and TiKV and Cockroac
 
 | Data | Lives in | Replication |
 |---|---|---|
-| Configuration, IPAM, zones, policies | Embedded KV store (`redb` or RocksDB) | Raft group (one, split if Spike A indicates) |
+| Configuration, IPAM, zones, policies | Embedded KV store (`redb`), on SSD or NVMe only (OPS-19) | Raft group (one; writes coalesced into entries) |
 | DHCP leases | Local WAL on each `dhcp` node | Synchronized between failover partners, not through Raft |
 | Serving data | In-memory index per node, built from the local copy | Not replicated itself; derived from the replicated state |
 
 Every node also keeps a local cache of the state it needs, which is what makes data plane independence possible.
 
-### Phase 0 gate (Spike A)
+### Phase 0 gate (Spike A): passed
 
-A zone with 1 M records and a zone with 5 M records are loaded and measured:
+A real in-process openraft cluster of three voters over redb was loaded with 5 M A records in one zone plus 20 percent PTR records (6 M RRsets) on an NVMe SSD. Results against the thresholds:
 
-| Measurement | Pass criterion |
-|---|---|
-| Import time | Recorded |
-| RSS at 5 M records | Below 2 GB |
-| Catch-up time of a new node | Below 5 minutes on 1 Gbit |
-| IXFR delta computation | Recorded |
-| p99 query latency under 1k updates per second | Unaffected |
+| Measurement | Pass criterion | Measured |
+|---|---|---|
+| Import time | Recorded | 82 s into 3 voters (73k records/s); 26 s into one voter |
+| RSS at 5 M records | Below 2 GB | 1.17 GiB per node |
+| Catch-up time of a new node | Below 5 minutes on 1 Gbit | 19.1 s in process; 896.6 MiB snapshot, 7.5 s at 1 Gbit/s |
+| IXFR delta computation | Recorded | Last 10,000 changes from the journal table in about 2 ms |
+| p99 query latency under 1k updates per second | Unaffected | 1.6 us against a 1.4 us baseline (1.14x) |
 
-The gate passes if the three thresholds (RSS, catch-up time, p99 latency) hold; import time and IXFR delta computation are recorded for reference. Scripts and results live in `bench/`, and the decision is recorded in ADR 0002, which stays Proposed until then.
+Conditions that follow from the measurements (details in ADR 0002):
 
-**Fallback if the gate fails:** Raft carries only configuration, IPAM and policies. Zone data is replicated between DDI nodes with built-in IXFR and NOTIFY in a primary/secondary arrangement, which must be built anyway for interoperability with BIND and Windows (DNS-09).
+- The store runs on SSD or NVMe only. On an SMR hard disk the same load was 93 times slower and the leader lost leadership under write load (OPS-19).
+- Writes are coalesced into Raft entries; dynamic updates return to the client after apply, so update latency of 50 to 200 ms under heavy load is expected.
+- Disk usage is about 4x raw per node; space is reclaimed by snapshot-and-purge and by re-seeding a node from a snapshot, not by online compaction.
+- A compact index layout is needed before zones beyond about 10 M RRsets per node are supported.
+- Still to build and measure in Phase 1: atomic index swap during snapshot install, crash and restart recovery, failover, and a real network transport.
+
+Scripts and results live in `bench/spike-a-raft/`. The fallback (Raft for configuration only, zone data via built-in IXFR/NOTIFY) was not needed and is kept in ADR 0002 for reference.
 
 ## Cluster communication
 
@@ -448,8 +454,8 @@ These choices are candidates, to be confirmed in the Phase 0 spikes. Final choic
 |---|---|---|
 | DNS wire format, zone files, DNSSEC, XFR, TSIG | `domain` (NLnet Labs) or `hickory-proto` | Chosen after Spike B |
 | DHCPv4 and DHCPv6 wire format | `dhcproto` | Kea is the semantic reference |
-| Raft | `openraft` | Subject to the Spike A gate |
-| Embedded KV store | `redb` (pure Rust) or RocksDB | Recorded in ADR 0002 |
+| Raft | `openraft` 0.9 | Confirmed by Spike A (ADR 0002); writes coalesced into entries |
+| Embedded KV store | `redb` | Confirmed by Spike A (ADR 0002); SSD or NVMe required |
 | Kerberos and GSS-TSIG | `cross-krb5` (Linux) and `sspi-rs` (Windows) | Phase 4 (DNS-28) |
 | LDAP | `ldap3` | AD reads for migration |
 | TLS, QUIC, HTTP | `rustls` with `aws-lc-rs`; `quinn` (DoQ); `hyper` and `h3` (DoH) | |

@@ -53,35 +53,23 @@ The move job (IPAM-19) is introduced in Phase 1 and gains automation as the engi
 3. Spikes A, B and C are run.
 4. The CI pipeline is set up.
 
-### Spike A: Raft storage gate
+### Spike A: Raft storage gate (passed)
 
-This spike decides ADR 0002 (currently Proposed). The embedded Raft store is conditional on zones with more than 1 M records working.
+This spike decided ADR 0002, now Accepted with conditions. The embedded Raft store was conditional on zones with more than 1 M records working.
 
-Procedure: load a zone with 1 M records and with 5 M records, and measure:
+Procedure: load a zone with 1 M records and with 5 M records (plus 20 percent PTR records in reverse zones), and measure import time, RSS, catch-up time for a new node, IXFR delta generation and p99 query latency under 1k updates/s.
 
-- import time
-- RSS
-- catch-up time for a new node
-- IXFR delta generation
-- p99 query latency under 1k updates/s
+**Result (2026-10-09, Windows, NVMe, real in-process openraft cluster of 3 voters over redb):**
 
-Pass criteria:
+| Measure | Threshold | Measured |
+|---|---|---|
+| RSS at 5 M records (6 M RRsets) | Below 2 GB | 1.17 GiB per node |
+| New node caught up over 1 Gbit | Below 5 minutes | 19.1 s in process; 896.6 MiB snapshot, 7.5 s at 1 Gbit/s |
+| p99 query latency under 1k updates/s | Unaffected | 1.6 us against 1.4 us baseline |
 
-| Measure | Threshold |
-|---|---|
-| RSS at 5 M records | Below 2 GB |
-| New node caught up over 1 Gbit | Below 5 minutes |
-| p99 query latency under 1k updates/s | Unaffected |
+Conditions recorded in ADR 0002: SSD or NVMe is mandatory for the store (an SMR hard disk was 93x slower and lost leadership under load), updates are coalesced into Raft entries (openraft 0.9 saturates at about 120 single-entry writes/s), disk usage is about 4x raw per node and is reclaimed by snapshot re-seeding, and a compact index layout is needed beyond about 10 M RRsets per node. Phase 1 must add the atomic index swap on snapshot install, crash and restart recovery, failover tests and a real network transport. Results and scripts: `bench/spike-a-raft/`.
 
-Fallback if the gate fails: Raft is used only for configuration, IPAM and policies. Zone data is replicated between DDI nodes with built-in IXFR/NOTIFY primary/secondary, which must be built anyway for interoperability (DNS-09). The storage group may also be split into several Raft groups if the measurement points that way.
-
-Why the gate is expected to pass (details in ARCHITECTURE.md):
-
-- Raft replicates changes, not data. State lives in an embedded KV store (redb or RocksDB), about 150–300 MB on disk for 1 M records. Queries are served from a local index held in RAM on each node, and the Raft log is never in the query path.
-- Bulk import is batched: an AXFR of 1 M records becomes about 100 log entries of 10k records each. Snapshots are streamed to new nodes in chunks, and the log is compacted behind the snapshot.
-- The write rate is low: 100k AD clients re-registering every 24 hours produce about 1.2 updates/s, and Raft on a LAN handles thousands per second.
-- DHCP leases do not go through the global Raft group. They are hot, and are synchronized between failover partners by a dedicated protocol with a local write-ahead log per node.
-- Precedent: etcd recommends less than 8 GB per cluster, and TiKV and CockroachDB run terabytes through multi-Raft. Even several 1 M record zones stay far below the etcd limit.
+The fallback (Raft for configuration, IPAM and policies only, zone data via built-in IXFR/NOTIFY) was not needed.
 
 ### Spike B: UDP throughput and DNS wire-format crate
 
@@ -99,7 +87,7 @@ Serve the SPA from the binary together with SSE, and measure cold start and bund
 ### Done when
 
 - All three spikes have measurement data with reproducible scripts in `bench/`.
-- The gate decision is documented in ADR 0002, with status Accepted, or in a superseding ADR that records the fallback.
+- The gate decision is documented in ADR 0002, with status Accepted, or in a superseding ADR that records the fallback. (Done: ADR 0002 is Accepted with conditions.)
 
 ## Phase 1: Platform and IPAM
 

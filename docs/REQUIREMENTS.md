@@ -359,6 +359,7 @@ The data plane survives the control plane. At home, all roles run in one process
 | OPS-16 | Declarative configuration with diff, dry-run and rollback (GitOps). | 5 | Should |
 | OPS-17 | Health hooks that drive anycast route withdrawal (BGP via FRR or BIRD). Anycast is the supported way to distribute DNS load across nodes (CON-04). | 5 | Should |
 | OPS-18 | Autoscaling hooks for orchestrators (Kubernetes, Nomad, Proxmox API), driven by metrics and kept outside the core (CON-06). | 5 | Could |
+| OPS-19 | The replicated store runs on SSD or NVMe storage only. Rotating and SMR disks are unsupported for the data directory; the first-run wizard and the node health check warn when the data directory is on a rotating disk (ADR 0002: 93x slower load and lost leadership on an SMR disk). | 1 | Must |
 
 ## API and product
 
