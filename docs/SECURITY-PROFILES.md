@@ -55,6 +55,7 @@ Reading the matrix:
 | TGL-20 | UniFi write access | On | On | Off (read-only) until explicitly enabled; writes need approval once IAM-02 exists | On | 1 | CONN-06, CONN-08, CONN-09 |
 | TGL-21 | Audit export | Local only | Local, syslog optional | Export required (syslog, CEF or JSON), alert on export failure | Local only | 1 | IAM-18 |
 | TGL-22 | Recursion and forwarding ACL | Prefixes known to IPAM | Prefixes known to IPAM | Explicit allow-list per view | Any (open resolver allowed) | 2 | DNS-02, DNS-20 |
+| TGL-23 | In-app update check and install (OPS-24) | Check daily, install from the UI | Check daily, install from the UI with step-up authentication | Check daily (version string only), install only from an uploaded and verified release file | Check daily, install from the UI | 1 (Slice 2) | OPS-24, API-19 |
 
 Notes:
 

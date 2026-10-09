@@ -109,6 +109,7 @@ Replaces the existing IPAM spreadsheet.
 - **Intent/observation model, reconciler and job engine**: proposals, lock flag and audit (IPAM-12 to IPAM-17).
 - **Connectors**: the plugin SDK and host runner first (ADR 0012: process plugins over gRPC, manifest, supervision, secret injection, conformance test), then the bundled reference plugins: UniFi (read topology and SSIDs, write VLANs, port profiles and per-client VLAN with guardrails), Proxmox inventory, Home Assistant inventory (CONN-01 to CONN-09).
 - **VLAN objects, topology map and move job** with preview and rollback (IPAM-03, IPAM-19, IPAM-20).
+- **Releases and upgrades**: a data-directory format version with migrations and `tenko upgrade check`, release builds with checksums per tag, a compatibility test against the previous release, and in-app update notices with release notes and single-node installation from the UI (OPS-23, OPS-24).
 
 In Phase 1 the move job performs the IPAM intent change, the UniFi L2 move and the observation. The reservation and DNS steps are manual tasks until Tenko's own engines exist (Phase 2 to 3), at which point the same job becomes fully automatic.
 

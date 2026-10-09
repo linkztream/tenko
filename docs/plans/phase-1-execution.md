@@ -494,6 +494,7 @@ Slice 2: discovery and connectors
 | WP2.7 VLAN, topology | `tenko-ipam/src/{vlan_sync,topology}/`, UI map | WP2.3, WP2.6 | VLAN create job (IPAM-03); graph (IPAM-20) | E6, E7 | M, map scale |
 | WP2.8 Move job | `tenko-ipam/src/move/`, UI drag and drop | WP2.4, WP2.6 | IPAM-19 steps 1 to 7 (2, 3, 6 manual), ARP or ping wait, step 4 rollback, parallelism limit | E8 | L, per-client VLAN support |
 | WP2.9 UI discovery | `ui/src/{discovery,proposals,connectors,topology}/` | WP2.3 to WP2.7 | Ports and OS (SCAN-08), proposals, scans, connector settings | Keyboard and axe checks | L, design coverage |
+| WP2.10 Releases and upgrades | `crates/tenko/src/upgrade/`, the store format version, `.github/workflows/release.yml`, `CHANGELOG.md`, `ui/src/updates/` | Slice 1 | OPS-23: format version and migrations, `tenko upgrade check`, compatibility test against the previous release, release workflow with checksums, changelog discipline checked in CI; OPS-24: release manifest with notes, update notice and what's new in the UI, installation from the UI for native single-node installs through a `current` link and a supervisor restart, rollback on failed health. Scheduled before WP2.6, because it fixes how the store format may change | A data directory from the previous release opens and migrates; an older binary refuses a newer directory; a tagged build publishes binaries, image and checksums; the UI shows the notice and notes against a mock manifest and installs on a single node in the acceptance run | M, R17 |
 
 Slice 3: platform hardening
 
@@ -559,6 +560,7 @@ Results go to `bench/phase1-*/results/` with scripts, machine and versions, as i
 | R13 | The workstation's repository drive is SMR (store tests 93x slower) | Tests use the OS temp directory, override `TENKO_TEST_DATA_DIR` (proposed) |
 | R14 | API-03 "shares the client library" cannot be literal across Rust and TypeScript | Both derive from one OpenAPI document |
 | R16 | Plugin executables run with Tenko's identity on the host (ADR 0012) | Install from trusted sources only; manifest permissions enforced by the host; package signing and sandboxed Wasm with the hub (CONN-21) |
+| R17 | Self-update of a network service is a supply-chain path (OPS-24) | Pinned release source, checksums now and signatures with API-19, step-up authentication and audit for installs, installation from the UI off in Hardened, dry-run migration and automatic switch-back on failed health |
 | R15 | KEK directory trust: a plain-file KEK generation stays readable when a sealed provider (DPAPI, systemd-creds) is active, so anyone who can write the KEK directory could drop in a higher-numbered plain generation and make it active | Directory permissions (0700, service account only) from Slice 1; in Slice 3 refuse plain generations once a sealed one exists unless explicitly allowed, and alarm on a provider downgrade |
 
 ### 9.3 Decisions taken on 2026-10-09
