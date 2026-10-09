@@ -89,6 +89,7 @@ ARP and ND do not cross routers, so one probe is needed per network segment (SCA
 | Home | All roles in one process on one box. Target: idle below 100 MB RSS with all roles (OPS-15). |
 | Enterprise | 3 to 5 controllers, N `dns` nodes behind anycast, `dhcp` nodes in failover pairs per site, one probe per segment. |
 | Reference home-lab environment (three LANs plus a DMZ) | One node with all roles plus one probe per segment. The DMZ probe is its own trust zone (SCAN-01). |
+| Branch site over a slow link | One `dns` node (and a `dhcp` node or pair) with no controller, fed by resumable deltas and serving from its local copy during outages (OPS-28); or an independent installation that receives the zones it needs through IXFR and NOTIFY with TSIG (DNS-09). Controllers stay together on one site, because Raft needs low latency and a quorum. |
 
 DNS clients do not balance load themselves (CON-04), so replication between `dns` nodes is not load distribution. Anycast with health-based route withdrawal arrives in Phase 5 (OPS-17). DHCP "load balancing" means the failover protocol between partners (CON-05).
 
