@@ -424,11 +424,11 @@ mod tests {
         server.await.expect("server");
         #[cfg(unix)]
         {
+            use std::os::unix::fs::PermissionsExt;
             let dir = Path::new(&endpoint.address)
                 .parent()
                 .expect("dir")
                 .to_path_buf();
-            use std::os::unix::fs::PermissionsExt;
             let mode = std::fs::metadata(&dir).expect("dir").permissions().mode();
             assert_eq!(mode & 0o777, 0o700);
             drop(allocation);
