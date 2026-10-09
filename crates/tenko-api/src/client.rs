@@ -356,6 +356,24 @@ impl Client {
         .await
     }
 
+    /// `PUT path` with `body` as JSON, and the JSON answer decoded as `T`. With `if_match`
+    /// the request carries `If-Match: "<revision>"`, as for [`Client::patch`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Client::post`].
+    pub async fn put<B: Serialize + ?Sized, T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+        if_match: Option<Revision>,
+    ) -> Result<T, ClientError> {
+        self.json(Method::PUT, path, |request| {
+            with_if_match(request.json(body), if_match)
+        })
+        .await
+    }
+
     /// `DELETE path`, optionally with `If-Match: "<revision>"`; any 2xx answer is success
     /// and its body is ignored.
     ///

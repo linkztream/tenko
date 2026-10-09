@@ -1,0 +1,110 @@
+# Example only: copy and adapt before use.
+#
+# The Phase 1 controller (REST API, web UI, replicated store, IPAM) in one container on a
+# private bridge network with port 8443 published. No configuration file is needed: the
+# settings are TENKO_* environment variables (every key of deploy/tenko.example.toml has
+# one). The DNS and DHCP roles do not exist yet; when they do, they need macvlan or host
+# networking (macvlan.example.yml).
+#
+# Before the first start, from this directory:
+#
+#   umask 077
+#   mkdir -p secrets
+#   openssl rand -hex 32 > secrets/tenko_kek
+#   sudo chown 65532:65532 secrets/tenko_kek   # the uid of the image's user
+#   chmod 0400 secrets/tenko_kek
+#
+# secrets/tenko_kek is the key-encryption key of the vault. Keep an offline copy (a
+# password manager): a data volume restored without its key cannot open its secrets. Do
+# not commit the file and do not put it on the data volume; a key stored next to the data
+# it protects protects nothing. The server warns about the file provider at every start,
+# by design.
+#
+# Start:
+#   docker compose -f controller.example.yml up --build -d
+#
+# First-run setup. While setup is open the server writes a one-time setup token to the
+# console and to the log. Read it with:
+#   docker compose -f controller.example.yml logs tenko | grep -E 'Setup token|setup_token'
+# Then open https://ddi.example.org:8443/ and enter the token, or run on a machine with the
+# tenko binary (it asks for the token and the password):
+#   docker compose -f controller.example.yml cp tenko:/var/lib/tenko/tls/ca-root.pem .
+#   tenko setup --url https://ddi.example.org:8443 --ca-file ca-root.pem \
+#     --admin <name> --host-name ddi.example.org
+# The token changes at every start until setup is complete.
+#
+# Health: the image's HEALTHCHECK runs `tenko health` against https://localhost:8443 with the
+# internal CA root (GET /api/v1/health/ready). In the reverse-proxy variant below, add
+# 127.0.0.1 to TENKO_TLS__TRUSTED_PROXIES or override `healthcheck:` so the probe is allowed.
+#
+# The addresses below are RFC 5737 documentation addresses and the name is an example;
+# replace them with your own.
+
+services:
+  tenko:
+    build:
+      context: ../..
+      dockerfile: deploy/Dockerfile
+    image: tenko:local
+    restart: unless-stopped
+    # The server finishes open requests, stops its jobs and makes the store durable.
+    stop_grace_period: 30s
+    ports:
+      - "8443:8443/tcp"
+    environment:
+      # The key-encryption key comes from the Docker secret below, not from the data volume.
+      TENKO_KEK__PROVIDER: file
+      TENKO_KEK__PATH: /run/secrets/tenko_kek
+      # TLS mode a, the default: Tenko's internal CA. The certificate carries these names
+      # until first-run setup stores the host name. Install /var/lib/tenko/tls/ca-root.pem
+      # on admin clients.
+      TENKO_TLS__MODE: internal_ca
+      TENKO_TLS__HOST_NAME: ddi.example.org
+      TENKO_TLS__ADDRESSES: 192.0.2.10
+      #
+      # Behind a reverse proxy instead (TLS mode c): the proxy terminates TLS and reaches
+      # tenko over plain HTTP, or with the PROXY protocol, from the trusted addresses only;
+      # any other peer gets 403, health probes included. Remove `ports:`, attach the proxy
+      # to the `backend` network at a fixed address, and replace the three TLS lines above by
+      #   TENKO_TLS__MODE: reverse_proxy
+      #   TENKO_TLS__PUBLIC_HOST: ddi.example.org
+      #   TENKO_TLS__TRUSTED_PROXIES: 198.51.100.2
+      # (add TENKO_TLS__PROXY_PROTOCOL: "true" for the PROXY protocol). The public host is
+      # also the passkey relying-party ID.
+      #
+      # Useful for log collectors: one JSON object per line.
+      # TENKO_LOG__FORMAT: json
+    # To use a configuration file as well, mount it and pass it on; the environment
+    # variables above still override it:
+    # command: ["--config", "/etc/tenko/tenko.toml"]
+    secrets:
+      - tenko_kek
+    volumes:
+      # The store fsyncs on every commit: the volume must be on SSD or NVMe (OPS-19). The
+      # server logs the fsync median at start and warns above 10 ms.
+      - "tenko-data:/var/lib/tenko"
+      # - "./tenko.toml:/etc/tenko/tenko.toml:ro"
+    networks:
+      - backend
+    # The controller writes to /var/lib/tenko only, needs no capability and listens above
+    # port 1024.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  backend:
+    ipam:
+      config:
+        - subnet: 198.51.100.0/24
+
+secrets:
+  tenko_kek:
+    file: ./secrets/tenko_kek
+
+volumes:
+  tenko-data: {}

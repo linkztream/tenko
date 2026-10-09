@@ -1,23 +1,14 @@
-//! Entry point of the `tenko` binary.
+//! Entry point of the `tenko` binary. The exit statuses are documented in [`tenko::exit`].
+
+#![forbid(unsafe_code)]
 
 use std::process::ExitCode;
 
 use clap::Parser;
-use tracing_subscriber::EnvFilter;
 
-fn main() -> anyhow::Result<ExitCode> {
-    // Logs go to standard error; `RUST_LOG` overrides the default `info` level.
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
-        .init();
-
+fn main() -> ExitCode {
     let cli = tenko::Cli::parse();
-    let status = tenko::execute(
-        &cli,
-        &mut std::io::stdout().lock(),
-        &mut std::io::stderr().lock(),
-    )?;
-    Ok(ExitCode::from(status))
+    // Unlocked handles: the server writes to both from other threads while this one waits.
+    let status = tenko::execute(&cli, &mut std::io::stdout(), &mut std::io::stderr());
+    ExitCode::from(status)
 }

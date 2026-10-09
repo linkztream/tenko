@@ -1,0 +1,219 @@
+# tenko.toml: the bootstrap configuration of a Tenko DDI node.
+#
+# Copy this file to /etc/tenko/tenko.toml (Linux), C:\ProgramData\Tenko\tenko.toml
+# (Windows) or mount it at /etc/tenko/tenko.toml (containers), and adapt it. Every key
+# below shows its default unless marked otherwise; delete what you do not change.
+#
+# The file carries only what a node needs to start. The security profile chosen in the
+# first-run wizard, its toggles, users and all IPAM data live in the replicated store.
+#
+# Check a file with:   tenko config check --config /etc/tenko/tenko.toml
+# Run the server with: tenko serve --config /etc/tenko/tenko.toml
+#
+# Environment variables override the file (containers): TENKO_ followed by the key path in
+# upper case, with a double underscore between a section and its key, for example
+#   TENKO_DATA_DIR=/var/lib/tenko
+#   TENKO_TLS__MODE=reverse_proxy
+#   TENKO_TLS__TRUSTED_PROXIES=10.0.0.5,10.0.0.6
+#   TENKO_LOG__FORMAT=json
+# A value is read as TOML when it parses as TOML (true, 8443, ["a", "b"]) and as a string
+# otherwise; lists also accept a comma-separated string. The flags --data-dir and --roles
+# override both.
+
+# Directory with the state of this node (required here, with --data-dir or with
+# TENKO_DATA_DIR). It holds kek/ (key-encryption keys), store/ (the replicated store),
+# tls/ca-root.pem (the public root of the internal CA) and logs/. Put it on SSD or NVMe:
+# rotating and SMR disks are not supported, and the server warns at start when a durable
+# commit takes more than 10 ms (OPS-19). Keep it private to the service account.
+data_dir = "/var/lib/tenko"
+
+# Roles of this node: a comma-separated list of controller, dns, dhcp and probe, or "all".
+# Phase 1 implements the controller role; the others are reported and skipped.
+roles = "controller"
+
+[node]
+# Raft node id. Slice 1 runs a single voter.
+id = 1
+# Address other nodes reach this node at; empty for a single node.
+address = ""
+
+[profile]
+# The security profile before first-run setup: home, standard, hardened or lab. It decides
+# the listener until the wizard stores the chosen profile and its toggles; from then on the
+# stored profile applies and this value is ignored. "hardened" serves TLS 1.3 only, and
+# only "lab" allows tls.mode = "plain" (TGL-08).
+name = "home"
+
+[server]
+# Socket addresses of the API and web UI. Add "[::]:8443" for IPv6.
+listen = ["0.0.0.0:8443"]
+# Worker threads of the API runtime, 1 to 16 (2 to 4 recommended, ADR 0008).
+workers = 2
+# Most open connections; more are closed at once.
+max_connections = 20000
+# Seconds open requests may finish after a shutdown starts.
+shutdown_grace_secs = 10
+# Seconds for a TLS handshake or a PROXY protocol header.
+handshake_timeout_secs = 10
+# Seconds for reading the head of an HTTP/1.1 request.
+header_read_timeout_secs = 30
+# Origins the CSRF guard accepts besides the request's own (development: vite dev).
+allowed_origins = []
+# Serve the web UI from a directory (debug builds only).
+# ui_dir = "ui/dist"
+
+[tls]
+# How the listener does TLS (OPS-22):
+#   "internal_ca"   (a) a certificate from Tenko's internal CA; install the CA root
+#                   (<data_dir>/tls/ca-root.pem) on admin clients.
+#   "imported"      (b) your certificate and key in PEM files, reloaded when they change.
+#   "reverse_proxy" (c) TLS ends in HAProxy, nginx or Caddy in front of Tenko; plain HTTP
+#                   or the PROXY protocol is accepted from trusted_proxies only.
+#   "plain"         plain HTTP from every source: the Lab profile only.
+mode = "internal_ca"
+# Mode a: the certificate name until first-run setup stores a host name (default
+# "localhost"); afterwards the host name from setup is the subject and this one an extra name.
+# host_name = "ddi.example.org"
+# Mode a: further DNS names and IP addresses on the certificate.
+alt_names = []
+addresses = []
+# Mode b: the certificate chain (leaf first) and the private key.
+# cert_path = "/etc/tenko/tls/fullchain.pem"
+# key_path = "/etc/tenko/tls/privkey.pem"
+# Mode b: seconds between checks of the files for changes.
+watch_interval_secs = 5
+# Mode c: the proxies allowed to connect; forwarded headers from anyone else are refused.
+trusted_proxies = []
+# Mode c: the proxies send the PROXY protocol (v1 or v2) instead of X-Forwarded-* headers.
+proxy_protocol = false
+# Mode c: the public host name clients use; also the passkey relying-party ID. The listener
+# treats every request as HTTPS at this name, so a client that talks plain HTTP to the
+# listener directly (a test, a probe from a trusted address) sends an Origin the CSRF guard
+# refuses; add that origin to server.allowed_origins for such use.
+# public_host = "ddi.example.org"
+# Refuse TLS 1.2 (always on under the Hardened profile).
+tls13_only = false
+# Send Strict-Transport-Security on HTTPS answers.
+hsts = true
+# Mode a: hours between checks whether the certificate needs renewal (30 days before expiry).
+renew_check_hours = 24
+
+[kek]
+# The key-encryption key provider of the vault:
+#   "platform"       DPAPI on Windows, systemd-creds on Linux (default)
+#   "dpapi"          DPAPI-sealed key generations (Windows)
+#   "systemd_creds"  systemd-creds-sealed key generations (Linux; TPM2 where available);
+#                    without systemd-creds the key is a plain file and a warning is logged
+#   "file"           an explicit key file (containers, CI); warns at every start
+provider = "platform"
+# Directory of the key generations (default <data_dir>/kek).
+# dir = "/var/lib/tenko/kek"
+# DPAPI: "user" binds the key to the service account (its profile must be loaded);
+# "machine" lets any process on the host unseal it.
+scope = "user"
+# systemd-creds: "auto", "tpm2" or "host".
+with_key = "auto"
+# systemd-creds: the tool (default: found on PATH).
+# tool = "/usr/bin/systemd-creds"
+# file: the active key (32 raw bytes, 64 hexadecimal digits or base64), and earlier keys
+# still needed until a rotation completes.
+# path = "/run/secrets/tenko_kek"
+retired = []
+
+[auth]
+# The passkey relying-party ID. Default: tls.public_host in mode c, otherwise the host name
+# from first-run setup. Use "localhost" for development.
+# rp_id = "ddi.example.org"
+# Origins the UI is served from (default https://<rp id> on any port).
+origins = []
+# The name browsers show for the relying party.
+rp_name = "Tenko DDI"
+# DER or PEM files with attestation roots of accepted hardware security keys (ADR 0010).
+attestation_roots = []
+
+[hibp]
+# The breached-password check (IAM-04). Whether it runs is the TGL-06 toggle of the stored
+# profile; these keys only say where it may look.
+# Allow the online range API: only five hexadecimal characters of the password's SHA-1
+# leave the host (k-anonymity).
+online = true
+# A mirror of the range API.
+# range_url = "https://api.pwnedpasswords.com/range/"
+# The offline filter built with `tenko hibp build <corpus> <filter>`.
+# offline_filter = "/var/lib/tenko/hibp.filter"
+
+[sse]
+# Server-sent events (ADR 0008).
+# Events a subscriber may fall behind before it gets a reset.
+channel_capacity = 1024
+# Frames kept for Last-Event-ID replay; older ids come from the journal.
+ring_capacity = 256
+# Seconds between keep-alive comments.
+keepalive_secs = 15
+# Coalescing window in milliseconds; 0 sends every event at once.
+coalesce_ms = 0
+# Most change sets replayed for one reconnecting subscriber.
+journal_replay_limit = 10000
+# Seconds clients wait before reconnecting.
+retry_secs = 3
+# Most object references in one event.
+max_objects_per_event = 500
+
+[rate_limit]
+# Request rate limits of the API.
+enabled = true
+# IPv6 clients are grouped by this many leading bits.
+ipv6_prefix_len = 64
+# Most keys tracked per limiter (bounds memory).
+max_keys = 100000
+# Per client address, before authentication. Remove the line to switch it off.
+per_ip = { per_second = 20, burst = 100 }
+# Per signed-in principal. Remove the line to switch it off.
+per_principal = { per_second = 50, burst = 200 }
+
+[store]
+# The replicated store (openraft over redb, ADR 0002).
+# Page caches in MiB (home-lab defaults, OPS-15).
+log_cache_mib = 4
+sm_cache_mib = 32
+# "deferred": durable checkpoints every checkpoint_interval_ms; "immediate": every apply is
+# fsynced. The Raft log is fsynced before every commit either way.
+durability = "deferred"
+checkpoint_interval_ms = 1000
+# Change sets kept for event replay.
+journal_retention = 100000
+# Snapshot-and-purge: a snapshot after this many entries or MiB of log, keeping this many
+# entries behind it.
+snapshot_every_entries = 10000
+snapshot_every_log_mib = 64
+snapshot_keep_entries = 1000
+# Seconds a write waits to be applied, and a consistent read to be served.
+write_timeout_secs = 60
+read_wait_secs = 5
+# Durable commits measured by the start-up fsync probe (0 switches it off).
+fsync_probe_samples = 20
+# Verify every audit record at start instead of the chain head.
+verify_full_audit_chain = false
+
+[jobs]
+# Jobs driven at once.
+workers = 16
+# Started jobs per group at once (CONN-09).
+default_group_limit = 10
+# Seconds a runner lease lasts, and between scans for jobs of other runners.
+lease_ttl_secs = 30
+scan_interval_secs = 15
+
+[runtime]
+# Worker threads of the core runtime (store, authentication, jobs), 1 to 64.
+workers = 2
+
+[log]
+# Level or filter directive, for example "info" or "info,tenko_store=debug". RUST_LOG takes
+# precedence when it is set.
+level = "info"
+# "text" or "json" (one object per line).
+format = "text"
+# Also append the log to a file. The Windows service writes to <data_dir>/logs/tenko.log
+# when this is not set.
+# file = "/var/log/tenko/tenko.log"

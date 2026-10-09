@@ -660,6 +660,37 @@ async fn patch_and_delete_send_if_match_with_the_revision_in_quotes() {
 }
 
 #[tokio::test]
+async fn put_sends_the_body_and_an_optional_if_match() {
+    let stub = Stub::serve(vec![
+        json_reply("200 OK", &json!({ "revision": 4 })),
+        json_reply("200 OK", &json!({ "revision": 5 })),
+    ])
+    .await;
+    let client = stub.client();
+
+    let first: Value = client
+        .put(
+            "/imports/i1/mapping",
+            &json!({ "columns": { "A": "cidr" } }),
+            Some(Revision(3)),
+        )
+        .await
+        .expect("put");
+    assert_eq!(first["revision"], 4);
+    let _: Value = client
+        .put("/imports/i2/mapping", &json!({}), None)
+        .await
+        .expect("put");
+
+    let requests = stub.requests().await;
+    assert_eq!(requests[0].line, "PUT /api/v1/imports/i1/mapping HTTP/1.1");
+    assert_eq!(requests[0].header("if-match"), Some("\"3\""));
+    assert_eq!(requests[0].json(), json!({ "columns": { "A": "cidr" } }));
+    assert_eq!(requests[1].line, "PUT /api/v1/imports/i2/mapping HTTP/1.1");
+    assert!(requests[1].header("if-match").is_none());
+}
+
+#[tokio::test]
 async fn an_empty_answer_decodes_as_unit() {
     let stub = Stub::serve(vec![reply("204 No Content", None, "")]).await;
     let () = stub

@@ -1,42 +1,118 @@
-# Hardened systemd unit for tenko.
+# Hardened systemd unit for Tenko DDI, Phase 1: the controller role (REST API, web UI,
+# replicated store, IPAM). The DNS and DHCP roles do not exist yet; the end of this file
+# lists what the unit gains when they do.
 #
-# Install:
+# Needs systemd 250 or later (LoadCredentialEncrypted= and the %d specifier): Debian 12,
+# Ubuntu 24.04, RHEL 9 and newer.
+#
+# Install (as root; the full walk-through is in deploy/README.md):
 #   1. Place the binary at /usr/local/bin/tenko.
-#   2. Create the system user first:
-#        useradd --system --home-dir /var/lib/tenko --shell /usr/sbin/nologin tenko
-#   3. Put the configuration in /etc/tenko/tenko.toml.
-#   4. Install this file as /etc/systemd/system/tenko.service, then run:
+#   2. Create the service account first:
+#        useradd --system --home-dir /var/lib/tenko --no-create-home \
+#                --shell /usr/sbin/nologin tenko
+#   3. Create /etc/tenko, readable by the service account but not writable by it, and put
+#      the configuration (deploy/tenko.example.toml) in it:
+#        install -d -m 0750 -o root -g tenko /etc/tenko
+#        install -m 0640 -o root -g tenko deploy/tenko.example.toml /etc/tenko/tenko.toml
+#        tenko config check --config /etc/tenko/tenko.toml
+#   4. Create the key-encryption key as an encrypted credential, once (see the section
+#      "Key-encryption key" below; keep an offline copy of the key, see deploy/README.md):
+#        openssl rand -hex 32 | systemd-creds encrypt --name=tenko_kek - /etc/tenko/kek.cred
+#        chmod 0600 /etc/tenko/kek.cred
+#   5. Install this file as /etc/systemd/system/tenko.service, then run:
 #        systemctl daemon-reload && systemctl enable --now tenko
+#   6. While first-run setup is open the server prints a one-time setup token; read it with
+#        journalctl -u tenko | grep -E 'Setup token|setup_token='
+#      and complete setup in the web UI or with `tenko setup`.
+#
+# If the unit fails at once with status 243/CREDENTIALS, /etc/tenko/kek.cred is missing or
+# was created with another --name. Exit statuses 2, 3 and 4 of `tenko serve` (usage,
+# invalid configuration, a start step failed) are not retried; see `journalctl -u tenko`.
 
 [Unit]
-Description=Tenko DDI (DNS, DHCP and IPAM)
+Description=Tenko DDI (DNS, DHCP and IPAM): controller
 After=network-online.target
 Wants=network-online.target
+# Give up after five failed starts within five minutes instead of looping.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
-# Type=notify will replace Type=simple once the server implements sd_notify
-# readiness.
-Type=simple
-ExecStart=/usr/local/bin/tenko serve --roles controller,dns,dhcp --data-dir /var/lib/tenko --config /etc/tenko/tenko.toml
+# `tenko serve` sends READY=1 once the API listens and STOPPING=1 when it shuts down, from
+# its main process (NOTIFY_SOCKET).
+Type=notify
+NotifyAccess=main
+# The configuration file names the node's settings; --roles defaults to the file's value
+# ("controller"). Phase 1 runs the controller role only: a role list without `controller`
+# exits with status 2, and dns/dhcp next to it are skipped with a notice.
+ExecStart=/usr/local/bin/tenko serve --config /etc/tenko/tenko.toml
+# The data directory is the state directory below; the unit pins it so that a data_dir in
+# tenko.toml cannot point at a path the sandbox makes read-only.
+Environment=TENKO_DATA_DIR=/var/lib/tenko
+
 Restart=on-failure
-RestartSec=2s
+RestartSec=5s
+# 2 usage, 3 invalid configuration, 4 a start step failed (key, store, port, ...): the same
+# start would fail again, so do not loop. 1 (unexpected failure) is retried.
+RestartPreventExitStatus=2 3 4
+# Starting opens the store and runs the fsync probe; the server reports readiness (READY=1)
+# when it is done.
+TimeoutStartSec=120s
+# A stop lets open requests finish (server.shutdown_grace_secs, 10 s), stops the job runner
+# (up to 15 s) and makes the store durable.
+TimeoutStopSec=30s
 
 # Identity
 User=tenko
 Group=tenko
-DynamicUser=no
-# Bind DNS/DHCP ports below 1024 and use raw sockets for DHCP without running as root.
-AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW
+# Phase 1 listens on 8443 (above 1024) and opens no raw sockets: no capability at all.
+CapabilityBoundingSet=
+AmbientCapabilities=
 NoNewPrivileges=yes
 
+# Key-encryption key (KEK) of the vault
+# The vault needs a 256-bit KEK at every start. This unit passes it as a systemd credential
+# and tells tenko to read it as a key file (kek.provider = "file"; the environment beats
+# tenko.toml). Why not the default provider ("platform", which runs `systemd-creds encrypt`
+# itself as the tenko user)?
+#   * The host key /var/lib/systemd/credential.secret is readable by root only, so the
+#     unprivileged tenko account can seal only with a TPM2 it may open (/dev/tpmrm0, which
+#     PrivateDevices= hides) or, from systemd 256, with `systemd-creds --user` (tenko tries
+#     it; not verified here). Where sealing fails, tenko falls back to a plain 0600 file in
+#     <data dir>/kek and warns at every start: the key then sits next to the data it
+#     protects, and in the same backups.
+#   * LoadCredentialEncrypted= is decrypted by the service manager (root; host key and/or
+#     TPM2) and handed to the service as a read-only file in a RAM-backed directory that
+#     only the service account (and root) can read ($CREDENTIALS_DIRECTORY, %d). At rest
+#     the key is /etc/tenko/kek.cred, sealed to this host.
+# tenko logs two warnings about a plain key file ("THE KEY-ENCRYPTION KEY IS A PLAIN FILE")
+# for the file provider at every start, and `tenko config check` says "no OS protection".
+# With this unit that is expected: the file lives in the credentials directory and is sealed
+# at rest.
+# The credential name (tenko_kek) must match the --name used when encrypting.
+# To rotate, add a second credential (for example tenko_kek_old) and list its path,
+# /run/credentials/tenko.service/tenko_kek_old, under `retired` in the [kek] section of
+# tenko.toml (see tenko.example.toml).
+LoadCredentialEncrypted=tenko_kek:/etc/tenko/kek.cred
+Environment=TENKO_KEK__PROVIDER=file
+Environment=TENKO_KEK__PATH=%d/tenko_kek
+# Alternative on a host where the tenko account may use a TPM2 (untested here): drop the
+# three lines above, add SupplementaryGroups=tss, PrivateDevices=no, DevicePolicy=closed and
+# DeviceAllow=/dev/tpmrm0 rw, and set TENKO_KEK__PROVIDER=systemd_creds with
+# TENKO_KEK__WITH_KEY=tpm2. The service then spawns systemd-creds (allowed by the system
+# call filter below).
+
 # Filesystem
+# /var/lib/tenko holds kek/ (unused with the credential above), store/ (redb files, fsynced
+# on every commit), tls/ca-root.pem and logs/. Mode 0700: the service account only.
+# Put it on SSD or NVMe (OPS-19); the server logs the fsync median at start and warns
+# above 10 ms.
 StateDirectory=tenko
-StateDirectoryMode=0750
-ConfigurationDirectory=tenko
-ConfigurationDirectoryMode=0750
-RuntimeDirectory=tenko
+StateDirectoryMode=0700
 UMask=0077
+# /etc and the rest of the system are read-only for the service. A tenko.toml with
+# log.file needs LogsDirectory=tenko; imported TLS certificates (tls.mode = "imported") are
+# read from /etc/tenko/tls, readable by group tenko.
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
@@ -57,18 +133,32 @@ RestrictRealtime=yes
 RestrictSUIDSGID=yes
 RestrictNamespaces=yes
 RemoveIPC=yes
+# No core dumps: process memory holds the unsealed KEK and data keys.
+LimitCORE=0
 
 # Network
-# AF_PACKET is needed by the DHCP role for raw layer-2 replies; AF_NETLINK for interface discovery.
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
+# TCP listeners (AF_INET, AF_INET6) and the sd_notify socket (AF_UNIX).
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 # System calls
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources
+# A call outside the filter fails with EPERM instead of killing the service.
+SystemCallErrorNumber=EPERM
 
 # Limits
-LimitNOFILE=1048576
+# One descriptor per open connection (server.max_connections, default 20000) plus the store
+# files.
+LimitNOFILE=65536
+
+# Later roles (not implemented yet). When the DNS and DHCP roles exist, this unit gains:
+#   AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
+#   CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW
+#       port 53 (DNS) and 67/547 (DHCP), and raw sockets for DHCP;
+#   RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
+#       interface discovery (AF_NETLINK) and layer-2 DHCP replies (AF_PACKET);
+#   a higher LimitNOFILE for the DNS sockets.
 
 [Install]
 WantedBy=multi-user.target
