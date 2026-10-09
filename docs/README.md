@@ -10,6 +10,7 @@ Tenko DDI is a DNS, DHCP and IPAM stack written in Rust with an embedded web UI.
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Roles, data plane independence, storage and replication, IPAM as intent hub, move job, connectors, repository layout |
 | [SECURITY-PROFILES.md](SECURITY-PROFILES.md) | Home, Standard, Hardened and Lab profiles as toggle bundles, the never-off list and the PIN coupling rule |
 | [MIGRATION.md](MIGRATION.md) | Connector-based migration from mixed sources: IR and loss report, plan/apply/verify, coexistence modes, Windows cmdlet inventory |
+| [plugins.md](plugins.md) | How to write a connector plugin: manifest, protocol, conformance suite, security expectations |
 | [CONFORMANCE.md](CONFORMANCE.md) | RFC and specification matrix with target phase and status |
 | [ROADMAP.md](ROADMAP.md) | Phases 0 to 5 with deliverables, spikes, "Done when" criteria, verification and open questions |
 | [adr/README.md](adr/README.md) | Architecture Decision Records: process and index |

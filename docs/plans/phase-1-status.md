@@ -36,7 +36,7 @@
 | WP | State | Where | Notes |
 |---|---|---|---|
 | WP2.10 Releases, upgrades, modules | In progress | `crates/tenko/src/{upgrade,modules.rs}`, `crates/tenko-store/src/format.rs`, `CHANGELOG.md`, `ui/src/updates` | Started 2026-10-09 night; OPS-23, OPS-24, OPS-25, TGL-23; CI and release workflow steps come as contract requests to the lead |
-| WP2.0 Plugin SDK and host | In progress | `crates/tenko-connect`, `crates/tenko/src/plugin`, `routes/connectors.rs` | Started 2026-10-09 night; ADR 0012, CONN-19, CONN-20; protobuf compiled without protoc; dependencies come as a contract request |
+| WP2.0 Plugin SDK and host | FINAL, committed locally | `e3e0482` | Protocol `tenko.connect.v1` (handshake over stdio, gRPC over a private socket or pipe), manifest with settings schema and secret purposes, host supervisor with backoff and circuit breaker, per-call secret injection with audit, conformance suite, `tenko plugin list|run|test`, sample plugin bundled, connector API with inline edit jobs and run jobs, `connectors` start step and SSE topic; 226 crate tests, 5 route tests, an end-to-end CLI test; `docs/plugins.md` |
 | WP2.4 Reconciler | Next | | After WP1.11 reports |
 | WP2.6 UniFi, WP2.5 Proxmox and Home Assistant | Waiting for the owner | | Need the UniFi API key or local admin and the Proxmox token |
 
@@ -76,6 +76,7 @@ The committed tree compiles and `Cargo.lock` matches the committed manifests sin
 - systemd: the unit uses `LoadCredentialEncrypted=` with the `file` KEK provider; a systemd-credential protection kind in tenko-vault (Slice 3 hardening) removes the plain-file warnings. The root `systemd-creds encrypt` path was not run end to end.
 - M9 margins: RSS grows about 14 KiB per prefix on Linux (86.4 MiB at 1,000 prefixes) and glibc keeps about 19 MiB of Argon2 buffers after the first login; an allocator trim or a compact index layout is needed before the 100 MB target holds at a few thousand prefixes.
 - `reverse_proxy` mode: a client that speaks plain HTTP to the listener needs its origin in `server.allowed_origins` (documented in the example configuration).
+- Connectors (WP2.0 open items): no webhook ingress route yet (`POST /connectors/{id}/webhook`); observations are discarded until WP2.4 supplies the `ObservationSink`; in a cluster every controller would run every instance (leader-only or ownership scheduling in Slice 3); network targets are declarations without egress enforcement (R16); rate limiting is 4 concurrent calls, 60 s minimum poll interval and serialized runs; one audit record per secret-bearing call; actuator and migration capabilities are reachable only as typed host calls; Windows named pipes keep the default DACL (no unsafe FFI).
 - Jobs API: the kind of the current step in `JobSummary` and a job-group filter on `GET /jobs` would remove two derivations in the UI (Slice 2, with the job engine work).
 - Some UI tests assert the Swedish rendering of keys, following the WP1.9 precedent; acceptable while the two languages ship together, revisit when language packs become runtime files (API-21).
 - `GET /api/v1/openapi.json` serves compact JSON while `docs/api/openapi.json` is pretty-printed; byte equality holds for the printed form only (`tenko openapi`). Decide whether the route should serve the committed bytes.

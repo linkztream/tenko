@@ -66,7 +66,7 @@ Read before changing anything substantial:
 | `tenko-dns`             | Authoritative, forwarder/cache, RPZ, XFR, views                      |
 | `tenko-dhcp`            | DHCPv4/v6, failover, relay handling, DDNS                            |
 | `tenko-jobs`            | Job engine: steps, state, timeouts, rollback                         |
-| `tenko-connect`         | Connector traits: `InventorySource`, `Actuator`, `MigrationSource`, `NetworkController` |
+| `tenko-connect`         | Connector plugin SDK: protocol, host runner, helper library, manifest, conformance test |
 | `tenko-connect-proxmox` | Proxmox VE connector (stub)                                          |
 | `tenko-connect-unifi`   | UniFi connector (stub)                                               |
 | `tenko-connect-hass`    | Home Assistant connector (stub)                                      |
