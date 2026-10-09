@@ -51,6 +51,9 @@ ui/
     jobs/               job list and job detail with manual steps
     audit/              audit log, record detail, chain verification
     import/             import wizard and export panel; api.ts is its only API module
+    updates/            update notice, release notes, what is new, install from the UI
+                        (OPS-24, TGL-23), and the module switch of OPS-25 (modules.ts,
+                        ModuleGate); api.ts is its only API module
 ```
 
 Every area folder owns a `routes.ts` that exports `routes: AppRoute[]`; `src/app/router.ts`
@@ -119,6 +122,7 @@ other key stays in the core table that the first load carries.
 | `setup` | `setup.` |
 | `settings` | `settings.` |
 | `account` | `account.` |
+| `updates` | `updates.`, `errors.update.`, `errors.upgrade.` |
 
 The Vite plugin (`scripts/vite-plugin-i18n.mjs`) builds one module per pack and language
 (`virtual:tenko-i18n/<language>/<pack>`). A route loads its packs together with its chunk:

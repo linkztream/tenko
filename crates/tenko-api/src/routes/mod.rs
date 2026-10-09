@@ -38,6 +38,7 @@ use utoipa_axum::router::OpenApiRouter;
 
 use crate::{
     API_BASE,
+    modules::{Module, ModuleSet},
     problem::{ApiError, ProblemDetails},
     state::AppState,
 };
@@ -125,27 +126,40 @@ pub(crate) fn api_doc() -> utoipa::openapi::OpenApi {
     ApiDoc::openapi()
 }
 
-/// Every route of the API, relative to [`API_BASE`], with the document
-/// skeleton as base.
+/// Every route of the API, relative to [`API_BASE`], with the document skeleton as base;
+/// all modules, so the OpenAPI document always describes the whole API.
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::with_openapi(api_doc())
+    router_for(ModuleSet::ALL)
+}
+
+/// The routes of the platform and of the enabled product modules (OPS-25). A disabled
+/// module registers nothing, so its paths answer 404 `sys.route_not_found` like any
+/// unknown path. The platform areas (setup, auth, users, settings, jobs, audit, events,
+/// system) are always registered; IPAM owns tenancy, prefixes, addresses, hosts, common,
+/// import, export and moves; DNS, DHCP and Discovery have no routes yet.
+pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
+    let mut router = OpenApiRouter::with_openapi(api_doc())
         .merge(setup::routes())
         .merge(auth::routes())
         .merge(users::routes())
         .merge(settings::routes())
-        .merge(tenancy::routes())
-        .merge(prefixes::routes())
-        .merge(addresses::routes())
-        .merge(hosts::routes())
-        .merge(common::routes())
-        .merge(import::routes())
-        .merge(export::routes())
         .merge(jobs::routes())
-        .merge(moves::routes())
         .merge(audit::routes())
         .merge(events::routes())
         .merge(system::routes())
-        .merge(connectors::routes())
+        .merge(connectors::routes());
+    if modules.contains(Module::Ipam) {
+        router = router
+            .merge(tenancy::routes())
+            .merge(prefixes::routes())
+            .merge(addresses::routes())
+            .merge(hosts::routes())
+            .merge(common::routes())
+            .merge(import::routes())
+            .merge(export::routes())
+            .merge(moves::routes());
+    }
+    router
 }
 
 /// The stub answer of an endpoint that is declared but not implemented yet.

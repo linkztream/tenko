@@ -1,4 +1,4 @@
-// The security toggles of Slice 1 (TGL-01 to TGL-07, docs/SECURITY-PROFILES.md): their
+// The security toggles of Slice 1 (TGL-01 to TGL-07 and TGL-23, docs/SECURITY-PROFILES.md): their
 // names, how a value reads in the UI, and whether a value is weaker than the Home profile.
 // Shared by the first-run wizard (profile preview) and the security settings page.
 import type {
@@ -6,6 +6,7 @@ import type {
   LockoutMode,
   MfaRequirement,
   PasswordPolicy,
+  Profile,
   SecuritySettings,
   SessionLifetime,
 } from "../api/types";
@@ -18,7 +19,8 @@ export type ToggleSetting =
   | "session"
   | "token_max_days"
   | "breach_check"
-  | "lockout";
+  | "lockout"
+  | "updates";
 
 export interface ToggleDef {
   id: string;
@@ -34,10 +36,11 @@ export const TOGGLES: readonly ToggleDef[] = [
   { id: "TGL-05", setting: "token_max_days", name: "toggles.token_max_days.name" },
   { id: "TGL-06", setting: "breach_check", name: "toggles.breach_check.name" },
   { id: "TGL-07", setting: "lockout", name: "toggles.lockout.name" },
+  { id: "TGL-23", setting: "updates", name: "toggles.updates.name" },
 ];
 
 /** The total number of toggles in the profile matrix; later ones arrive with their features. */
-export const TOGGLE_TOTAL = 22;
+export const TOGGLE_TOTAL = 23;
 
 export function toggleById(id: string): ToggleDef | undefined {
   return TOGGLES.find((x) => x.id === id);
@@ -45,6 +48,32 @@ export function toggleById(id: string): ToggleDef | undefined {
 
 export function toggleBySetting(setting: string): ToggleDef | undefined {
   return TOGGLES.find((x) => x.setting === setting);
+}
+
+/** TGL-23 (OPS-24): the daily update check and who may install a new version. */
+export type UpdatesPolicy = NonNullable<SecuritySettings["updates"]>;
+export type UpdatesInstall = UpdatesPolicy["install"];
+export const UPDATES_INSTALL: readonly UpdatesInstall[] = ["ui", "ui_step_up", "upload_only"];
+
+/** The value of TGL-23 in each profile (docs/SECURITY-PROFILES.md): the daily check is on in all of them. */
+export const UPDATES_DEFAULT: Readonly<Record<Profile, UpdatesPolicy>> = {
+  home: { check: true, install: "ui" },
+  standard: { check: true, install: "ui_step_up" },
+  hardened: { check: true, install: "upload_only" },
+  lab: { check: true, install: "ui" },
+};
+
+/** The updates policy of a settings object; one without it (an older answer) follows its profile. */
+export function updatesOf(settings: SecuritySettings): UpdatesPolicy {
+  return settings.updates ?? UPDATES_DEFAULT[settings.profile];
+}
+
+export function formatUpdates(value: unknown): string {
+  const policy = (value ?? UPDATES_DEFAULT.home) as UpdatesPolicy;
+  return t("toggles.updates.value", {
+    check: t(policy.check ? "toggles.updates.check_on" : "toggles.updates.check_off"),
+    install: t(`toggles.updates.install.${policy.install}`),
+  });
 }
 
 export function formatPolicy(p: PasswordPolicy): string {
@@ -83,6 +112,8 @@ export function formatToggle(setting: string, value: unknown): string {
       return t(`toggles.breach_check.${value as BreachMode}`);
     case "lockout":
       return t(`toggles.lockout.${value as LockoutMode}`);
+    case "updates":
+      return formatUpdates(value);
     default:
       return typeof value === "string" ? value : JSON.stringify(value);
   }
@@ -130,6 +161,9 @@ export function weakerThan(setting: string, value: unknown, home: unknown): bool
       return value === "off" && home !== "off";
     case "lockout":
       return LOCKOUT_RANK[value as LockoutMode] < LOCKOUT_RANK[home as LockoutMode];
+    case "updates":
+      // Not looking for new versions is weaker than Home; who installs them is a matter of taste.
+      return (value as UpdatesPolicy).check === false && (home as UpdatesPolicy).check === true;
     default:
       return false;
   }
@@ -137,5 +171,5 @@ export function weakerThan(setting: string, value: unknown, home: unknown): bool
 
 /** The value of a toggle in a settings object. */
 export function settingValue(settings: SecuritySettings, setting: ToggleSetting): unknown {
-  return settings[setting];
+  return setting === "updates" ? updatesOf(settings) : settings[setting];
 }

@@ -113,6 +113,8 @@ COPY --from=builder /out/tenko /usr/local/bin/tenko
 COPY --from=builder --chown=65532:65532 /out/state /var/lib/tenko
 USER nonroot:nonroot
 ENV TENKO_DATA_DIR=/var/lib/tenko
+# Updates come as a new image: the web UI shows the pull command instead of installing.
+ENV TENKO_UPDATES__CONTAINER=true
 VOLUME ["/var/lib/tenko"]
 # 8443/tcp  HTTPS API and web UI (Phase 1: the controller role)
 # Later roles will add: 53/udp and 53/tcp (DNS), 67/udp (DHCPv4), 547/udp (DHCPv6).

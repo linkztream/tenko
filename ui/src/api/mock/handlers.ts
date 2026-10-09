@@ -10,6 +10,7 @@ import { importRoutes } from "./routes-import";
 import { jobRoutes } from "./routes-jobs";
 import { moveRoutes } from "./routes-move";
 import { systemRoutes } from "./routes-system";
+import { updatesRoutes } from "./routes-updates";
 import { eventRoutes } from "./sse";
 import { stubs } from "./stubs";
 
@@ -25,6 +26,9 @@ export const happyPaths: HttpHandler[] = [
   ...jobRoutes,
   ...auditRoutes,
   ...authRoutes,
+  // Updates and modules come before the admin and system routes: they decorate the security
+  // settings with TGL-23 and answer the health probe with the version that runs.
+  ...updatesRoutes,
   ...adminRoutes,
   ...systemRoutes,
   ...eventRoutes,

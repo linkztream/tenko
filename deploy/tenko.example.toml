@@ -31,6 +31,14 @@ data_dir = "/var/lib/tenko"
 # Phase 1 implements the controller role; the others are reported and skipped.
 roles = "controller"
 
+# Product modules of this installation (OPS-25): a list of "ipam", "dns", "dhcp" and
+# "discovery", or ["all"]. Modules answer what the installation has, roles where a part
+# runs. A disabled module registers no API routes, shows no UI area and starts nothing.
+# Leave it unset (the default) to let the first-run wizard ask what the installation is
+# for (every module otherwise); setting it pins the set and the wizard and settings cannot
+# change it. Environment: TENKO_MODULES=ipam,dns. Slice 1 has the IPAM module only.
+# modules = ["ipam", "dns", "dhcp", "discovery"]
+
 [node]
 # Raft node id. Slice 1 runs a single voter.
 id = 1
@@ -217,3 +225,29 @@ format = "text"
 # Also append the log to a file. The Windows service writes to <data_dir>/logs/tenko.log
 # when this is not set.
 # file = "/var/log/tenko/tenko.log"
+
+[updates]
+# In-app updates (OPS-24). Whether the server checks for new versions and how they may be
+# installed is the security toggle TGL-23 (Home and Lab: from the UI; Standard: from the UI
+# with a fresh sign-in; Hardened: uploaded release files only). The check sends nothing but
+# the running version. docs/upgrades.md describes the procedure and the layout that
+# installation from the UI needs.
+# The release manifest. Release files are downloaded from the same scheme and host only.
+source_url = "https://github.com/linkztream/tenko/releases/latest/download/releases.json"
+# Never contact the release source: no check, no download. Upload the manifest and the
+# release file in the UI instead.
+air_gapped = false
+# Hours between two checks.
+check_interval_hours = 24
+# Offer pre-release versions.
+prereleases = false
+# Seconds a newly installed version has to become ready before the previous one is
+# switched back in.
+ready_timeout_secs = 180
+# Versions kept in <data_dir>/updates besides the ones `current` and `previous` point at.
+keep_versions = 2
+# The server runs in a container: the UI shows the pull command instead of installing.
+# The image sets TENKO_UPDATES__CONTAINER=true; /.dockerenv is recognized as well.
+container = false
+# The image the pull command names.
+image = "ghcr.io/linkztream/tenko"

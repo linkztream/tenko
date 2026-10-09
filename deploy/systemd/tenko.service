@@ -27,7 +27,19 @@
 #
 # If the unit fails at once with status 243/CREDENTIALS, /etc/tenko/kek.cred is missing or
 # was created with another --name. Exit statuses 2, 3 and 4 of `tenko serve` (usage,
-# invalid configuration, a start step failed) are not retried; see `journalctl -u tenko`.
+# invalid configuration or a data directory of a newer format, a start step failed) are not
+# retried; see `journalctl -u tenko`. Exit status 12 asks for a restart (an update installed
+# from the web UI, a changed module set, a switch back to the previous version) and is
+# always restarted.
+#
+# Versions (OPS-24, docs/upgrades.md): the service runs /var/lib/tenko/updates/current/tenko,
+# the version that the link `current` points at. ExecStartPre= copies /usr/local/bin/tenko
+# into /var/lib/tenko/updates/<version>/ when it is missing, and moves `current` to it when
+# it is newer than the running version (an administrator upgraded the binary by hand), so
+# that an update installed from the web UI is a switch of the link and a restart. To keep
+# the old layout without updates from the UI, use instead:
+#   ExecStart=/usr/local/bin/tenko serve --config /etc/tenko/tenko.toml
+# and delete the ExecStartPre= line; the UI then shows update notices only.
 
 [Unit]
 Description=Tenko DDI (DNS, DHCP and IPAM): controller
@@ -44,16 +56,21 @@ Type=notify
 NotifyAccess=main
 # The configuration file names the node's settings; --roles defaults to the file's value
 # ("controller"). Phase 1 runs the controller role only: a role list without `controller`
-# exits with status 2, and dns/dhcp next to it are skipped with a notice.
-ExecStart=/usr/local/bin/tenko serve --config /etc/tenko/tenko.toml
+# exits with status 2, and dns/dhcp next to it are skipped with a notice. The binary is the
+# version that `current` points at; ExecStartPre= sets the layout up (see the top).
+ExecStartPre=/usr/local/bin/tenko upgrade layout --config /etc/tenko/tenko.toml
+ExecStart=/var/lib/tenko/updates/current/tenko serve --config /etc/tenko/tenko.toml
 # The data directory is the state directory below; the unit pins it so that a data_dir in
 # tenko.toml cannot point at a path the sandbox makes read-only.
 Environment=TENKO_DATA_DIR=/var/lib/tenko
 
 Restart=on-failure
 RestartSec=5s
-# 2 usage, 3 invalid configuration, 4 a start step failed (key, store, port, ...): the same
-# start would fail again, so do not loop. 1 (unexpected failure) is retried.
+# 12: stopped to be restarted (an installed update, a module change, a switch back).
+RestartForceExitStatus=12
+# 2 usage, 3 invalid configuration or a newer data format, 4 a start step failed (key,
+# store, port, ...): the same start would fail again, so do not loop. 1 (unexpected
+# failure) is retried.
 RestartPreventExitStatus=2 3 4
 # Starting opens the store and runs the fsync probe; the server reports readiness (READY=1)
 # when it is done.

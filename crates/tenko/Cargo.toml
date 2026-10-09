@@ -19,15 +19,20 @@ default = ["import"]
 # The import service of WP1.5 (`tenko_ipam::import`): staged uploads, preview and apply
 # jobs behind `/api/v1/imports`. Without it those routes answer 503 `import.unavailable`.
 import = []
+# Signature verification of release files (API-19). Off until the release signing of API-19
+# exists: with it on, every install refuses a release whose signature cannot be checked.
+release-signatures = []
 
 [dependencies]
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 clap = { workspace = true, features = ["env"] }
 futures = { workspace = true }
 ipnet = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 tenko-api = { workspace = true, features = ["client"] }
 tenko-auth = { workspace = true, features = ["online"] }
 tenko-cluster = { workspace = true }

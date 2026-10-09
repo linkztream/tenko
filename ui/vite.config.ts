@@ -31,6 +31,9 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   setup: ["setup."],
   settings: ["settings."],
   account: ["account."],
+  // The updates page, the release notes dialog and the page of a module that is switched off
+  // (OPS-24, OPS-25), and the error texts of the update endpoints.
+  updates: ["updates.", "errors.update.", "errors.upgrade."],
 };
 
 export default defineConfig(({ command, mode }) => {

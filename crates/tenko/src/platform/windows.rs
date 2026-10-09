@@ -231,6 +231,10 @@ fn status_meaning(status: u32) -> &'static str {
             "the configuration is invalid; run `tenko config check --config <file>`"
         }
         Ok(exit::START) => "a start step failed; the service log names the step",
+        Ok(exit::RESTART) => {
+            "it stopped to be restarted (an update, a module change or a switch back); the \
+             failure actions start it again"
+        }
         _ => "see the service log",
     }
 }
@@ -393,9 +397,12 @@ fn service_info(
     }
 }
 
-/// What the SCM does when the service fails: restart it after 10 s on the first two
-/// failures and leave it stopped on the third; the count starts over after a day without a
-/// failure.
+/// What the SCM does when the service fails: restart it after 10 s on the first three
+/// failures and leave it stopped on the fourth; the count starts over after a day without a
+/// failure. A restart the server asks for (exit status 12: an installed update, a module
+/// change) counts as a failure too, and an update that is switched back takes up to three
+/// (the switch, a failed start of the new version, the switch back), so three restarts keep
+/// the previous version running after a failed update.
 fn failure_actions() -> ServiceFailureActions {
     let restart = ServiceAction {
         action_type: ServiceActionType::Restart,
@@ -409,7 +416,7 @@ fn failure_actions() -> ServiceFailureActions {
         reset_period: ServiceFailureResetPeriod::After(FAILURE_RESET),
         reboot_msg: None,
         command: None,
-        actions: Some(vec![restart.clone(), restart, give_up]),
+        actions: Some(vec![restart.clone(), restart.clone(), restart, give_up]),
     }
 }
 
@@ -462,9 +469,17 @@ fn install_service(args: &InstallArgs, out: &mut impl Write, err: &mut impl Writ
     let resolved = load_config(&config, data_dir.as_deref())
         .map_err(|error| Failure::new(exit::CONFIG, error.to_string()))?;
     require_absolute_paths(&resolved.config)?;
-    let executable = std::env::current_exe().map_err(|error| {
+    let own = std::env::current_exe().map_err(|error| {
         Failure::general(format!("cannot find the path of this executable: {error}"))
     })?;
+    // The `current` link layout (OPS-24): the service runs the version that `current` points
+    // at, so that an update installed from the UI is a switch of the link and a restart.
+    let layout = crate::upgrade::layout::Layout::new(&resolved.data_dir);
+    let executable = if args.no_update_layout {
+        own.clone()
+    } else {
+        layout.current_binary()
+    };
     let account = account(args);
     let info = service_info(
         args,
@@ -484,6 +499,22 @@ fn install_service(args: &InstallArgs, out: &mut impl Write, err: &mut impl Writ
         ),
         ..failure
     })?;
+    if !args.no_update_layout {
+        let note = crate::upgrade::ensure_layout(
+            &resolved.data_dir,
+            &own,
+            &crate::upgrade::running_version(),
+        )
+        .map_err(|error| {
+            Failure::general(format!(
+                "cannot set up the version layout in {}: {error}; the service is registered \
+                 but cannot start, remove it with `tenko service uninstall --name {name}` or \
+                 register it again with --no-update-layout",
+                layout.root().display()
+            ))
+        })?;
+        let _ = writeln!(out, "  versions:      {note}");
+    }
     let _ = writeln!(out, "start it with: tenko service start --name {name}");
     Ok(())
 }
@@ -524,7 +555,7 @@ fn configure(service: &Service, out: &mut impl Write, err: &mut impl Write) {
         Ok(()) => {
             let _ = writeln!(
                 out,
-                "  on failure:    restart after {} s, up to two times",
+                "  on failure:    restart after {} s, up to three times",
                 RESTART_DELAY.as_secs()
             );
         }
@@ -862,6 +893,8 @@ fn serve_until_stopped(
         // The log is not open yet; the exit status is all the SCM can show.
         return exit::CONFIG;
     };
+    // A restart request (exit status 12) relies on the failure actions below.
+    crate::upgrade::restart::set_windows_service();
     let path = log_path(&resolved);
     if logging::init_server(&resolved.config.log, Some(&path), Sink::FileOnly).is_err() {
         return exit::FAILURE;
@@ -978,6 +1011,7 @@ mod tests {
             data_dir: None,
             account: None,
             manual: false,
+            no_update_layout: false,
         }
     }
 
@@ -1085,7 +1119,7 @@ mod tests {
     }
 
     #[test]
-    fn failure_actions_restart_twice_then_stop() {
+    fn failure_actions_restart_three_times_then_stop() {
         let actions = failure_actions().actions.expect("actions");
         let kinds: Vec<_> = actions.iter().map(|action| action.action_type).collect();
         assert_eq!(
@@ -1093,11 +1127,12 @@ mod tests {
             [
                 ServiceActionType::Restart,
                 ServiceActionType::Restart,
+                ServiceActionType::Restart,
                 ServiceActionType::None
             ]
         );
         assert_eq!(actions[0].delay, Duration::from_secs(10));
-        assert_eq!(actions[1].delay, Duration::from_secs(10));
+        assert_eq!(actions[2].delay, Duration::from_secs(10));
     }
 
     #[test]

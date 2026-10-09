@@ -20,6 +20,7 @@
 //! |---|---|
 //! | [`dto`] | shared bodies: [`dto::Page`], audit, events and system DTOs |
 //! | [`problem`] | RFC 9457 problem details, `ApiError`, the platform's error codes |
+//! | [`modules`] | the product modules of OPS-25 (`Module`, `ModuleSet`) |
 //! | `client` | the API client (feature `client`) |
 //! | `server` | [`serve`], [`start`], [`ServerConfig`], the listener, PROXY protocol, trusted proxies |
 //! | `middleware` | security headers, CSRF guard, rate limits, idempotency, request counters |
@@ -49,6 +50,7 @@
 #[cfg(feature = "client")]
 pub mod client;
 pub mod dto;
+pub mod modules;
 pub mod problem;
 
 #[cfg(feature = "server")]
@@ -83,12 +85,26 @@ pub const fn version() -> &'static str {
 }
 
 /// Builds the router of the API under [`API_BASE`], over `state`, together with its OpenAPI
-/// document. The server wraps it with its middleware and the UI ([`server::app`]).
+/// document. The server wraps it with its middleware and the UI ([`server::app`]). Only the
+/// routes of the modules of the state are registered ([`state::AppState::modules`],
+/// OPS-25).
 #[cfg(feature = "server")]
 pub fn api(state: state::AppState) -> (axum::Router, utoipa::openapi::OpenApi) {
+    let modules = state.modules();
+    api_with(state, modules)
+}
+
+/// [`api`] with an explicit module set: a disabled module registers no route, so its
+/// paths answer 404 like unknown ones (OPS-25). The document describes the registered
+/// routes; [`openapi`] always describes the whole API.
+#[cfg(feature = "server")]
+pub fn api_with(
+    state: state::AppState,
+    modules: modules::ModuleSet,
+) -> (axum::Router, utoipa::openapi::OpenApi) {
     let (router, mut document) =
         utoipa_axum::router::OpenApiRouter::<state::AppState>::with_openapi(routes::api_doc())
-            .nest(API_BASE, routes::router())
+            .nest(API_BASE, routes::router_for(modules))
             .split_for_parts();
     add_stream_schemas(&mut document);
     (router.with_state(state), document)

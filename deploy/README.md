@@ -127,13 +127,16 @@ tenko prefix list
 | 0 | Success; for `tenko serve`, a graceful shutdown |
 | 1 | An unexpected failure: I/O, a server that stopped with an error, a bug |
 | 2 | Usage: invalid arguments, a command that does not exist on this platform, or roles that Phase 1 does not implement |
-| 3 | The configuration is invalid (`tenko serve`, `tenko config check`) |
+| 3 | The configuration is invalid (`tenko serve`, `tenko config check`, `tenko upgrade check`), or `tenko serve` found a data directory of a newer format than it reads (`upgrade.format_newer`) |
 | 4 | `tenko serve` refused to start: a start step failed |
 | 5 | The server answered with an error (the problem code is printed) |
 | 6 | Not signed in, or the stored credentials were refused: run `tenko login` |
 | 7 | The server could not be reached (connection, TLS, timeout) |
 | 8 | A job or an import ended without success |
 | 9 | `tenko audit verify`: the audit chain does not verify |
+| 10 | `tenko upgrade check`: the data directory needs a migration and the dry run passed |
+| 11 | `tenko upgrade check`: this binary refuses the data directory (a newer format, a missing migration, records that disagree, or a migration that failed in the dry run) |
+| 12 | `tenko serve`: stopped on purpose to be started again (an installed update, a switch back to the previous version, a changed module set); the service manager starts it |
 
 ## Linux: systemd
 
@@ -177,6 +180,19 @@ If the unit fails at once with status 243/CREDENTIALS, `/etc/tenko/kek.cred` is 
 was encrypted with another `--name`. The unit comments describe the alternative for hosts
 where the `tenko` account can use a TPM2.
 
+**Versions.** The unit does not run `/usr/local/bin/tenko` itself. `ExecStartPre=` runs
+`tenko upgrade layout`, which on the first start copies the binary to
+`/var/lib/tenko/updates/<version>/` and points the link `current` at it, and `ExecStart=`
+runs `/var/lib/tenko/updates/current/tenko`. An update installed from the web UI is then a
+switch of that link and a restart; `RestartForceExitStatus=12` makes systemd start the
+server again when it stops itself with status 12. A newer binary placed at
+`/usr/local/bin/tenko` is adopted at the next start. To keep the old layout, without
+updates from the UI, put `/usr/local/bin/tenko serve --config /etc/tenko/tenko.toml` in
+`ExecStart=` and delete the `ExecStartPre=` line. An installation made before the layout
+existed gets it when the unit is installed again. The format of the data directory, the
+procedure for upgrades and rollbacks, and the layout are described in
+[../docs/upgrades.md](../docs/upgrades.md).
+
 ## Containers
 
 The image runs `tenko serve` as the non-root user `nonroot` (65532) with no configuration
@@ -212,7 +228,55 @@ Run the other `tenko` commands in the same image, for example
 `docker run --rm --entrypoint /usr/local/bin/tenko tenko config check`. Allow 30 seconds
 for a stop (`--stop-timeout 30` or `stop_grace_period`); the default of 10 is too short.
 
+**Updates.** A container is updated by pulling a new image and creating the container
+again. The data volume keeps the state, and the server migrates the data directory at its
+first start with the new image, after copying the store aside. The image sets
+`TENKO_UPDATES__CONTAINER=true` (`/.dockerenv` and `/run/.containerenv` are recognized as
+well), so the web UI announces new versions and shows the command that pulls them, for
+example `docker pull ghcr.io/linkztream/tenko:0.2.0`; it installs nothing itself. Pin the
+version in the tag instead of `latest`, and check the volume with the new image before you
+switch:
+
+```
+docker run --rm -v tenko-data:/var/lib/tenko --entrypoint /usr/local/bin/tenko \
+  ghcr.io/linkztream/tenko:0.2.0 upgrade check
+```
+
 ## Windows
 
 `tenko service install` registers `tenko serve` as a Windows service; see
 [windows/README.md](windows/README.md).
+
+## Upgrades
+
+A node has a binary, which has a version, and a data directory, which has a format. A new
+binary migrates an older format when it starts, after copying the store aside; an older
+binary refuses a newer format and changes nothing. `tenko upgrade check`, run with the new
+binary on the stopped node, dry-runs the migration on a copy and reports with an exit
+status: 0 nothing to do, 10 a migration is needed and passed, 11 refused (see the exit
+statuses above). In short, on Linux with the shipped unit, as root:
+
+```
+systemctl stop tenko
+cp -a /var/lib/tenko /srv/backup/tenko-20261009                  # and keep the key apart
+sudo -u tenko /usr/local/bin/tenko-0.2.0 upgrade check \
+  --config /etc/tenko/tenko.toml --data-dir /var/lib/tenko       # 0 or 10 means go on
+sudo -u tenko /usr/local/bin/tenko-0.2.0 upgrade layout \
+  --config /etc/tenko/tenko.toml --data-dir /var/lib/tenko       # switch `current`
+systemctl start tenko
+journalctl -u tenko --since '10 minutes ago' | grep -E 'data format|migrat'
+tenko health --live --url https://ddi.example.org:8443 --ca-file /var/lib/tenko/tls/ca-root.pem
+```
+
+`/usr/local/bin/tenko-0.2.0` is the new binary, staged beside the installed one and
+verified against `SHA256SUMS` of the release. To roll back, stop the unit and move the link
+back with `sudo -u tenko ln -sfn 0.1.0 /var/lib/tenko/updates/current`. When the new
+version migrated the data (`store/format` names a newer format than the old binary
+writes), the old binary refuses the directory: restore the store from
+`upgrade-backups/<name>/store` or from the backup first. Containers and the Windows
+service follow the same steps with their own commands.
+
+[../docs/upgrades.md](../docs/upgrades.md) has the full procedure for Linux, Windows and
+containers, the rollback in detail, updates installed from the web UI, how the release
+manifest and the layout work, and the convention that developers follow when stored data
+changes. [windows/README.md](windows/README.md) has the Windows commands.

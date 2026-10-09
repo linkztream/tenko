@@ -28,12 +28,12 @@ async function openEditor(name: string) {
 }
 
 describe("the security page", () => {
-  it("lists TGL-01 to TGL-07 in order with the current and the profile value", async () => {
+  it("lists TGL-01 to TGL-07 and TGL-23 in order with the current and the profile value", async () => {
     await signInAs();
     await openPage();
     const ids = Array.from(document.querySelectorAll("tbody tr[data-toggle]")).map((r) => r.getAttribute("data-toggle"));
     expect(ids).toEqual(TOGGLES.map((d) => d.id));
-    expect(ids).toHaveLength(7);
+    expect(ids).toHaveLength(8);
     // The Standard profile: administrators need MFA, passwords are at least 12 characters.
     expect(within(row("TGL-02")).getAllByText("Required for administrators")).toHaveLength(2);
     expect(within(row("TGL-01")).getAllByText("Standard: at least 12 characters")).toHaveLength(2);
@@ -41,7 +41,7 @@ describe("the security page", () => {
     // Everything follows the profile: no deviation, no reset button, no banner.
     expect(screen.getByText("Every setting follows the profile.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Reset to profile/ })).toBeNull();
-    expect(screen.getByText(/of 22 settings are available/)).toBeTruthy();
+    expect(screen.getByText(/of 23 settings are available/)).toBeTruthy();
   });
 
   it("shows the profile with its description and how many settings differ", async () => {
@@ -208,10 +208,11 @@ describe("the security page", () => {
     expect(
       await within(dialog).findByText("Switching to Hardened resets every setting to the Hardened values."),
     ).toBeTruthy();
-    expect(within(dialog).getByText("7 settings change:")).toBeTruthy();
+    expect(within(dialog).getByText("8 settings change:")).toBeTruthy();
     const table = within(dialog).getByRole("table", { name: "Settings that change" });
     expect(within(table).getByText("Password policy preset")).toBeTruthy();
     expect(within(table).getByText("Lockout")).toBeTruthy();
+    expect(within(table).getByText("Updates")).toBeTruthy();
     // The database has not changed before the confirmation.
     expect(db.settings.profile).toBe("standard");
 
@@ -348,6 +349,107 @@ describe("the security page", () => {
     const dialog = await screen.findByRole("dialog", { name: "Change security profile" });
     fireEvent.click(within(dialog).getByRole("radio", { name: /Lab/ }));
     await within(dialog).findByRole("button", { name: "Switch to Lab" });
+    expect(await axeViolations(dialog)).toEqual([]);
+  });
+});
+
+describe("TGL-23: the update check and who may install", () => {
+  it("lists the toggle with the value of the profile and no deviation", async () => {
+    await signInAs();
+    await openPage();
+    const updates = row("TGL-23");
+    expect(within(updates).getAllByText("Daily check on, install after a fresh sign-in")).toHaveLength(2);
+    expect(within(updates).getByText("Follows the profile")).toBeTruthy();
+    expect(within(updates).queryByRole("button", { name: /Reset to profile/ })).toBeNull();
+  });
+
+  it("shows the default of each profile in the profile dialog", async () => {
+    await signInAs("lab");
+    await openPage();
+    // Lab installs from the web interface; Standard asks for a fresh sign-in first.
+    expect(within(row("TGL-23")).getAllByText("Daily check on, install from the web interface")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Change profile" }));
+    const dialog = await screen.findByRole("dialog", { name: "Change security profile" });
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Hardened/ }));
+    const table = await within(dialog).findByRole("table", { name: "Settings that change" });
+    const changed = within(table).getByText("Updates").closest("tr") as HTMLElement;
+    expect(within(changed).getByText("Daily check on, install from the web interface")).toBeTruthy();
+    expect(within(changed).getByText("Daily check on, install from an uploaded file only")).toBeTruthy();
+  });
+
+  it("edits the install mode, explains each option and marks the deviation", async () => {
+    await signInAs();
+    await openPage();
+    const dialog = await openEditor("Updates");
+    expect(within(dialog).getByRole("switch", { name: /Check for new versions every day/ })).toBeTruthy();
+    expect((within(dialog).getByRole("switch", { name: /Check for new versions every day/ }) as HTMLInputElement).checked).toBe(true);
+    // Each option says what it means.
+    const modes = within(dialog).getAllByTestId("updates-install-mode");
+    expect(modes.map((m) => m.getAttribute("data-key"))).toEqual(["ui", "ui_step_up", "upload_only"]);
+    expect((modes[1] as HTMLInputElement).checked).toBe(true);
+    expect(within(dialog).getByText(/An administrator can install a new version with one click/)).toBeTruthy();
+    expect(within(dialog).getByText(/must sign in again with a stronger method before the install starts/)).toBeTruthy();
+    expect(within(dialog).getByText(/The server downloads nothing/)).toBeTruthy();
+    expect((within(dialog).getByRole("button", { name: "Save setting" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Only from an uploaded file/ }));
+    expect(await within(dialog).findByText(/Differs from the Standard profile/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save setting" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(db.settings.updates).toEqual({ check: true, install: "upload_only" });
+    const updates = row("TGL-23");
+    expect(within(updates).getByText("Daily check on, install from an uploaded file only")).toBeTruthy();
+    expect(within(updates).getByText("Differs from the profile")).toBeTruthy();
+    expect(within(updates).queryByText("Weaker than Home")).toBeNull();
+    expect(await screen.findByText("Saved Updates")).toBeTruthy();
+  });
+
+  it("calls a switched-off check weaker than Home, raises the banner and resets to the profile", async () => {
+    await signInAs();
+    await openPage();
+    expect(session()?.banner.weaker_than_home).toBe(false);
+    const dialog = await openEditor("Updates");
+    fireEvent.click(within(dialog).getByRole("switch", { name: /Check for new versions every day/ }));
+    expect(await within(dialog).findByText("Weaker than Home: the warning banner will show for everyone.")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save setting" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    expect(db.settings.updates).toEqual({ check: false, install: "ui_step_up" });
+    expect(session()?.banner.weaker_than_home).toBe(true);
+    expect(session()?.banner.deviations).toEqual(["TGL-23"]);
+    const updates = row("TGL-23");
+    expect(within(updates).getByText("Weaker than Home")).toBeTruthy();
+    expect(within(updates).getByText("Daily check off, install after a fresh sign-in")).toBeTruthy();
+
+    fireEvent.click(within(updates).getByRole("button", { name: "Reset to profile: Updates" }));
+    await waitFor(() => expect(within(row("TGL-23")).queryByText("Weaker than Home")).toBeNull());
+    expect(db.settings.updates).toEqual({ check: true, install: "ui_step_up" });
+    expect(session()?.banner.weaker_than_home).toBe(false);
+  });
+
+  it("keeps the other toggles when only the updates change, and the updates when another toggle changes", async () => {
+    await signInAs();
+    await openPage();
+    const first = await openEditor("Updates");
+    fireEvent.click(within(first).getByRole("radio", { name: /^From the web interface\s*An administrator can install/ }));
+    fireEvent.click(within(first).getByRole("button", { name: "Save setting" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(db.settings.updates).toEqual({ check: true, install: "ui" });
+
+    const second = await openEditor("Lockout");
+    fireEvent.change(within(second).getByLabelText("Lockout"), { target: { value: "lock_until_unlock" } });
+    fireEvent.click(within(second).getByRole("button", { name: "Save setting" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(db.settings.lockout).toBe("lock_until_unlock");
+    // The row of TGL-23 is still there, with the value the first edit saved.
+    expect(within(row("TGL-23")).getByText("Daily check on, install from the web interface")).toBeTruthy();
+  });
+
+  it("is accessible", async () => {
+    await signInAs();
+    await openPage();
+    const dialog = await openEditor("Updates");
     expect(await axeViolations(dialog)).toEqual([]);
   });
 });

@@ -1,0 +1,46 @@
+/* The updates page and the what-is-new dialog. */
+.upd-card { display: grid; gap: var(--sp-5); padding: var(--sp-5) var(--sp-6); }
+.upd-card p { margin: 0; line-height: var(--lh-text); }
+.upd-kv { grid-template-columns: 160px minmax(0, 1fr); }
+.upd-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); }
+.upd-card .form-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); }
+.upd-card .field .input[type="file"] { height: auto; padding: var(--sp-2) var(--sp-4); max-width: 100%; }
+
+/* A release. */
+.upd-release { display: grid; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); }
+.upd-release-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-5); }
+.upd-release-head h3 { font-size: var(--fs-16); }
+.upd-action { margin: 0; }
+.upd-action .md > :first-child, .upd-confirm-action .md > :first-child { margin-top: 0; }
+
+/* Markdown of the notes. */
+.md { display: grid; gap: var(--sp-3); color: var(--ink-2); line-height: var(--lh-text); max-width: 80ch; min-width: 0; overflow-wrap: anywhere; }
+.md > * { margin: 0; }
+.md h4, .md h5, .md h6 { font-size: var(--fs-13); color: var(--ink); margin-top: var(--sp-3); }
+.md ul, .md ol { padding-left: var(--sp-8); display: grid; gap: var(--sp-1); }
+.md ul ul, .md ul ol, .md ol ul, .md ol ol { margin-top: var(--sp-1); }
+.md code { font-family: var(--font-data); font-size: 0.96em; background: var(--surface-3); padding: 0 var(--sp-2); border-radius: var(--r-1); }
+.md pre { background: var(--surface-3); border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--sp-4) var(--sp-5); overflow: auto; }
+.md pre code { background: transparent; padding: 0; }
+.md a { color: var(--accent); }
+
+/* The pull command of a container. */
+.upd-pull { display: grid; gap: var(--sp-3); }
+.upd-code { display: flex; align-items: flex-start; gap: var(--sp-4); }
+.upd-code pre { flex: 1; min-width: 0; margin: 0; background: var(--surface-3); border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--sp-4) var(--sp-5); overflow: auto; }
+.upd-code code { font-family: var(--font-data); font-size: var(--fs-12); white-space: pre; }
+
+/* An install in progress. */
+.upd-job { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-5); }
+.upd-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
+.upd-steps li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); }
+.upd-steps li > span:last-child { color: var(--ink-2); }
+.note ul { margin: var(--sp-3) 0 0; padding-left: var(--sp-8); }
+
+/* The what-is-new dialog. */
+.dialog.upd-whatsnew { width: min(640px, calc(100vw - 32px)); max-height: 84vh; overflow: auto; }
+.upd-whatsnew .upd-notes { display: grid; gap: var(--sp-5); }
+.upd-confirm-action { display: grid; gap: var(--sp-2); margin-top: var(--sp-3); }
+
+/* The page of a module that is switched off. */
+.upd-module-off { max-width: 56ch; display: grid; gap: var(--sp-5); justify-items: start; }

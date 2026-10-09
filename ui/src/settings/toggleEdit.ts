@@ -21,6 +21,8 @@ export function patchFor(setting: ToggleSetting, value: unknown): SettingsPatch 
       return { breach_check: value as NonNullable<SettingsPatch["breach_check"]> };
     case "lockout":
       return { lockout: value as NonNullable<SettingsPatch["lockout"]> };
+    case "updates":
+      return { updates: value as NonNullable<SettingsPatch["updates"]> };
   }
 }
 

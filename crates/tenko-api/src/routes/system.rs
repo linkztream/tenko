@@ -1,7 +1,9 @@
-//! Health, status, the internal CA root, the OpenAPI document and metrics.
+//! Health, status, the internal CA root, the OpenAPI document and metrics; in-app updates
+//! and the module switch in the submodules [`updates`] and [`modules`].
 //!
-//! Area: system. Owner: WP1.7 (`GET /system/ca-root`: WP1.8b). Requirements: API-01,
-//! API-10, OPS-05, OPS-19, OPS-22.
+//! Area: system. Owner: WP1.7 (`GET /system/ca-root`: WP1.8b; [`updates`] and [`modules`]:
+//! WP2.10).
+//! Requirements: API-01, API-10, OPS-05, OPS-19, OPS-22, OPS-24, OPS-25.
 //!
 //! Liveness, readiness, the CA root and the OpenAPI document are open. `GET /system/status`
 //! needs an authenticated principal with read access to the system. `GET /metrics` needs a
@@ -35,8 +37,13 @@ use crate::{
     state::AppState,
 };
 
+pub mod modules;
+pub mod updates;
+
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
+        .merge(modules::routes())
+        .merge(updates::routes())
         .routes(routes!(health))
         .routes(routes!(ready))
         .routes(routes!(system_status))
@@ -239,6 +246,7 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
         },
         |listener| listener.ui(),
     );
+    warnings.extend(state.notices_list());
     if ui.stub {
         warnings.push(crate::dto::system::StatusWarning {
             code: "sys.ui.stub".to_owned(),
@@ -271,6 +279,7 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
         },
         tls,
         ui,
+        modules: state.modules(),
         warnings,
     }
 }

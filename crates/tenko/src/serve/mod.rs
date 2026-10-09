@@ -170,6 +170,9 @@ pub enum ServeError {
     Start(StartError),
     /// The server stopped with an error after it had started.
     Runtime(String),
+    /// The server stopped so that its service manager starts it again (an installed
+    /// update, a changed module set, a switch back to the previous version).
+    Restart(String),
 }
 
 impl fmt::Display for ServeError {
@@ -177,6 +180,7 @@ impl fmt::Display for ServeError {
         match self {
             Self::Start(error) => fmt::Display::fmt(error, f),
             Self::Runtime(reason) => write!(f, "the server stopped with an error: {reason}"),
+            Self::Restart(reason) => write!(f, "the server stopped to restart: {reason}"),
         }
     }
 }
@@ -184,13 +188,21 @@ impl fmt::Display for ServeError {
 impl std::error::Error for ServeError {}
 
 impl ServeError {
-    /// The exit status for this error.
+    /// The exit status for this error: 3 for a data directory with a newer format than
+    /// this binary (`upgrade.format_newer`, a deployment error), 4 for other failed steps.
     pub fn exit_code(&self) -> u8 {
         match self {
+            Self::Start(error) if error.code == "upgrade.format_newer" => exit::CONFIG,
             Self::Start(_) => exit::START,
             Self::Runtime(_) => exit::FAILURE,
+            Self::Restart(_) => exit::RESTART,
         }
     }
+}
+
+/// A start error from the data-directory format check.
+fn upgrade_error(step: &'static str, error: &crate::upgrade::datadir::UpgradeError) -> StartError {
+    StartError::new(step, error.code(), error.to_string())
 }
 
 /// The server is up.
@@ -265,6 +277,15 @@ pub fn command(args: &ServeArgs, err: &mut impl Write) -> u8 {
     };
     match run(resolved, shutdown, crate::platform::notify_hooks()) {
         Ok(()) => exit::OK,
+        Err(ServeError::Restart(reason)) => {
+            tracing::info!(%reason, "tenko serve stopped for a restart (exit status 12)");
+            let _ = writeln!(
+                err,
+                "tenko serve: stopped for a restart ({reason}); exit status 12 asks the \
+                 service manager to start it again"
+            );
+            exit::RESTART
+        }
         Err(error) => {
             tracing::error!(%error, "tenko serve ended with an error");
             let _ = writeln!(err, "tenko serve: {error}");
@@ -542,11 +563,23 @@ async fn serve(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> Result<(
         version()
     );
     let mut running = Running::new();
-    let started = start(&resolved, &mut running).await;
+    let restart = crate::upgrade::restart::Restart::new();
+    // A newly installed version is on probation (OPS-24): read before anything else, so a
+    // switched-back previous version restores its store before the format check.
+    let probation = probation_at_start(&resolved, &restart)?;
+    let started = start(&resolved, &mut running, &restart, probation.as_ref()).await;
     let services = match started {
         Ok(services) => services,
         Err(error) => {
             running.stop().await;
+            if let Some(probation) = &probation
+                && probation.switch_back(&error.code)
+            {
+                return Err(ServeError::Restart(format!(
+                    "the new version failed to start ({}); switched back",
+                    error.code
+                )));
+            }
             return Err(ServeError::Start(error));
         }
     };
@@ -555,6 +588,17 @@ async fn serve(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> Result<(
         elapsed: services.elapsed,
     };
     announce(&resolved, &services, &ready_info);
+    if let Some(probation) = &probation
+        && !probation.confirm()
+    {
+        tracing::warn!("ready after the probation deadline; the previous version takes over");
+    }
+    if let Some(updates) = &services.updates {
+        let updates = updates.clone();
+        running.tasks.push(tokio::spawn(async move {
+            updates.report_outcome().await;
+        }));
+    }
     if let Some(ready) = ready {
         ready(&ready_info);
     }
@@ -564,14 +608,20 @@ async fn serve(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> Result<(
         ipam,
         engine,
         vault,
+        updates,
         ..
     } = services;
     let requested = Arc::new(std::sync::OnceLock::<Instant>::new());
     let mark = Arc::clone(&requested);
+    let restart_requested = restart.clone();
     let notify_stopping = async move {
-        shutdown.await;
+        tokio::select! {
+            () = shutdown => tracing::info!("shutdown requested"),
+            reason = restart_requested.requested() => {
+                tracing::info!(%reason, "stopping for a restart");
+            }
+        }
         let _ = mark.set(Instant::now());
-        tracing::info!("shutdown requested");
         if let Some(stopping) = stopping {
             stopping();
         }
@@ -584,14 +634,55 @@ async fn serve(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> Result<(
         elapsed_ms = since(&requested),
         "API stopped: requests finished, event streams ended"
     );
-    drop((auth, ipam, engine, vault));
+    drop((auth, ipam, engine, vault, updates));
     running.stop().await;
-    match result {
-        Ok(()) => {
+    match (result, restart.reason()) {
+        (Ok(()), Some(reason)) => {
+            tracing::info!(
+                elapsed_ms = since(&requested),
+                "tenko stopped for a restart"
+            );
+            Err(ServeError::Restart(reason))
+        }
+        (Ok(()), None) => {
             tracing::info!(elapsed_ms = since(&requested), "tenko stopped");
             Ok(())
         }
-        Err(error) => Err(ServeError::Runtime(error.to_string())),
+        (Err(error), _) => Err(ServeError::Runtime(error.to_string())),
+    }
+}
+
+/// Reads the update attempt at start: the probation of a newly installed version, or an
+/// immediate switch back when a previous start of it did not become ready.
+fn probation_at_start(
+    resolved: &Resolved,
+    restart: &crate::upgrade::restart::Restart,
+) -> Result<Option<crate::upgrade::probation::Probation>, ServeError> {
+    use crate::upgrade::probation::{StartAction, on_start};
+
+    let own = crate::upgrade::running_version();
+    match on_start(&resolved.data_dir, &own) {
+        Ok(StartAction::Normal) => Ok(None),
+        Ok(StartAction::Probation(probation)) => {
+            tracing::warn!(
+                version = %own,
+                deadline_secs = probation.snapshot().deadline_secs,
+                "this version was just installed and runs on probation"
+            );
+            probation.watch(restart.clone());
+            Ok(Some(probation))
+        }
+        Ok(StartAction::SwitchBack(probation)) => {
+            probation.switch_back("upgrade.not_confirmed");
+            Err(ServeError::Restart(
+                "the new version did not become ready at its first start".to_owned(),
+            ))
+        }
+        Err(error) => Err(ServeError::Start(StartError::new(
+            "data_dir",
+            "upgrade.attempt_unreadable",
+            format!("the update attempt record cannot be used: {error}"),
+        ))),
     }
 }
 
@@ -599,7 +690,10 @@ async fn serve(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> Result<(
 struct Services {
     server: tenko_api::RunningServer,
     auth: Arc<AuthService>,
-    ipam: Arc<IpamService>,
+    /// The IPAM domain; `None` while the module is off (OPS-25).
+    ipam: Option<Arc<IpamService>>,
+    /// In-app updates (OPS-24); `None` when the service cannot run.
+    updates: Option<crate::upgrade::updates::Updates>,
     engine: JobEngine,
     vault: Arc<StoreVault>,
     setup_token: Option<tenko_auth::secret::SetupToken>,
@@ -615,11 +709,22 @@ struct Services {
     clippy::too_many_lines,
     reason = "the start order reads best as one sequence"
 )]
-async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, StartError> {
+async fn start(
+    resolved: &Resolved,
+    running: &mut Running,
+    restart: &crate::upgrade::restart::Restart,
+    probation: Option<&crate::upgrade::probation::Probation>,
+) -> Result<Services, StartError> {
     let config = &resolved.config;
     let layout = resolved.layout();
     let mut steps = Steps::new();
     create_data_dir(&resolved.data_dir)?;
+    // The data-directory format (OPS-23): a newer format is refused before anything, the
+    // keys included, is touched; an older one is copied aside before the store opens and
+    // migrated after.
+    let registry = crate::upgrade::migrations::Registry::builtin();
+    let plan = crate::upgrade::datadir::preflight(&layout.store(), registry)
+        .map_err(|error| upgrade_error("store", &error))?;
 
     let fresh = layout.is_fresh();
     let ring: KekRing = steps
@@ -655,9 +760,47 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
 
     let store: RaftStore = steps
         .run("store", async {
+            let backup = if let crate::upgrade::datadir::Plan::Migrate { from, to, .. } = plan {
+                let (data_dir, store_dir) = (resolved.data_dir.clone(), layout.store());
+                let copy = tokio::task::spawn_blocking(move || {
+                    crate::upgrade::datadir::backup(&data_dir, &store_dir, from, to)
+                })
+                .await
+                .map_err(|error| StartError::new("store", "start.store.panic", error.to_string()))?
+                .map_err(|error| upgrade_error("store", &error))?;
+                if let Some(probation) = probation {
+                    probation.set_backup(&copy);
+                }
+                Some(copy)
+            } else {
+                None
+            };
             let store = RaftStore::open(store_config(resolved))
                 .await
                 .map_err(|error| StartError::coded("store", &error))?;
+            // A migration does not count against the probation deadline of a new version.
+            if let Some(probation) = probation {
+                probation.pause();
+            }
+            let finished =
+                crate::upgrade::datadir::finish(&store, &layout.store(), plan, registry, version())
+                    .await;
+            if let Some(probation) = probation {
+                probation.resume();
+            }
+            let format = match finished {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    let _ = store.shutdown().await;
+                    if let Some(copy) = &backup {
+                        tracing::error!(
+                            backup = %copy.display(),
+                            "the migration failed; the store copy taken before it is kept"
+                        );
+                    }
+                    return Err(upgrade_error("store", &error));
+                }
+            };
             let status = store.status();
             let fsync = match status.fsync_p50_micros {
                 Some(p50) if p50 > FSYNC_WARN_MICROS => {
@@ -675,10 +818,11 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
             };
             let disk = maintenance::at_start(&store, maintenance::Policy::new(&config.store)).await;
             let summary = format!(
-                "{} at revision {}, audit head {}{fsync}; {disk}",
+                "{} at revision {}, audit head {}, {}{fsync}; {disk}",
                 if fresh { "created" } else { "opened" },
                 status.revision,
                 status.audit_head,
+                format.summary(),
             );
             Ok((store, summary))
         })
@@ -690,6 +834,21 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
         running.stop.subscribe(),
     )));
     let store_dyn: Arc<dyn Store> = Arc::new(store.clone());
+    // The module switch (OPS-25): tenko.toml, else the installation's choice, else all.
+    let stored_modules = crate::modules::stored(store_dyn.as_ref())
+        .await
+        .map_err(|error| StartError::coded("store", &error))?;
+    let modules = crate::modules::effective(config.modules, stored_modules);
+    if let (Some(pinned), Some(chosen)) = (config.modules, stored_modules)
+        && pinned != chosen
+    {
+        tracing::info!(
+            pinned = %pinned,
+            chosen = %chosen,
+            "modules in tenko.toml decide; the installation's choice is not used"
+        );
+    }
+    let ipam_on = modules.contains(crate::modules::Module::Ipam);
 
     let vault = steps
         .run("vault", async {
@@ -737,7 +896,7 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
         })
         .await?;
 
-    let (ipam, engine, imports) = steps
+    let (ipam, mut engine, imports) = steps
         .run("ipam", async {
             let mut engine = JobEngine::new(
                 Arc::clone(&store_dyn),
@@ -750,6 +909,16 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
                     ..EngineConfig::default()
                 },
             );
+            if !ipam_on {
+                // A disabled module registers no step, builds no tree and starts no task.
+                return Ok((
+                    (None, engine, None),
+                    format!(
+                        "the IPAM module is off ({})",
+                        crate::modules::describe(modules, config.modules)
+                    ),
+                ));
+            }
             tenko_ipam::jobs::register_steps(&mut engine);
             let ipam = IpamService::new(
                 Arc::clone(&store_dyn),
@@ -773,20 +942,63 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
             }
             let (imports, import_summary) = Imports::start(&ipam, &engine, &vault, &layout)?;
             Ok((
-                (ipam, engine, imports),
+                (Some(ipam), engine, Some(imports)),
                 format!("prefix tree built, step handlers registered, {import_summary}"),
             ))
         })
         .await?;
-    running
-        .tasks
-        .extend(imports.spawn_purge(running.stop.subscribe()));
-    let mut stop = running.stop.subscribe();
-    running
-        .tasks
-        .push(tokio::spawn(Arc::clone(&ipam).run_alarms(async move {
-            let _ = stop.wait_for(|stopped| *stopped).await;
-        })));
+    if let Some(imports) = &imports {
+        running
+            .tasks
+            .extend(imports.spawn_purge(running.stop.subscribe()));
+    }
+    if let Some(ipam) = &ipam {
+        let mut stop = running.stop.subscribe();
+        running
+            .tasks
+            .push(tokio::spawn(Arc::clone(ipam).run_alarms(async move {
+                let _ = stop.wait_for(|stopped| *stopped).await;
+            })));
+    }
+
+    // In-app updates (OPS-24): the service and the steps of its install job, registered
+    // before the runner starts.
+    let updates = {
+        let raft = store.clone();
+        let env = crate::upgrade::updates::Environment::detect(
+            resolved.data_dir.clone(),
+            resolved.node_id,
+            &config.updates,
+        );
+        let parts = crate::upgrade::updates::Parts {
+            section: config.updates.clone(),
+            store: Arc::clone(&store_dyn),
+            raft: Some(store.clone()),
+            policy: Arc::clone(&auth) as Arc<dyn crate::upgrade::updates::Policy>,
+            engine: engine.clone(),
+            restart: restart.clone(),
+            cluster: Box::new(move || {
+                raft.raft()
+                    .metrics()
+                    .borrow()
+                    .membership_config
+                    .membership()
+                    .voter_ids()
+                    .count()
+                    > 1
+            }),
+        };
+        match crate::upgrade::updates::Updates::new(env, parts) {
+            Ok(updates) => {
+                updates.register_steps(&mut engine);
+                Some(updates)
+            }
+            Err(error) => {
+                tracing::warn!(code = %error.code, detail = %error.detail, "in-app updates are off");
+                None
+            }
+        }
+    };
 
     let runner = steps
         .run("jobs", async {
@@ -823,11 +1035,12 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
                 Arc::clone(&store_dyn),
                 StateOptions {
                     sse: config.sse.to_config(),
-                    event_routes: EventRoutes::default(),
+                    event_routes: event_routes(),
                     node: NodeStatus {
                         id: Some(resolved.node_id),
                         roles: vec![Role::Controller.as_str().to_owned()],
                     },
+                    modules,
                 },
             );
             state.auth = Some(Arc::clone(&auth) as Arc<dyn tenko_core::Authenticator>);
@@ -852,8 +1065,24 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
                 Duration::from_secs(config.server.header_read_timeout_secs);
             server.max_connections = config.server.max_connections;
             server.extensions.insert(Arc::clone(&auth));
-            server.extensions.insert(Arc::clone(&ipam));
+            if let Some(ipam) = &ipam {
+                server.extensions.insert(Arc::clone(ipam));
+            }
             server.extensions.insert(engine.clone());
+            let module_switch: Arc<dyn tenko_api::routes::system::modules::ModuleService> =
+                Arc::new(crate::modules::ModuleSwitch::new(
+                    Arc::clone(&store_dyn),
+                    state.clone(),
+                    modules,
+                    config.modules,
+                    restart.clone(),
+                ));
+            server.extensions.insert(module_switch);
+            if let Some(updates) = &updates {
+                let service: Arc<dyn tenko_api::routes::system::updates::UpdateService> =
+                    Arc::new(updates.clone());
+                server.extensions.insert(service);
+            }
             if let Some((pem, fingerprint)) = &tls.ca_root {
                 server.extensions.insert(Arc::new(CaRootSource::new(
                     tls.service.clone(),
@@ -861,7 +1090,9 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
                     fingerprint.as_str(),
                 )));
             }
-            imports.register(&mut server);
+            if let Some(imports) = &imports {
+                imports.register(&mut server);
+            }
             connectors.register(&mut server);
             let running = tenko_api::start(server, state).await.map_err(|error| {
                 let code = match &error {
@@ -885,6 +1116,11 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
         })
         .await?;
 
+    if let Some(updates) = &updates {
+        running
+            .tasks
+            .push(updates.spawn_checks(running.stop.subscribe()));
+    }
     tracing::info!(
         elapsed_ms = millis(steps.started.elapsed()),
         "started in {} ms ({})",
@@ -899,10 +1135,23 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
         vault,
         setup_token,
         ca_root_sha256: tls.ca_root.as_ref().map(|(_, sha256)| sha256.clone()),
+        updates: updates.clone(),
         https,
         elapsed: steps.started.elapsed(),
         lab_plain_http,
     })
+}
+
+/// The event routes of the server: the defaults, and a new release manifest on the `admin`
+/// topic (OPS-24).
+fn event_routes() -> EventRoutes {
+    let mut routes = EventRoutes::default();
+    routes.table(
+        crate::upgrade::updates::MANIFEST.name().clone(),
+        tenko_api::sse::Topic::Admin,
+        None,
+    );
+    routes
 }
 
 /// Creates the data directory, private to the service account on Unix (R15).

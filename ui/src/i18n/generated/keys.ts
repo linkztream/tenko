@@ -358,12 +358,24 @@ export type MessageKey =
   | "dashboard.audit.all"
   | "dashboard.audit.none"
   | "dashboard.audit.title"
+  | "dashboard.modules.name.dhcp"
+  | "dashboard.modules.name.discovery"
+  | "dashboard.modules.name.dns"
+  | "dashboard.modules.name.ipam"
+  | "dashboard.modules.none"
+  | "dashboard.modules.restart_body"
+  | "dashboard.modules.restart_title"
   | "dashboard.palette_hint"
   | "dashboard.tile.addresses"
   | "dashboard.tile.addresses_of"
   | "dashboard.tile.alarms"
   | "dashboard.tile.alarms_hint"
   | "dashboard.tile.waiting_for_you"
+  | "dashboard.update.action"
+  | "dashboard.update.body"
+  | "dashboard.update.open"
+  | "dashboard.update.security"
+  | "dashboard.update.title"
   | "dashboard.use.empty"
   | "dashboard.use.more"
   | "dashboard.use.networks"
@@ -479,6 +491,10 @@ export type MessageKey =
   | "errors.ipam.unavailable"
   | "errors.ipam.validation"
   | "errors.ipam.vlan.duplicate"
+  | "errors.modules.conflict"
+  | "errors.modules.pinned"
+  | "errors.modules.store"
+  | "errors.modules.unavailable"
   | "errors.settings.pin_coupling"
   | "errors.sys.csrf_rejected"
   | "errors.sys.internal"
@@ -489,6 +505,48 @@ export type MessageKey =
   | "errors.sys.shutting_down"
   | "errors.sys.store.no_quorum"
   | "errors.sys.store.precondition_failed"
+  | "errors.update.check_failed"
+  | "errors.update.check_off"
+  | "errors.update.check_refused"
+  | "errors.update.check_timeout"
+  | "errors.update.check_unavailable"
+  | "errors.update.checksum_mismatch"
+  | "errors.update.fetch_failed"
+  | "errors.update.install_blocked"
+  | "errors.update.io"
+  | "errors.update.job"
+  | "errors.update.job_failed"
+  | "errors.update.manifest.invalid"
+  | "errors.update.manifest.json"
+  | "errors.update.manifest.project"
+  | "errors.update.manifest.schema"
+  | "errors.update.manifest.too_large"
+  | "errors.update.not_executable"
+  | "errors.update.not_newer"
+  | "errors.update.signature_unverified"
+  | "errors.update.size_mismatch"
+  | "errors.update.source_mismatch"
+  | "errors.update.store"
+  | "errors.update.unavailable"
+  | "errors.update.upload_failed"
+  | "errors.update.version_mismatch"
+  | "errors.update.version_unknown"
+  | "errors.upgrade.attempt_unreadable"
+  | "errors.upgrade.copy_target"
+  | "errors.upgrade.crashed"
+  | "errors.upgrade.format_mismatch"
+  | "errors.upgrade.format_newer"
+  | "errors.upgrade.in_use"
+  | "errors.upgrade.io"
+  | "errors.upgrade.marker_invalid"
+  | "errors.upgrade.migration_failed"
+  | "errors.upgrade.migration_missing"
+  | "errors.upgrade.no_store"
+  | "errors.upgrade.not_confirmed"
+  | "errors.upgrade.not_ready"
+  | "errors.upgrade.open_failed"
+  | "errors.upgrade.refused"
+  | "errors.upgrade.store"
   | "errors.users.last_administrator"
   | "errors.users.name_taken"
   | "errors.users.not_found"
@@ -1264,6 +1322,10 @@ export type MessageKey =
   | "jobs.step.ipam_intent"
   | "jobs.step.l2_move"
   | "jobs.step.observe"
+  | "jobs.step.sys_update_check"
+  | "jobs.step.sys_update_fetch"
+  | "jobs.step.sys_update_switch"
+  | "jobs.step.sys_update_verify"
   | "jobs.step_position"
   | "jobs.step_state.compensated"
   | "jobs.step_state.compensating"
@@ -1292,6 +1354,10 @@ export type MessageKey =
   | "jobs.stepname.ipam_move_observe"
   | "jobs.stepname.l2_move"
   | "jobs.stepname.observe"
+  | "jobs.stepname.sys_update_check"
+  | "jobs.stepname.sys_update_fetch"
+  | "jobs.stepname.sys_update_switch"
+  | "jobs.stepname.sys_update_verify"
   | "jobs.steps.heading"
   | "jobs.steps.label"
   | "jobs.sub"
@@ -1305,6 +1371,7 @@ export type MessageKey =
   | "jobs.title.import_apply"
   | "jobs.title.ipam_apply"
   | "jobs.title.move"
+  | "jobs.title.update_install"
   | "jobs.undo.step"
   | "jobs.view.active"
   | "jobs.view.all"
@@ -1408,6 +1475,7 @@ export type MessageKey =
   | "role.viewer.name"
   | "settings.nav.label"
   | "settings.nav.security"
+  | "settings.nav.updates"
   | "settings.nav.users"
   | "settings.reloaded"
   | "settings.security.col.actions"
@@ -1488,6 +1556,15 @@ export type MessageKey =
   | "settings.security.unit.hours"
   | "settings.security.unit.label"
   | "settings.security.unit.minutes"
+  | "settings.security.updates.check"
+  | "settings.security.updates.check_hint"
+  | "settings.security.updates.install"
+  | "settings.security.updates.install_ui"
+  | "settings.security.updates.install_ui_help"
+  | "settings.security.updates.install_ui_step_up"
+  | "settings.security.updates.install_ui_step_up_help"
+  | "settings.security.updates.install_upload_only"
+  | "settings.security.updates.install_upload_only_help"
   | "settings.security.vault.body"
   | "settings.security.vault.title"
   | "settings.title"
@@ -1718,6 +1795,7 @@ export type MessageKey =
   | "setup.gate.host_empty"
   | "setup.gate.host_invalid"
   | "setup.gate.lab_ack"
+  | "setup.gate.modules_none"
   | "setup.gate.passkey_required"
   | "setup.gate.passkey_waiting"
   | "setup.gate.password.passphrase"
@@ -1758,6 +1836,18 @@ export type MessageKey =
   | "setup.lab.relax.tokens"
   | "setup.lab.relaxes"
   | "setup.lab.title"
+  | "setup.modules.aside"
+  | "setup.modules.dhcp.description"
+  | "setup.modules.dhcp.name"
+  | "setup.modules.discovery.description"
+  | "setup.modules.discovery.name"
+  | "setup.modules.dns.description"
+  | "setup.modules.dns.name"
+  | "setup.modules.ipam.description"
+  | "setup.modules.ipam.name"
+  | "setup.modules.later"
+  | "setup.modules.save_failed"
+  | "setup.modules.title"
   | "setup.profile.group"
   | "setup.profile.hint.hardened"
   | "setup.profile.hint.home"
@@ -1920,7 +2010,9 @@ export type MessageKey =
   | "shell.command.theme_dark"
   | "shell.command.theme_light"
   | "shell.command.theme_system"
+  | "shell.command.updates"
   | "shell.command.vlans"
+  | "shell.command.whats_new"
   | "shell.dashboard.jobs"
   | "shell.dashboard.no_roles"
   | "shell.dashboard.node"
@@ -2009,11 +2101,16 @@ export type MessageKey =
   | "shell.status.last_event"
   | "shell.status.live"
   | "shell.status.live_title"
+  | "shell.status.modules_restart"
+  | "shell.status.modules_restart_title"
   | "shell.status.no_events"
   | "shell.status.offline"
   | "shell.status.reconnecting"
   | "shell.status.running"
   | "shell.status.selection"
+  | "shell.status.update"
+  | "shell.status.update_security"
+  | "shell.status.update_title"
   | "shell.status.version"
   | "shell.status.waiting"
   | "shell.theme.change"
@@ -2061,7 +2158,123 @@ export type MessageKey =
   | "toggles.session.value"
   | "toggles.token_max_days.days"
   | "toggles.token_max_days.name"
-  | "toggles.token_max_days.unlimited";
+  | "toggles.token_max_days.unlimited"
+  | "toggles.updates.check_off"
+  | "toggles.updates.check_on"
+  | "toggles.updates.install.ui"
+  | "toggles.updates.install.ui_step_up"
+  | "toggles.updates.install.upload_only"
+  | "toggles.updates.name"
+  | "toggles.updates.value"
+  | "updates.attempt.failed"
+  | "updates.attempt.rolled_back"
+  | "updates.blocked.air_gapped"
+  | "updates.blocked.cluster"
+  | "updates.blocked.container"
+  | "updates.blocked.in_progress"
+  | "updates.blocked.layout_missing"
+  | "updates.blocked.no_asset"
+  | "updates.blocked.other"
+  | "updates.blocked.settings_link"
+  | "updates.blocked.unsupervised"
+  | "updates.blocked.unsupported_platform"
+  | "updates.blocked.up_to_date"
+  | "updates.blocked.upload_only"
+  | "updates.check.checking"
+  | "updates.check.error"
+  | "updates.check.found"
+  | "updates.check.heading"
+  | "updates.check.last"
+  | "updates.check.never"
+  | "updates.check.none"
+  | "updates.check.now"
+  | "updates.check.off_air_gapped"
+  | "updates.check.off_setting"
+  | "updates.check.on"
+  | "updates.check.settings_link"
+  | "updates.check.source"
+  | "updates.check.state"
+  | "updates.code_unknown"
+  | "updates.install.blocked_title"
+  | "updates.install.button"
+  | "updates.install.confirm_action"
+  | "updates.install.confirm_body"
+  | "updates.install.confirm_ok"
+  | "updates.install.confirm_security"
+  | "updates.install.confirm_title"
+  | "updates.install.confirm_upload"
+  | "updates.install.copy_failed"
+  | "updates.install.heading"
+  | "updates.install.lead"
+  | "updates.install.pull_lead"
+  | "updates.install.step_up_hint"
+  | "updates.install.up_to_date"
+  | "updates.manifest.fetched"
+  | "updates.manifest.heading"
+  | "updates.manifest.uploaded"
+  | "updates.mark.action"
+  | "updates.mark.security"
+  | "updates.module.body"
+  | "updates.module.home"
+  | "updates.module.name.dhcp"
+  | "updates.module.name.discovery"
+  | "updates.module.name.dns"
+  | "updates.module.name.ipam"
+  | "updates.module.title"
+  | "updates.progress.failed"
+  | "updates.progress.failed_unknown"
+  | "updates.progress.heading"
+  | "updates.progress.job_link"
+  | "updates.release.action_title"
+  | "updates.release.action_unspecified"
+  | "updates.release.format"
+  | "updates.release.newest"
+  | "updates.release.no_notes"
+  | "updates.release.title"
+  | "updates.releases.count"
+  | "updates.releases.heading"
+  | "updates.releases.none"
+  | "updates.restart.body"
+  | "updates.restart.check_log"
+  | "updates.restart.check_previous"
+  | "updates.restart.check_service"
+  | "updates.restart.confirmed"
+  | "updates.restart.reason"
+  | "updates.restart.reload"
+  | "updates.restart.rolled_back"
+  | "updates.restart.timeout_body"
+  | "updates.restart.timeout_title"
+  | "updates.restart.title"
+  | "updates.running.format"
+  | "updates.running.heading"
+  | "updates.running.newest"
+  | "updates.running.platform"
+  | "updates.running.up_to_date"
+  | "updates.running.version"
+  | "updates.stepup.body"
+  | "updates.stepup.button"
+  | "updates.stepup.title"
+  | "updates.sub"
+  | "updates.title"
+  | "updates.unavailable"
+  | "updates.upload.button"
+  | "updates.upload.chosen"
+  | "updates.upload.expected"
+  | "updates.upload.file_label"
+  | "updates.upload.heading"
+  | "updates.upload.lead"
+  | "updates.upload.manifest_button"
+  | "updates.upload.manifest_done"
+  | "updates.upload.manifest_help"
+  | "updates.upload.manifest_label"
+  | "updates.upload.need_manifest"
+  | "updates.upload.uploading"
+  | "updates.upload.version_label"
+  | "updates.whatsnew.close"
+  | "updates.whatsnew.empty"
+  | "updates.whatsnew.lead"
+  | "updates.whatsnew.lead_first"
+  | "updates.whatsnew.title";
 /** Arguments of the messages that take any. */
 export interface MessageArgs {
   "account.methods.requires": { method: string | number; profile: string | number };
@@ -2106,8 +2319,10 @@ export interface MessageArgs {
   "auth.signin.retry_in": { seconds: number };
   "common.count.items": { count: number };
   "common.greeting": { name: string | number };
+  "dashboard.modules.restart_body": { configured: string | number; running: string | number };
   "dashboard.tile.alarms_hint": { critical: number };
   "dashboard.tile.waiting_for_you": { count: number };
+  "dashboard.update.body": { running: string | number; version: string | number };
   "dashboard.use.more": { count: number };
   "dashboard.use.vrf": { tenant: string | number; vrf: string | number };
   "dashboard.waiting.step": { step: number; total: number };
@@ -2465,6 +2680,7 @@ export interface MessageArgs {
   "shell.status.last_event": { ago: string | number };
   "shell.status.running": { count: number };
   "shell.status.selection": { selected: number; total: number };
+  "shell.status.update": { version: string | number };
   "shell.status.version": { version: string | number };
   "shell.status.waiting": { count: number };
   "shell.theme.change": { current: string | number };
@@ -2475,6 +2691,43 @@ export interface MessageArgs {
   "toggles.password_policy.custom": { min: string | number };
   "toggles.session.value": { absolute: string | number; idle: string | number };
   "toggles.token_max_days.days": { days: number };
+  "toggles.updates.value": { check: string | number; install: string | number };
+  "updates.attempt.failed": { to: string | number };
+  "updates.attempt.rolled_back": { from: string | number; to: string | number };
+  "updates.blocked.other": { reason: string | number };
+  "updates.blocked.unsupported_platform": { platform: string | number };
+  "updates.check.on": { hours: number };
+  "updates.code_unknown": { code: string | number };
+  "updates.install.button": { version: string | number };
+  "updates.install.confirm_body": { seconds: number; version: string | number };
+  "updates.install.confirm_ok": { version: string | number };
+  "updates.install.confirm_title": { version: string | number };
+  "updates.install.confirm_upload": { seconds: number; version: string | number };
+  "updates.install.lead": { version: string | number };
+  "updates.install.up_to_date": { version: string | number };
+  "updates.manifest.fetched": { count: number; when: string | number };
+  "updates.manifest.uploaded": { count: number; when: string | number };
+  "updates.module.body": { module: string | number };
+  "updates.progress.failed": { version: string | number };
+  "updates.progress.heading": { version: string | number };
+  "updates.release.format": { format: string | number };
+  "updates.release.title": { version: string | number };
+  "updates.releases.count": { count: number };
+  "updates.restart.body": { version: string | number };
+  "updates.restart.confirmed": { version: string | number };
+  "updates.restart.reason": { reason: string | number };
+  "updates.restart.rolled_back": { from: string | number; to: string | number };
+  "updates.restart.timeout_body": { seconds: number; version: string | number };
+  "updates.restart.title": { version: string | number };
+  "updates.sub": { version: string | number };
+  "updates.upload.button": { version: string | number };
+  "updates.upload.chosen": { name: string | number; size: string | number };
+  "updates.upload.expected": { name: string | number; size: string | number };
+  "updates.upload.file_label": { platform: string | number };
+  "updates.upload.manifest_done": { count: number };
+  "updates.whatsnew.empty": { version: string | number };
+  "updates.whatsnew.lead": { last: string | number };
+  "updates.whatsnew.title": { version: string | number };
 }
 export const messageKeys: readonly MessageKey[] = [
   "account.codes.lede",
@@ -2835,12 +3088,24 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.audit.all",
   "dashboard.audit.none",
   "dashboard.audit.title",
+  "dashboard.modules.name.dhcp",
+  "dashboard.modules.name.discovery",
+  "dashboard.modules.name.dns",
+  "dashboard.modules.name.ipam",
+  "dashboard.modules.none",
+  "dashboard.modules.restart_body",
+  "dashboard.modules.restart_title",
   "dashboard.palette_hint",
   "dashboard.tile.addresses",
   "dashboard.tile.addresses_of",
   "dashboard.tile.alarms",
   "dashboard.tile.alarms_hint",
   "dashboard.tile.waiting_for_you",
+  "dashboard.update.action",
+  "dashboard.update.body",
+  "dashboard.update.open",
+  "dashboard.update.security",
+  "dashboard.update.title",
   "dashboard.use.empty",
   "dashboard.use.more",
   "dashboard.use.networks",
@@ -2956,6 +3221,10 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.ipam.unavailable",
   "errors.ipam.validation",
   "errors.ipam.vlan.duplicate",
+  "errors.modules.conflict",
+  "errors.modules.pinned",
+  "errors.modules.store",
+  "errors.modules.unavailable",
   "errors.settings.pin_coupling",
   "errors.sys.csrf_rejected",
   "errors.sys.internal",
@@ -2966,6 +3235,48 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.sys.shutting_down",
   "errors.sys.store.no_quorum",
   "errors.sys.store.precondition_failed",
+  "errors.update.check_failed",
+  "errors.update.check_off",
+  "errors.update.check_refused",
+  "errors.update.check_timeout",
+  "errors.update.check_unavailable",
+  "errors.update.checksum_mismatch",
+  "errors.update.fetch_failed",
+  "errors.update.install_blocked",
+  "errors.update.io",
+  "errors.update.job",
+  "errors.update.job_failed",
+  "errors.update.manifest.invalid",
+  "errors.update.manifest.json",
+  "errors.update.manifest.project",
+  "errors.update.manifest.schema",
+  "errors.update.manifest.too_large",
+  "errors.update.not_executable",
+  "errors.update.not_newer",
+  "errors.update.signature_unverified",
+  "errors.update.size_mismatch",
+  "errors.update.source_mismatch",
+  "errors.update.store",
+  "errors.update.unavailable",
+  "errors.update.upload_failed",
+  "errors.update.version_mismatch",
+  "errors.update.version_unknown",
+  "errors.upgrade.attempt_unreadable",
+  "errors.upgrade.copy_target",
+  "errors.upgrade.crashed",
+  "errors.upgrade.format_mismatch",
+  "errors.upgrade.format_newer",
+  "errors.upgrade.in_use",
+  "errors.upgrade.io",
+  "errors.upgrade.marker_invalid",
+  "errors.upgrade.migration_failed",
+  "errors.upgrade.migration_missing",
+  "errors.upgrade.no_store",
+  "errors.upgrade.not_confirmed",
+  "errors.upgrade.not_ready",
+  "errors.upgrade.open_failed",
+  "errors.upgrade.refused",
+  "errors.upgrade.store",
   "errors.users.last_administrator",
   "errors.users.name_taken",
   "errors.users.not_found",
@@ -3741,6 +4052,10 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.step.ipam_intent",
   "jobs.step.l2_move",
   "jobs.step.observe",
+  "jobs.step.sys_update_check",
+  "jobs.step.sys_update_fetch",
+  "jobs.step.sys_update_switch",
+  "jobs.step.sys_update_verify",
   "jobs.step_position",
   "jobs.step_state.compensated",
   "jobs.step_state.compensating",
@@ -3769,6 +4084,10 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.stepname.ipam_move_observe",
   "jobs.stepname.l2_move",
   "jobs.stepname.observe",
+  "jobs.stepname.sys_update_check",
+  "jobs.stepname.sys_update_fetch",
+  "jobs.stepname.sys_update_switch",
+  "jobs.stepname.sys_update_verify",
   "jobs.steps.heading",
   "jobs.steps.label",
   "jobs.sub",
@@ -3782,6 +4101,7 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.title.import_apply",
   "jobs.title.ipam_apply",
   "jobs.title.move",
+  "jobs.title.update_install",
   "jobs.undo.step",
   "jobs.view.active",
   "jobs.view.all",
@@ -3885,6 +4205,7 @@ export const messageKeys: readonly MessageKey[] = [
   "role.viewer.name",
   "settings.nav.label",
   "settings.nav.security",
+  "settings.nav.updates",
   "settings.nav.users",
   "settings.reloaded",
   "settings.security.col.actions",
@@ -3965,6 +4286,15 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.security.unit.hours",
   "settings.security.unit.label",
   "settings.security.unit.minutes",
+  "settings.security.updates.check",
+  "settings.security.updates.check_hint",
+  "settings.security.updates.install",
+  "settings.security.updates.install_ui",
+  "settings.security.updates.install_ui_help",
+  "settings.security.updates.install_ui_step_up",
+  "settings.security.updates.install_ui_step_up_help",
+  "settings.security.updates.install_upload_only",
+  "settings.security.updates.install_upload_only_help",
   "settings.security.vault.body",
   "settings.security.vault.title",
   "settings.title",
@@ -4195,6 +4525,7 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.gate.host_empty",
   "setup.gate.host_invalid",
   "setup.gate.lab_ack",
+  "setup.gate.modules_none",
   "setup.gate.passkey_required",
   "setup.gate.passkey_waiting",
   "setup.gate.password.passphrase",
@@ -4235,6 +4566,18 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.lab.relax.tokens",
   "setup.lab.relaxes",
   "setup.lab.title",
+  "setup.modules.aside",
+  "setup.modules.dhcp.description",
+  "setup.modules.dhcp.name",
+  "setup.modules.discovery.description",
+  "setup.modules.discovery.name",
+  "setup.modules.dns.description",
+  "setup.modules.dns.name",
+  "setup.modules.ipam.description",
+  "setup.modules.ipam.name",
+  "setup.modules.later",
+  "setup.modules.save_failed",
+  "setup.modules.title",
   "setup.profile.group",
   "setup.profile.hint.hardened",
   "setup.profile.hint.home",
@@ -4397,7 +4740,9 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.command.theme_dark",
   "shell.command.theme_light",
   "shell.command.theme_system",
+  "shell.command.updates",
   "shell.command.vlans",
+  "shell.command.whats_new",
   "shell.dashboard.jobs",
   "shell.dashboard.no_roles",
   "shell.dashboard.node",
@@ -4486,11 +4831,16 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.status.last_event",
   "shell.status.live",
   "shell.status.live_title",
+  "shell.status.modules_restart",
+  "shell.status.modules_restart_title",
   "shell.status.no_events",
   "shell.status.offline",
   "shell.status.reconnecting",
   "shell.status.running",
   "shell.status.selection",
+  "shell.status.update",
+  "shell.status.update_security",
+  "shell.status.update_title",
   "shell.status.version",
   "shell.status.waiting",
   "shell.theme.change",
@@ -4539,4 +4889,120 @@ export const messageKeys: readonly MessageKey[] = [
   "toggles.token_max_days.days",
   "toggles.token_max_days.name",
   "toggles.token_max_days.unlimited",
+  "toggles.updates.check_off",
+  "toggles.updates.check_on",
+  "toggles.updates.install.ui",
+  "toggles.updates.install.ui_step_up",
+  "toggles.updates.install.upload_only",
+  "toggles.updates.name",
+  "toggles.updates.value",
+  "updates.attempt.failed",
+  "updates.attempt.rolled_back",
+  "updates.blocked.air_gapped",
+  "updates.blocked.cluster",
+  "updates.blocked.container",
+  "updates.blocked.in_progress",
+  "updates.blocked.layout_missing",
+  "updates.blocked.no_asset",
+  "updates.blocked.other",
+  "updates.blocked.settings_link",
+  "updates.blocked.unsupervised",
+  "updates.blocked.unsupported_platform",
+  "updates.blocked.up_to_date",
+  "updates.blocked.upload_only",
+  "updates.check.checking",
+  "updates.check.error",
+  "updates.check.found",
+  "updates.check.heading",
+  "updates.check.last",
+  "updates.check.never",
+  "updates.check.none",
+  "updates.check.now",
+  "updates.check.off_air_gapped",
+  "updates.check.off_setting",
+  "updates.check.on",
+  "updates.check.settings_link",
+  "updates.check.source",
+  "updates.check.state",
+  "updates.code_unknown",
+  "updates.install.blocked_title",
+  "updates.install.button",
+  "updates.install.confirm_action",
+  "updates.install.confirm_body",
+  "updates.install.confirm_ok",
+  "updates.install.confirm_security",
+  "updates.install.confirm_title",
+  "updates.install.confirm_upload",
+  "updates.install.copy_failed",
+  "updates.install.heading",
+  "updates.install.lead",
+  "updates.install.pull_lead",
+  "updates.install.step_up_hint",
+  "updates.install.up_to_date",
+  "updates.manifest.fetched",
+  "updates.manifest.heading",
+  "updates.manifest.uploaded",
+  "updates.mark.action",
+  "updates.mark.security",
+  "updates.module.body",
+  "updates.module.home",
+  "updates.module.name.dhcp",
+  "updates.module.name.discovery",
+  "updates.module.name.dns",
+  "updates.module.name.ipam",
+  "updates.module.title",
+  "updates.progress.failed",
+  "updates.progress.failed_unknown",
+  "updates.progress.heading",
+  "updates.progress.job_link",
+  "updates.release.action_title",
+  "updates.release.action_unspecified",
+  "updates.release.format",
+  "updates.release.newest",
+  "updates.release.no_notes",
+  "updates.release.title",
+  "updates.releases.count",
+  "updates.releases.heading",
+  "updates.releases.none",
+  "updates.restart.body",
+  "updates.restart.check_log",
+  "updates.restart.check_previous",
+  "updates.restart.check_service",
+  "updates.restart.confirmed",
+  "updates.restart.reason",
+  "updates.restart.reload",
+  "updates.restart.rolled_back",
+  "updates.restart.timeout_body",
+  "updates.restart.timeout_title",
+  "updates.restart.title",
+  "updates.running.format",
+  "updates.running.heading",
+  "updates.running.newest",
+  "updates.running.platform",
+  "updates.running.up_to_date",
+  "updates.running.version",
+  "updates.stepup.body",
+  "updates.stepup.button",
+  "updates.stepup.title",
+  "updates.sub",
+  "updates.title",
+  "updates.unavailable",
+  "updates.upload.button",
+  "updates.upload.chosen",
+  "updates.upload.expected",
+  "updates.upload.file_label",
+  "updates.upload.heading",
+  "updates.upload.lead",
+  "updates.upload.manifest_button",
+  "updates.upload.manifest_done",
+  "updates.upload.manifest_help",
+  "updates.upload.manifest_label",
+  "updates.upload.need_manifest",
+  "updates.upload.uploading",
+  "updates.upload.version_label",
+  "updates.whatsnew.close",
+  "updates.whatsnew.empty",
+  "updates.whatsnew.lead",
+  "updates.whatsnew.lead_first",
+  "updates.whatsnew.title",
 ];

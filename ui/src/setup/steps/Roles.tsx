@@ -5,6 +5,7 @@ import { formatMegabytes, formatMemory } from "../format";
 import { FOCUS } from "../gates";
 import { ProblemNotice } from "../parts";
 import { useWizard } from "../controller";
+import { Modules } from "./Modules";
 
 /** What each role needs from the node, in megabytes (the mockup's estimates). */
 const ROLE_MEMORY: Readonly<Record<NodeRole, number>> = { controller: 1100, dns: 250, dhcp: 100, probe: 150 };
@@ -103,6 +104,8 @@ export function Roles() {
           </Show>
         </div>
       </div>
+
+      <Modules />
 
       <div class="wz-blk">
         <h2 id="wz-probe-title">

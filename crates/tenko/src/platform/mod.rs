@@ -93,6 +93,11 @@ pub struct InstallArgs {
     /// Register with manual start instead of automatic start at boot.
     #[arg(long)]
     pub manual: bool,
+
+    /// Register this executable itself instead of `<data_dir>/updates/current/tenko.exe`;
+    /// installing new versions from the UI then stays off (OPS-24).
+    #[arg(long)]
+    pub no_update_layout: bool,
 }
 
 /// Arguments of `tenko service run`.

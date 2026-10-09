@@ -693,6 +693,33 @@ impl RaftStore {
         self.inner.sm.current_snapshot()
     }
 
+    /// Copies the current state into `dir` (created; it must not exist or must be empty) as
+    /// a new store directory: a compacted `sm.redb` written from one read transaction,
+    /// without the Raft log and the snapshots, and returns the revision of the copy. Writes
+    /// continue meanwhile. Opening the directory with the same node id gives a store at the
+    /// state of the copy (openraft purges the missing log up to the applied entry), so a
+    /// running node can hand its state to a dry run (`tenko upgrade check`) or a backup.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Storage`] when `dir` is not empty or the copy cannot be written (no
+    /// file is left behind), or [`StoreError::ShuttingDown`].
+    pub async fn copy_state_to(&self, dir: &std::path::Path) -> Result<Revision, StoreError> {
+        self.inner.check_running()?;
+        if fs::read_dir(dir).is_ok_and(|mut entries| entries.next().is_some()) {
+            return Err(StoreError::Storage(format!(
+                "{} exists and is not empty",
+                dir.display()
+            )));
+        }
+        fs::create_dir_all(dir).map_err(|error| open_error("copy directory", error))?;
+        let sm = self.inner.sm.clone();
+        let target = dir.join("sm.redb");
+        tokio::task::spawn_blocking(move || sm.export_state(&target))
+            .await
+            .map_err(|error| StoreError::Storage(error.to_string()))?
+    }
+
     /// Engine counters.
     pub fn engine_stats(&self) -> EngineStats {
         let log = self.inner.log.stats();

@@ -48,6 +48,7 @@ tenko service install --config C:\ProgramData\Tenko\tenko.toml
 | `--display-name <TEXT>` | `Tenko DDI` | The name in the Services console. |
 | `--account <ACCOUNT>` | `NT SERVICE\<name>` | The account the service runs as, see below. |
 | `--manual` | off | Manual start instead of automatic start at boot. |
+| `--no-update-layout` | off | Register this executable itself instead of the version layout, see "Upgrades" below. Installing new versions from the UI then stays off. |
 
 `service install` does these steps in order and reports each on standard output:
 
@@ -57,12 +58,18 @@ tenko service install --config C:\ProgramData\Tenko\tenko.toml
 2. Registers the service with the SCM: its own process, automatic start (`--manual`:
    manual), error control normal, the account below, and the description "Tenko DDI: DNS,
    DHCP and IPAM". The command line the SCM runs is
-   `tenko.exe service run --name <name> --config <abs config> [--data-dir <abs dir>]`.
-3. Sets the failure actions: restart the service after 10 s on the first two failures, and
-   leave it stopped on the third. The failure count starts over after a day without a
+   `tenko.exe service run --name <name> --config <abs config> [--data-dir <abs dir>]`. With
+   the version layout (the default) the executable is `<data_dir>\updates\current\tenko.exe`
+   and not the file that ran the command.
+3. Sets the failure actions: restart the service after 10 s on the first three failures,
+   and leave it stopped on the fourth. The failure count starts over after a day without a
    failure. The actions also apply when the service stops with a non-zero exit status, not
    only when the process crashes.
 4. Creates the data directory and restricts it (see below).
+5. Sets up the version layout, unless `--no-update-layout` is given (see "Upgrades" below):
+   copies the executable that ran the command to `<data_dir>\updates\<version>\tenko.exe`
+   and creates the junction `<data_dir>\updates\current` that points at it. The output
+   shows this as the line `versions:`.
 
 Install does not start the service. Start it with `tenko service start`.
 
@@ -162,8 +169,73 @@ prints it with an explanation):
 | 2 | None of the configured roles runs in this version. |
 | 3 | The configuration is invalid. Run `tenko config check --config <file>` in an elevated prompt. |
 | 4 | A start step failed. The log names the step and its code. |
+| 12 | Not an error: the server stopped itself so that it is started again (an installed update, a switch back to the previous version, or a changed module set). The failure actions start it again. |
 
-The failure actions restart the service after such a stop, twice at most.
+The failure actions restart the service after such a stop, three times at most.
+
+A restart that the server asks for with status 12 counts as a failure, like a crash. An
+installed update uses one of the three restarts. A failed update that is switched back uses
+up to three (the switch, the failed start of the new version, and the switch back), so it
+leaves the previous version running. A fourth failure within a day, of any kind, leaves the
+service stopped; start it with `tenko service start`.
+
+## Upgrades
+
+The service runs `<data_dir>\updates\current\tenko.exe`. `current` is a directory junction
+(made with `mklink /J`, which needs no privilege) to the directory of the running version,
+`<data_dir>\updates\<version>`, so a new version is a switch of the junction and a restart.
+The web UI does this itself when the security profile allows it (Home and Lab; Standard after
+a fresh sign-in; Hardened only for a release file that you upload) and switches back when the
+new version does not become ready. The service account can write the binaries it runs, which
+is what lets it install. `--no-update-layout` keeps the old behaviour: a service that runs the
+executable it was registered with, and no installs from the UI. With the layout the file
+that ran `service install` is copied, so it can be moved or deleted afterwards; the note
+about moving the executable under "Before you install" applies to `--no-update-layout` only.
+
+To upgrade by hand, run these commands in an elevated PowerShell, with the new
+`tenko-0.2.0.exe` staged where administrators can run it and its checksum compared with the
+`SHA256SUMS` of the release. The check refuses a store that a running service has open, so
+the service must be stopped first.
+
+```
+tenko service stop
+robocopy C:\ProgramData\Tenko D:\Backup\Tenko-20261009 /E /SEC /XJD /R:1 /W:1
+& "C:\Program Files\Tenko\tenko-0.2.0.exe" upgrade check --config C:\ProgramData\Tenko\tenko.toml
+$LASTEXITCODE
+& "C:\Program Files\Tenko\tenko-0.2.0.exe" upgrade layout --config C:\ProgramData\Tenko\tenko.toml
+tenko service start
+Select-String -Path C:\ProgramData\Tenko\logs\tenko.log -Pattern 'data format'
+```
+
+- `robocopy` statuses below 8 mean success. The copy of the data directory holds the
+  DPAPI-sealed key files, which unseal only under the same account on the same machine.
+- `upgrade check` exits with 0 (nothing to do) or 10 (a migration is needed and its dry run
+  passed) when it is safe to go on. Any other status means stop (11: this binary refuses the
+  data directory; 1: the check could not run).
+- `upgrade layout` run by the new binary copies it to `updates\0.2.0\tenko.exe`, points
+  `previous` at the version that ran and `current` at the new one.
+- The log line `data format 2`, with `(migrated from format 1 in 1 step(s))` after a
+  migration, and `tenko health --live` (which prints the version) show what runs.
+
+To roll back, stop the service and point the junction at the previous version. Use
+`cmd.exe` for it: `rmdir` without `/s` removes the junction and leaves the version
+directory alone.
+
+```
+tenko service stop
+cmd /c rmdir C:\ProgramData\Tenko\updates\current
+cmd /c mklink /J C:\ProgramData\Tenko\updates\current C:\ProgramData\Tenko\updates\0.1.0
+tenko service start
+```
+
+If the new version raised the data format (`store\format` names a newer format than the
+old executable writes), the old executable refuses the directory with exit status 3 and the
+store must be restored first: rename `store` to `store.failed-20261009` and copy
+`upgrade-backups\<name>\store`, the copy that the migration took, to `store`. A service
+installed before the layout existed gets it with `tenko service uninstall` and a new
+`tenko service install` (the data directory, its permissions and the configuration stay).
+The full procedure, the rollback in detail, updates from the web UI and the recovery from a
+version that crash-loops are in [../../docs/upgrades.md](../../docs/upgrades.md).
 
 ## Run in a console instead
 

@@ -22,6 +22,10 @@ import type {
 } from "../api/types";
 import { NODE_ROLES } from "../api/types";
 import { establish } from "../auth/session";
+import { toast } from "../components/toast";
+import { writeModules } from "../updates/api";
+import type { ModuleName } from "../updates/modules";
+import { allModules, chosenModules, modulesGate } from "../updates/wizardModules";
 import { CeremonyError, registerPasskey } from "../auth/webauthn";
 import { locale, t } from "../i18n";
 import {
@@ -31,6 +35,7 @@ import {
   gateFor,
   LAST_STEP,
   STEP_COUNT,
+  STEP_IDS,
   type DiskRisk,
   type Gate,
   type GateInput,
@@ -77,6 +82,8 @@ export interface WizardState {
   acceptSlowDisk: boolean;
   roles: Record<NodeRole, boolean>;
   rolesTouched: boolean;
+  /** What the installation is for (OPS-25): the modules to run. At least one stays selected. */
+  modules: Record<ModuleName, boolean>;
   /** Probe networks by id: ticked or not. */
   networks: Record<string, boolean>;
   submitting: boolean;
@@ -102,6 +109,7 @@ function initialState(): WizardState {
     acceptSlowDisk: false,
     roles: defaultRoles("home"),
     rolesTouched: false,
+    modules: allModules(),
     networks: {},
     submitting: false,
     problem: null,
@@ -198,6 +206,7 @@ export interface Wizard {
   // Choices with side effects on other choices
   setProfile: (profile: Profile) => void;
   setRole: (role: NodeRole, on: boolean) => void;
+  setModule: (module: ModuleName, on: boolean) => void;
   selectedNetworks: Accessor<string[]>;
   // Finishing
   submit: () => Promise<void>;
@@ -343,7 +352,9 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
     hasNetworks: networks().length > 0,
   }));
 
-  const gate = (step: number = state.step): Gate | null => gateFor(step, gateInput());
+  // The roles step also holds the module choice, which has its own gate (src/updates/wizardModules.ts).
+  const gate = (step: number = state.step): Gate | null =>
+    gateFor(step, gateInput()) ?? (STEP_IDS[step] === "roles" ? modulesGate(state.modules) : null);
 
   /** Focuses the control with this id, or the first control inside the element with it. */
   function focusById(id: string): void {
@@ -431,6 +442,10 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
     });
   }
 
+  function setModule(module: ModuleName, on: boolean): void {
+    setState("modules", module, on);
+  }
+
   function setRole(role: NodeRole, on: boolean): void {
     batch(() => {
       setState("roles", role, on);
@@ -461,6 +476,12 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
       setStep(blocked);
       const g = gateFor(blocked, input);
       if (g) refuse(g);
+      return;
+    }
+    const noModules = untrack(() => modulesGate(state.modules));
+    if (noModules) {
+      setStep(STEP_IDS.indexOf("roles"));
+      refuse(noModules);
       return;
     }
     const host = validateHostName(state.hostName);
@@ -497,9 +518,26 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
       setState("submitting", false);
     });
     await establish(result);
+    await saveModules();
     scrollToTop();
     focusHeading();
     await loadCodes();
+  }
+
+  /**
+   * Tells the server what the installation is for (OPS-25), when it is not for everything. Needs
+   * the new session. `tenko.toml` may pin the modules (409 `modules.pinned`): then the file wins
+   * and there is nothing to tell. Any other refusal is shown; the choice can be made again later.
+   */
+  async function saveModules(): Promise<void> {
+    const chosen = chosenModules(state.modules);
+    if (chosen.length === Object.keys(state.modules).length) return;
+    try {
+      await writeModules(chosen);
+    } catch (err) {
+      if (isApiError(err, "modules.pinned")) return;
+      toast({ kind: "bad", title: t("setup.modules.save_failed"), body: errorMessage(err) });
+    }
   }
 
   async function loadCodes(): Promise<void> {
@@ -596,6 +634,7 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
     review,
     setProfile,
     setRole,
+    setModule,
     selectedNetworks,
     submit,
     finished,

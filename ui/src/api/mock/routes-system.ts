@@ -4,12 +4,13 @@ import { http, type HttpHandler } from "msw";
 import type { NodeRole, SetupResult, SetupState, SystemStatus, TlsMode } from "../types";
 import { NODE_ROLES, PROFILES } from "../types";
 import { passwordStrength, requireSession, sessionInfo, startSession } from "./auth";
-import { commit, db, type MockUser } from "./db";
+import { commit, db, isAdmin, type MockUser } from "./db";
 import { MOCK_CA_FINGERPRINT, MOCK_VERSION } from "./fixtures";
 import { checkPassword } from "./policy";
 import { banner, profileSettings } from "./profiles";
 import { Problem, fail, ok } from "./reply";
 import { route } from "./route";
+import { modulesWarnings, statusModules } from "./routes-updates";
 import { iso, randomId, uuidHandle } from "./util";
 import {
   failPolicy,
@@ -138,7 +139,7 @@ const health = route("get", "/api/v1/health", () => ok({ status: "ok", version: 
 const ready = route("get", "/api/v1/health/ready", () => ok({ status: "ready", revision: db.revision }));
 
 const systemStatus = route("get", "/api/v1/system/status", () => {
-  requireSession();
+  const { user } = requireSession();
   const now = Date.now();
   const tls = db.installation.tls;
   const warnings: SystemStatus["warnings"] = [];
@@ -149,7 +150,11 @@ const systemStatus = route("get", "/api/v1/system/status", () => {
       params: {},
     });
   }
+  // The modules this installation runs, and a pending change of them, are for administrators.
+  const admin = isAdmin(user);
+  if (admin) warnings.push(...modulesWarnings());
   return ok<SystemStatus>({
+    ...(admin ? { modules: statusModules() } : {}),
     version: MOCK_VERSION,
     started_at: iso(db.startedAt),
     uptime_seconds: Math.max(0, Math.floor((now - db.startedAt) / 1000)),

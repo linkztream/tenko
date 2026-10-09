@@ -189,3 +189,67 @@ jobs:
         run: |
           ./target/debug/tenko openapi > "$RUNNER_TEMP/openapi.json"
           diff -u docs/api/openapi.json "$RUNNER_TEMP/openapi.json"
+
+  # ---------------------------------------------------------------------------
+  # PROPOSAL for .github/workflows/ci.yml: add this job under `jobs:` (it is indented for
+  # that). Nothing else in the file changes.
+  #
+  # Changelog rule (OPS-23). Every change to the product adds an entry under
+  # "## [Unreleased]" in CHANGELOG.md, because that section becomes the release notes that
+  # running installations show. The product is `crates/**` and `ui/src/**`, except tests
+  # (directories named tests, benches or fixtures; *.test.ts and *.test.tsx), generated code
+  # (ui/src/api/generated, ui/src/i18n/generated) and test support (ui/src/app/testing,
+  # ui/src/api/mock). The check compares the Unreleased section at the base of the change
+  # with the one at its head; see scripts/README.md for the full rule.
+  #
+  #   - pull request: base is the base commit of the pull request;
+  #   - push to main: base is the commit before the push;
+  #   - a first push (all-zero base) or a base that no longer exists passes with a note.
+  #
+  # The ONLY override is the label `no-changelog` on a pull request, for changes nobody
+  # outside the team can see (a refactoring, a CI change under crates/). The label is read
+  # from the API when the job runs, not from the event payload, so adding the label and
+  # re-running the job is enough; the job passes without running the check. There is no
+  # override for pushes: a direct push to main that changes the product carries an entry.
+  #
+  # The job also runs the tests of the scripts themselves and validates the changelog file,
+  # so a broken CHANGELOG.md is caught even when no product path changed.
+  changelog:
+    name: Changelog
+    # Not on the nightly schedule or on manual runs: there is no base to compare with.
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # to read the labels of the pull request
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The check needs the history between the base and the head.
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Look for the no-changelog label
+        id: override
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          labels="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')"
+          if grep -qx 'no-changelog' <<< "$labels"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::The label no-changelog is set: the entry check is skipped."
+          fi
+      # Plain Node, no packages. A quoted glob: Node expands it itself, and `node --test
+      # scripts/` is not accepted by Node 22.
+      - name: Test the scripts
+        run: node --test "scripts/*.test.mjs"
+      - name: Validate CHANGELOG.md
+        run: node scripts/changelog.mjs validate
+      - name: Entry for product changes
+        if: steps.override.outputs.skip != 'true'
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/changelog.mjs check --base "$BASE"

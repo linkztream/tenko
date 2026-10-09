@@ -2,13 +2,14 @@ import { A } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import { Icon } from "../components/Icon";
 import { t } from "../i18n";
+import { areaEnabled } from "../updates/modules";
 import { AREAS } from "./areas";
 
 /** The navigation rail: icons with labels, 72 px (decision 13). */
 export function Rail(props: { activeJobs: number }) {
   return (
     <nav class="rail" aria-label={t("shell.nav.label")}>
-      <For each={AREAS}>
+      <For each={AREAS.filter((a) => areaEnabled(a.id))}>
         {(area) => (
           <A
             href={area.path}

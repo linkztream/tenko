@@ -35,6 +35,7 @@ use std::{
 use serde::{Deserialize, Deserializer, Serialize};
 use tenko_api::{
     middleware::{Quota, RateLimitConfig},
+    modules::ModuleSet,
     sse::SseConfig,
 };
 use tenko_auth::settings::Profile;
@@ -52,9 +53,11 @@ pub const ENV_SEPARATOR: &str = "__";
 pub const DEFAULT_LISTEN: &str = "0.0.0.0:8443";
 
 /// The top-level keys of the file; environment variables are matched against them.
-const TOP_LEVEL_KEYS: [&str; 15] = [
+const TOP_LEVEL_KEYS: [&str; 17] = [
     "data_dir",
     "roles",
+    "modules",
+    "updates",
     "node",
     "profile",
     "server",
@@ -82,6 +85,12 @@ pub struct Config {
     /// Roles of this node: a comma-separated list of `controller`, `dns`, `dhcp` and
     /// `probe`, or `all`. Phase 1 implements `controller` only.
     pub roles: String,
+    /// The product modules this installation runs (OPS-25): a list of `ipam`, `dns`,
+    /// `dhcp` and `discovery`, or `all`. Not set (the default): the choice made in the
+    /// first-run wizard, else every module. When set, it pins the set and the wizard cannot
+    /// change it. A disabled module registers no routes and starts nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modules: Option<ModuleSet>,
     /// Identity of this node in the cluster.
     pub node: NodeSection,
     /// The security profile used before first-run setup.
@@ -108,6 +117,8 @@ pub struct Config {
     pub runtime: RuntimeSection,
     /// Logging.
     pub log: LogSection,
+    /// In-app updates (OPS-24).
+    pub updates: UpdatesSection,
 }
 
 impl Default for Config {
@@ -128,6 +139,8 @@ impl Default for Config {
             jobs: JobsSection::default(),
             runtime: RuntimeSection::default(),
             log: LogSection::default(),
+            modules: None,
+            updates: UpdatesSection::default(),
         }
     }
 }
@@ -665,6 +678,108 @@ impl Default for LogSection {
     }
 }
 
+/// The release manifest the update check reads by default: the project's releases.
+pub const DEFAULT_UPDATE_SOURCE: &str =
+    "https://github.com/linkztream/tenko/releases/latest/download/releases.json";
+
+/// `[updates]`: in-app updates (OPS-24). Whether the check runs and how a new version may be
+/// installed is TGL-23 of the stored security settings; this section names the source and
+/// the deployment facts the server cannot know by itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UpdatesSection {
+    /// The release manifest (`releases.json`). Release files are downloaded only from the
+    /// same scheme and host (the pinned source, R17). Default: the project's releases.
+    pub source_url: String,
+    /// Never contact the release source: no check, no download. New versions are installed
+    /// from an uploaded manifest and release file. Default off.
+    pub air_gapped: bool,
+    /// Hours between two checks (default 24).
+    pub check_interval_hours: u64,
+    /// Offer pre-release versions (default off).
+    pub prereleases: bool,
+    /// Seconds a newly installed version has to become ready before the previous version
+    /// is switched back in (default 180).
+    pub ready_timeout_secs: u64,
+    /// Versions kept in `<data_dir>/updates` besides the ones `current` and `previous`
+    /// point at (default 2).
+    pub keep_versions: usize,
+    /// The server runs in a container: updates come as a new image, never from the UI. The
+    /// image sets it (`TENKO_UPDATES__CONTAINER=true`); `/.dockerenv` and
+    /// `/run/.containerenv` are recognized as well.
+    pub container: bool,
+    /// The image the pull command names for containers (default
+    /// `ghcr.io/linkztream/tenko`).
+    pub image: String,
+}
+
+impl Default for UpdatesSection {
+    fn default() -> Self {
+        Self {
+            source_url: DEFAULT_UPDATE_SOURCE.to_owned(),
+            air_gapped: false,
+            check_interval_hours: 24,
+            prereleases: false,
+            ready_timeout_secs: 180,
+            keep_versions: 2,
+            container: false,
+            image: "ghcr.io/linkztream/tenko".to_owned(),
+        }
+    }
+}
+
+impl UpdatesSection {
+    fn validate(&self) -> Result<(), ConfigError> {
+        let url = self.source_url.trim();
+        let loopback = ["http://localhost", "http://127.0.0.1", "http://[::1]"]
+            .iter()
+            .any(|prefix| {
+                url.strip_prefix(prefix)
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with([':', '/']))
+            });
+        if !(url.starts_with("https://") || loopback) {
+            return Err(ConfigError::invalid(
+                "updates.source_url must be an https URL (plain http only on the loopback \
+                 host, for tests)",
+            ));
+        }
+        if url.chars().any(char::is_whitespace) {
+            return Err(ConfigError::invalid(
+                "updates.source_url must not contain whitespace",
+            ));
+        }
+        if !(1..=720).contains(&self.check_interval_hours) {
+            return Err(ConfigError::invalid(
+                "updates.check_interval_hours must be between 1 and 720",
+            ));
+        }
+        if !(30..=3_600).contains(&self.ready_timeout_secs) {
+            return Err(ConfigError::invalid(
+                "updates.ready_timeout_secs must be between 30 and 3600",
+            ));
+        }
+        if !(1..=10).contains(&self.keep_versions) {
+            return Err(ConfigError::invalid(
+                "updates.keep_versions must be between 1 and 10",
+            ));
+        }
+        if self.image.trim().is_empty() || self.image.chars().any(char::is_whitespace) {
+            return Err(ConfigError::invalid(
+                "updates.image must be an image name without whitespace",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Whether the server runs in a container: the setting, or the marker files of Docker
+    /// and Podman.
+    pub fn in_container(&self) -> bool {
+        self.container
+            || (cfg!(target_os = "linux")
+                && (Path::new("/.dockerenv").exists() || Path::new("/run/.containerenv").exists()))
+    }
+}
+
 /// Deserializes a list from a list or from one comma-separated string (environment
 /// variables).
 fn string_or_list<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
@@ -992,6 +1107,7 @@ impl Config {
             ));
         }
         self.log.validate()?;
+        self.updates.validate()?;
         if let Some(url) = &self.hibp.range_url
             && !(url.starts_with("https://") || url.starts_with("http://"))
         {
@@ -1514,6 +1630,69 @@ mod tests {
         )
         .expect("the example parses");
         loaded.config.resolve().expect("the example is valid");
+    }
+
+    #[test]
+    fn modules_and_updates_are_read_from_the_file_and_the_environment() {
+        let loaded = from_text(
+            "data_dir = \"/d\"\nmodules = [\"ipam\", \"dns\"]\n[updates]\nair_gapped = true\n",
+            &[("TENKO_UPDATES__READY_TIMEOUT_SECS", "60")],
+        )
+        .expect("loads");
+        let modules = loaded.config.modules.expect("modules");
+        assert_eq!(modules.to_string(), "ipam,dns");
+        assert!(loaded.config.updates.air_gapped);
+        assert_eq!(loaded.config.updates.ready_timeout_secs, 60);
+        loaded.config.resolve().expect("valid");
+
+        let from_env =
+            from_text("data_dir = \"/d\"\n", &[("TENKO_MODULES", "dhcp")]).expect("loads");
+        assert_eq!(
+            from_env.config.modules.map(|set| set.to_string()),
+            Some("dhcp".to_owned())
+        );
+        assert_eq!(
+            from_text("data_dir = \"/d\"\n", &[])
+                .expect("loads")
+                .config
+                .modules,
+            None
+        );
+        let unknown =
+            from_text("data_dir = \"/d\"\nmodules = [\"ntp\"]\n", &[]).expect_err("unknown module");
+        assert!(
+            unknown.message.contains("unknown module `ntp`"),
+            "{unknown}"
+        );
+    }
+
+    #[test]
+    fn update_settings_are_checked() {
+        for (text, needle) in [
+            (
+                "[updates]\nsource_url = \"http://example.com/r.json\"\n",
+                "https URL",
+            ),
+            (
+                "[updates]\ncheck_interval_hours = 0\n",
+                "check_interval_hours",
+            ),
+            ("[updates]\nready_timeout_secs = 5\n", "ready_timeout_secs"),
+            ("[updates]\nkeep_versions = 0\n", "keep_versions"),
+        ] {
+            let loaded = from_text(&format!("data_dir = \"/d\"\n{text}"), &[]).expect("parses");
+            let error = loaded.config.resolve().expect_err(text);
+            assert!(error.message.contains(needle), "{error}");
+        }
+        let loopback = from_text(
+            "data_dir = \"/d\"\n[updates]\nsource_url = \"http://127.0.0.1:9/releases.json\"\n",
+            &[],
+        )
+        .expect("parses");
+        loopback
+            .config
+            .resolve()
+            .expect("loopback http is allowed for tests");
     }
 
     #[test]

@@ -40,6 +40,7 @@
 //!   `tenko_store::conformance_tests!(|config| async move { RaftStore::open_temp(config).await });`
 
 pub mod api;
+pub mod format;
 pub mod mem;
 #[cfg(feature = "raft")]
 pub mod raft;

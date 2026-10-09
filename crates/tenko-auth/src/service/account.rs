@@ -224,6 +224,18 @@ impl AuthService {
         Ok(())
     }
 
+    /// Checks that the session of `ctx` authenticated within the last five minutes, for
+    /// actions that need a step-up outside this service (the installs of TGL-23).
+    ///
+    /// # Errors
+    ///
+    /// [`AuthError::Unauthenticated`] for anything but a session,
+    /// [`AuthError::StepUpRequired`] when its authentication is older.
+    pub async fn require_fresh_session(&self, ctx: &RequestCtx) -> Result<(), AuthError> {
+        let (_, _, _, session) = self.current(ctx).await?;
+        Self::require_fresh(&session, ctx.now)
+    }
+
     /// `GET /auth/session` (IAM-08).
     ///
     /// # Errors

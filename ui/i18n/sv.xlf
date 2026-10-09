@@ -1628,7 +1628,7 @@
         <segment><source>Security settings</source><target>Säkerhetsinställningar</target></segment>
       </unit>
       <unit id="settings.security.toggles.range">
-        <segment><source>TGL-01 to TGL-07</source><target>TGL-01 till TGL-07</target></segment>
+        <segment><source>TGL-01 to TGL-07 and TGL-23</source><target>TGL-01 till TGL-07 och TGL-23</target></segment>
       </unit>
       <unit id="settings.security.toggles.table">
         <segment><source>Security settings and their values</source><target>Säkerhetsinställningar och deras värden</target></segment>
@@ -6456,6 +6456,647 @@
       </unit>
       <unit id="hosts.form.iface_saved">
         <segment><source>Saved {name} of {host}</source><target>Sparade {name} för {host}</target></segment>
+      </unit>
+      <unit id="shell.status.update">
+        <segment><source>Update available: {version}</source><target>Uppdatering finns: {version}</target></segment>
+      </unit>
+      <unit id="shell.status.update_security">
+        <segment><source>Security fixes</source><target>Säkerhetsfixar</target></segment>
+      </unit>
+      <unit id="shell.status.update_title">
+        <segment><source>A newer release is available. Open the updates page.</source><target>En nyare utgåva finns. Öppna uppdateringssidan.</target></segment>
+      </unit>
+      <unit id="shell.status.modules_restart">
+        <segment><source>Restart needed for the module change</source><target>Omstart behövs för moduländringen</target></segment>
+      </unit>
+      <unit id="shell.status.modules_restart_title">
+        <segment><source>The modules changed. Restart the server to apply the change.</source><target>Modulerna har ändrats. Starta om servern för att tillämpa ändringen.</target></segment>
+      </unit>
+      <unit id="shell.command.updates">
+        <segment><source>Updates</source><target>Uppdateringar</target></segment>
+      </unit>
+      <unit id="shell.command.whats_new">
+        <segment><source>What is new in this version</source><target>Nytt i den här versionen</target></segment>
+      </unit>
+      <unit id="toggles.updates.name">
+        <notes><note category="description">Name of the toggle TGL-23: the daily check for new versions and who may install them.</note></notes>
+        <segment><source>Updates</source><target>Uppdateringar</target></segment>
+      </unit>
+      <unit id="toggles.updates.value">
+        <notes><note category="description">How the value of TGL-23 reads. Arguments: check is the words about the daily check, install the words about installing.</note></notes>
+        <segment><source>{check}, {install}</source><target>{check}, {install}</target></segment>
+      </unit>
+      <unit id="toggles.updates.check_on">
+        <segment><source>Daily check on</source><target>Daglig kontroll på</target></segment>
+      </unit>
+      <unit id="toggles.updates.check_off">
+        <segment><source>Daily check off</source><target>Daglig kontroll av</target></segment>
+      </unit>
+      <unit id="toggles.updates.install.ui">
+        <segment><source>install from the web interface</source><target>installera från webbgränssnittet</target></segment>
+      </unit>
+      <unit id="toggles.updates.install.ui_step_up">
+        <segment><source>install after a fresh sign-in</source><target>installera efter ny inloggning</target></segment>
+      </unit>
+      <unit id="toggles.updates.install.upload_only">
+        <segment><source>install from an uploaded file only</source><target>installera bara från en uppladdad fil</target></segment>
+      </unit>
+      <unit id="errors.modules.pinned">
+        <segment><source>The modules are set in tenko.toml and cannot be changed here.</source><target>Modulerna anges i tenko.toml och kan inte ändras här.</target></segment>
+      </unit>
+      <unit id="errors.modules.conflict">
+        <segment><source>The modules were changed by someone else. Reload and try again.</source><target>Modulerna ändrades av någon annan. Ladda om och försök igen.</target></segment>
+      </unit>
+      <unit id="errors.modules.store">
+        <segment><source>The module choice could not be stored.</source><target>Modulvalet kunde inte sparas.</target></segment>
+      </unit>
+      <unit id="errors.modules.unavailable">
+        <segment><source>This installation does not manage its modules from the web interface.</source><target>Den här installationen hanterar inte sina moduler från webbgränssnittet.</target></segment>
+      </unit>
+      <unit id="errors.update.check_off">
+        <segment><source>The update check is switched off.</source><target>Uppdateringskontrollen är avstängd.</target></segment>
+      </unit>
+      <unit id="errors.update.fetch_failed">
+        <segment><source>The release source did not answer with a valid release list.</source><target>Utgåvekällan svarade inte med en giltig utgåvelista.</target></segment>
+      </unit>
+      <unit id="errors.update.install_blocked">
+        <segment><source>This installation cannot install the update now.</source><target>Den här installationen kan inte installera uppdateringen nu.</target></segment>
+      </unit>
+      <unit id="errors.update.checksum_mismatch">
+        <segment><source>The file does not match the checksum in the release list. It may be damaged or belong to another release.</source><target>Filen stämmer inte med kontrollsumman i utgåvelistan. Den kan vara skadad eller höra till en annan utgåva.</target></segment>
+      </unit>
+      <unit id="errors.update.size_mismatch">
+        <segment><source>The file has a different size than the release list says.</source><target>Filen har en annan storlek än utgåvelistan anger.</target></segment>
+      </unit>
+      <unit id="errors.update.version_unknown">
+        <segment><source>That version is not in the release list.</source><target>Den versionen finns inte i utgåvelistan.</target></segment>
+      </unit>
+      <unit id="errors.update.not_newer">
+        <segment><source>That version is not newer than the running one.</source><target>Den versionen är inte nyare än den som körs.</target></segment>
+      </unit>
+      <unit id="errors.update.unavailable">
+        <segment><source>This installation does not provide updates.</source><target>Den här installationen tillhandahåller inte uppdateringar.</target></segment>
+      </unit>
+      <unit id="errors.update.manifest.invalid">
+        <segment><source>The release list is not valid.</source><target>Utgåvelistan är inte giltig.</target></segment>
+      </unit>
+      <unit id="errors.update.manifest.json">
+        <segment><source>The file is not valid JSON.</source><target>Filen är inte giltig JSON.</target></segment>
+      </unit>
+      <unit id="errors.update.manifest.schema">
+        <segment><source>The release list has a format that this version does not understand.</source><target>Utgåvelistan har ett format som den här versionen inte förstår.</target></segment>
+      </unit>
+      <unit id="errors.update.manifest.project">
+        <segment><source>The release list belongs to another project.</source><target>Utgåvelistan tillhör ett annat projekt.</target></segment>
+      </unit>
+      <unit id="errors.update.manifest.too_large">
+        <segment><source>The release list is too large. At most 1 MB is accepted.</source><target>Utgåvelistan är för stor. Högst 1 MB accepteras.</target></segment>
+      </unit>
+      <unit id="jobs.title.update_install">
+        <segment><source>Install an update</source><target>Installera en uppdatering</target></segment>
+      </unit>
+      <unit id="jobs.step.sys_update_fetch">
+        <segment><source>Download the release file</source><target>Hämta utgåvefilen</target></segment>
+      </unit>
+      <unit id="jobs.step.sys_update_verify">
+        <segment><source>Verify the file against the release list</source><target>Verifiera filen mot utgåvelistan</target></segment>
+      </unit>
+      <unit id="jobs.step.sys_update_check">
+        <segment><source>Check the data with the new version (dry run)</source><target>Kontrollera data med den nya versionen (torrkörning)</target></segment>
+      </unit>
+      <unit id="jobs.step.sys_update_switch">
+        <segment><source>Switch to the new version and restart</source><target>Byt till den nya versionen och starta om</target></segment>
+      </unit>
+      <unit id="jobs.stepname.sys_update_fetch">
+        <segment><source>Download</source><target>Hämta</target></segment>
+      </unit>
+      <unit id="jobs.stepname.sys_update_verify">
+        <segment><source>Verify</source><target>Verifiera</target></segment>
+      </unit>
+      <unit id="jobs.stepname.sys_update_check">
+        <segment><source>Dry run</source><target>Torrkörning</target></segment>
+      </unit>
+      <unit id="jobs.stepname.sys_update_switch">
+        <segment><source>Switch and restart</source><target>Byt och starta om</target></segment>
+      </unit>
+      <unit id="updates.title">
+        <segment><source>Updates</source><target>Uppdateringar</target></segment>
+      </unit>
+      <unit id="updates.sub">
+        <segment><source>Running {version}</source><target>Kör {version}</target></segment>
+      </unit>
+      <unit id="updates.unavailable">
+        <segment><source>This installation does not offer updates from the web interface.</source><target>Den här installationen erbjuder inte uppdateringar från webbgränssnittet.</target></segment>
+      </unit>
+      <unit id="updates.code_unknown">
+        <segment><source>Error code {code}</source><target>Felkod {code}</target></segment>
+      </unit>
+      <unit id="updates.running.heading">
+        <segment><source>Running version</source><target>Körande version</target></segment>
+      </unit>
+      <unit id="updates.running.version">
+        <segment><source>Version</source><target>Version</target></segment>
+      </unit>
+      <unit id="updates.running.format">
+        <segment><source>Data format</source><target>Dataformat</target></segment>
+      </unit>
+      <unit id="updates.running.platform">
+        <segment><source>Platform</source><target>Plattform</target></segment>
+      </unit>
+      <unit id="updates.running.newest">
+        <segment><source>Newest release</source><target>Senaste utgåva</target></segment>
+      </unit>
+      <unit id="updates.running.up_to_date">
+        <segment><source>You are running the newest release.</source><target>Du kör den senaste utgåvan.</target></segment>
+      </unit>
+      <unit id="updates.releases.heading">
+        <segment><source>Newer releases</source><target>Nyare utgåvor</target></segment>
+      </unit>
+      <unit id="updates.releases.count">
+        <segment><source>{count, plural, one {# release} other {# releases}}</source><target>{count, plural, one {# utgåva} other {# utgåvor}}</target></segment>
+      </unit>
+      <unit id="updates.releases.none">
+        <segment><source>There is no newer release.</source><target>Det finns ingen nyare utgåva.</target></segment>
+      </unit>
+      <unit id="updates.release.title">
+        <segment><source>Version {version}</source><target>Version {version}</target></segment>
+      </unit>
+      <unit id="updates.release.newest">
+        <segment><source>Newest</source><target>Senaste</target></segment>
+      </unit>
+      <unit id="updates.release.format">
+        <segment><source>Data format {format}</source><target>Dataformat {format}</target></segment>
+      </unit>
+      <unit id="updates.release.action_title">
+        <segment><source>You must do this when upgrading:</source><target>Det här måste du göra vid uppgraderingen:</target></segment>
+      </unit>
+      <unit id="updates.release.action_unspecified">
+        <segment><source>This release needs an action from you. It does not say which; read the release notes.</source><target>Den här utgåvan kräver en åtgärd av dig. Den anger inte vilken; läs versionsanteckningarna.</target></segment>
+      </unit>
+      <unit id="updates.release.no_notes">
+        <segment><source>This release has no notes.</source><target>Den här utgåvan har inga anteckningar.</target></segment>
+      </unit>
+      <unit id="updates.mark.security">
+        <segment><source>Security fixes</source><target>Säkerhetsfixar</target></segment>
+      </unit>
+      <unit id="updates.mark.action">
+        <segment><source>Action required</source><target>Åtgärd krävs</target></segment>
+      </unit>
+      <unit id="updates.check.heading">
+        <segment><source>Update check</source><target>Uppdateringskontroll</target></segment>
+      </unit>
+      <unit id="updates.check.source">
+        <segment><source>Release source</source><target>Utgåvekälla</target></segment>
+      </unit>
+      <unit id="updates.check.state">
+        <segment><source>Check</source><target>Kontroll</target></segment>
+      </unit>
+      <unit id="updates.check.on">
+        <segment><source>On, every {hours, plural, one {# hour} other {# hours}}</source><target>På, var {hours, plural, one {# timme} other {# timmar}}</target></segment>
+      </unit>
+      <unit id="updates.check.off_air_gapped">
+        <segment><source>Off: this installation is air-gapped.</source><target>Av: den här installationen är isolerad från nätet.</target></segment>
+      </unit>
+      <unit id="updates.check.off_setting">
+        <segment><source>Off: switched off in the security settings.</source><target>Av: avstängd i säkerhetsinställningarna.</target></segment>
+      </unit>
+      <unit id="updates.check.settings_link">
+        <segment><source>Open the security settings</source><target>Öppna säkerhetsinställningarna</target></segment>
+      </unit>
+      <unit id="updates.check.last">
+        <segment><source>Last checked</source><target>Senast kontrollerad</target></segment>
+      </unit>
+      <unit id="updates.check.never">
+        <segment><source>Not checked yet</source><target>Inte kontrollerad än</target></segment>
+      </unit>
+      <unit id="updates.check.error">
+        <segment><source>Last error</source><target>Senaste fel</target></segment>
+      </unit>
+      <unit id="updates.check.now">
+        <segment><source>Check now</source><target>Kontrollera nu</target></segment>
+      </unit>
+      <unit id="updates.check.checking">
+        <segment><source>Checking…</source><target>Kontrollerar…</target></segment>
+      </unit>
+      <unit id="updates.check.found">
+        <segment><source>A newer release is available.</source><target>En nyare utgåva finns.</target></segment>
+      </unit>
+      <unit id="updates.check.none">
+        <segment><source>You are running the newest release.</source><target>Du kör den senaste utgåvan.</target></segment>
+      </unit>
+      <unit id="updates.manifest.heading">
+        <segment><source>Release list</source><target>Utgåvelista</target></segment>
+      </unit>
+      <unit id="updates.manifest.fetched">
+        <segment><source>Fetched {when}; lists {count, plural, one {# release} other {# releases}}</source><target>Hämtad {when}; innehåller {count, plural, one {# utgåva} other {# utgåvor}}</target></segment>
+      </unit>
+      <unit id="updates.manifest.uploaded">
+        <segment><source>Uploaded {when}; lists {count, plural, one {# release} other {# releases}}</source><target>Uppladdad {when}; innehåller {count, plural, one {# utgåva} other {# utgåvor}}</target></segment>
+      </unit>
+      <unit id="updates.install.heading">
+        <segment><source>Install</source><target>Installera</target></segment>
+      </unit>
+      <unit id="updates.install.up_to_date">
+        <segment><source>Version {version} is the newest release. There is nothing to install.</source><target>Version {version} är den senaste utgåvan. Det finns inget att installera.</target></segment>
+      </unit>
+      <unit id="updates.install.lead">
+        <segment><source>Tenko downloads version {version}, checks it, switches to it and restarts. The web interface is unavailable for a short while.</source><target>Tenko hämtar version {version}, kontrollerar den, byter till den och startar om. Webbgränssnittet är otillgängligt en kort stund.</target></segment>
+      </unit>
+      <unit id="updates.install.button">
+        <segment><source>Install {version}</source><target>Installera {version}</target></segment>
+      </unit>
+      <unit id="updates.install.step_up_hint">
+        <segment><source>Installing needs a fresh sign-in with a stronger method. The security settings ask for it.</source><target>Installation kräver en ny inloggning med en starkare metod. Säkerhetsinställningarna begär det.</target></segment>
+      </unit>
+      <unit id="updates.install.blocked_title">
+        <segment><source>Installing from here is not possible</source><target>Det går inte att installera härifrån</target></segment>
+      </unit>
+      <unit id="updates.install.pull_lead">
+        <segment><source>Pull the new image on the host that runs the container, then recreate the container:</source><target>Hämta den nya avbilden på värden som kör containern och skapa sedan containern på nytt:</target></segment>
+      </unit>
+      <unit id="updates.install.copy_failed">
+        <segment><source>The command could not be copied. Select it and copy it by hand.</source><target>Kommandot kunde inte kopieras. Markera det och kopiera det för hand.</target></segment>
+      </unit>
+      <unit id="updates.install.confirm_title">
+        <segment><source>Install version {version}?</source><target>Installera version {version}?</target></segment>
+      </unit>
+      <unit id="updates.install.confirm_body">
+        <segment><source>Tenko downloads and checks version {version}, switches to it and restarts. The web interface and the API are unavailable for a short while. If the new version is not ready within {seconds, plural, one {# second} other {# seconds}}, the previous version starts again.</source><target>Tenko hämtar och kontrollerar version {version}, byter till den och startar om. Webbgränssnittet och API:et är otillgängliga en kort stund. Om den nya versionen inte är redo inom {seconds, plural, one {# sekund} other {# sekunder}} startar den tidigare versionen igen.</target></segment>
+      </unit>
+      <unit id="updates.install.confirm_upload">
+        <segment><source>Tenko checks the file you chose against the release list, switches to version {version} and restarts. The web interface and the API are unavailable for a short while. If the new version is not ready within {seconds, plural, one {# second} other {# seconds}}, the previous version starts again.</source><target>Tenko kontrollerar filen du valde mot utgåvelistan, byter till version {version} och startar om. Webbgränssnittet och API:et är otillgängliga en kort stund. Om den nya versionen inte är redo inom {seconds, plural, one {# sekund} other {# sekunder}} startar den tidigare versionen igen.</target></segment>
+      </unit>
+      <unit id="updates.install.confirm_security">
+        <segment><source>This upgrade includes security fixes.</source><target>Den här uppgraderingen innehåller säkerhetsfixar.</target></segment>
+      </unit>
+      <unit id="updates.install.confirm_action">
+        <segment><source>This upgrade needs an action from you:</source><target>Den här uppgraderingen kräver en åtgärd av dig:</target></segment>
+      </unit>
+      <unit id="updates.install.confirm_ok">
+        <segment><source>Install {version}</source><target>Installera {version}</target></segment>
+      </unit>
+      <unit id="updates.stepup.title">
+        <segment><source>Sign in again to continue</source><target>Logga in igen för att fortsätta</target></segment>
+      </unit>
+      <unit id="updates.stepup.body">
+        <segment><source>Installing needs a fresh sign-in with a stronger method. Sign in again and you return to this page.</source><target>Installation kräver en ny inloggning med en starkare metod. Logga in igen så kommer du tillbaka till den här sidan.</target></segment>
+      </unit>
+      <unit id="updates.stepup.button">
+        <segment><source>Sign in again</source><target>Logga in igen</target></segment>
+      </unit>
+      <unit id="updates.blocked.container">
+        <segment><source>This server runs in a container. Update it by pulling the new image and recreating the container.</source><target>Den här servern körs i en container. Uppdatera genom att hämta den nya avbilden och skapa containern på nytt.</target></segment>
+      </unit>
+      <unit id="updates.blocked.cluster">
+        <segment><source>This node belongs to a cluster. A cluster cannot be updated from the web interface yet; update the nodes one at a time from the command line.</source><target>Den här noden ingår i ett kluster. Ett kluster kan inte uppdateras från webbgränssnittet än; uppdatera noderna en i taget från kommandoraden.</target></segment>
+      </unit>
+      <unit id="updates.blocked.layout_missing">
+        <segment><source>This installation does not use the versioned directory layout, so it cannot switch versions by itself. Install the new version by hand.</source><target>Den här installationen använder inte den versionshanterade katalogstrukturen och kan därför inte byta version själv. Installera den nya versionen för hand.</target></segment>
+      </unit>
+      <unit id="updates.blocked.unsupervised">
+        <segment><source>No service manager restarts the server after the switch. Run Tenko as a systemd service or a Windows service, or set TENKO_SUPERVISED=1 when another supervisor restarts it.</source><target>Ingen tjänstehanterare startar om servern efter bytet. Kör Tenko som en systemd-tjänst eller en Windows-tjänst, eller sätt TENKO_SUPERVISED=1 när en annan övervakare startar om den.</target></segment>
+      </unit>
+      <unit id="updates.blocked.unsupported_platform">
+        <segment><source>There is no release file for this platform ({platform}).</source><target>Det finns ingen utgåvefil för den här plattformen ({platform}).</target></segment>
+      </unit>
+      <unit id="updates.blocked.upload_only">
+        <segment><source>The security settings allow installing only from an uploaded file.</source><target>Säkerhetsinställningarna tillåter bara installation från en uppladdad fil.</target></segment>
+      </unit>
+      <unit id="updates.blocked.settings_link">
+        <segment><source>Open the security settings</source><target>Öppna säkerhetsinställningarna</target></segment>
+      </unit>
+      <unit id="updates.blocked.air_gapped">
+        <segment><source>This installation is air-gapped and does not download releases. Install from an uploaded file.</source><target>Den här installationen är isolerad från nätet och hämtar inga utgåvor. Installera från en uppladdad fil.</target></segment>
+      </unit>
+      <unit id="updates.blocked.no_asset">
+        <segment><source>The newest release has no file for this platform.</source><target>Den senaste utgåvan har ingen fil för den här plattformen.</target></segment>
+      </unit>
+      <unit id="updates.blocked.up_to_date">
+        <segment><source>No newer release is available.</source><target>Ingen nyare utgåva finns.</target></segment>
+      </unit>
+      <unit id="updates.blocked.in_progress">
+        <segment><source>An update is already in progress.</source><target>En uppdatering pågår redan.</target></segment>
+      </unit>
+      <unit id="updates.blocked.other">
+        <segment><source>Installing is not possible now ({reason}).</source><target>Det går inte att installera nu ({reason}).</target></segment>
+      </unit>
+      <unit id="updates.upload.heading">
+        <segment><source>Install from a file</source><target>Installera från en fil</target></segment>
+      </unit>
+      <unit id="updates.upload.lead">
+        <segment><source>Use this when the server cannot reach the release source. Upload the release list first, then the release file for this platform. The server checks the file against the list before it installs anything.</source><target>Använd det här när servern inte når utgåvekällan. Ladda först upp utgåvelistan och sedan utgåvefilen för den här plattformen. Servern kontrollerar filen mot listan innan något installeras.</target></segment>
+      </unit>
+      <unit id="updates.upload.manifest_label">
+        <segment><source>Release list (releases.json)</source><target>Utgåvelista (releases.json)</target></segment>
+      </unit>
+      <unit id="updates.upload.manifest_button">
+        <segment><source>Upload release list</source><target>Ladda upp utgåvelista</target></segment>
+      </unit>
+      <unit id="updates.upload.manifest_help">
+        <segment><source>The file published with the release. At most 1 MB.</source><target>Filen som publiceras med utgåvan. Högst 1 MB.</target></segment>
+      </unit>
+      <unit id="updates.upload.manifest_done">
+        <segment><source>Release list uploaded: {count, plural, one {# release} other {# releases}}.</source><target>Utgåvelistan laddades upp: {count, plural, one {# utgåva} other {# utgåvor}}.</target></segment>
+      </unit>
+      <unit id="updates.upload.need_manifest">
+        <segment><source>Upload the release list of a newer release to install from a file.</source><target>Ladda upp utgåvelistan för en nyare utgåva för att installera från en fil.</target></segment>
+      </unit>
+      <unit id="updates.upload.version_label">
+        <segment><source>Version to install</source><target>Version att installera</target></segment>
+      </unit>
+      <unit id="updates.upload.file_label">
+        <segment><source>Release file for {platform}</source><target>Utgåvefil för {platform}</target></segment>
+      </unit>
+      <unit id="updates.upload.expected">
+        <segment><source>Expected file: {name} ({size})</source><target>Förväntad fil: {name} ({size})</target></segment>
+      </unit>
+      <unit id="updates.upload.chosen">
+        <segment><source>Chosen: {name} ({size})</source><target>Vald: {name} ({size})</target></segment>
+      </unit>
+      <unit id="updates.upload.button">
+        <segment><source>Upload and install {version}</source><target>Ladda upp och installera {version}</target></segment>
+      </unit>
+      <unit id="updates.upload.uploading">
+        <segment><source>Uploading…</source><target>Laddar upp…</target></segment>
+      </unit>
+      <unit id="updates.progress.heading">
+        <segment><source>Installing {version}</source><target>Installerar {version}</target></segment>
+      </unit>
+      <unit id="updates.progress.job_link">
+        <segment><source>Open the job</source><target>Öppna jobbet</target></segment>
+      </unit>
+      <unit id="updates.progress.failed">
+        <segment><source>The installation of {version} failed</source><target>Installationen av {version} misslyckades</target></segment>
+      </unit>
+      <unit id="updates.progress.failed_unknown">
+        <segment><source>The job did not say why. Open the job for details.</source><target>Jobbet angav ingen orsak. Öppna jobbet för detaljer.</target></segment>
+      </unit>
+      <unit id="updates.restart.title">
+        <segment><source>Restarting into {version}…</source><target>Startar om i {version}…</target></segment>
+      </unit>
+      <unit id="updates.restart.body">
+        <segment><source>The server is restarting into version {version}. This page reloads when the new version answers.</source><target>Servern startar om i version {version}. Sidan laddas om när den nya versionen svarar.</target></segment>
+      </unit>
+      <unit id="updates.restart.timeout_title">
+        <segment><source>The server did not come back</source><target>Servern kom inte tillbaka</target></segment>
+      </unit>
+      <unit id="updates.restart.timeout_body">
+        <segment><source>Version {version} did not answer within {seconds, plural, one {# second} other {# seconds}}. Check this:</source><target>Version {version} svarade inte inom {seconds, plural, one {# sekund} other {# sekunder}}. Kontrollera detta:</target></segment>
+      </unit>
+      <unit id="updates.restart.check_service">
+        <segment><source>The Tenko service is running (systemd or the Windows service).</source><target>Tenko-tjänsten körs (systemd eller Windows-tjänsten).</target></segment>
+      </unit>
+      <unit id="updates.restart.check_log">
+        <segment><source>The server log says why the new version did not start.</source><target>Serverloggen anger varför den nya versionen inte startade.</target></segment>
+      </unit>
+      <unit id="updates.restart.check_previous">
+        <segment><source>If the new version could not start, the previous version is started again automatically.</source><target>Om den nya versionen inte kunde starta startas den tidigare versionen om automatiskt.</target></segment>
+      </unit>
+      <unit id="updates.restart.reload">
+        <segment><source>Reload the page</source><target>Ladda om sidan</target></segment>
+      </unit>
+      <unit id="updates.restart.rolled_back">
+        <segment><source>Version {to} did not become ready. Version {from} is running again.</source><target>Version {to} blev inte redo. Version {from} körs igen.</target></segment>
+      </unit>
+      <unit id="updates.restart.reason">
+        <segment><source>Reason: {reason}</source><target>Orsak: {reason}</target></segment>
+      </unit>
+      <unit id="updates.restart.confirmed">
+        <segment><source>Version {version} is running</source><target>Version {version} körs</target></segment>
+      </unit>
+      <unit id="updates.attempt.rolled_back">
+        <segment><source>The update from {from} to {to} was rolled back</source><target>Uppdateringen från {from} till {to} återställdes</target></segment>
+      </unit>
+      <unit id="updates.attempt.failed">
+        <segment><source>The update to {to} failed</source><target>Uppdateringen till {to} misslyckades</target></segment>
+      </unit>
+      <unit id="updates.whatsnew.title">
+        <segment><source>What is new in {version}</source><target>Nytt i {version}</target></segment>
+      </unit>
+      <unit id="updates.whatsnew.lead">
+        <segment><source>Changes since version {last}, which you saw last.</source><target>Ändringar sedan version {last}, som du såg senast.</target></segment>
+      </unit>
+      <unit id="updates.whatsnew.lead_first">
+        <segment><source>The release notes of this version.</source><target>Versionsanteckningarna för den här versionen.</target></segment>
+      </unit>
+      <unit id="updates.whatsnew.empty">
+        <segment><source>There are no release notes to show for version {version}.</source><target>Det finns inga versionsanteckningar att visa för version {version}.</target></segment>
+      </unit>
+      <unit id="updates.whatsnew.close">
+        <segment><source>Got it</source><target>Uppfattat</target></segment>
+      </unit>
+      <unit id="updates.module.title">
+        <segment><source>This module is not enabled on this installation</source><target>Den här modulen är inte aktiverad i den här installationen</target></segment>
+      </unit>
+      <unit id="updates.module.body">
+        <segment><source>{module} is switched off here, so its pages are not available. An administrator can switch it on; the change applies after the server restarts.</source><target>{module} är avstängd här, så dess sidor är inte tillgängliga. En administratör kan slå på den; ändringen gäller efter att servern startats om.</target></segment>
+      </unit>
+      <unit id="updates.module.home">
+        <segment><source>Go to the dashboard</source><target>Gå till översikten</target></segment>
+      </unit>
+      <unit id="updates.module.name.ipam">
+        <segment><source>IPAM</source><target>IPAM</target></segment>
+      </unit>
+      <unit id="updates.module.name.dns">
+        <segment><source>DNS</source><target>DNS</target></segment>
+      </unit>
+      <unit id="updates.module.name.dhcp">
+        <segment><source>DHCP</source><target>DHCP</target></segment>
+      </unit>
+      <unit id="updates.module.name.discovery">
+        <segment><source>Discovery</source><target>Upptäckt</target></segment>
+      </unit>
+      <unit id="dashboard.update.title">
+        <segment><source>Update available</source><target>Uppdatering finns</target></segment>
+      </unit>
+      <unit id="dashboard.update.body">
+        <segment><source>Version {version} is available. This installation runs {running}.</source><target>Version {version} finns. Den här installationen kör {running}.</target></segment>
+      </unit>
+      <unit id="dashboard.update.open">
+        <segment><source>Review the update</source><target>Granska uppdateringen</target></segment>
+      </unit>
+      <unit id="dashboard.update.security">
+        <segment><source>Security fixes</source><target>Säkerhetsfixar</target></segment>
+      </unit>
+      <unit id="dashboard.update.action">
+        <segment><source>Action required</source><target>Åtgärd krävs</target></segment>
+      </unit>
+      <unit id="dashboard.modules.restart_title">
+        <segment><source>Restart needed</source><target>Omstart behövs</target></segment>
+      </unit>
+      <unit id="dashboard.modules.restart_body">
+        <segment><source>The modules of this installation changed. Restart the server to apply the change. Running now: {running}. After the restart: {configured}.</source><target>Modulerna i den här installationen har ändrats. Starta om servern för att tillämpa ändringen. Körs nu: {running}. Efter omstarten: {configured}.</target></segment>
+      </unit>
+      <unit id="dashboard.modules.none">
+        <segment><source>none</source><target>inga</target></segment>
+      </unit>
+      <unit id="dashboard.modules.name.ipam">
+        <segment><source>IPAM</source><target>IPAM</target></segment>
+      </unit>
+      <unit id="dashboard.modules.name.dns">
+        <segment><source>DNS</source><target>DNS</target></segment>
+      </unit>
+      <unit id="dashboard.modules.name.dhcp">
+        <segment><source>DHCP</source><target>DHCP</target></segment>
+      </unit>
+      <unit id="dashboard.modules.name.discovery">
+        <segment><source>Discovery</source><target>Upptäckt</target></segment>
+      </unit>
+      <unit id="setup.modules.title">
+        <segment><source>What is this installation for?</source><target>Vad ska den här installationen användas till?</target></segment>
+      </unit>
+      <unit id="setup.modules.aside">
+        <segment><source>Keep at least one. You can change this later.</source><target>Behåll minst en. Du kan ändra detta senare.</target></segment>
+      </unit>
+      <unit id="setup.modules.later">
+        <segment><source>Arrives in a later version</source><target>Kommer i en senare version</target></segment>
+      </unit>
+      <unit id="setup.modules.save_failed">
+        <segment><source>The module choice could not be saved</source><target>Modulvalet kunde inte sparas</target></segment>
+      </unit>
+      <unit id="setup.modules.ipam.name">
+        <segment><source>IPAM</source><target>IPAM</target></segment>
+      </unit>
+      <unit id="setup.modules.ipam.description">
+        <segment><source>Plan and record networks, addresses, VLANs and hosts.</source><target>Planera och registrera nätverk, adresser, VLAN och värdar.</target></segment>
+      </unit>
+      <unit id="setup.modules.dns.name">
+        <segment><source>DNS</source><target>DNS</target></segment>
+      </unit>
+      <unit id="setup.modules.dns.description">
+        <segment><source>Serve and manage DNS zones.</source><target>Tillhandahåll och hantera DNS-zoner.</target></segment>
+      </unit>
+      <unit id="setup.modules.dhcp.name">
+        <segment><source>DHCP</source><target>DHCP</target></segment>
+      </unit>
+      <unit id="setup.modules.dhcp.description">
+        <segment><source>Serve and manage DHCP scopes and leases.</source><target>Tillhandahåll och hantera DHCP-scope och adresslån.</target></segment>
+      </unit>
+      <unit id="setup.modules.discovery.name">
+        <segment><source>Discovery</source><target>Upptäckt</target></segment>
+      </unit>
+      <unit id="setup.modules.discovery.description">
+        <segment><source>Find devices on the networks and compare what is seen with what is planned.</source><target>Hitta enheter i nätverken och jämför det som syns med det som är planerat.</target></segment>
+      </unit>
+      <unit id="setup.gate.modules_none">
+        <segment><source>Select at least one module.</source><target>Välj minst en modul.</target></segment>
+      </unit>
+      <unit id="settings.nav.updates">
+        <segment><source>Updates</source><target>Uppdateringar</target></segment>
+      </unit>
+      <unit id="settings.security.updates.check">
+        <segment><source>Check for new versions every day</source><target>Leta efter nya versioner varje dag</target></segment>
+      </unit>
+      <unit id="settings.security.updates.check_hint">
+        <segment><source>The check sends nothing but the running version to the release source. It stays off when this installation is air-gapped.</source><target>Kontrollen skickar bara den körande versionen till utgåvekällan. Den förblir avstängd när installationen är isolerad från nätet.</target></segment>
+      </unit>
+      <unit id="settings.security.updates.install">
+        <segment><source>Installing a new version</source><target>Installera en ny version</target></segment>
+      </unit>
+      <unit id="settings.security.updates.install_ui">
+        <segment><source>From the web interface</source><target>Från webbgränssnittet</target></segment>
+      </unit>
+      <unit id="settings.security.updates.install_ui_help">
+        <segment><source>An administrator can install a new version with one click and a confirmation.</source><target>En administratör kan installera en ny version med ett klick och en bekräftelse.</target></segment>
+      </unit>
+      <unit id="settings.security.updates.install_ui_step_up">
+        <segment><source>From the web interface after a fresh sign-in</source><target>Från webbgränssnittet efter ny inloggning</target></segment>
+      </unit>
+      <unit id="settings.security.updates.install_ui_step_up_help">
+        <segment><source>An administrator must sign in again with a stronger method before the install starts.</source><target>En administratör måste logga in igen med en starkare metod innan installationen startar.</target></segment>
+      </unit>
+      <unit id="settings.security.updates.install_upload_only">
+        <segment><source>Only from an uploaded file</source><target>Bara från en uppladdad fil</target></segment>
+      </unit>
+      <unit id="settings.security.updates.install_upload_only_help">
+        <segment><source>The server downloads nothing. An administrator uploads the release file, which the server checks against the release list.</source><target>Servern hämtar inget. En administratör laddar upp utgåvefilen, som servern kontrollerar mot utgåvelistan.</target></segment>
+      </unit>
+      <unit id="errors.update.source_mismatch">
+        <segment><source>The release file does not come from the configured release source.</source><target>Utgåvefilen kommer inte från den inställda utgåvekällan.</target></segment>
+      </unit>
+      <unit id="errors.update.io">
+        <segment><source>The server could not read or write a file of the update.</source><target>Servern kunde inte läsa eller skriva en fil för uppdateringen.</target></segment>
+      </unit>
+      <unit id="errors.update.job">
+        <segment><source>The update job could not be started.</source><target>Uppdateringsjobbet kunde inte startas.</target></segment>
+      </unit>
+      <unit id="errors.update.job_failed">
+        <segment><source>The update job failed.</source><target>Uppdateringsjobbet misslyckades.</target></segment>
+      </unit>
+      <unit id="errors.update.signature_unverified">
+        <segment><source>The signature of the release could not be verified.</source><target>Utgåvans signatur kunde inte verifieras.</target></segment>
+      </unit>
+      <unit id="errors.update.check_timeout">
+        <segment><source>The new version did not finish its check in time.</source><target>Den nya versionen blev inte klar med sin kontroll i tid.</target></segment>
+      </unit>
+      <unit id="errors.update.not_executable">
+        <segment><source>The downloaded file is not an executable for this platform.</source><target>Den hämtade filen är ingen körbar fil för den här plattformen.</target></segment>
+      </unit>
+      <unit id="errors.update.version_mismatch">
+        <segment><source>The file reports another version than the one in the release list.</source><target>Filen anger en annan version än den i utgåvelistan.</target></segment>
+      </unit>
+      <unit id="errors.update.check_unavailable">
+        <segment><source>The check of the new version needs a store that this node does not have.</source><target>Kontrollen av den nya versionen kräver ett lager som den här noden inte har.</target></segment>
+      </unit>
+      <unit id="errors.update.check_failed">
+        <segment><source>The new version could not run its check.</source><target>Den nya versionen kunde inte köra sin kontroll.</target></segment>
+      </unit>
+      <unit id="errors.update.check_refused">
+        <segment><source>The new version refused to run on this data.</source><target>Den nya versionen vägrade köras på de här uppgifterna.</target></segment>
+      </unit>
+      <unit id="errors.update.store">
+        <segment><source>The update could not be recorded in the store.</source><target>Uppdateringen kunde inte registreras i lagret.</target></segment>
+      </unit>
+      <unit id="errors.update.upload_failed">
+        <segment><source>The uploaded file could not be stored.</source><target>Den uppladdade filen kunde inte sparas.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.not_ready">
+        <segment><source>The new version did not become ready in time.</source><target>Den nya versionen blev inte redo i tid.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.not_confirmed">
+        <segment><source>The new version was never confirmed as healthy.</source><target>Den nya versionen bekräftades aldrig som frisk.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.crashed">
+        <segment><source>The new version crashed.</source><target>Den nya versionen kraschade.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.format_newer">
+        <segment><source>The data directory has a newer format than this version understands.</source><target>Datakatalogen har ett nyare format än den här versionen förstår.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.migration_missing">
+        <segment><source>This version cannot convert the data directory from its format.</source><target>Den här versionen kan inte konvertera datakatalogen från dess format.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.migration_failed">
+        <segment><source>Converting the data directory failed.</source><target>Konverteringen av datakatalogen misslyckades.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.format_mismatch">
+        <segment><source>The data directory does not have the format that was expected.</source><target>Datakatalogen har inte det förväntade formatet.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.in_use">
+        <segment><source>The data directory is in use by another process.</source><target>Datakatalogen används av en annan process.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.store">
+        <segment><source>The store could not be opened.</source><target>Lagret kunde inte öppnas.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.open_failed">
+        <segment><source>The store could not be opened for the check.</source><target>Lagret kunde inte öppnas för kontrollen.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.refused">
+        <segment><source>The upgrade check refused the change.</source><target>Uppgraderingskontrollen avvisade ändringen.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.attempt_unreadable">
+        <segment><source>The record of the update attempt could not be read.</source><target>Uppgifterna om uppdateringsförsöket kunde inte läsas.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.io">
+        <segment><source>A file of the upgrade could not be read or written.</source><target>En fil för uppgraderingen kunde inte läsas eller skrivas.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.copy_target">
+        <segment><source>The copy of the data for the check could not be made.</source><target>Kopian av data för kontrollen kunde inte göras.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.no_store">
+        <segment><source>There is no store to check.</source><target>Det finns inget lager att kontrollera.</target></segment>
+      </unit>
+      <unit id="errors.upgrade.marker_invalid">
+        <segment><source>The upgrade marker in the data directory is not valid.</source><target>Uppgraderingsmarkören i datakatalogen är inte giltig.</target></segment>
       </unit>
     </group>
   </file>

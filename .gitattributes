@@ -34,3 +34,7 @@
 # HIBP range fixtures reproduce the API response byte for byte, including CRLF line ends.
 crates/tenko-auth/tests/fixtures/hibp/*.txt -text
 crates/tenko-ipam/tests/fixtures/** -text
+
+# Data-directory compatibility fixtures: redb files and the format marker, byte for byte.
+*.redb binary
+crates/tenko/tests/fixtures/datadir/** -text

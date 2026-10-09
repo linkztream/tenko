@@ -41,6 +41,10 @@ pub struct SystemStatus {
     pub tls: Option<TlsStatus>,
     /// Whether the build embeds the real web UI or the development placeholder.
     pub ui: UiStatus,
+    /// The product modules this installation runs (OPS-25); the UI shows only their
+    /// areas. Absent in answers of servers that predate the module switch: all modules.
+    #[serde(default)]
+    pub modules: crate::modules::ModuleSet,
     /// Conditions an administrator should look at, for example a certificate close to
     /// expiry or plain HTTP in the Lab profile.
     pub warnings: Vec<StatusWarning>,

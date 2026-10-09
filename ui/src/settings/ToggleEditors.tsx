@@ -6,6 +6,7 @@ import type { BreachMode, LockoutMode, MfaRequirement, PasswordPolicy, SessionLi
 import { Switch as SwitchControl } from "../components/Switch";
 import { t } from "../i18n";
 import { FieldHelp, SelectField } from "./fields";
+import { UPDATES_DEFAULT, UPDATES_INSTALL, type UpdatesInstall, type UpdatesPolicy } from "./toggles";
 import { customPolicy, DURATION_UNITS, splitDuration, toDays, toSeconds, type DurationUnit } from "./toggleEdit";
 
 export interface EditorProps<T> {
@@ -336,6 +337,56 @@ export function TokenEditor(props: EditorProps<number | null>) {
           />
         </div>
       </Show>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------------
+// TGL-23: the update check and who may install
+
+export function UpdatesEditor(props: EditorProps<UpdatesPolicy>) {
+  const init = untrack(() => props.initial) ?? UPDATES_DEFAULT.home;
+  const [check, setCheck] = createSignal(init.check);
+  const [install, setInstall] = createSignal<UpdatesInstall>(init.install);
+  createEffect(() => props.onDraft({ check: check(), install: install() }));
+
+  return (
+    <>
+      <div class="field">
+        <SwitchControl
+          id="tg-updates-check"
+          checked={check()}
+          onChange={setCheck}
+          label={t("settings.security.updates.check")}
+          hint={t("settings.security.updates.check_hint")}
+        />
+      </div>
+      <div class="field">
+        <span class="label" id="tg-updates-install-label">
+          {t("settings.security.updates.install")}
+        </span>
+        <div class="choices" role="radiogroup" aria-labelledby="tg-updates-install-label">
+          <For each={UPDATES_INSTALL}>
+            {(mode) => (
+              <label class="choice">
+                <input
+                  type="radio"
+                  name="tg-updates-install"
+                  value={mode}
+                  data-testid="updates-install-mode"
+                  data-key={mode}
+                  checked={install() === mode}
+                  onChange={() => setInstall(mode)}
+                />
+                <span>
+                  {t(`settings.security.updates.install_${mode}`)}
+                  <small class="muted">{t(`settings.security.updates.install_${mode}_help`)}</small>
+                </span>
+              </label>
+            )}
+          </For>
+        </div>
+      </div>
     </>
   );
 }

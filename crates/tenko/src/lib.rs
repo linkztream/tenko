@@ -9,6 +9,8 @@
 //! | [`platform`] | systemd `sd_notify` and the Windows service |
 //! | [`client`] | the client commands over the public API |
 //! | [`kek`] | `tenko kek rotate`: key-encryption key rotation with the server stopped |
+//! | [`modules`] | the module switch of OPS-25 |
+//! | [`upgrade`] | `tenko upgrade`, the data-directory format and its migrations, in-app updates (OPS-23, OPS-24) |
 //! | [`plugin`] | `tenko plugin`: list, run a bundled plugin, conformance test; the connector service of `tenko serve` |
 //! | [`logging`] | `tracing` to standard error or a file, as text or JSON |
 //! | [`exit`] | the exit statuses |
@@ -24,9 +26,11 @@ pub mod config;
 pub mod exit;
 pub mod kek;
 pub mod logging;
+pub mod modules;
 pub mod platform;
 pub mod plugin;
 pub mod serve;
+pub mod upgrade;
 
 /// Name of this crate as declared in its manifest.
 pub const CRATE_NAME: &str = "tenko";
@@ -68,6 +72,13 @@ pub enum Command {
         /// The `kek` subcommand to run.
         #[command(subcommand)]
         action: kek::KekCommand,
+    },
+
+    /// Data-directory format checks and upgrades (run `check` before switching binaries).
+    Upgrade {
+        /// The `upgrade` subcommand to run.
+        #[command(subcommand)]
+        action: upgrade::UpgradeCommand,
     },
 
     /// Manage the Windows service (Windows only).
@@ -179,6 +190,7 @@ impl Command {
             Command::Kek {
                 action: kek::KekCommand::Rotate(_),
             } => "kek rotate",
+            Command::Upgrade { action } => action.name(),
             Command::Service { action } => action.name(),
             Command::Roles {
                 action: RolesCommand::List,
@@ -218,6 +230,7 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
         Command::Kek {
             action: kek::KekCommand::Rotate(args),
         } => kek::rotate(args, out, err),
+        Command::Upgrade { action } => upgrade::command(action, out, err),
         Command::Service { action } => platform::command(action, out, err),
         Command::Roles {
             action: RolesCommand::List,
@@ -518,9 +531,10 @@ mod tests {
 
     #[test]
     fn command_names_match_the_command_line() {
-        let cases: [(&[&str], &str); 17] = [
+        let cases: [(&[&str], &str); 18] = [
             (&["kek", "rotate"], "kek rotate"),
             (&["plugin", "list"], "plugin list"),
+            (&["upgrade", "check"], "upgrade check"),
             (&["health"], "health"),
             (&["ca-root"], "ca-root"),
             (&["openapi"], "openapi"),

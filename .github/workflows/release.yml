@@ -1,0 +1,310 @@
+# PROPOSAL for .github/workflows/release.yml (OPS-23, OPS-24).
+#
+# A release is made by pushing a tag `vX.Y.Z` (or `vX.Y.Z-rc.1`) on a commit of main whose
+# changelog has the section `## [X.Y.Z] - <date>` and whose crates/tenko/Cargo.toml has
+# `version = "X.Y.Z"`. The workflow
+#
+#   1. verify   checks the tag against the crate version and the changelog;
+#   2. ui       builds and tests the web UI once;
+#   3. build    builds the binaries for Linux and Windows with the real UI embedded;
+#   4. image    builds and pushes the container image to ghcr.io;
+#   5. publish  builds releases.json and SHA256SUMS (scripts/release-manifest.mjs), takes the
+#               release text from the changelog (scripts/changelog.mjs notes) and creates
+#               the GitHub release with the binaries, releases.json and SHA256SUMS.
+#
+# Running installations read releases.json from the latest release to learn about updates;
+# the file names tenko-<version>-<platform>[.exe] are the contract with scripts/README.md.
+#
+# Re-running: when a run fails before `publish`, re-run the failed jobs. When `publish`
+# failed after the release was created, delete that release (not the tag) and re-run.
+# The workflow_dispatch trigger builds an existing tag by hand; it never creates a tag.
+#
+# Not yet here: signing of the binaries and of releases.json. It arrives with its own
+# requirement; the two places for it are marked SIGNING below.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, for example v0.2.0"
+        required: true
+        type: string
+
+# Least privilege: the jobs that build run with read access only; `image` and `publish`
+# raise what they need. (Together they use contents: write and packages: write.)
+permissions:
+  contents: read
+
+# Two runs for one tag never overlap, and a running release is never cancelled.
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # The tag being released: the pushed tag, or the input of a manual run. Shell steps read
+  # it from the environment; it is never pasted into a script with ${{ }}.
+  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  IMAGE: ghcr.io/linkztream/tenko
+  DOWNLOAD_URL: https://github.com/linkztream/tenko/releases/download
+
+jobs:
+  # -------------------------------------------------------------------------------------
+  verify:
+    name: Verify the tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Tag, crate version and changelog
+        id: tag
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            v*) ;;
+            *) echo "::error::The tag '$TAG' must start with v."; exit 1 ;;
+          esac
+          version="${TAG#v}"
+          case "$version" in
+            *+*) echo "::error::The tag '$TAG' has build metadata; container tags cannot hold '+'."; exit 1 ;;
+          esac
+          crate="$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/tenko/Cargo.toml | head -n 1)"
+          if [ "$crate" != "$version" ]; then
+            echo "::error::The tag says $version but crates/tenko/Cargo.toml says '$crate'. Bump the version, commit, and tag that commit."
+            exit 1
+          fi
+          # Fails when CHANGELOG.md has no section "## [$version] - <date>" (or does not parse).
+          node scripts/changelog.mjs notes "$version" > /dev/null
+          if [[ "$version" == *-* ]]; then prerelease=true; else prerelease=false; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "Releasing $version (prerelease: $prerelease)"
+
+  # -------------------------------------------------------------------------------------
+  ui:
+    name: UI
+    needs: verify
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm run test
+      - name: Build
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  # -------------------------------------------------------------------------------------
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: [verify, ui]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x86_64
+            exe: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows-x86_64
+            exe: ".exe"
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      TARGET: ${{ matrix.target }}
+      PLATFORM: ${{ matrix.platform }}
+      EXE: ${{ matrix.exe }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      # No Rust cache here: a release is built from a clean state. TENKO_UI_STUB is not set,
+      # so the build embeds the real UI and refuses the placeholder page.
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+      - name: Build
+        run: cargo build --release --locked -p tenko --target ${{ matrix.target }}
+      - name: Smoke test the binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="target/${TARGET}/release/tenko${EXE}"
+          out="$("$bin" --version)"
+          echo "$out"
+          case "$out" in
+            *"$VERSION"*) ;;
+            *) echo "::error::The binary reports '$out', expected version $VERSION."; exit 1 ;;
+          esac
+          "$bin" upgrade format
+      - name: Name the binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "target/${TARGET}/release/tenko${EXE}" "dist/tenko-${VERSION}-${PLATFORM}${EXE}"
+          # SIGNING (later): sign dist/tenko-${VERSION}-${PLATFORM}${EXE} here (Authenticode
+          # on Windows, a detached signature on Linux) and upload the signature next to it.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}
+          path: dist/tenko-${{ needs.verify.outputs.version }}-${{ matrix.platform }}${{ matrix.exe }}
+          if-no-files-found: error
+          retention-days: 1
+
+  # -------------------------------------------------------------------------------------
+  image:
+    name: Container image
+    # After the binaries: nothing is pushed, and `latest` does not move, for a release
+    # whose build failed.
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - name: Tags
+        id: tags
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          {
+            echo "tags<<TAGS_END"
+            echo "${IMAGE}:${VERSION}"
+            # A pre-release never becomes latest.
+            if [ "$PRERELEASE" != "true" ]; then echo "${IMAGE}:latest"; fi
+            echo "TAGS_END"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          # SIGNING (later): sign the image digest (cosign) after the push.
+
+  # -------------------------------------------------------------------------------------
+  publish:
+    name: Publish the release
+    needs: [verify, build, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: dist
+          merge-multiple: true
+      - name: Data-directory format
+        # The format number of this version, from the Linux binary that is being released
+        # (a matrix job cannot hand one leg's output on reliably).
+        run: |
+          set -euo pipefail
+          bin="dist/tenko-${VERSION}-linux-x86_64"
+          chmod +x "$bin"
+          format="$("$bin" upgrade format)"
+          case "$format" in
+            ''|*[!0-9]*) echo "::error::tenko upgrade format printed '$format', expected a number."; exit 1 ;;
+          esac
+          echo "FORMAT=$format" >> "$GITHUB_ENV"
+      - name: Releases.json of the latest release
+        # The manifest of the latest published release holds every earlier release; the new
+        # one is added to it. There is none for the very first release. (GitHub does not
+        # count a pre-release as the latest release, so a pre-release is merged into the
+        # manifest of the last stable release.)
+        run: |
+          mkdir -p prev
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern releases.json --dir prev || true
+          if [ -f prev/releases.json ]; then
+            echo "Merging into the releases.json of the latest release."
+          else
+            echo "::notice::No earlier releases.json found; the manifest starts with this release."
+          fi
+      - name: Build releases.json and SHA256SUMS
+        run: |
+          set -euo pipefail
+          args=(
+            --version "$VERSION"
+            --assets dist
+            --base-url "${DOWNLOAD_URL}/${TAG}"
+            --image "${IMAGE}:${VERSION}"
+            --format "$FORMAT"
+            --out dist/releases.json
+          )
+          if [ -f prev/releases.json ]; then args+=(--previous prev/releases.json); fi
+          node scripts/release-manifest.mjs "${args[@]}"
+          # SIGNING (later): sign dist/releases.json and dist/SHA256SUMS here.
+          ls -l dist
+      - name: Release notes
+        run: node scripts/changelog.mjs notes "$VERSION" > notes.md
+      - name: Create the release
+        run: |
+          set -euo pipefail
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Tenko DDI ${VERSION}" \
+            --notes-file notes.md \
+            --verify-tag \
+            "${flags[@]}"

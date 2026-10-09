@@ -5,6 +5,7 @@ import { Match, Show, Switch } from "solid-js";
 import { decodeSegment, paths } from "../app/paths";
 import { PageHead } from "../components/PageHead";
 import { t } from "../i18n";
+import { UPDATES_PATH } from "../updates/paths";
 import SecurityPage from "./SecurityPage";
 import UserDetail from "./UserDetail";
 import UsersPage from "./UsersPage";
@@ -18,6 +19,7 @@ export default function Settings() {
       <nav class="subnav" aria-label={t("settings.nav.label")}>
         <A href={paths.settings("security")}>{t("settings.nav.security")}</A>
         <A href={paths.settings("users")}>{t("settings.nav.users")}</A>
+        <A href={UPDATES_PATH}>{t("settings.nav.updates")}</A>
       </nav>
       <Switch fallback={<Navigate href={paths.settings("security")} />}>
         <Match when={params.section === "security"}>

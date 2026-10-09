@@ -793,6 +793,30 @@ impl StateMachine {
         })
     }
 
+    /// Writes the current state into the new state file `target` from one read transaction,
+    /// so the copy is consistent at the revision of that view, and returns the revision
+    /// (blocking). Applies continue meanwhile. A directory whose `sm.redb` is this file and
+    /// which has no log opens as a store at that state: openraft purges the empty log up to
+    /// the applied id. The caller makes sure `target` does not exist.
+    pub(crate) fn export_state(&self, target: &Path) -> Result<Revision, StoreError> {
+        let view = self.view()?;
+        let state = view.meta().clone();
+        let written = (|| {
+            let mut database = open_database(target, self.shared.options.cache_bytes)?;
+            let txn = database.begin_write().map_err(storage)?;
+            copy_tables(view.txn(), &txn)?;
+            write_meta(&txn, &state)?;
+            txn.commit().map_err(storage)?;
+            compact(&mut database)?;
+            Ok(())
+        })();
+        drop(view);
+        if written.is_err() {
+            let _ = fs::remove_file(target);
+        }
+        written.map(|()| state.revision)
+    }
+
     /// A fresh file in the snapshot directory to receive a snapshot into.
     pub(crate) fn receive_path(&self) -> PathBuf {
         self.shared

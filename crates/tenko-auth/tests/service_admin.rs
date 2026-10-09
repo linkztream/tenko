@@ -1414,6 +1414,16 @@ fn expected_toggles() -> Vec<(&'static str, &'static str, [Value; 4])> {
                 json!("off"),
             ],
         ),
+        (
+            "TGL-23",
+            "updates",
+            [
+                json!({"check": true, "install": "ui"}),
+                json!({"check": true, "install": "ui_step_up"}),
+                json!({"check": true, "install": "upload_only"}),
+                json!({"check": true, "install": "ui"}),
+            ],
+        ),
     ]
 }
 
@@ -1446,7 +1456,7 @@ async fn the_settings_view_reports_each_profile_as_the_matrix_says() {
         assert_eq!(
             ids,
             [
-                "TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07"
+                "TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-23"
             ]
         );
         for (toggle, (id, setting, values)) in view.toggles.iter().zip(&expected) {

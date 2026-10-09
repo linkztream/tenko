@@ -8,6 +8,7 @@ import { Dialog } from "../components/Dialog";
 import { Icon, type IconName } from "../components/Icon";
 import { Kbd } from "../components/Kbd";
 import { t, type MessageKey } from "../i18n";
+import { moduleRunning } from "../updates/modules";
 import { activeCommands, matchCommand, type Command, type CommandGroup } from "./commands";
 
 const GROUP_LABEL: Record<CommandGroup, MessageKey> = {
@@ -47,7 +48,8 @@ export function CommandPalette(props: { onClose: () => void; initial?: string })
   let controller: AbortController | undefined;
   createEffect(() => {
     const q = text();
-    const skip = commandsOnly() || q.length < 2;
+    // The inventory search belongs to IPAM; without that module there is nothing to search.
+    const skip = commandsOnly() || q.length < 2 || !moduleRunning("ipam");
     clearTimeout(timer);
     controller?.abort();
     if (skip) {
@@ -85,7 +87,7 @@ export function CommandPalette(props: { onClose: () => void; initial?: string })
   const items = createMemo<Item[]>(() => {
     const q = text();
     const out: Item[] = [];
-    if (!commandsOnly()) {
+    if (!commandsOnly() && moduleRunning("ipam")) {
       for (const hit of hits()) {
         const title = hitTitle(hit);
         out.push({

@@ -11,7 +11,9 @@ use utoipa::ToSchema;
 
 pub mod audit;
 pub mod events;
+pub mod release;
 pub mod system;
+pub mod updates;
 
 /// One page of a list (plan section 4): the items, the opaque cursor of the next page and
 /// the store revision the page was read at.

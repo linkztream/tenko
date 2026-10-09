@@ -1,9 +1,12 @@
 import { useLocation, useNavigate } from "@solidjs/router";
-import { createEffect, createSignal, on, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, lazy, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { DENSITIES, setDensity, setEmphasizeHost, setTheme, cycleTheme, emphasizeHost, THEMES } from "../app/prefs";
 import { paths } from "../app/paths";
-import { signOut } from "../auth/session";
-import { t } from "../i18n";
+import { isAdmin, signOut } from "../auth/session";
+import { t, withPacks } from "../i18n";
+import { ModuleGate } from "../updates/ModuleGate";
+import { areaEnabled, loadModules, moduleRunning, resetModules, RESTART_WARNING } from "../updates/modules";
+import { UPDATES_PATH } from "../updates/paths";
 import { AccountMenu } from "./AccountMenu";
 import { AREAS } from "./areas";
 import { CommandPalette } from "./CommandPalette";
@@ -16,6 +19,9 @@ import { createShellStatus, setSelectionStatus } from "./status";
 import { StatusBar } from "./StatusBar";
 import { TopBar } from "./TopBar";
 
+// The release notes after an upgrade, and on request, come from the updates area.
+const WhatsNew = lazy(withPacks(["updates"], () => import("../updates/WhatsNew")));
+
 const HINTS: Partial<Record<string, () => string>> = {
   dashboard: () => t("shell.command.dashboard_hint"),
 };
@@ -27,7 +33,20 @@ export function Shell(props: { children?: JSX.Element }) {
   const [palette, setPalette] = createSignal<string | null>(null);
   const [sheet, setSheet] = createSignal(false);
   const [account, setAccount] = createSignal<HTMLElement | null>(null);
+  const [notes, setNotes] = createSignal(false);
   const status = createShellStatus();
+
+  // Which modules this installation runs decides which areas show (OPS-25).
+  onMount(() => void loadModules());
+  onCleanup(resetModules);
+  // A module change that waits for a restart shows up in the status; read the modules again.
+  createEffect(
+    on(
+      () => status.system()?.warnings.some((w) => w.code === RESTART_WARNING) ?? false,
+      () => void loadModules(),
+      { defer: true },
+    ),
+  );
 
   const doSignOut = async () => {
     setAccount(null);
@@ -54,6 +73,7 @@ export function Shell(props: { children?: JSX.Element }) {
       label: () => t(a.label),
       hint: HINTS[a.id],
       keys: ["G", a.chord],
+      when: () => areaEnabled(a.id),
       run: () => navigate(a.path),
     })),
     {
@@ -68,6 +88,7 @@ export function Shell(props: { children?: JSX.Element }) {
       group: "goto",
       icon: "server",
       label: () => t("shell.command.hosts"),
+      when: () => moduleRunning("ipam"),
       run: () => navigate(paths.hosts()),
     },
     {
@@ -75,6 +96,7 @@ export function Shell(props: { children?: JSX.Element }) {
       group: "goto",
       icon: "ipam",
       label: () => t("shell.command.addresses"),
+      when: () => moduleRunning("ipam"),
       run: () => navigate(paths.addresses()),
     },
     {
@@ -82,6 +104,7 @@ export function Shell(props: { children?: JSX.Element }) {
       group: "goto",
       icon: "link",
       label: () => t("shell.command.vlans"),
+      when: () => moduleRunning("ipam"),
       run: () => navigate(paths.vlans()),
     },
     {
@@ -89,7 +112,23 @@ export function Shell(props: { children?: JSX.Element }) {
       group: "actions",
       icon: "export",
       label: () => t("shell.command.import"),
+      when: () => moduleRunning("ipam"),
       run: () => navigate(paths.imports()),
+    },
+    {
+      id: "shell.goto.updates",
+      group: "goto",
+      icon: "download",
+      label: () => t("shell.command.updates"),
+      when: isAdmin,
+      run: () => navigate(UPDATES_PATH),
+    },
+    {
+      id: "shell.whats_new",
+      group: "actions",
+      icon: "info",
+      label: () => t("shell.command.whats_new"),
+      run: () => setNotes(true),
     },
     {
       id: "shell.audit_verify",
@@ -158,7 +197,7 @@ export function Shell(props: { children?: JSX.Element }) {
       <SecurityBanner />
       <Rail activeJobs={activeJobs()} />
       <main class="main" id="main" tabIndex={-1}>
-        {props.children}
+        <ModuleGate>{props.children}</ModuleGate>
       </main>
       <StatusBar jobs={status.jobs()} version={status.system()?.version} />
       <Show when={palette() !== null}>
@@ -167,6 +206,7 @@ export function Shell(props: { children?: JSX.Element }) {
       <Show when={sheet()}>
         <KeySheet onClose={() => setSheet(false)} />
       </Show>
+      <WhatsNew open={notes()} onClose={() => setNotes(false)} />
       <Show when={account()}>
         {(anchor) => (
           <AccountMenu

@@ -1,0 +1,9 @@
+/* Update notices: the marks of a release, the status bar item and the dashboard card. */
+.upd-marks { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
+.upd-mark { display: inline-flex; align-items: center; gap: 4px; padding: 1px var(--sp-4); border-radius: var(--r-1); font-size: var(--fs-12); font-weight: var(--fw-medium); border: 1px solid var(--line-strong); color: var(--ink-2); white-space: nowrap; }
+.upd-mark.security { background: var(--danger-wash); border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); color: var(--danger-ink); }
+.upd-mark.action { background: var(--warn-wash); border-color: color-mix(in srgb, var(--discrepancy-mark) 60%, var(--line)); color: var(--warn-ink); }
+
+.statusbar a.status-update { display: flex; align-items: center; gap: 6px; color: var(--accent); text-decoration: none; }
+.statusbar a.status-update.security { color: var(--danger-ink); }
+.statusbar a.status-update:hover { background: var(--surface-3); }

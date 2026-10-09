@@ -15,8 +15,9 @@
 //! ```
 
 use std::{
+    collections::BTreeMap,
     sync::{
-        Arc,
+        Arc, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
     time::Instant,
@@ -27,8 +28,9 @@ use tenko_core::{Action, Authenticator, Authorizer, ObjectRef, Principal, Timest
 use tenko_store::{MemStore, Store};
 
 use crate::{
-    dto::system::NodeStatus,
+    dto::system::{NodeStatus, StatusWarning},
     middleware::{idempotency::InFlight, metrics::Metrics},
+    modules::ModuleSet,
     problem::ApiError,
     server::ListenerInfo,
     sse::{EventHub, EventRoutes, SseConfig},
@@ -43,6 +45,9 @@ pub struct StateOptions {
     pub event_routes: EventRoutes,
     /// Identity and roles of this node, for `/system/status`.
     pub node: NodeStatus,
+    /// The product modules this installation runs (OPS-25): the routes of the others are
+    /// not registered, and `/system/status` reports the set to the UI. Default: all.
+    pub modules: ModuleSet,
 }
 
 /// Shared services of the API.
@@ -81,6 +86,10 @@ pub(crate) struct Platform {
     pub(crate) listener: ArcSwapOption<ListenerInfo>,
     /// Readiness as set by the server binary.
     pub(crate) ready: AtomicBool,
+    /// The product modules of the installation.
+    pub(crate) modules: ModuleSet,
+    /// Conditions the server binary reports in `/system/status`, by code.
+    pub(crate) notices: Mutex<BTreeMap<String, StatusWarning>>,
 }
 
 impl Default for AppState {
@@ -125,6 +134,8 @@ impl AppState {
                 node: options.node,
                 listener: ArcSwapOption::empty(),
                 ready: AtomicBool::new(true),
+                modules: options.modules,
+                notices: Mutex::new(BTreeMap::new()),
             }),
             store,
         }
@@ -150,6 +161,34 @@ impl AppState {
     /// Whether the node reports itself ready.
     pub fn is_ready(&self) -> bool {
         self.platform.ready.load(Ordering::SeqCst)
+    }
+
+    /// The product modules this installation runs (OPS-25).
+    pub fn modules(&self) -> ModuleSet {
+        self.platform.modules
+    }
+
+    /// Adds or replaces a condition that `GET /system/status` lists among its warnings
+    /// (for example a module change that needs a restart), keyed by its code.
+    pub fn set_notice(&self, warning: StatusWarning) {
+        self.notices().insert(warning.code.clone(), warning);
+    }
+
+    /// Removes the condition with this code.
+    pub fn clear_notice(&self, code: &str) {
+        self.notices().remove(code);
+    }
+
+    /// The conditions set with [`AppState::set_notice`], in code order.
+    pub fn notices_list(&self) -> Vec<StatusWarning> {
+        self.notices().values().cloned().collect()
+    }
+
+    fn notices(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, StatusWarning>> {
+        self.platform
+            .notices
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Checks an action with the authorizer; passes when none is configured.

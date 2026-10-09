@@ -25,8 +25,9 @@ import {
   PolicyEditor,
   SessionEditor,
   TokenEditor,
+  UpdatesEditor,
 } from "./ToggleEditors";
-import { formatToggle, weakerThan, type ToggleDef } from "./toggles";
+import { formatToggle, weakerThan, type ToggleDef, type UpdatesPolicy } from "./toggles";
 
 export function ToggleDialog(props: {
   view: SecuritySettingsView;
@@ -123,6 +124,9 @@ export function ToggleDialog(props: {
             </Match>
             <Match when={setting === "lockout"}>
               <LockoutEditor initial={initial as LockoutMode} onDraft={onDraft} />
+            </Match>
+            <Match when={setting === "updates"}>
+              <UpdatesEditor initial={initial as UpdatesPolicy} onDraft={onDraft} />
             </Match>
           </Switch>
 

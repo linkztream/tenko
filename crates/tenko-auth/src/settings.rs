@@ -1,4 +1,5 @@
-//! Security profiles and the authentication toggles TGL-01 to TGL-07 (SECURITY-PROFILES.md).
+//! Security profiles, the authentication toggles TGL-01 to TGL-07 and the in-app update
+//! toggle TGL-23 (SECURITY-PROFILES.md).
 //!
 //! A profile is a bundle of toggle values, not a code path: [`Profile::defaults`] gives the
 //! values, every toggle can then be changed on its own, and [`SecuritySettings::toggles`]
@@ -65,6 +66,7 @@ impl Profile {
                 token_max_days: Some(365),
                 breach_check: BreachMode::Online,
                 lockout: LockoutMode::ProgressiveDelay,
+                updates: Some(UpdatePolicy::new(UpdateInstall::Ui)),
             },
             Self::Standard => SecuritySettings {
                 profile: self,
@@ -78,6 +80,7 @@ impl Profile {
                 token_max_days: Some(90),
                 breach_check: BreachMode::Online,
                 lockout: LockoutMode::DelayThenTemporaryLock,
+                updates: Some(UpdatePolicy::new(UpdateInstall::UiStepUp)),
             },
             Self::Hardened => SecuritySettings {
                 profile: self,
@@ -91,6 +94,7 @@ impl Profile {
                 token_max_days: Some(30),
                 breach_check: BreachMode::OfflinePreferred,
                 lockout: LockoutMode::LockUntilUnlock,
+                updates: Some(UpdatePolicy::new(UpdateInstall::UploadOnly)),
             },
             Self::Lab => SecuritySettings {
                 profile: self,
@@ -104,7 +108,54 @@ impl Profile {
                 token_max_days: None,
                 breach_check: BreachMode::Off,
                 lockout: LockoutMode::Off,
+                updates: Some(UpdatePolicy::new(UpdateInstall::Ui)),
             },
+        }
+    }
+}
+
+/// How an administrator may install a new version from the UI (TGL-23, OPS-24).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateInstall {
+    /// Download from the release source and install from the UI (Home, Lab).
+    Ui,
+    /// As `ui`, with a fresh authentication for every install (Standard).
+    UiStepUp,
+    /// Only an uploaded and verified release file, with a fresh authentication (Hardened).
+    UploadOnly,
+}
+
+impl UpdateInstall {
+    /// Whether installing needs a fresh authentication (step-up).
+    pub const fn needs_step_up(self) -> bool {
+        !matches!(self, Self::Ui)
+    }
+
+    /// Whether a release may be downloaded from the source and installed.
+    pub const fn allows_download(self) -> bool {
+        !matches!(self, Self::UploadOnly)
+    }
+}
+
+/// TGL-23: the in-app update check and install (OPS-24). The check sends nothing but the
+/// running version; `updates.air_gapped` in `tenko.toml` stops it regardless.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+pub struct UpdatePolicy {
+    /// Check the release source daily.
+    pub check: bool,
+    /// How a new version may be installed.
+    pub install: UpdateInstall,
+}
+
+impl UpdatePolicy {
+    /// Daily checks with the given install mode (every profile checks daily).
+    pub const fn new(install: UpdateInstall) -> Self {
+        Self {
+            check: true,
+            install,
         }
     }
 }
@@ -165,6 +216,10 @@ pub struct SecuritySettings {
     pub breach_check: BreachMode,
     /// TGL-07: lockout.
     pub lockout: LockoutMode,
+    /// TGL-23: the in-app update check and install. `None` in settings stored before the
+    /// toggle existed: the profile's value applies ([`SecuritySettings::updates`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updates: Option<UpdatePolicy>,
 }
 
 impl Default for SecuritySettings {
@@ -193,7 +248,14 @@ pub struct ToggleState {
 }
 
 impl SecuritySettings {
-    /// The toggles TGL-01 to TGL-07 with deviation and weakness markers.
+    /// The effective TGL-23 value: the stored one, else the profile's.
+    pub fn updates(&self) -> UpdatePolicy {
+        self.updates
+            .or_else(|| self.profile.defaults().updates)
+            .unwrap_or(UpdatePolicy::new(UpdateInstall::UiStepUp))
+    }
+
+    /// The toggles TGL-01 to TGL-07 and TGL-23 with deviation and weakness markers.
     pub fn toggles(&self) -> Vec<ToggleState> {
         let profile = self.profile.defaults();
         let home = Profile::Home.defaults();
@@ -261,6 +323,15 @@ impl SecuritySettings {
                 json(serde_json::to_value(self.lockout)),
                 json(serde_json::to_value(profile.lockout)),
                 self.lockout == LockoutMode::Off && home.lockout != LockoutMode::Off,
+            ),
+            // No install mode is weaker than the Home value (install from the UI); a check
+            // that is off is, because security fixes then go unnoticed.
+            entry(
+                "TGL-23",
+                "updates",
+                json(serde_json::to_value(self.updates())),
+                json(serde_json::to_value(profile.updates())),
+                !self.updates().check && home.updates().check,
             ),
         ]
     }
@@ -349,6 +420,9 @@ pub struct SettingsPatch {
     /// TGL-07.
     #[serde(default)]
     pub lockout: Option<LockoutMode>,
+    /// TGL-23.
+    #[serde(default)]
+    pub updates: Option<UpdatePolicy>,
 }
 
 /// The TGL-05 value in a patch.
@@ -390,6 +464,9 @@ impl SettingsPatch {
         }
         if let Some(mode) = self.lockout {
             next.lockout = mode;
+        }
+        if let Some(updates) = self.updates {
+            next.updates = Some(updates);
         }
         next
     }
@@ -442,7 +519,12 @@ mod tests {
         assert!(hardened.passkey_for_admins);
         assert_eq!(hardened.session.idle_secs, 900);
         assert_eq!(hardened.breach_check, BreachMode::OfflinePreferred);
+        assert_eq!(home.updates().install, UpdateInstall::Ui);
+        assert_eq!(standard.updates().install, UpdateInstall::UiStepUp);
+        assert_eq!(hardened.updates().install, UpdateInstall::UploadOnly);
+        assert!(hardened.updates().check);
         let lab = Profile::Lab.defaults();
+        assert_eq!(lab.updates().install, UpdateInstall::Ui);
         assert_eq!(lab.token_max_days, None);
         assert_eq!(lab.breach_check, BreachMode::Off);
         assert_eq!(lab.lockout, LockoutMode::Off);
@@ -500,6 +582,37 @@ mod tests {
         assert!(fields.contains(&"profile"));
         assert!(fields.contains(&"TGL-01"));
         assert!(!fields.contains(&"TGL-07"));
+    }
+
+    #[test]
+    fn stored_settings_without_tgl_23_take_the_profile_value() {
+        let mut stored = serde_json::to_value(Profile::Hardened.defaults()).expect("json");
+        stored.as_object_mut().expect("an object").remove("updates");
+        let settings: SecuritySettings = serde_json::from_value(stored).expect("old settings");
+        assert_eq!(settings.updates, None);
+        assert_eq!(settings.updates().install, UpdateInstall::UploadOnly);
+        assert_eq!(settings.banner().deviations, Vec::<String>::new());
+        assert!(UpdateInstall::UploadOnly.needs_step_up());
+        assert!(!UpdateInstall::Ui.needs_step_up());
+        assert!(!UpdateInstall::UploadOnly.allows_download());
+    }
+
+    #[test]
+    fn switching_the_update_check_off_is_weaker_than_home() {
+        let patch = SettingsPatch {
+            updates: Some(UpdatePolicy {
+                check: false,
+                install: UpdateInstall::UiStepUp,
+            }),
+            ..SettingsPatch::default()
+        };
+        let next = patch.apply(&Profile::Standard.defaults());
+        let banner = next.banner();
+        assert_eq!(banner.deviations, vec!["TGL-23".to_owned()]);
+        assert!(banner.weaker_than_home);
+        let audit = changes(&Profile::Standard.defaults(), &next);
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].field, "TGL-23");
     }
 
     #[test]

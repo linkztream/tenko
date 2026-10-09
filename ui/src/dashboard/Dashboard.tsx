@@ -4,7 +4,7 @@
 // an import). Every number that can grow is an SI number with the exact value as tooltip;
 // utilization is a bar, never a gauge.
 import { A, useNavigate } from "@solidjs/router";
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, For, lazy, Show } from "solid-js";
 import { api } from "../api/client";
 import { createLiveQuery } from "../api/live";
 import { fetchAll } from "../api/paginate";
@@ -27,7 +27,12 @@ import { JobStateChip } from "../jobs/StateChip";
 import { jobTitle } from "../jobs/words";
 import { createShellStatus } from "../shell/status";
 import { storeRoleLabel } from "../shell/TopBar";
+import { moduleRunning } from "../updates/modules";
 import "./dashboard.css";
+
+// The notices of the updates area: a newer release, and a module change that waits for a restart.
+const UpdateCard = lazy(() => import("../updates/UpdateCard"));
+const ModulesNotice = lazy(() => import("../updates/ModulesNotice"));
 
 const ROLE: Record<string, MessageKey> = {
   controller: "node.role.controller",
@@ -62,6 +67,8 @@ function useUtilization() {
     relevant: (e) => isAlarmEvent(e) || e.objects.some((o) => o.kind === "prefix" || o.kind === "address" || o.kind === "range"),
     debounceMs: 500,
     fetch: async (signal) => {
+      // Without the IPAM module there are no networks to count.
+      if (!moduleRunning("ipam")) return { value: [] as VrfUse[] };
       const [tenants, vrfs] = await Promise.all([
         fetchAll<Tenant>("/api/v1/tenants", { signal }),
         fetchAll<Vrf>("/api/v1/vrfs", { signal }),
@@ -133,7 +140,7 @@ export default function Dashboard() {
         title={t("shell.nav.dashboard")}
         sub={t("shell.dashboard.sub")}
         actions={
-          <>
+          <Show when={moduleRunning("ipam")}>
             <button type="button" class="btn" data-testid="dashboard-claim" onClick={() => setAction("claim")} disabled={!scope.vrf()}>
               <Icon name="plus" />
               {t("dashboard.action.claim")}
@@ -146,10 +153,11 @@ export default function Dashboard() {
               <Icon name="export" />
               {t("dashboard.action.import")}
             </A>
-          </>
+          </Show>
         }
       />
       <div class="page-body wide dash-body">
+        <ModulesNotice warnings={s()?.warnings} />
         <div class="tiles">
           <section class="card tile">
             <h2>{t("shell.dashboard.node")}</h2>
@@ -165,6 +173,7 @@ export default function Dashboard() {
               </For>
             </p>
           </section>
+          <Show when={moduleRunning("ipam")}>
           <section class="card tile">
             <h2>{t("dashboard.tile.addresses")}</h2>
             <div class="tile-value">
@@ -174,6 +183,8 @@ export default function Dashboard() {
               {t("dashboard.tile.addresses_of")} <Count value={vrfs().reduce((n, v) => n + v.capacity, 0n)} />
             </p>
           </section>
+          </Show>
+          <Show when={moduleRunning("ipam")}>
           <section class="card tile">
             <h2>{t("dashboard.tile.alarms")}</h2>
             <div class="tile-value">
@@ -181,6 +192,7 @@ export default function Dashboard() {
             </div>
             <p class="muted">{t("dashboard.tile.alarms_hint", { critical: alarms().filter((a) => a.node.level === "critical").length })}</p>
           </section>
+          </Show>
           <section class="card tile">
             <h2>{t("shell.dashboard.jobs")}</h2>
             <div class="tile-value">
@@ -196,6 +208,8 @@ export default function Dashboard() {
         </div>
 
         <div class="dash-grid">
+          <UpdateCard />
+          <Show when={moduleRunning("ipam")}>
           <section class="card dash-card" id="alarms" aria-labelledby="dash-alarms" data-testid="dashboard-alarms">
             <h2 id="dash-alarms">{t("dashboard.alarms.title")}</h2>
             <Show when={alarms().length > 0} fallback={<p class="muted">{t("dashboard.alarms.none")}</p>}>
@@ -220,6 +234,7 @@ export default function Dashboard() {
               </ul>
             </Show>
           </section>
+          </Show>
 
           <section class="card dash-card" aria-labelledby="dash-waiting" data-testid="dashboard-waiting">
             <h2 id="dash-waiting">
@@ -268,6 +283,7 @@ export default function Dashboard() {
           </section>
         </div>
 
+        <Show when={moduleRunning("ipam")}>
         <section class="dash-use" aria-labelledby="dash-use" data-testid="dashboard-utilization">
           <h2 id="dash-use">{t("dashboard.use.title")}</h2>
           <div class="dash-vrfs">
@@ -312,6 +328,7 @@ export default function Dashboard() {
             </For>
           </div>
         </section>
+        </Show>
         <p class="muted">
           <Kbd keys={["Ctrl", "K"]} /> {t("dashboard.palette_hint")}
         </p>
