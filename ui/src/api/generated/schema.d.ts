@@ -1540,6 +1540,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/system/ca-root": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download the root certificate of the internal CA as PEM */
+        get: operations["get_ca_root"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system/status": {
         parameters: {
             query?: never;
@@ -13892,6 +13909,39 @@ export interface operations {
             };
             /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_ca_root: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The root certificate of the internal CA */
+            200: {
+                headers: {
+                    /** @description `public, max-age=3600` */
+                    "Cache-Control"?: string;
+                    /** @description `attachment; filename="tenko-ca-root.pem"` */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-pem-file": string;
+                };
+            };
+            /** @description The listener does not use the internal CA (`tls.no_internal_ca`) */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

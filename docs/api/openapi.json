@@ -10459,6 +10459,51 @@
         ]
       }
     },
+    "/api/v1/system/ca-root": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Download the root certificate of the internal CA as PEM",
+        "operationId": "get_ca_root",
+        "responses": {
+          "200": {
+            "description": "The root certificate of the internal CA",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`public, max-age=3600`"
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`attachment; filename=\"tenko-ca-root.pem\"`"
+              }
+            },
+            "content": {
+              "application/x-pem-file": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The listener does not use the internal CA (`tls.no_internal_ca`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/system/status": {
       "get": {
         "tags": [
