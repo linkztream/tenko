@@ -853,8 +853,23 @@ pub struct StoreStatus {
     /// by the start-up probe (OPS-19; the store warns above 10 ms). `None` for `MemStore` or
     /// when the probe did not run.
     pub fsync_p50_micros: Option<u64>,
+    /// Bytes of the state-machine file alone (`None` for `MemStore`). Compare with
+    /// `data_bytes`: a node is re-seeded from a snapshot when the file passes about twice
+    /// the live data (ADR 0002).
+    #[serde(default)]
+    pub sm_file_bytes: Option<u64>,
     /// Registered derived indexes.
     pub indexes: Vec<IndexStatus>,
+}
+
+impl StoreStatus {
+    /// `sm_file_bytes / data_bytes` when both are known and there is live data.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn sm_file_ratio(&self) -> Option<f64> {
+        let file = self.sm_file_bytes?;
+        (self.data_bytes > 0).then(|| file as f64 / self.data_bytes as f64)
+    }
 }
 
 /// Store errors.

@@ -292,6 +292,7 @@ struct Inner {
     closed: AtomicBool,
     fsync: Option<FsyncProbe>,
     disk_bytes: AtomicU64,
+    sm_file_bytes: AtomicU64,
     coalescer: Arc<CoalescerStats>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
     /// A temporary data directory removed when the store is dropped.
@@ -554,6 +555,7 @@ impl RaftStore {
             closed: AtomicBool::new(false),
             fsync,
             disk_bytes: AtomicU64::new(0),
+            sm_file_bytes: AtomicU64::new(0),
             coalescer: coalescer_stats,
             tasks: Mutex::new(vec![coalescer]),
             temp_dir,
@@ -874,8 +876,10 @@ impl Inner {
     fn refresh_sizes(&self) {
         let dir = &self.config.data_dir;
         let file = |name: &str| fs::metadata(dir.join(name)).map_or(0, |m| m.len());
-        let bytes = file("log.redb") + file("sm.redb") + sm::dir_bytes(self.sm.snapshot_dir());
+        let sm_file = file("sm.redb");
+        let bytes = file("log.redb") + sm_file + sm::dir_bytes(self.sm.snapshot_dir());
         self.disk_bytes.store(bytes, Ordering::Relaxed);
+        self.sm_file_bytes.store(sm_file, Ordering::Relaxed);
     }
 }
 
@@ -1099,6 +1103,7 @@ impl Store for RaftStore {
             journal_len: meta.journal_len,
             data_bytes: meta.data_bytes,
             disk_bytes: Some(inner.disk_bytes.load(Ordering::Relaxed)),
+            sm_file_bytes: Some(inner.sm_file_bytes.load(Ordering::Relaxed)),
             fsync_p50_micros: inner.fsync.map(|probe| probe.p50_micros()),
             indexes: inner.sm.index_statuses(),
         }
