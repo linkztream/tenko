@@ -3064,6 +3064,12 @@ export interface components {
         /** @description What to run. */
         JobSpec: {
             group?: components["schemas"]["GroupKey"] | null;
+            /**
+             * Format: int32
+             * @description Parallelism of the job's group when the engine has no configured limit for it; the
+             *     jobs of one group carry the same value (a move job group, IPAM-19, CONN-09).
+             */
+            group_limit?: number | null;
             idempotency?: components["schemas"]["IdempotencyKey"] | null;
             /** @description The kind of job. */
             kind: components["schemas"]["JobKind"];
@@ -3749,6 +3755,12 @@ export interface components {
                  * @example 192.0.2.199
                  */
                 last: string;
+                /**
+                 * Format: int32
+                 * @description DHCP lease time in seconds of a `dhcp_pool` range. Informational until Tenko DHCP
+                 *     exists, and the source of the default move timeout (IPAM-19).
+                 */
+                lease_secs?: number | null;
                 /** @description Metadata. */
                 meta: components["schemas"]["Meta"];
                 /** @description The containing prefix. */
@@ -4347,6 +4359,12 @@ export interface components {
              * @example 192.0.2.199
              */
             last: string;
+            /**
+             * Format: int32
+             * @description DHCP lease time in seconds of a `dhcp_pool` range. Informational until Tenko DHCP
+             *     exists, and the source of the default move timeout (IPAM-19).
+             */
+            lease_secs?: number | null;
             /** @description Metadata. */
             meta: components["schemas"]["Meta"];
             /** @description The containing prefix. */
@@ -5806,6 +5824,12 @@ export interface components {
                  * @example 192.0.2.199
                  */
                 last: string;
+                /**
+                 * Format: int32
+                 * @description DHCP lease time in seconds of a `dhcp_pool` range. Informational until Tenko DHCP
+                 *     exists, and the source of the default move timeout (IPAM-19).
+                 */
+                lease_secs?: number | null;
                 /** @description Metadata. */
                 meta: components["schemas"]["Meta"];
                 /** @description The containing prefix. */
