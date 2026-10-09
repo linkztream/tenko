@@ -8,7 +8,7 @@ exclude = ["bench", "fuzz"]
 [workspace.package]
 edition = "2024"
 rust-version = "1.85"
-# Placeholder until the project licence is decided (see docs/adr/).
+# Placeholder until the project licence is decided (open question in docs/ROADMAP.md).
 license = "LicenseRef-Proprietary"
 
 [workspace.lints.rust]
