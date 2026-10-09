@@ -11589,6 +11589,116 @@
         }
       }
     },
+    "/api/v1/system/modules": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Get the product modules this installation runs",
+        "operationId": "get_modules",
+        "responses": {
+          "200": {
+            "description": "The running and the configured modules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuleSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No module service (`modules.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Set the product modules this installation runs",
+        "operationId": "put_modules",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModulesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stored; the running and the configured modules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuleSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`modules` in tenko.toml decides (`modules.pinned`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No module service (`modules.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/system/status": {
       "get": {
         "tags": [
@@ -11619,6 +11729,464 @@
           },
           "403": {
             "description": "Not allowed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/updates": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Get the update status: newer releases with their notes and how to install them",
+        "operationId": "get_updates",
+        "responses": {
+          "200": {
+            "description": "The update status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No update service (`update.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/updates/check": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Ask the release source for new versions now",
+        "operationId": "check_updates",
+        "responses": {
+          "200": {
+            "description": "The update status after the check",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The check is off: air-gapped or switched off in the settings (`update.check_off`, parameter `reason`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The release source did not answer with a valid manifest (`update.fetch_failed`, `update.manifest.*`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No update service (`update.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/updates/install": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Install a newer version from the release source",
+        "operationId": "install_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The install job started; follow it on the `jobs` topic",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallStarted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The version is not in the manifest or not newer (`update.version_unknown`, `update.not_newer`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed, or a fresh authentication is needed (`auth.forbidden`, `auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No update service (`update.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/updates/manifest": {
+      "put": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Upload a release manifest (air-gapped installations)",
+        "operationId": "put_update_manifest",
+        "requestBody": {
+          "description": "The release manifest, at most 1 MiB",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseManifest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The manifest is stored; the update status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The manifest is invalid (`update.manifest.json`, `update.manifest.invalid`, `update.manifest.schema`, `update.manifest.project`, `update.manifest.too_large`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No update service (`update.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/updates/upload": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Install an uploaded release file",
+        "operationId": "upload_update",
+        "parameters": [
+          {
+            "name": "version",
+            "in": "query",
+            "description": "The version of the uploaded file; the manifest must list it with a file for this\nplatform, whose SHA-256 the upload must match.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ReleaseVersion"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The release file for this platform",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The file is stored and verified; the install job started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallStarted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The file does not match the manifest (`update.checksum_mismatch`, `update.size_mismatch`), or the version is unknown (`update.version_unknown`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed, or a fresh authentication is needed (`auth.forbidden`, `auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This installation cannot install now (`update.install_blocked`, parameter `reason`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The file is larger than the manifest says (`update.size_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No update service (`update.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/updates/whats-new": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Get the notes to show this user after an upgrade",
+        "operationId": "get_whats_new",
+        "responses": {
+          "200": {
+            "description": "The notes and whether to show them",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatsNew"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No update service (`update.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/updates/whats-new/seen": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Mark the notes of the running version as seen by this user",
+        "operationId": "mark_whats_new_seen",
+        "responses": {
+          "204": {
+            "description": "Recorded"
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No update service (`update.unavailable`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -15785,6 +16353,17 @@
           "unmanaged"
         ]
       },
+      "AttemptState": {
+        "type": "string",
+        "description": "The state of an install attempt.",
+        "enum": [
+          "installing",
+          "restarting",
+          "confirmed",
+          "rolled_back",
+          "failed"
+        ]
+      },
       "AttestationKind": {
         "oneOf": [
           {
@@ -16427,6 +17006,14 @@
           "lock",
           "unlock",
           "remove"
+        ]
+      },
+      "CheckOff": {
+        "type": "string",
+        "description": "Why the scheduled check does not run.",
+        "enum": [
+          "air_gapped",
+          "setting"
         ]
       },
       "CodeLogin": {
@@ -18428,6 +19015,126 @@
               "$ref": "#/components/schemas/TargetInfo"
             },
             "description": "The targets the mapping step offers (custom fields included)."
+          }
+        }
+      },
+      "InstallAbility": {
+        "type": "object",
+        "description": "How this installation can install a new version.",
+        "required": [
+          "policy",
+          "step_up",
+          "from_source",
+          "upload",
+          "ready_timeout_secs"
+        ],
+        "properties": {
+          "from_source": {
+            "type": "boolean",
+            "description": "`POST /system/updates/install` would start now."
+          },
+          "from_source_blocked": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/InstallBlock",
+                "description": "Why it would not."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "policy": {
+            "$ref": "#/components/schemas/InstallPolicy",
+            "description": "The policy of TGL-23."
+          },
+          "pull_command": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Containers: the command that pulls the newest image."
+          },
+          "ready_timeout_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds a new version has to become ready before it is switched back.",
+            "minimum": 0
+          },
+          "step_up": {
+            "type": "boolean",
+            "description": "Installing needs a fresh authentication (step-up)."
+          },
+          "upload": {
+            "type": "boolean",
+            "description": "`POST /system/updates/upload` is possible."
+          },
+          "upload_blocked": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/InstallBlock",
+                "description": "Why it is not."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "InstallBlock": {
+        "type": "string",
+        "description": "Why an installation path is not available.",
+        "enum": [
+          "container",
+          "cluster",
+          "layout_missing",
+          "unsupervised",
+          "unsupported_platform",
+          "upload_only",
+          "air_gapped",
+          "no_asset",
+          "up_to_date",
+          "in_progress"
+        ]
+      },
+      "InstallPolicy": {
+        "type": "string",
+        "description": "How an administrator may install a new version (TGL-23).",
+        "enum": [
+          "ui",
+          "ui_step_up",
+          "upload_only"
+        ]
+      },
+      "InstallRequest": {
+        "type": "object",
+        "description": "`POST /system/updates/install`.",
+        "required": [
+          "version"
+        ],
+        "properties": {
+          "version": {
+            "$ref": "#/components/schemas/ReleaseVersion",
+            "description": "The version to install; it must be in the manifest and newer than the running one."
+          }
+        }
+      },
+      "InstallStarted": {
+        "type": "object",
+        "description": "The answer of `POST /system/updates/install` and `POST /system/updates/upload`.",
+        "required": [
+          "job_id",
+          "version"
+        ],
+        "properties": {
+          "job_id": {
+            "$ref": "#/components/schemas/JobId",
+            "description": "The install job: download (or the uploaded file), verification, dry run and switch.\nThe server restarts into the new version when it succeeds."
+          },
+          "version": {
+            "$ref": "#/components/schemas/ReleaseVersion",
+            "description": "The version being installed."
           }
         }
       },
@@ -20597,6 +21304,38 @@
         },
         "additionalProperties": false
       },
+      "ManifestInfo": {
+        "type": "object",
+        "description": "The stored release manifest.",
+        "required": [
+          "origin",
+          "at",
+          "releases"
+        ],
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it was fetched or uploaded."
+          },
+          "origin": {
+            "$ref": "#/components/schemas/ManifestOrigin",
+            "description": "Where it came from."
+          },
+          "releases": {
+            "type": "integer",
+            "description": "Releases it lists.",
+            "minimum": 0
+          }
+        }
+      },
+      "ManifestOrigin": {
+        "type": "string",
+        "description": "Where the stored release manifest came from.",
+        "enum": [
+          "fetched",
+          "uploaded"
+        ]
+      },
       "ManifestProblem": {
         "type": "object",
         "description": "One problem of a manifest or of instance settings.",
@@ -20751,6 +21490,80 @@
           "administrators",
           "everyone"
         ]
+      },
+      "Module": {
+        "type": "string",
+        "description": "A product module that an installation can enable or disable (OPS-25).",
+        "enum": [
+          "ipam",
+          "dns",
+          "dhcp",
+          "discovery"
+        ]
+      },
+      "ModuleRestart": {
+        "type": "string",
+        "description": "What happens to a module change that the running server cannot apply by itself.",
+        "enum": [
+          "none",
+          "scheduled",
+          "required"
+        ]
+      },
+      "ModuleSet": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "description": "A product module that an installation can enable or disable (OPS-25).",
+          "enum": [
+            "ipam",
+            "dns",
+            "dhcp",
+            "discovery"
+          ]
+        },
+        "description": "Product modules in canonical order: ipam, dns, dhcp, discovery (OPS-25)."
+      },
+      "ModuleSettings": {
+        "type": "object",
+        "description": "`GET /system/modules` and the answer of `PUT /system/modules` (OPS-25).",
+        "required": [
+          "running",
+          "configured",
+          "pinned",
+          "restart"
+        ],
+        "properties": {
+          "configured": {
+            "$ref": "#/components/schemas/ModuleSet",
+            "description": "The modules the next start runs: `modules` of `tenko.toml` when it sets them, else\nthe installation's choice, else every module."
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "`tenko.toml` sets the modules; the installation's choice cannot change them."
+          },
+          "restart": {
+            "$ref": "#/components/schemas/ModuleRestart",
+            "description": "Whether a restart is pending to apply `configured`."
+          },
+          "running": {
+            "$ref": "#/components/schemas/ModuleSet",
+            "description": "The modules the server runs now."
+          }
+        }
+      },
+      "ModulesRequest": {
+        "type": "object",
+        "description": "`PUT /system/modules`: what the installation is for (the first-run wizard asks).",
+        "required": [
+          "modules"
+        ],
+        "properties": {
+          "modules": {
+            "$ref": "#/components/schemas/ModuleSet",
+            "description": "The modules to run."
+          }
+        }
       },
       "MoveDns": {
         "type": "object",
@@ -25152,6 +25965,145 @@
           }
         }
       },
+      "Release": {
+        "type": "object",
+        "description": "One release. Also the body of the release endpoints.",
+        "required": [
+          "version",
+          "date",
+          "notes"
+        ],
+        "properties": {
+          "action": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Markdown: what the operator must do; present when `requires_action` is set."
+          },
+          "assets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReleaseAsset"
+            },
+            "description": "The downloadable files, one per platform."
+          },
+          "date": {
+            "type": "string",
+            "description": "Release date, `YYYY-MM-DD`."
+          },
+          "format": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Format of the data directory this release writes.",
+            "minimum": 0
+          },
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Container image of the release, for example `ghcr.io/example/tenko:0.2.0`."
+          },
+          "notes": {
+            "type": "string",
+            "description": "Markdown: the changelog section of the version."
+          },
+          "requires_action": {
+            "type": "boolean",
+            "description": "The operator must do something when upgrading to this release."
+          },
+          "security": {
+            "type": "boolean",
+            "description": "The release contains security fixes."
+          },
+          "version": {
+            "$ref": "#/components/schemas/ReleaseVersion",
+            "description": "The version of the release."
+          }
+        }
+      },
+      "ReleaseAsset": {
+        "type": "object",
+        "description": "One downloadable file of a release.",
+        "required": [
+          "platform",
+          "name",
+          "url",
+          "sha256",
+          "size"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "File name, for example `tenko-0.2.0-linux-x86_64`."
+          },
+          "platform": {
+            "type": "string",
+            "description": "`<os>-<arch>` as Rust's `std::env::consts::OS` and `ARCH` name them: `linux-x86_64`,\n`linux-aarch64`, `windows-x86_64`."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "SHA-256 of the file: 64 lowercase hexadecimal digits."
+          },
+          "signature": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Detached signature; reserved for signed releases (API-19) and not checked yet."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size of the file in bytes.",
+            "minimum": 0
+          },
+          "url": {
+            "type": "string",
+            "description": "Absolute `http` or `https` URL, or a URL relative to the manifest URL."
+          }
+        }
+      },
+      "ReleaseManifest": {
+        "type": "object",
+        "description": "The release manifest (`releases.json`): every release of the product with its notes and\ndownloads.",
+        "required": [
+          "schema",
+          "project",
+          "releases"
+        ],
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "The project the manifest describes; always `tenko`."
+          },
+          "releases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Release"
+            },
+            "description": "The releases; [`ReleaseManifest::parse`] sorts them newest first."
+          },
+          "schema": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Format of the manifest; the only schema is 1.",
+            "minimum": 0
+          }
+        }
+      },
+      "ReleaseVersion": {
+        "type": "string",
+        "description": "Release version: MAJOR.MINOR.PATCH with an optional pre-release and build metadata, ordered by SemVer 2.0.0 precedence.",
+        "examples": [
+          "1.2.0",
+          "1.2.0-rc.1"
+        ]
+      },
       "RequestId": {
         "type": "string",
         "format": "uuid"
@@ -25530,6 +26482,17 @@
             "format": "int32",
             "description": "TGL-05: API token maximum lifetime in days; `None` allows non-expiring tokens.",
             "minimum": 0
+          },
+          "updates": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UpdatePolicy",
+                "description": "TGL-23: the in-app update check and install. `None` in settings stored before the\ntoggle existed: the profile's value applies ([`SecuritySettings::updates`])."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -25831,6 +26794,17 @@
               {
                 "$ref": "#/components/schemas/TokenMaxLifetime",
                 "description": "TGL-05: a number of days, or `unlimited`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updates": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UpdatePolicy",
+                "description": "TGL-23."
               },
               {
                 "type": "null"
@@ -27039,6 +28013,10 @@
           "warnings"
         ],
         "properties": {
+          "modules": {
+            "$ref": "#/components/schemas/ModuleSet",
+            "description": "The product modules this installation runs (OPS-25); the UI shows only their\nareas. Absent in answers of servers that predate the module switch: all modules."
+          },
           "node": {
             "$ref": "#/components/schemas/NodeStatus",
             "description": "This node."
@@ -27898,6 +28876,106 @@
         },
         "additionalProperties": false
       },
+      "UpdateAttempt": {
+        "type": "object",
+        "description": "The last install attempt.",
+        "required": [
+          "from",
+          "to",
+          "state",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it reached this state."
+          },
+          "from": {
+            "$ref": "#/components/schemas/ReleaseVersion",
+            "description": "The version before."
+          },
+          "job_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobId",
+                "description": "The install job."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The code of a failure or of the reason for a switch back."
+          },
+          "state": {
+            "$ref": "#/components/schemas/AttemptState",
+            "description": "Where it stands."
+          },
+          "to": {
+            "$ref": "#/components/schemas/ReleaseVersion",
+            "description": "The version installed."
+          }
+        }
+      },
+      "UpdateCheck": {
+        "type": "object",
+        "description": "The scheduled check of the release source.",
+        "required": [
+          "enabled",
+          "source",
+          "interval_hours"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the check runs."
+          },
+          "interval_hours": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Hours between two checks.",
+            "minimum": 0
+          },
+          "last_checked": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the source was last asked."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The code of the last failed check, for example `update.fetch_failed`."
+          },
+          "off_reason": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CheckOff",
+                "description": "Why it does not."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "string",
+            "description": "The URL of the release manifest."
+          }
+        }
+      },
       "UpdateCustomField": {
         "type": "object",
         "description": "Updates a custom field definition.",
@@ -27954,6 +29032,15 @@
         },
         "additionalProperties": false
       },
+      "UpdateInstall": {
+        "type": "string",
+        "description": "How an administrator may install a new version from the UI (TGL-23, OPS-24).",
+        "enum": [
+          "ui",
+          "ui_step_up",
+          "upload_only"
+        ]
+      },
       "UpdateInterface": {
         "type": "object",
         "description": "Updates an interface.",
@@ -27981,6 +29068,24 @@
           }
         },
         "additionalProperties": false
+      },
+      "UpdatePolicy": {
+        "type": "object",
+        "description": "TGL-23: the in-app update check and install (OPS-24). The check sends nothing but the\nrunning version; `updates.air_gapped` in `tenko.toml` stops it regardless.",
+        "required": [
+          "check",
+          "install"
+        ],
+        "properties": {
+          "check": {
+            "type": "boolean",
+            "description": "Check the release source daily."
+          },
+          "install": {
+            "$ref": "#/components/schemas/UpdateInstall",
+            "description": "How a new version may be installed."
+          }
+        }
       },
       "UpdatePrefix": {
         "type": "object",
@@ -28065,6 +29170,97 @@
           }
         },
         "additionalProperties": false
+      },
+      "UpdateStatus": {
+        "type": "object",
+        "description": "`GET /system/updates`.",
+        "required": [
+          "running",
+          "format",
+          "platform",
+          "update_available",
+          "security",
+          "requires_action",
+          "releases",
+          "check",
+          "install"
+        ],
+        "properties": {
+          "attempt": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UpdateAttempt",
+                "description": "The last install attempt."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "check": {
+            "$ref": "#/components/schemas/UpdateCheck",
+            "description": "The scheduled check."
+          },
+          "format": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The data-directory format of the running binary.",
+            "minimum": 0
+          },
+          "install": {
+            "$ref": "#/components/schemas/InstallAbility",
+            "description": "How a new version can be installed."
+          },
+          "latest": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReleaseVersion",
+                "description": "The newest release in the manifest."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "manifest": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ManifestInfo",
+                "description": "The stored manifest."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "platform": {
+            "type": "string",
+            "description": "The platform of this server, `<os>-<arch>`."
+          },
+          "releases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Release"
+            },
+            "description": "The releases newer than the running one, newest first, with their notes."
+          },
+          "requires_action": {
+            "type": "boolean",
+            "description": "A newer release needs an action when upgrading."
+          },
+          "running": {
+            "$ref": "#/components/schemas/ReleaseVersion",
+            "description": "The running version."
+          },
+          "security": {
+            "type": "boolean",
+            "description": "A newer release fixes security issues."
+          },
+          "update_available": {
+            "type": "boolean",
+            "description": "A release newer than the running one exists."
+          }
+        }
       },
       "UpdateTenant": {
         "type": "object",
@@ -28951,6 +30147,43 @@
           "security_key": {
             "type": "boolean",
             "description": "Ask for a security key with `direct` attestation (needed for break-glass)."
+          }
+        }
+      },
+      "WhatsNew": {
+        "type": "object",
+        "description": "`GET /system/updates/whats-new`: the notes to show a user once after an upgrade.",
+        "required": [
+          "running",
+          "show",
+          "releases"
+        ],
+        "properties": {
+          "last_seen": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReleaseVersion",
+                "description": "The version whose notes the user saw last; `null` for a user who never saw any."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "releases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Release"
+            },
+            "description": "The releases after `last_seen` up to the running one, newest first."
+          },
+          "running": {
+            "$ref": "#/components/schemas/ReleaseVersion",
+            "description": "The running version."
+          },
+          "show": {
+            "type": "boolean",
+            "description": "Whether to show the notes now: the user saw an older version's notes."
           }
         }
       },

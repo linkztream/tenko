@@ -1715,6 +1715,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/system/modules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the product modules this installation runs */
+        get: operations["get_modules"];
+        /** Set the product modules this installation runs */
+        put: operations["put_modules"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system/status": {
         parameters: {
             query?: never;
@@ -1726,6 +1744,125 @@ export interface paths {
         get: operations["system_status"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the update status: newer releases with their notes and how to install them */
+        get: operations["get_updates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/updates/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask the release source for new versions now */
+        post: operations["check_updates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/updates/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Install a newer version from the release source */
+        post: operations["install_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/updates/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Upload a release manifest (air-gapped installations) */
+        put: operations["put_update_manifest"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/updates/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Install an uploaded release file */
+        post: operations["upload_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/updates/whats-new": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the notes to show this user after an upgrade */
+        get: operations["get_whats_new"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/updates/whats-new/seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark the notes of the running version as seen by this user */
+        post: operations["mark_whats_new_seen"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2286,6 +2423,11 @@ export interface components {
          * @enum {string}
          */
         AssignmentMode: "static" | "reserved" | "dynamic" | "unmanaged";
+        /**
+         * @description The state of an install attempt.
+         * @enum {string}
+         */
+        AttemptState: "installing" | "restarting" | "confirmed" | "rolled_back" | "failed";
         /** @description What the attestation of a credential proved. */
         AttestationKind: {
             /** @enum {string} */
@@ -2515,6 +2657,11 @@ export interface components {
          * @enum {string}
          */
         ChangeAction: "create" | "update" | "delete" | "restore" | "lock" | "unlock" | "remove";
+        /**
+         * @description Why the scheduled check does not run.
+         * @enum {string}
+         */
+        CheckOff: "air_gapped" | "setting";
         /** @description `POST /auth/login/totp` and `POST /auth/login/recovery`. */
         CodeLogin: {
             /** @description The challenge from the password step. */
@@ -3252,6 +3399,51 @@ export interface components {
             /** @description The targets the mapping step offers (custom fields included). */
             targets: components["schemas"]["TargetInfo"][];
         };
+        /** @description How this installation can install a new version. */
+        InstallAbility: {
+            /** @description `POST /system/updates/install` would start now. */
+            from_source: boolean;
+            from_source_blocked?: components["schemas"]["InstallBlock"] | null;
+            /** @description The policy of TGL-23. */
+            policy: components["schemas"]["InstallPolicy"];
+            /** @description Containers: the command that pulls the newest image. */
+            pull_command?: string | null;
+            /**
+             * Format: int64
+             * @description Seconds a new version has to become ready before it is switched back.
+             */
+            ready_timeout_secs: number;
+            /** @description Installing needs a fresh authentication (step-up). */
+            step_up: boolean;
+            /** @description `POST /system/updates/upload` is possible. */
+            upload: boolean;
+            upload_blocked?: components["schemas"]["InstallBlock"] | null;
+        };
+        /**
+         * @description Why an installation path is not available.
+         * @enum {string}
+         */
+        InstallBlock: "container" | "cluster" | "layout_missing" | "unsupervised" | "unsupported_platform" | "upload_only" | "air_gapped" | "no_asset" | "up_to_date" | "in_progress";
+        /**
+         * @description How an administrator may install a new version (TGL-23).
+         * @enum {string}
+         */
+        InstallPolicy: "ui" | "ui_step_up" | "upload_only";
+        /** @description `POST /system/updates/install`. */
+        InstallRequest: {
+            /** @description The version to install; it must be in the manifest and newer than the running one. */
+            version: components["schemas"]["ReleaseVersion"];
+        };
+        /** @description The answer of `POST /system/updates/install` and `POST /system/updates/upload`. */
+        InstallStarted: {
+            /**
+             * @description The install job: download (or the uploaded file), verification, dry run and switch.
+             *     The server restarts into the new version when it succeeds.
+             */
+            job_id: components["schemas"]["JobId"];
+            /** @description The version being installed. */
+            version: components["schemas"]["ReleaseVersion"];
+        };
         /** @description A network interface of a host. */
         Interface: {
             client_id?: components["schemas"]["HexBytes"] | null;
@@ -3917,6 +4109,20 @@ export interface components {
              */
             version: string;
         };
+        /** @description The stored release manifest. */
+        ManifestInfo: {
+            /** @description When it was fetched or uploaded. */
+            at: components["schemas"]["Timestamp"];
+            /** @description Where it came from. */
+            origin: components["schemas"]["ManifestOrigin"];
+            /** @description Releases it lists. */
+            releases: number;
+        };
+        /**
+         * @description Where the stored release manifest came from.
+         * @enum {string}
+         */
+        ManifestOrigin: "fetched" | "uploaded";
         /** @description One problem of a manifest or of instance settings. */
         ManifestProblem: {
             /** @description What is wrong, in English. */
@@ -3979,6 +4185,37 @@ export interface components {
          * @enum {string}
          */
         MfaRequirement: "optional" | "administrators" | "everyone";
+        /**
+         * @description A product module that an installation can enable or disable (OPS-25).
+         * @enum {string}
+         */
+        Module: "ipam" | "dns" | "dhcp" | "discovery";
+        /**
+         * @description What happens to a module change that the running server cannot apply by itself.
+         * @enum {string}
+         */
+        ModuleRestart: "none" | "scheduled" | "required";
+        /** @description Product modules in canonical order: ipam, dns, dhcp, discovery (OPS-25). */
+        ModuleSet: ("ipam" | "dns" | "dhcp" | "discovery")[];
+        /** @description `GET /system/modules` and the answer of `PUT /system/modules` (OPS-25). */
+        ModuleSettings: {
+            /**
+             * @description The modules the next start runs: `modules` of `tenko.toml` when it sets them, else
+             *     the installation's choice, else every module.
+             */
+            configured: components["schemas"]["ModuleSet"];
+            /** @description `tenko.toml` sets the modules; the installation's choice cannot change them. */
+            pinned: boolean;
+            /** @description Whether a restart is pending to apply `configured`. */
+            restart: components["schemas"]["ModuleRestart"];
+            /** @description The modules the server runs now. */
+            running: components["schemas"]["ModuleSet"];
+        };
+        /** @description `PUT /system/modules`: what the installation is for (the first-run wizard asks). */
+        ModulesRequest: {
+            /** @description The modules to run. */
+            modules: components["schemas"]["ModuleSet"];
+        };
         /** @description The DNS change of an item. */
         MoveDns: {
             /** @description The name. */
@@ -5549,6 +5786,72 @@ export interface components {
             /** @description Always `public-key`. */
             type: string;
         };
+        /** @description One release. Also the body of the release endpoints. */
+        Release: {
+            /** @description Markdown: what the operator must do; present when `requires_action` is set. */
+            action?: string | null;
+            /** @description The downloadable files, one per platform. */
+            assets?: components["schemas"]["ReleaseAsset"][];
+            /** @description Release date, `YYYY-MM-DD`. */
+            date: string;
+            /**
+             * Format: int32
+             * @description Format of the data directory this release writes.
+             */
+            format?: number | null;
+            /** @description Container image of the release, for example `ghcr.io/example/tenko:0.2.0`. */
+            image?: string | null;
+            /** @description Markdown: the changelog section of the version. */
+            notes: string;
+            /** @description The operator must do something when upgrading to this release. */
+            requires_action?: boolean;
+            /** @description The release contains security fixes. */
+            security?: boolean;
+            /** @description The version of the release. */
+            version: components["schemas"]["ReleaseVersion"];
+        };
+        /** @description One downloadable file of a release. */
+        ReleaseAsset: {
+            /** @description File name, for example `tenko-0.2.0-linux-x86_64`. */
+            name: string;
+            /**
+             * @description `<os>-<arch>` as Rust's `std::env::consts::OS` and `ARCH` name them: `linux-x86_64`,
+             *     `linux-aarch64`, `windows-x86_64`.
+             */
+            platform: string;
+            /** @description SHA-256 of the file: 64 lowercase hexadecimal digits. */
+            sha256: string;
+            /** @description Detached signature; reserved for signed releases (API-19) and not checked yet. */
+            signature?: string | null;
+            /**
+             * Format: int64
+             * @description Size of the file in bytes.
+             */
+            size: number;
+            /** @description Absolute `http` or `https` URL, or a URL relative to the manifest URL. */
+            url: string;
+        };
+        /**
+         * @description The release manifest (`releases.json`): every release of the product with its notes and
+         *     downloads.
+         */
+        ReleaseManifest: {
+            /** @description The project the manifest describes; always `tenko`. */
+            project: string;
+            /** @description The releases; [`ReleaseManifest::parse`] sorts them newest first. */
+            releases: components["schemas"]["Release"][];
+            /**
+             * Format: int32
+             * @description Format of the manifest; the only schema is 1.
+             */
+            schema: number;
+        };
+        /**
+         * @description Release version: MAJOR.MINOR.PATCH with an optional pre-release and build metadata, ordered by SemVer 2.0.0 precedence.
+         * @example 1.2.0
+         * @example 1.2.0-rc.1
+         */
+        ReleaseVersion: string;
         /** Format: uuid */
         RequestId: string;
         /**
@@ -5722,6 +6025,7 @@ export interface components {
              * @description TGL-05: API token maximum lifetime in days; `None` allows non-expiring tokens.
              */
             token_max_days?: number | null;
+            updates?: components["schemas"]["UpdatePolicy"] | null;
         };
         /** @description `GET /settings/security`. */
         SecuritySettingsView: {
@@ -5819,6 +6123,7 @@ export interface components {
             profile?: components["schemas"]["Profile"] | null;
             session?: components["schemas"]["SessionLifetime"] | null;
             token_max_lifetime?: components["schemas"]["TokenMaxLifetime"] | null;
+            updates?: components["schemas"]["UpdatePolicy"] | null;
         };
         /** @description The first administrator in `POST /setup`. */
         SetupAdmin: {
@@ -6227,6 +6532,11 @@ export interface components {
         SystemComponent: "setup" | "api" | "auth" | "vault" | "store" | "ipam" | "import" | "jobs" | "reconciler" | "connector" | "scan" | "cluster";
         /** @description Body of `GET /system/status`. */
         SystemStatus: {
+            /**
+             * @description The product modules this installation runs (OPS-25); the UI shows only their
+             *     areas. Absent in answers of servers that predate the module switch: all modules.
+             */
+            modules?: components["schemas"]["ModuleSet"];
             /** @description This node. */
             node: components["schemas"]["NodeStatus"];
             /** @description When the API started. */
@@ -6560,6 +6870,36 @@ export interface components {
             /** @description The changes. */
             patch: components["schemas"]["AddressPatch"];
         };
+        /** @description The last install attempt. */
+        UpdateAttempt: {
+            /** @description When it reached this state. */
+            at: components["schemas"]["Timestamp"];
+            /** @description The version before. */
+            from: components["schemas"]["ReleaseVersion"];
+            job_id?: components["schemas"]["JobId"] | null;
+            /** @description The code of a failure or of the reason for a switch back. */
+            reason?: string | null;
+            /** @description Where it stands. */
+            state: components["schemas"]["AttemptState"];
+            /** @description The version installed. */
+            to: components["schemas"]["ReleaseVersion"];
+        };
+        /** @description The scheduled check of the release source. */
+        UpdateCheck: {
+            /** @description Whether the check runs. */
+            enabled: boolean;
+            /**
+             * Format: int32
+             * @description Hours between two checks.
+             */
+            interval_hours: number;
+            last_checked?: components["schemas"]["Timestamp"] | null;
+            /** @description The code of the last failed check, for example `update.fetch_failed`. */
+            last_error?: string | null;
+            off_reason?: components["schemas"]["CheckOff"] | null;
+            /** @description The URL of the release manifest. */
+            source: string;
+        };
         /** @description Updates a custom field definition. */
         UpdateCustomField: {
             /**
@@ -6584,6 +6924,11 @@ export interface components {
             /** @description The changes. */
             patch: components["schemas"]["HostPatch"];
         };
+        /**
+         * @description How an administrator may install a new version from the UI (TGL-23, OPS-24).
+         * @enum {string}
+         */
+        UpdateInstall: "ui" | "ui_step_up" | "upload_only";
         /** @description Updates an interface. */
         UpdateInterface: {
             /**
@@ -6595,6 +6940,16 @@ export interface components {
             id: components["schemas"]["InterfaceId"];
             /** @description The changes. */
             patch: components["schemas"]["InterfacePatch"];
+        };
+        /**
+         * @description TGL-23: the in-app update check and install (OPS-24). The check sends nothing but the
+         *     running version; `updates.air_gapped` in `tenko.toml` stops it regardless.
+         */
+        UpdatePolicy: {
+            /** @description Check the release source daily. */
+            check: boolean;
+            /** @description How a new version may be installed. */
+            install: components["schemas"]["UpdateInstall"];
         };
         /** @description Updates a prefix. */
         UpdatePrefix: {
@@ -6631,6 +6986,33 @@ export interface components {
             id: components["schemas"]["SiteId"];
             /** @description The changes. */
             patch: components["schemas"]["SitePatch"];
+        };
+        /** @description `GET /system/updates`. */
+        UpdateStatus: {
+            attempt?: components["schemas"]["UpdateAttempt"] | null;
+            /** @description The scheduled check. */
+            check: components["schemas"]["UpdateCheck"];
+            /**
+             * Format: int32
+             * @description The data-directory format of the running binary.
+             */
+            format: number;
+            /** @description How a new version can be installed. */
+            install: components["schemas"]["InstallAbility"];
+            latest?: components["schemas"]["ReleaseVersion"] | null;
+            manifest?: components["schemas"]["ManifestInfo"] | null;
+            /** @description The platform of this server, `<os>-<arch>`. */
+            platform: string;
+            /** @description The releases newer than the running one, newest first, with their notes. */
+            releases: components["schemas"]["Release"][];
+            /** @description A newer release needs an action when upgrading. */
+            requires_action: boolean;
+            /** @description The running version. */
+            running: components["schemas"]["ReleaseVersion"];
+            /** @description A newer release fixes security issues. */
+            security: boolean;
+            /** @description A release newer than the running one exists. */
+            update_available: boolean;
         };
         /** @description Updates a tenant. */
         UpdateTenant: {
@@ -6961,6 +7343,16 @@ export interface components {
             label?: string | null;
             /** @description Ask for a security key with `direct` attestation (needed for break-glass). */
             security_key?: boolean;
+        };
+        /** @description `GET /system/updates/whats-new`: the notes to show a user once after an upgrade. */
+        WhatsNew: {
+            last_seen?: components["schemas"]["ReleaseVersion"] | null;
+            /** @description The releases after `last_seen` up to the running one, newest first. */
+            releases: components["schemas"]["Release"][];
+            /** @description The running version. */
+            running: components["schemas"]["ReleaseVersion"];
+            /** @description Whether to show the notes now: the user saw an older version's notes. */
+            show: boolean;
         };
         /** @description The answer of a write. */
         WriteResponse_Address: {
@@ -15598,6 +15990,104 @@ export interface operations {
             };
         };
     };
+    get_modules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The running and the configured modules */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleSettings"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No module service (`modules.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    put_modules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModulesRequest"];
+            };
+        };
+        responses: {
+            /** @description Stored; the running and the configured modules */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleSettings"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `modules` in tenko.toml decides (`modules.pinned`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No module service (`modules.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     system_status: {
         parameters: {
             query?: never;
@@ -15627,6 +16117,407 @@ export interface operations {
             };
             /** @description Not allowed */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_updates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The update status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateStatus"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No update service (`update.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    check_updates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The update status after the check */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateStatus"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The check is off: air-gapped or switched off in the settings (`update.check_off`, parameter `reason`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The release source did not answer with a valid manifest (`update.fetch_failed`, `update.manifest.*`) */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No update service (`update.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    install_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstallRequest"];
+            };
+        };
+        responses: {
+            /** @description The install job started; follow it on the `jobs` topic */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallStarted"];
+                };
+            };
+            /** @description The version is not in the manifest or not newer (`update.version_unknown`, `update.not_newer`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed, or a fresh authentication is needed (`auth.forbidden`, `auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No update service (`update.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    put_update_manifest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The release manifest, at most 1 MiB */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseManifest"];
+            };
+        };
+        responses: {
+            /** @description The manifest is stored; the update status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateStatus"];
+                };
+            };
+            /** @description The manifest is invalid (`update.manifest.json`, `update.manifest.invalid`, `update.manifest.schema`, `update.manifest.project`, `update.manifest.too_large`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No update service (`update.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    upload_update: {
+        parameters: {
+            query: {
+                /**
+                 * @description The version of the uploaded file; the manifest must list it with a file for this
+                 *     platform, whose SHA-256 the upload must match.
+                 */
+                version: components["schemas"]["ReleaseVersion"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The release file for this platform */
+        requestBody: {
+            content: {
+                "application/octet-stream": number[];
+            };
+        };
+        responses: {
+            /** @description The file is stored and verified; the install job started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallStarted"];
+                };
+            };
+            /** @description The file does not match the manifest (`update.checksum_mismatch`, `update.size_mismatch`), or the version is unknown (`update.version_unknown`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed, or a fresh authentication is needed (`auth.forbidden`, `auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description This installation cannot install now (`update.install_blocked`, parameter `reason`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The file is larger than the manifest says (`update.size_mismatch`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No update service (`update.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_whats_new: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The notes and whether to show them */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WhatsNew"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No update service (`update.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    mark_whats_new_seen: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recorded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No update service (`update.unavailable`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
