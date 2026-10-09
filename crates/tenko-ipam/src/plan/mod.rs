@@ -347,6 +347,17 @@ pub fn plan(
     planner::Planner::new(view, cx, options).run(commands)
 }
 
+/// Plans the default tenant and VRF (both named `default`) when they do not exist, as the
+/// first write that needs them would create them. The plan is empty when both exist; its
+/// results are the tenant and the VRF.
+///
+/// # Errors
+///
+/// Store and decoding errors.
+pub fn plan_defaults(view: &dyn ReadView, cx: &RequestCtx) -> IpamResult<IpamPlan> {
+    planner::Planner::new(view, cx, &PlanOptions::default()).run_defaults()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

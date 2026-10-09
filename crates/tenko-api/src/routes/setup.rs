@@ -18,6 +18,8 @@ use std::sync::Arc;
 use axum::{Extension, Json, http::StatusCode, response::Response};
 use serde::Serialize;
 use tenko_auth::service::{SessionInfo, SetupRequest, SetupState};
+use tenko_core::{RequestCtx, SystemComponent};
+use tenko_ipam::IpamService;
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -83,11 +85,23 @@ async fn complete_setup(
     Svc(service): Svc,
     PublicCtx { ctx, user_agent }: PublicCtx,
     ca_root: Option<Extension<Arc<CaRootSource>>>,
+    ipam: Option<Extension<Arc<IpamService>>>,
     ApiJson(request): ApiJson<SetupRequest>,
 ) -> Result<Response, RouteError> {
     let session = service
         .complete_setup(&ctx, user_agent.as_deref(), &request)
         .await?;
+    // The default tenant and VRF exist from setup on, so that a new installation can offer
+    // its first prefix; written by the setup component. Setup is closed at this point, so a
+    // failure only logs: the server creates them at its next start.
+    if let Some(Extension(ipam)) = ipam {
+        let mut system = RequestCtx::system(SystemComponent::Setup);
+        system.request = ctx.request;
+        system.source_ip = ctx.source_ip;
+        if let Err(error) = ipam.ensure_defaults(&system).await {
+            tracing::warn!(%error, "setup could not create the default tenant and VRF");
+        }
+    }
     let ca_fingerprint = ca_root
         .and_then(|Extension(source)| source.fingerprint())
         .map(|fingerprint| fingerprint.to_string());

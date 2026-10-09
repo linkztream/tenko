@@ -167,10 +167,6 @@ impl<'v> Planner<'v> {
         }
         self.check_reservations()?;
 
-        for warning in &mut self.warnings {
-            warning.acknowledged =
-                warning.requires_ack && self.options.acknowledge.contains(&warning.code);
-        }
         if let Some(key) = receipt_key
             && self.ws.has_writes()
         {
@@ -183,9 +179,28 @@ impl<'v> Planner<'v> {
             };
             self.ws.put_typed(&RECEIPTS, &key, &receipt)?;
         }
+        Ok(self.finish(base, results))
+    }
+
+    /// Plans the tenant and the VRF named `default` exactly as the first write that needs
+    /// them creates them; the plan is empty when both exist. The results are the tenant and
+    /// the VRF.
+    pub(crate) fn run_defaults(mut self) -> IpamResult<IpamPlan> {
+        let base = self.ws.revision();
+        let tenant = self.default_tenant()?;
+        let vrf = self.default_vrf()?;
+        Ok(self.finish(base, vec![tenant.into(), vrf.into()]))
+    }
+
+    /// The plan of what the planner collected.
+    fn finish(mut self, base: Revision, results: Vec<ObjectRef>) -> IpamPlan {
+        for warning in &mut self.warnings {
+            warning.acknowledged =
+                warning.requires_ack && self.options.acknowledge.contains(&warning.code);
+        }
         let principal = self.cx.principal.clone();
         let (preconditions, mutations) = self.ws.into_parts();
-        Ok(IpamPlan {
+        IpamPlan {
             base,
             principal,
             at: self.cx.now,
@@ -199,7 +214,7 @@ impl<'v> Planner<'v> {
             mutations,
             audit: self.audit,
             replay: None,
-        })
+        }
     }
 
     fn command(&mut self, command: &IpamCommand) -> IpamResult<ObjectRef> {

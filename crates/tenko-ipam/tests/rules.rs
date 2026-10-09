@@ -3541,3 +3541,91 @@ async fn host_expansion_shows_live_interfaces_and_hosts() {
         assert_eq!((&row.interface_detail, &row.host), (&None, &None));
     }
 }
+
+#[tokio::test]
+async fn defaults_are_ensured_once_by_the_system_and_reused_by_first_use() {
+    let (service, _) = service();
+    let cx = RequestCtx::system(SystemComponent::Setup);
+    let first = service.ensure_defaults(&cx).await.expect("defaults");
+    assert!(first.job_id.is_some(), "the first call writes");
+    let (tenant, vrf): (TenantId, VrfId) = match first.results[..] {
+        [tenant, vrf] => (tenant.id.into(), vrf.id.into()),
+        _ => panic!("two results: {:?}", first.results),
+    };
+    let view = service.view(Some(first.revision)).await.expect("view");
+    let tenants = query::list::<Tenant>(view.as_ref(), &query::ListQuery::default())
+        .expect("tenants")
+        .items;
+    let vrfs = query::list::<Vrf>(view.as_ref(), &query::ListQuery::default())
+        .expect("vrfs")
+        .items;
+    assert_eq!(tenants.len(), 1);
+    assert_eq!(
+        (tenants[0].id, tenants[0].name.as_str()),
+        (tenant, "default")
+    );
+    assert_eq!(vrfs.len(), 1);
+    assert_eq!((vrfs[0].id, vrfs[0].name.as_str()), (vrf, "default"));
+    assert_eq!(vrfs[0].tenant, tenant);
+    // Audited under the system principal of the call, with the history entries.
+    let records = view
+        .scan_typed(&AUDIT, KeyRange::all(), usize::MAX, false)
+        .expect("audit");
+    assert_eq!(records.len(), 2, "one record per object");
+    for (_, record, _) in &records {
+        assert_eq!(record.principal, cx.principal);
+        assert_eq!(record.request, Some(cx.request));
+    }
+    for object in [ObjectRef::from(tenant), ObjectRef::from(vrf)] {
+        let history = read_history(view.as_ref(), object, None, 10, false).expect("history");
+        assert_eq!(history.len(), 1, "{object}");
+        assert_eq!(history[0].1.action, ChangeAction::Create);
+    }
+    drop(view);
+
+    // Again: nothing is written, the answer names the same objects.
+    let again = service
+        .ensure_defaults(&RequestCtx::system(SystemComponent::Ipam))
+        .await
+        .expect("again");
+    assert_eq!(again.job_id, None);
+    assert_eq!(again.revision, first.revision);
+    assert_eq!(again.results, first.results);
+    // The first write that needs a VRF uses the ensured one.
+    let applied = run(
+        &service,
+        vec![IpamCommand::CreatePrefix(prefix(None, "192.0.2.0/24"))],
+    )
+    .await;
+    let view = service.view(Some(applied.revision)).await.expect("view");
+    let created =
+        query::get::<Prefix>(view.as_ref(), applied.results[0].id.into()).expect("prefix");
+    assert_eq!(created.vrf, vrf);
+    assert_eq!(
+        query::list::<Vrf>(view.as_ref(), &query::ListQuery::default())
+            .expect("vrfs")
+            .items
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn defaults_created_on_first_use_are_kept_by_a_later_ensure() {
+    let (service, _) = service();
+    let applied = run(
+        &service,
+        vec![IpamCommand::CreatePrefix(prefix(None, "192.0.2.0/24"))],
+    )
+    .await;
+    let view = service.view(Some(applied.revision)).await.expect("view");
+    let created =
+        query::get::<Prefix>(view.as_ref(), applied.results[0].id.into()).expect("prefix");
+    drop(view);
+    let ensured = service
+        .ensure_defaults(&RequestCtx::system(SystemComponent::Ipam))
+        .await
+        .expect("defaults");
+    assert_eq!(ensured.job_id, None, "nothing to write");
+    assert_eq!(ensured.results[1], ObjectRef::from(created.vrf));
+}

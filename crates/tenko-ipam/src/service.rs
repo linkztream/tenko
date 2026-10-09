@@ -383,6 +383,42 @@ impl IpamService {
         Err(IpamError::contended(self.config.max_attempts))
     }
 
+    /// Creates the tenant and the VRF named `default` when they do not exist, exactly as
+    /// the first write that needs them would, so that a new installation lists both before
+    /// anything else is written. Idempotent: when both exist nothing is written and the
+    /// answer carries the current revision. The results are the tenant and the VRF.
+    ///
+    /// The change is planned, audited and recorded in the history under `cx`; callers pass
+    /// a system context (setup, server start).
+    ///
+    /// # Errors
+    ///
+    /// Store errors, `ipam.contended` after too many stale plans, or the job's error.
+    pub async fn ensure_defaults(&self, cx: &RequestCtx) -> IpamResult<Applied> {
+        for attempt in 0..self.config.max_attempts {
+            let consistency = if attempt == 0 {
+                ReadConsistency::Local
+            } else {
+                ReadConsistency::Linearizable
+            };
+            let view = self.store.read(consistency).await?;
+            let plan = plan::plan_defaults(view.as_ref(), cx)?;
+            drop(view);
+            match self.apply(&plan, cx).await {
+                Ok(mut applied) => {
+                    applied.retries = attempt;
+                    return Ok(applied);
+                }
+                Err(error) if error.is(codes::PLAN_STALE) => {
+                    tracing::debug!(attempt, "IPAM defaults plan stale; planning again");
+                    tokio::time::sleep(backoff(attempt)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(IpamError::contended(self.config.max_attempts))
+    }
+
     /// The prefix whose local queue a command joins: next-free commands, and creates of
     /// addresses and ranges whose prefix the tree can tell. These all change the
     /// allocation counter of the prefix, so queueing them locally avoids conflicts between

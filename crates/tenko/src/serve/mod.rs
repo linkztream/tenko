@@ -760,6 +760,16 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
             engine.set_prefix_resolver(Arc::new(move |prefix| {
                 tree.prefix(prefix).map(|(_, network)| network)
             }));
+            // An installation whose setup is closed has the default tenant and VRF from now on.
+            if setup_token.is_none()
+                && let Err(error) = ipam
+                    .ensure_defaults(&tenko_core::RequestCtx::system(
+                        tenko_core::SystemComponent::Ipam,
+                    ))
+                    .await
+            {
+                tracing::warn!(%error, "the default tenant and VRF could not be created");
+            }
             let (imports, import_summary) = Imports::start(&ipam, &engine, &vault, &layout)?;
             Ok((
                 (ipam, engine, imports),

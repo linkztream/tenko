@@ -1342,6 +1342,92 @@ mod tests {
     use super::testkit::{Api, Policy, Reply, label, unknown_id};
     use crate::state::AppState;
 
+    /// First-run setup through the API leaves the default tenant and VRF, created by the
+    /// setup component, so that a new installation lists both before anything else.
+    #[tokio::test]
+    async fn setup_leaves_the_default_tenant_and_vrf() {
+        use std::sync::Arc;
+
+        use axum::Extension;
+        use tenko_auth::testing::{
+            TestEnv,
+            env::{ADMIN_PIN, HOST},
+        };
+        use tenko_core::{Authenticator, Timestamp};
+        use tenko_ipam::IpamService;
+        use tenko_store::Store;
+
+        use super::super::auth::testkit::{Credential, request, send_to};
+
+        let env = TestEnv::new().await;
+        env.clock.set(Timestamp::now());
+        let ipam = IpamService::with_direct_jobs(env.store.clone() as Arc<dyn Store>)
+            .expect("IPAM service");
+        let mut state = AppState::new(env.store.clone());
+        state.auth = Some(env.service.clone() as Arc<dyn Authenticator>);
+        state.authorizer = Some(env.service.authorizer());
+        let router = crate::api(state)
+            .0
+            .layer(Extension(env.service.clone()))
+            .layer(Extension(Arc::clone(&ipam)));
+        let get = |path: &str, secret: &str| {
+            send_to(
+                router.clone(),
+                request("GET", path, Credential::Cookie(secret), None, &[]),
+            )
+        };
+
+        let token = env
+            .service
+            .prepare_setup()
+            .await
+            .expect("prepare")
+            .expect("setup is open")
+            .expose()
+            .to_owned();
+        let body = json!({
+            "setup_token": token,
+            "profile": "home",
+            "admin": { "name": "root", "password": ADMIN_PIN },
+            "host_name": HOST,
+            "language": "en"
+        });
+        let reply = send_to(
+            router.clone(),
+            request("POST", "/setup", Credential::Anonymous, Some(&body), &[]),
+        )
+        .await;
+        reply.assert_status(200);
+        let secret = reply.session_secret();
+
+        let tenants = get("/tenants", &secret).await;
+        tenants.assert_status(200);
+        let tenants = tenants.body["items"].as_array().expect("items").clone();
+        assert_eq!(tenants.len(), 1, "{tenants:?}");
+        assert_eq!(tenants[0]["name"], "default");
+        let vrfs = get("/vrfs", &secret).await;
+        vrfs.assert_status(200);
+        let vrfs = vrfs.body["items"].as_array().expect("items").clone();
+        assert_eq!(vrfs.len(), 1, "{vrfs:?}");
+        assert_eq!(vrfs[0]["name"], "default");
+        assert_eq!(vrfs[0]["tenant"], tenants[0]["id"]);
+        // Written by the setup component, not by the new administrator.
+        let history = get(
+            &format!(
+                "/tenants/{}/history",
+                tenants[0]["id"].as_str().expect("id")
+            ),
+            &secret,
+        )
+        .await;
+        history.assert_status(200);
+        let entries = history.body["items"].as_array().expect("items");
+        assert_eq!(entries.len(), 1, "{}", history.body);
+        assert_eq!(entries[0]["action"], "create");
+        assert_eq!(entries[0]["by"]["kind"], "system", "{}", history.body);
+        assert_eq!(entries[0]["by"]["component"], "setup", "{}", history.body);
+    }
+
     /// One of the four collections of this area.
     #[derive(Clone, Copy)]
     struct Kind {
