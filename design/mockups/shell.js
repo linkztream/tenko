@@ -267,6 +267,114 @@
     if (e.key === 'g') { chord = 'g'; chordTimer = setTimeout(function () { chord = null; }, 900); }
   });
 
+  /* ---------------- Address emphasis preference ---------------- */
+  // Off by default: addresses and MACs render plain. When on, the network part of an
+  // address and the vendor part of a MAC are grayed and the host part is bold.
+  var EMPH_KEY = 'tenko-emphasize';
+  function setEmphasis(on) {
+    if (on) root.dataset.emphasize = 'host'; else delete root.dataset.emphasize;
+    try { if (on) localStorage.setItem(EMPH_KEY, 'host'); else localStorage.removeItem(EMPH_KEY); } catch (e) {}
+  }
+
+  /* ---------------- Numbers that can grow: SI suffixes ---------------- */
+  // 982, 1.0K, 1.2K, 48K, 1.3M, 48M, 1.3G. At most three significant digits, so a tile never
+  // grows; the exact value goes into the title attribute.
+  function si(n) {
+    if (n === null || n === undefined || isNaN(n)) return '';
+    var neg = n < 0; n = Math.abs(n);
+    var units = ['', 'K', 'M', 'G', 'T', 'P'], i = 0;
+    while (n >= 1000 && i < units.length - 1) { n /= 1000; i++; }
+    var s;
+    if (i === 0) s = String(Math.round(n));
+    else {
+      var r = n < 10 ? Math.round(n * 10) / 10 : Math.round(n);
+      if (r >= 1000 && i < units.length - 1) { r = 1; i++; }
+      s = (r < 10 ? r.toFixed(1) : String(r)) + units[i];
+    }
+    return (neg ? '-' : '') + s;
+  }
+  function exact(n) { return Number(n).toLocaleString('en-US'); }
+  // <span data-si="48213"></span> becomes "48K" with title "48,213".
+  function formatAll(scope) {
+    (scope || document).querySelectorAll('[data-si]').forEach(function (el) {
+      var v = +el.dataset.si; el.textContent = si(v); el.title = exact(v) + (el.dataset.siUnit ? ' ' + el.dataset.siUnit : '');
+    });
+  }
+
+  /* ---------------- VLAN palette ---------------- */
+  // Hues spread evenly around the OKLCH circle for the n VLANs visible in a view,
+  // starting at --vlan-h0, at the theme's --vlan-l and --vlan-c. Chroma is reduced only
+  // to stay inside sRGB; lightness is nudged until the color has at least 3:1 against the
+  // background (default: --surface). Returns [{ hex, hue, contrast }].
+  function oklchToLinear(L, C, h) {
+    var a = C * Math.cos(h * Math.PI / 180), b = C * Math.sin(h * Math.PI / 180);
+    var l = Math.pow(L + 0.3963377774 * a + 0.2158037573 * b, 3);
+    var m = Math.pow(L - 0.1055613458 * a - 0.0638541728 * b, 3);
+    var s = Math.pow(L - 0.0894841775 * a - 1.2914855480 * b, 3);
+    return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+      -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+      -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s];
+  }
+  function lumOf(rgb) { return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]; }
+  function hexToLinear(hex) {
+    hex = hex.trim().replace('#', '');
+    if (hex.length === 3) hex = hex.replace(/./g, '$&$&');
+    return [0, 2, 4].map(function (i) { var v = parseInt(hex.slice(i, i + 2), 16) / 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+  }
+  function linearToHex(rgb) {
+    return '#' + rgb.map(function (v) { v = Math.min(1, Math.max(0, v)); v = v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; return ('0' + Math.round(v * 255).toString(16)).slice(-2); }).join('').toUpperCase();
+  }
+  function vlanPalette(n, opts) {
+    opts = opts || {};
+    var cs = getComputedStyle(root);
+    var L0 = +(opts.l || cs.getPropertyValue('--vlan-l')) || 0.58;
+    var C0 = +(opts.c || cs.getPropertyValue('--vlan-c')) || 0.14;
+    var h0 = +(opts.h0 || cs.getPropertyValue('--vlan-h0')) || 255;
+    var bg = (opts.bg || cs.getPropertyValue('--surface') || '#FFFFFF').trim();
+    var yb = lumOf(hexToLinear(bg)), darkBg = yb < 0.18, out = [];
+    for (var i = 0; i < n; i++) {
+      var h = (h0 + i * 360 / n) % 360, L = L0, C, rgb, cr = 0;
+      for (var k = 0; k < 60; k++) {
+        C = C0; rgb = oklchToLinear(L, C, h);
+        while (rgb.some(function (v) { return v < -0.0005 || v > 1.0005; }) && C > 0.02) { C -= 0.005; rgb = oklchToLinear(L, C, h); }
+        var clamped = rgb.map(function (v) { return Math.min(1, Math.max(0, v)); });
+        var y = lumOf(clamped);
+        cr = (Math.max(y, yb) + 0.05) / (Math.min(y, yb) + 0.05);
+        if (cr >= 3) break;
+        L += darkBg ? 0.01 : -0.01;
+      }
+      out.push({ hex: linearToHex(rgb), hue: Math.round(h), contrast: Math.round(cr * 100) / 100 });
+    }
+    return out;
+  }
+
+  /* ---------------- Account menu ---------------- */
+  function closeAcct() { var m = document.getElementById('acct'); if (m) m.remove(); document.removeEventListener('mousedown', acctOutside); }
+  function acctOutside(e) { if (!e.target.closest('#acct') && !e.target.closest('.avatar')) closeAcct(); }
+  function openAcct(btn) {
+    if (document.getElementById('acct')) { closeAcct(); return; }
+    var m = document.createElement('div');
+    m.id = 'acct'; m.className = 'acct'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-label', 'Account and preferences');
+    var t = root.dataset.theme || 'system', d = root.dataset.density || 'compact', emph = root.dataset.emphasize === 'host';
+    function seg(name, attr, items, cur) { return '<div class="seg" role="group" aria-label="' + name + '">' + items.map(function (x) { return '<button ' + attr + '="' + x[0] + '" aria-pressed="' + (x[0] === cur) + '">' + x[1] + '</button>'; }).join('') + '</div>'; }
+    m.innerHTML = '<div class="who"><strong>alex</strong><span>Administrator, signed in with a passkey</span></div>' +
+      '<div class="row"><span class="lbl">Theme</span>' + seg('Theme', 'data-set-theme', [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']], t) + '</div>' +
+      '<div class="row"><span class="lbl">Row density</span>' + seg('Density', 'data-density-set', [['dense', 'Dense'], ['compact', 'Compact'], ['comfortable', 'Comfortable']], d) + '</div>' +
+      '<div class="row"><label class="pref switch"><span>Emphasize host part</span><input type="checkbox" id="pref-emph"' + (emph ? ' checked' : '') + '><small>Grays the network part of addresses and the vendor part of MACs. Off by default.</small></label>' +
+      '<span class="sample"><span class="addr"><span class="net">192.0.2.</span><span class="host">41</span></span>, <span class="mac"><span class="oui">00-00-5E-</span>00-53-29</span></span></div>' +
+      '<div class="row" style="padding:var(--sp-2) 0"><button class="item" data-action="keys">' + icon('info') + 'Keyboard shortcuts<span class="kbd">?</span></button>' +
+      '<a class="item" href="signin.html">' + icon('user') + 'Sign out</a></div>';
+    document.body.appendChild(m);
+    var r = btn.getBoundingClientRect();
+    m.style.top = (r.bottom + 6) + 'px'; m.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+    m.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-set-theme]');
+      if (b) { var v = b.dataset.setTheme; if (v === 'system') { delete root.dataset.theme; try { localStorage.removeItem(THEME_KEY); } catch (x) {} } else { root.dataset.theme = v; try { localStorage.setItem(THEME_KEY, v); } catch (x) {} } paintThemeButtons(); m.querySelectorAll('[data-set-theme]').forEach(function (z) { z.setAttribute('aria-pressed', String(z === b)); }); }
+    });
+    m.querySelector('#pref-emph').addEventListener('change', function (e) { setEmphasis(e.target.checked); });
+    setTimeout(function () { document.addEventListener('mousedown', acctOutside); }, 0);
+  }
+
   /* ---------------- Wiring ---------------- */
   function init() {
     injectSprite();
@@ -274,7 +382,17 @@
     if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintThemeButtons);
     var d = null; try { d = localStorage.getItem(DENSITY_KEY); } catch (e) {}
     setDensity(d || 'compact');
+    var em = null; try { em = localStorage.getItem(EMPH_KEY); } catch (e) {}
+    setEmphasis(em === 'host');
+    formatAll();
+    // Mockup chrome: the brand goes to the start page (dashboard), so offer a way back to the index.
+    var nb = document.querySelector('.statusbar [data-action="notes"]');
+    if (nb && !document.querySelector('.statusbar .to-index')) {
+      nb.insertAdjacentHTML('beforebegin', '<a class="to-index" href="index.html" style="color:inherit;text-decoration:none;display:flex;align-items:center;padding:0 var(--sp-5);border-left:1px dashed var(--control-line)">All mockups</a>');
+    }
     document.addEventListener('click', function (e) {
+      var av = e.target.closest('.avatar');
+      if (av) { openAcct(av); return; }
       var a = e.target.closest('[data-action]');
       if (a) {
         var act = a.dataset.action;
@@ -292,5 +410,5 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 
-  window.tenko = { toast: toast, icon: icon, openPalette: openPalette, setDensity: setDensity };
+  window.tenko = { toast: toast, icon: icon, openPalette: openPalette, setDensity: setDensity, setEmphasis: setEmphasis, si: si, exact: exact, formatAll: formatAll, vlanPalette: vlanPalette };
 })();

@@ -7,6 +7,7 @@
 /* ---------- Base ---------- */
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; }
+html { font-variant-ligatures: no-contextual; } /* no code ligatures in identifiers, anywhere */
 body {
   margin: 0;
   background: var(--bg);
@@ -36,14 +37,18 @@ svg.i.xs { width: 12px; height: 12px; }
 .muted { color: var(--ink-3); }
 .ink-2 { color: var(--ink-2); }
 
-/* The address treatment: network part recedes, host part carries the row. */
+/* Addresses and MACs render plain in the data font by default. The markup keeps
+   the split (.net/.host, .oui) so the per-user preference "Emphasize host part"
+   (html[data-emphasize="host"], account menu) can gray the network part of an
+   address and the vendor part of a MAC and set the host part in bold. */
 .addr { font-family: var(--font-data); font-size: 0.96em; white-space: nowrap; font-variant-ligatures: none; }
-.addr .net { color: var(--ink-3); }
-.addr .host { color: var(--ink); font-weight: var(--fw-bold); }
-.addr .len { color: var(--ink-3); }
-/* MACs: the vendor part (OUI) recedes, the device part carries it. */
+.addr .net, .addr .host, .addr .len { color: inherit; font-weight: inherit; }
 .mac { font-family: var(--font-data); font-size: 0.96em; white-space: nowrap; color: var(--ink-2); font-variant-ligatures: none; }
-.mac .oui { color: var(--ink-3); }
+.mac .oui { color: inherit; }
+:root[data-emphasize="host"] .addr .net,
+:root[data-emphasize="host"] .addr .len { color: var(--ink-3); }
+:root[data-emphasize="host"] .addr .host { color: var(--ink); font-weight: var(--fw-bold); }
+:root[data-emphasize="host"] .mac .oui { color: var(--ink-3); }
 
 /* ---------- App frame ---------- */
 .app {
@@ -389,13 +394,13 @@ input[type="checkbox"].cb:indeterminate::after { content: ""; width: 8px; height
 .tag.ok { background: var(--ok-wash); color: var(--ok-ink); }
 .tag.accent { background: var(--accent-wash); color: var(--accent); }
 
-/* VLAN chip: swatch + id + name. DMZ (fourth VLAN) is neutral and dashed. */
+/* VLAN chip: swatch + id + name. Swatch colors come from the generated VLAN palette. */
 .vlan { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--ink-2); white-space: nowrap; }
 .vlan::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--vlan, var(--ink-4)); flex: none; }
 .vlan.lan { --vlan: var(--vlan-lan); }
 .vlan.lab { --vlan: var(--vlan-lab); }
 .vlan.iot { --vlan: var(--vlan-iot); }
-.vlan.dmz::before { background: transparent; border: 1.5px dashed var(--vlan-dmz); width: 9px; height: 9px; }
+.vlan.dmz { --vlan: var(--vlan-dmz); }
 .vlan .id { font-variant-numeric: tabular-nums; color: var(--ink); font-weight: var(--fw-medium); }
 
 /* Job state chip: glyph + word, never color alone. */
@@ -702,3 +707,19 @@ table.grid { width: 100%; border-collapse: separate; border-spacing: 0; table-la
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; }
 }
+
+/* ---------- Account menu (shell.js) ---------- */
+.acct { position: fixed; z-index: var(--z-overlay); width: 300px; padding: var(--sp-2) 0; border: 1px solid var(--line-strong); border-radius: var(--r-3); background: var(--surface); box-shadow: var(--shadow-float); font-size: var(--fs-13); }
+.acct .who { padding: var(--sp-4) var(--sp-5) var(--sp-5); border-bottom: 1px solid var(--line); }
+.acct .who strong { display: block; }
+.acct .who span { color: var(--ink-3); font-size: var(--fs-12); }
+.acct .row { display: grid; gap: var(--sp-3); padding: var(--sp-4) var(--sp-5); }
+.acct .row + .row { border-top: 1px solid var(--line); }
+.acct .lbl { color: var(--ink-3); font-size: var(--fs-12); }
+.acct .pref { display: grid; grid-template-columns: 1fr auto; gap: 2px var(--sp-4); align-items: center; }
+.acct .pref small { grid-column: 1; color: var(--ink-3); font-size: var(--fs-12); }
+.acct .pref .switch { grid-row: 1 / span 2; grid-column: 2; }
+.acct .sample { font-size: var(--fs-12); color: var(--ink-2); }
+.acct a.item, .acct button.item { display: flex; align-items: center; gap: var(--sp-4); width: 100%; padding: var(--sp-3) var(--sp-5); border: 0; background: transparent; color: var(--ink); text-align: left; text-decoration: none; }
+.acct a.item:hover, .acct button.item:hover { background: var(--surface-3); text-decoration: none; }
+.acct .item .kbd { margin-left: auto; }

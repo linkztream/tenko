@@ -8,10 +8,10 @@
 <link rel="icon" href="../logo/tenko-favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&amp;display=swap">
 <link rel="stylesheet" href="../tokens.css">
 <link rel="stylesheet" href="shell.css">
-<script>try{var t=localStorage.getItem('tenko-theme');if(t)document.documentElement.dataset.theme=t;var d=localStorage.getItem('tenko-density');if(d&&d!=='compact')document.documentElement.dataset.density=d;}catch(e){}</script>
+<script>try{var t=localStorage.getItem('tenko-theme');if(t)document.documentElement.dataset.theme=t;var em=localStorage.getItem('tenko-emphasize');if(em)document.documentElement.dataset.emphasize=em;var d=localStorage.getItem('tenko-density');if(d&&d!=='compact')document.documentElement.dataset.density=d;}catch(e){}</script>
 <script src="shell.js" defer></script>
 <style>
   /* Topology page. Page-level only; every color comes from a token. */
@@ -41,13 +41,24 @@
   .node.leaf .body { fill: color-mix(in srgb, var(--v) 9%, var(--surface)); }
   .node .stack { fill: var(--surface-2); stroke: var(--v); stroke-width: 1; opacity: 0.8; }
   .node .halo { fill: none; stroke: var(--accent); stroke-width: 7; stroke-opacity: 0; transition: stroke-opacity var(--dur-1); }
-  .v-lan { --v: var(--vlan-lan); }
-  .v-lab { --v: var(--vlan-lab); }
-  .v-iot { --v: var(--vlan-iot); }
-  .v-dmz { --v: var(--vlan-dmz); }
-  .node.leaf.v-dmz .body { fill: var(--surface); }
-  .v-dmz .body { stroke-dasharray: 4 3; }
-  .v-dmz .stack { stroke-dasharray: 4 3; }
+  /* VLAN identity. The colors are generated in script for the VLANs in view and written to custom
+     properties on .main (--v-10 is the color of VLAN 10, --d-10 its dash style, both neutral by default).
+     Anything with data-v takes its VLAN's color as --v and its dash style as --dash. */
+  .main { --v-neutral: var(--ink-3); --v-site: var(--v-neutral);
+          --v-10: var(--v-neutral); --v-20: var(--v-neutral); --v-30: var(--v-neutral); --v-40: var(--v-neutral);
+          --d-10: none; --d-20: none; --d-30: none; --d-40: none; }
+  [data-v="10"] { --v: var(--v-10); --dash: var(--d-10); }
+  [data-v="20"] { --v: var(--v-20); --dash: var(--d-20); }
+  [data-v="30"] { --v: var(--v-30); --dash: var(--d-30); }
+  [data-v="40"] { --v: var(--v-40); --dash: var(--d-40); }
+  .main .lan.vlan { --vlan: var(--v-10); }
+  .main .lab.vlan { --vlan: var(--v-20); }
+  .main .iot.vlan { --vlan: var(--v-30); }
+  .main .dmz.vlan { --vlan: var(--v-40); }
+  .map[data-color="site"] .node { --v: var(--v-site); }
+  .map[data-color="site"] .vsw { fill: var(--v-neutral); }
+  /* Patterns: a dash style per colored VLAN on node outlines and edges. Selected nodes keep their solid accent outline. */
+  .map.patterns .node[data-v]:not(.sel):not(.onpath) .body, .map.patterns .node[data-v] .stack { stroke-dasharray: var(--dash); }
   .node:hover .body, .node.hov .body { stroke-width: 2.25; }
   .node.sel .body, .node.onpath .body { stroke: var(--accent); stroke-width: 2.25; stroke-dasharray: none; }
   .node.sel .body, .node.sel.leaf .body { fill: var(--accent-wash); }
@@ -58,7 +69,6 @@
   .node .more { font-size: 11px; fill: var(--ink-3); }
   .node .vt { font-size: 11px; font-weight: 500; fill: var(--ink-2); }
   .node .vsw { fill: var(--v); }
-  .v-dmz .vsw { fill: none; stroke: var(--vlan-dmz); stroke-width: 1.25; stroke-dasharray: 2 1.5; }
   .nicon { fill: none; stroke: var(--ink-2); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .node.sel .nicon { stroke: var(--accent); }
   .map.radial .node .more { display: none; }
@@ -75,9 +85,35 @@
   .edge.uplink { stroke-width: 2.5; }
   .edge.wifi { stroke-width: 2; stroke-dasharray: 0.1 4.5; }
   .edge.vmlink { stroke-dasharray: 5 3.5; }
+  /* Edges to a client or VM take that VLAN's color; with Patterns on they also take its dash style. A stem shared by
+     several client edges (the .seg pieces, drawn by script) carries several VLANs, so it stays neutral. */
+  .map.radial .edge.seg { display: none; }
+  .edge[data-v] { stroke: var(--v); }
+  .map.patterns .edge[data-v] { stroke-dasharray: var(--dash); }
+  .map.patterns .edge[data-v]:not(.hl) { stroke-linecap: butt; }
   .edge.hl { stroke: var(--accent); stroke-width: 3; }
   .edge.hl.wifi { stroke-dasharray: 0.1 5.5; stroke-width: 3.5; }
-  .map.relayout .edge, .map.relayout .port { opacity: 0; }
+  .map.patterns .edge.hl[data-v] { stroke-dasharray: none; }
+  .map.patterns .edge.hl.wifi[data-v] { stroke-dasharray: 0.1 5.5; }
+  .map.relayout .edge, .map.relayout .port, .map.relayout .elab, .map.relayout .ssid { opacity: 0; }
+
+  /* ---------- Map: VLAN tags on edge groups, and SSID labels ---------- */
+  .elab { transition: opacity var(--dur-2) var(--ease-out); }
+  .elab .ebg { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1; }
+  .elab text { font-size: 11px; font-weight: 600; fill: var(--ink-2); text-anchor: middle; font-variant-numeric: tabular-nums; }
+  .elab tspan[data-v] { fill: var(--v); }
+  .elab.wf text { font-weight: 500; text-anchor: start; fill: var(--v); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
+  .map.radial .elab.wf text { text-anchor: middle; }
+  .map:not(.radial) .elab[data-k="lf"], .map.radial .elab[data-k="bd"] { display: none; }
+  .ssid { cursor: pointer; outline: none; transition: opacity var(--dur-2) var(--ease-out); }
+  .ssid .sbg { fill: var(--surface); stroke: var(--v); stroke-width: 1.25; }
+  .ssid .sic { fill: none; stroke: var(--ink-2); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .ssid .sn { font-size: 11px; font-weight: 500; fill: var(--ink); }
+  .ssid .sv { font-size: 11px; font-weight: 600; fill: var(--v); text-anchor: end; font-variant-numeric: tabular-nums; }
+  .ssid:hover .sbg { stroke-width: 2; }
+  .ssid.sel .sbg { stroke: var(--accent); stroke-width: 2; fill: var(--accent-wash); }
+  .ssid:focus-visible .sbg { stroke: var(--focus); stroke-width: 2.5; }
+  .map.patterns .ssid:not(.sel) .sbg { stroke-dasharray: var(--dash); }
 
   /* ---------- Map: port badges (the switch end of an edge) ---------- */
   .port { cursor: pointer; outline: none; transition: opacity var(--dur-2) var(--ease-out); }
@@ -91,7 +127,7 @@
 
   /* Level of detail: labels only above a zoom threshold. Color and shape stay. */
   .map[data-lod="mid"] .nsub { display: none; }
-  .map[data-lod="low"] .nsub, .map[data-lod="low"] .nm, .map[data-lod="low"] .more, .map[data-lod="low"] .port, .map[data-lod="low"] .wtx { display: none; }
+  .map[data-lod="low"] .nsub, .map[data-lod="low"] .nm, .map[data-lod="low"] .more, .map[data-lod="low"] .port, .map[data-lod="low"] .wtx, .map[data-lod="low"] .elab, .map[data-lod="low"] .ssid { display: none; }
 
   /* ---------- Canvas overlays ---------- */
   .legend { position: absolute; left: var(--sp-5); top: var(--sp-5); z-index: var(--z-sticky); max-width: 420px; border: 1px solid var(--line); border-radius: var(--r-3); background: color-mix(in srgb, var(--surface) 94%, transparent); color: var(--ink-2); font-size: var(--fs-11); }
@@ -102,11 +138,12 @@
   .legend[open] summary { border-bottom: 1px solid var(--line); }
   .legend .rows { display: grid; gap: 6px; padding: 7px 10px 9px; }
   .lg-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
-  .lg-h { width: 36px; color: var(--ink-3); }
+  .lg-h { width: 40px; color: var(--ink-3); }
   .lg-item { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
   .lg-item svg { width: 22px; height: 14px; overflow: visible; flex: none; }
   .lg-item svg .lgs { fill: var(--surface); stroke: var(--ink-3); stroke-width: 1.25; }
-  .lg-item svg .lgs.dash { stroke-dasharray: 3 2; }
+  .lg-item svg.lgp { width: 22px; height: 6px; }
+  .lg-item svg.lgp path { fill: none; stroke: var(--v); stroke-width: 2; }
   .lg-item .vlan { font-size: var(--fs-11); }
 
   .map-note { position: absolute; right: var(--sp-5); top: var(--sp-5); z-index: var(--z-sticky); display: flex; align-items: center; gap: var(--sp-3); padding: 3px 4px 3px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-3); background: var(--surface); font-size: var(--fs-12); color: var(--ink-2); }
@@ -132,6 +169,12 @@
   .hovercard .kv dd { font-size: var(--fs-12); }
   .hc-via { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--line); color: var(--ink); font-size: var(--fs-12); display: flex; gap: var(--sp-3); align-items: flex-start; }
   .hc-via svg.i { color: var(--ink-3); margin-top: 1px; }
+  .hc-ssids { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--line); display: grid; gap: 3px; font-size: var(--fs-12); }
+  .hc-ssids .hc-h { color: var(--ink-3); font-size: var(--fs-11); }
+  .hc-ssids .row { display: flex; align-items: center; gap: var(--sp-3); }
+  .hc-ssids .row svg.i { color: var(--ink-2); }
+  .hc-ssids .row b { font-weight: var(--fw-medium); }
+  .hc-ssids .row .vlan { margin-left: auto; }
   .hc-hint { margin-top: var(--sp-3); display: flex; align-items: center; gap: var(--sp-3); color: var(--ink-3); font-size: var(--fs-11); }
   .hc-keys { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-1); }
   .hc-keys span:first-child { margin-right: var(--sp-2); }
@@ -168,7 +211,7 @@
 <body>
 <div class="app">
   <header class="topbar">
-    <a class="brand" href="index.html" aria-label="Tenko DDI home"><span class="mark-cell"><svg class="mark" viewBox="0 2 48 48" aria-hidden="true"><defs><mask id="tenko-knock" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="52"><rect width="48" height="52" fill="#fff"/><path d="M15 30.5L17.6 19.8L21.6 23.9L26.4 23.9L30.4 19.8L33 30.5L24 40.5Z" fill="#000" stroke="#000" stroke-width="3" stroke-linejoin="round"/></mask></defs><path mask="url(#tenko-knock)" fill="currentColor" d="M20.06 33.69L19.59 33.22L19.13 33.06L18.66 32.97L18.19 32.91L17.72 32.88L17.25 32.87L16.77 32.87L16.3 32.9L15.83 32.93L15.36 32.99L14.9 33.05L14.43 33.13L13.97 33.22L13.51 33.32L13.05 33.44L12.6 33.56L12.15 33.7L11.7 33.84L11.26 34L10.83 34.16L10.39 34.34L9.97 34.52L9.55 34.72L9.13 34.92L8.73 35.13L8.32 35.36L7.93 35.59L7.54 35.83L7.16 36.08L6.81 36.36L6.53 36.73L6.27 37.1L6.03 37.48L5.8 37.86L5.58 38.25L5.38 38.63L5.2 39.02L5.03 39.42L4.88 39.81L4.75 40.2L4.64 40.6L4.55 40.99L4.48 41.39L4.44 41.78L4.41 42.17L4.42 42.56L4.46 42.94L4.58 43.33L4.58 43.33L5.09 43.15L5.5 42.97L5.89 42.81L6.26 42.65L6.62 42.51L6.98 42.38L7.33 42.27L7.68 42.16L8.02 42.06L8.37 41.97L8.71 41.89L9.06 41.82L9.4 41.76L9.74 41.7L10.08 41.65L10.43 41.6L10.77 41.56L11.12 41.53L11.33 41.35L11.52 41.11L11.72 40.88L11.94 40.64L12.16 40.4L12.38 40.17L12.62 39.93L12.87 39.7L13.13 39.47L13.39 39.24L13.67 39.01L13.95 38.78L14.23 38.55L14.53 38.33L14.83 38.1L15.14 37.88L15.45 37.66L15.77 37.44L16.1 37.23L16.43 37.01L16.77 36.79L17.12 36.57L17.46 36.35L17.82 36.13L18.18 35.89L18.55 35.65L18.92 35.38L19.3 35.08L19.68 34.69L20.06 33.69ZM20.14 31.96L19.9 31.33L19.52 30.99L19.12 30.7L18.71 30.45L18.28 30.21L17.85 30L17.4 29.8L16.95 29.62L16.49 29.45L16.03 29.3L15.57 29.16L15.1 29.03L14.63 28.91L14.16 28.81L13.68 28.72L13.21 28.64L12.73 28.57L12.25 28.51L11.78 28.46L11.3 28.43L10.82 28.41L10.35 28.39L9.87 28.39L9.4 28.4L8.93 28.43L8.46 28.46L7.99 28.5L7.53 28.56L7.07 28.62L6.62 28.73L6.21 28.95L5.8 29.18L5.41 29.43L5.03 29.68L4.66 29.94L4.31 30.21L3.97 30.49L3.65 30.78L3.34 31.07L3.05 31.38L2.77 31.7L2.51 32.02L2.28 32.35L2.06 32.69L1.87 33.04L1.71 33.4L1.58 33.77L1.51 34.18L1.51 34.18L2.06 34.23L2.52 34.24L2.94 34.24L3.35 34.26L3.74 34.28L4.12 34.31L4.5 34.34L4.87 34.39L5.23 34.44L5.59 34.51L5.94 34.57L6.29 34.65L6.64 34.73L6.98 34.82L7.32 34.92L7.66 35.02L8 35.13L8.33 35.24L8.62 35.16L8.9 35.03L9.19 34.9L9.49 34.77L9.8 34.65L10.12 34.53L10.45 34.42L10.78 34.31L11.12 34.21L11.47 34.11L11.83 34.02L12.19 33.93L12.56 33.85L12.94 33.77L13.32 33.7L13.7 33.63L14.1 33.57L14.49 33.51L14.89 33.45L15.3 33.39L15.71 33.34L16.13 33.29L16.56 33.24L16.99 33.19L17.43 33.14L17.88 33.07L18.34 32.99L18.83 32.88L19.36 32.7L20.14 31.96ZM20.94 30.43L20.97 29.73L20.76 29.25L20.5 28.81L20.22 28.38L19.91 27.98L19.59 27.58L19.25 27.2L18.91 26.84L18.55 26.48L18.18 26.13L17.8 25.8L17.41 25.47L17.02 25.16L16.62 24.85L16.21 24.56L15.8 24.27L15.38 24L14.95 23.74L14.53 23.49L14.09 23.25L13.65 23.02L13.21 22.8L12.77 22.59L12.32 22.39L11.87 22.21L11.41 22.03L10.96 21.87L10.5 21.72L10.04 21.58L9.57 21.49L9.09 21.51L8.61 21.55L8.14 21.6L7.67 21.66L7.22 21.74L6.77 21.84L6.33 21.95L5.9 22.07L5.48 22.21L5.07 22.37L4.68 22.54L4.3 22.73L3.93 22.93L3.58 23.15L3.25 23.39L2.94 23.65L2.65 23.93L2.41 24.28L2.41 24.28L2.89 24.55L3.31 24.74L3.71 24.93L4.08 25.11L4.44 25.29L4.79 25.48L5.13 25.67L5.45 25.86L5.77 26.06L6.08 26.27L6.38 26.48L6.68 26.7L6.97 26.92L7.26 27.15L7.54 27.38L7.82 27.62L8.09 27.86L8.36 28.11L8.67 28.16L8.99 28.16L9.33 28.17L9.67 28.19L10.02 28.21L10.37 28.25L10.73 28.29L11.09 28.34L11.46 28.4L11.84 28.47L12.22 28.54L12.6 28.62L12.98 28.71L13.37 28.81L13.77 28.91L14.16 29.03L14.56 29.14L14.96 29.27L15.37 29.4L15.78 29.53L16.19 29.67L16.61 29.82L17.03 29.97L17.46 30.12L17.9 30.27L18.35 30.42L18.83 30.56L19.33 30.68L19.9 30.75L20.94 30.43ZM22.31 29.37L22.63 28.74L22.64 28.2L22.58 27.68L22.5 27.16L22.39 26.65L22.25 26.14L22.1 25.64L21.94 25.15L21.76 24.66L21.56 24.18L21.36 23.7L21.14 23.23L20.91 22.77L20.67 22.31L20.41 21.86L20.15 21.42L19.88 20.98L19.6 20.55L19.31 20.14L19.01 19.72L18.7 19.32L18.39 18.93L18.06 18.54L17.73 18.17L17.39 17.8L17.05 17.44L16.69 17.09L16.34 16.76L15.97 16.43L15.58 16.14L15.12 15.95L14.66 15.78L14.21 15.62L13.75 15.47L13.3 15.35L12.84 15.24L12.39 15.15L11.94 15.08L11.49 15.03L11.05 14.99L10.61 14.98L10.17 14.98L9.75 15.01L9.33 15.06L8.92 15.14L8.52 15.24L8.13 15.37L7.76 15.58L7.76 15.58L8.09 16.04L8.4 16.39L8.69 16.72L8.96 17.05L9.21 17.37L9.46 17.68L9.69 18L9.91 18.32L10.12 18.64L10.32 18.96L10.52 19.28L10.7 19.61L10.88 19.94L11.05 20.27L11.22 20.61L11.38 20.94L11.53 21.28L11.68 21.63L11.94 21.81L12.24 21.96L12.55 22.11L12.86 22.28L13.17 22.46L13.49 22.65L13.8 22.84L14.12 23.05L14.44 23.27L14.76 23.5L15.07 23.74L15.39 23.98L15.71 24.24L16.03 24.5L16.35 24.77L16.67 25.05L16.99 25.34L17.31 25.63L17.63 25.93L17.95 26.24L18.27 26.56L18.6 26.88L18.92 27.21L19.26 27.54L19.6 27.87L19.95 28.21L20.33 28.56L20.74 28.89L21.23 29.22L22.31 29.37ZM24 29L24.74 28.5L25.01 28L25.21 27.5L25.38 26.99L25.52 26.49L25.65 25.99L25.77 25.49L25.88 24.99L25.98 24.49L26.08 23.99L26.17 23.5L26.26 23.01L26.34 22.52L26.42 22.03L26.5 21.54L26.57 21.06L26.64 20.58L26.71 20.11L26.78 19.63L26.84 19.17L26.91 18.71L26.97 18.25L27.03 17.8L27.09 17.35L27.14 16.91L27.2 16.47L27.25 16.05L27.31 15.62L27.36 15.21L27.36 14.8L27.21 14.4L27.06 14.01L26.91 13.62L26.75 13.25L26.59 12.88L26.43 12.52L26.27 12.17L26.1 11.83L25.93 11.5L25.76 11.18L25.58 10.87L25.4 10.56L25.21 10.28L25.01 10L24.8 9.73L24.58 9.47L24.33 9.23L24 9L24 9L23.67 9.23L23.42 9.47L23.2 9.73L22.99 10L22.79 10.28L22.6 10.56L22.42 10.87L22.24 11.18L22.07 11.5L21.9 11.83L21.73 12.17L21.57 12.52L21.41 12.88L21.25 13.25L21.09 13.62L20.94 14.01L20.79 14.4L20.64 14.8L20.64 15.21L20.69 15.62L20.75 16.05L20.8 16.47L20.86 16.91L20.91 17.35L20.97 17.8L21.03 18.25L21.09 18.71L21.16 19.17L21.22 19.63L21.29 20.11L21.36 20.58L21.43 21.06L21.5 21.54L21.58 22.03L21.66 22.52L21.74 23.01L21.83 23.5L21.92 23.99L22.02 24.49L22.12 24.99L22.23 25.49L22.35 25.99L22.48 26.49L22.62 26.99L22.79 27.5L22.99 28L23.26 28.5L24 29ZM25.69 29.37L26.77 29.22L27.26 28.89L27.67 28.56L28.05 28.21L28.4 27.87L28.74 27.54L29.08 27.21L29.4 26.88L29.73 26.56L30.05 26.24L30.37 25.93L30.69 25.63L31.01 25.34L31.33 25.05L31.65 24.77L31.97 24.5L32.29 24.24L32.61 23.98L32.93 23.74L33.24 23.5L33.56 23.27L33.88 23.05L34.2 22.84L34.51 22.65L34.83 22.46L35.14 22.28L35.45 22.11L35.76 21.96L36.06 21.81L36.32 21.63L36.47 21.28L36.62 20.94L36.78 20.61L36.95 20.27L37.12 19.94L37.3 19.61L37.48 19.28L37.68 18.96L37.88 18.64L38.09 18.32L38.31 18L38.54 17.68L38.79 17.37L39.04 17.05L39.31 16.72L39.6 16.39L39.91 16.04L40.24 15.58L40.24 15.58L39.87 15.37L39.48 15.24L39.08 15.14L38.67 15.06L38.25 15.01L37.83 14.98L37.39 14.98L36.95 14.99L36.51 15.03L36.06 15.08L35.61 15.15L35.16 15.24L34.7 15.35L34.25 15.47L33.79 15.62L33.34 15.78L32.88 15.95L32.42 16.14L32.03 16.43L31.66 16.76L31.31 17.09L30.95 17.44L30.61 17.8L30.27 18.17L29.94 18.54L29.61 18.93L29.3 19.32L28.99 19.72L28.69 20.14L28.4 20.55L28.12 20.98L27.85 21.42L27.59 21.86L27.33 22.31L27.09 22.77L26.86 23.23L26.64 23.7L26.44 24.18L26.24 24.66L26.06 25.15L25.9 25.64L25.75 26.14L25.61 26.65L25.5 27.16L25.42 27.68L25.36 28.2L25.37 28.74L25.69 29.37ZM27.06 30.43L28.1 30.75L28.67 30.68L29.17 30.56L29.65 30.42L30.1 30.27L30.54 30.12L30.97 29.97L31.39 29.82L31.81 29.67L32.22 29.53L32.63 29.4L33.04 29.27L33.44 29.14L33.84 29.03L34.23 28.91L34.63 28.81L35.02 28.71L35.4 28.62L35.78 28.54L36.16 28.47L36.54 28.4L36.91 28.34L37.27 28.29L37.63 28.25L37.98 28.21L38.33 28.19L38.67 28.17L39.01 28.16L39.33 28.16L39.64 28.11L39.91 27.86L40.18 27.62L40.46 27.38L40.74 27.15L41.03 26.92L41.32 26.7L41.62 26.48L41.92 26.27L42.23 26.06L42.55 25.86L42.87 25.67L43.21 25.48L43.56 25.29L43.92 25.11L44.29 24.93L44.69 24.74L45.11 24.55L45.59 24.28L45.59 24.28L45.35 23.93L45.06 23.65L44.75 23.39L44.42 23.15L44.07 22.93L43.7 22.73L43.32 22.54L42.93 22.37L42.52 22.21L42.1 22.07L41.67 21.95L41.23 21.84L40.78 21.74L40.33 21.66L39.86 21.6L39.39 21.55L38.91 21.51L38.43 21.49L37.96 21.58L37.5 21.72L37.04 21.87L36.59 22.03L36.13 22.21L35.68 22.39L35.23 22.59L34.79 22.8L34.35 23.02L33.91 23.25L33.47 23.49L33.05 23.74L32.62 24L32.2 24.27L31.79 24.56L31.38 24.85L30.98 25.16L30.59 25.47L30.2 25.8L29.82 26.13L29.45 26.48L29.09 26.84L28.75 27.2L28.41 27.58L28.09 27.98L27.78 28.38L27.5 28.81L27.24 29.25L27.03 29.73L27.06 30.43ZM27.86 31.96L28.64 32.7L29.17 32.88L29.66 32.99L30.12 33.07L30.57 33.14L31.01 33.19L31.44 33.24L31.87 33.29L32.29 33.34L32.7 33.39L33.11 33.45L33.51 33.51L33.9 33.57L34.3 33.63L34.68 33.7L35.06 33.77L35.44 33.85L35.81 33.93L36.17 34.02L36.53 34.11L36.88 34.21L37.22 34.31L37.55 34.42L37.88 34.53L38.2 34.65L38.51 34.77L38.81 34.9L39.1 35.03L39.38 35.16L39.67 35.24L40 35.13L40.34 35.02L40.68 34.92L41.02 34.82L41.36 34.73L41.71 34.65L42.06 34.57L42.41 34.51L42.77 34.44L43.13 34.39L43.5 34.34L43.88 34.31L44.26 34.28L44.65 34.26L45.06 34.24L45.48 34.24L45.94 34.23L46.49 34.18L46.49 34.18L46.42 33.77L46.29 33.4L46.13 33.04L45.94 32.69L45.72 32.35L45.49 32.02L45.23 31.7L44.95 31.38L44.66 31.07L44.35 30.78L44.03 30.49L43.69 30.21L43.34 29.94L42.97 29.68L42.59 29.43L42.2 29.18L41.79 28.95L41.38 28.73L40.93 28.62L40.47 28.56L40.01 28.5L39.54 28.46L39.07 28.43L38.6 28.4L38.13 28.39L37.65 28.39L37.18 28.41L36.7 28.43L36.22 28.46L35.75 28.51L35.27 28.57L34.79 28.64L34.32 28.72L33.84 28.81L33.37 28.91L32.9 29.03L32.43 29.16L31.97 29.3L31.51 29.45L31.05 29.62L30.6 29.8L30.15 30L29.72 30.21L29.29 30.45L28.88 30.7L28.48 30.99L28.1 31.33L27.86 31.96ZM27.94 33.69L28.32 34.69L28.7 35.08L29.08 35.38L29.45 35.65L29.82 35.89L30.18 36.13L30.54 36.35L30.88 36.57L31.23 36.79L31.57 37.01L31.9 37.23L32.23 37.44L32.55 37.66L32.86 37.88L33.17 38.1L33.47 38.33L33.77 38.55L34.05 38.78L34.33 39.01L34.61 39.24L34.87 39.47L35.13 39.7L35.38 39.93L35.62 40.17L35.84 40.4L36.06 40.64L36.28 40.88L36.48 41.11L36.67 41.35L36.88 41.53L37.23 41.56L37.57 41.6L37.92 41.65L38.26 41.7L38.6 41.76L38.94 41.82L39.29 41.89L39.63 41.97L39.98 42.06L40.32 42.16L40.67 42.27L41.02 42.38L41.38 42.51L41.74 42.65L42.11 42.81L42.5 42.97L42.91 43.15L43.42 43.33L43.42 43.33L43.54 42.94L43.58 42.56L43.59 42.17L43.56 41.78L43.52 41.39L43.45 40.99L43.36 40.6L43.25 40.2L43.12 39.81L42.97 39.42L42.8 39.02L42.62 38.63L42.42 38.25L42.2 37.86L41.97 37.48L41.73 37.1L41.47 36.73L41.19 36.36L40.84 36.08L40.46 35.83L40.07 35.59L39.68 35.36L39.27 35.13L38.87 34.92L38.45 34.72L38.03 34.52L37.61 34.34L37.17 34.16L36.74 34L36.3 33.84L35.85 33.7L35.4 33.56L34.95 33.44L34.49 33.32L34.03 33.22L33.57 33.13L33.1 33.05L32.64 32.99L32.17 32.93L31.7 32.9L31.23 32.87L30.75 32.87L30.28 32.88L29.81 32.91L29.34 32.97L28.87 33.06L28.41 33.22L27.94 33.69Z"/><path fill="currentColor" fill-rule="evenodd" d="M15 30.5L17.6 19.8L21.6 23.9L26.4 23.9L30.4 19.8L33 30.5L24 40.5ZM17.9 29.2L21.6 30.5L21 31.7L18.6 30.7ZM30.1 29.2L26.4 30.5L27 31.7L29.4 30.7Z"/></svg></span><svg class="wordmark" viewBox="55 13 133 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="3.6" stroke-linejoin="round" d="M56 15.8H73M64.5 14V36M77.2 28H89.6A6.2 6.2 0 1 0 88.15 31.99M96.4 20V36M96.4 28A6.2 6.2 0 0 1 108.8 28V36M115.6 14V36M126.4 20.6L117.4 29.2M120.7 26L127.4 36M145.2 28A6.2 6.2 0 1 1 132.8 28A6.2 6.2 0 1 1 145.2 28Z"/><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round" stroke-opacity="0.62" d="M156.3 20V36M156.3 21.3H158.8A6.7 6.7 0 0 1 158.8 34.7H156.3M170.7 20V36M170.7 21.3H173.2A6.7 6.7 0 0 1 173.2 34.7H170.7M185.1 20V36"/></svg></a>
+    <a class="brand" href="dashboard.html" aria-label="Tenko DDI, start page"><span class="mark-cell"><svg class="mark" viewBox="0 2 48 48" aria-hidden="true"><defs><mask id="tenko-knock" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="52"><rect width="48" height="52" fill="#fff"/><path d="M15 30.5L17.6 19.8L21.6 23.9L26.4 23.9L30.4 19.8L33 30.5L24 40.5Z" fill="#000" stroke="#000" stroke-width="3" stroke-linejoin="round"/></mask></defs><path mask="url(#tenko-knock)" fill="currentColor" d="M20.06 33.69L19.59 33.22L19.13 33.06L18.66 32.97L18.19 32.91L17.72 32.88L17.25 32.87L16.77 32.87L16.3 32.9L15.83 32.93L15.36 32.99L14.9 33.05L14.43 33.13L13.97 33.22L13.51 33.32L13.05 33.44L12.6 33.56L12.15 33.7L11.7 33.84L11.26 34L10.83 34.16L10.39 34.34L9.97 34.52L9.55 34.72L9.13 34.92L8.73 35.13L8.32 35.36L7.93 35.59L7.54 35.83L7.16 36.08L6.81 36.36L6.53 36.73L6.27 37.1L6.03 37.48L5.8 37.86L5.58 38.25L5.38 38.63L5.2 39.02L5.03 39.42L4.88 39.81L4.75 40.2L4.64 40.6L4.55 40.99L4.48 41.39L4.44 41.78L4.41 42.17L4.42 42.56L4.46 42.94L4.58 43.33L4.58 43.33L5.09 43.15L5.5 42.97L5.89 42.81L6.26 42.65L6.62 42.51L6.98 42.38L7.33 42.27L7.68 42.16L8.02 42.06L8.37 41.97L8.71 41.89L9.06 41.82L9.4 41.76L9.74 41.7L10.08 41.65L10.43 41.6L10.77 41.56L11.12 41.53L11.33 41.35L11.52 41.11L11.72 40.88L11.94 40.64L12.16 40.4L12.38 40.17L12.62 39.93L12.87 39.7L13.13 39.47L13.39 39.24L13.67 39.01L13.95 38.78L14.23 38.55L14.53 38.33L14.83 38.1L15.14 37.88L15.45 37.66L15.77 37.44L16.1 37.23L16.43 37.01L16.77 36.79L17.12 36.57L17.46 36.35L17.82 36.13L18.18 35.89L18.55 35.65L18.92 35.38L19.3 35.08L19.68 34.69L20.06 33.69ZM20.14 31.96L19.9 31.33L19.52 30.99L19.12 30.7L18.71 30.45L18.28 30.21L17.85 30L17.4 29.8L16.95 29.62L16.49 29.45L16.03 29.3L15.57 29.16L15.1 29.03L14.63 28.91L14.16 28.81L13.68 28.72L13.21 28.64L12.73 28.57L12.25 28.51L11.78 28.46L11.3 28.43L10.82 28.41L10.35 28.39L9.87 28.39L9.4 28.4L8.93 28.43L8.46 28.46L7.99 28.5L7.53 28.56L7.07 28.62L6.62 28.73L6.21 28.95L5.8 29.18L5.41 29.43L5.03 29.68L4.66 29.94L4.31 30.21L3.97 30.49L3.65 30.78L3.34 31.07L3.05 31.38L2.77 31.7L2.51 32.02L2.28 32.35L2.06 32.69L1.87 33.04L1.71 33.4L1.58 33.77L1.51 34.18L1.51 34.18L2.06 34.23L2.52 34.24L2.94 34.24L3.35 34.26L3.74 34.28L4.12 34.31L4.5 34.34L4.87 34.39L5.23 34.44L5.59 34.51L5.94 34.57L6.29 34.65L6.64 34.73L6.98 34.82L7.32 34.92L7.66 35.02L8 35.13L8.33 35.24L8.62 35.16L8.9 35.03L9.19 34.9L9.49 34.77L9.8 34.65L10.12 34.53L10.45 34.42L10.78 34.31L11.12 34.21L11.47 34.11L11.83 34.02L12.19 33.93L12.56 33.85L12.94 33.77L13.32 33.7L13.7 33.63L14.1 33.57L14.49 33.51L14.89 33.45L15.3 33.39L15.71 33.34L16.13 33.29L16.56 33.24L16.99 33.19L17.43 33.14L17.88 33.07L18.34 32.99L18.83 32.88L19.36 32.7L20.14 31.96ZM20.94 30.43L20.97 29.73L20.76 29.25L20.5 28.81L20.22 28.38L19.91 27.98L19.59 27.58L19.25 27.2L18.91 26.84L18.55 26.48L18.18 26.13L17.8 25.8L17.41 25.47L17.02 25.16L16.62 24.85L16.21 24.56L15.8 24.27L15.38 24L14.95 23.74L14.53 23.49L14.09 23.25L13.65 23.02L13.21 22.8L12.77 22.59L12.32 22.39L11.87 22.21L11.41 22.03L10.96 21.87L10.5 21.72L10.04 21.58L9.57 21.49L9.09 21.51L8.61 21.55L8.14 21.6L7.67 21.66L7.22 21.74L6.77 21.84L6.33 21.95L5.9 22.07L5.48 22.21L5.07 22.37L4.68 22.54L4.3 22.73L3.93 22.93L3.58 23.15L3.25 23.39L2.94 23.65L2.65 23.93L2.41 24.28L2.41 24.28L2.89 24.55L3.31 24.74L3.71 24.93L4.08 25.11L4.44 25.29L4.79 25.48L5.13 25.67L5.45 25.86L5.77 26.06L6.08 26.27L6.38 26.48L6.68 26.7L6.97 26.92L7.26 27.15L7.54 27.38L7.82 27.62L8.09 27.86L8.36 28.11L8.67 28.16L8.99 28.16L9.33 28.17L9.67 28.19L10.02 28.21L10.37 28.25L10.73 28.29L11.09 28.34L11.46 28.4L11.84 28.47L12.22 28.54L12.6 28.62L12.98 28.71L13.37 28.81L13.77 28.91L14.16 29.03L14.56 29.14L14.96 29.27L15.37 29.4L15.78 29.53L16.19 29.67L16.61 29.82L17.03 29.97L17.46 30.12L17.9 30.27L18.35 30.42L18.83 30.56L19.33 30.68L19.9 30.75L20.94 30.43ZM22.31 29.37L22.63 28.74L22.64 28.2L22.58 27.68L22.5 27.16L22.39 26.65L22.25 26.14L22.1 25.64L21.94 25.15L21.76 24.66L21.56 24.18L21.36 23.7L21.14 23.23L20.91 22.77L20.67 22.31L20.41 21.86L20.15 21.42L19.88 20.98L19.6 20.55L19.31 20.14L19.01 19.72L18.7 19.32L18.39 18.93L18.06 18.54L17.73 18.17L17.39 17.8L17.05 17.44L16.69 17.09L16.34 16.76L15.97 16.43L15.58 16.14L15.12 15.95L14.66 15.78L14.21 15.62L13.75 15.47L13.3 15.35L12.84 15.24L12.39 15.15L11.94 15.08L11.49 15.03L11.05 14.99L10.61 14.98L10.17 14.98L9.75 15.01L9.33 15.06L8.92 15.14L8.52 15.24L8.13 15.37L7.76 15.58L7.76 15.58L8.09 16.04L8.4 16.39L8.69 16.72L8.96 17.05L9.21 17.37L9.46 17.68L9.69 18L9.91 18.32L10.12 18.64L10.32 18.96L10.52 19.28L10.7 19.61L10.88 19.94L11.05 20.27L11.22 20.61L11.38 20.94L11.53 21.28L11.68 21.63L11.94 21.81L12.24 21.96L12.55 22.11L12.86 22.28L13.17 22.46L13.49 22.65L13.8 22.84L14.12 23.05L14.44 23.27L14.76 23.5L15.07 23.74L15.39 23.98L15.71 24.24L16.03 24.5L16.35 24.77L16.67 25.05L16.99 25.34L17.31 25.63L17.63 25.93L17.95 26.24L18.27 26.56L18.6 26.88L18.92 27.21L19.26 27.54L19.6 27.87L19.95 28.21L20.33 28.56L20.74 28.89L21.23 29.22L22.31 29.37ZM24 29L24.74 28.5L25.01 28L25.21 27.5L25.38 26.99L25.52 26.49L25.65 25.99L25.77 25.49L25.88 24.99L25.98 24.49L26.08 23.99L26.17 23.5L26.26 23.01L26.34 22.52L26.42 22.03L26.5 21.54L26.57 21.06L26.64 20.58L26.71 20.11L26.78 19.63L26.84 19.17L26.91 18.71L26.97 18.25L27.03 17.8L27.09 17.35L27.14 16.91L27.2 16.47L27.25 16.05L27.31 15.62L27.36 15.21L27.36 14.8L27.21 14.4L27.06 14.01L26.91 13.62L26.75 13.25L26.59 12.88L26.43 12.52L26.27 12.17L26.1 11.83L25.93 11.5L25.76 11.18L25.58 10.87L25.4 10.56L25.21 10.28L25.01 10L24.8 9.73L24.58 9.47L24.33 9.23L24 9L24 9L23.67 9.23L23.42 9.47L23.2 9.73L22.99 10L22.79 10.28L22.6 10.56L22.42 10.87L22.24 11.18L22.07 11.5L21.9 11.83L21.73 12.17L21.57 12.52L21.41 12.88L21.25 13.25L21.09 13.62L20.94 14.01L20.79 14.4L20.64 14.8L20.64 15.21L20.69 15.62L20.75 16.05L20.8 16.47L20.86 16.91L20.91 17.35L20.97 17.8L21.03 18.25L21.09 18.71L21.16 19.17L21.22 19.63L21.29 20.11L21.36 20.58L21.43 21.06L21.5 21.54L21.58 22.03L21.66 22.52L21.74 23.01L21.83 23.5L21.92 23.99L22.02 24.49L22.12 24.99L22.23 25.49L22.35 25.99L22.48 26.49L22.62 26.99L22.79 27.5L22.99 28L23.26 28.5L24 29ZM25.69 29.37L26.77 29.22L27.26 28.89L27.67 28.56L28.05 28.21L28.4 27.87L28.74 27.54L29.08 27.21L29.4 26.88L29.73 26.56L30.05 26.24L30.37 25.93L30.69 25.63L31.01 25.34L31.33 25.05L31.65 24.77L31.97 24.5L32.29 24.24L32.61 23.98L32.93 23.74L33.24 23.5L33.56 23.27L33.88 23.05L34.2 22.84L34.51 22.65L34.83 22.46L35.14 22.28L35.45 22.11L35.76 21.96L36.06 21.81L36.32 21.63L36.47 21.28L36.62 20.94L36.78 20.61L36.95 20.27L37.12 19.94L37.3 19.61L37.48 19.28L37.68 18.96L37.88 18.64L38.09 18.32L38.31 18L38.54 17.68L38.79 17.37L39.04 17.05L39.31 16.72L39.6 16.39L39.91 16.04L40.24 15.58L40.24 15.58L39.87 15.37L39.48 15.24L39.08 15.14L38.67 15.06L38.25 15.01L37.83 14.98L37.39 14.98L36.95 14.99L36.51 15.03L36.06 15.08L35.61 15.15L35.16 15.24L34.7 15.35L34.25 15.47L33.79 15.62L33.34 15.78L32.88 15.95L32.42 16.14L32.03 16.43L31.66 16.76L31.31 17.09L30.95 17.44L30.61 17.8L30.27 18.17L29.94 18.54L29.61 18.93L29.3 19.32L28.99 19.72L28.69 20.14L28.4 20.55L28.12 20.98L27.85 21.42L27.59 21.86L27.33 22.31L27.09 22.77L26.86 23.23L26.64 23.7L26.44 24.18L26.24 24.66L26.06 25.15L25.9 25.64L25.75 26.14L25.61 26.65L25.5 27.16L25.42 27.68L25.36 28.2L25.37 28.74L25.69 29.37ZM27.06 30.43L28.1 30.75L28.67 30.68L29.17 30.56L29.65 30.42L30.1 30.27L30.54 30.12L30.97 29.97L31.39 29.82L31.81 29.67L32.22 29.53L32.63 29.4L33.04 29.27L33.44 29.14L33.84 29.03L34.23 28.91L34.63 28.81L35.02 28.71L35.4 28.62L35.78 28.54L36.16 28.47L36.54 28.4L36.91 28.34L37.27 28.29L37.63 28.25L37.98 28.21L38.33 28.19L38.67 28.17L39.01 28.16L39.33 28.16L39.64 28.11L39.91 27.86L40.18 27.62L40.46 27.38L40.74 27.15L41.03 26.92L41.32 26.7L41.62 26.48L41.92 26.27L42.23 26.06L42.55 25.86L42.87 25.67L43.21 25.48L43.56 25.29L43.92 25.11L44.29 24.93L44.69 24.74L45.11 24.55L45.59 24.28L45.59 24.28L45.35 23.93L45.06 23.65L44.75 23.39L44.42 23.15L44.07 22.93L43.7 22.73L43.32 22.54L42.93 22.37L42.52 22.21L42.1 22.07L41.67 21.95L41.23 21.84L40.78 21.74L40.33 21.66L39.86 21.6L39.39 21.55L38.91 21.51L38.43 21.49L37.96 21.58L37.5 21.72L37.04 21.87L36.59 22.03L36.13 22.21L35.68 22.39L35.23 22.59L34.79 22.8L34.35 23.02L33.91 23.25L33.47 23.49L33.05 23.74L32.62 24L32.2 24.27L31.79 24.56L31.38 24.85L30.98 25.16L30.59 25.47L30.2 25.8L29.82 26.13L29.45 26.48L29.09 26.84L28.75 27.2L28.41 27.58L28.09 27.98L27.78 28.38L27.5 28.81L27.24 29.25L27.03 29.73L27.06 30.43ZM27.86 31.96L28.64 32.7L29.17 32.88L29.66 32.99L30.12 33.07L30.57 33.14L31.01 33.19L31.44 33.24L31.87 33.29L32.29 33.34L32.7 33.39L33.11 33.45L33.51 33.51L33.9 33.57L34.3 33.63L34.68 33.7L35.06 33.77L35.44 33.85L35.81 33.93L36.17 34.02L36.53 34.11L36.88 34.21L37.22 34.31L37.55 34.42L37.88 34.53L38.2 34.65L38.51 34.77L38.81 34.9L39.1 35.03L39.38 35.16L39.67 35.24L40 35.13L40.34 35.02L40.68 34.92L41.02 34.82L41.36 34.73L41.71 34.65L42.06 34.57L42.41 34.51L42.77 34.44L43.13 34.39L43.5 34.34L43.88 34.31L44.26 34.28L44.65 34.26L45.06 34.24L45.48 34.24L45.94 34.23L46.49 34.18L46.49 34.18L46.42 33.77L46.29 33.4L46.13 33.04L45.94 32.69L45.72 32.35L45.49 32.02L45.23 31.7L44.95 31.38L44.66 31.07L44.35 30.78L44.03 30.49L43.69 30.21L43.34 29.94L42.97 29.68L42.59 29.43L42.2 29.18L41.79 28.95L41.38 28.73L40.93 28.62L40.47 28.56L40.01 28.5L39.54 28.46L39.07 28.43L38.6 28.4L38.13 28.39L37.65 28.39L37.18 28.41L36.7 28.43L36.22 28.46L35.75 28.51L35.27 28.57L34.79 28.64L34.32 28.72L33.84 28.81L33.37 28.91L32.9 29.03L32.43 29.16L31.97 29.3L31.51 29.45L31.05 29.62L30.6 29.8L30.15 30L29.72 30.21L29.29 30.45L28.88 30.7L28.48 30.99L28.1 31.33L27.86 31.96ZM27.94 33.69L28.32 34.69L28.7 35.08L29.08 35.38L29.45 35.65L29.82 35.89L30.18 36.13L30.54 36.35L30.88 36.57L31.23 36.79L31.57 37.01L31.9 37.23L32.23 37.44L32.55 37.66L32.86 37.88L33.17 38.1L33.47 38.33L33.77 38.55L34.05 38.78L34.33 39.01L34.61 39.24L34.87 39.47L35.13 39.7L35.38 39.93L35.62 40.17L35.84 40.4L36.06 40.64L36.28 40.88L36.48 41.11L36.67 41.35L36.88 41.53L37.23 41.56L37.57 41.6L37.92 41.65L38.26 41.7L38.6 41.76L38.94 41.82L39.29 41.89L39.63 41.97L39.98 42.06L40.32 42.16L40.67 42.27L41.02 42.38L41.38 42.51L41.74 42.65L42.11 42.81L42.5 42.97L42.91 43.15L43.42 43.33L43.42 43.33L43.54 42.94L43.58 42.56L43.59 42.17L43.56 41.78L43.52 41.39L43.45 40.99L43.36 40.6L43.25 40.2L43.12 39.81L42.97 39.42L42.8 39.02L42.62 38.63L42.42 38.25L42.2 37.86L41.97 37.48L41.73 37.1L41.47 36.73L41.19 36.36L40.84 36.08L40.46 35.83L40.07 35.59L39.68 35.36L39.27 35.13L38.87 34.92L38.45 34.72L38.03 34.52L37.61 34.34L37.17 34.16L36.74 34L36.3 33.84L35.85 33.7L35.4 33.56L34.95 33.44L34.49 33.32L34.03 33.22L33.57 33.13L33.1 33.05L32.64 32.99L32.17 32.93L31.7 32.9L31.23 32.87L30.75 32.87L30.28 32.88L29.81 32.91L29.34 32.97L28.87 33.06L28.41 33.22L27.94 33.69Z"/><path fill="currentColor" fill-rule="evenodd" d="M15 30.5L17.6 19.8L21.6 23.9L26.4 23.9L30.4 19.8L33 30.5L24 40.5ZM17.9 29.2L21.6 30.5L21 31.7L18.6 30.7ZM30.1 29.2L26.4 30.5L27 31.7L29.4 30.7Z"/></svg></span><svg class="wordmark" viewBox="55 13 133 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="3.6" stroke-linejoin="round" d="M56 15.8H73M64.5 14V36M77.2 28H89.6A6.2 6.2 0 1 0 88.15 31.99M96.4 20V36M96.4 28A6.2 6.2 0 0 1 108.8 28V36M115.6 14V36M126.4 20.6L117.4 29.2M120.7 26L127.4 36M145.2 28A6.2 6.2 0 1 1 132.8 28A6.2 6.2 0 1 1 145.2 28Z"/><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round" stroke-opacity="0.62" d="M156.3 20V36M156.3 21.3H158.8A6.7 6.7 0 0 1 158.8 34.7H156.3M170.7 20V36M170.7 21.3H173.2A6.7 6.7 0 0 1 173.2 34.7H170.7M185.1 20V36"/></svg></a>
     <button class="cmd" data-action="palette" aria-label="Open command palette">
       <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
       <span class="hint">Search addresses, hosts, MACs, records or run a command</span>
@@ -205,7 +248,7 @@
     <div class="page-head">
       <div>
         <div class="crumbs"><a href="#">Home</a><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg><span>Topology</span></div>
-        <h1>Topology <span class="sub">Home site, 25 devices, 4 VLANs</span></h1>
+        <h1>Topology <span class="sub">Home site, 25 devices, 4 VLANs, 3 wireless networks</span></h1>
       </div>
       <div class="actions">
         <span class="head-note" title="Links come from UniFi, LLDP, Proxmox and ARP scans"><span class="dot live" style="display:inline-block;margin-right:6px"></span>Links read from UniFi and Proxmox 12 s ago</span>
@@ -233,7 +276,14 @@
         <button data-type="client" aria-pressed="true" title="Clients and other hosts" aria-label="Clients and other hosts"><svg class="i sm" aria-hidden="true"><use href="#i-rdp"/></svg></button>
       </div>
       <span class="divider"></span>
-      <label class="switch" title="Show only the selected node and its neighbours"><input type="checkbox" id="focus-sw" role="switch"><span>Focus mode</span><span class="kbd">F</span></label>
+      <label class="switch" title="Show only the selected node and its neighbors"><input type="checkbox" id="focus-sw" role="switch"><span>Focus mode</span><span class="kbd">F</span></label>
+      <span class="divider"></span>
+      <select class="select" id="colorby" aria-label="Color by" title="What gets a color on the map. VLANs in view: hues are generated for the VLANs you can see. Selected VLANs: only the VLAN chips you select get color. Site: color by site, VLANs gray.">
+        <option value="view">Color by: VLANs in view</option>
+        <option value="selected">Color by: Selected VLANs</option>
+        <option value="site">Color by: Site</option>
+      </select>
+      <label class="switch" title="Adds a dash style per VLAN to node outlines and edges, so VLANs can be told apart without color"><input type="checkbox" id="patterns-sw" role="switch"><span>Patterns</span></label>
       <div class="right">
         <div class="seg" role="group" aria-label="Zoom">
           <button id="z-out" title="Zoom out (-)" aria-label="Zoom out">&minus;</button>
@@ -246,39 +296,39 @@
 
     <div class="stage" id="stage">
       <div class="canvas" id="canvas">
-        <svg class="map" id="map" viewBox="0 0 988 600" role="group" aria-label="Network topology of site Home. Select a node to highlight its path, select a port badge to see what is connected to it.">
+        <svg class="map" id="map" viewBox="0 0 1026 600" role="group" aria-label="Network topology of site Home. Select a node to highlight its path, select a port badge to see what is connected to it.">
     <!-- Edges first, then nodes, then port badges, so badges stay clickable. Layered positions are stored as CSS transforms; Radial moves the same nodes. -->
     <g class="edges">
-    <path class="edge uplink" data-id="wan~gw" d="M494,26V76"/>
-    <path class="edge uplink" data-id="gw~sw-core" d="M494,96V164"/>
+    <path class="edge uplink" data-id="wan~gw" d="M513,26V76"/>
+    <path class="edge uplink" data-id="gw~sw-core" d="M513,96V164"/>
     <path class="edge uplink" data-id="sw-core~sw-desk" d="M68,186V264"/>
     <path class="edge uplink" data-id="sw-core~ap-hall" d="M230,186V264"/>
-    <path class="edge uplink" data-id="sw-core~ap-garage" d="M392,186V264"/>
-    <path class="edge" data-id="sw-core~nas" d="M514,186V264"/>
-    <path class="edge" data-id="sw-core~pve1" d="M636,186V264"/>
-    <path class="edge" data-id="sw-core~hub-zigbee" d="M798,186V264"/>
-    <path class="edge" data-id="sw-core~cam-door" d="M920,186V264"/>
-    <path class="edge" data-id="sw-desk~desk-01" d="M26,286V329Q26,335 32,335H60"/>
-    <path class="edge" data-id="sw-desk~printer-1" d="M26,286V375Q26,381 32,381H60"/>
-    <path class="edge" data-id="sw-desk~lab-ws01" d="M26,286V421Q26,427 32,427H60"/>
-    <path class="edge wifi" data-id="ap-hall~laptop-02" d="M188,286V329Q188,335 194,335H222"/>
-    <path class="edge wifi" data-id="ap-hall~thermostat-1" d="M188,286V375Q188,381 194,381H222"/>
-    <path class="edge wifi" data-id="ap-hall~plug-kitchen" d="M188,286V421Q188,427 194,427H222"/>
-    <path class="edge wifi" data-id="ap-hall~speaker-den" d="M188,286V467Q188,473 194,473H222"/>
-    <path class="edge wifi" data-id="ap-garage~doorbell" d="M392,286V324"/>
-    <path class="edge vmlink" data-id="pve1~ha" d="M594,286V329Q594,335 600,335H628"/>
-    <path class="edge vmlink" data-id="pve1~tenko1" d="M594,286V375Q594,381 600,381H628"/>
-    <path class="edge vmlink" data-id="pve1~web-dmz" d="M594,286V421Q594,427 600,427H628"/>
-    <path class="edge vmlink" data-id="pve1~proxy-dmz" d="M594,286V467Q594,473 600,473H628"/>
-    <path class="edge vmlink" data-id="pve1~lab-dc01" d="M594,286V513Q594,519 600,519H628"/>
-    <path class="edge vmlink" data-id="pve1~lab-k8s" d="M594,286V559Q594,565 600,565H628"/>
-    <path class="edge vmlink off" data-id="pve1~lab-k8s-1" d="M594,286V559Q594,565 600,565H628"/>
-    <path class="edge vmlink off" data-id="pve1~lab-k8s-2" d="M594,286V605Q594,611 600,611H628"/>
-    <path class="edge vmlink off" data-id="pve1~lab-k8s-3" d="M594,286V651Q594,657 600,657H628"/>
+    <path class="edge uplink" data-id="sw-core~ap-garage" d="M430,186V264"/>
+    <path class="edge" data-id="sw-core~nas" data-v="10" d="M552,186V264"/>
+    <path class="edge" data-id="sw-core~pve1" d="M674,186V264"/>
+    <path class="edge" data-id="sw-core~hub-zigbee" data-v="30" d="M836,186V264"/>
+    <path class="edge" data-id="sw-core~cam-door" data-v="30" d="M958,186V264"/>
+    <path class="edge" data-id="sw-desk~desk-01" data-v="10" d="M26,329Q26,335 32,335H60"/>
+    <path class="edge" data-id="sw-desk~printer-1" data-v="10" d="M26,375Q26,381 32,381H60"/>
+    <path class="edge" data-id="sw-desk~lab-ws01" data-v="20" d="M26,421Q26,427 32,427H60"/>
+    <path class="edge wifi" data-id="ap-hall~laptop-02" data-v="10" d="M188,375Q188,381 194,381H262"/>
+    <path class="edge wifi" data-id="ap-hall~thermostat-1" data-v="30" d="M188,421Q188,427 194,427H262"/>
+    <path class="edge wifi" data-id="ap-hall~plug-kitchen" data-v="30" d="M188,467Q188,473 194,473H262"/>
+    <path class="edge wifi" data-id="ap-hall~speaker-den" data-v="30" d="M188,513Q188,519 194,519H262"/>
+    <path class="edge wifi" data-id="ap-garage~doorbell" data-v="30" d="M388,286V364"/>
+    <path class="edge vmlink" data-id="pve1~ha" data-v="10" d="M632,337Q632,343 638,343H666"/>
+    <path class="edge vmlink" data-id="pve1~tenko1" data-v="10" d="M632,383Q632,389 638,389H666"/>
+    <path class="edge vmlink" data-id="pve1~web-dmz" data-v="40" d="M632,429Q632,435 638,435H666"/>
+    <path class="edge vmlink" data-id="pve1~proxy-dmz" data-v="40" d="M632,475Q632,481 638,481H666"/>
+    <path class="edge vmlink" data-id="pve1~lab-dc01" data-v="20" d="M632,521Q632,527 638,527H666"/>
+    <path class="edge vmlink" data-id="pve1~lab-k8s" data-v="20" d="M632,567Q632,573 638,573H666"/>
+    <path class="edge vmlink off" data-id="pve1~lab-k8s-1" data-v="20" d="M632,567Q632,573 638,573H666"/>
+    <path class="edge vmlink off" data-id="pve1~lab-k8s-2" data-v="20" d="M632,613Q632,619 638,619H666"/>
+    <path class="edge vmlink off" data-id="pve1~lab-k8s-3" data-v="20" d="M632,659Q632,665 638,665H666"/>
     </g>
     <g class="nodes">
-    <g class="wan" data-id="wan" style="transform:translate(469px,4px)"><use class="nicon" href="#i-dns" x="0" y="2" width="16" height="16"/><text class="wtx" x="22" y="15">WAN</text></g>
-    <g class="node infra" data-id="gw" data-kind="router" role="button" tabindex="0" aria-pressed="false" aria-label="gw, router, management VLAN 10 LAN, 192.0.2.1" style="transform:translate(440px,66px)">
+    <g class="wan" data-id="wan" style="transform:translate(487px,4px)"><use class="nicon" href="#i-dns" x="0" y="2" width="16" height="16"/><text class="wtx" x="22" y="15">WAN</text></g>
+    <g class="node infra" data-id="gw" data-kind="router" role="button" tabindex="0" aria-pressed="false" aria-label="gw, router, management VLAN 10 LAN, 192.0.2.1" style="transform:translate(459px,66px)">
       <polygon class="halo" points="12,0 96,0 108,19 96,38 12,38 0,19"/>
       <polygon class="body" points="12,0 96,0 108,19 96,38 12,38 0,19"/>
       <use class="nicon" href="#i-router" x="13" y="11" width="16" height="16"/>
@@ -300,28 +350,28 @@
       <text class="nm" x="28" y="16">sw-desk</text>
       <text class="ip nsub" x="28" y="31">192.0.2.3</text>
     </g>
-    <g class="node infra" data-id="ap-hall" data-kind="ap" role="button" tabindex="0" aria-pressed="false" aria-label="ap-hall, access point, management VLAN 10 LAN, 192.0.2.4" style="transform:translate(176px,256px)">
+    <g class="node infra" data-id="ap-hall" data-kind="ap" role="button" tabindex="0" aria-pressed="false" aria-label="ap-hall, access point, management VLAN 10 LAN, 192.0.2.4, wireless networks Home, Home-IoT and Lab-Test" style="transform:translate(176px,256px)">
       <rect class="halo" width="108" height="38" rx="19"/>
       <rect class="body" width="108" height="38" rx="19"/>
       <use class="nicon" href="#i-wifi" x="12" y="11" width="16" height="16"/>
       <text class="nm" x="32" y="16">ap-hall</text>
       <text class="ip nsub" x="32" y="31">192.0.2.4</text>
     </g>
-    <g class="node infra" data-id="ap-garage" data-kind="ap" role="button" tabindex="0" aria-pressed="false" aria-label="ap-garage, access point, management VLAN 10 LAN, 192.0.2.5" style="transform:translate(338px,256px)">
+    <g class="node infra" data-id="ap-garage" data-kind="ap" role="button" tabindex="0" aria-pressed="false" aria-label="ap-garage, access point, management VLAN 10 LAN, 192.0.2.5, wireless networks Home and Home-IoT" style="transform:translate(376px,256px)">
       <rect class="halo" width="108" height="38" rx="19"/>
       <rect class="body" width="108" height="38" rx="19"/>
       <use class="nicon" href="#i-wifi" x="12" y="11" width="16" height="16"/>
       <text class="nm" x="32" y="16">ap-garage</text>
       <text class="ip nsub" x="32" y="31">192.0.2.5</text>
     </g>
-    <g class="node leaf v-lan" data-id="nas" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="nas, client, VLAN 10 LAN, 192.0.2.11" style="transform:translate(460px,256px)">
+    <g class="node leaf" data-v="10" data-id="nas" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="nas, client, VLAN 10 LAN, 192.0.2.11" style="transform:translate(498px,256px)">
       <rect class="halo" width="108" height="38" rx="8"/>
       <rect class="body" width="108" height="38" rx="8"/>
       <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">nas</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">10 LAN</text></g>
     </g>
-    <g class="node infra" data-id="pve1" data-kind="hypervisor" role="button" tabindex="0" aria-pressed="false" aria-label="pve1, hypervisor, management VLAN 10 LAN, 192.0.2.10" style="transform:translate(582px,256px)">
+    <g class="node infra" data-id="pve1" data-kind="hypervisor" role="button" tabindex="0" aria-pressed="false" aria-label="pve1, hypervisor, management VLAN 10 LAN, 192.0.2.10" style="transform:translate(620px,256px)">
       <rect class="stack" x="5" y="5" width="108" height="38" rx="6"/>
       <rect class="halo" width="108" height="38" rx="6"/>
       <rect class="body" width="108" height="38" rx="6"/>
@@ -329,112 +379,112 @@
       <text class="nm" x="28" y="16">pve1</text>
       <text class="ip nsub" x="28" y="31">192.0.2.10</text>
     </g>
-    <g class="node leaf v-iot" data-id="hub-zigbee" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="hub-zigbee, client, VLAN 30 IoT, 198.51.100.20" style="transform:translate(744px,256px)">
+    <g class="node leaf" data-v="30" data-id="hub-zigbee" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="hub-zigbee, client, VLAN 30 IoT, 198.51.100.20" style="transform:translate(782px,256px)">
       <rect class="halo" width="108" height="38" rx="8"/>
       <rect class="body" width="108" height="38" rx="8"/>
       <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">hub-zigbee</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">30 IoT</text></g>
     </g>
-    <g class="node leaf v-iot" data-id="cam-door" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="cam-door, client, VLAN 30 IoT, 198.51.100.43" style="transform:translate(866px,256px)">
+    <g class="node leaf" data-v="30" data-id="cam-door" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="cam-door, client, VLAN 30 IoT, 198.51.100.43" style="transform:translate(904px,256px)">
       <rect class="halo" width="108" height="38" rx="8"/>
       <rect class="body" width="108" height="38" rx="8"/>
       <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">cam-door</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">30 IoT</text></g>
     </g>
-    <g class="node leaf v-lan" data-id="desk-01" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="desk-01, client, VLAN 10 LAN, 192.0.2.20" style="transform:translate(54px,316px)">
+    <g class="node leaf" data-v="10" data-id="desk-01" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="desk-01, client, VLAN 10 LAN, 192.0.2.20" style="transform:translate(54px,316px)">
       <rect class="halo" width="108" height="38" rx="8"/>
       <rect class="body" width="108" height="38" rx="8"/>
       <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">desk-01</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">10 LAN</text></g>
     </g>
-    <g class="node leaf v-lan" data-id="printer-1" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="printer-1, client, VLAN 10 LAN, 192.0.2.30" style="transform:translate(54px,362px)">
+    <g class="node leaf" data-v="10" data-id="printer-1" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="printer-1, client, VLAN 10 LAN, 192.0.2.30" style="transform:translate(54px,362px)">
       <rect class="halo" width="108" height="38" rx="8"/>
       <rect class="body" width="108" height="38" rx="8"/>
       <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">printer-1</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">10 LAN</text></g>
     </g>
-    <g class="node leaf v-lab" data-id="lab-ws01" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="lab-ws01, client, VLAN 20 Lab, 203.0.113.21" style="transform:translate(54px,408px)">
+    <g class="node leaf" data-v="20" data-id="lab-ws01" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="lab-ws01, client, VLAN 20 Lab, 203.0.113.21" style="transform:translate(54px,408px)">
       <rect class="halo" width="108" height="38" rx="8"/>
       <rect class="body" width="108" height="38" rx="8"/>
       <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">lab-ws01</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">20 Lab</text></g>
     </g>
-    <g class="node leaf v-lan" data-id="laptop-02" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="laptop-02, client, VLAN 10 LAN, 192.0.2.21" style="transform:translate(216px,316px)">
+    <g class="node leaf" data-v="10" data-id="laptop-02" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="laptop-02, client, VLAN 10 LAN, 192.0.2.21" style="transform:translate(256px,362px)">
       <rect class="halo" width="108" height="38" rx="8"/>
       <rect class="body" width="108" height="38" rx="8"/>
       <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">laptop-02</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">10 LAN</text></g>
     </g>
-    <g class="node leaf v-iot" data-id="thermostat-1" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="thermostat-1, client, VLAN 30 IoT, 198.51.100.41" style="transform:translate(216px,362px)">
+    <g class="node leaf" data-v="30" data-id="thermostat-1" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="thermostat-1, client, VLAN 30 IoT, 198.51.100.41" style="transform:translate(256px,408px)">
       <rect class="halo" width="108" height="38" rx="8"/>
       <rect class="body" width="108" height="38" rx="8"/>
       <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">thermostat-1</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">30 IoT</text></g>
     </g>
-    <g class="node leaf v-iot" data-id="plug-kitchen" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="plug-kitchen, client, VLAN 30 IoT, 198.51.100.42" style="transform:translate(216px,408px)">
+    <g class="node leaf" data-v="30" data-id="plug-kitchen" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="plug-kitchen, client, VLAN 30 IoT, 198.51.100.42" style="transform:translate(256px,454px)">
       <rect class="halo" width="108" height="38" rx="8"/>
       <rect class="body" width="108" height="38" rx="8"/>
       <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">plug-kitchen</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">30 IoT</text></g>
     </g>
-    <g class="node leaf v-iot" data-id="speaker-den" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="speaker-den, client, VLAN 30 IoT, 198.51.100.45" style="transform:translate(216px,454px)">
+    <g class="node leaf" data-v="30" data-id="speaker-den" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="speaker-den, client, VLAN 30 IoT, 198.51.100.45" style="transform:translate(256px,500px)">
       <rect class="halo" width="108" height="38" rx="8"/>
       <rect class="body" width="108" height="38" rx="8"/>
       <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">speaker-den</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">30 IoT</text></g>
     </g>
-    <g class="node leaf v-iot" data-id="doorbell" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="doorbell, client, VLAN 30 IoT, 198.51.100.60" style="transform:translate(338px,316px)">
+    <g class="node leaf" data-v="30" data-id="doorbell" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="doorbell, client, VLAN 30 IoT, 198.51.100.60" style="transform:translate(376px,356px)">
       <rect class="halo" width="108" height="38" rx="8"/>
       <rect class="body" width="108" height="38" rx="8"/>
       <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">doorbell</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">30 IoT</text></g>
     </g>
-    <g class="node leaf v-lan" data-id="ha" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="ha, VM, VLAN 10 LAN, 192.0.2.12" style="transform:translate(622px,316px)">
+    <g class="node leaf" data-v="10" data-id="ha" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="ha, VM, VLAN 10 LAN, 192.0.2.12" style="transform:translate(660px,324px)">
       <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">ha</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">10 LAN</text></g>
     </g>
-    <g class="node leaf v-lan" data-id="tenko1" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="tenko1, VM, VLAN 10 LAN, 192.0.2.13" style="transform:translate(622px,362px)">
+    <g class="node leaf" data-v="10" data-id="tenko1" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="tenko1, VM, VLAN 10 LAN, 192.0.2.13" style="transform:translate(660px,370px)">
       <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">tenko1</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">10 LAN</text></g>
     </g>
-    <g class="node leaf v-dmz" data-id="web-dmz" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="web-dmz, VM, VLAN 40 DMZ, 203.0.113.140" style="transform:translate(622px,408px)">
+    <g class="node leaf" data-v="40" data-id="web-dmz" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="web-dmz, VM, VLAN 40 DMZ, 203.0.113.140" style="transform:translate(660px,416px)">
       <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">web-dmz</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">40 DMZ</text></g>
     </g>
-    <g class="node leaf v-dmz" data-id="proxy-dmz" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="proxy-dmz, VM, VLAN 40 DMZ, 203.0.113.141" style="transform:translate(622px,454px)">
+    <g class="node leaf" data-v="40" data-id="proxy-dmz" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="proxy-dmz, VM, VLAN 40 DMZ, 203.0.113.141" style="transform:translate(660px,462px)">
       <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">proxy-dmz</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">40 DMZ</text></g>
     </g>
-    <g class="node leaf v-lab" data-id="lab-dc01" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="lab-dc01, VM, VLAN 20 Lab, 203.0.113.10" style="transform:translate(622px,500px)">
+    <g class="node leaf" data-v="20" data-id="lab-dc01" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="lab-dc01, VM, VLAN 20 Lab, 203.0.113.10" style="transform:translate(660px,508px)">
       <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">lab-dc01</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">20 Lab</text></g>
     </g>
-    <g class="node leaf v-lab" data-id="lab-k8s" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="lab-k8s ×3, VM, VLAN 20 Lab, 203.0.113.31 to 203.0.113.33" style="transform:translate(622px,546px)">
+    <g class="node leaf" data-v="20" data-id="lab-k8s" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="lab-k8s ×3, VM, VLAN 20 Lab, 203.0.113.31 to 203.0.113.33" style="transform:translate(660px,554px)">
       <polygon class="stack" points="16,8 116,8 116,38 108,46 8,46 8,16"/>
       <polygon class="stack" points="12,4 112,4 112,34 104,42 4,42 4,12"/>
       <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
@@ -443,21 +493,21 @@
       <text class="nm" x="28" y="16">lab-k8s ×3</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">20 Lab</text></g>
     </g>
-    <g class="node leaf v-lab off" data-id="lab-k8s-1" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="lab-k8s-1, VM, VLAN 20 Lab, 203.0.113.31" style="transform:translate(622px,546px)">
+    <g class="node leaf off" data-v="20" data-id="lab-k8s-1" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="lab-k8s-1, VM, VLAN 20 Lab, 203.0.113.31" style="transform:translate(660px,554px)">
       <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">lab-k8s-1</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">20 Lab</text></g>
     </g>
-    <g class="node leaf v-lab off" data-id="lab-k8s-2" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="lab-k8s-2, VM, VLAN 20 Lab, 203.0.113.32" style="transform:translate(622px,592px)">
+    <g class="node leaf off" data-v="20" data-id="lab-k8s-2" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="lab-k8s-2, VM, VLAN 20 Lab, 203.0.113.32" style="transform:translate(660px,600px)">
       <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
       <text class="nm" x="28" y="16">lab-k8s-2</text>
       <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">20 Lab</text></g>
     </g>
-    <g class="node leaf v-lab off" data-id="lab-k8s-3" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="lab-k8s-3, VM, VLAN 20 Lab, 203.0.113.33" style="transform:translate(622px,638px)">
+    <g class="node leaf off" data-v="20" data-id="lab-k8s-3" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="lab-k8s-3, VM, VLAN 20 Lab, 203.0.113.33" style="transform:translate(660px,646px)">
       <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
       <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
@@ -466,14 +516,14 @@
     </g>
     </g>
     <g class="ports">
-    <g class="port" data-sw="sw-core" data-port="1" data-pl="494,141" transform="translate(494 141)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 1, gw"><title>sw-core port 1, gw</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">1</text></g>
+    <g class="port" data-sw="sw-core" data-port="1" data-pl="513,141" transform="translate(513 141)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 1, gw"><title>sw-core port 1, gw</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">1</text></g>
     <g class="port" data-sw="sw-core" data-port="3" data-pl="68,208" transform="translate(68 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 3, sw-desk"><title>sw-core port 3, sw-desk</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">3</text></g>
     <g class="port" data-sw="sw-core" data-port="4" data-pl="230,208" transform="translate(230 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 4, ap-hall"><title>sw-core port 4, ap-hall</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">4</text></g>
-    <g class="port" data-sw="sw-core" data-port="5" data-pl="392,208" transform="translate(392 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 5, ap-garage"><title>sw-core port 5, ap-garage</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">5</text></g>
-    <g class="port" data-sw="sw-core" data-port="6" data-pl="514,208" transform="translate(514 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 6, nas"><title>sw-core port 6, nas</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">6</text></g>
-    <g class="port" data-sw="sw-core" data-port="8" data-pl="636,208" transform="translate(636 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 8, pve1"><title>sw-core port 8, pve1</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">8</text></g>
-    <g class="port" data-sw="sw-core" data-port="12" data-pl="798,208" transform="translate(798 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 12, hub-zigbee"><title>sw-core port 12, hub-zigbee</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">12</text></g>
-    <g class="port" data-sw="sw-core" data-port="14" data-pl="920,208" transform="translate(920 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 14, cam-door"><title>sw-core port 14, cam-door</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">14</text></g>
+    <g class="port" data-sw="sw-core" data-port="5" data-pl="430,208" transform="translate(430 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 5, ap-garage"><title>sw-core port 5, ap-garage</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">5</text></g>
+    <g class="port" data-sw="sw-core" data-port="6" data-pl="552,208" transform="translate(552 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 6, nas"><title>sw-core port 6, nas</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">6</text></g>
+    <g class="port" data-sw="sw-core" data-port="8" data-pl="674,208" transform="translate(674 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 8, pve1"><title>sw-core port 8, pve1</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">8</text></g>
+    <g class="port" data-sw="sw-core" data-port="12" data-pl="836,208" transform="translate(836 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 12, hub-zigbee"><title>sw-core port 12, hub-zigbee</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">12</text></g>
+    <g class="port" data-sw="sw-core" data-port="14" data-pl="958,208" transform="translate(958 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 14, cam-door"><title>sw-core port 14, cam-door</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">14</text></g>
     <g class="port" data-sw="sw-desk" data-port="2" data-pl="41,335" transform="translate(41 335)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-desk port 2, desk-01"><title>sw-desk port 2, desk-01</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">2</text></g>
     <g class="port" data-sw="sw-desk" data-port="5" data-pl="41,381" transform="translate(41 381)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-desk port 5, printer-1"><title>sw-desk port 5, printer-1</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">5</text></g>
     <g class="port" data-sw="sw-desk" data-port="7" data-pl="41,427" transform="translate(41 427)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-desk port 7, lab-ws01"><title>sw-desk port 7, lab-ws01</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">7</text></g>
@@ -490,6 +540,7 @@
               <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><rect class="lgs" x="4" y="3.5" width="17" height="10" rx="3"/><rect class="lgs" x="1" y="0.5" width="17" height="10" rx="3"/></svg>Hypervisor</span>
               <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><polygon class="lgs" points="4,2 21,2 21,9.5 18,12 1,12 1,5"/></svg>VM</span>
               <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><rect class="lgs" x="1" y="2" width="20" height="10" rx="3.5"/></svg>Client</span>
+              <span class="lg-item" title="Wireless network (SSID) broadcast by an access point, with the VLAN it carries"><svg viewBox="0 0 22 14" aria-hidden="true"><rect class="lgs" x="1" y="3" width="20" height="8" rx="4"/></svg>SSID</span>
             </div>
             <div class="lg-row"><span class="lg-h">Links</span>
               <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><path class="edge" d="M1 7H21"/></svg>Wired port</span>
@@ -497,13 +548,7 @@
               <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><path class="edge wifi" d="M1 7H21"/></svg>Wireless</span>
               <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><path class="edge vmlink" d="M1 7H21"/></svg>VM to host</span>
             </div>
-            <div class="lg-row"><span class="lg-h">VLAN</span>
-              <span class="lg-item"><span class="vlan lan"><span class="id">10</span> LAN</span></span>
-              <span class="lg-item"><span class="vlan lab"><span class="id">20</span> Lab</span></span>
-              <span class="lg-item"><span class="vlan iot"><span class="id">30</span> IoT</span></span>
-              <span class="lg-item"><span class="vlan dmz"><span class="id">40</span> DMZ</span></span>
-              <span class="lg-item muted">Switches and routers are neutral: they carry several VLANs</span>
-            </div>
+            <div class="lg-row" id="lg-vlan"></div>
           </div>
         </details>
 
@@ -516,8 +561,8 @@
           <span class="count"><span id="ab-name"></span><span class="addr" id="ab-ip"></span></span>
           <a class="btn sm primary" id="ab-open" href="host.html"><svg class="i sm" aria-hidden="true"><use href="#i-ext"/></svg>Open host<span class="kbd">Shift</span><span class="kbd">Enter</span></a>
           <button class="chip" id="ab-path" aria-pressed="false" title="Highlight the path to the gateway">Path to gw<span class="kbd">P</span></button>
-          <button class="chip" id="ab-focus" aria-pressed="false" title="Show only this node and its neighbours">Focus<span class="kbd">F</span></button>
-          <span class="seg" id="ab-hops" role="group" aria-label="Neighbour distance" hidden><button data-hops="1" aria-pressed="false">1 hop</button><button data-hops="2" aria-pressed="true">2 hops</button></span>
+          <button class="chip" id="ab-focus" aria-pressed="false" title="Show only this node and its neighbors">Focus<span class="kbd">F</span></button>
+          <span class="seg" id="ab-hops" role="group" aria-label="Neighbor distance" hidden><button data-hops="1" aria-pressed="false">1 hop</button><button data-hops="2" aria-pressed="true">2 hops</button></span>
           <button class="btn sm ghost" id="ab-port" hidden></button>
           <button class="btn sm ghost" id="ab-expand" hidden></button>
           <span class="sep"></span>
@@ -563,16 +608,21 @@
 
 <aside class="notes" id="notes" aria-label="Mockup notes">
   <h2>Mockup notes: topology <button class="icon-btn" data-action="notes" aria-label="Close notes"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></h2>
-  <p class="sub">Try it: hover a node, click a port badge (14 or 1), click desk-01 and press <span class="kbd">P</span>, click a VLAN chip to show only that VLAN (Shift+click adds or removes one), type "port 14" in the search, switch the layout to Radial, zoom out below 75 % and click the lab-k8s node. The three scenes in the status bar jump to the interesting states.</p>
+  <p class="sub">Try it: hover a node (ap-hall lists its wireless networks), click a port badge (14 or 1), click the Home-IoT label under an access point, click desk-01 and press <span class="kbd">P</span>, click a VLAN chip to show only that VLAN (Shift+click adds or removes one) and watch the colors change, set Color by to Selected VLANs or Site, turn Patterns on, type "port 14" in the search, switch the layout to Radial, zoom out below 75 % and click the lab-k8s node. The three scenes in the status bar jump to the interesting states.</p>
+  <ul>
+    <li><strong>Decided:</strong> VLAN colors are generated for the VLANs in view, with no fixed cap. A label on every edge group, a legend with the contrast of each color and a Patterns toggle are the backup, so color is never the only carrier.</li>
+    <li><strong>Decided:</strong> hosts are moved by dragging them onto the IPAM prefix tree. The map has no drop targets; it only selects, highlights and opens.</li>
+    <li><strong>Owner&rsquo;s request:</strong> wireless networks (SSIDs) are IPAM objects, read from UniFi with their VLAN; access points are labeled with their SSIDs.</li>
+  </ul>
   <ol>
     <li>Layered is the default because a home or branch network is a tree. Real sites add redundant links and aggregation, which a strict tree hides. Keep Layered as the default and offer Radial only as an overview, or default to whichever fits the data?</li>
-    <li>Routers, switches and APs are drawn neutral because they carry several VLANs, and only clients and VMs take a VLAN color. Is that right, or should a switch show a small stack of VLAN swatches for what its trunk carries?</li>
-    <li>Filters dim, they do not hide, so positions never move. At a few hundred nodes dimmed clutter becomes noise. Dim up to a limit and then hide automatically, or let the user choose?</li>
+    <li>Routers, switches and APs are drawn neutral because they carry several VLANs, and only clients and VMs take a VLAN color. Trunk edges list the VLANs they carry as text ("10, 20, 40"). Is the list enough, or should a switch also show a small stack of VLAN swatches?</li>
+    <li>Filters dim, they do not hide, so positions never move. At a few hundred nodes dimmed clutter becomes noise. Dim up to a limit and then hide automatically, or let the user choose? Related: with Color by Selected VLANs the same chips pick colors instead of filtering. Is one set of chips for both jobs clear?</li>
     <li>Path highlight always ends at the gateway. Should it also work between any two nodes (Shift+click a second node), for questions like "how does lab-ws01 reach web-dmz"?</li>
     <li>Port numbers sit on every wired edge. Always visible helps the "which port is that" question but adds noise. Show them always, only on hover and selection, or only above a zoom level?</li>
     <li>The port panel is read only and links to the job that last changed the port. Should it also offer "change port profile", or must every L2 change go through the move preview?</li>
     <li>Click selects and the bar offers Open host (<span class="kbd">Shift</span><span class="kbd">Enter</span>). Would you rather double-click to open the host and keep single click for select only? Clicking a switch opens its port list automatically; is that too eager?</li>
-    <li>Wireless edges are dotted and carry no label. Do you want band and signal strength on the edge, or only in the hover card?</li>
+    <li>Wireless edges now carry the SSID name and each access point lists its SSIDs. Should band and signal strength also sit on the edge, or stay in the hover card and the SSID panel? Should an SSID nobody uses yet (Lab-Test) stay on the access point?</li>
   </ol>
   <h3 style="font-size:var(--fs-13);color:var(--ink);margin:var(--sp-5) 0 0">How it scales to thousands of nodes</h3>
   <p class="sub" style="margin-top:var(--sp-2)">This page is a static SVG of 23 nodes, for review only. The product behavior is below; the controls on this page are the same ones the product keeps.</p>
@@ -580,9 +630,10 @@
     <li><strong>Clustering.</strong> A switch's clients collapse into a count bubble such as "24 clients" and expand on click. The lab-k8s node shows the pattern (select it, then Expand).</li>
     <li><strong>Search first.</strong> Type a host, IP, MAC or port, press <span class="kbd">Enter</span> to jump to the node, then show N hops around it. Nothing needs the whole map on screen.</li>
     <li><strong>Focus mode.</strong> The selected node plus 1 to 2 hops, everything else removed and the view refitted. This is the default way to read a large site.</li>
-    <li><strong>Level of detail.</strong> Labels only above a zoom threshold (zoom out below 75 % and below 50 % to see it). VLAN colors are used for at most three VLANs in focus; any further VLAN is neutral with a dashed outline and always carries its label.</li>
+    <li><strong>Level of detail.</strong> Labels only above a zoom threshold (zoom out below 75 % and below 50 % to see it). Color and shape stay at every zoom level.</li>
+    <li><strong>150 or more VLANs.</strong> Hues are generated for the VLANs in view, which stays distinguishable up to roughly a dozen. Beyond that, color by selection (only the VLAN chips you select get color, the rest neutral gray) or by site (VLANs neutral). Labels on every edge group and the Patterns toggle (a dash style per VLAN) remain as backup, and the legend lists only what is in view and counts the rest with an SI suffix (1.2K).</li>
     <li><strong>Rendering.</strong> WebGL with sigma.js and graphology, and an ELK layered layout, chosen in the phase 1 spike. Plain SVG gets sluggish in the low thousands of elements and WebGL stays smooth well beyond that, so the spike decides by measuring.</li>
-    <li><strong>Position memory.</strong> Layout is computed once, then positions are stored per user and site, so the map does not reshuffle between visits. New nodes are placed next to their neighbours, and "Reset layout" is the only thing that recomputes.</li>
+    <li><strong>Position memory.</strong> Layout is computed once, then positions are stored per user and site, so the map does not reshuffle between visits. New nodes are placed next to their neighbors, and "Reset layout" is the only thing that recomputes.</li>
   </ul>
 </aside>
 
@@ -592,35 +643,35 @@
 (function () {
   'use strict';
   var DATA = {
-    vbw: 988,
+    vbw: 1026,
     nodes: {
-    "wan": {"id":"wan","type":"wan","name":"WAN","dom":"","ip":"","mac":"","model":"","via":"","parent":null,"kids":["gw"],"pos":{"l":[469,4],"r":[-25,-308]},"w":{"l":52,"r":52}},
-    "gw": {"id":"gw","type":"router","name":"gw","dom":".example.test","ip":"192.0.2.1","mac":"00-00-5E-00-53-01","vlan":"10","mode":"static","seen":"now","model":"OPNsense router","via":"WAN on port wan1, LAN on sw-core port 1","parent":"wan","kids":["sw-core"],"edge":"uplink","pos":{"l":[440,66],"r":[-54,-189]},"w":{"l":108,"r":108}},
-    "sw-core": {"id":"sw-core","type":"switch","name":"sw-core","dom":".example.test","ip":"192.0.2.2","mac":"00-00-5E-00-53-02","vlan":"10","mode":"static","seen":"4 s","model":"UniFi 24-port PoE switch","via":"Uplink to gw on port 1","parent":"gw","kids":["sw-desk","ap-hall","ap-garage","nas","pve1","hub-zigbee","cam-door"],"edge":"uplink","port":1,"pk":"sw-core:1","pos":{"l":[14,156],"r":[-54,-19]},"w":{"l":960,"r":108}},
+    "wan": {"id":"wan","type":"wan","name":"WAN","dom":"","ip":"","mac":"","model":"","via":"","parent":null,"kids":["gw"],"pos":{"l":[487,4],"r":[-25,-308]},"w":{"l":52,"r":52}},
+    "gw": {"id":"gw","type":"router","name":"gw","dom":".example.test","ip":"192.0.2.1","mac":"00-00-5E-00-53-01","vlan":"10","mode":"static","seen":"now","model":"OPNsense router","via":"WAN on port wan1, LAN on sw-core port 1","parent":"wan","kids":["sw-core"],"edge":"uplink","pos":{"l":[459,66],"r":[-54,-189]},"w":{"l":108,"r":108}},
+    "sw-core": {"id":"sw-core","type":"switch","name":"sw-core","dom":".example.test","ip":"192.0.2.2","mac":"00-00-5E-00-53-02","vlan":"10","mode":"static","seen":"4 s","model":"UniFi 24-port PoE switch","via":"Uplink to gw on port 1","parent":"gw","kids":["sw-desk","ap-hall","ap-garage","nas","pve1","hub-zigbee","cam-door"],"edge":"uplink","port":1,"pk":"sw-core:1","pos":{"l":[14,156],"r":[-54,-19]},"w":{"l":998,"r":108}},
     "sw-desk": {"id":"sw-desk","type":"switch","name":"sw-desk","dom":".example.test","ip":"192.0.2.3","mac":"00-00-5E-00-53-03","vlan":"10","mode":"static","seen":"2 s","model":"UniFi 8-port switch","via":"Uplink via sw-core port 3","parent":"sw-core","kids":["desk-01","printer-1","lab-ws01"],"edge":"uplink","port":3,"pk":"sw-core:3","pos":{"l":[14,256],"r":[-332.2,-38]},"w":{"l":108,"r":108}},
-    "ap-hall": {"id":"ap-hall","type":"ap","name":"ap-hall","dom":".example.test","ip":"192.0.2.4","mac":"00-00-5E-00-53-04","vlan":"10","mode":"reserved","seen":"1 s","model":"UniFi access point","via":"Connected via sw-core port 4, uplink, PoE 7.8 W","parent":"sw-core","kids":["laptop-02","thermostat-1","plug-kitchen","speaker-den"],"edge":"uplink","port":4,"pk":"sw-core:4","pos":{"l":[176,256],"r":[-146.5,141.5]},"w":{"l":108,"r":108}},
-    "ap-garage": {"id":"ap-garage","type":"ap","name":"ap-garage","dom":".example.test","ip":"192.0.2.5","mac":"00-00-5E-00-53-05","vlan":"10","mode":"reserved","seen":"1 s","model":"UniFi access point","via":"Connected via sw-core port 5, uplink, PoE 7.2 W","parent":"sw-core","kids":["doorbell"],"edge":"uplink","port":5,"pk":"sw-core:5","pos":{"l":[338,256],"r":[-272.9,-125]},"w":{"l":108,"r":108}},
-    "nas": {"id":"nas","type":"client","name":"nas","dom":".example.test","ip":"192.0.2.11","mac":"00-00-5E-00-53-0B","vlan":"10","mode":"static","seen":"12 s","model":"Network storage","via":"Connected via sw-core port 6, 1 Gb/s","parent":"sw-core","kids":[],"edge":"wired","port":6,"pk":"sw-core:6","pos":{"l":[460,256],"r":[-306.3,54.8]},"w":{"l":108,"r":108}},
-    "pve1": {"id":"pve1","type":"hypervisor","name":"pve1","dom":".example.test","ip":"192.0.2.10","mac":"00-00-5E-00-53-0A","vlan":"10","mode":"static","seen":"now","model":"Proxmox VE host","via":"Connected via sw-core port 8, trunk VLAN 10, 20 and 40","parent":"sw-core","kids":["ha","tenko1","web-dmz","proxy-dmz","lab-dc01","lab-k8s","lab-k8s-1","lab-k8s-2","lab-k8s-3"],"edge":"wired","port":8,"pk":"sw-core:8","pos":{"l":[582,256],"r":[219,-56.8]},"w":{"l":108,"r":108}},
-    "hub-zigbee": {"id":"hub-zigbee","type":"client","name":"hub-zigbee","dom":".iot.example.test","ip":"198.51.100.20","mac":"00-00-5E-00-53-28","vlan":"30","mode":"static","seen":"3 s","model":"Zigbee hub","via":"Connected via sw-core port 12, 100 Mb/s","parent":"sw-core","kids":[],"edge":"wired","port":12,"pk":"sw-core:12","pos":{"l":[744,256],"r":[-175.5,-172.2]},"w":{"l":108,"r":108}},
-    "cam-door": {"id":"cam-door","type":"client","name":"cam-door","dom":".iot.example.test","ip":"198.51.100.43","mac":"00-00-5E-00-53-2B","vlan":"30","mode":"reserved","seen":"2 s","model":"IP camera","via":"Connected via sw-core port 14, PoE 6.1 W","parent":"sw-core","kids":[],"edge":"wired","port":14,"pk":"sw-core:14","pos":{"l":[866,256],"r":[67.5,134.2]},"w":{"l":108,"r":108}},
+    "ap-hall": {"id":"ap-hall","type":"ap","name":"ap-hall","dom":".example.test","ip":"192.0.2.4","mac":"00-00-5E-00-53-04","vlan":"10","mode":"reserved","seen":"1 s","model":"UniFi access point","via":"Connected via sw-core port 4, uplink, PoE 7.8 W","parent":"sw-core","kids":["laptop-02","thermostat-1","plug-kitchen","speaker-den"],"ssids":["Home","Home-IoT","Lab-Test"],"edge":"uplink","port":4,"pk":"sw-core:4","pos":{"l":[176,256],"r":[-146.5,141.5]},"w":{"l":108,"r":108}},
+    "ap-garage": {"id":"ap-garage","type":"ap","name":"ap-garage","dom":".example.test","ip":"192.0.2.5","mac":"00-00-5E-00-53-05","vlan":"10","mode":"reserved","seen":"1 s","model":"UniFi access point","via":"Connected via sw-core port 5, uplink, PoE 7.2 W","parent":"sw-core","kids":["doorbell"],"ssids":["Home","Home-IoT"],"edge":"uplink","port":5,"pk":"sw-core:5","pos":{"l":[376,256],"r":[-272.9,-125]},"w":{"l":108,"r":108}},
+    "nas": {"id":"nas","type":"client","name":"nas","dom":".example.test","ip":"192.0.2.11","mac":"00-00-5E-00-53-0B","vlan":"10","mode":"static","seen":"12 s","model":"Network storage","via":"Connected via sw-core port 6, 1 Gb/s","parent":"sw-core","kids":[],"edge":"wired","port":6,"pk":"sw-core:6","pos":{"l":[498,256],"r":[-306.3,54.8]},"w":{"l":108,"r":108}},
+    "pve1": {"id":"pve1","type":"hypervisor","name":"pve1","dom":".example.test","ip":"192.0.2.10","mac":"00-00-5E-00-53-0A","vlan":"10","mode":"static","seen":"now","model":"Proxmox VE host","via":"Connected via sw-core port 8, trunk VLAN 10, 20 and 40","parent":"sw-core","kids":["ha","tenko1","web-dmz","proxy-dmz","lab-dc01","lab-k8s","lab-k8s-1","lab-k8s-2","lab-k8s-3"],"edge":"wired","port":8,"pk":"sw-core:8","pos":{"l":[620,256],"r":[219,-56.8]},"w":{"l":108,"r":108}},
+    "hub-zigbee": {"id":"hub-zigbee","type":"client","name":"hub-zigbee","dom":".iot.example.test","ip":"198.51.100.20","mac":"00-00-5E-00-53-28","vlan":"30","mode":"static","seen":"3 s","model":"Zigbee hub","via":"Connected via sw-core port 12, 100 Mb/s","parent":"sw-core","kids":[],"edge":"wired","port":12,"pk":"sw-core:12","pos":{"l":[782,256],"r":[-175.5,-172.2]},"w":{"l":108,"r":108}},
+    "cam-door": {"id":"cam-door","type":"client","name":"cam-door","dom":".iot.example.test","ip":"198.51.100.43","mac":"00-00-5E-00-53-2B","vlan":"30","mode":"reserved","seen":"2 s","model":"IP camera","via":"Connected via sw-core port 14, PoE 6.1 W","parent":"sw-core","kids":[],"edge":"wired","port":14,"pk":"sw-core:14","pos":{"l":[904,256],"r":[67.5,134.2]},"w":{"l":108,"r":108}},
     "desk-01": {"id":"desk-01","type":"client","name":"desk-01","dom":".example.test","ip":"192.0.2.20","mac":"00-00-5E-00-53-14","vlan":"10","mode":"reserved","seen":"now","model":"Workstation","via":"Connected via sw-desk port 2, 1 Gb/s","parent":"sw-desk","kids":[],"edge":"wired","port":2,"pk":"sw-desk:2","pos":{"l":[54,316],"r":[-531,14.6]},"w":{"l":108,"r":108}},
     "printer-1": {"id":"printer-1","type":"client","name":"printer-1","dom":".example.test","ip":"192.0.2.30","mac":"00-00-5E-00-53-1E","vlan":"10","mode":"static","seen":"40 s","model":"Network printer","via":"Connected via sw-desk port 5, 100 Mb/s","parent":"sw-desk","kids":[],"edge":"wired","port":5,"pk":"sw-desk:5","pos":{"l":[54,362],"r":[-531,-52.6]},"w":{"l":108,"r":108}},
     "lab-ws01": {"id":"lab-ws01","type":"client","name":"lab-ws01","dom":".lab.example.test","ip":"203.0.113.21","mac":"00-00-5E-00-53-54","vlan":"20","mode":"dynamic","seen":"9 s","model":"Workstation","via":"Connected via sw-desk port 7, 1 Gb/s","parent":"sw-desk","kids":[],"edge":"wired","port":7,"pk":"sw-desk:7","pos":{"l":[54,408],"r":[-507.1,-118.1]},"w":{"l":108,"r":108}},
-    "laptop-02": {"id":"laptop-02","type":"client","name":"laptop-02","dom":".example.test","ip":"192.0.2.21","mac":"00-00-5E-00-53-15","vlan":"10","mode":"dynamic","seen":"6 min","model":"Laptop","via":"Wireless on ap-hall, 5 GHz, -56 dBm","parent":"ap-hall","kids":[],"edge":"wifi","pos":{"l":[216,316],"r":[-13.7,279.9]},"w":{"l":108,"r":108}},
-    "thermostat-1": {"id":"thermostat-1","type":"client","name":"thermostat-1","dom":".iot.example.test","ip":"198.51.100.41","mac":"00-00-5E-00-53-29","vlan":"30","mode":"reserved","seen":"8 s","model":"Thermostat","via":"Wireless on ap-hall, 2.4 GHz, -61 dBm","parent":"ap-hall","kids":[],"edge":"wifi","pos":{"l":[216,362],"r":[-147.6,275.2]},"w":{"l":108,"r":108}},
-    "plug-kitchen": {"id":"plug-kitchen","type":"client","name":"plug-kitchen","dom":".iot.example.test","ip":"198.51.100.42","mac":"00-00-5E-00-53-2A","vlan":"30","mode":"reserved","seen":"31 s","model":"Smart plug","via":"Wireless on ap-hall, 2.4 GHz, -67 dBm","parent":"ap-hall","kids":[],"edge":"wifi","pos":{"l":[216,408],"r":[-274.3,247.5]},"w":{"l":108,"r":108}},
-    "speaker-den": {"id":"speaker-den","type":"client","name":"speaker-den","dom":".iot.example.test","ip":"198.51.100.45","mac":"00-00-5E-00-53-2C","vlan":"30","mode":"reserved","seen":"5 s","model":"Speaker","via":"Wireless on ap-hall, 5 GHz, -58 dBm","parent":"ap-hall","kids":[],"edge":"wifi","pos":{"l":[216,454],"r":[-383.8,199]},"w":{"l":108,"r":108}},
-    "doorbell": {"id":"doorbell","type":"client","name":"doorbell","dom":".iot.example.test","ip":"198.51.100.60","mac":"00-00-5E-00-53-3C","vlan":"30","mode":"reserved","seen":"14 s","model":"Video doorbell","via":"Wireless on ap-garage, 2.4 GHz, -63 dBm","parent":"ap-garage","kids":[],"edge":"wifi","pos":{"l":[338,316],"r":[-429.3,-206]},"w":{"l":108,"r":108}},
-    "ha": {"id":"ha","type":"vm","name":"ha","dom":".example.test","ip":"192.0.2.12","mac":"00-00-5E-00-53-0C","vlan":"10","mode":"reserved","seen":"3 s","model":"Home automation hub, VM","via":"Runs on pve1, bridge vmbr0","parent":"pve1","kids":[],"edge":"vmlink","pos":{"l":[622,316],"r":[117.2,-299.3]},"w":{"l":108,"r":108}},
-    "tenko1": {"id":"tenko1","type":"vm","name":"tenko1","dom":".example.test","ip":"192.0.2.13","mac":"00-00-5E-00-53-0D","vlan":"10","mode":"static","seen":"now","model":"Tenko controller, LXC container","via":"Runs on pve1, bridge vmbr0","parent":"pve1","kids":[],"edge":"vmlink","pos":{"l":[622,362],"r":[234.6,-258.7]},"w":{"l":108,"r":108}},
-    "web-dmz": {"id":"web-dmz","type":"vm","name":"web-dmz","dom":".dmz.example.test","ip":"203.0.113.140","mac":"00-00-5E-00-53-60","vlan":"40","mode":"static","seen":"5 s","model":"Web server, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 40","parent":"pve1","kids":[],"edge":"vmlink","pos":{"l":[622,408],"r":[329.5,-199.4]},"w":{"l":108,"r":108}},
-    "proxy-dmz": {"id":"proxy-dmz","type":"vm","name":"proxy-dmz","dom":".dmz.example.test","ip":"203.0.113.141","mac":"00-00-5E-00-53-61","vlan":"40","mode":"static","seen":"5 s","model":"Reverse proxy, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 40","parent":"pve1","kids":[],"edge":"vmlink","pos":{"l":[622,454],"r":[394.4,-126]},"w":{"l":108,"r":108}},
-    "lab-dc01": {"id":"lab-dc01","type":"vm","name":"lab-dc01","dom":".lab.example.test","ip":"203.0.113.10","mac":"00-00-5E-00-53-50","vlan":"20","mode":"static","seen":"2 s","model":"Domain controller, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 20","parent":"pve1","kids":[],"edge":"vmlink","pos":{"l":[622,500],"r":[424.3,-44.2]},"w":{"l":108,"r":108}},
-    "lab-k8s": {"id":"lab-k8s","type":"vm","name":"lab-k8s","dom":".lab.example.test","ip":"203.0.113.31","mac":"00-00-5E-00-53-51","vlan":"20","mode":"static","seen":"2 s","model":"Kubernetes nodes, 3 VMs","via":"Runs on pve1, bridge vmbr0, VLAN tag 20","parent":"pve1","kids":[],"edge":"vmlink","group":true,"memberIds":["lab-k8s-1","lab-k8s-2","lab-k8s-3"],"count":3,"pos":{"l":[622,546],"r":[372.5,118.7]},"w":{"l":108,"r":108}},
-    "lab-k8s-1": {"id":"lab-k8s-1","type":"vm","name":"lab-k8s-1","dom":".lab.example.test","ip":"203.0.113.31","mac":"00-00-5E-00-53-51","vlan":"20","mode":"static","seen":"2 s","model":"Kubernetes node, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 20","parent":"pve1","kids":[],"edge":"vmlink","member":true,"pos":{"l":[622,546],"r":[416.8,39.5]},"w":{"l":108,"r":108}},
-    "lab-k8s-2": {"id":"lab-k8s-2","type":"vm","name":"lab-k8s-2","dom":".lab.example.test","ip":"203.0.113.32","mac":"00-00-5E-00-53-52","vlan":"20","mode":"static","seen":"3 s","model":"Kubernetes node, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 20","parent":"pve1","kids":[],"edge":"vmlink","member":true,"pos":{"l":[622,592],"r":[372.5,118.7]},"w":{"l":108,"r":108}},
-    "lab-k8s-3": {"id":"lab-k8s-3","type":"vm","name":"lab-k8s-3","dom":".lab.example.test","ip":"203.0.113.33","mac":"00-00-5E-00-53-53","vlan":"20","mode":"static","seen":"2 s","model":"Kubernetes node, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 20","parent":"pve1","kids":[],"edge":"vmlink","member":true,"pos":{"l":[622,638],"r":[294.8,187.1]},"w":{"l":108,"r":108}}
+    "laptop-02": {"id":"laptop-02","type":"client","name":"laptop-02","dom":".example.test","ip":"192.0.2.21","mac":"00-00-5E-00-53-15","vlan":"10","mode":"dynamic","seen":"6 min","model":"Laptop","via":"Wireless on ap-hall, SSID Home, 5 GHz, -56 dBm","ssid":"Home","band":"5 GHz","sig":-56,"parent":"ap-hall","kids":[],"edge":"wifi","pos":{"l":[256,362],"r":[-13.7,279.9]},"w":{"l":108,"r":108}},
+    "thermostat-1": {"id":"thermostat-1","type":"client","name":"thermostat-1","dom":".iot.example.test","ip":"198.51.100.41","mac":"00-00-5E-00-53-29","vlan":"30","mode":"reserved","seen":"8 s","model":"Thermostat","via":"Wireless on ap-hall, SSID Home-IoT, 2.4 GHz, -61 dBm","ssid":"Home-IoT","band":"2.4 GHz","sig":-61,"parent":"ap-hall","kids":[],"edge":"wifi","pos":{"l":[256,408],"r":[-147.6,275.2]},"w":{"l":108,"r":108}},
+    "plug-kitchen": {"id":"plug-kitchen","type":"client","name":"plug-kitchen","dom":".iot.example.test","ip":"198.51.100.42","mac":"00-00-5E-00-53-2A","vlan":"30","mode":"reserved","seen":"31 s","model":"Smart plug","via":"Wireless on ap-hall, SSID Home-IoT, 2.4 GHz, -67 dBm","ssid":"Home-IoT","band":"2.4 GHz","sig":-67,"parent":"ap-hall","kids":[],"edge":"wifi","pos":{"l":[256,454],"r":[-274.3,247.5]},"w":{"l":108,"r":108}},
+    "speaker-den": {"id":"speaker-den","type":"client","name":"speaker-den","dom":".iot.example.test","ip":"198.51.100.45","mac":"00-00-5E-00-53-2C","vlan":"30","mode":"reserved","seen":"5 s","model":"Speaker","via":"Wireless on ap-hall, SSID Home-IoT, 5 GHz, -58 dBm","ssid":"Home-IoT","band":"5 GHz","sig":-58,"parent":"ap-hall","kids":[],"edge":"wifi","pos":{"l":[256,500],"r":[-383.8,199]},"w":{"l":108,"r":108}},
+    "doorbell": {"id":"doorbell","type":"client","name":"doorbell","dom":".iot.example.test","ip":"198.51.100.60","mac":"00-00-5E-00-53-3C","vlan":"30","mode":"reserved","seen":"14 s","model":"Video doorbell","via":"Wireless on ap-garage, SSID Home-IoT, 2.4 GHz, -63 dBm","ssid":"Home-IoT","band":"2.4 GHz","sig":-63,"parent":"ap-garage","kids":[],"edge":"wifi","pos":{"l":[376,356],"r":[-429.3,-206]},"w":{"l":108,"r":108}},
+    "ha": {"id":"ha","type":"vm","name":"ha","dom":".example.test","ip":"192.0.2.12","mac":"00-00-5E-00-53-0C","vlan":"10","mode":"reserved","seen":"3 s","model":"Home Assistant VM","via":"Runs on pve1, bridge vmbr0","parent":"pve1","kids":[],"edge":"vmlink","pos":{"l":[660,324],"r":[117.2,-299.3]},"w":{"l":108,"r":108}},
+    "tenko1": {"id":"tenko1","type":"vm","name":"tenko1","dom":".example.test","ip":"192.0.2.13","mac":"00-00-5E-00-53-0D","vlan":"10","mode":"static","seen":"now","model":"Tenko controller, LXC container","via":"Runs on pve1, bridge vmbr0","parent":"pve1","kids":[],"edge":"vmlink","pos":{"l":[660,370],"r":[234.6,-258.7]},"w":{"l":108,"r":108}},
+    "web-dmz": {"id":"web-dmz","type":"vm","name":"web-dmz","dom":".dmz.example.test","ip":"203.0.113.140","mac":"00-00-5E-00-53-60","vlan":"40","mode":"static","seen":"5 s","model":"Web server, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 40","parent":"pve1","kids":[],"edge":"vmlink","pos":{"l":[660,416],"r":[329.5,-199.4]},"w":{"l":108,"r":108}},
+    "proxy-dmz": {"id":"proxy-dmz","type":"vm","name":"proxy-dmz","dom":".dmz.example.test","ip":"203.0.113.141","mac":"00-00-5E-00-53-61","vlan":"40","mode":"static","seen":"5 s","model":"Reverse proxy, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 40","parent":"pve1","kids":[],"edge":"vmlink","pos":{"l":[660,462],"r":[394.4,-126]},"w":{"l":108,"r":108}},
+    "lab-dc01": {"id":"lab-dc01","type":"vm","name":"lab-dc01","dom":".lab.example.test","ip":"203.0.113.10","mac":"00-00-5E-00-53-50","vlan":"20","mode":"static","seen":"2 s","model":"Domain controller, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 20","parent":"pve1","kids":[],"edge":"vmlink","pos":{"l":[660,508],"r":[424.3,-44.2]},"w":{"l":108,"r":108}},
+    "lab-k8s": {"id":"lab-k8s","type":"vm","name":"lab-k8s","dom":".lab.example.test","ip":"203.0.113.31","mac":"00-00-5E-00-53-51","vlan":"20","mode":"static","seen":"2 s","model":"Kubernetes nodes, 3 VMs","via":"Runs on pve1, bridge vmbr0, VLAN tag 20","parent":"pve1","kids":[],"edge":"vmlink","group":true,"memberIds":["lab-k8s-1","lab-k8s-2","lab-k8s-3"],"count":3,"pos":{"l":[660,554],"r":[372.5,118.7]},"w":{"l":108,"r":108}},
+    "lab-k8s-1": {"id":"lab-k8s-1","type":"vm","name":"lab-k8s-1","dom":".lab.example.test","ip":"203.0.113.31","mac":"00-00-5E-00-53-51","vlan":"20","mode":"static","seen":"2 s","model":"Kubernetes node, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 20","parent":"pve1","kids":[],"edge":"vmlink","member":true,"pos":{"l":[660,554],"r":[416.8,39.5]},"w":{"l":108,"r":108}},
+    "lab-k8s-2": {"id":"lab-k8s-2","type":"vm","name":"lab-k8s-2","dom":".lab.example.test","ip":"203.0.113.32","mac":"00-00-5E-00-53-52","vlan":"20","mode":"static","seen":"3 s","model":"Kubernetes node, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 20","parent":"pve1","kids":[],"edge":"vmlink","member":true,"pos":{"l":[660,600],"r":[372.5,118.7]},"w":{"l":108,"r":108}},
+    "lab-k8s-3": {"id":"lab-k8s-3","type":"vm","name":"lab-k8s-3","dom":".lab.example.test","ip":"203.0.113.33","mac":"00-00-5E-00-53-53","vlan":"20","mode":"static","seen":"2 s","model":"Kubernetes node, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 20","parent":"pve1","kids":[],"edge":"vmlink","member":true,"pos":{"l":[660,646],"r":[294.8,187.1]},"w":{"l":108,"r":108}}
     },
     edges: [{"id":"wan~gw","from":"wan","to":"gw"},{"id":"gw~sw-core","from":"gw","to":"sw-core","sw":"sw-core","port":1},{"id":"sw-core~sw-desk","from":"sw-core","to":"sw-desk","sw":"sw-core","port":3},{"id":"sw-core~ap-hall","from":"sw-core","to":"ap-hall","sw":"sw-core","port":4},{"id":"sw-core~ap-garage","from":"sw-core","to":"ap-garage","sw":"sw-core","port":5},{"id":"sw-core~nas","from":"sw-core","to":"nas","sw":"sw-core","port":6},{"id":"sw-core~pve1","from":"sw-core","to":"pve1","sw":"sw-core","port":8},{"id":"sw-core~hub-zigbee","from":"sw-core","to":"hub-zigbee","sw":"sw-core","port":12},{"id":"sw-core~cam-door","from":"sw-core","to":"cam-door","sw":"sw-core","port":14},{"id":"sw-desk~desk-01","from":"sw-desk","to":"desk-01","sw":"sw-desk","port":2},{"id":"sw-desk~printer-1","from":"sw-desk","to":"printer-1","sw":"sw-desk","port":5},{"id":"sw-desk~lab-ws01","from":"sw-desk","to":"lab-ws01","sw":"sw-desk","port":7},{"id":"ap-hall~laptop-02","from":"ap-hall","to":"laptop-02"},{"id":"ap-hall~thermostat-1","from":"ap-hall","to":"thermostat-1"},{"id":"ap-hall~plug-kitchen","from":"ap-hall","to":"plug-kitchen"},{"id":"ap-hall~speaker-den","from":"ap-hall","to":"speaker-den"},{"id":"ap-garage~doorbell","from":"ap-garage","to":"doorbell"},{"id":"pve1~ha","from":"pve1","to":"ha"},{"id":"pve1~tenko1","from":"pve1","to":"tenko1"},{"id":"pve1~web-dmz","from":"pve1","to":"web-dmz"},{"id":"pve1~proxy-dmz","from":"pve1","to":"proxy-dmz"},{"id":"pve1~lab-dc01","from":"pve1","to":"lab-dc01"},{"id":"pve1~lab-k8s","from":"pve1","to":"lab-k8s"},{"id":"pve1~lab-k8s-1","from":"pve1","to":"lab-k8s-1"},{"id":"pve1~lab-k8s-2","from":"pve1","to":"lab-k8s-2"},{"id":"pve1~lab-k8s-3","from":"pve1","to":"lab-k8s-3"}]
   };
@@ -628,7 +679,31 @@
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
 
   var NODE = DATA.nodes, EDGES = DATA.edges;
-  var VL = { '10': { key: 'lan', name: 'LAN' }, '20': { key: 'lab', name: 'Lab' }, '30': { key: 'iot', name: 'IoT' }, '40': { key: 'dmz', name: 'DMZ' } };
+  var VL = { '10': { key: 'lan', name: 'LAN', prefix: '192.0.2.0/24' }, '20': { key: 'lab', name: 'Lab', prefix: '203.0.113.0/25' }, '30': { key: 'iot', name: 'IoT', prefix: '198.51.100.0/24' }, '40': { key: 'dmz', name: 'DMZ', prefix: '203.0.113.128/26' } };
+  var VIDS = Object.keys(VL).sort(function (a, b) { return a - b; });
+  /* Wireless networks are IPAM objects read from UniFi, each with the VLAN it carries. */
+  var SSID = {
+    'Home': { vlan: '10', aps: ['ap-hall', 'ap-garage'], band: '2.4 and 5 GHz', sec: 'WPA3 personal' },
+    'Home-IoT': { vlan: '30', aps: ['ap-hall', 'ap-garage'], band: '2.4 and 5 GHz', sec: 'WPA2 personal' },
+    'Lab-Test': { vlan: '20', aps: ['ap-hall'], band: '5 GHz', sec: 'WPA3 personal' }
+  };
+  /* Dash styles for Patterns, assigned in the same order as the hues (they repeat after eight). */
+  var PATTERNS = ['none', '9 4', '4 3', '1 3 7 3', '1.5 3', '8 3 1.5 3 1.5 3', '14 3 3 3', '2.5 2.5'];
+  /* VLANs carried by each trunk edge (access ports carry their one VLAN) and where its label sits in the Layered layout. */
+  var TRUNK = {
+    'gw~sw-core': { at: [513, 121], vl: ['10', '20', '30', '40'] },
+    'sw-core~sw-desk': { at: [68, 238], vl: ['10', '20', '30'] },
+    'sw-core~ap-hall': { at: [230, 238], vl: ['10', '20', '30'] },
+    'sw-core~ap-garage': { at: [430, 238], vl: ['10', '30'] },
+    'sw-core~nas': { at: [552, 238], vl: ['10'] },
+    'sw-core~pve1': { at: [674, 238], vl: ['10', '20', '40'] },
+    'sw-core~hub-zigbee': { at: [836, 238], vl: ['30'] },
+    'sw-core~cam-door': { at: [958, 238], vl: ['30'] }
+  };
+  /* Where the VLAN tag of a bundle of client edges sits: just under the switch or host the bundle leaves. */
+  var BUNDLE = { 'sw-desk': [26, 306], 'pve1': [632, 308] };
+  /* Where the SSID name sits on each wireless edge (Layered layout). */
+  var WIFI_AT = { 'ap-hall~laptop-02': [200, 376], 'ap-hall~thermostat-1': [200, 422], 'ap-hall~plug-kitchen': [200, 468], 'ap-hall~speaker-den': [200, 514], 'ap-garage~doorbell': [394, 349] };
   var TYPE_ICON = { router: 'router', switch: 'cable', ap: 'wifi', hypervisor: 'server', vm: 'vm', client: 'rdp' };
   var TYPE_NAME = { router: 'Router', switch: 'Switch', ap: 'Access point', hypervisor: 'Hypervisor', vm: 'VM', client: 'Client' };
   var NODE_H = 38;
@@ -638,8 +713,8 @@
   var PORTS = {
     'sw-core:1': { sw: 'sw-core', port: 1, peer: 'gw', mode: 'Trunk, native VLAN 10, VLANs 20, 30 and 40 tagged', link: '2.5 Gb/s full duplex', guard: 'Uplink to gw. ' + GUARD, change: 'No change by Tenko. Set in UniFi 5 months ago.' },
     'sw-core:3': { sw: 'sw-core', port: 3, peer: 'sw-desk', mode: 'Trunk, native VLAN 10, VLANs 20 and 30 tagged', link: '1 Gb/s full duplex', guard: 'Uplink to sw-desk. ' + GUARD, change: 'No change by Tenko. Set in UniFi 5 months ago.' },
-    'sw-core:4': { sw: 'sw-core', port: 4, peer: 'ap-hall', mode: 'Trunk, native VLAN 10, VLAN 30 tagged for the IoT network', link: '1 Gb/s full duplex', poe: [7.8, 15.4], guard: 'Access point uplink. ' + GUARD, change: 'No change by Tenko. Set in UniFi 5 months ago.' },
-    'sw-core:5': { sw: 'sw-core', port: 5, peer: 'ap-garage', mode: 'Trunk, native VLAN 10, VLAN 30 tagged for the IoT network', link: '1 Gb/s full duplex', poe: [7.2, 15.4], guard: 'Access point uplink. ' + GUARD, change: 'No change by Tenko. Set in UniFi 5 months ago.' },
+    'sw-core:4': { sw: 'sw-core', port: 4, peer: 'ap-hall', mode: 'Trunk, native VLAN 10, VLANs 20 and 30 tagged for the wireless networks Lab-Test and Home-IoT', link: '1 Gb/s full duplex', poe: [7.8, 15.4], guard: 'Access point uplink. ' + GUARD, change: 'No change by Tenko. Set in UniFi 5 months ago.' },
+    'sw-core:5': { sw: 'sw-core', port: 5, peer: 'ap-garage', mode: 'Trunk, native VLAN 10, VLAN 30 tagged for the wireless network Home-IoT', link: '1 Gb/s full duplex', poe: [7.2, 15.4], guard: 'Access point uplink. ' + GUARD, change: 'No change by Tenko. Set in UniFi 5 months ago.' },
     'sw-core:6': { sw: 'sw-core', port: 6, peer: 'nas', access: '10', profile: 'LAN', link: '1 Gb/s full duplex', change: 'No change by Tenko. Set in UniFi 5 months ago.' },
     'sw-core:8': { sw: 'sw-core', port: 8, peer: 'pve1', mode: 'Trunk, native VLAN 10, VLANs 20 and 40 tagged', link: '1 Gb/s full duplex', guard: 'Hypervisor trunk. ' + GUARD, change: 'No change by Tenko. Set in UniFi 5 months ago.' },
     'sw-core:12': { sw: 'sw-core', port: 12, peer: 'hub-zigbee', access: '30', profile: 'IoT', link: '100 Mb/s full duplex', change: 'Port profile set to IoT in UniFi 3 months ago.' },
@@ -668,11 +743,13 @@
       vlans: { '10': true, '20': true, '30': true, '40': true },
       types: { router: true, 'switch': true, ap: true, hypervisor: true, vm: true, client: true },
       q: '', sel: null, selPort: null, path: false, focus: false, hops: 2,
-      layout: 'layered', expanded: false, panel: null
+      layout: 'layered', expanded: false, panel: null,
+      colorBy: 'view', colorSel: { '30': true }, patterns: false
     };
   }
   S = freshState();
-  var G = { lit: {}, gone: {}, path: null, matches: [] };
+  var G = { lit: {}, gone: {}, view: {}, path: null, matches: [] };
+  var ES = {};   /* per edge, set by render: lit, highlighted, outside focus */
 
   /* ---------- Element index ---------- */
   var svg = $('#map'), stage = $('#stage'), canvas = $('#canvas');
@@ -688,8 +765,161 @@
     var n = NODE[id], extra = '';
     if (n.group) extra = ' ' + n.memberIds.map(function (m) { return NODE[m].name + ' ' + NODE[m].ip + ' ' + NODE[m].mac; }).join(' ');
     Object.keys(PORTS).forEach(function (k) { if (PORTS[k].sw === id) extra += ' port ' + PORTS[k].port; });
-    n.hay = (n.name + n.dom + ' ' + (n.ip || '') + ' ' + (n.mac || '') + ' ' + (n.model || '') + ' ' + (n.via || '') + extra).toLowerCase();
+    if (n.ssids) extra += ' ssid ' + n.ssids.join(' ');
+    n.hay =(n.name + n.dom + ' ' + (n.ip || '') + ' ' + (n.mac || '') + ' ' + (n.model || '') + ' ' + (n.via || '') + extra).toLowerCase();
   });
+
+  /* ---------- Labels: VLAN tags on edge groups, SSID labels under access points ---------- */
+  var NS = 'http://www.w3.org/2000/svg';
+  function svgEl(tag, attrs, parent) {
+    var e = document.createElementNS(NS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  /* Text width in the UI font, so tags are sized to their text on any platform */
+  var measure = (function () {
+    var cv = document.createElement('canvas'), cx = cv.getContext && cv.getContext('2d'), fam = '';
+    return function (str, weight) {
+      if (!cx) return String(str).length * 6.2;
+      if (!fam) fam = getComputedStyle(document.body).fontFamily;
+      cx.font = weight + ' 11px ' + fam;
+      return cx.measureText(String(str)).width;
+    };
+  })();
+  var gLabels = svgEl('g', { 'class': 'labels' });
+  svg.insertBefore(gLabels, $('.nodes', svg));
+  var LAB = {}, BUN = {}, SSIDEL = [];
+  var gSsids = svgEl('g', { 'class': 'ssids' });
+  svg.insertBefore(gSsids, $('.ports', svg));
+  /* Every edge outside the WAN link gets a label: trunks and access ports list their VLANs, wireless edges name the SSID,
+     and client edges of a switch or host share one tag where the bundle leaves it (Layered) or carry a number each (Radial). */
+  EDGES.forEach(function (e) {
+    if (e.id === 'wan~gw') return;
+    var to = NODE[e.to], kind = TRUNK[e.id] ? 'tr' : to.edge === 'wifi' ? 'wf' : 'lf';
+    var g = svgEl('g', { 'class': 'elab' + (kind === 'wf' ? ' wf' : ''), 'data-k': kind, 'aria-hidden': 'true' }, gLabels);
+    if (kind === 'wf') { g.setAttribute('data-v', to.vlan); svgEl('text', { x: 0, y: 0 }, g).textContent = to.ssid; }
+    else { svgEl('rect', { 'class': 'ebg', y: -7, height: 14, rx: 7 }, g); svgEl('text', { x: 0, y: 3.9 }, g); }
+    LAB[e.id] = { g: g, kind: kind, at: kind === 'tr' ? TRUNK[e.id].at : kind === 'wf' ? WIFI_AT[e.id] : null, vl: kind === 'tr' ? TRUNK[e.id].vl : [to.vlan] };
+  });
+  Object.keys(BUNDLE).forEach(function (pid) {
+    var g = svgEl('g', { 'class': 'elab', 'data-k': 'bd', 'aria-hidden': 'true', transform: 'translate(' + BUNDLE[pid][0] + ' ' + BUNDLE[pid][1] + ')' }, gLabels);
+    svgEl('rect', { 'class': 'ebg', y: -7, height: 14, rx: 7 }, g); svgEl('text', { x: 0, y: 3.9 }, g);
+    BUN[pid] = { g: g };
+  });
+  /* Client edges that leave a switch, access point or host along one shared stem: the stem carries several VLANs and stays neutral,
+     and only each branch (the edge element itself) takes its client's VLAN color. Each stem piece belongs to the clients below it,
+     so it is highlighted, dimmed or hidden together with them. */
+  var SEGS = {};
+  (function () {
+    var groups = {};
+    EDGES.forEach(function (e) {
+      var m = /^M([\d.]+),([\d.]+)Q/.exec(e.d);
+      if (m) (groups[e.from] = groups[e.from] || []).push({ e: e, x: +m[1], y: +m[2] });
+    });
+    Object.keys(groups).forEach(function (pid) {
+      var list = groups[pid];
+      list.forEach(function (b) {
+        var prev = 286;
+        list.forEach(function (o) { if (o.y < b.y && o.y > prev) prev = o.y; });
+        var kind = NODE[b.e.to].edge;
+        b.el = svgEl('path', { 'class': 'edge seg' + (kind === 'wifi' ? ' wifi' : kind === 'vmlink' ? ' vmlink' : ''), d: 'M' + b.x + ',' + prev + 'V' + b.y }, $('.edges', svg));
+      });
+      SEGS[pid] = list;
+    });
+  })();
+  /* A tag lists VLAN numbers, each in its own color; the numbers themselves are the label, so color is never alone. */
+  function setPill(g, vids) {
+    var sig = vids.join(','); if (g._sig === sig) return; g._sig = sig;
+    var t = g.querySelector('text'); while (t.firstChild) t.removeChild(t.firstChild);
+    vids.forEach(function (v, i) {
+      if (i) svgEl('tspan', {}, t).textContent = ', ';
+      svgEl('tspan', { 'data-v': v }, t).textContent = v;
+    });
+    var w = Math.ceil(measure(vids.join(', '), 600)) + 12, r = g.querySelector('rect');
+    r.setAttribute('x', -w / 2); r.setAttribute('width', w);
+  }
+  /* One small label per wireless network under each access point, with the wifi icon and the VLAN it carries.
+     They sit in their own layer, placed from the access point's position, so they follow it into the Radial layout. */
+  (function () {
+    var wn = 0, wv = 0;
+    Object.keys(SSID).forEach(function (nm) { wn = Math.max(wn, measure(nm, 500)); wv = Math.max(wv, measure(SSID[nm].vlan, 600)); });
+    var W = Math.ceil(19 + wn + 8 + wv + 6);
+    Object.keys(NODE).forEach(function (id) {
+      var n = NODE[id]; if (!n.ssids) return;
+      n.ssids.forEach(function (nm, i) {
+        var v = SSID[nm].vlan;
+        var g = svgEl('g', { 'class': 'ssid', 'data-ssid': nm, 'data-ap': id, 'data-v': v, role: 'button', tabindex: '0', 'aria-pressed': 'false', 'aria-label': 'SSID ' + nm + ' on ' + id + ', carries VLAN ' + v + ' ' + VL[v].name, transform: 'translate(0 0)' }, gSsids);
+        g._i = i;
+        svgEl('rect', { 'class': 'sbg', width: W, height: 15, rx: 7.5 }, g);
+        svgEl('use', { 'class': 'sic', href: '#i-wifi', x: 4, y: 2, width: 11, height: 11 }, g);
+        svgEl('text', { 'class': 'sn', x: 19, y: 11 }, g).textContent = nm;
+        svgEl('text', { 'class': 'sv', x: W - 6, y: 11 }, g).textContent = v;
+        SSIDEL.push(g);
+      });
+    });
+  })();
+
+  /* ---------- Colors: generated for the VLANs in view ---------- */
+  /* tenko.vlanPalette(n, { bg }) spreads n hues around the circle at a fixed lightness and chroma per theme and checks 3:1
+     against the map background. It is called again whenever the visible set, the color mode or the theme changes.
+     The colors reach the SVG, chips, legend and panels as custom properties on .main (--v-10 and so on). */
+  var COLOR = { mode: 'view', order: [], inView: [], col: {}, site: null, sig: '' };
+  var colorHost = $('.main');
+  function mapBg() { return getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || undefined; }
+  function palette(n, bg) { return (n && window.tenko && tenko.vlanPalette) ? tenko.vlanPalette(n, bg ? { bg: bg } : {}) : []; }
+  function viewVlans() {
+    var seen = {};
+    Object.keys(NODE).forEach(function (id) { var n = NODE[id]; if (G.view[id] && VL[n.vlan]) seen[n.vlan] = true; });
+    return VIDS.filter(function (v) { return seen[v]; });
+  }
+  function applyColors() {
+    var mode = S.colorBy, bg = mapBg(), inView = viewVlans();
+    var order = mode === 'view' ? inView : mode === 'selected' ? VIDS.filter(function (v) { return S.colorSel[v]; }) : [];
+    var pal = palette(order.length, bg), site = mode === 'site' ? palette(1, bg)[0] : null, col = {};
+    order.forEach(function (v, i) { if (pal[i]) col[v] = { hex: pal[i].hex, hue: pal[i].hue, contrast: pal[i].contrast, pat: PATTERNS[i % PATTERNS.length] }; });
+    order = order.filter(function (v) { return col[v]; });
+    var sig = [mode, bg, S.patterns, inView.join(','), order.map(function (v) { return v + col[v].hex; }).join(','), site ? site.hex : ''].join('|');
+    if (sig === COLOR.sig) return;
+    VIDS.forEach(function (v) {
+      var c = col[v];
+      if (c) colorHost.style.setProperty('--v-' + v, c.hex); else colorHost.style.removeProperty('--v-' + v);
+      if (c && S.patterns) colorHost.style.setProperty('--d-' + v, c.pat); else colorHost.style.removeProperty('--d-' + v);
+    });
+    if (site) colorHost.style.setProperty('--v-site', site.hex); else colorHost.style.removeProperty('--v-site');
+    COLOR = { mode: mode, order: order, inView: inView, col: col, site: site, sig: sig };
+    renderLegend();
+  }
+  function lgItem(v) {
+    var c = COLOR.col[v];
+    var pat = (S.patterns && c) ? '<svg class="lgp" data-v="' + v + '" viewBox="0 0 22 6" aria-hidden="true"><path d="M1 3H21" style="stroke-dasharray:' + c.pat + '"/></svg>' : '';
+    return '<span class="lg-item" title="' + (c ? c.contrast.toFixed(1) + ':1 against the map' : 'No color: gray') + '">' + vlanHtml(v) + pat + '</span>';
+  }
+  function renderLegend() {
+    var C = COLOR, h = '', CAP = 8;
+    if (C.mode === 'site') {
+      h = '<span class="lg-h">Site</span><span class="lg-item" title="' + (C.site ? C.site.contrast.toFixed(1) + ':1 against the map' : '') + '"><span class="vlan" style="--vlan:var(--v-site)"><span class="id">Home</span></span></span>' +
+        '<span class="lg-item muted">VLANs are gray in this mode</span>';
+    } else {
+      h = '<span class="lg-h">VLANs</span>' + C.order.slice(0, CAP).map(lgItem).join('');
+      if (C.order.length > CAP) h += '<span class="lg-item muted">and <span data-si="' + (C.order.length - CAP) + '"></span> more</span>';
+      if (C.mode === 'selected') {
+        var rest = C.inView.filter(function (v) { return !C.col[v]; }).length;
+        if (!C.order.length) h += '<span class="lg-item muted">No VLAN selected</span>';
+        if (rest) h += '<span class="lg-item" title="No color: gray"><span class="vlan" style="--vlan:var(--v-neutral)">Other VLANs <span class="id" data-si="' + rest + '"></span></span></span>';
+      } else if (!C.order.length) h += '<span class="lg-item muted">No VLAN in view</span>';
+      if (S.patterns) h += '<span class="lg-item muted">Dash style marks the VLAN on outlines and edges</span>';
+      h += '<span class="lg-item muted">Switches and routers are neutral: they carry several VLANs</span>';
+    }
+    var row = $('#lg-vlan'); row.innerHTML = h;
+    if (window.tenko && tenko.formatAll) tenko.formatAll(row);
+  }
+  /* A theme change (the theme button, the account menu or the operating system) recomputes the palette */
+  if (window.MutationObserver) new MutationObserver(function () { applyColors(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  if (window.matchMedia) {
+    var mqDark = matchMedia('(prefers-color-scheme: dark)');
+    if (mqDark.addEventListener) mqDark.addEventListener('change', function () { applyColors(); }); else if (mqDark.addListener) mqDark.addListener(function () { applyColors(); });
+  }
 
   /* ---------- Graph helpers ---------- */
   function active(id) { var n = NODE[id]; if (!n) return false; if (n.member) return S.expanded; if (n.group) return !S.expanded; return true; }
@@ -724,7 +954,7 @@
     var path = (S.path && S.sel) ? pathTo(S.sel) : null;
     var hop = (S.focus && S.sel) ? within(S.sel, S.hops) : null;
     var toks = tokens();
-    G.lit = {}; G.gone = {}; G.path = path; G.matches = [];
+    G.lit = {}; G.gone = {}; G.view = {}; G.path = path; G.matches = [];
     var shown = 0, total = 0;
     Object.keys(NODE).forEach(function (id) {
       if (id === 'wan') return;
@@ -735,6 +965,8 @@
       var lit = path ? onPath : isLit(n, toks);
       var gone = hop ? (hop[id] == null && !onPath) : false;
       G.lit[id] = lit; G.gone[id] = gone;
+      /* In view = passes the VLAN, type and focus filters (search and path highlight only dim, so they do not recolor the map) */
+      G.view[id] = !gone && !isInfra(n) && !!S.types[n.type] && !!S.vlans[n.vlan];
       el.classList.toggle('dim', !lit);
       el.classList.toggle('gone', gone);
       el.classList.toggle('sel', S.sel === id);
@@ -753,15 +985,24 @@
       var el = gEdge[e.id], on = active(e.from) && active(e.to);
       el.classList.toggle('off', !on);
       var pe = e.port ? gPort[e.sw + ':' + e.port] : null;
+      var lb = LAB[e.id], lvl = lb && lb.kind !== 'wf' ? lb.vl.filter(function (v) { return S.vlans[v]; }) : null;
+      ES[e.id] = null;
       if (pe) pe.classList.toggle('off', !on);
+      if (lb) lb.g.classList.toggle('off', !on || (lvl && !lvl.length));
       if (!on) return;
       var l = G.lit[e.from] && G.lit[e.to];
       if (path) l = path.indexOf(e.from) >= 0 && path.indexOf(e.to) >= 0;
       var psel = !!(S.selPort && e.port && S.selPort === e.sw + ':' + e.port);
       var gone = !!(G.gone[e.from] || G.gone[e.to]);
+      ES[e.id] = { lit: !!(l || psel), hl: (!!path && l) || psel, gone: gone };
       el.classList.toggle('hl', (!!path && l) || psel);
       el.classList.toggle('dim', !(l || psel));
       el.classList.toggle('gone', gone);
+      if (lb) {
+        lb.g.classList.toggle('dim', !(l || psel));
+        lb.g.classList.toggle('gone', gone);
+        if (lvl && lvl.length) setPill(lb.g, lvl);
+      }
       if (pe) {
         pe.classList.toggle('dim', !(l || psel));
         pe.classList.toggle('gone', gone);
@@ -770,8 +1011,55 @@
       }
     });
 
+    /* Neutral stem pieces follow the clients below them */
+    Object.keys(SEGS).forEach(function (pid) {
+      SEGS[pid].forEach(function (b) {
+        var any = false, lit = false, hl = false, gone = true;
+        SEGS[pid].forEach(function (o) {
+          var st = ES[o.e.id];
+          if (o.y < b.y || !st) return;
+          any = true; lit = lit || st.lit; hl = hl || st.hl; gone = gone && st.gone;
+        });
+        b.el.classList.toggle('off', !any || !ES[b.e.id]);
+        b.el.classList.toggle('dim', !lit);
+        b.el.classList.toggle('hl', hl);
+        b.el.classList.toggle('gone', any && gone);
+      });
+    });
+    /* VLAN tags on bundles of client edges: the VLANs of the clients that are lit */
+    Object.keys(BUN).forEach(function (pid) {
+      var seen = {};
+      EDGES.forEach(function (e) {
+        var lb = LAB[e.id];
+        if (e.from !== pid || !lb || lb.kind !== 'lf' || !active(e.to) || !G.lit[e.to] || G.gone[e.to]) return;
+        seen[NODE[e.to].vlan] = true;
+      });
+      var vl = VIDS.filter(function (v) { return seen[v]; });
+      BUN[pid].g.classList.toggle('off', !vl.length);
+      BUN[pid].g.classList.toggle('gone', !!G.gone[pid]);
+      if (vl.length) setPill(BUN[pid].g, vl);
+    });
+    /* SSID labels under access points: dimmed when the VLAN they carry is filtered out, accent when their panel is open */
+    SSIDEL.forEach(function (p) {
+      var ap = p.dataset.ap, open = !!(S.panel && S.panel.kind === 'ssid' && S.panel.id === p.dataset.ssid);
+      p.classList.toggle('sel', open);
+      p.setAttribute('aria-pressed', String(open));
+      p.classList.toggle('off', !active(ap));
+      p.classList.toggle('gone', !!G.gone[ap]);
+      p.classList.toggle('dim', !G.lit[ap] || !S.vlans[p.dataset.v]);
+    });
+    applyColors();
+
     /* Controls mirror the state */
-    $$('[data-vlan]').forEach(function (b) { b.setAttribute('aria-pressed', String(!!S.vlans[b.dataset.vlan])); });
+    $$('[data-vlan]').forEach(function (b) {
+      var id = b.dataset.vlan, v = VL[id], picking = S.colorBy === 'selected';
+      b.setAttribute('aria-pressed', String(picking ? !!S.colorSel[id] : !!S.vlans[id]));
+      b.title = 'VLAN ' + id + ' ' + v.name + '. ' + (picking ? 'Click to give it a color or take the color away. Every other VLAN stays gray; nothing is hidden.' : 'Click to show only ' + v.name + ', click again to show all. Shift+click adds or removes it.');
+    });
+    $('#colorby').value = S.colorBy;
+    $('#patterns-sw').checked = S.patterns;
+    svg.dataset.color = S.colorBy;
+    svg.classList.toggle('patterns', S.patterns);
     $$('[data-type]').forEach(function (b) { b.setAttribute('aria-pressed', String(!!S.types[b.dataset.type])); });
     $('#focus-sw').checked = S.focus;
     $('#layout').value = S.layout;
@@ -818,7 +1106,8 @@
     var sig = S.panel.kind + ':' + (S.panel.key || S.panel.id) + ':' + S.selPort;
     if (sig !== panelSig) {
       panelSig = sig;
-      if (S.panel.kind === 'port') portPanel(S.panel.key); else switchPanel(S.panel.id);
+      p.setAttribute('aria-label', S.panel.kind === 'ssid' ? 'Wireless network ' + S.panel.id : S.panel.kind === 'switch' ? 'Ports in use on ' + S.panel.id : 'What is connected to this port');
+      if (S.panel.kind === 'port') portPanel(S.panel.key); else if (S.panel.kind === 'ssid') ssidPanel(S.panel.id); else switchPanel(S.panel.id);
     }
     sizeChanged();
   }
@@ -874,6 +1163,36 @@
       '<thead><tr><th>Port</th><th>Device</th><th>VLAN</th><th>PoE</th></tr></thead><tbody>' + rows + '</tbody></table>' +
       '<div class="section" style="border-bottom:0"><p class="muted">Select a port to see what is connected to it, which VLAN it carries and who changed it last.</p><div class="panel-actions" style="margin-top:8px"><a class="btn" href="host.html">Open ' + n.name + '</a></div></div>';
   }
+  function ssidClients(name) { return Object.keys(NODE).filter(function (id) { return NODE[id].ssid === name; }).map(function (id) { return NODE[id]; }); }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+  function ssidPanel(name) {
+    var sd = SSID[name], cl = ssidClients(name), v = VL[sd.vlan];
+    $('#panel-title').textContent = 'SSID ' + name;
+    $('#panel-meta').textContent = 'Carries VLAN ' + sd.vlan + ', ' + plural(cl.length, 'client', 'clients') + ' on ' + plural(sd.aps.length, 'access point', 'access points') + ', read from UniFi 12 s ago';
+    var h = '<div class="section"><h3>Wireless network<a class="more" href="shell-and-ipam.html">Open in IPAM</a></h3><dl class="kv">' +
+      '<dt>SSID</dt><dd><b>' + esc(name) + '</b><span class="tag">IPAM object</span></dd>' +
+      '<dt>VLAN</dt><dd>' + vlanHtml(sd.vlan) + '</dd>' +
+      '<dt>Network</dt><dd><span class="mono">' + v.prefix + '</span></dd>' +
+      '<dt>Bands</dt><dd>' + esc(sd.band) + '</dd>' +
+      '<dt>Security</dt><dd>' + esc(sd.sec) + '</dd></dl></div>';
+    h += '<div class="section"><h3>Access points</h3><table class="grid" aria-label="Access points broadcasting ' + esc(name) + '"><colgroup><col><col style="width:84px"><col style="width:84px"></colgroup>' +
+      '<thead><tr><th>Access point</th><th>Uplink</th><th>Clients</th></tr></thead><tbody>' +
+      sd.aps.map(function (id) {
+        var ap = NODE[id], c = cl.filter(function (x) { return x.parent === id; }).length;
+        return '<tr tabindex="0" data-node="' + id + '"><td><span class="hostname">' + ap.name + '</span></td><td>port <span class="portn">' + ap.port + '</span></td><td class="num">' + c + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    h += '<div class="section"><h3>Clients</h3>';
+    if (cl.length) {
+      h += '<table class="grid" aria-label="Clients on ' + esc(name) + '"><colgroup><col><col style="width:78px"><col style="width:66px"><col style="width:62px"></colgroup>' +
+        '<thead><tr><th>Client</th><th>Access point</th><th>Band</th><th>Signal</th></tr></thead><tbody>' +
+        cl.map(function (c) { return '<tr tabindex="0" data-node="' + c.id + '"><td><span class="hostname">' + c.name + '</span></td><td>' + c.parent + '</td><td>' + c.band + '</td><td class="num">' + c.sig + ' dBm</td></tr>'; }).join('') + '</tbody></table>';
+    } else {
+      h += '<p class="muted">No client is using this network right now.</p>';
+    }
+    h += '</div><div class="section" style="border-bottom:0"><div class="panel-actions"><a class="btn primary" href="shell-and-ipam.html">Open ' + esc(name) + ' in IPAM</a></div></div>';
+    $('#panel-body').innerHTML = h;
+  }
+  function openSsid(name) { S.panel = { kind: 'ssid', id: name }; S.selPort = null; render(); }
   function openPort(key) { S.panel = { kind: 'port', key: key }; S.selPort = key; render(); }
   function closePanel() { S.panel = null; S.selPort = null; render(); }
 
@@ -892,17 +1211,26 @@
     h.innerHTML = '<div class="hc-head">' + ic(TYPE_ICON[n.type]) + '<b>' + n.name + (n.group ? ' ×3' : '') + '</b><span class="domain">' + n.dom + '</span></div>' +
       '<div class="hc-sub"><span>' + esc(n.model) + '</span><span class="tag">' + TYPE_NAME[n.type] + '</span></div>' +
       '<dl class="kv"><dt>Address</dt><dd>' + addr + '</dd><dt>MAC</dt><dd>' + mac + '</dd><dt>VLAN</dt><dd>' + vlanHtml(n.vlan) + vlanExtra + '</dd><dt>Mode</dt><dd>' + modeHtml(n.mode) + '</dd><dt>Last seen</dt><dd>' + seenHtml(n.seen) + '</dd></dl>' +
-      '<div class="hc-via">' + ic(n.edge === 'wifi' ? 'wifi' : n.edge === 'vmlink' ? 'link' : 'cable', 'sm') + '<span>' + esc(n.via) + '</span></div>' +
+      '<div class="hc-via">' + ic(n.edge === 'wifi' ? 'wifi' : n.edge === 'vmlink' ? 'link' : 'cable', 'sm') + '<span>' + esc(n.via) + '</span></div>' + ssidList(n) +
       '<div class="hc-hint"><span>Click to select</span><span class="hc-keys"><span>Open host</span><span class="kbd">Shift</span><span class="kbd">Enter</span></span></div>';
     h.hidden = false;
     placeHover();
   }
+  /* Wireless networks an access point broadcasts, each with the VLAN it carries */
+  function ssidList(n) {
+    if (!n.ssids) return '';
+    return '<div class="hc-ssids"><div class="hc-h">Wireless networks, read from UniFi</div>' + n.ssids.map(function (nm) {
+      var cl = ssidClients(nm).filter(function (c) { return c.parent === n.id; }).length;
+      return '<div class="row">' + ic('wifi', 'sm') + '<b>' + esc(nm) + '</b><span class="muted">' + cl + (cl === 1 ? ' client' : ' clients') + '</span>' + vlanHtml(SSID[nm].vlan) + '</div>';
+    }).join('') + '</div>';
+  }
   function placeHover() {
     var h = $('#hovercard'); if (h.hidden || !hoverId) return;
     var el = gNode[hoverId]; if (!el) return;
-    var r = el.getBoundingClientRect(), c = canvas.getBoundingClientRect();
+    var r = el.getBoundingClientRect(), c = canvas.getBoundingClientRect(), bottom = r.bottom;
+    SSIDEL.forEach(function (p) { if (p.dataset.ap === hoverId) bottom = Math.max(bottom, p.getBoundingClientRect().bottom); });
     var w = h.offsetWidth || 256, ht = h.offsetHeight || 215;
-    var left = r.left - c.left, top = r.bottom - c.top + 8;
+    var left = r.left - c.left, top = bottom - c.top + 8;
     if (left + w > c.width - 8) left = c.width - w - 8;
     if (left < 8) left = 8;
     if (top + ht > c.height - 8) top = r.top - c.top - ht - 8;
@@ -961,7 +1289,7 @@
 
   var pan = null;
   svg.addEventListener('pointerdown', function (e) {
-    if (e.button !== 0 || e.target.closest('.node, .port')) return;
+    if (e.button !== 0 || e.target.closest('.node, .port, .ssid')) return;
     pan = { x: e.clientX, y: e.clientY, vx: vb.x, vy: vb.y, moved: false };
     try { svg.setPointerCapture(e.pointerId); } catch (err) {}
     svg.classList.add('panning'); hideHover();
@@ -985,29 +1313,39 @@
   svg.addEventListener('wheel', function (e) { e.preventDefault(); var p = toUser(e.clientX, e.clientY); zoomBy(e.deltaY < 0 ? 1.12 : 1 / 1.12, p.x, p.y); }, { passive: false });
 
   /* ---------- Hover and click on the map ---------- */
-  svg.addEventListener('pointerover', function (e) { var n = e.target.closest('.node'); if (n && !pan) showHover(n.dataset.id); });
-  svg.addEventListener('pointerout', function (e) { var n = e.target.closest('.node'); if (n && !(e.relatedTarget && n.contains(e.relatedTarget))) hideHover(); });
-  svg.addEventListener('focusin', function (e) { var n = e.target.closest && e.target.closest('.node'); if (n) showHover(n.dataset.id); });
-  svg.addEventListener('focusout', function (e) { if (e.target.closest && e.target.closest('.node')) hideHover(); });
+  /* a node, or one of an access point's SSID labels, stands for its node */
+  function nodeOf(el) {
+    if (!el || !el.closest) return null;
+    var n = el.closest('.node'); if (n) return n.dataset.id;
+    var s = el.closest('.ssid'); return s ? s.dataset.ap : null;
+  }
+  svg.addEventListener('pointerover', function (e) { var id = nodeOf(e.target); if (id && !pan) showHover(id); });
+  svg.addEventListener('pointerout', function (e) { var id = nodeOf(e.target); if (id && id !== nodeOf(e.relatedTarget)) hideHover(); });
+  svg.addEventListener('focusin', function (e) { var id = nodeOf(e.target); if (id) showHover(id); });
+  svg.addEventListener('focusout', function (e) { if (nodeOf(e.target) && nodeOf(e.relatedTarget) !== nodeOf(e.target)) hideHover(); });
   svg.addEventListener('click', function (e) {
     var pt = e.target.closest('.port');
     if (pt) { openPort(pt.dataset.sw + ':' + pt.dataset.port); return; }
+    var ss = e.target.closest('.ssid');
+    if (ss) { openSsid(ss.dataset.ssid); return; }
     var nd = e.target.closest('.node');
     if (nd) selectNode(nd.dataset.id);
   });
   svg.addEventListener('dblclick', function (e) { var nd = e.target.closest('.node'); if (nd && (NODE[nd.dataset.id].group || NODE[nd.dataset.id].member)) toggleGroup(); });
   svg.addEventListener('keydown', function (e) {
-    var el = e.target.closest && e.target.closest('.node, .port'); if (!el) return;
+    var el = e.target.closest && e.target.closest('.ssid, .node, .port'); if (!el) return;
     if (e.key === 'Enter' && e.shiftKey && el.classList.contains('node')) { location.href = 'host.html'; return; }
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      if (el.classList.contains('port')) openPort(el.dataset.sw + ':' + el.dataset.port); else selectNode(el.dataset.id);
+      if (el.classList.contains('ssid')) openSsid(el.dataset.ssid);
+      else if (el.classList.contains('port')) openPort(el.dataset.sw + ':' + el.dataset.port); else selectNode(el.dataset.id);
     }
   });
 
   function selectNode(id) {
     /* the open port panel stays when you select the device that is plugged into it */
-    var keep = S.panel && S.panel.kind === 'port' && PORTS[S.panel.key].peer === id;
+    var keep = S.panel && ((S.panel.kind === 'port' && PORTS[S.panel.key].peer === id) ||
+      (S.panel.kind === 'ssid' && (NODE[id].ssid === S.panel.id || (NODE[id].ssids || []).indexOf(S.panel.id) >= 0)));
     S.sel = id;
     if (NODE[id].type === 'switch') { S.panel = { kind: 'switch', id: id }; S.selPort = null; }
     else if (!keep) { S.panel = null; S.selPort = null; }
@@ -1023,6 +1361,19 @@
     S.expanded = !S.expanded;
     S.sel = S.expanded ? 'lab-k8s-1' : 'lab-k8s';
     render(); fit();
+  }
+  /* Color by: VLANs in view (default), Selected VLANs (the chips pick which ones get color) or Site */
+  function setColorBy(mode) {
+    S.colorBy = mode;
+    if (mode === 'selected') {
+      /* the chips now pick colors, so every VLAN stays visible */
+      Object.keys(S.vlans).forEach(function (k) { S.vlans[k] = true; });
+      if (!Object.keys(S.colorSel).some(function (k) { return S.colorSel[k]; })) S.colorSel = { '30': true };
+      tenko.toast({ title: 'Color by selected VLANs', body: 'Only the VLAN chips you select get a color; every other VLAN stays gray and nothing is hidden. This is how a site with 150 or more VLANs stays readable. IoT is selected to start.' });
+    } else if (mode === 'site') {
+      tenko.toast({ title: 'Color by site', body: 'There is only one site here, Home, so every device gets the same color and VLANs turn gray. Site color matters when you manage several sites: each site gets its own hue.' });
+    }
+    render();
   }
   function setFocus(on) {
     if (on && !S.sel) {
@@ -1047,17 +1398,24 @@
     fit();
   }
   function centerOfBox(id) { var n = NODE[id], k = lk(), p = n.pos[k]; return [p[0] + n.w[k] / 2, p[1] + (id === 'wan' ? 10 : NODE_H / 2)]; }
+  function placeSsids() {
+    var k = lk();
+    SSIDEL.forEach(function (p) { var q = NODE[p.dataset.ap].pos[k]; p.setAttribute('transform', 'translate(' + r1(q[0] + 20) + ' ' + r1(q[1] + 42 + p._i * 17) + ')'); });
+  }
   function routeEdges() {
     var radial = S.layout === 'radial';
+    placeSsids();
     EDGES.forEach(function (e) {
-      var el = gEdge[e.id], pe = e.port ? gPort[e.sw + ':' + e.port] : null;
+      var el = gEdge[e.id], pe = e.port ? gPort[e.sw + ':' + e.port] : null, lb = LAB[e.id];
       if (!radial) {
         el.setAttribute('d', e.d);
         if (pe) pe.setAttribute('transform', 'translate(' + pe._l[0] + ' ' + pe._l[1] + ')');
+        if (lb && lb.at) lb.g.setAttribute('transform', 'translate(' + lb.at[0] + ' ' + lb.at[1] + ')');
         return;
       }
       var a = centerOfBox(e.from), b = centerOfBox(e.to);
       el.setAttribute('d', 'M' + r1(a[0]) + ',' + r1(a[1]) + 'L' + r1(b[0]) + ',' + r1(b[1]));
+      if (lb) { var tt = lb.kind === 'wf' ? 0.66 : 0.5; /* SSID names sit nearer the client, clear of the access point's own labels */ lb.g.setAttribute('transform', 'translate(' + r1(a[0] + (b[0] - a[0]) * tt) + ' ' + r1(a[1] + (b[1] - a[1]) * tt + (lb.kind === 'wf' ? -5 : 0)) + ')'); }
       if (pe) {
         var swIsFrom = e.sw === e.from, s = swIsFrom ? a : b, t = swIsFrom ? b : a;
         var dx = t[0] - s[0], dy = t[1] - s[1], len = Math.sqrt(dx * dx + dy * dy) || 1, ux = dx / len, uy = dy / len;
@@ -1071,6 +1429,7 @@
   $$('[data-vlan]').forEach(function (b) {
     b.addEventListener('click', function (e) {
       var id = b.dataset.vlan, keys = Object.keys(S.vlans);
+      if (S.colorBy === 'selected') { S.colorSel[id] = !S.colorSel[id]; render(); return; }
       var shown = keys.filter(function (k) { return S.vlans[k]; });
       if (e.shiftKey || e.ctrlKey || e.metaKey) S.vlans[id] = !S.vlans[id];
       else if (shown.length === 1 && S.vlans[id]) keys.forEach(function (k) { S.vlans[k] = true; });
@@ -1080,6 +1439,8 @@
   });
   $$('[data-type]').forEach(function (b) { b.addEventListener('click', function () { S.types[b.dataset.type] = !S.types[b.dataset.type]; render(); }); });
   $('#focus-sw').addEventListener('change', function () { setFocus(this.checked); });
+  $('#colorby').addEventListener('change', function () { setColorBy(this.value); });
+  $('#patterns-sw').addEventListener('change', function () { S.patterns = this.checked; render(); });
   $('#layout').addEventListener('change', function () { applyLayout(this.value, true); render(); });
   $('#z-in').addEventListener('click', function () { zoomBy(1.25); });
   $('#z-out').addEventListener('click', function () { zoomBy(1 / 1.25); });
@@ -1097,8 +1458,15 @@
   $('#ab-clear').addEventListener('click', deselect);
   $('#panel-close').addEventListener('click', closePanel);
   $('#panel-meta').addEventListener('click', function (e) { var a = e.target.closest('a[data-sw]'); if (!a) return; e.preventDefault(); S.panel = { kind: 'switch', id: a.dataset.sw }; S.selPort = null; render(); });
-  $('#panel-body').addEventListener('click', function (e) { var tr = e.target.closest('tr[data-port]'); if (tr) openPort(tr.dataset.port); });
-  $('#panel-body').addEventListener('keydown', function (e) { var tr = e.target.closest('tr[data-port]'); if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openPort(tr.dataset.port); } });
+  $('#panel-body').addEventListener('click', function (e) {
+    var tr = e.target.closest('tr[data-port]'); if (tr) { openPort(tr.dataset.port); return; }
+    var nr = e.target.closest('tr[data-node]'); if (nr) { selectNode(nr.dataset.node); centerOn(nr.dataset.node); }
+  });
+  $('#panel-body').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var tr = e.target.closest('tr[data-port]'), nr = e.target.closest('tr[data-node]');
+    if (tr) { e.preventDefault(); openPort(tr.dataset.port); } else if (nr) { e.preventDefault(); selectNode(nr.dataset.node); centerOn(nr.dataset.node); }
+  });
 
   /* Search: dims what does not match; Enter jumps to the first match */
   var qi = $('#q');
@@ -1140,8 +1508,10 @@
   /* ---------- Mockup scenes ---------- */
   function setScene(name) {
     $$('[data-scene]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.scene === name)); });
-    var wasRadial = S.layout === 'radial';
+    var wasRadial = S.layout === 'radial', look = { colorBy: S.colorBy, colorSel: S.colorSel, patterns: S.patterns };
     S = freshState();
+    /* how the map is colored is a view preference, so a scene keeps it; in Selected VLANs the chips pick colors instead of filtering, so the filtered scene goes back to VLANs in view */
+    S.colorBy = (look.colorBy === 'selected' && name === 'iot') ? 'view' : look.colorBy; S.colorSel = look.colorSel; S.patterns = look.patterns;
     if (name === 'hover') { S.panel = { kind: 'port', key: 'sw-core:14' }; S.selPort = 'sw-core:14'; }
     else if (name === 'path') { S.sel = 'desk-01'; S.path = true; }
     else if (name === 'iot') { S.vlans = { '10': false, '20': false, '30': true, '40': false }; }
@@ -1159,6 +1529,7 @@
   window.addEventListener('resize', sizeChanged);
   if (window.ResizeObserver) new ResizeObserver(function () { setVB(); placeHover(); }).observe(canvas);
   function start() {
+    routeEdges();
     setScene('hover');
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { placeHover(); });
   }

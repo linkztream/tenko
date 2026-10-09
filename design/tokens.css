@@ -18,11 +18,12 @@
 :root {
   /* Type. UI text uses the platform face: zero bytes, native rendering,
      instant first paint. Identifiers (addresses, MACs, prefixes, DUIDs)
-     use one embedded face chosen for unambiguous glyphs: 0/O, 1/l/I, 5/S, 8/B. */
+     use one embedded monospace face, JetBrains Mono, with clear 0/O and 1/l/I.
+     Its code ligatures are switched off (shell.css), so "::" in IPv6 stays two colons. */
   --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system,
     BlinkMacSystemFont, "SF Pro Text", Roboto, "Noto Sans", "Helvetica Neue",
     Arial, sans-serif;
-  --font-data: "Atkinson Hyperlegible Mono", ui-monospace, "Cascadia Mono",
+  --font-data: "JetBrains Mono", ui-monospace, "Cascadia Mono",
     "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
   /* Type scale (px). The classical scale, cut to what a dense tool needs. */
@@ -213,13 +214,20 @@
   --seq-500: #256abf;
   --seq-700: #0d366b;
 
-  /* VLAN identity for the sample network. Assigned from the categorical order.
-     All-pairs views (topology) color at most three VLANs; the rest are drawn
-     neutral with a dashed outline and always carry their VLAN tag. */
-  --vlan-lan: var(--series-1);
-  --vlan-lab: var(--series-2);
-  --vlan-iot: var(--series-3);
-  --vlan-dmz: #8D94A1;  /* neutral + dashed: the fourth VLAN in view */
+  /* VLAN identity is generated, not fixed: the VLANs visible in a view get hues
+     spread evenly around the OKLCH circle, starting at --vlan-h0, at one lightness
+     and chroma per theme (chroma is reduced only to stay inside sRGB). These values
+     give at least 4:1 against the light map background and 6:1 against the dark one
+     for any number of VLANs (tested for 1 to 24). See tenko.vlanPalette() in
+     mockups/shell.js. Color is never alone: labels, legend and a patterns mode. */
+  --vlan-l: 0.58;
+  --vlan-c: 0.14;
+  --vlan-h0: 255;
+  /* The instance for the four VLANs of the sample network (n = 4, light). */
+  --vlan-lan: #3A7BCB;  /* hue 255 */
+  --vlan-lab: #B2548D;  /* hue 345 */
+  --vlan-iot: #A36E09;  /* hue 75 */
+  --vlan-dmz: #0A9068;  /* hue 165 */
 
   /* Brand: the mark is one color (currentColor); the two-tone variant uses the accent. */
   --brand-ink: var(--ink);
@@ -304,7 +312,12 @@
     --seq-300: #256abf;
     --seq-500: #5598e7;
     --seq-700: #b7d3f6;
-    --vlan-dmz: #6E7686;
+    --vlan-l: 0.70;
+    --vlan-c: 0.13;
+    --vlan-lan: #64A1EE;
+    --vlan-lab: #D77CB1;
+    --vlan-iot: #CD9130;
+    --vlan-dmz: #37B78A;
     --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.5);
     --shadow-drag: 0 2px 4px rgba(0, 0, 0, 0.4), 0 14px 32px rgba(0, 0, 0, 0.6);
   }
@@ -383,7 +396,12 @@
   --seq-300: #256abf;
   --seq-500: #5598e7;
   --seq-700: #b7d3f6;
-  --vlan-dmz: #6E7686;
+  --vlan-l: 0.70;
+  --vlan-c: 0.13;
+  --vlan-lan: #64A1EE;
+  --vlan-lab: #D77CB1;
+  --vlan-iot: #CD9130;
+  --vlan-dmz: #37B78A;
   --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.5);
   --shadow-drag: 0 2px 4px rgba(0, 0, 0, 0.4), 0 14px 32px rgba(0, 0, 0, 0.6);
 }

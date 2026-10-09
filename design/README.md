@@ -2,13 +2,13 @@
 
 This folder is the Phase 1 design spike for the Tenko DDI user interface: a design language, a token file, a logo, and clickable HTML mockups of the core views. It exists so the owner can review the look and the interaction model before any SolidJS component is written. Nothing here is product code. The SolidJS UI will take over the tokens and the component inventory, not the markup.
 
-Start with [`mockups/index.html`](mockups/index.html), and use [`REVIEW.md`](REVIEW.md) as the question list while you click through.
+Start with [`mockups/index.html`](mockups/index.html). The owner has reviewed the mockups: the answers are in [`REVIEW.md`](REVIEW.md) and summarized under [Decisions](#decisions) below; the rest of this document already reflects them.
 
 ## How to open
 
-Double-click `mockups/index.html`. Every page is static HTML, CSS and a little plain JavaScript, with no build step and no framework. Each page loads three local files (`../tokens.css`, `shell.css`, `shell.js`) and one stylesheet from Google Fonts for the identifier face (Atkinson Hyperlegible Mono). Offline, the pages fall back to the platform monospace face and still work. The product will not call Google: it embeds the font files (SIL Open Font License) in the binary next to the UI bundle, served from `/assets/` like every other asset (ADR 0008).
+Double-click `mockups/index.html`. Every page is static HTML, CSS and a little plain JavaScript, with no build step and no framework. Each page loads three local files (`../tokens.css`, `shell.css`, `shell.js`) and one stylesheet from Google Fonts for the identifier face (JetBrains Mono). Offline, the pages fall back to the platform monospace face and still work. The product will not call Google: it embeds the font file (SIL Open Font License) in the binary next to the UI bundle, served from `/assets/` like every other asset (ADR 0008).
 
-Theme and density are remembered per browser in `localStorage` (`tenko-theme`, `tenko-density`). The theme button in the top bar cycles system, light, dark. Every mockup has a collapsed "Mockup notes" drawer, opened from the right end of the status bar (from the header in the wizard), with the open questions for that view. Some have a dashed "Mockup scene" switcher to show states that would otherwise need live data. Dashed borders always mean mockup-only, never product UI.
+Theme, density and the "Emphasize host part" preference are remembered per browser in `localStorage` (`tenko-theme`, `tenko-density`, `tenko-emphasize`) and can all be changed in the account menu (the AK avatar, top right); the theme button in the top bar also cycles system, light, dark. Every mockup has a collapsed "Mockup notes" drawer, opened from the right end of the status bar (from the header in the wizard and on the sign-in page), with the decisions and open questions for that view, and an "All mockups" link back to the index. Some have a dashed "Mockup scene" switcher to show states that would otherwise need live data. Dashed borders always mean mockup-only, never product UI.
 
 ## Principles
 
@@ -19,11 +19,34 @@ Theme and density are remembered per browser in `localStorage` (`tenko-theme`, `
 5. **Dark and light with equal care.** Both themes are designed, not inverted. Each has its own validated steps for state and chart colors.
 6. **Color is for exceptions.** A healthy grid is calm and almost monochrome. Color appears where a person must act (conflict, proposal, intent and observation disagree, failed job) and for the accent (selection, focus, primary action). State never relies on color alone: it always has a glyph and a word.
 
+## Decisions
+
+The owner reviewed all mockups on 2026-10-09 and answered the review guide. These decisions are applied everywhere in this folder.
+
+| # | Topic | Decision | Where it shows |
+|---|---|---|---|
+| 1 | Density | Compact (28 px rows) stays the default; dense and comfortable are one click away. | Filter bar, account menu |
+| 2 | Address treatment | Addresses and MACs render plain in the data font. Graying the network part and bolding the host part (and graying a MAC's vendor part) is a per-user preference, "Emphasize host part", off by default. | Account menu; all grids |
+| 3 | Color only for exceptions | Stays as shown (red conflict, magenta discovered, amber differs). "Adopt" stays. | IPAM grid |
+| 4 | Identifier font | JetBrains Mono, embedded in the product; the accent stays. | `tokens.css` |
+| 5 | Move gesture | Dragging onto the prefix tree is primary; `M` and the action bar remain. No drop target on the topology map. | IPAM, topology |
+| 6 | Move preview | Stays its own page. | Move job |
+| 7 | Manual steps | One grouped checklist for the whole job; a device waits for its ticked tasks before its L2 change. A disabled "Create tickets" button hints at a ticketing connector (later). | Move job |
+| 8 | Move defaults | Automatic rollback on timeout. The default observation timeout is half the DHCP lease of the target network (the renewal point, T1), never below 5 minutes, explained in the preview ("lease 24 h → timeout 12 h"). Parallelism 2. | Move job |
+| 9 | Side panel versus page | As mocked. | Host |
+| 10 | Copying a password | As mocked. Single sign-on (SAML and OIDC: ADFS, Entra ID, Okta) comes later and is noted on the sign-in mockup. | Host, sign-in |
+| 11 | VLAN colors | No cap of three: the palette is generated for the VLANs in view, hues spread evenly in OKLCH at a fixed lightness and chroma per theme, every color at least 3:1 against the map; labels on edge groups, a legend and a patterns mode as redundancy. See [Charts and VLANs](#charts-and-vlans). | Topology, `tokens.css`, `shell.js` |
+| 12 | Numbers | Queries per second is a number, never a dial. Every number that can grow uses SI suffixes (1.2K, 48K, 1.3M) so a tile never grows; the exact value is in the tooltip. | Dashboard, `tenko.si()` |
+| 13 | Start page and navigation | The dashboard is the start page (the brand links to it, sign-in and the wizard lead to it). The rail keeps icons with labels (72 px). | All pages |
+| 14 | Status bar | Stays. | All pages |
+| 15 | Logo | The fox is approved. The lockup keeps exactly the letterforms of the 16 px header wordmark. The two-tone fox (tails in the accent) is used on the sign-in page and in the wizard, one color everywhere else. | Logo, sign-in, wizard |
+| 16 | SSIDs (owner's request) | Wireless networks are IPAM objects, read from UniFi with their VLAN mapping and shown under the network that carries their VLAN. A wireless client moves to the SSID that carries the target VLAN instead of getting a per-client VLAN override. Access points are labeled with their SSIDs on the map. | IPAM tree, move job, topology |
+
 ## Visual direction
 
-**Type.** The interface text uses the platform face (Segoe UI Variable on Windows 11, SF on macOS, the system sans elsewhere): zero bytes, native rendering, instant first paint. Identifiers use one embedded face, **Atkinson Hyperlegible Mono**, drawn for low-vision legibility: 0 and O, 1, l and I, 5 and S, 8 and B are unmistakable. That is the hardest legibility problem in this product, where a misread MAC or address is a real outage. The identifier face is where the typography spends its boldness.
+**Type.** The interface text uses the platform face (Segoe UI Variable on Windows 11, SF on macOS, the system sans elsewhere): zero bytes, native rendering, instant first paint. Identifiers (addresses, MACs, prefixes, DUIDs, ports) use one embedded monospace face, **JetBrains Mono**: wide, open shapes with clear 0 and O, 1, l and I, which matters in a product where a misread MAC or address is a real outage. Its code ligatures are switched off everywhere (`font-variant-ligatures: no-contextual` on the root, `none` on identifiers), so the `::` of an IPv6 address always shows as two colons.
 
-**The address treatment.** In a grid, the network part of every address is set in muted ink and the host part in bold ink: `192.0.2.`**`41`**. Within a prefix the network part is identical on every row, so the eye goes straight to what differs. MACs follow the same rule: the vendor part (OUI) is muted. The same treatment applies to IPv6 (prefix muted, interface identifier strong).
+**The address treatment.** Addresses and MACs render plain in the data font by default, one color and one weight. The markup always carries the split (network part and host part of an address, vendor part of a MAC), so the per-user preference "Emphasize host part" in the account menu can gray the network part and set the host part in bold (`192.0.2.`**`41`**), and gray a MAC's vendor part. The same applies to IPv6 (prefix and interface identifier).
 
 **Color.** Cool, slightly ink-blue neutrals in both themes, and one accent: *kikyo*, a bellflower blue-violet (`#4B44CF` light, `#9C97FF` dark). The accent marks only selection, focus, the primary action and running work. Domain states have their own reserved hues (below). Charts use a validated categorical palette that never borrows the accent or a state color.
 
@@ -112,7 +135,9 @@ Job states (IPAM-17). Running and waiting share the accent: running is a filled 
 
 Chart colors follow the data-visualization method used for the dashboard: eight categorical hues in a fixed order (`--series-1` to `--series-8`), a single-hue sequential ramp (`--seq-*`) and a fixed status scale (`--status-good`, `-warning`, `-serious`, `-critical`), each validated for color-vision deficiency and contrast against Tenko's own surfaces (`#FFFFFF` and `#171A21`). Status colors always come with an icon and a label.
 
-VLAN identity uses the categorical order: LAN, Lab and IoT take slots 1 to 3. Views where any two VLANs can sit side by side (the topology map) can color at most three VLANs and stay distinguishable for every reader, so a fourth VLAN in view is drawn neutral with a dashed outline and keeps its VLAN tag. With many VLANs the rule becomes: color the three you are focusing on, gray the rest.
+VLAN identity is generated, not fixed. The VLANs visible in a view get hues spread evenly around the OKLCH circle, starting at `--vlan-h0` (255), at one lightness and chroma per theme (`--vlan-l` and `--vlan-c`: 0.58 and 0.14 in light, 0.70 and 0.13 in dark). Chroma is reduced only where a hue would leave sRGB, and lightness is nudged until each color has at least 3:1 against the map background; with these values every color measures at least 4:1 on the light map and 6:1 on the dark one, for any number of VLANs from 1 to 24. `tenko.vlanPalette(n)` in `mockups/shell.js` implements the rule, and `--vlan-lan`, `--vlan-lab`, `--vlan-iot` and `--vlan-dmz` in `tokens.css` are its four-VLAN instance. Hue alone cannot separate many VLANs for every reader, so color is never alone: every edge group carries a VLAN label, the legend lists the VLANs in view with their swatches, and a "Patterns" mode adds a dash style per VLAN.
+
+With 150 or more VLANs no palette stays readable, so color follows attention: color by selection (the VLANs you pick in the filter are colored, all others neutral gray) or color by site (sites get the hues, VLANs stay neutral), with search and focus mode to reduce the view first. Labels and patterns work at any count.
 
 ### Motion
 
@@ -129,13 +154,15 @@ All of these exist in [`mockups/shell.css`](mockups/shell.css) and are used acro
 | Grid | `table.grid` | Sticky header, cell-level focus ring (`td.focus`), selected rows with an accent edge, proposal rows dashed, conflict rows with a red edge, free runs collapsed into one striped row, ranges as collapsible group rows. |
 | Inline editor | `.cell-input`, `.cell-hint` | Enter or double-click edits a hostname in place; a one-line hint states the consequence ("updates A and PTR as a job"). Mode opens a small list with each mode's consequence. |
 | Filter bar | `.filterbar`, `.query`, `.chip` | A query field that accepts `field:value` terms, dimension chips, exception toggles with counts (conflicts, proposals, differs), density switch, column chooser. |
-| Prefix tree | `.tree`, `.tnode` | Tenant and VRF, supernet, prefix, range; utilization meter per prefix; drop target state while dragging. |
+| Prefix tree | `.tree`, `.tnode` | Tenant and VRF, supernet, prefix, range; wireless networks (SSIDs, `.tnode.ssid` with a wifi glyph) under the network that carries their VLAN; utilization meter per prefix; drop target state while dragging (a prefix or an SSID). |
 | Selection action bar | `.actionbar` | Appears with a selection: Move to network, Set mode, Lock, Export CSV, each with its key. |
 | Side panel | `.panel` | Docked over the grid on the right; the full-page view of the same object uses the same sections. |
 | Job panel | `.jstate` plus the move-job mockup | Per-item state with glyph and word, step list, countdown while waiting for observation, failure reason and Roll back. |
 | Toast | `.toasts`, `.toast` | Result of an action with Undo or Open job. Auto-dismisses unless it reports a failure. |
 | Command palette | `#palette` (shell.js) | One field for addresses, hosts, MACs, prefixes and commands; `>` limits to commands. |
-| Wizard | wizard mockup | Numbered steps on the left, one card on the right, Back and Continue. |
+| Account menu | `.acct` (shell.js) | Opens from the avatar: theme, row density, "Emphasize host part", keyboard shortcuts, sign out. |
+| Number formatter | `tenko.si()`, `data-si` (shell.js) | 982, 1.2K, 48K, 1.3M: at most three significant digits so tiles and cells never grow; the exact value goes into the title. |
+| Wizard and sign-in | wizard and sign-in mockups | Focused pages without the rail; the two-tone mark. The wizard has numbered steps on the left and one card on the right; sign-in is passkey first. |
 | Badges | `.mode`, `.src`, `.flag`, `.tag`, `.vlan`, `.meter` | Mode glyph and word; source badges (agrees, differs, only observed, stale); flags; VLAN swatch and number; utilization meter neutral until it crosses the alarm. |
 
 ## Keyboard map
@@ -176,11 +203,13 @@ Single-key shortcuts never fire while focus is in a text field.
 - **No modal spinners for background work.** Scans, moves and imports run as jobs. The status bar and the Jobs badge show them; the rest of the UI stays usable. A spinner is allowed only inside the control that is waiting, for less than a second.
 - **Drag and drop has a keyboard twin.** Dragging a selection lifts it as a stacked ghost with a count. Valid targets highlight with a dashed accent outline, invalid ones dim and say why on hover. Dropping opens the preview; it never changes anything by itself.
 - **Errors say what happened and what to do.** "No ARP or lease from 00-00-5E-00-53-2C within 5:00. The client did not reconnect." followed by Retry and Roll back. No apologies, no codes without words.
+- **Numbers never resize their container.** Counts that can grow use SI suffixes with at most three significant digits (1.2K, 48K, 1.3M), with the exact value on hover. Queries per second is a number, never a dial.
+- **Moves wait for the network, then clean up after themselves.** A move waits for each device up to half the target network's DHCP lease (never less than 5 minutes) and rolls back automatically on timeout. Other failures wait for a decision (Retry or Roll back).
 - **Insecure state is loud.** The Lab profile and any setting weaker than the Home profile show a persistent banner.
 
 ## The mark
 
-The Tenko mark is a nine-tailed fox, the form a tenko takes. A geometric fox head, seven points with two ears and a pointed chin, sits in front of nine tails that fan out behind it. The tails rise from a point just behind the chin, at 25-degree steps from -100 to +100 degrees, and each one flicks its tip outward, so the silhouette reads as a fox spreading its tails, not as a flower or a sun. It is built on a 48-unit grid: the fan center is at (24, 33), the tails end on circles of radius 22 at the sides and 24 at the top, and a 1.5-unit knockout separates the head from the tails so the mark works in a single color. It is drawn in `currentColor` and follows the theme. The two-tone variant colors only the tails with the accent. Below 24 px the small cut drops the eyes and widens the knockout to 1.9 units; the favicon uses that cut and switches between ink and light ink with the system theme. Clear space: keep x on every side, where x is half the width of the head (9 units, about a fifth of the mark's height). Minimum sizes are 16 px for the mark and 88 px wide for the lockup. The wordmark "Tenko" is drawn as monoline strokes on the same grid, with "DDI" set in the x-height in a lighter stroke, so the lockup needs no font file. See [`logo/preview.html`](logo/preview.html) for every variant at 16, 32 and 128 px on light and dark, the construction grid and the rules for use.
+The Tenko mark is a nine-tailed fox, the form a tenko takes. A geometric fox head, seven points with two ears and a pointed chin, sits in front of nine tails that fan out behind it. The tails rise from a point just behind the chin, at 25-degree steps from -100 to +100 degrees, and each one flicks its tip outward, so the silhouette reads as a fox spreading its tails, not as a flower or a sun. It is built on a 48-unit grid: the fan center is at (24, 33), the tails end on circles of radius 22 at the sides and 24 at the top, and a 1.5-unit knockout separates the head from the tails so the mark works in a single color. It is drawn in `currentColor` and follows the theme. The two-tone variant colors only the tails with the accent and is used on the sign-in page and in the first-run wizard; everywhere else the mark is one color. Below 24 px the small cut drops the eyes and widens the knockout to 1.9 units; the favicon uses that cut and switches between ink and light ink with the system theme. Clear space: keep x on every side, where x is half the width of the head (9 units, about a fifth of the mark's height). Minimum sizes are 16 px for the mark and 88 px wide for the lockup. The wordmark "Tenko" is drawn as monoline strokes on the same grid, with "DDI" set in the x-height in a lighter stroke, so the lockup needs no font file; its letterforms are fixed as the ones in the 16 px header wordmark of every page. See [`logo/preview.html`](logo/preview.html) for every variant at 16, 32 and 128 px on light and dark, the construction grid and the rules for use.
 
 ## Files
 
@@ -202,11 +231,12 @@ The Tenko mark is a nine-tailed fox, the form a tenko takes. A geometric fox hea
 | `mockups/topology.html` | Topology map with hover card, port panel, filters and legend |
 | `mockups/dashboard.html` | Dashboard per node and for the cluster |
 | `mockups/wizard.html` | First-run wizard |
+| `mockups/signin.html` | Sign-in (passkey first), with the two-tone mark |
 
 ## Notes for the SolidJS implementation
 
 - `tokens.css` can be imported as is. Components should reference roles (`var(--surface)`, `var(--mode-reserved)`), never hex values.
 - The grid needs virtualized rows. The cell focus model (row index, column index) and the selection model (set of ids plus an anchor) are separate state, as in the mockup script.
 - The icon sprite in `shell.js` is a 16-unit stroke set; it becomes one inline sprite in the bundle.
-- The font is the only binary asset besides the mark: Atkinson Hyperlegible Mono as one variable WOFF2 under `/assets/`, measured at 18 KB for the Latin subset (which covers Swedish) and 28 KB with Latin Extended. Regular and bold come from the same file.
+- The font is the only binary asset besides the mark: JetBrains Mono as one variable WOFF2 under `/assets/`, measured at 31 KB for the Latin subset (which covers Swedish) and 43 KB with Latin Extended. Regular and bold come from the same file.
 - Every UI string in the mockups is plain English in sentence case and is meant to become a key in the English language pack (API-21).

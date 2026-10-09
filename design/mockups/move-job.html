@@ -8,10 +8,10 @@
 <link rel="icon" href="../logo/tenko-favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&amp;display=swap">
 <link rel="stylesheet" href="../tokens.css">
 <link rel="stylesheet" href="shell.css">
-<script>try{var t=localStorage.getItem('tenko-theme');if(t)document.documentElement.dataset.theme=t;var d=localStorage.getItem('tenko-density');if(d&&d!=='compact')document.documentElement.dataset.density=d;}catch(e){}</script>
+<script>try{var t=localStorage.getItem('tenko-theme');if(t)document.documentElement.dataset.theme=t;var em=localStorage.getItem('tenko-emphasize');if(em)document.documentElement.dataset.emphasize=em;var d=localStorage.getItem('tenko-density');if(d&&d!=='compact')document.documentElement.dataset.density=d;}catch(e){}</script>
 <script src="shell.js" defer></script>
 <style>
   /* Move job: three scenes of one view (preview, running, jobs list).
@@ -26,8 +26,6 @@
   .statusbar .scenes .seg button { height: 18px; padding: 0 8px; font-size: var(--fs-11); }
 
   /* ---------- Shared parts ---------- */
-  .mac { font-family: var(--font-data); font-size: 0.96em; white-space: nowrap; color: var(--ink-2); }
-  .mac .oui { color: var(--ink-3); }
   .twisty { display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--r-1); background: transparent; color: var(--ink-3); flex: none; }
   .twisty:hover { background: var(--surface-3); color: var(--ink); }
   .devcell { display: inline-flex; align-items: center; gap: var(--sp-3); min-width: 0; vertical-align: middle; }
@@ -99,7 +97,7 @@
   .pv-note li { display: flex; gap: var(--sp-3); }
   .pv-note li svg.i { margin-top: 2px; color: var(--ink-3); }
 
-  .pvt { min-width: 1060px; }
+  .pvt { min-width: 1320px; }
   .pvt tbody tr.move-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 2px; }
   .pvt tr.move-row.has-note > td { border-bottom-color: transparent; }
   .pvt .dnschg { display: inline-flex; align-items: center; gap: var(--sp-3); vertical-align: middle; }
@@ -121,6 +119,16 @@
   .nt > svg.i { margin-top: 2px; flex: none; color: var(--ink-3); }
   .nt b { color: var(--ink); font-weight: var(--fw-semibold); }
   .nt .btn { margin-left: var(--sp-3); flex: none; }
+  .pvt tr.note.more > td { border-bottom-color: transparent; }
+  .l2sel { width: 100%; max-width: 340px; height: var(--ctl-h-sm); font-size: var(--fs-12); }
+  .l2sel:disabled { color: var(--ink-3); background: var(--surface-2); }
+  .pv-note p + p { margin-top: var(--sp-2); }
+
+  /* "Create tickets": a hint of a later ticketing connector. Looks disabled, stays focusable, does nothing. */
+  .tk-aff { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin-left: auto; }
+  .tk-aff .hint { color: var(--ink-3); font-size: var(--fs-12); font-weight: var(--fw-regular); }
+  .side-tk { display: flex; padding: 0 var(--sp-6) var(--sp-3); }
+  .side-tk .tk-aff { margin-left: 0; }
 
   details.pv-manual { border-top: 1px solid var(--line); }
   details.pv-manual > summary { list-style: none; display: flex; align-items: center; gap: var(--sp-4); min-height: 36px; padding: var(--sp-3) var(--sp-6); cursor: pointer; }
@@ -140,7 +148,9 @@
   .cbl { display: inline-flex; align-items: center; gap: var(--sp-3); height: var(--ctl-h); cursor: pointer; }
   .cbl .dh { display: none; color: var(--ink-3); font-size: var(--fs-12); }
   .cbl input:checked ~ .dh { display: inline; }
-  .cf-act { margin-left: auto; display: flex; gap: var(--sp-3); }
+  .cf-act { margin-left: auto; display: flex; align-items: center; gap: var(--sp-3); }
+  .cf-rb { max-width: 300px; margin-right: var(--sp-3); color: var(--ink-2); font-size: var(--fs-12); line-height: var(--lh-text); text-align: right; }
+  #to-help { max-width: 380px; }
 
   /* ---------- Scene 2: running ---------- */
   .rj { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 380px; }
@@ -227,7 +237,7 @@
 <body>
 <div class="app">
   <header class="topbar">
-    <a class="brand" href="index.html" aria-label="Tenko DDI home"><span class="mark-cell"><svg class="mark" viewBox="0 2 48 48" aria-hidden="true"><defs><mask id="tenko-knock" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="52"><rect width="48" height="52" fill="#fff"/><path d="M15 30.5L17.6 19.8L21.6 23.9L26.4 23.9L30.4 19.8L33 30.5L24 40.5Z" fill="#000" stroke="#000" stroke-width="3" stroke-linejoin="round"/></mask></defs><path mask="url(#tenko-knock)" fill="currentColor" d="M20.06 33.69L19.59 33.22L19.13 33.06L18.66 32.97L18.19 32.91L17.72 32.88L17.25 32.87L16.77 32.87L16.3 32.9L15.83 32.93L15.36 32.99L14.9 33.05L14.43 33.13L13.97 33.22L13.51 33.32L13.05 33.44L12.6 33.56L12.15 33.7L11.7 33.84L11.26 34L10.83 34.16L10.39 34.34L9.97 34.52L9.55 34.72L9.13 34.92L8.73 35.13L8.32 35.36L7.93 35.59L7.54 35.83L7.16 36.08L6.81 36.36L6.53 36.73L6.27 37.1L6.03 37.48L5.8 37.86L5.58 38.25L5.38 38.63L5.2 39.02L5.03 39.42L4.88 39.81L4.75 40.2L4.64 40.6L4.55 40.99L4.48 41.39L4.44 41.78L4.41 42.17L4.42 42.56L4.46 42.94L4.58 43.33L4.58 43.33L5.09 43.15L5.5 42.97L5.89 42.81L6.26 42.65L6.62 42.51L6.98 42.38L7.33 42.27L7.68 42.16L8.02 42.06L8.37 41.97L8.71 41.89L9.06 41.82L9.4 41.76L9.74 41.7L10.08 41.65L10.43 41.6L10.77 41.56L11.12 41.53L11.33 41.35L11.52 41.11L11.72 40.88L11.94 40.64L12.16 40.4L12.38 40.17L12.62 39.93L12.87 39.7L13.13 39.47L13.39 39.24L13.67 39.01L13.95 38.78L14.23 38.55L14.53 38.33L14.83 38.1L15.14 37.88L15.45 37.66L15.77 37.44L16.1 37.23L16.43 37.01L16.77 36.79L17.12 36.57L17.46 36.35L17.82 36.13L18.18 35.89L18.55 35.65L18.92 35.38L19.3 35.08L19.68 34.69L20.06 33.69ZM20.14 31.96L19.9 31.33L19.52 30.99L19.12 30.7L18.71 30.45L18.28 30.21L17.85 30L17.4 29.8L16.95 29.62L16.49 29.45L16.03 29.3L15.57 29.16L15.1 29.03L14.63 28.91L14.16 28.81L13.68 28.72L13.21 28.64L12.73 28.57L12.25 28.51L11.78 28.46L11.3 28.43L10.82 28.41L10.35 28.39L9.87 28.39L9.4 28.4L8.93 28.43L8.46 28.46L7.99 28.5L7.53 28.56L7.07 28.62L6.62 28.73L6.21 28.95L5.8 29.18L5.41 29.43L5.03 29.68L4.66 29.94L4.31 30.21L3.97 30.49L3.65 30.78L3.34 31.07L3.05 31.38L2.77 31.7L2.51 32.02L2.28 32.35L2.06 32.69L1.87 33.04L1.71 33.4L1.58 33.77L1.51 34.18L1.51 34.18L2.06 34.23L2.52 34.24L2.94 34.24L3.35 34.26L3.74 34.28L4.12 34.31L4.5 34.34L4.87 34.39L5.23 34.44L5.59 34.51L5.94 34.57L6.29 34.65L6.64 34.73L6.98 34.82L7.32 34.92L7.66 35.02L8 35.13L8.33 35.24L8.62 35.16L8.9 35.03L9.19 34.9L9.49 34.77L9.8 34.65L10.12 34.53L10.45 34.42L10.78 34.31L11.12 34.21L11.47 34.11L11.83 34.02L12.19 33.93L12.56 33.85L12.94 33.77L13.32 33.7L13.7 33.63L14.1 33.57L14.49 33.51L14.89 33.45L15.3 33.39L15.71 33.34L16.13 33.29L16.56 33.24L16.99 33.19L17.43 33.14L17.88 33.07L18.34 32.99L18.83 32.88L19.36 32.7L20.14 31.96ZM20.94 30.43L20.97 29.73L20.76 29.25L20.5 28.81L20.22 28.38L19.91 27.98L19.59 27.58L19.25 27.2L18.91 26.84L18.55 26.48L18.18 26.13L17.8 25.8L17.41 25.47L17.02 25.16L16.62 24.85L16.21 24.56L15.8 24.27L15.38 24L14.95 23.74L14.53 23.49L14.09 23.25L13.65 23.02L13.21 22.8L12.77 22.59L12.32 22.39L11.87 22.21L11.41 22.03L10.96 21.87L10.5 21.72L10.04 21.58L9.57 21.49L9.09 21.51L8.61 21.55L8.14 21.6L7.67 21.66L7.22 21.74L6.77 21.84L6.33 21.95L5.9 22.07L5.48 22.21L5.07 22.37L4.68 22.54L4.3 22.73L3.93 22.93L3.58 23.15L3.25 23.39L2.94 23.65L2.65 23.93L2.41 24.28L2.41 24.28L2.89 24.55L3.31 24.74L3.71 24.93L4.08 25.11L4.44 25.29L4.79 25.48L5.13 25.67L5.45 25.86L5.77 26.06L6.08 26.27L6.38 26.48L6.68 26.7L6.97 26.92L7.26 27.15L7.54 27.38L7.82 27.62L8.09 27.86L8.36 28.11L8.67 28.16L8.99 28.16L9.33 28.17L9.67 28.19L10.02 28.21L10.37 28.25L10.73 28.29L11.09 28.34L11.46 28.4L11.84 28.47L12.22 28.54L12.6 28.62L12.98 28.71L13.37 28.81L13.77 28.91L14.16 29.03L14.56 29.14L14.96 29.27L15.37 29.4L15.78 29.53L16.19 29.67L16.61 29.82L17.03 29.97L17.46 30.12L17.9 30.27L18.35 30.42L18.83 30.56L19.33 30.68L19.9 30.75L20.94 30.43ZM22.31 29.37L22.63 28.74L22.64 28.2L22.58 27.68L22.5 27.16L22.39 26.65L22.25 26.14L22.1 25.64L21.94 25.15L21.76 24.66L21.56 24.18L21.36 23.7L21.14 23.23L20.91 22.77L20.67 22.31L20.41 21.86L20.15 21.42L19.88 20.98L19.6 20.55L19.31 20.14L19.01 19.72L18.7 19.32L18.39 18.93L18.06 18.54L17.73 18.17L17.39 17.8L17.05 17.44L16.69 17.09L16.34 16.76L15.97 16.43L15.58 16.14L15.12 15.95L14.66 15.78L14.21 15.62L13.75 15.47L13.3 15.35L12.84 15.24L12.39 15.15L11.94 15.08L11.49 15.03L11.05 14.99L10.61 14.98L10.17 14.98L9.75 15.01L9.33 15.06L8.92 15.14L8.52 15.24L8.13 15.37L7.76 15.58L7.76 15.58L8.09 16.04L8.4 16.39L8.69 16.72L8.96 17.05L9.21 17.37L9.46 17.68L9.69 18L9.91 18.32L10.12 18.64L10.32 18.96L10.52 19.28L10.7 19.61L10.88 19.94L11.05 20.27L11.22 20.61L11.38 20.94L11.53 21.28L11.68 21.63L11.94 21.81L12.24 21.96L12.55 22.11L12.86 22.28L13.17 22.46L13.49 22.65L13.8 22.84L14.12 23.05L14.44 23.27L14.76 23.5L15.07 23.74L15.39 23.98L15.71 24.24L16.03 24.5L16.35 24.77L16.67 25.05L16.99 25.34L17.31 25.63L17.63 25.93L17.95 26.24L18.27 26.56L18.6 26.88L18.92 27.21L19.26 27.54L19.6 27.87L19.95 28.21L20.33 28.56L20.74 28.89L21.23 29.22L22.31 29.37ZM24 29L24.74 28.5L25.01 28L25.21 27.5L25.38 26.99L25.52 26.49L25.65 25.99L25.77 25.49L25.88 24.99L25.98 24.49L26.08 23.99L26.17 23.5L26.26 23.01L26.34 22.52L26.42 22.03L26.5 21.54L26.57 21.06L26.64 20.58L26.71 20.11L26.78 19.63L26.84 19.17L26.91 18.71L26.97 18.25L27.03 17.8L27.09 17.35L27.14 16.91L27.2 16.47L27.25 16.05L27.31 15.62L27.36 15.21L27.36 14.8L27.21 14.4L27.06 14.01L26.91 13.62L26.75 13.25L26.59 12.88L26.43 12.52L26.27 12.17L26.1 11.83L25.93 11.5L25.76 11.18L25.58 10.87L25.4 10.56L25.21 10.28L25.01 10L24.8 9.73L24.58 9.47L24.33 9.23L24 9L24 9L23.67 9.23L23.42 9.47L23.2 9.73L22.99 10L22.79 10.28L22.6 10.56L22.42 10.87L22.24 11.18L22.07 11.5L21.9 11.83L21.73 12.17L21.57 12.52L21.41 12.88L21.25 13.25L21.09 13.62L20.94 14.01L20.79 14.4L20.64 14.8L20.64 15.21L20.69 15.62L20.75 16.05L20.8 16.47L20.86 16.91L20.91 17.35L20.97 17.8L21.03 18.25L21.09 18.71L21.16 19.17L21.22 19.63L21.29 20.11L21.36 20.58L21.43 21.06L21.5 21.54L21.58 22.03L21.66 22.52L21.74 23.01L21.83 23.5L21.92 23.99L22.02 24.49L22.12 24.99L22.23 25.49L22.35 25.99L22.48 26.49L22.62 26.99L22.79 27.5L22.99 28L23.26 28.5L24 29ZM25.69 29.37L26.77 29.22L27.26 28.89L27.67 28.56L28.05 28.21L28.4 27.87L28.74 27.54L29.08 27.21L29.4 26.88L29.73 26.56L30.05 26.24L30.37 25.93L30.69 25.63L31.01 25.34L31.33 25.05L31.65 24.77L31.97 24.5L32.29 24.24L32.61 23.98L32.93 23.74L33.24 23.5L33.56 23.27L33.88 23.05L34.2 22.84L34.51 22.65L34.83 22.46L35.14 22.28L35.45 22.11L35.76 21.96L36.06 21.81L36.32 21.63L36.47 21.28L36.62 20.94L36.78 20.61L36.95 20.27L37.12 19.94L37.3 19.61L37.48 19.28L37.68 18.96L37.88 18.64L38.09 18.32L38.31 18L38.54 17.68L38.79 17.37L39.04 17.05L39.31 16.72L39.6 16.39L39.91 16.04L40.24 15.58L40.24 15.58L39.87 15.37L39.48 15.24L39.08 15.14L38.67 15.06L38.25 15.01L37.83 14.98L37.39 14.98L36.95 14.99L36.51 15.03L36.06 15.08L35.61 15.15L35.16 15.24L34.7 15.35L34.25 15.47L33.79 15.62L33.34 15.78L32.88 15.95L32.42 16.14L32.03 16.43L31.66 16.76L31.31 17.09L30.95 17.44L30.61 17.8L30.27 18.17L29.94 18.54L29.61 18.93L29.3 19.32L28.99 19.72L28.69 20.14L28.4 20.55L28.12 20.98L27.85 21.42L27.59 21.86L27.33 22.31L27.09 22.77L26.86 23.23L26.64 23.7L26.44 24.18L26.24 24.66L26.06 25.15L25.9 25.64L25.75 26.14L25.61 26.65L25.5 27.16L25.42 27.68L25.36 28.2L25.37 28.74L25.69 29.37ZM27.06 30.43L28.1 30.75L28.67 30.68L29.17 30.56L29.65 30.42L30.1 30.27L30.54 30.12L30.97 29.97L31.39 29.82L31.81 29.67L32.22 29.53L32.63 29.4L33.04 29.27L33.44 29.14L33.84 29.03L34.23 28.91L34.63 28.81L35.02 28.71L35.4 28.62L35.78 28.54L36.16 28.47L36.54 28.4L36.91 28.34L37.27 28.29L37.63 28.25L37.98 28.21L38.33 28.19L38.67 28.17L39.01 28.16L39.33 28.16L39.64 28.11L39.91 27.86L40.18 27.62L40.46 27.38L40.74 27.15L41.03 26.92L41.32 26.7L41.62 26.48L41.92 26.27L42.23 26.06L42.55 25.86L42.87 25.67L43.21 25.48L43.56 25.29L43.92 25.11L44.29 24.93L44.69 24.74L45.11 24.55L45.59 24.28L45.59 24.28L45.35 23.93L45.06 23.65L44.75 23.39L44.42 23.15L44.07 22.93L43.7 22.73L43.32 22.54L42.93 22.37L42.52 22.21L42.1 22.07L41.67 21.95L41.23 21.84L40.78 21.74L40.33 21.66L39.86 21.6L39.39 21.55L38.91 21.51L38.43 21.49L37.96 21.58L37.5 21.72L37.04 21.87L36.59 22.03L36.13 22.21L35.68 22.39L35.23 22.59L34.79 22.8L34.35 23.02L33.91 23.25L33.47 23.49L33.05 23.74L32.62 24L32.2 24.27L31.79 24.56L31.38 24.85L30.98 25.16L30.59 25.47L30.2 25.8L29.82 26.13L29.45 26.48L29.09 26.84L28.75 27.2L28.41 27.58L28.09 27.98L27.78 28.38L27.5 28.81L27.24 29.25L27.03 29.73L27.06 30.43ZM27.86 31.96L28.64 32.7L29.17 32.88L29.66 32.99L30.12 33.07L30.57 33.14L31.01 33.19L31.44 33.24L31.87 33.29L32.29 33.34L32.7 33.39L33.11 33.45L33.51 33.51L33.9 33.57L34.3 33.63L34.68 33.7L35.06 33.77L35.44 33.85L35.81 33.93L36.17 34.02L36.53 34.11L36.88 34.21L37.22 34.31L37.55 34.42L37.88 34.53L38.2 34.65L38.51 34.77L38.81 34.9L39.1 35.03L39.38 35.16L39.67 35.24L40 35.13L40.34 35.02L40.68 34.92L41.02 34.82L41.36 34.73L41.71 34.65L42.06 34.57L42.41 34.51L42.77 34.44L43.13 34.39L43.5 34.34L43.88 34.31L44.26 34.28L44.65 34.26L45.06 34.24L45.48 34.24L45.94 34.23L46.49 34.18L46.49 34.18L46.42 33.77L46.29 33.4L46.13 33.04L45.94 32.69L45.72 32.35L45.49 32.02L45.23 31.7L44.95 31.38L44.66 31.07L44.35 30.78L44.03 30.49L43.69 30.21L43.34 29.94L42.97 29.68L42.59 29.43L42.2 29.18L41.79 28.95L41.38 28.73L40.93 28.62L40.47 28.56L40.01 28.5L39.54 28.46L39.07 28.43L38.6 28.4L38.13 28.39L37.65 28.39L37.18 28.41L36.7 28.43L36.22 28.46L35.75 28.51L35.27 28.57L34.79 28.64L34.32 28.72L33.84 28.81L33.37 28.91L32.9 29.03L32.43 29.16L31.97 29.3L31.51 29.45L31.05 29.62L30.6 29.8L30.15 30L29.72 30.21L29.29 30.45L28.88 30.7L28.48 30.99L28.1 31.33L27.86 31.96ZM27.94 33.69L28.32 34.69L28.7 35.08L29.08 35.38L29.45 35.65L29.82 35.89L30.18 36.13L30.54 36.35L30.88 36.57L31.23 36.79L31.57 37.01L31.9 37.23L32.23 37.44L32.55 37.66L32.86 37.88L33.17 38.1L33.47 38.33L33.77 38.55L34.05 38.78L34.33 39.01L34.61 39.24L34.87 39.47L35.13 39.7L35.38 39.93L35.62 40.17L35.84 40.4L36.06 40.64L36.28 40.88L36.48 41.11L36.67 41.35L36.88 41.53L37.23 41.56L37.57 41.6L37.92 41.65L38.26 41.7L38.6 41.76L38.94 41.82L39.29 41.89L39.63 41.97L39.98 42.06L40.32 42.16L40.67 42.27L41.02 42.38L41.38 42.51L41.74 42.65L42.11 42.81L42.5 42.97L42.91 43.15L43.42 43.33L43.42 43.33L43.54 42.94L43.58 42.56L43.59 42.17L43.56 41.78L43.52 41.39L43.45 40.99L43.36 40.6L43.25 40.2L43.12 39.81L42.97 39.42L42.8 39.02L42.62 38.63L42.42 38.25L42.2 37.86L41.97 37.48L41.73 37.1L41.47 36.73L41.19 36.36L40.84 36.08L40.46 35.83L40.07 35.59L39.68 35.36L39.27 35.13L38.87 34.92L38.45 34.72L38.03 34.52L37.61 34.34L37.17 34.16L36.74 34L36.3 33.84L35.85 33.7L35.4 33.56L34.95 33.44L34.49 33.32L34.03 33.22L33.57 33.13L33.1 33.05L32.64 32.99L32.17 32.93L31.7 32.9L31.23 32.87L30.75 32.87L30.28 32.88L29.81 32.91L29.34 32.97L28.87 33.06L28.41 33.22L27.94 33.69Z"/><path fill="currentColor" fill-rule="evenodd" d="M15 30.5L17.6 19.8L21.6 23.9L26.4 23.9L30.4 19.8L33 30.5L24 40.5ZM17.9 29.2L21.6 30.5L21 31.7L18.6 30.7ZM30.1 29.2L26.4 30.5L27 31.7L29.4 30.7Z"/></svg></span><svg class="wordmark" viewBox="55 13 133 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="3.6" stroke-linejoin="round" d="M56 15.8H73M64.5 14V36M77.2 28H89.6A6.2 6.2 0 1 0 88.15 31.99M96.4 20V36M96.4 28A6.2 6.2 0 0 1 108.8 28V36M115.6 14V36M126.4 20.6L117.4 29.2M120.7 26L127.4 36M145.2 28A6.2 6.2 0 1 1 132.8 28A6.2 6.2 0 1 1 145.2 28Z"/><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round" stroke-opacity="0.62" d="M156.3 20V36M156.3 21.3H158.8A6.7 6.7 0 0 1 158.8 34.7H156.3M170.7 20V36M170.7 21.3H173.2A6.7 6.7 0 0 1 173.2 34.7H170.7M185.1 20V36"/></svg></a>
+    <a class="brand" href="dashboard.html" aria-label="Tenko DDI, start page"><span class="mark-cell"><svg class="mark" viewBox="0 2 48 48" aria-hidden="true"><defs><mask id="tenko-knock" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="52"><rect width="48" height="52" fill="#fff"/><path d="M15 30.5L17.6 19.8L21.6 23.9L26.4 23.9L30.4 19.8L33 30.5L24 40.5Z" fill="#000" stroke="#000" stroke-width="3" stroke-linejoin="round"/></mask></defs><path mask="url(#tenko-knock)" fill="currentColor" d="M20.06 33.69L19.59 33.22L19.13 33.06L18.66 32.97L18.19 32.91L17.72 32.88L17.25 32.87L16.77 32.87L16.3 32.9L15.83 32.93L15.36 32.99L14.9 33.05L14.43 33.13L13.97 33.22L13.51 33.32L13.05 33.44L12.6 33.56L12.15 33.7L11.7 33.84L11.26 34L10.83 34.16L10.39 34.34L9.97 34.52L9.55 34.72L9.13 34.92L8.73 35.13L8.32 35.36L7.93 35.59L7.54 35.83L7.16 36.08L6.81 36.36L6.53 36.73L6.27 37.1L6.03 37.48L5.8 37.86L5.58 38.25L5.38 38.63L5.2 39.02L5.03 39.42L4.88 39.81L4.75 40.2L4.64 40.6L4.55 40.99L4.48 41.39L4.44 41.78L4.41 42.17L4.42 42.56L4.46 42.94L4.58 43.33L4.58 43.33L5.09 43.15L5.5 42.97L5.89 42.81L6.26 42.65L6.62 42.51L6.98 42.38L7.33 42.27L7.68 42.16L8.02 42.06L8.37 41.97L8.71 41.89L9.06 41.82L9.4 41.76L9.74 41.7L10.08 41.65L10.43 41.6L10.77 41.56L11.12 41.53L11.33 41.35L11.52 41.11L11.72 40.88L11.94 40.64L12.16 40.4L12.38 40.17L12.62 39.93L12.87 39.7L13.13 39.47L13.39 39.24L13.67 39.01L13.95 38.78L14.23 38.55L14.53 38.33L14.83 38.1L15.14 37.88L15.45 37.66L15.77 37.44L16.1 37.23L16.43 37.01L16.77 36.79L17.12 36.57L17.46 36.35L17.82 36.13L18.18 35.89L18.55 35.65L18.92 35.38L19.3 35.08L19.68 34.69L20.06 33.69ZM20.14 31.96L19.9 31.33L19.52 30.99L19.12 30.7L18.71 30.45L18.28 30.21L17.85 30L17.4 29.8L16.95 29.62L16.49 29.45L16.03 29.3L15.57 29.16L15.1 29.03L14.63 28.91L14.16 28.81L13.68 28.72L13.21 28.64L12.73 28.57L12.25 28.51L11.78 28.46L11.3 28.43L10.82 28.41L10.35 28.39L9.87 28.39L9.4 28.4L8.93 28.43L8.46 28.46L7.99 28.5L7.53 28.56L7.07 28.62L6.62 28.73L6.21 28.95L5.8 29.18L5.41 29.43L5.03 29.68L4.66 29.94L4.31 30.21L3.97 30.49L3.65 30.78L3.34 31.07L3.05 31.38L2.77 31.7L2.51 32.02L2.28 32.35L2.06 32.69L1.87 33.04L1.71 33.4L1.58 33.77L1.51 34.18L1.51 34.18L2.06 34.23L2.52 34.24L2.94 34.24L3.35 34.26L3.74 34.28L4.12 34.31L4.5 34.34L4.87 34.39L5.23 34.44L5.59 34.51L5.94 34.57L6.29 34.65L6.64 34.73L6.98 34.82L7.32 34.92L7.66 35.02L8 35.13L8.33 35.24L8.62 35.16L8.9 35.03L9.19 34.9L9.49 34.77L9.8 34.65L10.12 34.53L10.45 34.42L10.78 34.31L11.12 34.21L11.47 34.11L11.83 34.02L12.19 33.93L12.56 33.85L12.94 33.77L13.32 33.7L13.7 33.63L14.1 33.57L14.49 33.51L14.89 33.45L15.3 33.39L15.71 33.34L16.13 33.29L16.56 33.24L16.99 33.19L17.43 33.14L17.88 33.07L18.34 32.99L18.83 32.88L19.36 32.7L20.14 31.96ZM20.94 30.43L20.97 29.73L20.76 29.25L20.5 28.81L20.22 28.38L19.91 27.98L19.59 27.58L19.25 27.2L18.91 26.84L18.55 26.48L18.18 26.13L17.8 25.8L17.41 25.47L17.02 25.16L16.62 24.85L16.21 24.56L15.8 24.27L15.38 24L14.95 23.74L14.53 23.49L14.09 23.25L13.65 23.02L13.21 22.8L12.77 22.59L12.32 22.39L11.87 22.21L11.41 22.03L10.96 21.87L10.5 21.72L10.04 21.58L9.57 21.49L9.09 21.51L8.61 21.55L8.14 21.6L7.67 21.66L7.22 21.74L6.77 21.84L6.33 21.95L5.9 22.07L5.48 22.21L5.07 22.37L4.68 22.54L4.3 22.73L3.93 22.93L3.58 23.15L3.25 23.39L2.94 23.65L2.65 23.93L2.41 24.28L2.41 24.28L2.89 24.55L3.31 24.74L3.71 24.93L4.08 25.11L4.44 25.29L4.79 25.48L5.13 25.67L5.45 25.86L5.77 26.06L6.08 26.27L6.38 26.48L6.68 26.7L6.97 26.92L7.26 27.15L7.54 27.38L7.82 27.62L8.09 27.86L8.36 28.11L8.67 28.16L8.99 28.16L9.33 28.17L9.67 28.19L10.02 28.21L10.37 28.25L10.73 28.29L11.09 28.34L11.46 28.4L11.84 28.47L12.22 28.54L12.6 28.62L12.98 28.71L13.37 28.81L13.77 28.91L14.16 29.03L14.56 29.14L14.96 29.27L15.37 29.4L15.78 29.53L16.19 29.67L16.61 29.82L17.03 29.97L17.46 30.12L17.9 30.27L18.35 30.42L18.83 30.56L19.33 30.68L19.9 30.75L20.94 30.43ZM22.31 29.37L22.63 28.74L22.64 28.2L22.58 27.68L22.5 27.16L22.39 26.65L22.25 26.14L22.1 25.64L21.94 25.15L21.76 24.66L21.56 24.18L21.36 23.7L21.14 23.23L20.91 22.77L20.67 22.31L20.41 21.86L20.15 21.42L19.88 20.98L19.6 20.55L19.31 20.14L19.01 19.72L18.7 19.32L18.39 18.93L18.06 18.54L17.73 18.17L17.39 17.8L17.05 17.44L16.69 17.09L16.34 16.76L15.97 16.43L15.58 16.14L15.12 15.95L14.66 15.78L14.21 15.62L13.75 15.47L13.3 15.35L12.84 15.24L12.39 15.15L11.94 15.08L11.49 15.03L11.05 14.99L10.61 14.98L10.17 14.98L9.75 15.01L9.33 15.06L8.92 15.14L8.52 15.24L8.13 15.37L7.76 15.58L7.76 15.58L8.09 16.04L8.4 16.39L8.69 16.72L8.96 17.05L9.21 17.37L9.46 17.68L9.69 18L9.91 18.32L10.12 18.64L10.32 18.96L10.52 19.28L10.7 19.61L10.88 19.94L11.05 20.27L11.22 20.61L11.38 20.94L11.53 21.28L11.68 21.63L11.94 21.81L12.24 21.96L12.55 22.11L12.86 22.28L13.17 22.46L13.49 22.65L13.8 22.84L14.12 23.05L14.44 23.27L14.76 23.5L15.07 23.74L15.39 23.98L15.71 24.24L16.03 24.5L16.35 24.77L16.67 25.05L16.99 25.34L17.31 25.63L17.63 25.93L17.95 26.24L18.27 26.56L18.6 26.88L18.92 27.21L19.26 27.54L19.6 27.87L19.95 28.21L20.33 28.56L20.74 28.89L21.23 29.22L22.31 29.37ZM24 29L24.74 28.5L25.01 28L25.21 27.5L25.38 26.99L25.52 26.49L25.65 25.99L25.77 25.49L25.88 24.99L25.98 24.49L26.08 23.99L26.17 23.5L26.26 23.01L26.34 22.52L26.42 22.03L26.5 21.54L26.57 21.06L26.64 20.58L26.71 20.11L26.78 19.63L26.84 19.17L26.91 18.71L26.97 18.25L27.03 17.8L27.09 17.35L27.14 16.91L27.2 16.47L27.25 16.05L27.31 15.62L27.36 15.21L27.36 14.8L27.21 14.4L27.06 14.01L26.91 13.62L26.75 13.25L26.59 12.88L26.43 12.52L26.27 12.17L26.1 11.83L25.93 11.5L25.76 11.18L25.58 10.87L25.4 10.56L25.21 10.28L25.01 10L24.8 9.73L24.58 9.47L24.33 9.23L24 9L24 9L23.67 9.23L23.42 9.47L23.2 9.73L22.99 10L22.79 10.28L22.6 10.56L22.42 10.87L22.24 11.18L22.07 11.5L21.9 11.83L21.73 12.17L21.57 12.52L21.41 12.88L21.25 13.25L21.09 13.62L20.94 14.01L20.79 14.4L20.64 14.8L20.64 15.21L20.69 15.62L20.75 16.05L20.8 16.47L20.86 16.91L20.91 17.35L20.97 17.8L21.03 18.25L21.09 18.71L21.16 19.17L21.22 19.63L21.29 20.11L21.36 20.58L21.43 21.06L21.5 21.54L21.58 22.03L21.66 22.52L21.74 23.01L21.83 23.5L21.92 23.99L22.02 24.49L22.12 24.99L22.23 25.49L22.35 25.99L22.48 26.49L22.62 26.99L22.79 27.5L22.99 28L23.26 28.5L24 29ZM25.69 29.37L26.77 29.22L27.26 28.89L27.67 28.56L28.05 28.21L28.4 27.87L28.74 27.54L29.08 27.21L29.4 26.88L29.73 26.56L30.05 26.24L30.37 25.93L30.69 25.63L31.01 25.34L31.33 25.05L31.65 24.77L31.97 24.5L32.29 24.24L32.61 23.98L32.93 23.74L33.24 23.5L33.56 23.27L33.88 23.05L34.2 22.84L34.51 22.65L34.83 22.46L35.14 22.28L35.45 22.11L35.76 21.96L36.06 21.81L36.32 21.63L36.47 21.28L36.62 20.94L36.78 20.61L36.95 20.27L37.12 19.94L37.3 19.61L37.48 19.28L37.68 18.96L37.88 18.64L38.09 18.32L38.31 18L38.54 17.68L38.79 17.37L39.04 17.05L39.31 16.72L39.6 16.39L39.91 16.04L40.24 15.58L40.24 15.58L39.87 15.37L39.48 15.24L39.08 15.14L38.67 15.06L38.25 15.01L37.83 14.98L37.39 14.98L36.95 14.99L36.51 15.03L36.06 15.08L35.61 15.15L35.16 15.24L34.7 15.35L34.25 15.47L33.79 15.62L33.34 15.78L32.88 15.95L32.42 16.14L32.03 16.43L31.66 16.76L31.31 17.09L30.95 17.44L30.61 17.8L30.27 18.17L29.94 18.54L29.61 18.93L29.3 19.32L28.99 19.72L28.69 20.14L28.4 20.55L28.12 20.98L27.85 21.42L27.59 21.86L27.33 22.31L27.09 22.77L26.86 23.23L26.64 23.7L26.44 24.18L26.24 24.66L26.06 25.15L25.9 25.64L25.75 26.14L25.61 26.65L25.5 27.16L25.42 27.68L25.36 28.2L25.37 28.74L25.69 29.37ZM27.06 30.43L28.1 30.75L28.67 30.68L29.17 30.56L29.65 30.42L30.1 30.27L30.54 30.12L30.97 29.97L31.39 29.82L31.81 29.67L32.22 29.53L32.63 29.4L33.04 29.27L33.44 29.14L33.84 29.03L34.23 28.91L34.63 28.81L35.02 28.71L35.4 28.62L35.78 28.54L36.16 28.47L36.54 28.4L36.91 28.34L37.27 28.29L37.63 28.25L37.98 28.21L38.33 28.19L38.67 28.17L39.01 28.16L39.33 28.16L39.64 28.11L39.91 27.86L40.18 27.62L40.46 27.38L40.74 27.15L41.03 26.92L41.32 26.7L41.62 26.48L41.92 26.27L42.23 26.06L42.55 25.86L42.87 25.67L43.21 25.48L43.56 25.29L43.92 25.11L44.29 24.93L44.69 24.74L45.11 24.55L45.59 24.28L45.59 24.28L45.35 23.93L45.06 23.65L44.75 23.39L44.42 23.15L44.07 22.93L43.7 22.73L43.32 22.54L42.93 22.37L42.52 22.21L42.1 22.07L41.67 21.95L41.23 21.84L40.78 21.74L40.33 21.66L39.86 21.6L39.39 21.55L38.91 21.51L38.43 21.49L37.96 21.58L37.5 21.72L37.04 21.87L36.59 22.03L36.13 22.21L35.68 22.39L35.23 22.59L34.79 22.8L34.35 23.02L33.91 23.25L33.47 23.49L33.05 23.74L32.62 24L32.2 24.27L31.79 24.56L31.38 24.85L30.98 25.16L30.59 25.47L30.2 25.8L29.82 26.13L29.45 26.48L29.09 26.84L28.75 27.2L28.41 27.58L28.09 27.98L27.78 28.38L27.5 28.81L27.24 29.25L27.03 29.73L27.06 30.43ZM27.86 31.96L28.64 32.7L29.17 32.88L29.66 32.99L30.12 33.07L30.57 33.14L31.01 33.19L31.44 33.24L31.87 33.29L32.29 33.34L32.7 33.39L33.11 33.45L33.51 33.51L33.9 33.57L34.3 33.63L34.68 33.7L35.06 33.77L35.44 33.85L35.81 33.93L36.17 34.02L36.53 34.11L36.88 34.21L37.22 34.31L37.55 34.42L37.88 34.53L38.2 34.65L38.51 34.77L38.81 34.9L39.1 35.03L39.38 35.16L39.67 35.24L40 35.13L40.34 35.02L40.68 34.92L41.02 34.82L41.36 34.73L41.71 34.65L42.06 34.57L42.41 34.51L42.77 34.44L43.13 34.39L43.5 34.34L43.88 34.31L44.26 34.28L44.65 34.26L45.06 34.24L45.48 34.24L45.94 34.23L46.49 34.18L46.49 34.18L46.42 33.77L46.29 33.4L46.13 33.04L45.94 32.69L45.72 32.35L45.49 32.02L45.23 31.7L44.95 31.38L44.66 31.07L44.35 30.78L44.03 30.49L43.69 30.21L43.34 29.94L42.97 29.68L42.59 29.43L42.2 29.18L41.79 28.95L41.38 28.73L40.93 28.62L40.47 28.56L40.01 28.5L39.54 28.46L39.07 28.43L38.6 28.4L38.13 28.39L37.65 28.39L37.18 28.41L36.7 28.43L36.22 28.46L35.75 28.51L35.27 28.57L34.79 28.64L34.32 28.72L33.84 28.81L33.37 28.91L32.9 29.03L32.43 29.16L31.97 29.3L31.51 29.45L31.05 29.62L30.6 29.8L30.15 30L29.72 30.21L29.29 30.45L28.88 30.7L28.48 30.99L28.1 31.33L27.86 31.96ZM27.94 33.69L28.32 34.69L28.7 35.08L29.08 35.38L29.45 35.65L29.82 35.89L30.18 36.13L30.54 36.35L30.88 36.57L31.23 36.79L31.57 37.01L31.9 37.23L32.23 37.44L32.55 37.66L32.86 37.88L33.17 38.1L33.47 38.33L33.77 38.55L34.05 38.78L34.33 39.01L34.61 39.24L34.87 39.47L35.13 39.7L35.38 39.93L35.62 40.17L35.84 40.4L36.06 40.64L36.28 40.88L36.48 41.11L36.67 41.35L36.88 41.53L37.23 41.56L37.57 41.6L37.92 41.65L38.26 41.7L38.6 41.76L38.94 41.82L39.29 41.89L39.63 41.97L39.98 42.06L40.32 42.16L40.67 42.27L41.02 42.38L41.38 42.51L41.74 42.65L42.11 42.81L42.5 42.97L42.91 43.15L43.42 43.33L43.42 43.33L43.54 42.94L43.58 42.56L43.59 42.17L43.56 41.78L43.52 41.39L43.45 40.99L43.36 40.6L43.25 40.2L43.12 39.81L42.97 39.42L42.8 39.02L42.62 38.63L42.42 38.25L42.2 37.86L41.97 37.48L41.73 37.1L41.47 36.73L41.19 36.36L40.84 36.08L40.46 35.83L40.07 35.59L39.68 35.36L39.27 35.13L38.87 34.92L38.45 34.72L38.03 34.52L37.61 34.34L37.17 34.16L36.74 34L36.3 33.84L35.85 33.7L35.4 33.56L34.95 33.44L34.49 33.32L34.03 33.22L33.57 33.13L33.1 33.05L32.64 32.99L32.17 32.93L31.7 32.9L31.23 32.87L30.75 32.87L30.28 32.88L29.81 32.91L29.34 32.97L28.87 33.06L28.41 33.22L27.94 33.69Z"/><path fill="currentColor" fill-rule="evenodd" d="M15 30.5L17.6 19.8L21.6 23.9L26.4 23.9L30.4 19.8L33 30.5L24 40.5ZM17.9 29.2L21.6 30.5L21 31.7L18.6 30.7ZM30.1 29.2L26.4 30.5L27 31.7L29.4 30.7Z"/></svg></span><svg class="wordmark" viewBox="55 13 133 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="3.6" stroke-linejoin="round" d="M56 15.8H73M64.5 14V36M77.2 28H89.6A6.2 6.2 0 1 0 88.15 31.99M96.4 20V36M96.4 28A6.2 6.2 0 0 1 108.8 28V36M115.6 14V36M126.4 20.6L117.4 29.2M120.7 26L127.4 36M145.2 28A6.2 6.2 0 1 1 132.8 28A6.2 6.2 0 1 1 145.2 28Z"/><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round" stroke-opacity="0.62" d="M156.3 20V36M156.3 21.3H158.8A6.7 6.7 0 0 1 158.8 34.7H156.3M170.7 20V36M170.7 21.3H173.2A6.7 6.7 0 0 1 173.2 34.7H170.7M185.1 20V36"/></svg></a>
     <button class="cmd" data-action="palette" aria-label="Open command palette">
       <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
       <span class="hint">Search addresses, hosts, MACs, records or run a command</span>
@@ -266,7 +276,7 @@
       <div class="page-head">
         <div>
           <div class="crumbs"><a href="shell-and-ipam.html">Home</a><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg><a href="shell-and-ipam.html">192.0.2.0/24</a><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg><span>Move preview</span></div>
-          <h1><span>Move <span id="pv-n">5</span> <span id="pv-hosts">hosts</span> to <span class="mono">198.51.100.0/24</span></span><span class="sub">IoT, VLAN 30, iot.example.test</span></h1>
+          <h1><span>Move <span id="pv-n" data-si="5">5</span> <span id="pv-hosts">hosts</span> to <span class="mono">198.51.100.0/24</span></span><span class="sub">IoT, VLAN 30, iot.example.test</span></h1>
         </div>
         <div class="actions"><span class="pv-state"><svg class="i sm" aria-hidden="true"><use href="#i-eye"/></svg>Preview only. Nothing has changed yet.</span></div>
       </div>
@@ -275,7 +285,10 @@
         <div class="pv-notes">
           <div class="pv-note">
             <svg class="i" aria-hidden="true"><use href="#i-info"/></svg>
-            <p><strong>Phase 1:</strong> Tenko changes IPAM intent and UniFi, then waits until each device shows up in the new network. Reservation and DNS changes are manual tasks you tick off.</p>
+            <div>
+              <p><strong>Phase 1:</strong> Tenko changes IPAM intent and UniFi, then waits until each device shows up in the new network. Reservation and DNS changes, and joining a Wi-Fi on a device, are manual tasks you tick off.</p>
+              <p><strong>Wireless networks:</strong> SSIDs are IPAM objects, read from UniFi with their VLAN. <span class="mono">Home</span> carries VLAN 10 (LAN), <span class="mono">Home-IoT</span> carries VLAN 30 (IoT), <span class="mono">Lab-Test</span> carries VLAN 20 (Lab). A wireless device moves to the SSID that carries the target VLAN, so it has to join that SSID.</p>
+            </div>
           </div>
           <div class="pv-note">
             <svg class="i" aria-hidden="true"><use href="#i-shield"/></svg>
@@ -290,7 +303,7 @@
         </div>
 
         <div class="tools">
-          <h2>Devices</h2><span class="count" id="pv-count">5 of 5 included</span>
+          <h2>Devices</h2><span class="count" id="pv-count"><span data-si="5">5</span> of <span data-si="5">5</span> included</span>
           <div class="right">
             <span class="legend2"><span><svg class="i xs" aria-hidden="true"><use href="#i-bolt"/></svg>Tenko does it</span><span><svg class="i xs" aria-hidden="true"><use href="#i-user"/></svg>You tick it off</span></span>
             <span class="keys"><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> move <span class="gap"></span><span class="kbd">Space</span> include <span class="gap"></span><span class="kbd">Enter</span> show steps</span>
@@ -307,34 +320,36 @@
               <th>Mode</th>
               <th>IP change</th>
               <th>DNS change (A, PTR), manual</th>
-              <th>L2 action (UniFi, automatic)</th>
+              <th>L2 action (UniFi)</th>
               <th>Manual steps</th>
             </tr>
           </thead>
 
           <tbody data-h="thermostat-1">
-            <tr class="move-row" tabindex="0">
+            <tr class="move-row has-note" tabindex="0">
               <td class="check"><input type="checkbox" class="cb" checked aria-label="Include thermostat-1"></td>
               <td><span class="devcell"><button class="twisty" aria-expanded="false" aria-label="Show steps for thermostat-1" tabindex="-1"><svg class="i xs" aria-hidden="true"><use href="#i-chev-r"/></svg></button><svg class="i sm" aria-hidden="true"><use href="#i-wifi"/></svg><span class="sr-only">Wireless</span><span class="nm">thermostat-1</span></span></td>
               <td><span class="mode reserved">reserved</span></td>
               <td><span class="chg"><span class="addr"><span class="net">192.0.2.</span><span class="host">41</span></span><svg class="i xs" aria-hidden="true"><use href="#i-arrow-r"/></svg><span class="addr"><span class="net">198.51.100.</span><span class="host">41</span></span></span></td>
               <td><span class="dnschg"><svg class="i xs" aria-hidden="true"><use href="#i-user"/></svg><span class="hostname">thermostat-1<span class="domain">.example.test</span></span><svg class="i xs" aria-hidden="true"><use href="#i-arrow-r"/></svg><span class="hostname new"><span class="domain">.iot.example.test</span></span></span></td>
-              <td><span class="hostname">ap-hall</span>: per-client VLAN <span class="mono">30</span></td>
+              <td><select class="select l2sel" data-l2="thermostat-1" aria-label="Wireless move method for thermostat-1"><option value="ssid" selected>Move to SSID Home-IoT (carries VLAN 30)</option><option value="override">Per-client VLAN override (VLAN 30)</option></select></td>
               <td><span class="mt"><span class="on-only"><svg class="i xs" aria-hidden="true"><use href="#i-user"/></svg> 2 tasks</span><span class="off-only tag">Excluded</span></span></td>
             </tr>
+            <tr class="note wnote"><td></td><td colspan="6"><div class="nt"></div></td></tr>
             <tr class="sd" hidden><td colspan="7"><div class="sdw"></div></td></tr>
           </tbody>
 
           <tbody data-h="plug-kitchen">
-            <tr class="move-row" tabindex="0">
+            <tr class="move-row has-note" tabindex="0">
               <td class="check"><input type="checkbox" class="cb" checked aria-label="Include plug-kitchen"></td>
               <td><span class="devcell"><button class="twisty" aria-expanded="false" aria-label="Show steps for plug-kitchen" tabindex="-1"><svg class="i xs" aria-hidden="true"><use href="#i-chev-r"/></svg></button><svg class="i sm" aria-hidden="true"><use href="#i-wifi"/></svg><span class="sr-only">Wireless</span><span class="nm">plug-kitchen</span></span></td>
               <td><span class="mode reserved">reserved</span></td>
               <td><span class="chg"><span class="addr"><span class="net">192.0.2.</span><span class="host">42</span></span><svg class="i xs" aria-hidden="true"><use href="#i-arrow-r"/></svg><span class="addr"><span class="net">198.51.100.</span><span class="host">42</span></span></span></td>
               <td><span class="dnschg"><svg class="i xs" aria-hidden="true"><use href="#i-user"/></svg><span class="hostname">plug-kitchen<span class="domain">.example.test</span></span><svg class="i xs" aria-hidden="true"><use href="#i-arrow-r"/></svg><span class="hostname new"><span class="domain">.iot.example.test</span></span></span></td>
-              <td><span class="hostname">ap-hall</span>: per-client VLAN <span class="mono">30</span></td>
+              <td><select class="select l2sel" data-l2="plug-kitchen" aria-label="Wireless move method for plug-kitchen"><option value="ssid" selected>Move to SSID Home-IoT (carries VLAN 30)</option><option value="override">Per-client VLAN override (VLAN 30)</option></select></td>
               <td><span class="mt"><span class="on-only"><svg class="i xs" aria-hidden="true"><use href="#i-user"/></svg> 2 tasks</span><span class="off-only tag">Excluded</span></span></td>
             </tr>
+            <tr class="note wnote"><td></td><td colspan="6"><div class="nt"></div></td></tr>
             <tr class="sd" hidden><td colspan="7"><div class="sdw"></div></td></tr>
           </tbody>
 
@@ -375,21 +390,22 @@
               <td><span class="mode reserved">reserved</span></td>
               <td><span class="chg"><span class="addr"><span class="net">192.0.2.</span><span class="host">44</span></span><svg class="i xs" aria-hidden="true"><use href="#i-arrow-r"/></svg><span class="addr"><span class="net">198.51.100.</span><span class="host">45</span></span><svg class="i xs warn-ic" aria-hidden="true"><use href="#i-alert"/></svg><span class="sr-only">Not the same host part</span></span></td>
               <td><span class="dnschg"><svg class="i xs" aria-hidden="true"><use href="#i-user"/></svg><span class="hostname">speaker-den<span class="domain">.example.test</span></span><svg class="i xs" aria-hidden="true"><use href="#i-arrow-r"/></svg><span class="hostname new"><span class="domain">.iot.example.test</span></span></span></td>
-              <td><span class="hostname">ap-hall</span>: per-client VLAN <span class="mono">30</span></td>
+              <td><select class="select l2sel" data-l2="speaker-den" aria-label="Wireless move method for speaker-den"><option value="ssid" selected>Move to SSID Home-IoT (carries VLAN 30)</option><option value="override">Per-client VLAN override (VLAN 30)</option></select></td>
               <td><span class="mt"><span class="on-only"><svg class="i xs" aria-hidden="true"><use href="#i-user"/></svg> 2 tasks</span><span class="off-only tag">Excluded</span></span></td>
             </tr>
-            <tr class="note">
+            <tr class="note more">
               <td></td>
               <td colspan="6"><div class="nt"><svg class="i sm warn-ic" aria-hidden="true"><use href="#i-alert"/></svg><span><b>Not .44:</b> <span class="hostname">sensor-garage<span class="domain">.iot.example.test</span></span> already uses <span class="addr"><span class="net">198.51.100.</span><span class="host">44</span></span>, so Tenko took the next free address in IoT, <span class="addr"><span class="net">198.51.100.</span><span class="host">45</span></span>.</span><button class="btn sm ghost" data-act="pick">Choose another address</button></div></td>
             </tr>
+            <tr class="note wnote"><td></td><td colspan="6"><div class="nt"></div></td></tr>
             <tr class="sd" hidden><td colspan="7"><div class="sdw"></div></td></tr>
           </tbody>
         </table>
 
         <details class="pv-manual" id="pv-manual">
-          <summary><svg class="i xs chev" aria-hidden="true"><use href="#i-chev-r"/></svg><strong>Manual tasks</strong><span class="muted" id="pv-mt-sum">5 DHCP tasks, 5 DNS tasks and 1 on the device</span></summary>
+          <summary><svg class="i xs chev" aria-hidden="true"><use href="#i-chev-r"/></svg><strong>Manual tasks</strong><span class="muted" id="pv-mt-sum">5 DHCP tasks, 5 DNS tasks and 3 on the device</span><span class="tk-aff"><button class="btn sm tk-btn" type="button" aria-disabled="true" aria-describedby="pv-tk-h" title="Sends these tasks to a ticket system such as Jira once a ticketing connector exists.">Create tickets</button><span class="hint" id="pv-tk-h">Ticketing integration, later</span></span></summary>
           <div id="pv-mt-body"></div>
-          <p class="pv-foot">The job creates these tasks when it starts. A move starts when its DHCP and DNS tasks are ticked and a slot is free. Clean-up tasks (remove the old reservation and old DNS records) are added after each device is seen in the new network.</p>
+          <p class="pv-foot">The job creates these tasks when it starts, in one checklist for the whole job. A move starts when its DHCP and DNS tasks are ticked and a slot is free. Device tasks (reconfigure a printer, join a Wi-Fi) are not part of that gate: Tenko waits for the device afterwards. Clean-up tasks (remove the old reservation and old DNS records) are added after each device is seen in the new network.</p>
         </details>
       </div>
 
@@ -410,15 +426,20 @@
           </div>
           <div class="field">
             <label for="timeout">Observation timeout</label>
-            <select class="select" id="timeout">
-              <option>2 min</option>
-              <option selected>5 min</option>
-              <option>10 min</option>
-              <option>15 min</option>
-            </select>
+            <div class="cf-inline">
+              <select class="select" id="timeout">
+                <option value="auto" selected>Automatic: 12 h</option>
+                <option value="300">5 min</option>
+                <option value="1800">30 min</option>
+                <option value="3600">1 h</option>
+                <option value="14400">4 h</option>
+              </select>
+              <span class="help" id="to-help">lease 24 h &rarr; timeout 12 h (half the lease, when devices renew; never below 5 min)</span>
+            </div>
           </div>
           <label class="cbl"><input type="checkbox" class="cb" id="dry"><span>Dry run: read and diff only</span><span class="dh">Nothing is written to UniFi.</span></label>
           <div class="cf-act">
+            <span class="cf-rb">A device that is not seen within the timeout is rolled back automatically.</span>
             <a class="btn" href="shell-and-ipam.html" id="cancel">Cancel</a>
             <button class="btn primary" id="start" type="button"><span id="start-lbl">Start 5 moves</span><span class="kbd">Ctrl</span><span class="kbd">Enter</span></button>
           </div>
@@ -431,7 +452,7 @@
       <div class="page-head">
         <div>
           <div class="crumbs"><a href="#jobs" data-goto="jobs">Jobs</a><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg><span>#221</span></div>
-          <h1><span>Job <span class="mono">#221</span></span><span class="sub">Move 5 hosts to iot.example.test</span><span class="jstate running" id="rj-chip" style="--p:20%">Running</span></h1>
+          <h1><span>Job <span class="mono">#221</span></span><span class="sub">Move <span data-si="5">5</span> hosts to iot.example.test</span><span class="jstate running" id="rj-chip" style="--p:20%">Running</span></h1>
         </div>
         <div class="actions">
           <button class="btn" id="rj-pause" type="button"><svg class="i sm" aria-hidden="true" id="rj-pause-ic"><use href="#i-pause"/></svg><span id="rj-pause-lbl">Pause</span></button>
@@ -443,7 +464,7 @@
         <div class="rj-main">
           <div class="rj-sum">
             <div class="rj-prog">
-              <div class="top"><span class="big"><span id="rj-done">1</span> of 5 done</span><span class="of">moves finished and seen in the new network</span></div>
+              <div class="top"><span class="big"><span id="rj-done" data-si="1">1</span> of <span data-si="5">5</span> done</span><span class="of">moves finished and seen in the new network</span></div>
               <div class="segbar" id="rj-seg" role="img" aria-label="Progress of the five moves"></div>
               <div class="brk" id="rj-brk"></div>
             </div>
@@ -451,12 +472,12 @@
               <div><dt>Started</dt><dd><span class="num">14:02:10</span> by alex</dd></div>
               <div><dt>Running for</dt><dd class="num" id="rj-elapsed">5:57</dd></div>
               <div><dt>Parallelism</dt><dd class="num">2</dd></div>
-              <div><dt>Observation timeout</dt><dd class="num">5 min</dd></div>
+              <div><dt>Observation timeout</dt><dd class="num" title="Lease 24 h, so half of it is 12 h (the renewal point). A device not seen within the timeout is rolled back automatically.">12 h <span class="muted">automatic rollback</span></dd></div>
             </dl>
           </div>
 
           <div class="tools">
-            <h2>Devices</h2><span class="count">5 moves</span>
+            <h2>Devices</h2><span class="count"><span data-si="5">5</span> moves</span>
             <div class="right">
               <span class="legend2"><span><svg class="i xs" aria-hidden="true"><use href="#i-bolt"/></svg>Tenko does it</span><span><svg class="i xs" aria-hidden="true"><use href="#i-user"/></svg>You tick it off</span></span>
               <button class="btn sm ghost" id="rj-expand" type="button" aria-pressed="false">Show all steps</button>
@@ -477,7 +498,8 @@
         </div>
 
         <aside class="rj-side" aria-label="Manual tasks and activity">
-          <div class="side-head"><h2>Manual tasks</h2><span class="count" id="rj-tcount">4 open of 12</span></div>
+          <div class="side-head"><h2>Manual tasks</h2><span class="count" id="rj-tcount"><span data-si="4">4</span> open of <span data-si="14">14</span></span></div>
+          <div class="side-tk"><span class="tk-aff"><button class="btn sm tk-btn" type="button" aria-disabled="true" aria-describedby="rj-tk-h" title="Sends these tasks to a ticket system such as Jira once a ticketing connector exists.">Create tickets</button><span class="hint" id="rj-tk-h">Ticketing integration, later</span></span></div>
           <p class="side-note">A move starts when its DHCP and DNS tasks are ticked and a slot is free. Tick a task here or from the device it belongs to.</p>
           <div id="rj-tasks"></div>
           <div class="side-head" style="margin-top:var(--sp-4)"><h2>Recent activity</h2></div>
@@ -511,20 +533,20 @@
           <option value="export">Export</option>
         </select>
         <span class="divider"></span>
-        <button class="chip" type="button" data-state="running" aria-pressed="false"><span class="jstate running" style="--p:60%"></span>Running <span class="n">1</span></button>
-        <button class="chip discrepancy" type="button" data-state="needs" aria-pressed="false"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg>Needs you <span class="n">1</span></button>
-        <button class="chip" type="button" data-state="failed" aria-pressed="false">Failed <span class="n">1</span></button>
-        <button class="chip" type="button" data-state="rolledback" aria-pressed="false">Rolled back <span class="n">1</span></button>
-        <button class="chip" type="button" data-state="done" aria-pressed="false">Done <span class="n">8</span></button>
+        <button class="chip" type="button" data-state="running" aria-pressed="false"><span class="jstate running" style="--p:60%"></span>Running <span class="n" data-si="1">1</span></button>
+        <button class="chip discrepancy" type="button" data-state="needs" aria-pressed="false"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg>Needs you <span class="n" data-si="1">1</span></button>
+        <button class="chip" type="button" data-state="failed" aria-pressed="false">Failed <span class="n" data-si="1">1</span></button>
+        <button class="chip" type="button" data-state="rolledback" aria-pressed="false">Rolled back <span class="n" data-si="1">1</span></button>
+        <button class="chip" type="button" data-state="done" aria-pressed="false">Done <span class="n" data-si="8">8</span></button>
         <span class="divider"></span>
-        <button class="chip" type="button" id="jb-mine" aria-pressed="false"><svg class="i" aria-hidden="true"><use href="#i-user"/></svg>Mine <span class="n">8</span></button>
-        <div class="right"><span class="muted" id="jb-count" style="font-size:var(--fs-12)">11 jobs</span></div>
+        <button class="chip" type="button" id="jb-mine" aria-pressed="false"><svg class="i" aria-hidden="true"><use href="#i-user"/></svg>Mine <span class="n" data-si="8">8</span></button>
+        <div class="right"><span class="muted" id="jb-count" style="font-size:var(--fs-12)"><span data-si="11">11</span> jobs</span></div>
       </div>
       <div class="bg-note"><svg class="i sm" aria-hidden="true"><use href="#i-info"/></svg><span>Jobs run in the background. Keep working: nothing on this page locks the interface, and running jobs show in the rail and the status bar.</span></div>
 
       <div class="grid-wrap">
         <table class="grid jbt" id="jb-table" aria-label="Jobs">
-          <colgroup><col style="width:76px"><col style="width:112px"><col><col style="width:270px"><col style="width:170px"><col style="width:84px"><col style="width:96px"><col style="width:92px"></colgroup>
+          <colgroup><col style="width:76px"><col style="width:112px"><col><col style="width:400px"><col style="width:170px"><col style="width:84px"><col style="width:96px"><col style="width:92px"></colgroup>
           <thead>
             <tr>
               <th aria-sort="descending"><span class="sort">Job <svg class="i xs" aria-hidden="true"><use href="#i-chev-d"/></svg></span></th>
@@ -535,9 +557,9 @@
             <tr class="job" tabindex="0" data-id="221" data-kind="move" data-by="alex" data-tags="running needs" title="Open job #221">
               <td><span class="jid">#221</span></td>
               <td><span class="jk"><svg class="i sm" aria-hidden="true"><use href="#i-move"/></svg>Move</span></td>
-              <td>5 hosts to <span class="hostname">iot<span class="domain">.example.test</span></span></td>
+              <td><span data-si="5">5</span> hosts to <span class="hostname">iot<span class="domain">.example.test</span></span></td>
               <td id="jb-221-state"><span class="jstate running" style="--p:20%">Running</span><span class="flag rsn" id="jb-221-flag"><svg class="i xs" aria-hidden="true"><use href="#i-alert"/></svg>1 failed, needs you</span></td>
-              <td id="jb-221-prog"><span class="meter"><span class="bar"><i style="--v:20%"></i></span><span class="val num">1 of 5</span></span></td>
+              <td id="jb-221-prog"><span class="meter"><span class="bar"><i style="--v:20%"></i></span><span class="val num"><span data-si="1">1</span> of <span data-si="5">5</span></span></span></td>
               <td><span class="seen" title="2026-10-09 14:02">6 min</span></td>
               <td>alex</td>
               <td class="num" id="jb-221-dur">5:57</td>
@@ -547,7 +569,7 @@
               <td><span class="jk"><svg class="i sm" aria-hidden="true"><use href="#i-scan"/></svg>Scan</span></td>
               <td><span class="mono">192.0.2.0/24</span></td>
               <td><span class="jstate done">Done</span></td>
-              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num">254 of 254</span></span></td>
+              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num"><span data-si="254">254</span> of <span data-si="254">254</span></span></span></td>
               <td><span class="seen" title="2026-10-09 13:37">31 min</span></td>
               <td>alex</td>
               <td class="num">48 s</td>
@@ -557,7 +579,7 @@
               <td><span class="jk"><svg class="i sm" aria-hidden="true"><use href="#i-dns"/></svg>Rename</span></td>
               <td><span class="hostname">printer-1<span class="domain">.example.test</span></span></td>
               <td><span class="jstate done">Done</span></td>
-              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num">2 of 2</span></span></td>
+              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num"><span data-si="2">2</span> of <span data-si="2">2</span></span></span></td>
               <td><span class="seen" title="2026-10-09 13:26">42 min</span></td>
               <td>alex</td>
               <td class="num">3:12</td>
@@ -566,18 +588,18 @@
               <td><span class="jid">#218</span></td>
               <td><span class="jk"><svg class="i sm" aria-hidden="true"><use href="#i-move"/></svg>Move</span></td>
               <td><span class="hostname">tv-living</span> to <span class="hostname">iot<span class="domain">.example.test</span></span></td>
-              <td><span class="jstate rolledback">Rolled back</span><span class="rsn">no lease seen within 5 min</span></td>
-              <td><span class="meter"><span class="bar"><i style="--v:0%"></i></span><span class="val num">0 of 1</span></span></td>
-              <td><span class="seen" title="2026-10-08 20:14">17 h</span></td>
+              <td title="Rolled back automatically: not seen within 12 h (the timeout)"><span class="jstate rolledback">Rolled back</span><span class="rsn">automatically: not seen within 12 h (the timeout)</span></td>
+              <td><span class="meter"><span class="bar"><i style="--v:0%"></i></span><span class="val num"><span data-si="0">0</span> of <span data-si="1">1</span></span></span></td>
+              <td><span class="seen" title="2026-10-08 09:40">yesterday</span></td>
               <td>alex</td>
-              <td class="num">5:31</td>
+              <td class="num" title="12:00:07">12 h</td>
             </tr>
             <tr class="job" tabindex="0" data-id="217" data-kind="adopt" data-by="alex" data-tags="done" title="Open job #217">
               <td><span class="jid">#217</span></td>
               <td><span class="jk"><svg class="i sm" aria-hidden="true"><use href="#i-proposal"/></svg>Adopt</span></td>
-              <td>3 discovered hosts</td>
+              <td><span data-si="3">3</span> discovered hosts</td>
               <td><span class="jstate done">Done</span></td>
-              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num">3 of 3</span></span></td>
+              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num"><span data-si="3">3</span> of <span data-si="3">3</span></span></span></td>
               <td><span class="seen" title="2026-10-07 09:48">2 d</span></td>
               <td>alex</td>
               <td class="num">2 s</td>
@@ -585,9 +607,9 @@
             <tr class="job" tabindex="0" data-id="216" data-kind="import" data-by="alex" data-tags="done" title="Open job #216">
               <td><span class="jid">#216</span></td>
               <td><span class="jk"><svg class="i sm" aria-hidden="true"><use href="#i-export"/></svg>Import</span></td>
-              <td>Spreadsheet, 212 rows</td>
+              <td>Spreadsheet, <span data-si="212">212</span> rows</td>
               <td><span class="jstate done">Done</span></td>
-              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num">212 of 212</span></span></td>
+              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num"><span data-si="212">212</span> of <span data-si="212">212</span></span></span></td>
               <td><span class="seen" title="2026-10-07 09:31">2 d</span></td>
               <td>alex</td>
               <td class="num">6 s</td>
@@ -597,7 +619,7 @@
               <td><span class="jk"><svg class="i sm" aria-hidden="true"><use href="#i-scan"/></svg>Scan</span></td>
               <td><span class="mono">198.51.100.0/24</span></td>
               <td><span class="jstate done">Done</span></td>
-              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num">254 of 254</span></span></td>
+              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num"><span data-si="254">254</span> of <span data-si="254">254</span></span></span></td>
               <td><span class="seen" title="2026-10-06 03:00">3 d</span></td>
               <td>scheduler</td>
               <td class="num">41 s</td>
@@ -607,7 +629,7 @@
               <td><span class="jk"><svg class="i sm" aria-hidden="true"><use href="#i-refresh"/></svg>Sync</span></td>
               <td>UniFi clients and devices</td>
               <td><span class="jstate done">Done</span></td>
-              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num">50 of 50</span></span></td>
+              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num"><span data-si="50">50</span> of <span data-si="50">50</span></span></span></td>
               <td><span class="seen" title="2026-10-05 02:00">4 d</span></td>
               <td>scheduler</td>
               <td class="num">3 s</td>
@@ -615,9 +637,9 @@
             <tr class="job" tabindex="0" data-id="213" data-kind="move" data-by="alex" data-tags="done" title="Open job #213">
               <td><span class="jid">#213</span></td>
               <td><span class="jk"><svg class="i sm" aria-hidden="true"><use href="#i-move"/></svg>Move</span></td>
-              <td>2 hosts to <span class="hostname">lab<span class="domain">.example.test</span></span></td>
+              <td><span data-si="2">2</span> hosts to <span class="hostname">lab<span class="domain">.example.test</span></span></td>
               <td><span class="jstate done">Done</span></td>
-              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num">2 of 2</span></span></td>
+              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num"><span data-si="2">2</span> of <span data-si="2">2</span></span></span></td>
               <td><span class="seen" title="2026-10-03 18:20">6 d</span></td>
               <td>alex</td>
               <td class="num">4:18</td>
@@ -627,7 +649,7 @@
               <td><span class="jk"><svg class="i sm" aria-hidden="true"><use href="#i-export"/></svg>Export</span></td>
               <td><span class="mono">192.0.2.0/24</span> as CSV</td>
               <td><span class="jstate done">Done</span></td>
-              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num">254 of 254</span></span></td>
+              <td><span class="meter"><span class="bar"><i style="--v:100%"></i></span><span class="val num"><span data-si="254">254</span> of <span data-si="254">254</span></span></span></td>
               <td><span class="seen" title="2026-10-02 11:05">7 d</span></td>
               <td>alex</td>
               <td class="num">1 s</td>
@@ -637,7 +659,7 @@
               <td><span class="jk"><svg class="i sm" aria-hidden="true"><use href="#i-refresh"/></svg>Sync</span></td>
               <td>UniFi clients and devices</td>
               <td><span class="jstate failed">Failed</span><span class="rsn">controller rejected the login</span></td>
-              <td><span class="meter"><span class="bar"><i style="--v:0%"></i></span><span class="val num">0 of 1</span></span></td>
+              <td><span class="meter"><span class="bar"><i style="--v:0%"></i></span><span class="val num"><span data-si="0">0</span> of <span data-si="1">1</span></span></span></td>
               <td><span class="seen" title="2026-10-01 02:00">8 d</span></td>
               <td>scheduler</td>
               <td class="num">2 s</td>
@@ -669,15 +691,15 @@
 
 <aside class="notes" id="notes" aria-label="Mockup notes">
   <h2>Mockup notes: move job <button class="icon-btn" data-action="notes" aria-label="Close notes"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></h2>
-  <p class="sub">Switch scenes in the status bar. Preview: untick a device (or press Space on a focused row) and watch the counts and the button change; Ctrl+Enter starts. Running (always the same sample job, 2 in parallel, 5 min timeout): wait about 8 seconds, tick printer-1's tasks, try Retry or Roll back on speaker-den, open a device's steps with its chevron. Jobs list: filter, search, start a scan, open #221.</p>
+  <p class="sub">Switch scenes in the status bar. Preview: untick a device (or press Space on a focused row) and watch the counts and the button change; switch a wireless row between the SSID move and a per-client VLAN override; Ctrl+Enter starts. Running (always the same sample job, 2 in parallel, 12 h timeout): wait about 8 seconds, tick printer-1's tasks, try Retry or Roll back on speaker-den (its Wi-Fi join was refused), open a device's steps with its chevron. Jobs list: filter, search, start a scan, open #221.</p>
   <ol>
-    <li>Gating: a move waits until you tick its reservation and DNS tasks, so nothing lands in IoT without its address. The cost is that plug-kitchen held a slot for 3 minutes waiting for you. Keep the gate, or let the L2 move go ahead and only warn?</li>
-    <li>Timeout: speaker-den stays failed until you choose Retry or Roll back. Should a timeout roll back by itself, as #218 did, or always ask? A setting per job?</li>
-    <li>printer-1 is static, so it needs no reservation. To reach the 10 manual tasks (5 DHCP, 5 DNS) I gave it a task to keep 198.51.100.30 out of the DHCP pool. Is that a real task, or should the count read 9?</li>
+    <li><strong>Owner's request:</strong> wireless networks (SSIDs) are IPAM objects; a wireless move goes to the SSID that carries the target VLAN instead of a per-client VLAN override.</li>
+    <li>Open question on SSIDs: a controller cannot switch a client to another SSID, so someone has to join Home-IoT on the device. How should Tenko handle devices that cannot be reconfigured remotely (no screen, no app, Wi-Fi set once at install)? Skip them, hold the move until you confirm, or fall back to the per-client VLAN override?</li>
+    <li>printer-1 is static, so it needs no reservation. To reach the 10 manual DHCP and DNS tasks (5 DHCP, 5 DNS) I gave it a task to keep 198.51.100.30 out of the DHCP pool. Is that a real task, or should the count read 9?</li>
     <li>A move is done when the device is seen. Clean-up (old reservation, old DNS records) is a separate task that stays open in the checklist and does not hold the move. Should the move stay open until clean-up is ticked?</li>
-    <li>A waiting move holds a parallelism slot until it is seen or fails. With parallelism 2, one silent device blocks half the capacity for the whole timeout. Should waiting moves release their slot?</li>
-    <li>Pause stops new moves from starting; moves in progress keep their observation clock running. Is that what you expect, or should Pause stop the clock too?</li>
-    <li>Only the address can be changed per row (Choose another address on speaker-den). Do you also want to edit the new hostname or pick the L2 method (per-client VLAN or SSID) per device here?</li>
+    <li>A waiting move holds a parallelism slot until it is seen, fails or times out. With parallelism 2 and a 12 h timeout, one silent device can block half the capacity for half a day. Should waiting moves release their slot?</li>
+    <li>Pause stops new moves from starting; moves in progress keep their observation clock running, so the 12 h timeouts keep counting. Is that what you expect, or should Pause stop the clock too?</li>
+    <li>Per row you can change the address (Choose another address on speaker-den) and, on wireless rows, the method (SSID move or per-client VLAN override). Do you also want to edit the new hostname per device here?</li>
     <li>With 60 devices the device list gets long. Group by state with counts and fold the done ones, or keep one flat list with a state filter?</li>
   </ol>
 </aside>
@@ -693,10 +715,18 @@
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function fmtClock(sec) { return pad(Math.floor(sec / 3600) % 24) + ':' + pad(Math.floor(sec / 60) % 60) + ':' + pad(sec % 60); }
+  function fmtAt(abs) { return fmtClock(abs) + (abs >= 86400 ? ' tomorrow' : ''); }
   function fmtMS(sec) { return Math.floor(sec / 60) + ':' + pad(sec % 60); }
+  function fmtHMS(sec) { return pad(Math.floor(sec / 3600)) + ':' + pad(Math.floor(sec / 60) % 60) + ':' + pad(sec % 60); }
   function ico(name, cls) { return '<svg class="i ' + (cls || '') + '" aria-hidden="true"><use href="#i-' + name + '"/></svg>'; }
   function toast(o) { if (window.tenko) window.tenko.toast(o); }
   function pl(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+  /* Counts that can grow carry data-si; shell.js formats them (982, 1.2K, 48K) and puts the exact value in the title. */
+  function N(n) { return '<span data-si="' + n + '">' + n + '</span>'; }
+  function plN(n, one, many) { return N(n) + ' ' + (n === 1 ? one : many); }
+  function fmtDom(el) { if (window.tenko && window.tenko.formatAll) { window.tenko.formatAll(el); } }
+  function setHTML(el, html) { el.innerHTML = html; fmtDom(el); }
+  function setSI(el, n) { el.dataset.si = String(n); el.textContent = String(n); fmtDom(el.parentNode || el); }
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function A(ip) {
     var m = /^(\d+\.\d+\.\d+\.)(\d+)$/.exec(ip);
@@ -714,25 +744,51 @@
 
   /* ---------- Sample world ---------- */
   var NET = '198.51.100.0/24';
+  /* Automatic observation timeout: half the DHCP lease of the target network (the renewal point, T1), never below 5 min.
+     198.51.100.0/24 has a 24 h lease, so the default is 12 h. */
+  var TIMEOUT = 43200;
+  var JOIN_LB = 'Join Wi-Fi Home-IoT on the device';
+  /* Wireless networks (SSIDs) are IPAM objects, read from UniFi with their VLAN mapping:
+     Home carries VLAN 10 (LAN), Home-IoT carries VLAN 30 (IoT), Lab-Test carries VLAN 20 (Lab).
+     l2 is the method chosen per wireless device: 'ssid' (default) or 'override' (per-client VLAN).
+     knows: the device already has Home-IoT saved, so UniFi can make it rejoin without a manual step. */
   var HOSTS = [
-    { id: 'thermostat-1', link: 'wifi', via: 'ap-hall', mode: 'reserved', mac: '00-00-5E-00-53-29', old: '192.0.2.41', neu: '198.51.100.41' },
-    { id: 'plug-kitchen', link: 'wifi', via: 'ap-hall', mode: 'reserved', mac: '00-00-5E-00-53-2A', old: '192.0.2.42', neu: '198.51.100.42' },
+    { id: 'thermostat-1', link: 'wifi', via: 'ap-hall', l2: 'ssid', knows: true, mode: 'reserved', mac: '00-00-5E-00-53-29', old: '192.0.2.41', neu: '198.51.100.41' },
+    { id: 'plug-kitchen', link: 'wifi', via: 'ap-hall', l2: 'ssid', knows: false, mode: 'reserved', mac: '00-00-5E-00-53-2A', old: '192.0.2.42', neu: '198.51.100.42' },
     { id: 'cam-door', link: 'cable', via: 'sw-core', port: '14', poe: true, mode: 'reserved', mac: '00-00-5E-00-53-2B', old: '192.0.2.43', neu: '198.51.100.43' },
     { id: 'printer-1', link: 'cable', via: 'sw-desk', port: '5', mode: 'static', mac: '00-00-5E-00-53-1E', old: '192.0.2.30', neu: '198.51.100.30' },
-    { id: 'speaker-den', link: 'wifi', via: 'ap-hall', mode: 'reserved', mac: '00-00-5E-00-53-2C', old: '192.0.2.44', neu: '198.51.100.45', taken: 'sensor-garage' }
+    { id: 'speaker-den', link: 'wifi', via: 'ap-hall', l2: 'ssid', knows: false, mode: 'reserved', mac: '00-00-5E-00-53-2C', old: '192.0.2.44', neu: '198.51.100.45', taken: 'sensor-garage' }
   ];
   var ORDER = HOSTS.map(function (h) { return h.id; });
   function hostById(id) { for (var i = 0; i < HOSTS.length; i++) { if (HOSTS[i].id === id) { return HOSTS[i]; } } return null; }
   function lastOctet(ip) { return ip.split('.')[3]; }
+  function isSsid(h) { return h.link === 'wifi' && h.l2 === 'ssid'; }
+  function joinManual(h) { return isSsid(h) && !h.knows; }
+  /* The running job is always the sample job: a copy of each host with the default method, so the preview's choices do not leak into it. */
+  function runHost(id) {
+    var s = hostById(id), c = {}, k;
+    for (k in s) { c[k] = s[k]; }
+    if (c.link === 'wifi') { c.l2 = 'ssid'; }
+    return c;
+  }
 
   /* ---------- Steps and tasks shared by the preview and the job ---------- */
   var STEP = ['', 'Choose IP', 'Create reservation', 'Update DNS', 'L2 move via UniFi', 'Wait for observation', 'Clean up', 'Roll back on timeout'];
-  function stepLabel(h, n) { return n === 2 && h.mode === 'static' ? 'Keep out of DHCP pool' : STEP[n]; }
+  function stepLabel(h, n) {
+    if (n === 2 && h.mode === 'static') { return 'Keep out of DHCP pool'; }
+    if (n === 4 && h.link === 'wifi') { return h.l2 === 'override' ? 'Per-client VLAN override' : 'Move to SSID'; }
+    return STEP[n];
+  }
   function who(kind, name, note) {
     return '<span class="wh">' + ico(kind === 'manual' ? 'user' : 'bolt', 'xs') + '<span>' + name + '</span><span class="m">' + note + '</span></span>';
   }
   var PLAN_WHO = [null, ['auto', 'IPAM'], ['manual', 'DHCP'], ['manual', 'DNS'], ['auto', 'UniFi'], ['auto', 'Reconciler'], ['manual', 'DHCP and DNS'], ['auto', 'Job engine']];
-  function timeoutText() { var s = $('#timeout'); return s.options[s.selectedIndex].text; }
+  function timeoutText() { var s = $('#timeout'); return s.value === 'auto' ? '12 h' : s.options[s.selectedIndex].text; }
+  function joinDetail(h) {
+    return h.knows
+      ? h.id + ' already knows ' + P('Home-IoT') + ' (via Home Assistant). UniFi disconnects it once and it rejoins by itself. The job waits for it in step 5.'
+      : 'A controller cannot switch a client to another SSID, so join ' + P('Home-IoT') + ' on ' + h.id + ' (Wi-Fi settings or its app). The job waits for it in step 5.';
+  }
   function planDetail(h, n) {
     var part = P('.' + lastOctet(h.old)), isStatic = h.mode === 'static';
     switch (n) {
@@ -743,14 +799,20 @@
         ? 'Keep ' + A(h.neu) + ' out of the IoT DHCP pool. A static host gets no reservation.'
         : 'Reserve ' + A(h.neu) + ' for ' + M(h.mac) + ' in the IoT scope on the router. The old reservation stays until the move is seen.';
       case 3: return 'A and PTR: ' + HN(h.id, '.example.test') + ' to ' + HN(h.id, '.iot.example.test') + ', pointing at ' + A(h.neu) + '. Old records stay until clean-up.';
-      case 4: return h.link === 'wifi'
-        ? 'Set per-client VLAN ' + P('30') + ' on ' + h.via + '. UniFi is read back and diffed first.'
-        : 'Change the port profile on ' + h.via + ' port ' + P(h.port) + ' to IoT. UniFi is read back and diffed first. Uplinks are never touched.';
-      case 5: return 'Wait up to ' + timeoutText() + ' for ARP or ping from ' + M(h.mac) + ' in ' + P(NET) + '.';
+      case 4:
+        if (h.link === 'wifi') {
+          return h.l2 === 'override'
+            ? 'Set per-client VLAN ' + P('30') + ' on ' + h.via + ' and disconnect the client so it reconnects. It stays on SSID ' + P('Home') + '. UniFi is read back and diffed first.'
+            : 'Check that SSID ' + P('Home-IoT') + ' is on ' + h.via + ' and carries VLAN ' + P('30') + ' (read from UniFi). The client’s own WLAN carries the target VLAN, so no client setting changes.';
+        }
+        return 'Change the port profile on ' + h.via + ' port ' + P(h.port) + ' to IoT. UniFi is read back and diffed first. Uplinks are never touched.';
+      case 5: return 'Wait up to ' + timeoutText() + ' for ARP or ping from ' + M(h.mac) + ' in ' + P(NET) + '. Devices join when they renew at half their lease or when they reconnect.';
       case 6: return isStatic
         ? 'Remove the old DNS records for ' + HN(h.id, '.example.test') + ' and release ' + A(h.old) + '.'
         : 'Remove the old reservation for ' + A(h.old) + ' and the old records for ' + HN(h.id, '.example.test') + '.';
-      default: return 'If step 5 times out you choose Roll back. Step 4 is reverted automatically; steps 2 and 3 become manual tasks to delete what you created.';
+      default: return 'If step 5 times out (' + timeoutText() + '), the job rolls back by itself: ' +
+        (isSsid(h) ? 'the intent goes back to ' + A(h.old) + ' and UniFi changed nothing on the client' : 'step 4 is reverted automatically') +
+        '; steps 2 and 3 become manual tasks to delete what you created. Other failures wait for your decision.';
     }
   }
   function planSteps(h) {
@@ -761,6 +823,9 @@
       if (n === 4 && h.mode === 'static') {
         html += '<li><span class="n">4b</span><span class="lb">Reconfigure the printer</span>' + who('manual', 'You', 'manual task') + '<span class="dt">Set ' + P('198.51.100.30/24') + ' and gateway ' + A('198.51.100.1') + ' on the printer. The job waits for it in step 5.</span></li>';
       }
+      if (n === 4 && isSsid(h)) {
+        html += '<li><span class="n">4b</span><span class="lb">' + JOIN_LB + '</span>' + (h.knows ? who('auto', 'UniFi', 'automatic') : who('manual', 'You', 'manual task')) + '<span class="dt">' + joinDetail(h) + '</span></li>';
+      }
     }
     return html + '</ol>';
   }
@@ -768,7 +833,7 @@
     switch (kind) {
       case 'dhcp': return h.mode === 'static' ? 'Keep ' + A(h.neu) + ' out of the IoT DHCP pool (static address)' : 'Create a reservation for ' + M(h.mac) + ' at ' + A(h.neu);
       case 'dns': return 'Point A and PTR for ' + HN(h.id, '.iot.example.test') + ' at ' + A(h.neu);
-      case 'dev': return 'Reconfigure the printer to ' + P('198.51.100.30/24') + ', gateway ' + A('198.51.100.1');
+      case 'dev': return h.link === 'wifi' ? 'Join Wi-Fi ' + P('Home-IoT') + ' on the device' : 'Reconfigure the printer to ' + P('198.51.100.30/24') + ', gateway ' + A('198.51.100.1');
       case 'clean': return h.mode === 'static' ? 'Remove the old records for ' + HN(h.id, '.example.test') + ' and release ' + A(h.old) : 'Remove the old reservation for ' + A(h.old) + ' and the old records for ' + HN(h.id, '.example.test');
       case 'undo-dhcp': return 'Delete the reservation for ' + M(h.mac) + ' at ' + A(h.neu);
       default: return 'Delete A and PTR for ' + HN(h.id, '.iot.example.test');
@@ -782,15 +847,31 @@
   HOSTS.forEach(function (h) { included[h.id] = true; });
   function pvBodies() { return $$('tbody[data-h]', pvt); }
   function incl() { return HOSTS.filter(function (h) { return included[h.id]; }); }
+  function wnoteHtml(h) {
+    if (h.l2 === 'override') {
+      return ico('info', 'sm') + '<span><b>Per-client VLAN override.</b> UniFi puts ' + h.id + ' in VLAN ' + P('30') + ' on ' + h.via + ' and disconnects it so it reconnects. It stays on SSID ' + P('Home') + ', so nothing to do on the device. The override stays on the client until you remove it.</span>';
+    }
+    if (h.knows) {
+      return ico('bolt', 'sm') + '<span><b>Rejoins Home-IoT by itself.</b> A controller cannot switch a client to another SSID. ' + h.id + ' already knows ' + P('Home-IoT') + ' (via Home Assistant), so UniFi disconnects it once and it rejoins.</span>';
+    }
+    return ico('user', 'sm') + '<span><b>Join Wi-Fi ' + P('Home-IoT') + ' on the device.</b> A controller cannot switch a client to another SSID, and ' + h.id + ' does not know ' + P('Home-IoT') + ' yet. Join it on the device (a manual task); Tenko then waits for it to appear.</span>';
+  }
   function buildPlans() {
     pvBodies().forEach(function (tb) {
       var h = hostById(tb.dataset.h), tds = $$('tr.move-row > td', tb);
       $('.sdw', tb).innerHTML = planSteps(h);
       tds[4].title = 'Manual task in phase 1. A and PTR: ' + h.id + '.example.test to ' + h.id + '.iot.example.test';
-      tds[6].title = h.mode === 'static' ? 'Reconfigure the printer by hand, keep the address out of the DHCP pool and update DNS' : 'Create the reservation and update DNS';
+      if (h.link === 'wifi') {
+        var n = 2 + (joinManual(h) ? 1 : 0);
+        $('.on-only', tds[6]).innerHTML = ico('user', 'xs') + ' ' + pl(n, 'task', 'tasks');
+        tds[6].title = joinManual(h) ? 'Create the reservation, update DNS and join Home-IoT on the device' : 'Create the reservation and update DNS' + (isSsid(h) ? '. ' + h.id + ' rejoins Home-IoT by itself.' : '');
+        $('tr.wnote .nt', tb).innerHTML = wnoteHtml(h);
+      } else {
+        tds[6].title = h.mode === 'static' ? 'Reconfigure the printer by hand, keep the address out of the DHCP pool and update DNS' : 'Create the reservation and update DNS';
+      }
     });
   }
-  function sumItem(n, one, many) { return '<span' + (n ? '' : ' class="zero"') + '><b>' + n + '</b> ' + (n === 1 ? one : many) + '</span>'; }
+  function sumItem(n, one, many) { return '<span' + (n ? '' : ' class="zero"') + '><b>' + N(n) + '</b> ' + (n === 1 ? one : many) + '</span>'; }
   function planGroup(key, title, items, openMap) {
     if (!items.length) { return ''; }
     var open = openMap[key] === undefined ? true : openMap[key];
@@ -800,30 +881,32 @@
     var openMap = {};
     $$('#pv-mt-body details.grp').forEach(function (d) { openMap[d.dataset.g] = d.open; });
     var li = function (h, kind) { return '<li><span class="tx"><b>' + h.id + '</b> ' + taskText(kind, h) + '</span></li>'; };
-    var dev = list.filter(function (h) { return h.mode === 'static'; });
+    var dev = list.filter(function (h) { return h.mode === 'static' || joinManual(h); });
     $('#pv-mt-body').innerHTML =
       planGroup('dhcp', 'DHCP on the router', list.map(function (h) { return li(h, 'dhcp'); }), openMap) +
       planGroup('dns', 'DNS records', list.map(function (h) { return li(h, 'dns'); }), openMap) +
       planGroup('dev', 'On the device', dev.map(function (h) { return li(h, 'dev'); }), openMap);
-    $('#pv-mt-sum').textContent = list.length
-      ? pl(list.length, 'DHCP task', 'DHCP tasks') + ', ' + pl(list.length, 'DNS task', 'DNS tasks') + (dev.length ? ' and ' + dev.length + ' on the device' : '')
-      : 'No manual tasks';
+    setHTML($('#pv-mt-sum'), list.length
+      ? plN(list.length, 'DHCP task', 'DHCP tasks') + ', ' + plN(list.length, 'DNS task', 'DNS tasks') + (dev.length ? ' and ' + N(dev.length) + ' on the device' : '')
+      : 'No manual tasks');
   }
   function updatePreview() {
     var list = incl(), n = list.length, dry = $('#dry').checked;
-    var wifi = list.filter(function (h) { return h.link === 'wifi'; }).length;
-    var hand = list.filter(function (h) { return h.mode === 'static'; }).length;
-    $('#pv-n').textContent = n;
+    var wl = list.filter(function (h) { return h.link === 'wifi'; });
+    var ssid = wl.filter(isSsid).length, ovr = wl.length - ssid, wired = n - wl.length;
+    var hand = list.filter(function (h) { return h.mode === 'static' || joinManual(h); }).length;
+    setSI($('#pv-n'), n);
     $('#pv-hosts').textContent = n === 1 ? 'host' : 'hosts';
-    $('#pv-count').textContent = n + ' of ' + HOSTS.length + ' included';
-    $('#cf-sum').innerHTML =
+    setHTML($('#pv-count'), N(n) + ' of ' + N(HOSTS.length) + ' included');
+    setHTML($('#cf-sum'),
       sumItem(n, 'device', 'devices') +
-      sumItem(wifi, 'per-client VLAN change', 'per-client VLAN changes') +
-      sumItem(n - wifi, 'port profile change', 'port profile changes') +
-      sumItem(hand, 'device reconfiguration by hand', 'device reconfigurations by hand') +
+      sumItem(ssid, 'SSID move', 'SSID moves') +
+      (ovr ? sumItem(ovr, 'per-client VLAN override', 'per-client VLAN overrides') : '') +
+      sumItem(wired, 'port profile change', 'port profile changes') +
+      sumItem(hand, 'manual device step', 'manual device steps') +
       sumItem(2 * n, 'manual DHCP and DNS task', 'manual DHCP and DNS tasks') +
-      (dry ? '<span class="tag accent">Dry run: nothing is written</span>' : '');
-    $('#start-lbl').textContent = (dry ? 'Start dry run of ' : 'Start ') + pl(n, 'move', 'moves');
+      (dry ? '<span class="tag accent">Dry run: nothing is written</span>' : ''));
+    setHTML($('#start-lbl'), (dry ? 'Start dry run of ' : 'Start ') + plN(n, 'move', 'moves'));
     $('#start').disabled = !n;
     var all = $('#pv-all');
     all.checked = n === HOSTS.length;
@@ -834,6 +917,8 @@
     included[tb.dataset.h] = on;
     tb.classList.toggle('off', !on);
     $('tr.move-row .cb', tb).checked = on;
+    var sel = $('.l2sel', tb);
+    if (sel) { sel.disabled = !on; }
   }
   function pvToggle(tb, open) {
     var sd = $('tr.sd', tb), btn = $('.twisty', tb);
@@ -849,11 +934,16 @@
       return;
     }
     var tb = e.target.closest('tbody[data-h]');
-    if (!tb || e.target.closest('.cb')) { return; }
+    if (!tb || e.target.closest('.cb, select, option')) { return; }
     if (e.target.closest('tr.move-row')) { pvToggle(tb); }
   });
   pvt.addEventListener('change', function (e) {
     var cb = e.target;
+    if (cb.classList && cb.classList.contains('l2sel')) {
+      hostById(cb.dataset.l2).l2 = cb.value;
+      buildPlans(); updatePreview();
+      return;
+    }
     if (!cb.classList || !cb.classList.contains('cb')) { return; }
     if (cb.id === 'pv-all') { pvBodies().forEach(function (tb) { setIncluded(tb, cb.checked); }); }
     else { var tb = cb.closest('tbody[data-h]'); if (tb) { setIncluded(tb, cb.checked); } }
@@ -881,7 +971,17 @@
     $$('#par button').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
   });
   $('#dry').addEventListener('change', updatePreview);
-  $('#timeout').addEventListener('change', buildPlans);
+  $('#timeout').addEventListener('change', function () {
+    var auto = this.value === 'auto';
+    $('#to-help').textContent = auto
+      ? 'lease 24 h → timeout 12 h (half the lease, when devices renew; never below 5 min)'
+      : 'Manual override. Devices that only join when they renew (up to 12 h) can be rolled back too early.';
+    buildPlans();
+  });
+  /* "Create tickets" hints at a later ticketing connector: it looks disabled, stays focusable and does nothing. */
+  $$('.tk-btn').forEach(function (b) {
+    b.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); });
+  });
   function startMoves() {
     var n = incl().length; if (!n) { return; }
     var dry = $('#dry').checked;
@@ -906,6 +1006,7 @@
   ];
   var GROUP_OF = { dev: 'dev', dhcp: 'dhcp', dns: 'dns', clean: 'clean', 'undo-dhcp': 'undo', 'undo-dns': 'undo' };
   var TASK_ARIA = { dev: 'reconfigure task', dhcp: 'DHCP task', dns: 'DNS task', clean: 'clean-up task', 'undo-dhcp': 'undo task', 'undo-dns': 'undo task' };
+  function taskAria(t) { return t.k === 'dev' && run.hosts[t.hid].h.link === 'wifi' ? 'join task' : TASK_ARIA[t.k]; }
 
   function now() { return fmtClock(BASE + run.sec); }
   function after(sec, fn) { run.sched.push({ at: run.sec + sec, fn: fn }); }
@@ -923,7 +1024,14 @@
   }
   function dOk2(h) { return h.mode === 'static' ? A(h.neu) + ' is out of the IoT DHCP pool.' : 'Reservation for ' + M(h.mac) + ' at ' + A(h.neu) + '.'; }
   function dOk3(h) { return 'A and PTR now point ' + HN(h.id, '.iot.example.test') + ' at ' + A(h.neu) + '.'; }
-  function dOk4(h) { return h.link === 'wifi' ? 'Per-client VLAN ' + P('30') + ' set on ' + h.via + '. Read back matches.' : 'Port profile IoT set on ' + h.via + ' port ' + P(h.port) + '. Read back matches.'; }
+  function dOk4(h) {
+    if (h.link === 'wifi') {
+      return h.l2 === 'override'
+        ? 'Per-client VLAN ' + P('30') + ' set on ' + h.via + '. Read back matches.'
+        : 'SSID ' + P('Home-IoT') + ' on ' + h.via + ' carries VLAN ' + P('30') + '. Read back matches. No client setting changed.';
+    }
+    return 'Port profile IoT set on ' + h.via + ' port ' + P(h.port) + '. Read back matches.';
+  }
   function dTodo2(h) { return h.mode === 'static' ? 'Keep ' + A(h.neu) + ' out of the IoT DHCP pool.' : 'Create the reservation for ' + M(h.mac) + ' at ' + A(h.neu) + '.'; }
   function dTodo3(h) { return 'Point A and PTR for ' + HN(h.id, '.iot.example.test') + ' at ' + A(h.neu) + '.'; }
   var SUBL = ['Read back', 'Diff', 'Write'];
@@ -941,8 +1049,9 @@
 
   function resetRun() {
     var H = {};
-    ORDER.forEach(function (id) { H[id] = { id: id, h: hostById(id), st: 'queued', open: false, cd: null, cancelled: false, seenAt: '', steps: [], note: '', p: 50 }; });
+    ORDER.forEach(function (id) { H[id] = { id: id, h: runHost(id), st: 'queued', open: false, cd: null, cancelled: false, seenAt: '', steps: [], note: '', p: 50 }; });
     var x, h;
+    var S7 = 'Runs by itself if step 5 times out, after 12 h.';
 
     x = H['thermostat-1']; h = x.h; x.st = 'done'; x.seenAt = '14:03:02';
     x.steps = [
@@ -950,31 +1059,34 @@
       S(2, 'done', '14:02:41', 'manual', 'alex', dOk2(h)),
       S(3, 'done', '14:02:49', 'manual', 'alex', dOk3(h)),
       S(4, 'done', '14:02:52', 'auto', 'UniFi', dOk4(h)),
+      S('4b', 'done', '14:02:55', 'auto', 'UniFi', h.id + ' already knows ' + P('Home-IoT') + ' (via Home Assistant). UniFi disconnected it at 14:02:55 and it rejoined by itself.', { lb: JOIN_LB }),
       S(5, 'done', '14:03:02', 'auto', 'Reconciler', 'ARP from ' + M(h.mac) + ' in ' + P(NET) + '.'),
       S(6, 'waiting', '', 'manual', 'You', 'One task open: remove the old reservation and the old DNS records.'),
       S(7, 'na', '', 'auto', 'Job engine', '')
     ];
 
-    x = H['plug-kitchen']; h = x.h; x.st = 'waiting'; x.cd = { left: 221, total: 300 };
+    /* plug-kitchen has waited since 14:04:26, so at 14:08:07 it shows 11:56:19 left of 12:00:00 */
+    x = H['plug-kitchen']; h = x.h; x.st = 'waiting'; x.cd = { left: 42979, total: TIMEOUT };
     x.steps = [
       S(1, 'done', '14:02:10', 'auto', 'IPAM', dOk1(h)),
-      S(2, 'done', '14:06:31', 'manual', 'alex', dOk2(h)),
-      S(3, 'done', '14:06:38', 'manual', 'alex', dOk3(h)),
-      S(4, 'done', '14:06:48', 'auto', 'UniFi', dOk4(h)),
-      S(5, 'waiting', '14:06:48', 'auto', 'Reconciler', 'Waiting for ARP or ping. Times out at 14:11:48.'),
+      S(2, 'done', '14:03:52', 'manual', 'alex', dOk2(h)),
+      S(3, 'done', '14:04:00', 'manual', 'alex', dOk3(h)),
+      S(4, 'done', '14:04:08', 'auto', 'UniFi', dOk4(h)),
+      S('4b', 'done', '14:04:26', 'manual', 'alex', 'Joined ' + P('Home-IoT') + ' on the device. Ticked by alex.', { lb: JOIN_LB }),
+      S(5, 'waiting', '14:04:26', 'auto', 'Reconciler', 'Waiting for ARP or ping. Times out at ' + fmtAt(BASE + x.cd.left) + '.'),
       S(6, 'queued', '', 'manual', 'You', 'Starts after the device is seen.'),
-      S(7, 'queued', '', 'auto', 'Job engine', 'Available if step 5 times out.')
+      S(7, 'queued', '', 'auto', 'Job engine', S7)
     ];
 
     x = H['cam-door']; h = x.h; x.st = 'running'; x.p = 62;
     x.steps = [
       S(1, 'done', '14:02:10', 'auto', 'IPAM', dOk1(h)),
-      S(2, 'done', '14:06:44', 'manual', 'alex', dOk2(h)),
-      S(3, 'done', '14:06:52', 'manual', 'alex', dOk3(h)),
+      S(2, 'done', '14:07:44', 'manual', 'alex', dOk2(h)),
+      S(3, 'done', '14:07:52', 'manual', 'alex', dOk3(h)),
       S(4, 'running', '14:07:58', 'auto', 'UniFi', 'Changing the port profile on ' + h.via + ' port ' + P(h.port) + ' to IoT.', { sub: mkSub(h, 2, ['14:07:58', '14:08:01', '14:08:04']) }),
       S(5, 'queued', '', 'auto', 'Reconciler', 'Starts when step 4 is done.'),
       S(6, 'queued', '', 'manual', 'You', 'Starts after the device is seen.'),
-      S(7, 'queued', '', 'auto', 'Job engine', 'Available if step 5 times out.')
+      S(7, 'queued', '', 'auto', 'Job engine', S7)
     ];
 
     x = H['printer-1']; h = x.h;
@@ -986,18 +1098,20 @@
       S('4b', 'waiting', '', 'manual', 'You', 'Reconfigure the printer to ' + P('198.51.100.30/24') + ', gateway ' + A('198.51.100.1') + '.', { lb: 'Reconfigure the printer' }),
       S(5, 'queued', '', 'auto', 'Reconciler', 'Starts when step 4 is done.'),
       S(6, 'queued', '', 'manual', 'You', 'Starts after the device is seen.'),
-      S(7, 'queued', '', 'auto', 'Job engine', 'Available if step 5 times out.')
+      S(7, 'queued', '', 'auto', 'Job engine', S7)
     ];
 
-    x = H['speaker-den']; h = x.h; x.st = 'failed'; x.cd0 = 300;
+    /* speaker-den: a failure that is not a timeout, so it waits for a decision */
+    x = H['speaker-den']; h = x.h; x.st = 'failed'; x.failAt = '14:04:51';
     x.steps = [
       S(1, 'done', '14:02:10', 'auto', 'IPAM', dOk1(h)),
       S(2, 'done', '14:02:41', 'manual', 'alex', dOk2(h)),
       S(3, 'done', '14:02:49', 'manual', 'alex', dOk3(h)),
-      S(4, 'done', '14:02:56', 'auto', 'UniFi', 'Per-client VLAN override accepted on ' + h.via + '. Read back matches.'),
-      S(5, 'failed', '14:07:56', 'auto', 'Reconciler', 'No ARP or lease within 5:00.'),
+      S(4, 'done', '14:02:56', 'auto', 'UniFi', dOk4(h)),
+      S('4b', 'done', '14:04:30', 'manual', 'alex', 'Ticked by alex after entering the Wi-Fi passphrase for ' + P('Home-IoT') + ' on the device.', { lb: JOIN_LB }),
+      S(5, 'failed', '14:04:51', 'auto', 'Reconciler', 'Refused on ' + P('Home-IoT') + ': wrong Wi-Fi passphrase (UniFi, 14:04:51). The device is back on ' + P('Home') + ', VLAN ' + P('10') + '.'),
       S(6, 'queued', '', 'manual', 'You', 'Not run.'),
-      S(7, 'waiting', '', 'auto', 'Job engine', 'Your decision. Roll back reverts step 4 automatically.')
+      S(7, 'waiting', '', 'auto', 'Job engine', 'Your decision. A refusal is not a timeout, so it does not roll back by itself.')
     ];
 
     run.hosts = H;
@@ -1007,9 +1121,10 @@
 
     run.tasks = [];
     var T = function (id, k, hid, done, at) { run.tasks.push({ id: id, k: k, hid: hid, done: done, at: at || '', lock: done }); };
-    var resAt = { 'thermostat-1': '14:02:41', 'plug-kitchen': '14:06:31', 'cam-door': '14:06:44', 'speaker-den': '14:02:41' };
-    var dnsAt = { 'thermostat-1': '14:02:49', 'plug-kitchen': '14:06:38', 'cam-door': '14:06:52', 'speaker-den': '14:02:49' };
-    T('dev-printer-1', 'dev', 'printer-1', false);
+    var resAt = { 'thermostat-1': '14:02:41', 'plug-kitchen': '14:03:52', 'cam-door': '14:07:44', 'speaker-den': '14:02:41' };
+    var dnsAt = { 'thermostat-1': '14:02:49', 'plug-kitchen': '14:04:00', 'cam-door': '14:07:52', 'speaker-den': '14:02:49' };
+    var devAt = { 'plug-kitchen': '14:04:26', 'speaker-den': '14:04:30' };
+    ORDER.forEach(function (id) { var hh = H[id].h; if (hh.mode === 'static' || joinManual(hh)) { T('dev-' + id, 'dev', id, !!devAt[id], devAt[id]); } });
     ORDER.forEach(function (id) { T('dhcp-' + id, 'dhcp', id, id !== 'printer-1', resAt[id]); });
     ORDER.forEach(function (id) { T('dns-' + id, 'dns', id, id !== 'printer-1', dnsAt[id]); });
     T('clean-thermostat-1', 'clean', 'thermostat-1', false);
@@ -1017,8 +1132,8 @@
 
     run.log = [
       { t: '14:07:58', m: 'cam-door: reading back sw-core port 14, then writing the IoT profile' },
-      { t: '14:07:56', m: 'speaker-den: failed, no ARP or lease within 5:00' },
-      { t: '14:06:48', m: 'plug-kitchen: per-client VLAN 30 set, waiting for observation' },
+      { t: '14:04:51', m: 'speaker-den: refused on Home-IoT (wrong Wi-Fi passphrase), back on Home. Waiting for your decision' },
+      { t: '14:04:26', m: 'plug-kitchen: joined Home-IoT on the device, waiting for observation (up to 12 h)' },
       { t: '14:03:02', m: 'thermostat-1: seen at 198.51.100.41' },
       { t: '14:02:10', m: 'Job #221 started by alex: 5 moves, parallelism 2' }
     ];
@@ -1044,7 +1159,7 @@
   function progText(h) {
     if (h.cancelled || h.st === 'queued') { return 'Not started'; }
     if (h.st === 'done') { return 'Seen ' + h.seenAt; }
-    if (h.st === 'rolledback') { return 'Steps 2 to 4 reverted'; }
+    if (h.st === 'rolledback') { return h.h.link === 'wifi' ? 'Back on Home' : 'Steps 2 to 4 reverted'; }
     return 'Step ' + curStep(h) + ' of 7';
   }
   function ticksHtml(h) {
@@ -1059,7 +1174,7 @@
   function chipHtml(h) {
     var cls = h.cancelled ? 'queued' : h.st, word = h.cancelled ? 'Cancelled' : SW[h.st];
     var p = h.st === 'running' ? ' style="--p:' + h.p + '%"' : '';
-    return '<span class="jstate ' + cls + '"' + p + '>' + word + '</span>' + (h.cd ? '<span class="cdn" data-cd="' + h.id + '">' + fmtMS(Math.max(0, h.cd.left)) + '</span>' : '');
+    return '<span class="jstate ' + cls + '"' + p + '>' + word + '</span>' + (h.cd ? '<span class="cdn" data-cd="' + h.id + '">' + fmtHMS(Math.max(0, h.cd.left)) + '</span>' : '');
   }
   function mainRow(h) {
     var link = h.h.link === 'wifi';
@@ -1069,18 +1184,23 @@
       '<td>' + chipHtml(h) + '</td>' +
       '<td>' + ticksHtml(h) + ' <span class="muted num">' + progText(h) + '</span></td></tr>';
   }
+  /* The manual step on the device itself: reconfigure the printer, or join Wi-Fi Home-IoT */
   function devBox(h) {
-    if (h.id !== 'printer-1') { return ''; }
-    var t = findTask('dev-printer-1');
-    var what = '<b>Reconfigure the printer</b> to ' + P('198.51.100.30/24') + ', gateway ' + A('198.51.100.1') + '.';
+    var t = findTask('dev-' + h.id);
+    if (!t) { return ''; }
+    var wifi = h.h.link === 'wifi';
+    if (t.done && wifi) { return ''; }
+    var what = wifi
+      ? '<b>Join Wi-Fi ' + P('Home-IoT') + '</b> on the device.'
+      : '<b>Reconfigure the printer</b> to ' + P('198.51.100.30/24') + ', gateway ' + A('198.51.100.1') + '.';
     if (t.done) { return '<div class="manual-box">' + ico('check', 'sm') + '<div class="grow">' + what + ' Marked done at ' + t.at + '.</div></div>'; }
-    return '<div class="manual-box">' + ico('user', 'sm') + '<div class="grow">' + what + ' <span class="muted">Do it after the port moves to IoT. Tenko then waits for the printer to appear.</span></div><button class="btn sm" type="button" data-act="markdone">Mark done</button></div>';
+    return '<div class="manual-box">' + ico('user', 'sm') + '<div class="grow">' + what + ' <span class="muted">' + (wifi ? 'A controller cannot switch a client to another SSID. Tenko then waits for the device to appear.' : 'Do it after the port moves to IoT. Tenko then waits for the printer to appear.') + '</span></div><button class="btn sm" type="button" data-act="markdone">Mark done</button></div>';
   }
   function failText(h) {
-    var base = 'No ARP or lease from ' + M(h.h.mac) + ' in ' + P(NET) + ' within 5:00. ';
-    return base + (h.h.link === 'wifi'
-      ? 'UniFi still shows it on SSID Home, VLAN ' + P('10') + ': the per-client VLAN override was accepted but the client did not reconnect.'
-      : 'UniFi shows ' + h.h.via + ' port ' + P(h.h.port) + ' with the IoT profile and the link up. Check the network settings on the device.');
+    if (h.h.link === 'wifi') {
+      return h.id + ' tried ' + P('Home-IoT') + ' and was refused: wrong Wi-Fi passphrase (UniFi, ' + h.failAt + '). It is back on ' + P('Home') + ', VLAN ' + P('10') + '.';
+    }
+    return h.id + ' failed on ' + h.h.via + ' port ' + P(h.h.port) + ' at ' + h.failAt + '.';
   }
   function msgHtml(h) {
     var x = h.h, html = '';
@@ -1090,9 +1210,9 @@
       return '<p>Observed: ARP from ' + M(x.mac) + ' in ' + P(NET) + ' at ' + h.seenAt + '. ' + (ct && !ct.done ? 'Clean-up is a manual task and stays open in the checklist.' : 'Clean-up is done.') + '</p>';
     }
     if (h.st === 'waiting') {
-      var e = Math.round((h.cd.total - h.cd.left) / h.cd.total * 100);
-      html = '<p>' + (h.note ? h.note + ' ' : '') + 'Waiting for ARP or ping from ' + M(x.mac) + ' in ' + P(NET) + '. Devices join the new network when they reconnect; power-cycling it speeds this up.</p>' +
-        '<div class="cdrow"><span class="cdn" data-cd="' + h.id + '">' + fmtMS(Math.max(0, h.cd.left)) + '</span><span class="muted">left of ' + fmtMS(h.cd.total) + '</span><span class="cdbar" data-cdbar="' + h.id + '" style="--e:' + e + '%"><i></i></span></div>';
+      var e = ((h.cd.total - h.cd.left) / h.cd.total * 100).toFixed(2), by = fmtClock(BASE + run.sec + h.cd.left).slice(0, 5);
+      html = '<p>' + (h.note ? h.note + ' ' : '') + 'Waiting for ARP or ping from ' + M(x.mac) + ' in ' + P(NET) + '. Devices join when they renew at half their lease (by ' + by + ') or when they reconnect. Power-cycling the device speeds this up.</p>' +
+        '<div class="cdrow"><span class="cdn" data-cd="' + h.id + '">' + fmtHMS(Math.max(0, h.cd.left)) + '</span><span class="muted">left of ' + fmtHMS(h.cd.total) + '</span><span class="cdbar" data-cdbar="' + h.id + '" style="--e:' + e + '%"><i></i></span></div>';
       return html + devBox(h);
     }
     if (h.st === 'running') {
@@ -1111,10 +1231,17 @@
     if (h.st === 'failed') {
       var wifi = x.link === 'wifi';
       return '<p>' + failText(h) + '</p>' +
-        '<div class="acts"><button class="btn sm" type="button" data-act="retry">Retry</button><button class="btn sm danger" type="button" data-act="rollback">Roll back</button></div>' +
-        '<div class="rb-prev"><b>Roll back</b> reverts steps 2 to 4: ' + (wifi ? 'removes the per-client VLAN override' : 'restores the old port profile') + ' and restores the old intent. The old reservation and DNS records were never removed. The new reservation and DNS records you created become 2 manual tasks to delete.</div>';
+        '<p class="muted">Timeouts roll back automatically; failures like this one wait for you.</p>' +
+        '<div class="acts"><button class="btn sm" type="button" data-act="retry" title="' + (wifi ? 'Fix the passphrase on the device first. UniFi then disconnects the client again so it rejoins Home-IoT.' : 'Try the step again.') + '">Retry</button><button class="btn sm danger" type="button" data-act="rollback">Roll back</button></div>' +
+        '<div class="rb-prev"><b>Roll back</b> ' + (wifi
+          ? 'undoes the move: ' + h.id + ' stays on ' + P('Home') + ' (UniFi changed nothing on the client) and the intent goes back to ' + A(x.old) + '. '
+          : 'reverts steps 2 to 4: restores the old port profile and the old intent. ') +
+        'The old reservation and DNS records were never removed. The new reservation and DNS records you created become 2 manual tasks to delete.</div>';
     }
-    return '<p>Rolled back at ' + h.rbAt + '. ' + (x.link === 'wifi' ? 'The per-client VLAN override on ' + x.via + ' is removed' : 'The port profile on ' + x.via + ' port ' + P(x.port) + ' is restored') + ' and the intent is back at ' + A(x.old) + '. Two manual tasks delete the new reservation and DNS records.</p>';
+    var how = h.auto ? 'Rolled back automatically at ' + h.rbAt + ': not seen within 12 h (the timeout). ' : 'Rolled back at ' + h.rbAt + '. ';
+    return '<p>' + how + (x.link === 'wifi'
+      ? h.id + ' stays on ' + P('Home') + ', VLAN ' + P('10') + ' (UniFi changed nothing on the client) and the intent is back at ' + A(x.old)
+      : 'The port profile on ' + x.via + ' port ' + P(x.port) + ' is restored and the intent is back at ' + A(x.old)) + '. Two manual tasks delete the new reservation and DNS records.</p>';
   }
   function stepLi(h, s) {
     var chip = s.st === 'na' ? '<span class="muted">Not needed</span>' : '<span class="jstate ' + s.st + '"' + (s.st === 'running' ? ' style="--p:60%"' : '') + '>' + SW[s.st] + '</span>';
@@ -1150,12 +1277,12 @@
       var h = run.hosts[id];
       seg += '<i class="' + (h.cancelled || h.st === 'queued' ? '' : h.st) + '" title="' + id + ': ' + (h.cancelled ? 'cancelled' : SW[h.st].toLowerCase()) + '"></i>';
     });
-    $('#rj-done').textContent = c.done;
+    setSI($('#rj-done'), c.done);
     $('#rj-seg').innerHTML = seg;
     var parts = [['waiting', 'waiting for observation'], ['running', 'running'], ['queued', 'queued'], ['failed', 'failed'], ['rolledback', 'rolled back'], ['cancelled', 'cancelled']];
-    $('#rj-brk').innerHTML = parts.filter(function (p) { return c[p[0]]; }).map(function (p) {
-      return '<span class="jstate ' + (p[0] === 'cancelled' ? 'queued' : p[0]) + '">' + c[p[0]] + ' ' + p[1] + '</span>';
-    }).join('');
+    setHTML($('#rj-brk'), parts.filter(function (p) { return c[p[0]]; }).map(function (p) {
+      return '<span class="jstate ' + (p[0] === 'cancelled' ? 'queued' : p[0]) + '">' + N(c[p[0]]) + ' ' + p[1] + '</span>';
+    }).join(''));
     var js = jobState(), chip = $('#rj-chip');
     chip.className = 'jstate ' + js.cls; chip.textContent = js.word; chip.style.setProperty('--p', js.p + '%');
     var cancel = $('#rj-cancel'), none = c.queued === 0;
@@ -1163,8 +1290,8 @@
     cancel.title = none ? 'Every move has started or finished' : 'Cancel ' + pl(c.queued, 'move that has not started', 'moves that have not started');
   }
   function taskLi(t) {
-    var h = hostById(t.hid);
-    return '<li class="' + (t.done ? 'done' : '') + '" data-task="' + t.id + '"><input type="checkbox" class="cb" ' + (t.done ? 'checked ' : '') + (t.lock ? 'disabled ' : '') + 'aria-label="' + t.hid + ' ' + TASK_ARIA[t.k] + '"><span class="tx"><b>' + t.hid + '</b> ' + taskText(t.k, h) + '</span><span class="at">' + (t.done ? t.at : '') + '</span></li>';
+    var h = run.hosts[t.hid].h;
+    return '<li class="' + (t.done ? 'done' : '') + '" data-task="' + t.id + '"><input type="checkbox" class="cb" ' + (t.done ? 'checked ' : '') + (t.lock ? 'disabled ' : '') + 'aria-label="' + t.hid + ' ' + taskAria(t) + '"><span class="tx"><b>' + t.hid + '</b> ' + taskText(t.k, h) + '</span><span class="at">' + (t.done ? t.at : '') + '</span></li>';
   }
   function renderTasks(flashIds) {
     var wrap = $('#rj-tasks'), openMap = {}, html = '', openN = 0;
@@ -1179,7 +1306,7 @@
         '<span class="n">' + (left ? left + ' open of ' + items.length : 'all ' + items.length + ' ticked') + '</span></summary><ul class="tasks">' + items.map(taskLi).join('') + '</ul></details>';
     });
     wrap.innerHTML = html;
-    $('#rj-tcount').textContent = openN + ' open of ' + run.tasks.length;
+    setHTML($('#rj-tcount'), N(openN) + ' open of ' + N(run.tasks.length));
     (flashIds || []).forEach(function (id) { flash($('li[data-task="' + id + '"]', wrap)); });
   }
   function renderLog(flashFirst) {
@@ -1189,7 +1316,7 @@
   function addLog(msg) { run.log.unshift({ t: now(), m: msg }); lastEvt = 0; renderLog(true); }
   function paintCd(h) {
     if (!h.cd) { return; }
-    var txt = fmtMS(Math.max(0, h.cd.left)), e = Math.round((h.cd.total - h.cd.left) / h.cd.total * 100);
+    var txt = fmtHMS(Math.max(0, h.cd.left)), e = ((h.cd.total - h.cd.left) / h.cd.total * 100).toFixed(2);
     $$('[data-cd="' + h.id + '"]').forEach(function (el) { el.textContent = txt; });
     $$('[data-cdbar="' + h.id + '"]').forEach(function (el) { el.style.setProperty('--e', e + '%'); });
   }
@@ -1230,9 +1357,9 @@
   function finishL2(h) {
     var at = now(), s4 = step(h, 4), s5 = step(h, 5);
     s4.st = 'done'; s4.d = dOk4(h.h);
-    s5.st = 'waiting'; s5.t = at; s5.d = 'Waiting for ARP or ping. Times out at ' + fmtClock(BASE + run.sec + 300) + '.';
-    h.st = 'waiting'; h.cd = { left: 300, total: 300 };
-    addLog(h.id + ': ' + h.h.via + ' port ' + h.h.port + ' now uses the IoT profile, read back matches; waiting for observation');
+    s5.st = 'waiting'; s5.t = at; s5.d = 'Waiting for ARP or ping. Times out at ' + fmtAt(BASE + run.sec + TIMEOUT) + '.';
+    h.st = 'waiting'; h.cd = { left: TIMEOUT, total: TIMEOUT };
+    addLog(h.id + ': ' + h.h.via + ' port ' + h.h.port + ' now uses the IoT profile, read back matches; waiting for observation (up to 12 h)');
     renderHost(h.id, true); renderSum(); syncJobs();
   }
   function seen(h) {
@@ -1246,40 +1373,44 @@
     toast({ title: h.id + ' moved: seen at ' + h.h.neu, body: 'ARP from ' + h.h.mac + ' in ' + NET + ' at ' + at + '. The clean-up task is in the checklist.', kind: 'ok' });
     renderTasks([cid]); renderHost(h.id, true); renderSum(); syncJobs(); maybeStartAll();
   }
+  /* A timeout is not a decision for you: the job rolls the move back by itself. */
   function timeoutFail(h) {
-    var at = now(), s5 = step(h, 5), s7 = step(h, 7);
-    h.st = 'failed'; h.cd = null; h.note = '';
-    s5.st = 'failed'; s5.t = at; s5.d = 'No ARP or lease within 5:00.';
-    s7.st = 'waiting'; s7.wk = 'auto'; s7.w = 'Job engine'; s7.d = 'Your decision. Roll back reverts step 4 automatically.';
-    addLog(h.id + ': failed, no ARP or lease within 5:00');
-    toast({ title: h.id + ' failed: no ARP or lease within 5:00', body: 'Choose Retry or Roll back in the device list.', kind: 'bad' });
-    renderHost(h.id, true); renderSum(); syncJobs(); maybeStartAll();
+    rollBack(h, true);
   }
   function retry(h) {
-    var at = now(), s4 = step(h, 4), s5 = step(h, 5), s7 = step(h, 7), wifi = h.h.link === 'wifi';
-    h.st = 'waiting'; h.cd = { left: 300, total: 300 }; h.retried = true;
-    h.note = 'Retried at ' + at + ': UniFi ' + (wifi ? 'disconnected the client so it reconnects on VLAN 30.' : 'applied the port profile again.');
-    s4.st = 'done'; s4.t = at; s4.d = wifi ? 'Client disconnected at ' + at + ' so it reconnects on VLAN ' + P('30') + '. Read back matches.' : 'Port profile applied again at ' + at + '. Read back matches.';
-    s5.st = 'waiting'; s5.t = at; s5.d = 'Waiting for ARP or ping. Times out at ' + fmtClock(BASE + run.sec + 300) + '.';
-    s7.st = 'queued'; s7.d = 'Available if step 5 times out.';
-    addLog(h.id + ': retry sent, waiting up to 5:00');
-    toast({ title: 'Retried ' + h.id, body: 'UniFi ' + (wifi ? 'disconnected the client so it reconnects on VLAN 30' : 'applied the port profile again') + '. Tenko waits up to 5:00 for it to appear.' });
+    var at = now(), s4 = step(h, 4), s4b = step(h, '4b'), s5 = step(h, 5), s7 = step(h, 7), wifi = h.h.link === 'wifi';
+    h.st = 'waiting'; h.cd = { left: TIMEOUT, total: TIMEOUT }; h.retried = true;
+    h.note = 'Retried at ' + at + ': UniFi ' + (wifi ? 'disconnected the client again so it rejoins ' + P('Home-IoT') + '.' : 'applied the port profile again.');
+    if (wifi && s4b) { s4b.st = 'done'; s4b.t = at; s4b.d = 'Retried at ' + at + ': UniFi disconnected the client again so it rejoins ' + P('Home-IoT') + '.'; }
+    else { s4.st = 'done'; s4.t = at; s4.d = 'Port profile applied again at ' + at + '. Read back matches.'; }
+    s5.st = 'waiting'; s5.t = at; s5.d = 'Waiting for ARP or ping. Times out at ' + fmtAt(BASE + run.sec + TIMEOUT) + '.';
+    s7.st = 'queued'; s7.wk = 'auto'; s7.w = 'Job engine'; s7.d = 'Runs by itself if step 5 times out, after 12 h.';
+    addLog(h.id + ': retry sent, waiting up to 12 h');
+    toast({ title: 'Retried ' + h.id, body: 'UniFi ' + (wifi ? 'disconnected the client again so it rejoins Home-IoT' : 'applied the port profile again') + '. Tenko waits up to 12 h for it to appear.' });
     renderHost(h.id, true); renderSum(); syncJobs();
     after(7, function () { if (h.st === 'waiting' && h.retried) { seen(h); } });
   }
-  function rollBack(h) {
+  function rollBack(h, auto) {
     var at = now(), x = h.h, wifi = x.link === 'wifi', ids = ['undo-dhcp-' + h.id, 'undo-dns-' + h.id];
-    h.st = 'rolledback'; h.cd = null; h.rbAt = at; h.note = '';
-    var s2 = step(h, 2), s3 = step(h, 3), s4 = step(h, 4), s6 = step(h, 6), s7 = step(h, 7);
+    h.st = 'rolledback'; h.cd = null; h.rbAt = at; h.note = ''; h.auto = !!auto;
+    var s2 = step(h, 2), s3 = step(h, 3), s4 = step(h, 4), s4b = step(h, '4b'), s5 = step(h, 5), s6 = step(h, 6), s7 = step(h, 7);
+    if (auto) { s5.st = 'failed'; s5.t = at; s5.d = 'Not seen within 12 h (the timeout).'; }
     s2.st = 'rolledback'; s2.t = at; s2.wk = 'manual'; s2.w = 'You'; s2.d = 'Undo task added: delete the new reservation.';
     s3.st = 'rolledback'; s3.t = at; s3.wk = 'manual'; s3.w = 'You'; s3.d = 'Undo task added: delete the new A and PTR records.';
-    s4.st = 'rolledback'; s4.t = at; s4.d = wifi ? 'Per-client VLAN override removed on ' + x.via + '. Read back matches.' : 'Port profile on ' + x.via + ' port ' + P(x.port) + ' restored to LAN. Read back matches.';
+    s4.st = 'rolledback'; s4.t = at;
+    s4.d = wifi ? 'Nothing to undo in UniFi: no client setting was changed.' : 'Port profile on ' + x.via + ' port ' + P(x.port) + ' restored to LAN. Read back matches.';
+    if (wifi && s4b) { s4b.st = 'rolledback'; s4b.t = at; s4b.d = 'The device is back on ' + P('Home') + ', VLAN ' + P('10') + '. Forget ' + P('Home-IoT') + ' on the device if it should not try again.'; }
     s6.st = 'na'; s6.d = '';
-    s7.st = 'done'; s7.t = at; s7.d = 'Step 4 reverted automatically. Steps 2 and 3 are undone by 2 manual tasks.';
+    s7.st = 'done'; s7.t = at; s7.wk = 'auto'; s7.w = 'Job engine';
+    s7.d = (auto ? 'Rolled back automatically after the timeout. ' : 'Rolled back at your request. ') + (wifi ? 'Step 4 needed no undo in UniFi. ' : 'Step 4 reverted automatically. ') + 'Steps 2 and 3 are undone by 2 manual tasks.';
     run.tasks.push({ id: ids[0], k: 'undo-dhcp', hid: h.id, done: false, at: '', lock: false });
     run.tasks.push({ id: ids[1], k: 'undo-dns', hid: h.id, done: false, at: '', lock: false });
-    addLog(h.id + ': rolled back, ' + (wifi ? 'per-client VLAN override removed on ' + x.via : 'port profile restored on ' + x.via + ' port ' + x.port));
-    toast({ title: 'Rolled back ' + h.id, body: (wifi ? 'Removed the per-client VLAN override on ' + x.via : 'Restored the port profile on ' + x.via + ' port ' + x.port) + ' and restored the intent ' + x.old + '. 2 manual tasks delete the new reservation and DNS records.', kind: 'ok' });
+    addLog(h.id + ': ' + (auto ? 'not seen within 12 h, rolled back automatically' : 'rolled back') + ', ' + (wifi ? 'stays on Home, VLAN 10' : 'port profile restored on ' + x.via + ' port ' + x.port));
+    toast({
+      title: auto ? 'Rolled back ' + h.id + ' automatically' : 'Rolled back ' + h.id,
+      body: (auto ? 'Not seen within 12 h (the timeout). ' : '') + (wifi ? h.id + ' stays on Home, VLAN 10 (UniFi changed nothing on the client) and the intent is back at ' + x.old : 'Restored the port profile on ' + x.via + ' port ' + x.port + ' and the intent at ' + x.old) + '. 2 manual tasks delete the new reservation and DNS records.',
+      kind: auto ? 'bad' : 'ok'
+    });
     renderTasks(ids); renderHost(h.id, true); renderSum(); syncJobs(); maybeStartAll();
   }
   function setTask(id, on) {
@@ -1296,8 +1427,14 @@
       s = step(h, 6); s.st = on ? 'done' : 'waiting'; s.t = on ? at : ''; s.w = on ? 'alex' : 'You';
       s.d = on ? 'Old reservation and old DNS records removed.' : 'One task open: remove the old reservation and the old DNS records.';
     }
-    addLog(t.hid + ': ' + TASK_ARIA[t.k] + (on ? ' ticked' : ' reopened'));
-    if (t.k === 'dev' && on) { toast({ title: 'Marked done: reconfigure printer-1', body: 'Tenko waits for the printer at 198.51.100.30 once the port has moved.', kind: 'ok' }); }
+    addLog(t.hid + ': ' + taskAria(t) + (on ? ' ticked' : ' reopened'));
+    if (t.k === 'dev' && on) {
+      var wifi = h.h.link === 'wifi';
+      toast({
+        title: 'Marked done: ' + (wifi ? 'join Wi-Fi Home-IoT on ' : 'reconfigure ') + t.hid,
+        body: wifi ? 'Tenko waits for ' + t.hid + ' to appear in ' + NET + '.' : 'Tenko waits for the printer at 198.51.100.30 once the port has moved.', kind: 'ok'
+      });
+    }
     renderTasks([id]); renderHost(h.id, false); renderSum(); syncJobs();
     maybeStartAll();
   }
@@ -1308,7 +1445,7 @@
     var h = run.hosts[tb.dataset.h], act = e.target.closest('[data-act]');
     if (act) {
       var a = act.dataset.act;
-      if (a === 'retry') { retry(h); } else if (a === 'rollback') { rollBack(h); } else if (a === 'markdone') { setTask('dev-printer-1', true); }
+      if (a === 'retry') { retry(h); } else if (a === 'rollback') { rollBack(h); } else if (a === 'markdone') { setTask('dev-' + h.id, true); }
       return;
     }
     if (e.target.closest('tr.move-row')) { h.open = !h.open; renderHost(h.id, false); }
@@ -1390,8 +1527,8 @@
       tr.dataset.tags.split(' ').forEach(function (k) { if (c[k] !== undefined) { c[k]++; } });
       if (tr.dataset.by === 'alex') { mine++; }
     });
-    $$('.chip[data-state]').forEach(function (b) { var n = $('.n', b); if (n) { n.textContent = c[b.dataset.state]; } });
-    $('#jb-mine .n').textContent = mine;
+    $$('.chip[data-state]').forEach(function (b) { var n = $('.n', b); if (n) { setSI(n, c[b.dataset.state]); } });
+    setSI($('#jb-mine .n'), mine);
   }
   function applyJobs() {
     var on = Object.keys(jb.states).filter(function (k) { return jb.states[k]; }), kv = {}, free = [], shown = 0, rows = jbRows();
@@ -1412,7 +1549,7 @@
       if (ok) { shown++; }
     });
     $('#jb-empty').hidden = shown > 0;
-    $('#jb-count').textContent = shown === rows.length ? pl(rows.length, 'job', 'jobs') : shown + ' of ' + rows.length + ' jobs';
+    setHTML($('#jb-count'), shown === rows.length ? plN(rows.length, 'job', 'jobs') : N(shown) + ' of ' + N(rows.length) + ' jobs');
   }
   function syncJobs() {
     if (!run.hosts['thermostat-1']) { return; }
@@ -1428,7 +1565,7 @@
       tally(); applyJobs();
     }
     $('#jb-221-prog .bar > i').style.setProperty('--v', (c.done / 5 * 100) + '%');
-    $('#jb-221-prog .val').textContent = c.done + ' of 5';
+    setHTML($('#jb-221-prog .val'), N(c.done) + ' of ' + N(5));
     $('#jb-221-dur').textContent = fmtMS(ELAPSED0 + run.sec);
   }
   $$('.chip[data-state]').forEach(function (b) {
@@ -1471,7 +1608,7 @@
     tr.dataset.id = String(id); tr.dataset.kind = 'scan'; tr.dataset.by = 'alex'; tr.dataset.tags = 'running';
     tr.innerHTML = '<td><span class="jid">#' + id + '</span></td><td><span class="jk">' + ico('scan', 'sm') + 'Scan</span></td><td><span class="mono">192.0.2.0/24</span></td>' +
       '<td><span class="jstate running" style="--p:10%">Running</span></td>' +
-      '<td><span class="meter"><span class="bar"><i style="--v:0%"></i></span><span class="val num">0 of 254</span></span></td>' +
+      '<td><span class="meter"><span class="bar"><i style="--v:0%"></i></span><span class="val num"><span data-si="0">0</span> of <span data-si="254">254</span></span></span></td>' +
       '<td><span class="seen" title="2026-10-09 14:08">now</span></td><td>alex</td><td class="num">0 s</td>';
     var body = $('#jb-body');
     body.insertBefore(tr, body.firstChild);
@@ -1483,7 +1620,7 @@
       n = Math.min(254, n + 24 + Math.floor(Math.random() * 12));
       var secs = Math.round((Date.now() - t0) / 1000);
       $('.bar > i', tr).style.setProperty('--v', (n / 254 * 100) + '%');
-      $('.val', tr).textContent = n + ' of 254';
+      setHTML($('.val', tr), N(n) + ' of ' + N(254));
       $$('td', tr)[7].textContent = secs + ' s';
       $('.jstate', tr).style.setProperty('--p', Math.max(10, Math.round(n / 254 * 100)) + '%');
       if (n >= 254) {

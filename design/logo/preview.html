@@ -7,7 +7,7 @@
 <title>Tenko mark - logo preview</title>
 <link rel="icon" href="tenko-favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../tokens.css">
-<script>try{var t=localStorage.getItem('tenko-theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+<script>try{var t=localStorage.getItem('tenko-theme');if(t)document.documentElement.dataset.theme=t;var em=localStorage.getItem('tenko-emphasize');if(em)document.documentElement.dataset.emphasize=em;}catch(e){}</script>
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.5 var(--font-ui); }
@@ -77,7 +77,7 @@
 
   <section>
     <h2>Two-tone</h2>
-    <p>Tails in the accent color, head in currentColor. For the sign-in screen, the wizard and the README; not below 32 px. File: <code>tenko-mark-duo.svg</code>.</p>
+    <p>Tails in the accent color, head in currentColor. Used only on the sign-in page and in the first-run wizard (owner decision); one color everywhere else. Not below 32 px. File: <code>tenko-mark-duo.svg</code>.</p>
     <div class="swatches">
       <div class="sw light duo"><figure><svg width="32" height="32" role="img" aria-label="Two-tone Tenko mark at 32 px"><use href="#mark-duo"/></svg><figcaption>32</figcaption></figure><figure><svg width="48" height="48" role="img" aria-label="Two-tone Tenko mark at 48 px"><use href="#mark-duo"/></svg><figcaption>48</figcaption></figure><figure><svg width="64" height="64" role="img" aria-label="Two-tone Tenko mark at 64 px"><use href="#mark-duo"/></svg><figcaption>64</figcaption></figure><figure><svg width="128" height="128" role="img" aria-label="Two-tone Tenko mark at 128 px"><use href="#mark-duo"/></svg><figcaption>128</figcaption></figure></div>
       <div class="sw dark duo"><figure><svg width="32" height="32" role="img" aria-label="Two-tone Tenko mark at 32 px"><use href="#mark-duo"/></svg><figcaption>32</figcaption></figure><figure><svg width="48" height="48" role="img" aria-label="Two-tone Tenko mark at 48 px"><use href="#mark-duo"/></svg><figcaption>48</figcaption></figure><figure><svg width="64" height="64" role="img" aria-label="Two-tone Tenko mark at 64 px"><use href="#mark-duo"/></svg><figcaption>64</figcaption></figure><figure><svg width="128" height="128" role="img" aria-label="Two-tone Tenko mark at 128 px"><use href="#mark-duo"/></svg><figcaption>128</figcaption></figure></div>
@@ -95,7 +95,7 @@
 
   <section>
     <h2>Lockup</h2>
-    <p>Mark plus the wordmark "Tenko" and a smaller "DDI". The wordmark is drawn, not typeset: monoline strokes on the mark's grid, so it needs no font file. "DDI" sits exactly in the x-height of "Tenko", in a lighter stroke at 62 % opacity. File: <code>tenko-lockup.svg</code>.</p>
+    <p>Mark plus the wordmark "Tenko" and a smaller "DDI". The wordmark is drawn, not typeset: monoline strokes on the mark's grid, so it needs no font file. Its letterforms are fixed: exactly the ones in the 16 px header of every page (owner decision). "DDI" sits exactly in the x-height of "Tenko", in a lighter stroke at 62 % opacity. File: <code>tenko-lockup.svg</code>.</p>
     <div class="swatches">
       <div class="sw light" style="display:grid;gap:18px;justify-items:start"><svg width="380" height="96" role="img" aria-label="Tenko DDI"><use href="#lockup"/></svg><svg width="190" height="48" aria-hidden="true"><use href="#lockup"/></svg><svg width="95" height="24" aria-hidden="true"><use href="#lockup"/></svg></div>
       <div class="sw dark" style="display:grid;gap:18px;justify-items:start"><svg width="380" height="96" role="img" aria-label="Tenko DDI"><use href="#lockup"/></svg><svg width="190" height="48" aria-hidden="true"><use href="#lockup"/></svg><svg width="95" height="24" aria-hidden="true"><use href="#lockup"/></svg></div>

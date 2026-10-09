@@ -8,10 +8,10 @@
 <link rel="icon" href="../logo/tenko-favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&amp;display=swap">
 <link rel="stylesheet" href="../tokens.css">
 <link rel="stylesheet" href="shell.css">
-<script>try{var t=localStorage.getItem('tenko-theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+<script>try{var t=localStorage.getItem('tenko-theme');if(t)document.documentElement.dataset.theme=t;var em=localStorage.getItem('tenko-emphasize');if(em)document.documentElement.dataset.emphasize=em;}catch(e){}</script>
 <script src="shell.js" defer></script>
 <style>
   body { overflow-y: auto; }
@@ -73,6 +73,7 @@
         <span><span class="kbd">Ctrl</span><span class="kbd">K</span> search and commands</span>
         <span><span class="kbd">?</span> all shortcuts</span>
         <span><span class="kbd">G</span><span class="kbd">I</span> jump to IPAM</span>
+        <span>Account menu (AK): theme, density, emphasize host part</span>
         <span><span class="kbd">Shift</span><span class="kbd">T</span> theme</span>
       </div>
     </div>
@@ -84,19 +85,20 @@
   </section>
 
   <ol class="views">
-    <li><a href="shell-and-ipam.html"><span class="t">Shell and IPAM<span class="f">shell-and-ipam.html</span></span><span class="d">The application frame and the address grid for <span class="mono">192.0.2.0/24</span>: prefix tree, filter bar, source badges, inline editing, keyboard focus. Opens mid-gesture: <em>three hosts dragged onto the IoT network</em>. Try dragging rows yourself.</span><span class="go"><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg></span></a></li>
+    <li><a href="wizard.html"><span class="t">First-run wizard<span class="f">wizard.html</span></span><span class="d">From an empty node to a running one: security profile (pick Lab to see the warning), first administrator with passkey, data directory with the rotating-disk check, roles. Uses the two-tone fox.</span><span class="go"><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg></span></a></li>
+    <li><a href="signin.html"><span class="t">Sign-in<span class="f">signin.html</span></span><span class="d">Passkey first, password as fallback, the progressive delay after failed attempts. Uses the two-tone fox; single sign-on comes later.</span><span class="go"><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg></span></a></li>
+    <li><a href="dashboard.html"><span class="t">Dashboard (start page)<span class="f">dashboard.html</span></span><span class="d">Cluster and per-node health: queries per second with SI suffixes so tiles never grow, latency, cache, response codes, DHCP pools, store size, replication and dropped log records.</span><span class="go"><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg></span></a></li>
+    <li><a href="shell-and-ipam.html"><span class="t">Shell and IPAM<span class="f">shell-and-ipam.html</span></span><span class="d">The application frame and the address grid for <span class="mono">192.0.2.0/24</span>: prefix tree with networks and SSIDs, filter bar, source badges, inline editing, keyboard focus. Opens mid-gesture: <em>three hosts dragged onto the IoT network</em>. Try dragging rows yourself.</span><span class="go"><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg></span></a></li>
     <li><a href="host.html"><span class="t">Host detail<span class="f">host.html</span></span><span class="d">One host as a side panel over the grid and as a full page: identity, mode, lock, <em>intent next to observation with the differences marked</em>, ports, remote access with audited password copy, history.</span><span class="go"><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg></span></a></li>
-    <li><a href="move-job.html"><span class="t">Move job<span class="f">move-job.html</span></span><span class="d">Moving five devices to IoT: the <em>preview</em> per device, the confirm bar with parallelism, the <em>running job</em> with a countdown while it waits for each device to appear, a failure with Roll back, and the jobs list.</span><span class="go"><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg></span></a></li>
-    <li><a href="topology.html"><span class="t">Topology<span class="f">topology.html</span></span><span class="d">The network as a layered map colored by VLAN, with a hover card, <em>what is connected to this port</em>, a path highlight and filters, plus how it scales to thousands of nodes.</span><span class="go"><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg></span></a></li>
-    <li><a href="dashboard.html"><span class="t">Dashboard<span class="f">dashboard.html</span></span><span class="d">Cluster and per-node health: queries per second over the last 60 s, latency, cache, response codes, DHCP pools, store size, replication and dropped log records.</span><span class="go"><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg></span></a></li>
-    <li><a href="wizard.html"><span class="t">First-run wizard<span class="f">wizard.html</span></span><span class="d">From an empty node to a running one: security profile (pick Lab to see the warning), first administrator with passkey, data directory with the rotating-disk check, roles.</span><span class="go"><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg></span></a></li>
+    <li><a href="move-job.html"><span class="t">Move job<span class="f">move-job.html</span></span><span class="d">Moving five devices to IoT: the <em>preview</em> per device (wireless clients move to the SSID that carries the VLAN), the confirm bar with parallelism and a timeout derived from the lease, the <em>running job</em>, automatic rollback, and the jobs list.</span><span class="go"><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg></span></a></li>
+    <li><a href="topology.html"><span class="t">Topology<span class="f">topology.html</span></span><span class="d">The network as a layered map with generated VLAN colors, SSIDs on the access points, a hover card, <em>what is connected to this port</em>, a path highlight and filters, plus how it scales to thousands of nodes and 150+ VLANs.</span><span class="go"><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg></span></a></li>
   </ol>
 
   <h2>Also in this spike</h2>
   <div class="more">
     <a href="../logo/preview.html"><strong>The Tenko mark</strong><span>Nine-tailed fox in one color and two-tone, favicon pixel tests at 16 and 32 px, the lockup, construction and clear space.</span></a>
     <a href="../README.md"><strong>Design language</strong><span>Principles, type, color and state tokens, components, keyboard map and interaction rules. Plain text in the browser; best read in an editor.</span></a>
-    <a href="../REVIEW.md"><strong>Review questions</strong><span>What to decide while clicking through, and what was left out on purpose.</span></a>
+    <a href="../REVIEW.md"><strong>Review and decisions</strong><span>The owner&rsquo;s answers to the review questions, and what was left out on purpose.</span></a>
   </div>
 </div>
 </body>
