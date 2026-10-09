@@ -19,7 +19,7 @@
 | WP1.5 Import and export | In progress | worktree | Spec in `import-fixtures.md`; builds on `IpamService::plan` |
 | WP1.8 Server and CLI | In progress | worktree (`crates/tenko`, `deploy/`) | Start order and wiring notes from every package are in its brief; `tenko.toml`, Windows service, systemd, client subcommands, M9 |
 | WP1.9 UI shell, auth, setup | FINAL, committed locally | `4c3778c`, `0bebd53` | 552 tests in 26 files; first-load bundle 68.9 KB gzip; XLIFF 2.0 en/sv compiled at build; typed client from `docs/api/openapi.json` with drift check; msw mock API; the CI `ui` job now runs lint and test |
-| WP1.10 UI IPAM, import, audit | Ready to start | | Follows the conventions of WP1.9 (`ui/` layout, i18n, client, SSE, test kit) |
+| WP1.10 UI IPAM, import, audit | In progress | worktree (`ui/`) | Started 2026-10-09 late evening: grid, IPAM, hosts, move preview, jobs, audit, dashboard, then import behind mocks until WP1.5 lands; TOTP QR code included; `ui/README.md` with the `data-testid` convention for WP1.11 |
 | WP1.11 Acceptance and E2E | Not started | | After M3 |
 | Design spike | Done, committed locally | `4880d8c` | All 16 owner decisions applied; mockups served from `design/` |
 

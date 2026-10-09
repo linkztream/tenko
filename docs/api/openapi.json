@@ -15239,6 +15239,15 @@
         ],
         "description": "A custom field value."
       },
+      "Deleted": {
+        "type": "string",
+        "description": "Which soft-deleted objects a list returns (IPAM-09).",
+        "enum": [
+          "exclude",
+          "include",
+          "only"
+        ]
+      },
       "Digest": {
         "type": "string",
         "description": "SHA-256 digest as 64 lowercase hexadecimal characters"
@@ -21802,6 +21811,14 @@
           }
         },
         "additionalProperties": false
+      },
+      "SortOrder": {
+        "type": "string",
+        "description": "Sort direction of lists that only sort by their natural key.",
+        "enum": [
+          "asc",
+          "desc"
+        ]
       },
       "Stamp": {
         "type": "object",
