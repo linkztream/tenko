@@ -7599,6 +7599,235 @@
         }
       }
     },
+    "/api/v1/observations": {
+      "get": {
+        "tags": [
+          "observations"
+        ],
+        "summary": "List observed facts",
+        "operationId": "list_observations",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1,000 (default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page's `next_cursor`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least this store revision (read-your-writes after a write).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "description": "Only facts of this source: a source key such as `inventory:<connector>`, or a connector identifier (which matches the inventory and the network controller source of the connector).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "description": "Only facts about this kind of subject: `host`, `address`, `attachment`, `services`, `os` or `link`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mac",
+            "in": "query",
+            "description": "Only facts that name this MAC address (`00-00-5E-00-53-01` or `00:00:5e:00:53:01`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ip",
+            "in": "query",
+            "description": "Only facts that name this IP address.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "within",
+            "in": "query",
+            "description": "Only facts that name an IP address inside this network, such as `192.0.2.0/24`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Case-insensitive text search over the subject, the name, the operating system, the platform, the parent, the tags and the attachment device.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "current",
+            "in": "query",
+            "description": "`true`: only facts that count as current now; `false`: only expired facts.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "Sort order: comma-separated fields, `-` in front for descending. Fields: `last_seen` (the default, newest first), `first_seen`, `source`, `subject`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ObservedFact"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameter (`sys.invalid_query`, `sys.invalid_cursor`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/observations/{subject}": {
+      "get": {
+        "tags": [
+          "observations"
+        ],
+        "summary": "Get the picture of one subject across sources",
+        "operationId": "get_observation",
+        "parameters": [
+          {
+            "name": "subject",
+            "in": "path",
+            "description": "A MAC address (`00-00-5E-00-53-01` or `00:00:5e:00:53:01`), an IP address or a name (compared without case).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least at this store revision (read-your-writes).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The facts that name the subject, the picture across sources, the intent objects that match and their last sightings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubjectView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The subject is not a MAC address, an IP address or a name (`ipam.validation`), or a parameter is unknown (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not read observations",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No source has observed the subject (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/openapi.json": {
       "get": {
         "tags": [
@@ -8630,6 +8859,313 @@
         }
       }
     },
+    "/api/v1/prefixes/{id}/adoption": {
+      "get": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Get the adoption policy of a prefix",
+        "operationId": "get_adoption_policy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Prefix identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least at this store revision (read-your-writes).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The policy view, with `ETag: \"<revision>\"` of the prefix's own policy (`\"0\"` without one)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter is unknown or malformed (`sys.invalid_query`, `sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not read the prefix",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such prefix (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The prefix is deleted (`ipam.object_deleted`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Set the adoption policy of a prefix",
+        "operationId": "set_adoption_policy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Prefix identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as `\"12\"`; the write fails with 412\n`ipam.revision_mismatch` when the object changed since.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdoptionPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The policy view after the change, with `ETag`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The policy is invalid (`ipam.adoption.invalid`), the body is malformed (`sys.invalid_request`), or a parameter is unknown (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not change the prefix",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such prefix (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The prefix is deleted (`ipam.object_deleted`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match is stale (`ipam.revision_mismatch`); `\"0\"` means that the prefix has no policy of its own",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Remove the adoption policy of a prefix",
+        "operationId": "clear_adoption_policy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Prefix identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as `\"12\"`; the write fails with 412\n`ipam.revision_mismatch` when the object changed since.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The policy view after the change: no policy of its own, the inherited one in force",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter is unknown or malformed (`sys.invalid_query`, `sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not change the prefix",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such prefix (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The prefix is deleted (`ipam.object_deleted`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match is stale (`ipam.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/prefixes/{id}/history": {
       "get": {
         "tags": [
@@ -9443,6 +9979,524 @@
           },
           "412": {
             "description": "If-Match is stale (`ipam.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/proposals": {
+      "get": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "List proposals",
+        "operationId": "list_proposals",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1,000 (default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page's `next_cursor`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least this store revision (read-your-writes after a write).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Only proposals of these kinds: `discovered_host`, `orphaned_intent`, `address_mismatch`, `conflict` or `outside_prefixes`. Repeat the parameter or separate the kinds with commas.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "Only proposals in these states: `open`, `accepted`, `rejected`, `expired` or `superseded`. Repeat the parameter or separate the states with commas. Every state when absent.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "description": "Only proposals of these severities: `info`, `warning` or `critical`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "prefix",
+            "in": "query",
+            "description": "Only proposals about this prefix (identifier): its own subject, an address or a network inside it, or the prefix among the involved objects.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subject",
+            "in": "query",
+            "description": "Only proposals about this subject: a MAC address, an IP address, an object identifier, or text contained in the subject name or key.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "Sort order: comma-separated fields, `-` in front for descending. Fields: `created` (the default, newest first), `updated`, `severity`, `kind`, `state`, `last_seen`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of proposals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_IntentProposal"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameter (`sys.invalid_query`, `sys.invalid_cursor`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The prefix filter names no prefix (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/proposals/reconcile": {
+      "post": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Run the reconciler now",
+        "operationId": "reconcile_proposals",
+        "responses": {
+          "200": {
+            "description": "What the run did: proposals opened, refreshed, superseded, expired and adopted, and the revision of its write",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconcileReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter is unknown (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not decide proposals",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The reconciler does not run on this server (`ipam.reconciler.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/proposals/{id}": {
+      "get": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Get one proposal",
+        "operationId": "get_proposal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Proposal identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least at this store revision (read-your-writes).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The proposal, with `ETag: \"<revision>\"`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentProposal"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter is unknown or malformed (`sys.invalid_query`, `sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not read the proposal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such proposal (`ipam.proposal.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/proposals/{id}/approve": {
+      "post": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Approve a proposal",
+        "operationId": "approve_proposal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Proposal identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "description": "Plan the change and return the plan without writing (API-09).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "acknowledge",
+            "in": "query",
+            "description": "Warning codes to acknowledge, comma-separated (for example\n`ipam.prefix.nibble_boundary`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as `\"12\"`; the write fails with 412\n`ipam.revision_mismatch` when the object changed since.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The decision: the accepted proposal, the revision, the inline job and the objects changed, with `ETag` of the proposal; on a dry run the proposal as it is and the plan, with nothing written",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Decision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter is unknown or malformed (`sys.invalid_query`, `sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not approve proposals, or not make one of the changes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such proposal (`ipam.proposal.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The proposal is decided already (`ipam.proposal.not_open`), suggests no change (`ipam.proposal.nothing_to_apply`), a warning needs an acknowledgement (`ipam.plan.unacknowledged`), or the change conflicts with intent (`ipam.name_taken`, `ipam.address.duplicate`, `ipam.reference_missing`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match is stale (`ipam.proposal.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "A host of the change is locked (`ipam.host.locked`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/proposals/{id}/reject": {
+      "post": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Reject a proposal",
+        "operationId": "reject_proposal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Proposal identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as `\"12\"`; the write fails with 412\n`ipam.revision_mismatch` when the object changed since.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The decision: the rejected proposal and the revision, with `ETag` of the proposal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Decision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The reason is over 1,024 bytes or has control characters (`ipam.validation`), the body is malformed (`sys.invalid_request`), or a parameter is unknown (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not decide proposals",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such proposal (`ipam.proposal.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The proposal is decided already (`ipam.proposal.not_open`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match is stale (`ipam.proposal.revision_mismatch`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -16022,6 +17076,50 @@
         ],
         "description": "An address in a list: the address object, and with `expand=host` the interface it is\nbound to and that interface's host, so an address grid needs no read per row. Both\nmembers are absent when the address is not bound, when its interface or host is\ndeleted, and without the expansion."
       },
+      "AdoptionMode": {
+        "type": "string",
+        "description": "What a prefix's policy adopts without a person (IPAM-15 \"auto-adopt in network Z\").",
+        "enum": [
+          "manual",
+          "adopt_hosts",
+          "adopt_all"
+        ]
+      },
+      "AdoptionPolicy": {
+        "type": "object",
+        "description": "The adoption policy of a prefix, inherited by the prefixes inside it that have none.",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "host_mode": {
+            "$ref": "#/components/schemas/AssignmentMode",
+            "description": "The assignment mode of adopted hosts; `dynamic` by default (IPAM only observes)."
+          },
+          "min_sightings": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Only after this many counted sightings by one source (1 to 1,000; 1 by default).",
+            "minimum": 0
+          },
+          "mode": {
+            "$ref": "#/components/schemas/AdoptionMode",
+            "description": "What is adopted."
+          },
+          "only_dhcp_pools": {
+            "type": "boolean",
+            "description": "Only addresses inside a DHCP pool of the prefix."
+          },
+          "vendors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only devices whose vendor matches one entry: an OUI prefix of the MAC address\n(`00:00:5e`, `00-00-5E`) or text the source reports as the vendor (compared\nwithout case). Empty: any vendor. At most 32 entries of 1 to 64 characters."
+          }
+        },
+        "additionalProperties": false
+      },
       "AlarmLevel": {
         "type": "string",
         "description": "Alarm level of a prefix.",
@@ -16352,6 +17450,57 @@
           "dynamic",
           "unmanaged"
         ]
+      },
+      "AttachmentView": {
+        "type": "object",
+        "description": "Where a client is attached, as one source reports it.",
+        "required": [
+          "source",
+          "mac",
+          "device",
+          "last_seen"
+        ],
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "The switch or access point."
+          },
+          "last_seen": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the source last reported it."
+          },
+          "mac": {
+            "$ref": "#/components/schemas/MacAddr",
+            "description": "The client."
+          },
+          "port": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The switch port."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source key."
+          },
+          "ssid": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The wireless network."
+          },
+          "vlan": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The VLAN.",
+            "minimum": 0
+          }
+        }
       },
       "AttemptState": {
         "type": "string",
@@ -18018,6 +19167,71 @@
         ],
         "description": "A custom field value."
       },
+      "Decision": {
+        "type": "object",
+        "description": "The answer of a decision.",
+        "required": [
+          "proposal",
+          "dry_run",
+          "results",
+          "warnings"
+        ],
+        "properties": {
+          "dry_run": {
+            "type": "boolean",
+            "description": "Whether this is a dry run."
+          },
+          "job_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobId",
+                "description": "The inline job that carried it (IPAM-17); `null` on a dry run."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "plan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlanView",
+                "description": "The plan (dry runs of an approval only)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proposal": {
+            "$ref": "#/components/schemas/IntentProposal",
+            "description": "The proposal after the decision; on a dry run, as it is."
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectRef"
+            },
+            "description": "The objects the commands created or changed."
+          },
+          "revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The revision that committed the decision; `null` on a dry run.",
+            "minimum": 0
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanWarning"
+            },
+            "description": "Warnings of the plan."
+          }
+        }
+      },
       "Defaults": {
         "type": "object",
         "description": "Defaults a manifest suggests for new instances; the host enforces its own bounds.",
@@ -18059,6 +19273,26 @@
       "Duid": {
         "type": "string",
         "description": "DHCPv6 DUID as lowercase hexadecimal"
+      },
+      "Endpoint": {
+        "type": "object",
+        "description": "One end of a link.",
+        "required": [
+          "device"
+        ],
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "The device, as the source names it."
+          },
+          "port": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The port."
+          }
+        }
       },
       "Entry": {
         "type": "object",
@@ -18163,6 +19397,200 @@
             "description": "The topic."
           }
         }
+      },
+      "FactSubject": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A host of an inventory source, by the source's own identifier (CONN-02).",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "A host of an inventory source, by the source's own identifier (CONN-02).",
+                "required": [
+                  "external_id"
+                ],
+                "properties": {
+                  "external_id": {
+                    "type": "string",
+                    "description": "The source's identifier (VM id, entity id)."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "host"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An address in use in a VRF (probe sightings, later DHCP leases).",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "An address in use in a VRF (probe sightings, later DHCP leases).",
+                "required": [
+                  "vrf",
+                  "ip"
+                ],
+                "properties": {
+                  "ip": {
+                    "type": "string",
+                    "description": "The address."
+                  },
+                  "vrf": {
+                    "$ref": "#/components/schemas/VrfId",
+                    "description": "The VRF of the observing source."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "address"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Where a client is attached (network controller).",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "Where a client is attached (network controller).",
+                "required": [
+                  "mac"
+                ],
+                "properties": {
+                  "mac": {
+                    "$ref": "#/components/schemas/MacAddr",
+                    "description": "The client."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "attachment"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The open ports of an address (SCAN-08).",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "The open ports of an address (SCAN-08).",
+                "required": [
+                  "ip"
+                ],
+                "properties": {
+                  "ip": {
+                    "type": "string",
+                    "description": "The address."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "services"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The operating system guess of an address (SCAN-08).",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "The operating system guess of an address (SCAN-08).",
+                "required": [
+                  "ip"
+                ],
+                "properties": {
+                  "ip": {
+                    "type": "string",
+                    "description": "The address."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "os"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A link between two devices (topology, IPAM-20).",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "A link between two devices (topology, IPAM-20).",
+                "required": [
+                  "a",
+                  "b",
+                  "kind"
+                ],
+                "properties": {
+                  "a": {
+                    "$ref": "#/components/schemas/Endpoint",
+                    "description": "One end."
+                  },
+                  "b": {
+                    "$ref": "#/components/schemas/Endpoint",
+                    "description": "The other end."
+                  },
+                  "kind": {
+                    "$ref": "#/components/schemas/LinkKind",
+                    "description": "How the link was learned."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "link"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What a fact is about, within its source: the source's own identity of the thing it\nreports. Two reports of one source about one subject are the same fact, refreshed.\n\nAdjacently tagged (`{\"type\": \"address\", \"data\": {...}}`) because variants carry IP\naddresses (see the encoding rules in `tenko_core::codec`)."
       },
       "FactorEnrolled": {
         "type": "object",
@@ -19135,6 +20563,239 @@
           "version": {
             "$ref": "#/components/schemas/ReleaseVersion",
             "description": "The version being installed."
+          }
+        }
+      },
+      "IntentMatch": {
+        "type": "object",
+        "description": "The intent objects that match a subject: interfaces by MAC address, addresses by IP\naddress (in any VRF), hosts by name and through their interfaces. Live objects only.",
+        "required": [
+          "hosts",
+          "interfaces",
+          "addresses",
+          "vrfs"
+        ],
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressId"
+            },
+            "description": "Addresses."
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HostId"
+            },
+            "description": "Hosts."
+          },
+          "interfaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InterfaceId"
+            },
+            "description": "Interfaces."
+          },
+          "vrfs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VrfId"
+            },
+            "description": "VRFs of the matching addresses."
+          }
+        }
+      },
+      "IntentProposal": {
+        "type": "object",
+        "description": "A suggestion of the reconciler: evidence, the commands that would resolve it, and the\ndecision (IPAM-15). Stored in `ipam.proposals`.",
+        "required": [
+          "id",
+          "kind",
+          "rule",
+          "key",
+          "subject",
+          "severity",
+          "state",
+          "summary",
+          "evidence",
+          "fingerprint",
+          "created",
+          "updated"
+        ],
+        "properties": {
+          "adopted_by": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PrefixId",
+                "description": "The prefix whose adoption policy adopted it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "adoption_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The error code of the last failed adoption; the policy does not try again until\nthe proposal is replaced."
+          },
+          "commands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpamCommand"
+            },
+            "description": "The commands an approval applies (empty for conflicts, which a person resolves)."
+          },
+          "created": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it was opened."
+          },
+          "decided": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Stamp",
+                "description": "Who decided and when: the approving person, `system:reconciler` for an adoption,\nan expiry or a supersession."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProposalEvidence"
+            },
+            "description": "The observations behind it."
+          },
+          "fingerprint": {
+            "$ref": "#/components/schemas/Digest",
+            "description": "SHA-256 over the canonical CBOR of the kind, the subject key, the evidence\nidentities (sources, subjects, paired addresses) and the commands: equal evidence,\nequal fingerprint. A rejection is remembered by it."
+          },
+          "id": {
+            "$ref": "#/components/schemas/ProposalId",
+            "description": "Identifier."
+          },
+          "key": {
+            "type": "string",
+            "description": "The subject key: kind and subject, unique among open proposals\n(`discovered_host/mac:00:00:5e:00:53:01`)."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IntentProposalKind",
+            "description": "The kind."
+          },
+          "params": {
+            "type": "object",
+            "description": "Named parameters of the summary, for translation.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The rejection reason, or why it expired."
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectRef"
+            },
+            "description": "The objects its commands created or changed, once accepted."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Store revision (filled when read; `ETag` and `If-Match` of the decisions).",
+            "minimum": 0
+          },
+          "rule": {
+            "type": "string",
+            "description": "The rule that produced it, a stable code such as\n`ipam.reconcile.discovered_mac`; the UI translates it with [`Self::params`]."
+          },
+          "severity": {
+            "$ref": "#/components/schemas/ProposalSeverity",
+            "description": "How urgent it is."
+          },
+          "state": {
+            "$ref": "#/components/schemas/IntentProposalState",
+            "description": "The decision state."
+          },
+          "subject": {
+            "$ref": "#/components/schemas/ProposalSubject",
+            "description": "The subject."
+          },
+          "summary": {
+            "type": "string",
+            "description": "English one-line summary."
+          },
+          "superseded_by": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProposalId",
+                "description": "The proposal that replaced it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it last changed."
+          }
+        }
+      },
+      "IntentProposalKind": {
+        "type": "string",
+        "description": "What a proposal is about.",
+        "enum": [
+          "discovered_host",
+          "orphaned_intent",
+          "address_mismatch",
+          "conflict",
+          "outside_prefixes"
+        ]
+      },
+      "IntentProposalState": {
+        "type": "string",
+        "description": "The decision state of a proposal.",
+        "enum": [
+          "open",
+          "accepted",
+          "rejected",
+          "expired",
+          "superseded"
+        ]
+      },
+      "IntentSighting": {
+        "type": "object",
+        "description": "When an intent object (an address or an interface) was last matched by a current\nobservation; written by the reconciler at most once per refresh interval.",
+        "required": [
+          "at",
+          "source",
+          "observation"
+        ],
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "The latest matching sighting (the source's time)."
+          },
+          "observation": {
+            "$ref": "#/components/schemas/ObservationId",
+            "description": "The observation behind it."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source of that sighting."
           }
         }
       },
@@ -20910,6 +22571,16 @@
           }
         }
       },
+      "LinkKind": {
+        "type": "string",
+        "description": "How a link was learned.",
+        "enum": [
+          "lldp",
+          "uplink",
+          "wired",
+          "wireless"
+        ]
+      },
       "ListBody_CustomFieldDef": {
         "type": "object",
         "description": "A list without paging.",
@@ -22483,6 +24154,24 @@
           }
         }
       },
+      "ObjectSighting": {
+        "type": "object",
+        "description": "The last sighting of an intent object.",
+        "required": [
+          "object",
+          "sighting"
+        ],
+        "properties": {
+          "object": {
+            "$ref": "#/components/schemas/ObjectRef",
+            "description": "The address or interface."
+          },
+          "sighting": {
+            "$ref": "#/components/schemas/IntentSighting",
+            "description": "Its last sighting."
+          }
+        }
+      },
       "ObservationCondition": {
         "type": "object",
         "description": "An observation a waiting step needs.",
@@ -22501,6 +24190,515 @@
           "subject": {
             "$ref": "#/components/schemas/ObjectRef",
             "description": "The object the job waits for (usually the host)."
+          }
+        }
+      },
+      "ObservationId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "ObservationSource": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A discovery probe (SCAN-02, SCAN-04, SCAN-05).",
+            "required": [
+              "node",
+              "method",
+              "type"
+            ],
+            "properties": {
+              "method": {
+                "$ref": "#/components/schemas/ProbeMethod",
+                "description": "How it saw the subject."
+              },
+              "node": {
+                "$ref": "#/components/schemas/NodeId",
+                "description": "The probe node."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "probe"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An inventory connector (CONN-02).",
+            "required": [
+              "connector",
+              "type"
+            ],
+            "properties": {
+              "connector": {
+                "$ref": "#/components/schemas/ConnectorId",
+                "description": "The connector."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "inventory"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A network controller connector (CONN-05).",
+            "required": [
+              "connector",
+              "type"
+            ],
+            "properties": {
+              "connector": {
+                "$ref": "#/components/schemas/ConnectorId",
+                "description": "The connector."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "network_controller"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A DNS record (Phase 2).",
+            "required": [
+              "zone",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dns_record"
+                ]
+              },
+              "zone": {
+                "$ref": "#/components/schemas/Fqdn",
+                "description": "The zone."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A DHCP lease (Phase 3).",
+            "required": [
+              "node",
+              "type"
+            ],
+            "properties": {
+              "node": {
+                "$ref": "#/components/schemas/NodeId",
+                "description": "The DHCP node."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dhcp_lease"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "The source of an observation."
+      },
+      "Observed": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "An address in use, with the MAC behind it when known.",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "An address in use, with the MAC behind it when known.",
+                "required": [
+                  "vrf",
+                  "ip"
+                ],
+                "properties": {
+                  "ip": {
+                    "type": "string",
+                    "description": "The address."
+                  },
+                  "mac": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/MacAddr",
+                        "description": "The MAC address."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "vrf": {
+                    "$ref": "#/components/schemas/VrfId",
+                    "description": "The VRF the observing source belongs to."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "address"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A host from an inventory source.",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/ObservedHost",
+                "description": "A host from an inventory source."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "host"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Open TCP ports (SCAN-08).",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "Open TCP ports (SCAN-08).",
+                "required": [
+                  "ip",
+                  "open_tcp"
+                ],
+                "properties": {
+                  "ip": {
+                    "type": "string",
+                    "description": "The address scanned."
+                  },
+                  "open_tcp": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "format": "int32",
+                      "minimum": 0
+                    },
+                    "description": "Open ports."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "services"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An operating system guess (SCAN-08).",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "An operating system guess (SCAN-08).",
+                "required": [
+                  "ip",
+                  "guess",
+                  "confidence"
+                ],
+                "properties": {
+                  "confidence": {
+                    "type": "integer",
+                    "format": "int32",
+                    "description": "Confidence in percent.",
+                    "minimum": 0
+                  },
+                  "guess": {
+                    "type": "string",
+                    "description": "Free-text guess, such as `Linux 6.x`."
+                  },
+                  "ip": {
+                    "type": "string",
+                    "description": "The address scanned."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "os"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Where a client is attached (switch port or wireless network).",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "Where a client is attached (switch port or wireless network).",
+                "required": [
+                  "mac",
+                  "device"
+                ],
+                "properties": {
+                  "device": {
+                    "type": "string",
+                    "description": "The switch or access point, as the controller names it."
+                  },
+                  "mac": {
+                    "$ref": "#/components/schemas/MacAddr",
+                    "description": "The client."
+                  },
+                  "port": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The switch port."
+                  },
+                  "ssid": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The wireless network."
+                  },
+                  "vlan": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int32",
+                    "description": "The VLAN the client is in.",
+                    "minimum": 0
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "attachment"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A link between two devices (IPAM-20 topology edges).",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "A link between two devices (IPAM-20 topology edges).",
+                "required": [
+                  "a",
+                  "b",
+                  "kind"
+                ],
+                "properties": {
+                  "a": {
+                    "$ref": "#/components/schemas/Endpoint",
+                    "description": "One end."
+                  },
+                  "b": {
+                    "$ref": "#/components/schemas/Endpoint",
+                    "description": "The other end."
+                  },
+                  "kind": {
+                    "$ref": "#/components/schemas/LinkKind",
+                    "description": "How the link was learned."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "link"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What was observed.\n\nAdjacently tagged (`{\"type\": \"address\", \"data\": {...}}`) because variants carry IP\naddresses; see the encoding rules in [`crate::codec`]."
+      },
+      "ObservedFact": {
+        "type": "object",
+        "description": "One source's knowledge of one subject: the latest report as the source gave it, with\nfirst and last sighting. Facts of different sources are never merged; the view across\nsources is computed when read ([`super::view`]).",
+        "required": [
+          "source",
+          "source_key",
+          "subject",
+          "subject_key",
+          "observed",
+          "observation",
+          "first_seen",
+          "last_seen",
+          "received_at"
+        ],
+        "properties": {
+          "counted_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "The source's time of the last counted sighting."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the fact stops counting as current without a refresh; set to the receive time\nwhen a complete batch of the source no longer reports the subject."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "first_seen": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the source first reported the subject (its time)."
+          },
+          "last_seen": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the source last reported the subject (its time)."
+          },
+          "observation": {
+            "$ref": "#/components/schemas/ObservationId",
+            "description": "The observation that last changed the fact (or first reported it)."
+          },
+          "observed": {
+            "$ref": "#/components/schemas/Observed",
+            "description": "The latest report, with every attribute the source gave (name, MAC and IP\naddresses, OS, platform, hypervisor node, tags, attachment, ports)."
+          },
+          "received_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the fact was last written."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Store revision of the fact (filled when read).",
+            "minimum": 0
+          },
+          "sightings": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Reports of the subject, counted at most once per refresh interval (the adoption\nconstraint \"after N sightings\").",
+            "minimum": 0
+          },
+          "source": {
+            "$ref": "#/components/schemas/ObservationSource",
+            "description": "The source."
+          },
+          "source_key": {
+            "type": "string",
+            "description": "The canonical text of the source ([`source_key`])."
+          },
+          "subject": {
+            "$ref": "#/components/schemas/FactSubject",
+            "description": "The subject."
+          },
+          "subject_key": {
+            "type": "string",
+            "description": "The canonical text of the subject ([`FactSubject::key`])."
+          }
+        }
+      },
+      "ObservedHost": {
+        "type": "object",
+        "description": "A host as an inventory source reports it (CONN-02).",
+        "required": [
+          "external_id"
+        ],
+        "properties": {
+          "external_id": {
+            "type": "string",
+            "description": "The source's own identifier (VM id, entity id), stable across polls."
+          },
+          "ips": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IP addresses."
+          },
+          "macs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MacAddr"
+            },
+            "description": "MAC addresses."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name as the source shows it."
+          },
+          "os": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Operating system."
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The parent host's `external_id` (the hypervisor node of a VM)."
+          },
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Platform, such as `qemu`, `lxc` or `esphome`."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags from the source."
           }
         }
       },
@@ -23058,6 +25256,179 @@
           }
         }
       },
+      "Page_IntentProposal": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "A suggestion of the reconciler: evidence, the commands that would resolve it, and the\ndecision (IPAM-15). Stored in `ipam.proposals`.",
+              "required": [
+                "id",
+                "kind",
+                "rule",
+                "key",
+                "subject",
+                "severity",
+                "state",
+                "summary",
+                "evidence",
+                "fingerprint",
+                "created",
+                "updated"
+              ],
+              "properties": {
+                "adopted_by": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PrefixId",
+                      "description": "The prefix whose adoption policy adopted it."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "adoption_error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The error code of the last failed adoption; the policy does not try again until\nthe proposal is replaced."
+                },
+                "commands": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IpamCommand"
+                  },
+                  "description": "The commands an approval applies (empty for conflicts, which a person resolves)."
+                },
+                "created": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When it was opened."
+                },
+                "decided": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Stamp",
+                      "description": "Who decided and when: the approving person, `system:reconciler` for an adoption,\nan expiry or a supersession."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "evidence": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProposalEvidence"
+                  },
+                  "description": "The observations behind it."
+                },
+                "fingerprint": {
+                  "$ref": "#/components/schemas/Digest",
+                  "description": "SHA-256 over the canonical CBOR of the kind, the subject key, the evidence\nidentities (sources, subjects, paired addresses) and the commands: equal evidence,\nequal fingerprint. A rejection is remembered by it."
+                },
+                "id": {
+                  "$ref": "#/components/schemas/ProposalId",
+                  "description": "Identifier."
+                },
+                "key": {
+                  "type": "string",
+                  "description": "The subject key: kind and subject, unique among open proposals\n(`discovered_host/mac:00:00:5e:00:53:01`)."
+                },
+                "kind": {
+                  "$ref": "#/components/schemas/IntentProposalKind",
+                  "description": "The kind."
+                },
+                "params": {
+                  "type": "object",
+                  "description": "Named parameters of the summary, for translation.",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "propertyNames": {
+                    "type": "string"
+                  }
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The rejection reason, or why it expired."
+                },
+                "results": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ObjectRef"
+                  },
+                  "description": "The objects its commands created or changed, once accepted."
+                },
+                "revision": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Store revision (filled when read; `ETag` and `If-Match` of the decisions).",
+                  "minimum": 0
+                },
+                "rule": {
+                  "type": "string",
+                  "description": "The rule that produced it, a stable code such as\n`ipam.reconcile.discovered_mac`; the UI translates it with [`Self::params`]."
+                },
+                "severity": {
+                  "$ref": "#/components/schemas/ProposalSeverity",
+                  "description": "How urgent it is."
+                },
+                "state": {
+                  "$ref": "#/components/schemas/IntentProposalState",
+                  "description": "The decision state."
+                },
+                "subject": {
+                  "$ref": "#/components/schemas/ProposalSubject",
+                  "description": "The subject."
+                },
+                "summary": {
+                  "type": "string",
+                  "description": "English one-line summary."
+                },
+                "superseded_by": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ProposalId",
+                      "description": "The proposal that replaced it."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "updated": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When it last changed."
+                }
+              }
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
       "Page_Interface": {
         "type": "object",
         "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
@@ -23289,6 +25660,118 @@
                 "title": {
                   "$ref": "#/components/schemas/MessageKey",
                   "description": "Translatable title."
+                }
+              }
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
+      "Page_ObservedFact": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One source's knowledge of one subject: the latest report as the source gave it, with\nfirst and last sighting. Facts of different sources are never merged; the view across\nsources is computed when read ([`super::view`]).",
+              "required": [
+                "source",
+                "source_key",
+                "subject",
+                "subject_key",
+                "observed",
+                "observation",
+                "first_seen",
+                "last_seen",
+                "received_at"
+              ],
+              "properties": {
+                "counted_at": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Timestamp",
+                      "description": "The source's time of the last counted sighting."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expires_at": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Timestamp",
+                      "description": "When the fact stops counting as current without a refresh; set to the receive time\nwhen a complete batch of the source no longer reports the subject."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "first_seen": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When the source first reported the subject (its time)."
+                },
+                "last_seen": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When the source last reported the subject (its time)."
+                },
+                "observation": {
+                  "$ref": "#/components/schemas/ObservationId",
+                  "description": "The observation that last changed the fact (or first reported it)."
+                },
+                "observed": {
+                  "$ref": "#/components/schemas/Observed",
+                  "description": "The latest report, with every attribute the source gave (name, MAC and IP\naddresses, OS, platform, hypervisor node, tags, attachment, ports)."
+                },
+                "received_at": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When the fact was last written."
+                },
+                "revision": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Store revision of the fact (filled when read).",
+                  "minimum": 0
+                },
+                "sightings": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "Reports of the subject, counted at most once per refresh interval (the adoption\nconstraint \"after N sightings\").",
+                  "minimum": 0
+                },
+                "source": {
+                  "$ref": "#/components/schemas/ObservationSource",
+                  "description": "The source."
+                },
+                "source_key": {
+                  "type": "string",
+                  "description": "The canonical text of the source ([`source_key`])."
+                },
+                "subject": {
+                  "$ref": "#/components/schemas/FactSubject",
+                  "description": "The subject."
+                },
+                "subject_key": {
+                  "type": "string",
+                  "description": "The canonical text of the subject ([`FactSubject::key`])."
                 }
               }
             },
@@ -24634,6 +27117,64 @@
           "installed"
         ]
       },
+      "PolicyView": {
+        "type": "object",
+        "description": "The adoption policy of one prefix as the API shows it.",
+        "required": [
+          "prefix",
+          "effective",
+          "revision"
+        ],
+        "properties": {
+          "effective": {
+            "$ref": "#/components/schemas/AdoptionPolicy",
+            "description": "The policy in force: its own, an inherited one, or the default (`manual`)."
+          },
+          "policy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AdoptionPolicy",
+                "description": "Its own policy; `null` when it inherits."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prefix": {
+            "$ref": "#/components/schemas/PrefixId",
+            "description": "The prefix."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The revision of its own policy (`ETag`, `If-Match`); 0 without one.",
+            "minimum": 0
+          },
+          "source": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PrefixId",
+                "description": "The prefix the policy in force comes from; `null` for the default."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Stamp",
+                "description": "Who set its own policy and when."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "PolicyViolation": {
         "oneOf": [
           {
@@ -25358,6 +27899,20 @@
         ],
         "description": "Who performs an action."
       },
+      "ProbeMethod": {
+        "type": "string",
+        "description": "How a probe saw its subject.",
+        "enum": [
+          "arp",
+          "nd",
+          "mdns",
+          "lldp",
+          "icmp",
+          "tcp_syn",
+          "os_fingerprint",
+          "snmp"
+        ]
+      },
       "ProblemDetails": {
         "type": "object",
         "description": "The JSON body of every error response: RFC 9457 problem details plus the Tenko members\n`code`, `params` and `errors`.",
@@ -25654,6 +28209,155 @@
           }
         }
       },
+      "ProposalEvidence": {
+        "type": "object",
+        "description": "One observation behind a proposal, as it was when the proposal was written.",
+        "required": [
+          "source",
+          "source_key",
+          "subject_key",
+          "observation",
+          "first_seen",
+          "last_seen"
+        ],
+        "properties": {
+          "first_seen": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "First sighting by this source."
+          },
+          "ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The IP address, if any."
+          },
+          "last_seen": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Last sighting by this source."
+          },
+          "mac": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MacAddr",
+                "description": "The MAC address the fact pairs with the address, if any."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name the source gives, if any."
+          },
+          "observation": {
+            "$ref": "#/components/schemas/ObservationId",
+            "description": "The observation that last changed the fact."
+          },
+          "sightings": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Counted sightings by this source.",
+            "minimum": 0
+          },
+          "source": {
+            "$ref": "#/components/schemas/ObservationSource",
+            "description": "The source."
+          },
+          "source_key": {
+            "type": "string",
+            "description": "The canonical text of the source."
+          },
+          "subject_key": {
+            "type": "string",
+            "description": "The canonical text of the fact's subject."
+          }
+        }
+      },
+      "ProposalId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "ProposalSeverity": {
+        "type": "string",
+        "description": "How urgent a proposal is.",
+        "enum": [
+          "info",
+          "warning",
+          "critical"
+        ]
+      },
+      "ProposalSubject": {
+        "type": "object",
+        "description": "What a proposal concerns: the observed identity and the intent objects involved.",
+        "properties": {
+          "cidr": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The network (outside-prefix proposals)."
+          },
+          "ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The IP address."
+          },
+          "mac": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MacAddr",
+                "description": "The MAC address."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name a source gives the device."
+          },
+          "objects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectRef"
+            },
+            "description": "The intent objects involved (hosts, interfaces, addresses)."
+          },
+          "prefix": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PrefixId",
+                "description": "The most specific prefix of the address, if known."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vrf": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VrfId",
+                "description": "The VRF."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "Range": {
         "type": "object",
         "description": "A range of addresses inside a prefix.",
@@ -25910,6 +28614,98 @@
           }
         }
       },
+      "ReconcileReport": {
+        "type": "object",
+        "description": "What one run did.",
+        "required": [
+          "at",
+          "opened",
+          "refreshed",
+          "unchanged",
+          "superseded",
+          "expired",
+          "suppressed",
+          "adopted",
+          "adoption_failures",
+          "sightings",
+          "moves_confirmed"
+        ],
+        "properties": {
+          "adopted": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Proposals adopted by a policy.",
+            "minimum": 0
+          },
+          "adoption_failures": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Adoptions that failed (recorded on the proposal).",
+            "minimum": 0
+          },
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the run started."
+          },
+          "expired": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Proposals whose observation no longer holds.",
+            "minimum": 0
+          },
+          "moves_confirmed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Move jobs whose observation step was confirmed.",
+            "minimum": 0
+          },
+          "opened": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Proposals opened.",
+            "minimum": 0
+          },
+          "refreshed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Open proposals whose evidence was refreshed.",
+            "minimum": 0
+          },
+          "revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The revision of the proposal write; `null` when nothing changed.",
+            "minimum": 0
+          },
+          "sightings": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Last sightings of intent objects written.",
+            "minimum": 0
+          },
+          "superseded": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Proposals replaced by newer ones.",
+            "minimum": 0
+          },
+          "suppressed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Subjects not opened again because a person rejected the same evidence.",
+            "minimum": 0
+          },
+          "unchanged": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Open proposals left as they were.",
+            "minimum": 0
+          }
+        }
+      },
       "RecoveryCodes": {
         "type": "object",
         "description": "New recovery codes, shown once.",
@@ -25964,6 +28760,20 @@
             "description": "Always `public-key`."
           }
         }
+      },
+      "RejectRequest": {
+        "type": "object",
+        "description": "The body of a rejection.",
+        "properties": {
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the proposal is rejected; at most 1,024 bytes, no control characters other than\nline breaks and tabs. Blank counts as no reason."
+          }
+        },
+        "additionalProperties": false
       },
       "Release": {
         "type": "object",
@@ -27912,6 +30722,169 @@
           }
         }
       },
+      "SubjectSummary": {
+        "type": "object",
+        "description": "The picture of one subject across sources, computed from its facts. Lists are sorted\nand without duplicates; they draw on the current facts, or on every fact when none is\ncurrent.",
+        "required": [
+          "current",
+          "sources",
+          "macs",
+          "ips",
+          "names",
+          "os",
+          "platforms",
+          "parents",
+          "open_tcp",
+          "attachments",
+          "tags"
+        ],
+        "properties": {
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentView"
+            },
+            "description": "Attachments, one per source and MAC address."
+          },
+          "current": {
+            "type": "boolean",
+            "description": "Whether any fact is current."
+          },
+          "first_seen": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "The earliest first sighting of any fact."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ips": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IP addresses."
+          },
+          "last_seen": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "The latest sighting of any fact."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "macs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MacAddr"
+            },
+            "description": "MAC addresses."
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names (inventory names), as reported."
+          },
+          "open_tcp": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "Open TCP ports (SCAN-08)."
+          },
+          "os": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Operating systems: inventory OS and probe OS guesses."
+          },
+          "parents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Parent hosts (the hypervisor node of a VM)."
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Platforms (`qemu`, `lxc`, `esphome`)."
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The sources with a current fact."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags from the sources."
+          }
+        }
+      },
+      "SubjectView": {
+        "type": "object",
+        "description": "The computed view of one subject.",
+        "required": [
+          "subject",
+          "facts",
+          "summary",
+          "intent",
+          "sightings",
+          "revision"
+        ],
+        "properties": {
+          "facts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObservedFact"
+            },
+            "description": "Every fact that names the subject: current facts first, then by last sighting,\nnewest first."
+          },
+          "intent": {
+            "$ref": "#/components/schemas/IntentMatch",
+            "description": "The intent objects that match."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The revision of the view.",
+            "minimum": 0
+          },
+          "sightings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectSighting"
+            },
+            "description": "The last sightings of the matching addresses and interfaces."
+          },
+          "subject": {
+            "type": "string",
+            "description": "The subject as asked: `mac:<mac>`, `ip:<ip>` or `name:<name>`."
+          },
+          "summary": {
+            "$ref": "#/components/schemas/SubjectSummary",
+            "description": "The picture across sources."
+          }
+        }
+      },
       "SummaryCount": {
         "type": "object",
         "description": "How many objects of a kind a plan changes in one way.",
@@ -28487,7 +31460,8 @@
           "import",
           "system",
           "admin",
-          "connectors"
+          "connectors",
+          "discovery"
         ]
       },
       "TotpAlgorithm": {
@@ -31330,6 +34304,14 @@
     {
       "name": "connectors",
       "description": "Connector plugins and connector instances"
+    },
+    {
+      "name": "observations",
+      "description": "Observations of connectors and probes, per source and across sources"
+    },
+    {
+      "name": "proposals",
+      "description": "Proposals of the reconciler, their decisions and adoption policies"
     }
   ]
 }

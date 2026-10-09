@@ -1190,6 +1190,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/observations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List observed facts */
+        get: operations["list_observations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/observations/{subject}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the picture of one subject across sources */
+        get: operations["get_observation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/openapi.json": {
         parameters: {
             query?: never;
@@ -1339,6 +1373,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/prefixes/{id}/adoption": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the adoption policy of a prefix */
+        get: operations["get_adoption_policy"];
+        /** Set the adoption policy of a prefix */
+        put: operations["set_adoption_policy"];
+        post?: never;
+        /** Remove the adoption policy of a prefix */
+        delete: operations["clear_adoption_policy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/prefixes/{id}/history": {
         parameters: {
             query?: never;
@@ -1442,6 +1495,91 @@ export interface paths {
         put?: never;
         /** Restore one deleted prefix */
         post: operations["restore_prefix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List proposals */
+        get: operations["list_proposals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/proposals/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run the reconciler now */
+        post: operations["reconcile_proposals"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/proposals/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one proposal */
+        get: operations["get_proposal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/proposals/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve a proposal */
+        post: operations["approve_proposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/proposals/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject a proposal */
+        post: operations["reject_proposal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2335,6 +2473,31 @@ export interface components {
             interface_detail?: components["schemas"]["InterfaceSummary"] | null;
         };
         /**
+         * @description What a prefix's policy adopts without a person (IPAM-15 "auto-adopt in network Z").
+         * @enum {string}
+         */
+        AdoptionMode: "manual" | "adopt_hosts" | "adopt_all";
+        /** @description The adoption policy of a prefix, inherited by the prefixes inside it that have none. */
+        AdoptionPolicy: {
+            /** @description The assignment mode of adopted hosts; `dynamic` by default (IPAM only observes). */
+            host_mode?: components["schemas"]["AssignmentMode"];
+            /**
+             * Format: int32
+             * @description Only after this many counted sightings by one source (1 to 1,000; 1 by default).
+             */
+            min_sightings?: number;
+            /** @description What is adopted. */
+            mode: components["schemas"]["AdoptionMode"];
+            /** @description Only addresses inside a DHCP pool of the prefix. */
+            only_dhcp_pools?: boolean;
+            /**
+             * @description Only devices whose vendor matches one entry: an OUI prefix of the MAC address
+             *     (`00:00:5e`, `00-00-5E`) or text the source reports as the vendor (compared
+             *     without case). Empty: any vendor. At most 32 entries of 1 to 64 characters.
+             */
+            vendors?: string[];
+        };
+        /**
          * @description Alarm level of a prefix.
          * @enum {string}
          */
@@ -2423,6 +2586,26 @@ export interface components {
          * @enum {string}
          */
         AssignmentMode: "static" | "reserved" | "dynamic" | "unmanaged";
+        /** @description Where a client is attached, as one source reports it. */
+        AttachmentView: {
+            /** @description The switch or access point. */
+            device: string;
+            /** @description When the source last reported it. */
+            last_seen: components["schemas"]["Timestamp"];
+            /** @description The client. */
+            mac: components["schemas"]["MacAddr"];
+            /** @description The switch port. */
+            port?: string | null;
+            /** @description The source key. */
+            source: string;
+            /** @description The wireless network. */
+            ssid?: string | null;
+            /**
+             * Format: int32
+             * @description The VLAN.
+             */
+            vlan?: number | null;
+        };
         /**
          * @description The state of an install attempt.
          * @enum {string}
@@ -3033,6 +3216,24 @@ export interface components {
             /** @description The chosen option. */
             value: string;
         };
+        /** @description The answer of a decision. */
+        Decision: {
+            /** @description Whether this is a dry run. */
+            dry_run: boolean;
+            job_id?: components["schemas"]["JobId"] | null;
+            plan?: components["schemas"]["PlanView"] | null;
+            /** @description The proposal after the decision; on a dry run, as it is. */
+            proposal: components["schemas"]["IntentProposal"];
+            /** @description The objects the commands created or changed. */
+            results: components["schemas"]["ObjectRef"][];
+            /**
+             * Format: int64
+             * @description The revision that committed the decision; `null` on a dry run.
+             */
+            revision?: number | null;
+            /** @description Warnings of the plan. */
+            warnings: components["schemas"]["PlanWarning"][];
+        };
         /** @description Defaults a manifest suggests for new instances; the host enforces its own bounds. */
         Defaults: {
             /**
@@ -3055,6 +3256,13 @@ export interface components {
         Digest: string;
         /** @description DHCPv6 DUID as lowercase hexadecimal */
         Duid: string;
+        /** @description One end of a link. */
+        Endpoint: {
+            /** @description The device, as the source names it. */
+            device: string;
+            /** @description The port. */
+            port?: string | null;
+        };
         /**
          * @description How to start an installed plugin: an executable, or a script with its interpreter.
          *     Paths are relative to the plugin directory.
@@ -3097,6 +3305,68 @@ export interface components {
             tables?: string[];
             /** @description The topic. */
             topic: components["schemas"]["Topic"];
+        };
+        /**
+         * @description What a fact is about, within its source: the source's own identity of the thing it
+         *     reports. Two reports of one source about one subject are the same fact, refreshed.
+         *
+         *     Adjacently tagged (`{"type": "address", "data": {...}}`) because variants carry IP
+         *     addresses (see the encoding rules in `tenko_core::codec`).
+         */
+        FactSubject: {
+            /** @description A host of an inventory source, by the source's own identifier (CONN-02). */
+            data: {
+                /** @description The source's identifier (VM id, entity id). */
+                external_id: string;
+            };
+            /** @enum {string} */
+            type: "host";
+        } | {
+            /** @description An address in use in a VRF (probe sightings, later DHCP leases). */
+            data: {
+                /** @description The address. */
+                ip: string;
+                /** @description The VRF of the observing source. */
+                vrf: components["schemas"]["VrfId"];
+            };
+            /** @enum {string} */
+            type: "address";
+        } | {
+            /** @description Where a client is attached (network controller). */
+            data: {
+                /** @description The client. */
+                mac: components["schemas"]["MacAddr"];
+            };
+            /** @enum {string} */
+            type: "attachment";
+        } | {
+            /** @description The open ports of an address (SCAN-08). */
+            data: {
+                /** @description The address. */
+                ip: string;
+            };
+            /** @enum {string} */
+            type: "services";
+        } | {
+            /** @description The operating system guess of an address (SCAN-08). */
+            data: {
+                /** @description The address. */
+                ip: string;
+            };
+            /** @enum {string} */
+            type: "os";
+        } | {
+            /** @description A link between two devices (topology, IPAM-20). */
+            data: {
+                /** @description One end. */
+                a: components["schemas"]["Endpoint"];
+                /** @description The other end. */
+                b: components["schemas"]["Endpoint"];
+                /** @description How the link was learned. */
+                kind: components["schemas"]["LinkKind"];
+            };
+            /** @enum {string} */
+            type: "link";
         };
         /**
          * @description The answer of a factor enrolment. Enrolling a factor does not raise the strength of the
@@ -3443,6 +3713,105 @@ export interface components {
             job_id: components["schemas"]["JobId"];
             /** @description The version being installed. */
             version: components["schemas"]["ReleaseVersion"];
+        };
+        /**
+         * @description The intent objects that match a subject: interfaces by MAC address, addresses by IP
+         *     address (in any VRF), hosts by name and through their interfaces. Live objects only.
+         */
+        IntentMatch: {
+            /** @description Addresses. */
+            addresses: components["schemas"]["AddressId"][];
+            /** @description Hosts. */
+            hosts: components["schemas"]["HostId"][];
+            /** @description Interfaces. */
+            interfaces: components["schemas"]["InterfaceId"][];
+            /** @description VRFs of the matching addresses. */
+            vrfs: components["schemas"]["VrfId"][];
+        };
+        /**
+         * @description A suggestion of the reconciler: evidence, the commands that would resolve it, and the
+         *     decision (IPAM-15). Stored in `ipam.proposals`.
+         */
+        IntentProposal: {
+            adopted_by?: components["schemas"]["PrefixId"] | null;
+            /**
+             * @description The error code of the last failed adoption; the policy does not try again until
+             *     the proposal is replaced.
+             */
+            adoption_error?: string | null;
+            /** @description The commands an approval applies (empty for conflicts, which a person resolves). */
+            commands?: components["schemas"]["IpamCommand"][];
+            /** @description When it was opened. */
+            created: components["schemas"]["Timestamp"];
+            decided?: components["schemas"]["Stamp"] | null;
+            /** @description The observations behind it. */
+            evidence: components["schemas"]["ProposalEvidence"][];
+            /**
+             * @description SHA-256 over the canonical CBOR of the kind, the subject key, the evidence
+             *     identities (sources, subjects, paired addresses) and the commands: equal evidence,
+             *     equal fingerprint. A rejection is remembered by it.
+             */
+            fingerprint: components["schemas"]["Digest"];
+            /** @description Identifier. */
+            id: components["schemas"]["ProposalId"];
+            /**
+             * @description The subject key: kind and subject, unique among open proposals
+             *     (`discovered_host/mac:00:00:5e:00:53:01`).
+             */
+            key: string;
+            /** @description The kind. */
+            kind: components["schemas"]["IntentProposalKind"];
+            /** @description Named parameters of the summary, for translation. */
+            params?: {
+                [key: string]: string;
+            };
+            /** @description The rejection reason, or why it expired. */
+            reason?: string | null;
+            /** @description The objects its commands created or changed, once accepted. */
+            results?: components["schemas"]["ObjectRef"][];
+            /**
+             * Format: int64
+             * @description Store revision (filled when read; `ETag` and `If-Match` of the decisions).
+             */
+            revision?: number;
+            /**
+             * @description The rule that produced it, a stable code such as
+             *     `ipam.reconcile.discovered_mac`; the UI translates it with [`Self::params`].
+             */
+            rule: string;
+            /** @description How urgent it is. */
+            severity: components["schemas"]["ProposalSeverity"];
+            /** @description The decision state. */
+            state: components["schemas"]["IntentProposalState"];
+            /** @description The subject. */
+            subject: components["schemas"]["ProposalSubject"];
+            /** @description English one-line summary. */
+            summary: string;
+            superseded_by?: components["schemas"]["ProposalId"] | null;
+            /** @description When it last changed. */
+            updated: components["schemas"]["Timestamp"];
+        };
+        /**
+         * @description What a proposal is about.
+         * @enum {string}
+         */
+        IntentProposalKind: "discovered_host" | "orphaned_intent" | "address_mismatch" | "conflict" | "outside_prefixes";
+        /**
+         * @description The decision state of a proposal.
+         * @enum {string}
+         */
+        IntentProposalState: "open" | "accepted" | "rejected" | "expired" | "superseded";
+        /**
+         * @description When an intent object (an address or an interface) was last matched by a current
+         *     observation; written by the reconciler at most once per refresh interval.
+         */
+        IntentSighting: {
+            /** @description The latest matching sighting (the source's time). */
+            at: components["schemas"]["Timestamp"];
+            /** @description The observation behind it. */
+            observation: components["schemas"]["ObservationId"];
+            /** @description The source of that sighting. */
+            source: string;
         };
         /** @description A network interface of a host. */
         Interface: {
@@ -3947,6 +4316,11 @@ export interface components {
             /** @description Values the host dropped or replaced (at most 20). */
             warnings?: string[];
         };
+        /**
+         * @description How a link was learned.
+         * @enum {string}
+         */
+        LinkKind: "lldp" | "uplink" | "wired" | "wireless";
         /** @description A list without paging. */
         ListBody_CustomFieldDef: {
             /** @description Every item. */
@@ -4551,12 +4925,189 @@ export interface components {
             /** @description The kind of object. */
             kind: components["schemas"]["ObjectKind"];
         };
+        /** @description The last sighting of an intent object. */
+        ObjectSighting: {
+            /** @description The address or interface. */
+            object: components["schemas"]["ObjectRef"];
+            /** @description Its last sighting. */
+            sighting: components["schemas"]["IntentSighting"];
+        };
         /** @description An observation a waiting step needs. */
         ObservationCondition: {
             /** @description Any one of these satisfies the condition. */
             any_of: components["schemas"]["ObservedPredicate"][];
             /** @description The object the job waits for (usually the host). */
             subject: components["schemas"]["ObjectRef"];
+        };
+        /** Format: uuid */
+        ObservationId: string;
+        /** @description The source of an observation. */
+        ObservationSource: {
+            /** @description How it saw the subject. */
+            method: components["schemas"]["ProbeMethod"];
+            /** @description The probe node. */
+            node: components["schemas"]["NodeId"];
+            /** @enum {string} */
+            type: "probe";
+        } | {
+            /** @description The connector. */
+            connector: components["schemas"]["ConnectorId"];
+            /** @enum {string} */
+            type: "inventory";
+        } | {
+            /** @description The connector. */
+            connector: components["schemas"]["ConnectorId"];
+            /** @enum {string} */
+            type: "network_controller";
+        } | {
+            /** @enum {string} */
+            type: "dns_record";
+            /** @description The zone. */
+            zone: components["schemas"]["Fqdn"];
+        } | {
+            /** @description The DHCP node. */
+            node: components["schemas"]["NodeId"];
+            /** @enum {string} */
+            type: "dhcp_lease";
+        };
+        /**
+         * @description What was observed.
+         *
+         *     Adjacently tagged (`{"type": "address", "data": {...}}`) because variants carry IP
+         *     addresses; see the encoding rules in [`crate::codec`].
+         */
+        Observed: {
+            /** @description An address in use, with the MAC behind it when known. */
+            data: {
+                /** @description The address. */
+                ip: string;
+                mac?: components["schemas"]["MacAddr"] | null;
+                /** @description The VRF the observing source belongs to. */
+                vrf: components["schemas"]["VrfId"];
+            };
+            /** @enum {string} */
+            type: "address";
+        } | {
+            /** @description A host from an inventory source. */
+            data: components["schemas"]["ObservedHost"];
+            /** @enum {string} */
+            type: "host";
+        } | {
+            /** @description Open TCP ports (SCAN-08). */
+            data: {
+                /** @description The address scanned. */
+                ip: string;
+                /** @description Open ports. */
+                open_tcp: number[];
+            };
+            /** @enum {string} */
+            type: "services";
+        } | {
+            /** @description An operating system guess (SCAN-08). */
+            data: {
+                /**
+                 * Format: int32
+                 * @description Confidence in percent.
+                 */
+                confidence: number;
+                /** @description Free-text guess, such as `Linux 6.x`. */
+                guess: string;
+                /** @description The address scanned. */
+                ip: string;
+            };
+            /** @enum {string} */
+            type: "os";
+        } | {
+            /** @description Where a client is attached (switch port or wireless network). */
+            data: {
+                /** @description The switch or access point, as the controller names it. */
+                device: string;
+                /** @description The client. */
+                mac: components["schemas"]["MacAddr"];
+                /** @description The switch port. */
+                port?: string | null;
+                /** @description The wireless network. */
+                ssid?: string | null;
+                /**
+                 * Format: int32
+                 * @description The VLAN the client is in.
+                 */
+                vlan?: number | null;
+            };
+            /** @enum {string} */
+            type: "attachment";
+        } | {
+            /** @description A link between two devices (IPAM-20 topology edges). */
+            data: {
+                /** @description One end. */
+                a: components["schemas"]["Endpoint"];
+                /** @description The other end. */
+                b: components["schemas"]["Endpoint"];
+                /** @description How the link was learned. */
+                kind: components["schemas"]["LinkKind"];
+            };
+            /** @enum {string} */
+            type: "link";
+        };
+        /**
+         * @description One source's knowledge of one subject: the latest report as the source gave it, with
+         *     first and last sighting. Facts of different sources are never merged; the view across
+         *     sources is computed when read ([`super::view`]).
+         */
+        ObservedFact: {
+            counted_at?: components["schemas"]["Timestamp"] | null;
+            expires_at?: components["schemas"]["Timestamp"] | null;
+            /** @description When the source first reported the subject (its time). */
+            first_seen: components["schemas"]["Timestamp"];
+            /** @description When the source last reported the subject (its time). */
+            last_seen: components["schemas"]["Timestamp"];
+            /** @description The observation that last changed the fact (or first reported it). */
+            observation: components["schemas"]["ObservationId"];
+            /**
+             * @description The latest report, with every attribute the source gave (name, MAC and IP
+             *     addresses, OS, platform, hypervisor node, tags, attachment, ports).
+             */
+            observed: components["schemas"]["Observed"];
+            /** @description When the fact was last written. */
+            received_at: components["schemas"]["Timestamp"];
+            /**
+             * Format: int64
+             * @description Store revision of the fact (filled when read).
+             */
+            revision?: number;
+            /**
+             * Format: int32
+             * @description Reports of the subject, counted at most once per refresh interval (the adoption
+             *     constraint "after N sightings").
+             */
+            sightings?: number;
+            /** @description The source. */
+            source: components["schemas"]["ObservationSource"];
+            /** @description The canonical text of the source ([`source_key`]). */
+            source_key: string;
+            /** @description The subject. */
+            subject: components["schemas"]["FactSubject"];
+            /** @description The canonical text of the subject ([`FactSubject::key`]). */
+            subject_key: string;
+        };
+        /** @description A host as an inventory source reports it (CONN-02). */
+        ObservedHost: {
+            /** @description The source's own identifier (VM id, entity id), stable across polls. */
+            external_id: string;
+            /** @description IP addresses. */
+            ips?: string[];
+            /** @description MAC addresses. */
+            macs?: components["schemas"]["MacAddr"][];
+            /** @description Name as the source shows it. */
+            name?: string | null;
+            /** @description Operating system. */
+            os?: string | null;
+            /** @description The parent host's `external_id` (the hypervisor node of a VM). */
+            parent?: string | null;
+            /** @description Platform, such as `qemu`, `lxc` or `esphome`. */
+            platform?: string | null;
+            /** @description Tags from the source. */
+            tags?: string[];
         };
         /**
          * @description One acceptable observation.
@@ -4772,6 +5323,80 @@ export interface components {
          *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
          *     bound to the query that produced it.
          */
+        Page_IntentProposal: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                adopted_by?: components["schemas"]["PrefixId"] | null;
+                /**
+                 * @description The error code of the last failed adoption; the policy does not try again until
+                 *     the proposal is replaced.
+                 */
+                adoption_error?: string | null;
+                /** @description The commands an approval applies (empty for conflicts, which a person resolves). */
+                commands?: components["schemas"]["IpamCommand"][];
+                /** @description When it was opened. */
+                created: components["schemas"]["Timestamp"];
+                decided?: components["schemas"]["Stamp"] | null;
+                /** @description The observations behind it. */
+                evidence: components["schemas"]["ProposalEvidence"][];
+                /**
+                 * @description SHA-256 over the canonical CBOR of the kind, the subject key, the evidence
+                 *     identities (sources, subjects, paired addresses) and the commands: equal evidence,
+                 *     equal fingerprint. A rejection is remembered by it.
+                 */
+                fingerprint: components["schemas"]["Digest"];
+                /** @description Identifier. */
+                id: components["schemas"]["ProposalId"];
+                /**
+                 * @description The subject key: kind and subject, unique among open proposals
+                 *     (`discovered_host/mac:00:00:5e:00:53:01`).
+                 */
+                key: string;
+                /** @description The kind. */
+                kind: components["schemas"]["IntentProposalKind"];
+                /** @description Named parameters of the summary, for translation. */
+                params?: {
+                    [key: string]: string;
+                };
+                /** @description The rejection reason, or why it expired. */
+                reason?: string | null;
+                /** @description The objects its commands created or changed, once accepted. */
+                results?: components["schemas"]["ObjectRef"][];
+                /**
+                 * Format: int64
+                 * @description Store revision (filled when read; `ETag` and `If-Match` of the decisions).
+                 */
+                revision?: number;
+                /**
+                 * @description The rule that produced it, a stable code such as
+                 *     `ipam.reconcile.discovered_mac`; the UI translates it with [`Self::params`].
+                 */
+                rule: string;
+                /** @description How urgent it is. */
+                severity: components["schemas"]["ProposalSeverity"];
+                /** @description The decision state. */
+                state: components["schemas"]["IntentProposalState"];
+                /** @description The subject. */
+                subject: components["schemas"]["ProposalSubject"];
+                /** @description English one-line summary. */
+                summary: string;
+                superseded_by?: components["schemas"]["ProposalId"] | null;
+                /** @description When it last changed. */
+                updated: components["schemas"]["Timestamp"];
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
         Page_Interface: {
             /** @description The items of this page, at most `limit` of them. */
             items: {
@@ -4841,6 +5466,57 @@ export interface components {
                 targets: components["schemas"]["ObjectRef"][];
                 /** @description Translatable title. */
                 title: components["schemas"]["MessageKey"];
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_ObservedFact: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                counted_at?: components["schemas"]["Timestamp"] | null;
+                expires_at?: components["schemas"]["Timestamp"] | null;
+                /** @description When the source first reported the subject (its time). */
+                first_seen: components["schemas"]["Timestamp"];
+                /** @description When the source last reported the subject (its time). */
+                last_seen: components["schemas"]["Timestamp"];
+                /** @description The observation that last changed the fact (or first reported it). */
+                observation: components["schemas"]["ObservationId"];
+                /**
+                 * @description The latest report, with every attribute the source gave (name, MAC and IP
+                 *     addresses, OS, platform, hypervisor node, tags, attachment, ports).
+                 */
+                observed: components["schemas"]["Observed"];
+                /** @description When the fact was last written. */
+                received_at: components["schemas"]["Timestamp"];
+                /**
+                 * Format: int64
+                 * @description Store revision of the fact (filled when read).
+                 */
+                revision?: number;
+                /**
+                 * Format: int32
+                 * @description Reports of the subject, counted at most once per refresh interval (the adoption
+                 *     constraint "after N sightings").
+                 */
+                sightings?: number;
+                /** @description The source. */
+                source: components["schemas"]["ObservationSource"];
+                /** @description The canonical text of the source ([`source_key`]). */
+                source_key: string;
+                /** @description The subject. */
+                subject: components["schemas"]["FactSubject"];
+                /** @description The canonical text of the subject ([`FactSubject::key`]). */
+                subject_key: string;
             }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
@@ -5363,6 +6039,21 @@ export interface components {
          * @enum {string}
          */
         PluginSource: "bundled" | "installed";
+        /** @description The adoption policy of one prefix as the API shows it. */
+        PolicyView: {
+            /** @description The policy in force: its own, an inherited one, or the default (`manual`). */
+            effective: components["schemas"]["AdoptionPolicy"];
+            policy?: components["schemas"]["AdoptionPolicy"] | null;
+            /** @description The prefix. */
+            prefix: components["schemas"]["PrefixId"];
+            /**
+             * Format: int64
+             * @description The revision of its own policy (`ETag`, `If-Match`); 0 without one.
+             */
+            revision: number;
+            source?: components["schemas"]["PrefixId"] | null;
+            updated?: components["schemas"]["Stamp"] | null;
+        };
         /** @description One way a password breaks the policy. Each has a stable code under `auth.password.`. */
         PolicyViolation: {
             /** @enum {string} */
@@ -5550,6 +6241,11 @@ export interface components {
             kind: "node";
         };
         /**
+         * @description How a probe saw its subject.
+         * @enum {string}
+         */
+        ProbeMethod: "arp" | "nd" | "mdns" | "lldp" | "icmp" | "tcp_syn" | "os_fingerprint" | "snmp";
+        /**
          * @description The JSON body of every error response: RFC 9457 problem details plus the Tenko members
          *     `code`, `params` and `errors`.
          */
@@ -5668,6 +6364,52 @@ export interface components {
              */
             cidr: string;
         };
+        /** @description One observation behind a proposal, as it was when the proposal was written. */
+        ProposalEvidence: {
+            /** @description First sighting by this source. */
+            first_seen: components["schemas"]["Timestamp"];
+            /** @description The IP address, if any. */
+            ip?: string | null;
+            /** @description Last sighting by this source. */
+            last_seen: components["schemas"]["Timestamp"];
+            mac?: components["schemas"]["MacAddr"] | null;
+            /** @description The name the source gives, if any. */
+            name?: string | null;
+            /** @description The observation that last changed the fact. */
+            observation: components["schemas"]["ObservationId"];
+            /**
+             * Format: int32
+             * @description Counted sightings by this source.
+             */
+            sightings?: number;
+            /** @description The source. */
+            source: components["schemas"]["ObservationSource"];
+            /** @description The canonical text of the source. */
+            source_key: string;
+            /** @description The canonical text of the fact's subject. */
+            subject_key: string;
+        };
+        /** Format: uuid */
+        ProposalId: string;
+        /**
+         * @description How urgent a proposal is.
+         * @enum {string}
+         */
+        ProposalSeverity: "info" | "warning" | "critical";
+        /** @description What a proposal concerns: the observed identity and the intent objects involved. */
+        ProposalSubject: {
+            /** @description The network (outside-prefix proposals). */
+            cidr?: string | null;
+            /** @description The IP address. */
+            ip?: string | null;
+            mac?: components["schemas"]["MacAddr"] | null;
+            /** @description The name a source gives the device. */
+            name?: string | null;
+            /** @description The intent objects involved (hosts, interfaces, addresses). */
+            objects?: components["schemas"]["ObjectRef"][];
+            prefix?: components["schemas"]["PrefixId"] | null;
+            vrf?: components["schemas"]["VrfId"] | null;
+        };
         /** @description A range of addresses inside a prefix. */
         Range: {
             /**
@@ -5766,6 +6508,66 @@ export interface components {
             /** @description Always `ready`. */
             status: string;
         };
+        /** @description What one run did. */
+        ReconcileReport: {
+            /**
+             * Format: int32
+             * @description Proposals adopted by a policy.
+             */
+            adopted: number;
+            /**
+             * Format: int32
+             * @description Adoptions that failed (recorded on the proposal).
+             */
+            adoption_failures: number;
+            /** @description When the run started. */
+            at: components["schemas"]["Timestamp"];
+            /**
+             * Format: int32
+             * @description Proposals whose observation no longer holds.
+             */
+            expired: number;
+            /**
+             * Format: int32
+             * @description Move jobs whose observation step was confirmed.
+             */
+            moves_confirmed: number;
+            /**
+             * Format: int32
+             * @description Proposals opened.
+             */
+            opened: number;
+            /**
+             * Format: int32
+             * @description Open proposals whose evidence was refreshed.
+             */
+            refreshed: number;
+            /**
+             * Format: int64
+             * @description The revision of the proposal write; `null` when nothing changed.
+             */
+            revision?: number | null;
+            /**
+             * Format: int32
+             * @description Last sightings of intent objects written.
+             */
+            sightings: number;
+            /**
+             * Format: int32
+             * @description Proposals replaced by newer ones.
+             */
+            superseded: number;
+            /**
+             * Format: int32
+             * @description Subjects not opened again because a person rejected the same evidence.
+             */
+            suppressed: number;
+            /**
+             * Format: int32
+             * @description Open proposals left as they were.
+             */
+            unchanged: number;
+        };
         /** @description New recovery codes, shown once. */
         RecoveryCodes: {
             /** @description The codes. */
@@ -5785,6 +6587,14 @@ export interface components {
             response: components["schemas"]["AttestationResponse"];
             /** @description Always `public-key`. */
             type: string;
+        };
+        /** @description The body of a rejection. */
+        RejectRequest: {
+            /**
+             * @description Why the proposal is rejected; at most 1,024 bytes, no control characters other than
+             *     line breaks and tabs. Blank counts as no reason.
+             */
+            reason?: string | null;
         };
         /** @description One release. Also the body of the release endpoints. */
         Release: {
@@ -6500,6 +7310,58 @@ export interface components {
             /** @description `memory`, `leader`, `follower`, `learner`, `candidate` or `shutdown`. */
             role: string;
         };
+        /**
+         * @description The picture of one subject across sources, computed from its facts. Lists are sorted
+         *     and without duplicates; they draw on the current facts, or on every fact when none is
+         *     current.
+         */
+        SubjectSummary: {
+            /** @description Attachments, one per source and MAC address. */
+            attachments: components["schemas"]["AttachmentView"][];
+            /** @description Whether any fact is current. */
+            current: boolean;
+            first_seen?: components["schemas"]["Timestamp"] | null;
+            /** @description IP addresses. */
+            ips: string[];
+            last_seen?: components["schemas"]["Timestamp"] | null;
+            /** @description MAC addresses. */
+            macs: components["schemas"]["MacAddr"][];
+            /** @description Names (inventory names), as reported. */
+            names: string[];
+            /** @description Open TCP ports (SCAN-08). */
+            open_tcp: number[];
+            /** @description Operating systems: inventory OS and probe OS guesses. */
+            os: string[];
+            /** @description Parent hosts (the hypervisor node of a VM). */
+            parents: string[];
+            /** @description Platforms (`qemu`, `lxc`, `esphome`). */
+            platforms: string[];
+            /** @description The sources with a current fact. */
+            sources: string[];
+            /** @description Tags from the sources. */
+            tags: string[];
+        };
+        /** @description The computed view of one subject. */
+        SubjectView: {
+            /**
+             * @description Every fact that names the subject: current facts first, then by last sighting,
+             *     newest first.
+             */
+            facts: components["schemas"]["ObservedFact"][];
+            /** @description The intent objects that match. */
+            intent: components["schemas"]["IntentMatch"];
+            /**
+             * Format: int64
+             * @description The revision of the view.
+             */
+            revision: number;
+            /** @description The last sightings of the matching addresses and interfaces. */
+            sightings: components["schemas"]["ObjectSighting"][];
+            /** @description The subject as asked: `mac:<mac>`, `ip:<ip>` or `name:<name>`. */
+            subject: string;
+            /** @description The picture across sources. */
+            summary: components["schemas"]["SubjectSummary"];
+        };
         /** @description How many objects of a kind a plan changes in one way. */
         SummaryCount: {
             /** @description The action. */
@@ -6714,7 +7576,7 @@ export interface components {
          *     parameter subscribes to all of them.
          * @enum {string}
          */
-        Topic: "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "connectors";
+        Topic: "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "connectors" | "discovery";
         /**
          * @description The HMAC hash of a TOTP configuration (RFC 6238 section 1.2).
          * @enum {string}
@@ -13239,6 +14101,129 @@ export interface operations {
             };
         };
     };
+    list_observations: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+                /** @description Only facts of this source: a source key such as `inventory:<connector>`, or a connector identifier (which matches the inventory and the network controller source of the connector). */
+                source?: string;
+                /** @description Only facts about this kind of subject: `host`, `address`, `attachment`, `services`, `os` or `link`. */
+                type?: string;
+                /** @description Only facts that name this MAC address (`00-00-5E-00-53-01` or `00:00:5e:00:53:01`). */
+                mac?: string;
+                /** @description Only facts that name this IP address. */
+                ip?: string;
+                /** @description Only facts that name an IP address inside this network, such as `192.0.2.0/24`. */
+                within?: string;
+                /** @description Case-insensitive text search over the subject, the name, the operating system, the platform, the parent, the tags and the attachment device. */
+                q?: string;
+                /** @description `true`: only facts that count as current now; `false`: only expired facts. */
+                current?: boolean;
+                /** @description Sort order: comma-separated fields, `-` in front for descending. Fields: `last_seen` (the default, newest first), `first_seen`, `source`, `subject`. */
+                sort?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of facts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ObservedFact"];
+                };
+            };
+            /** @description Invalid parameter (`sys.invalid_query`, `sys.invalid_cursor`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_observation: {
+        parameters: {
+            query?: {
+                /** @description Read at least at this store revision (read-your-writes). */
+                at_least?: number;
+            };
+            header?: never;
+            path: {
+                /** @description A MAC address (`00-00-5E-00-53-01` or `00:00:5e:00:53:01`), an IP address or a name (compared without case). */
+                subject: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The facts that name the subject, the picture across sources, the intent objects that match and their last sightings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectView"];
+                };
+            };
+            /** @description The subject is not a MAC address, an IP address or a name (`ipam.validation`), or a parameter is unknown (`sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not read observations */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No source has observed the subject (`ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     openapi_document: {
         parameters: {
             query?: never;
@@ -13921,6 +14906,247 @@ export interface operations {
             };
         };
     };
+    get_adoption_policy: {
+        parameters: {
+            query?: {
+                /** @description Read at least at this store revision (read-your-writes). */
+                at_least?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Prefix identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The policy view, with `ETag: "<revision>"` of the prefix's own policy (`"0"` without one) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyView"];
+                };
+            };
+            /** @description A parameter is unknown or malformed (`sys.invalid_query`, `sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not read the prefix */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such prefix (`ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The prefix is deleted (`ipam.object_deleted`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    set_adoption_policy: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description The revision the client read, as `"12"`; the write fails with 412
+                 *     `ipam.revision_mismatch` when the object changed since.
+                 */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Prefix identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdoptionPolicy"];
+            };
+        };
+        responses: {
+            /** @description The policy view after the change, with `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyView"];
+                };
+            };
+            /** @description The policy is invalid (`ipam.adoption.invalid`), the body is malformed (`sys.invalid_request`), or a parameter is unknown (`sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not change the prefix */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such prefix (`ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The prefix is deleted (`ipam.object_deleted`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description If-Match is stale (`ipam.revision_mismatch`); `"0"` means that the prefix has no policy of its own */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    clear_adoption_policy: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description The revision the client read, as `"12"`; the write fails with 412
+                 *     `ipam.revision_mismatch` when the object changed since.
+                 */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Prefix identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The policy view after the change: no policy of its own, the inherited one in force */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyView"];
+                };
+            };
+            /** @description A parameter is unknown or malformed (`sys.invalid_query`, `sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not change the prefix */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such prefix (`ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The prefix is deleted (`ipam.object_deleted`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description If-Match is stale (`ipam.revision_mismatch`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     get_prefix_history: {
         parameters: {
             query?: {
@@ -14453,6 +15679,368 @@ export interface operations {
                 };
             };
             /** @description If-Match is stale (`ipam.revision_mismatch`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_proposals: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+                /** @description Only proposals of these kinds: `discovered_host`, `orphaned_intent`, `address_mismatch`, `conflict` or `outside_prefixes`. Repeat the parameter or separate the kinds with commas. */
+                kind?: string;
+                /** @description Only proposals in these states: `open`, `accepted`, `rejected`, `expired` or `superseded`. Repeat the parameter or separate the states with commas. Every state when absent. */
+                state?: string;
+                /** @description Only proposals of these severities: `info`, `warning` or `critical`. */
+                severity?: string;
+                /** @description Only proposals about this prefix (identifier): its own subject, an address or a network inside it, or the prefix among the involved objects. */
+                prefix?: string;
+                /** @description Only proposals about this subject: a MAC address, an IP address, an object identifier, or text contained in the subject name or key. */
+                subject?: string;
+                /** @description Sort order: comma-separated fields, `-` in front for descending. Fields: `created` (the default, newest first), `updated`, `severity`, `kind`, `state`, `last_seen`. */
+                sort?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of proposals */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_IntentProposal"];
+                };
+            };
+            /** @description Invalid parameter (`sys.invalid_query`, `sys.invalid_cursor`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The prefix filter names no prefix (`ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    reconcile_proposals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What the run did: proposals opened, refreshed, superseded, expired and adopted, and the revision of its write */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconcileReport"];
+                };
+            };
+            /** @description A parameter is unknown (`sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not decide proposals */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The reconciler does not run on this server (`ipam.reconciler.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_proposal: {
+        parameters: {
+            query?: {
+                /** @description Read at least at this store revision (read-your-writes). */
+                at_least?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Proposal identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The proposal, with `ETag: "<revision>"` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntentProposal"];
+                };
+            };
+            /** @description A parameter is unknown or malformed (`sys.invalid_query`, `sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not read the proposal */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such proposal (`ipam.proposal.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    approve_proposal: {
+        parameters: {
+            query?: {
+                /** @description Plan the change and return the plan without writing (API-09). */
+                dry_run?: boolean;
+                /**
+                 * @description Warning codes to acknowledge, comma-separated (for example
+                 *     `ipam.prefix.nibble_boundary`).
+                 */
+                acknowledge?: string;
+            };
+            header?: {
+                /**
+                 * @description The revision the client read, as `"12"`; the write fails with 412
+                 *     `ipam.revision_mismatch` when the object changed since.
+                 */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Proposal identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The decision: the accepted proposal, the revision, the inline job and the objects changed, with `ETag` of the proposal; on a dry run the proposal as it is and the plan, with nothing written */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Decision"];
+                };
+            };
+            /** @description A parameter is unknown or malformed (`sys.invalid_query`, `sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not approve proposals, or not make one of the changes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such proposal (`ipam.proposal.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The proposal is decided already (`ipam.proposal.not_open`), suggests no change (`ipam.proposal.nothing_to_apply`), a warning needs an acknowledgement (`ipam.plan.unacknowledged`), or the change conflicts with intent (`ipam.name_taken`, `ipam.address.duplicate`, `ipam.reference_missing`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description If-Match is stale (`ipam.proposal.revision_mismatch`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A host of the change is locked (`ipam.host.locked`) */
+            423: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    reject_proposal: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description The revision the client read, as `"12"`; the write fails with 412
+                 *     `ipam.revision_mismatch` when the object changed since.
+                 */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Proposal identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RejectRequest"];
+            };
+        };
+        responses: {
+            /** @description The decision: the rejected proposal and the revision, with `ETag` of the proposal */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Decision"];
+                };
+            };
+            /** @description The reason is over 1,024 bytes or has control characters (`ipam.validation`), the body is malformed (`sys.invalid_request`), or a parameter is unknown (`sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not decide proposals */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such proposal (`ipam.proposal.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The proposal is decided already (`ipam.proposal.not_open`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description If-Match is stale (`ipam.proposal.revision_mismatch`) */
             412: {
                 headers: {
                     [name: string]: unknown;
