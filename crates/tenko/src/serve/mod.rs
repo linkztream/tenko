@@ -1153,7 +1153,15 @@ mod tests {
         assert_eq!(
             names,
             [
-                "kek", "store", "vault", "tls", "auth", "ipam", "jobs", "connectors", "api"
+                "kek",
+                "store",
+                "vault",
+                "tls",
+                "auth",
+                "ipam",
+                "jobs",
+                "connectors",
+                "api"
             ]
         );
     }
