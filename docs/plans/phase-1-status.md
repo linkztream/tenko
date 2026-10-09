@@ -47,6 +47,7 @@ The committed tree compiles and `Cargo.lock` matches the committed manifests sin
 - Secrets: `Vault::stage_put` in the same batch as the owning row; system keys never count for the PIN rule; the idempotency cache stores only a marker for `no-store` or `Set-Cookie` responses.
 - Connectors are plugins (ADR 0012); Slice 2 starts with the SDK and host runner, UniFi first.
 - Store data directory: `log.redb`, `sm-<id>.redb` and the pointer file `sm.current`; never copy one without the other, backups go through `current_snapshot()`. Re-seed when `disk_usage().state_ratio_at_open` exceeds about 2.0, or the running `sm_file_ratio` about 4 (redb grows a file by doubling), through `reseed_in_place()` or by rejoining with an empty data directory.
+- Binary fixtures are platform-neutral: zip-based files (xlsx, ods) are written with a fixed host byte, times, modes and deflate level, and a test proves byte equality across a pause; the first Linux CI run of Slice 1 failed on the Windows host byte in `ip-plan.xlsx` (fixed in `0429146`).
 - Process: one owner per file; contract changes only through the lead; every builder uses its own `CARGO_TARGET_DIR` under `F:\`; a crate must compile at every save (in-progress modules behind a feature or a stub); the lead commits a package only after reading the test summary line, never on the exit status of a pipeline.
 
 ## Push state
