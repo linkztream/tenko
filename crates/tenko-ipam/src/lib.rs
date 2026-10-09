@@ -52,6 +52,7 @@
 //! | [`tree`] | the prefix tree index, utilization, next free |
 //! | [`alarm`] | alarm levels and events (IPAM-10) |
 //! | [`jobs`] | the inline job of a change, [`JobSink`], [`DirectJobs`] |
+//! | [`moves`] | moving hosts and addresses to another network (IPAM-19) |
 //! | [`history`] | history entries (IPAM-09) |
 //! | [`query`] | reads for the API: lists, filters, pagination, search |
 //! | [`custom`] | custom field validation (IPAM-08) |
@@ -70,6 +71,7 @@ pub mod export;
 pub mod history;
 pub mod import;
 pub mod jobs;
+pub mod moves;
 pub mod net;
 pub mod object;
 pub mod plan;
@@ -88,6 +90,7 @@ pub use history::{ChangeAction, HistoryEntry};
 /// The network type of the model, re-exported for API callers.
 pub use ipnet::IpNet;
 pub use jobs::{DirectJobs, IpamWriteStep, JobSink};
+pub use moves::{MoveItem, MovePreview, MoveRequest, MoveSubmitted};
 pub use object::{Entity, IpamObject};
 pub use plan::{Applied, IpamPlan, PlanOptions, PlanSummary, PlanView, PlanWarning, plan};
 pub use service::{IpamConfig, IpamService};

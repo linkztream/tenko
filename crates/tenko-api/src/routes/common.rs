@@ -49,8 +49,9 @@ use tenko_core::{
 use tenko_ipam::{
     Entity, HistoryEntry, IpamCommand, IpamService, PlanOptions, PlanView, PlanWarning, codes,
     command::{CustomFieldInput, CustomFieldPatch, UpdateCustomField},
-    query::{self, Deleted, ListQuery, Listable, SearchHit, TagCount},
+    query::{self, AddressRow, Deleted, HostExpander, ListQuery, Listable, SearchHit, TagCount},
 };
+use tenko_store::ReadView;
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -484,6 +485,63 @@ pub(crate) fn may_read_kind(app: &AppState, cx: &RequestCtx, kind: ObjectKind) -
             ScopeFilter::Nothing
         )
     })
+}
+
+/// The `expand` parameter of the address lists, removed from the other parameters so that
+/// a cursor stays valid with and without it. Only `host` exists; repeat the parameter or
+/// separate values with commas.
+///
+/// # Errors
+///
+/// 400 `sys.invalid_query` for another value.
+pub(crate) fn take_expand(filters: &Filters) -> Result<(Filters, bool), ApiError> {
+    let mut host = false;
+    for value in filters.all("expand") {
+        for part in value
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+        {
+            if part == "host" {
+                host = true;
+            } else {
+                return Err(ApiError::invalid_query(
+                    "expand",
+                    format!("unknown expansion `{part}`; allowed: host"),
+                ));
+            }
+        }
+    }
+    let rest = filters
+        .pairs()
+        .iter()
+        .filter(|(name, _)| name != "expand")
+        .cloned();
+    Ok((Filters::from_pairs(rest), host))
+}
+
+/// Address rows of a page, with interface and host when `expand` asks for them and the
+/// principal may read interfaces and hosts (otherwise both stay absent).
+pub(crate) fn address_rows(
+    app: &AppState,
+    cx: &RequestCtx,
+    view: &dyn ReadView,
+    addresses: Vec<Address>,
+    expand: bool,
+) -> Result<Vec<AddressRow>, ApiError> {
+    let mut rows: Vec<AddressRow> = addresses.into_iter().map(AddressRow::from).collect();
+    if expand && may_expand_hosts(app, cx) {
+        let mut expander = HostExpander::new(view);
+        for row in &mut rows {
+            expander.expand(row)?;
+        }
+    }
+    Ok(rows)
+}
+
+/// Whether `expand=host` may show interfaces and hosts to the principal.
+pub(crate) fn may_expand_hosts(app: &AppState, cx: &RequestCtx) -> bool {
+    may_read_kind(app, cx, ObjectKind::Interface) && may_read_kind(app, cx, ObjectKind::Host)
 }
 
 /// What a command needs: the action and the object it is checked against.

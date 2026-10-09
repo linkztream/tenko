@@ -108,6 +108,7 @@ pub fn range(prefix: PrefixId, first: &str, last: &str, role: RangeRole) -> Rang
         last: last.parse().expect("ip"),
         role,
         status: None,
+        lease_secs: None,
         tags: BTreeSet::new(),
         custom: BTreeMap::new(),
         description: None,

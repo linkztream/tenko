@@ -158,21 +158,43 @@ pub trait JobSink: Send + Sync + 'static {
     /// Returns [`JobError`] when the job cannot run at all; a step failure may also come
     /// back as a job in a failed state with its error set.
     async fn run_inline(&self, spec: JobSpec, cx: &RequestCtx) -> Result<Job, JobError>;
+
+    /// Accepts a background job for the runner (moves, IPAM-19) and returns its id.
+    ///
+    /// # Errors
+    ///
+    /// The engine's errors; without an engine, `ipam.move.no_engine` (503).
+    async fn submit(&self, spec: JobSpec, cx: &RequestCtx) -> Result<JobId, JobError> {
+        let _ = (spec, cx);
+        Err(JobError::Step(StepError::Coded(Box::new(CodedError::new(
+            crate::moves::codes::NO_ENGINE,
+            503,
+            "background jobs need the job engine, which this server does not run",
+        )))))
+    }
 }
 
 /// The job engine runs the inline job and commits the staged batch together with the job
-/// record in one write. Register [`IpamWriteStep`] with the engine first
-/// ([`register_steps`]).
+/// record in one write, and runs background jobs such as moves. Register the IPAM step
+/// handlers with the engine first ([`register_steps`]).
 #[async_trait::async_trait]
 impl JobSink for tenko_jobs::JobEngine {
     async fn run_inline(&self, spec: JobSpec, cx: &RequestCtx) -> Result<Job, JobError> {
         tenko_jobs::JobEngine::run_inline(self, spec, cx).await
     }
+
+    async fn submit(&self, spec: JobSpec, cx: &RequestCtx) -> Result<JobId, JobError> {
+        tenko_jobs::JobEngine::submit(self, spec, cx).await
+    }
 }
 
-/// Registers the step handlers of the IPAM domain with the job engine.
+/// Registers the step handlers of the IPAM domain with the job engine: `ipam.write` and
+/// the steps of a move (`ipam.move.*`).
 pub fn register_steps(engine: &mut tenko_jobs::JobEngine) {
     engine.register(Arc::new(IpamWriteStep));
+    for handler in crate::moves::move_step_handlers() {
+        engine.register(handler);
+    }
 }
 
 /// The handler of `ipam.write`: stages (under the engine) or proposes the batch handed over

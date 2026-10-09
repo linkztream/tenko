@@ -1224,6 +1224,7 @@ pub(super) mod testkit {
                 last: last.parse().expect("address"),
                 role,
                 status: None,
+                lease_secs: None,
                 tags: BTreeSet::new(),
                 custom: BTreeMap::new(),
                 description: None,

@@ -687,10 +687,11 @@ impl Planner<'_> {
             first: input.first,
             last: input.last,
             role: input.role,
-            lease_secs: None,
+            lease_secs: input.lease_secs,
             status,
             meta,
         };
+        check_lease(&range)?;
         self.check_range(&prefix, &range)?;
         self.check_parent_status(id.into(), status, prefix.id.into(), prefix.status);
         self.write(&range)?;
@@ -720,6 +721,10 @@ impl Planner<'_> {
         if let Some(role) = patch.role {
             after.role = role;
         }
+        if let Some(lease_secs) = patch.lease_secs {
+            after.lease_secs = lease_secs;
+        }
+        check_lease(&after)?;
         if let Some(status) = patch.status {
             Self::check_transition(before.id.into(), before.status, status)?;
             after.status = status;
@@ -1253,6 +1258,28 @@ fn check_cidr(field: &str, cidr: &IpNet) -> IpamResult<()> {
         .field(field, codes::PREFIX_HOST_BITS));
     }
     Ok(())
+}
+
+/// Shortest DHCP lease time of a range.
+const MIN_LEASE_SECS: u32 = 60;
+/// Longest DHCP lease time of a range (a year).
+const MAX_LEASE_SECS: u32 = 31_536_000;
+
+/// A lease time belongs to DHCP pools and lies between a minute and a year.
+fn check_lease(range: &Range) -> IpamResult<()> {
+    match range.lease_secs {
+        Some(_) if range.role != RangeRole::DhcpPool => Err(IpamError::invalid(
+            "lease_secs",
+            "only DHCP pools have a lease time",
+        )),
+        Some(secs) if !(MIN_LEASE_SECS..=MAX_LEASE_SECS).contains(&secs) => {
+            Err(IpamError::invalid(
+                "lease_secs",
+                format!("lease_secs {secs} is outside {MIN_LEASE_SECS} to {MAX_LEASE_SECS}"),
+            ))
+        }
+        _ => Ok(()),
+    }
 }
 
 fn check_alarm(alarm: Option<UtilizationAlarm>) -> IpamResult<Option<UtilizationAlarm>> {

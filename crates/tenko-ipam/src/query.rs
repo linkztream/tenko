@@ -22,6 +22,7 @@ use tenko_core::{
         Address, AssignmentMode, CustomFieldDef, FieldKey, Host, Interface, Meta, Prefix,
         PrefixRole, Range, RangeRole, Site, Status, Tag, Tenant, Vlan, Vrf,
     },
+    net::{Duid, HostName, MacAddr},
     serde_util::{from_hex, to_hex},
 };
 use tenko_store::{KeyRange, ReadView, ReadViewExt};
@@ -555,8 +556,8 @@ pub fn history(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum PrefixAddressItem {
-    /// An address object.
-    Address(Box<Address>),
+    /// An address object, with its interface and host when the list expands them.
+    Address(Box<AddressRow>),
     /// Free addresses between two address objects.
     Free {
         /// First free address.
@@ -638,9 +639,9 @@ pub fn prefix_addresses(
             next = Some(value);
             break;
         }
-        items.push(PrefixAddressItem::Address(Box::new(get::<Address>(
-            view, id,
-        )?)));
+        items.push(PrefixAddressItem::Address(Box::new(AddressRow::from(
+            get::<Address>(view, id)?,
+        ))));
         position = value.checked_add(1);
     }
     if next.is_none()
@@ -665,6 +666,158 @@ fn free_item(family: Family, first: u128, last: u128) -> PrefixAddressItem {
         first: u128_to_ip(family, first),
         last: u128_to_ip(family, last),
         size: span(first, last).to_string(),
+    }
+}
+
+/// An address in a list: the address object, and with `expand=host` the interface it is
+/// bound to and that interface's host, so an address grid needs no read per row. Both
+/// members are absent when the address is not bound, when its interface or host is
+/// deleted, and without the expansion.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AddressRow {
+    /// The address.
+    #[serde(flatten)]
+    pub address: Address,
+    /// The interface the address is bound to (`expand=host`). The address's own
+    /// `interface` member keeps the identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interface_detail: Option<InterfaceSummary>,
+    /// The host of that interface (`expand=host`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<HostSummary>,
+}
+
+impl From<Address> for AddressRow {
+    fn from(address: Address) -> Self {
+        Self {
+            address,
+            interface_detail: None,
+            host: None,
+        }
+    }
+}
+
+/// What an address row shows of an interface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct InterfaceSummary {
+    /// Identifier.
+    pub id: InterfaceId,
+    /// Name, such as `eth0`.
+    pub name: String,
+    /// MAC address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mac: Option<MacAddr>,
+    /// DUID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duid: Option<Duid>,
+}
+
+/// What an address row shows of a host.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct HostSummary {
+    /// Identifier.
+    pub id: HostId,
+    /// Name.
+    pub name: HostName,
+    /// What IPAM may do with the host's addresses.
+    pub mode: AssignmentMode,
+    /// Locked against automation.
+    pub lock: bool,
+}
+
+/// Resolves the interfaces and hosts of address rows from one view, reading each interface
+/// and host once however many rows share it.
+pub struct HostExpander<'v> {
+    view: &'v dyn ReadView,
+    interfaces: BTreeMap<InterfaceId, Option<(InterfaceSummary, HostId)>>,
+    hosts: BTreeMap<HostId, Option<HostSummary>>,
+}
+
+impl<'v> HostExpander<'v> {
+    /// An expander over `view`.
+    pub fn new(view: &'v dyn ReadView) -> Self {
+        Self {
+            view,
+            interfaces: BTreeMap::new(),
+            hosts: BTreeMap::new(),
+        }
+    }
+
+    /// Fills `interface_detail` and `host` of a row whose address is bound to a live
+    /// interface; leaves both absent otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Store and decoding errors.
+    pub fn expand(&mut self, row: &mut AddressRow) -> IpamResult<()> {
+        row.interface_detail = None;
+        row.host = None;
+        let Some(interface) = row.address.interface else {
+            return Ok(());
+        };
+        let Some((summary, host)) = self.interface(interface)? else {
+            return Ok(());
+        };
+        row.interface_detail = Some(summary);
+        row.host = self.host(host)?;
+        Ok(())
+    }
+
+    /// Expands every address row of a page of a prefix's addresses.
+    ///
+    /// # Errors
+    ///
+    /// Store and decoding errors.
+    pub fn expand_items(&mut self, items: &mut [PrefixAddressItem]) -> IpamResult<()> {
+        for item in items {
+            if let PrefixAddressItem::Address(row) = item {
+                self.expand(row)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn interface(&mut self, id: InterfaceId) -> IpamResult<Option<(InterfaceSummary, HostId)>> {
+        if let Some(found) = self.interfaces.get(&id) {
+            return Ok(found.clone());
+        }
+        let found = self
+            .view
+            .get_typed(Interface::table(), &id)?
+            .map(|(interface, _)| interface)
+            .filter(|interface| !interface.meta.is_deleted())
+            .map(|interface| {
+                (
+                    InterfaceSummary {
+                        id: interface.id,
+                        name: interface.name,
+                        mac: interface.mac,
+                        duid: interface.duid,
+                    },
+                    interface.host,
+                )
+            });
+        self.interfaces.insert(id, found.clone());
+        Ok(found)
+    }
+
+    fn host(&mut self, id: HostId) -> IpamResult<Option<HostSummary>> {
+        if let Some(found) = self.hosts.get(&id) {
+            return Ok(found.clone());
+        }
+        let found = self
+            .view
+            .get_typed(Host::table(), &id)?
+            .map(|(host, _)| host)
+            .filter(|host| !host.meta.is_deleted())
+            .map(|host| HostSummary {
+                id: host.id,
+                name: host.name,
+                mode: host.mode,
+                lock: host.lock,
+            });
+        self.hosts.insert(id, found.clone());
+        Ok(found)
     }
 }
 

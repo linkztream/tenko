@@ -3466,3 +3466,78 @@ async fn lookups_and_state_errors_have_their_own_codes() {
     .await;
     assert_eq!(status_of(&error), 400);
 }
+
+#[tokio::test]
+async fn host_expansion_shows_live_interfaces_and_hosts() {
+    use tenko_ipam::query::{self, AddressRow, Deleted, HostExpander, HostSummary, ListQuery};
+
+    let (service, _) = service();
+    let (input, interface) = host("host-01", AssignmentMode::Static, Some("00-00-5E-00-53-03"));
+    let host_id = input.id.expect("id");
+    let mut first = address(None, "192.0.2.10");
+    first.interface = Some(interface);
+    let mut second = address(None, "192.0.2.11");
+    second.interface = Some(interface);
+    run(
+        &service,
+        vec![
+            IpamCommand::CreatePrefix(prefix(None, "192.0.2.0/24")),
+            IpamCommand::CreateHost(input),
+            IpamCommand::CreateAddress(first),
+            IpamCommand::CreateAddress(second),
+            IpamCommand::CreateAddress(address(None, "192.0.2.12")),
+        ],
+    )
+    .await;
+    let rows = |deleted: Deleted| {
+        let service = service.clone();
+        async move {
+            let view = service.view(None).await.expect("view");
+            let query = ListQuery {
+                deleted,
+                ..ListQuery::default()
+            };
+            let page = query::list::<Address>(view.as_ref(), &query).expect("list");
+            let mut expander = HostExpander::new(view.as_ref());
+            let mut rows: Vec<AddressRow> = page.items.into_iter().map(AddressRow::from).collect();
+            for row in &mut rows {
+                expander.expand(row).expect("expand");
+            }
+            rows
+        }
+    };
+    let live = rows(Deleted::Exclude).await;
+    assert_eq!(live.len(), 3);
+    for row in &live[..2] {
+        let detail = row.interface_detail.as_ref().expect("interface");
+        assert_eq!((detail.id, detail.name.as_str()), (interface, "eth0"));
+        assert!(detail.mac.is_some());
+        assert_eq!(
+            row.host,
+            Some(HostSummary {
+                id: host_id,
+                name: "host-01".parse().expect("name"),
+                mode: AssignmentMode::Static,
+                lock: false,
+            })
+        );
+    }
+    assert_eq!((&live[2].interface_detail, &live[2].host), (&None, &None));
+
+    // Deleted with their host: the restore view shows no interface or host.
+    run(
+        &service,
+        vec![IpamCommand::Delete {
+            object: host_id.into(),
+            expected: None,
+            cascade: true,
+        }],
+    )
+    .await;
+    let gone = rows(Deleted::Only).await;
+    assert_eq!(gone.len(), 2);
+    for row in &gone {
+        assert_eq!(row.address.interface, Some(interface));
+        assert_eq!((&row.interface_detail, &row.host), (&None, &None));
+    }
+}

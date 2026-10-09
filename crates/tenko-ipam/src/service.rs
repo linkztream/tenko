@@ -49,6 +49,9 @@ pub struct IpamConfig {
     pub max_attempts: u32,
     /// Commands in one request (API-04 bulk).
     pub max_commands: usize,
+    /// How many jobs of one move run at once when the request does not say (IPAM-19,
+    /// design decision 8).
+    pub move_parallelism: u32,
 }
 
 impl Default for IpamConfig {
@@ -56,6 +59,7 @@ impl Default for IpamConfig {
         Self {
             max_attempts: 16,
             max_commands: 10_000,
+            move_parallelism: 2,
         }
     }
 }
@@ -114,6 +118,11 @@ impl IpamService {
     /// The store.
     pub fn store(&self) -> &Arc<dyn Store> {
         &self.store
+    }
+
+    /// The job sink: inline jobs of changes, background jobs of moves.
+    pub fn jobs(&self) -> &Arc<dyn JobSink> {
+        &self.jobs
     }
 
     /// The prefix tree.

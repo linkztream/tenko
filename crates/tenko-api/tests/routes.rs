@@ -201,6 +201,8 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
         "/jobs/{id}/steps/{index}/complete",
         "complete_job_step",
     ),
+    // moves
+    ("POST", "/moves", "create_move"),
     // audit
     ("GET", "/audit", "list_audit"),
     ("GET", "/audit/{seq}", "get_audit_record"),
@@ -411,7 +413,7 @@ fn operations_have_a_declared_tag_and_a_summary() {
         .flatten()
         .map(|tag| tag.name.as_str())
         .collect();
-    assert_eq!(tags.len(), 15, "one tag per area");
+    assert_eq!(tags.len(), 16, "one tag per area");
     for (path, item) in &document.paths.paths {
         for (method, operation) in operations(item) {
             let operation_tags = operation.tags.as_deref().unwrap_or_default();

@@ -33,19 +33,26 @@
 //! interfaces), `tag` and `q` (text over the address, the DNS name, the description and the
 //! tags). It sorts by `ip` (the default; VRF first, then numerically), `dns_name`, `status`,
 //! `created` and `updated`.
+//!
+//! With `expand=host` each bound address also carries `interface_detail` (`id`, `name`,
+//! `mac`, `duid`) and `host` (`id`, `name`, `mode`, `lock`), resolved from the same view in
+//! one pass (each interface and host read once), so an address grid needs no read per row.
+//! The members are optional and absent otherwise; `GET /prefixes/{id}/addresses` takes the
+//! same parameter.
 
 use axum::{Json, extract::State, http::HeaderMap, response::Response};
-use tenko_core::{Action, AddressId, ObjectKind, ObjectRef, ipam::Address};
+use tenko_core::{Action, AddressId, ObjectKind, ObjectRef, Revision, ipam::Address};
 use tenko_ipam::{
     IpamCommand,
     command::{AddressInput, AddressPatch, UpdateAddress},
+    query::{self, AddressRow},
 };
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use super::common::{
     Filter, IdempotencyKeyHeader, IfMatch, Ipam, IpamJson, IpamPath, ReadParams, WriteParams,
-    WriteResponse, authorize, get_one, if_match, list_args, list_collection, new_of, write_args,
-    write_one,
+    WriteResponse, address_rows, authorize, get_one, if_match, list_args, may_read_kind, new_of,
+    take_expand, wire_page, write_args, write_one,
 };
 use crate::{
     dto::Page,
@@ -79,10 +86,11 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         ("tag" = Option<String>, Query, description = "Only addresses that carry every one of these tags. Repeat the parameter or separate the tags with commas."),
         ("q" = Option<String>, Query, description = "Case-insensitive text search over the address, the DNS name, the description and the tags."),
         ("sort" = Option<String>, Query, description = "Sort order: comma-separated fields, `-` in front for descending, for example `-updated,ip`. Fields: `ip` (the default), `dns_name`, `status`, `created`, `updated`."),
-        ("deleted" = Option<String>, Query, description = "Deleted addresses: `exclude` (the default), `include` or `only` (the restore view).")
+        ("deleted" = Option<String>, Query, description = "Deleted addresses: `exclude` (the default), `include` or `only` (the restore view)."),
+        ("expand" = Option<String>, Query, description = "`host`: each address bound to an interface also carries `interface_detail` (`id`, `name`, `mac`, `duid`) and `host` (`id`, `name`, `mode`, `lock`), read from the same view as the page. Both are absent for an unbound address, when the interface or host is deleted, and when the principal may not read interfaces and hosts. Does not change the cursor.")
     ),
     responses(
-        (status = 200, description = "A page of addresses", body = Page<Address>),
+        (status = 200, description = "A page of addresses", body = Page<AddressRow>),
         (status = 400, description = "Invalid parameter (`sys.invalid_query`, `sys.invalid_cursor`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "IPAM not configured (`ipam.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
     )
@@ -92,7 +100,8 @@ async fn list_addresses(
     Ctx(cx): Ctx,
     Ipam(ipam): Ipam,
     filters: Filters,
-) -> Result<Json<Page<Address>>, ApiError> {
+) -> Result<Json<Page<AddressRow>>, ApiError> {
+    let (filters, expand) = take_expand(&filters)?;
     let args = list_args::<Address>(
         &filters,
         "ipam.addresses",
@@ -109,7 +118,20 @@ async fn list_addresses(
             Filter::Deleted,
         ],
     )?;
-    list_collection::<Address>(&app, &cx, &ipam, args).await
+    let view = ipam.view(args.page.at_least.map(Revision)).await?;
+    if !may_read_kind(&app, &cx, ObjectKind::Address) {
+        return Ok(Json(Page::new(Vec::new(), None, view.revision())));
+    }
+    let page = query::list::<Address>(view.as_ref(), &args.query)?;
+    let items = address_rows(&app, &cx, view.as_ref(), page.items, expand)?;
+    Ok(Json(wire_page(
+        query::Page {
+            items,
+            next_cursor: page.next_cursor,
+            revision: page.revision,
+        },
+        args.scope,
+    )))
 }
 
 /// Creates an address in a VRF. The most specific prefix of the VRF that contains it becomes
@@ -1288,5 +1310,166 @@ mod tests {
         let got = api.get(&path).await;
         assert_eq!(got.etag, created.etag);
         assert_eq!(api.get("/addresses").await.items().len(), 2);
+    }
+
+    // Expansion of interface and host (`expand=host`).
+
+    /// The network, a locked static host with the interfaces `eth0` (with a MAC) and `eth1`,
+    /// the addresses .10 and .11 on `eth0`, .12 on `eth1` and .13 unbound. Returns the API,
+    /// the prefix, the host and the interfaces by name.
+    async fn bound_addresses() -> (Api, String, String, Value, Value) {
+        let (api, prefix) = api_with_network().await;
+        let body = json!({
+            "name": label("host", 1),
+            "mode": "static",
+            "lock": true,
+            "interfaces": [
+                { "name": "eth0", "mac": "00-00-5E-00-53-01" },
+                { "name": "eth1" },
+            ],
+        });
+        let host = id_of(&api.create("/hosts", &body).await);
+        let interfaces = api.get(&format!("/hosts/{host}/interfaces")).await;
+        let named = |name: &str| {
+            interfaces
+                .items()
+                .iter()
+                .find(|item| item["name"] == name)
+                .expect("interface")
+                .clone()
+        };
+        let (eth0, eth1) = (named("eth0"), named("eth1"));
+        for (host_part, interface) in [(10, Some(&eth0)), (11, Some(&eth0)), (12, Some(&eth1))] {
+            let input = json!({ "ip": ip4(host_part), "interface": interface.map(id_of) });
+            api.create("/addresses", &input).await;
+        }
+        make_address(&api, 13).await;
+        (api, prefix, host, eth0, eth1)
+    }
+
+    /// Asserts the expansion of one row: the interface `interface` of the host `host`.
+    fn assert_bound(row: &Value, interface: &Value, host: &str) {
+        let detail = &row["interface_detail"];
+        assert_eq!(detail["id"], interface["id"], "{row}");
+        assert_eq!(detail["name"], interface["name"], "{row}");
+        assert_eq!(
+            detail.get("mac"),
+            interface.get("mac").filter(|m| !m.is_null())
+        );
+        assert_eq!(
+            row["interface"], interface["id"],
+            "the identifier stays: {row}"
+        );
+        assert_eq!(row["host"]["id"], host, "{row}");
+        assert_eq!(row["host"]["name"], label("host", 1), "{row}");
+        assert_eq!(row["host"]["mode"], "static", "{row}");
+        assert_eq!(row["host"]["lock"], true, "{row}");
+    }
+
+    /// Asserts that a row carries no expansion.
+    fn assert_plain(row: &Value) {
+        assert!(row.get("interface_detail").is_none(), "{row}");
+        assert!(row.get("host").is_none(), "{row}");
+    }
+
+    /// A row without the expansion members.
+    fn without_expansion(row: &Value) -> Value {
+        let mut row = row.clone();
+        let members = row.as_object_mut().expect("object");
+        members.remove("interface_detail");
+        members.remove("host");
+        row
+    }
+
+    #[tokio::test]
+    async fn expand_host_adds_interface_and_host_to_bound_addresses() {
+        let (api, _, host, eth0, eth1) = bound_addresses().await;
+        let plain = api.get("/addresses").await;
+        plain.assert_json(200);
+        plain.items().iter().for_each(assert_plain);
+
+        let expanded = api.get("/addresses?expand=host").await;
+        expanded.assert_json(200);
+        assert_eq!(expanded.texts("ip"), plain.texts("ip"));
+        let rows = expanded.items();
+        assert_bound(&rows[0], &eth0, &host);
+        assert_bound(&rows[1], &eth0, &host);
+        assert_bound(&rows[2], &eth1, &host);
+        assert!(
+            rows[2]["interface_detail"].get("mac").is_none(),
+            "eth1 has none"
+        );
+        assert_plain(&rows[3]);
+        // Otherwise the rows are the plain ones.
+        let stripped: Vec<Value> = rows.iter().map(without_expansion).collect();
+        assert_eq!(stripped, plain.items());
+        // Filters combine with the expansion; repeated and listed values are fine.
+        let on_eth1 = api
+            .get(&format!(
+                "/addresses?interface={}&expand=host,host&expand=host",
+                id_of(&eth1)
+            ))
+            .await;
+        on_eth1.assert_json(200);
+        assert_eq!(on_eth1.texts("ip"), [ip4(12)]);
+        assert_bound(&on_eth1.items()[0], &eth1, &host);
+    }
+
+    #[tokio::test]
+    async fn expand_host_keeps_the_cursor_and_refuses_other_expansions() {
+        let (api, ..) = bound_addresses().await;
+        let first = api.get("/addresses?limit=2").await;
+        let cursor = first.body["next_cursor"].as_str().expect("cursor");
+        let rest = api
+            .get(&format!("/addresses?limit=2&expand=host&cursor={cursor}"))
+            .await;
+        rest.assert_json(200);
+        assert_eq!(rest.texts("ip"), [ip4(12), ip4(13)]);
+        assert!(rest.items()[0]["host"].is_object(), "{}", rest.body);
+        for query in ["expand=prefix", "expand=host,vlan"] {
+            let reply = api.get(&format!("/addresses?{query}")).await;
+            reply.assert_problem(400, "sys.invalid_query");
+            assert_eq!(reply.body["params"]["parameter"], "expand");
+        }
+    }
+
+    /// Reads everything but interfaces and hosts.
+    struct NoHosts;
+
+    impl tenko_core::Authorizer for NoHosts {
+        fn check(
+            &self,
+            _: &tenko_core::Principal,
+            _: Action,
+            _: &ObjectRef,
+        ) -> Result<(), tenko_core::Denied> {
+            Ok(())
+        }
+
+        fn scope(
+            &self,
+            _: &tenko_core::Principal,
+            _: Action,
+            kind: ObjectKind,
+        ) -> tenko_core::ScopeFilter {
+            if matches!(kind, ObjectKind::Host | ObjectKind::Interface) {
+                tenko_core::ScopeFilter::Nothing
+            } else {
+                tenko_core::ScopeFilter::All
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn expand_host_shows_nothing_to_a_principal_without_host_reads() {
+        let (api, ..) = bound_addresses().await;
+        let restricted = api.sibling(AppState {
+            authorizer: Some(std::sync::Arc::new(NoHosts)),
+            ..AppState::default()
+        });
+        let reply = restricted.get("/addresses?expand=host").await;
+        reply.assert_json(200);
+        assert_eq!(reply.items().len(), 4);
+        reply.items().iter().for_each(assert_plain);
     }
 }

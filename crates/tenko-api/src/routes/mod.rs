@@ -21,6 +21,7 @@
 //! | [`import`] | import upload, mapping, preview, apply | WP1.5 |
 //! | [`export`] | CSV export | WP1.5 |
 //! | [`jobs`] | jobs and manual steps | WP1.6 |
+//! | [`moves`] | preview and start moves to another network (IPAM-19) | WP1.4b |
 //! | [`audit`] | audit log and chain verification | WP1.7 |
 //! | [`events`] | server-sent events | WP1.7 |
 //! | [`system`] | health, status, OpenAPI document, metrics | WP1.7 |
@@ -49,6 +50,7 @@ pub mod export;
 pub mod hosts;
 pub mod import;
 pub mod jobs;
+pub mod moves;
 pub mod prefixes;
 pub mod settings;
 pub mod setup;
@@ -76,6 +78,7 @@ pub mod users;
         (name = "import", description = "Import of spreadsheets and CSV files"),
         (name = "export", description = "CSV export in the import vocabulary"),
         (name = "jobs", description = "Jobs and manual steps"),
+        (name = "moves", description = "Moving hosts and addresses to another network"),
         (name = "audit", description = "Audit log and chain verification"),
         (name = "events", description = "Server-sent events"),
         (name = "system", description = "Health, status, the OpenAPI document and metrics"),
@@ -135,6 +138,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .merge(import::routes())
         .merge(export::routes())
         .merge(jobs::routes())
+        .merge(moves::routes())
         .merge(audit::routes())
         .merge(events::routes())
         .merge(system::routes())

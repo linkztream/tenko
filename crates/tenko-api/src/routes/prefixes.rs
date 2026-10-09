@@ -19,7 +19,7 @@
 //! | `DELETE /prefixes/{id}` | 200 deleted prefix | 409 `ipam.in_use` (unless `cascade=true`); 412 |
 //! | `POST /prefixes/{id}/next-free-address` | 201 address | 404; 409 `ipam.address.full` |
 //! | `POST /prefixes/{id}/next-free-prefix` | 201 prefix | 400 `ipam.validation`; 404; 409 `ipam.prefix.full`, `ipam.prefix.overlap` |
-//! | `GET /prefixes/{id}/addresses` | 200 page of addresses, with free gaps on request | 404 |
+//! | `GET /prefixes/{id}/addresses` | 200 page of addresses, with free gaps and interface and host (`expand=host`) on request | 404 |
 //! | `GET /prefixes/{id}/ranges` | 200 page of ranges | 404 |
 //! | `POST /prefixes/{id}/ranges` | 201 range | 404; 409 `ipam.range.overlap`, `ipam.range.outside_prefix`, `ipam.range.not_in_network` |
 //! | `GET /ranges/{id}` | 200 range with `ETag` | 404 |
@@ -73,7 +73,7 @@ use tenko_ipam::{
         AllocateAddress, AllocatePrefix, PrefixInput, PrefixPatch, RangeInput, RangePatch,
         UpdatePrefix, UpdateRange,
     },
-    query::{self, Deleted, PrefixAddressItem},
+    query::{self, Deleted, HostExpander, PrefixAddressItem},
     tables::{TENANT_NAMES, VRF_NAMES},
 };
 use tenko_store::{ReadView, ReadViewExt};
@@ -83,7 +83,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use super::common::{
     DeleteParams, Filter, IdempotencyKeyHeader, IfMatch, Ipam, IpamJson, IpamPath, ReadParams,
     WriteParams, WriteResponse, authorize, get_one, if_match, list_args, list_collection,
-    may_read_kind, new_of, wire_page, write_args, write_one,
+    may_expand_hosts, may_read_kind, new_of, take_expand, wire_page, write_args, write_one,
 };
 use crate::{
     dto::Page,
@@ -210,6 +210,10 @@ pub(crate) struct NewRange {
     /// Status; `active` when absent.
     #[serde(default)]
     pub(crate) status: Option<Status>,
+    /// DHCP lease time in seconds, 60 to 31,536,000 (`dhcp_pool` ranges only); half of it is
+    /// the default timeout of moves into the prefix.
+    #[serde(default)]
+    pub(crate) lease_secs: Option<u32>,
     /// Tags.
     #[serde(default)]
     pub(crate) tags: BTreeSet<Tag>,
@@ -683,7 +687,9 @@ async fn next_free_prefix(
 /// between them (the address grid of the UI).
 ///
 /// Each item is `{ "type": "address", "data": <address> }` or
-/// `{ "type": "free", "data": { first, last, size } }`; `size` is a decimal string. The gaps
+/// `{ "type": "free", "data": { first, last, size } }`; `size` is a decimal string. With
+/// `expand=host` the address data of a bound address also carries `interface_detail` and
+/// `host` (see `GET /addresses`). The gaps
 /// cover the assignable addresses of a network (IPv4 without network and broadcast address)
 /// and are counted in the page size like addresses. The cursor stays valid across the
 /// boundary between an address and a gap.
@@ -696,7 +702,8 @@ async fn next_free_prefix(
     params(
         ("id" = String, Path, description = "Prefix identifier"),
         PageParams,
-        ("include_free" = Option<bool>, Query, description = "Also return the free gaps between the addresses (default false)")
+        ("include_free" = Option<bool>, Query, description = "Also return the free gaps between the addresses (default false)"),
+        ("expand" = Option<String>, Query, description = "`host`: each address bound to an interface also carries `interface_detail` (`id`, `name`, `mac`, `duid`) and `host` (`id`, `name`, `mode`, `lock`), read from the same view as the page. Both are absent for an unbound address, when the interface or host is deleted, and when the principal may not read interfaces and hosts. Does not change the cursor.")
     ),
     responses(
         (status = 200, description = "A page of addresses and free gaps in address order", body = Page<PrefixAddressItem>),
@@ -714,6 +721,7 @@ async fn list_prefix_addresses(
     IpamPath(id): IpamPath<PrefixId>,
     filters: Filters,
 ) -> Result<Json<Page<PrefixAddressItem>>, ApiError> {
+    let (filters, expand) = take_expand(&filters)?;
     filters.only(&["include_free"])?;
     let include_free = filters.boolean("include_free")?.unwrap_or(false);
     let page = filters.page()?;
@@ -726,13 +734,16 @@ async fn list_prefix_addresses(
         query::get::<Prefix>(view.as_ref(), id)?;
         return Ok(Json(Page::new(Vec::new(), None, view.revision())));
     }
-    let found = query::prefix_addresses(
+    let mut found = query::prefix_addresses(
         view.as_ref(),
         id,
         include_free,
         cursor.as_deref(),
         Some(limit),
     )?;
+    if expand && may_expand_hosts(&app, &cx) {
+        HostExpander::new(view.as_ref()).expand_items(&mut found.items)?;
+    }
     Ok(Json(wire_page(found, scope)))
 }
 
@@ -837,6 +848,7 @@ async fn create_range(
         last: body.last,
         role: body.role,
         status: body.status,
+        lease_secs: body.lease_secs,
         tags: body.tags,
         custom: body.custom,
         description: body.description,
@@ -2966,6 +2978,110 @@ mod tests {
         );
         let without = api.get(&format!("/prefixes/{id}/addresses")).await;
         assert_eq!(without.items().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn addresses_of_a_prefix_expand_interface_and_host() {
+        use tenko_core::{HostId, InterfaceId, ipam::AssignmentMode};
+        use tenko_ipam::command::{HostInput, InterfaceInput};
+
+        let api = Api::new();
+        let prefix = api.prefix(&json!({ "cidr": "192.0.2.0/29" })).await;
+        let id = prefix["id"].as_str().expect("id");
+        let (host, interface) = (HostId::generate(), InterfaceId::generate());
+        api.execute(IpamCommand::CreateHost(HostInput {
+            id: Some(host),
+            tenant: None,
+            name: "host-01.example.test".parse().expect("name"),
+            mode: Some(AssignmentMode::Reserved),
+            lock: None,
+            site: None,
+            interfaces: vec![InterfaceInput {
+                id: Some(interface),
+                host: None,
+                name: "eth0".to_owned(),
+                mac: Some("00-00-5E-00-53-02".parse().expect("mac")),
+                duid: None,
+                client_id: None,
+                tags: BTreeSet::new(),
+                custom: BTreeMap::new(),
+                description: None,
+            }],
+            tags: BTreeSet::new(),
+            custom: BTreeMap::new(),
+            description: None,
+        }))
+        .await;
+        api.execute(IpamCommand::CreateAddress(AddressInput {
+            id: None,
+            vrf: None,
+            ip: "192.0.2.2".parse().expect("ip"),
+            status: None,
+            interface: Some(interface),
+            dns_name: None,
+            tags: BTreeSet::new(),
+            custom: BTreeMap::new(),
+            description: None,
+        }))
+        .await;
+        api.address("192.0.2.5").await;
+
+        let path = format!("/prefixes/{id}/addresses?include_free=true");
+        let plain = api.get(&path).await;
+        plain.assert_status(StatusCode::OK);
+        for item in plain.items() {
+            assert!(item["data"].get("interface_detail").is_none(), "{item}");
+            assert!(item["data"].get("host").is_none(), "{item}");
+        }
+        let expanded = api.get(&format!("{path}&expand=host")).await;
+        expanded.assert_status(StatusCode::OK);
+        let types = |reply: &Reply| reply.texts("type");
+        assert_eq!(
+            types(&expanded),
+            ["free", "address", "free", "address", "free"]
+        );
+        assert_eq!(types(&expanded), types(&plain));
+        let bound = &expanded.items()[1]["data"];
+        assert_eq!(bound["ip"], "192.0.2.2");
+        assert_eq!(bound["interface"], interface.to_string());
+        assert_eq!(bound["interface_detail"]["id"], interface.to_string());
+        assert_eq!(bound["interface_detail"]["name"], "eth0");
+        assert!(bound["interface_detail"]["mac"].is_string(), "{bound}");
+        assert!(bound["interface_detail"].get("duid").is_none(), "{bound}");
+        assert_eq!(
+            bound["host"],
+            json!({
+                "id": host.to_string(),
+                "name": "host-01.example.test",
+                "mode": "reserved",
+                "lock": false,
+            })
+        );
+        let unbound = &expanded.items()[3]["data"];
+        assert_eq!(unbound["ip"], "192.0.2.5");
+        assert!(unbound.get("interface_detail").is_none(), "{unbound}");
+        assert!(unbound.get("host").is_none(), "{unbound}");
+        for index in [0, 2, 4] {
+            assert_eq!(expanded.items()[index], plain.items()[index], "free gaps");
+        }
+
+        // A cursor of a plain page continues an expanded one, and other values are refused.
+        let first = api
+            .get(&format!(
+                "/prefixes/{id}/addresses?include_free=true&limit=1"
+            ))
+            .await;
+        let cursor = first.body["next_cursor"].as_str().expect("cursor");
+        let next = api
+            .get(&format!(
+                "/prefixes/{id}/addresses?include_free=true&limit=1&expand=host&cursor={cursor}"
+            ))
+            .await;
+        next.assert_status(StatusCode::OK);
+        assert_eq!(next.items()[0]["data"]["host"]["id"], host.to_string());
+        api.get(&format!("/prefixes/{id}/addresses?expand=hosts"))
+            .await
+            .assert_problem(400, "sys.invalid_query");
     }
 
     #[tokio::test]

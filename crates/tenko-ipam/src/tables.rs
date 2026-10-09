@@ -26,6 +26,7 @@
 //! | `ipam.history` | (object, time, request, base revision, index) | [`HistoryEntry`] |
 //! | `ipam.alarms` | `PrefixId` | [`AlarmEvent`] |
 //! | `ipam.receipts` | (principal subject, idempotency key) | [`Receipt`] |
+//! | `ipam.move_receipts` | (principal subject, idempotency key) | `MoveReceipt` |
 //!
 //! Counters (checked by preconditions, bumped by mutations):
 //!
@@ -117,6 +118,9 @@ pub static HISTORY: TableDef<(ObjectRef, Timestamp, RequestId, Revision, u32), H
 pub static ALARMS: TableDef<PrefixId, AlarmEvent> = TableDef::new("ipam.alarms");
 /// Results of requests that carried an idempotency key (API-04).
 pub static RECEIPTS: TableDef<(String, String), Receipt> = TableDef::new("ipam.receipts");
+/// Answers of moves submitted with an idempotency key (API-04, IPAM-19).
+pub static MOVE_RECEIPTS: TableDef<(String, String), crate::moves::MoveReceipt> =
+    TableDef::new("ipam.move_receipts");
 
 /// The prefix-set version of a VRF.
 pub fn tree_counter(vrf: VrfId) -> CounterKey {

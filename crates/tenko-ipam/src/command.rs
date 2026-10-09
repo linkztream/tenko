@@ -298,6 +298,10 @@ meta_input_fields! {
         /// Status; `active` when absent.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub status: Option<Status>,
+        /// DHCP lease time in seconds, 60 to 31,536,000 (`dhcp_pool` ranges only); half of it
+        /// is the default timeout of moves into the prefix (IPAM-19).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub lease_secs: Option<u32>,
     }
 }
 
@@ -318,6 +322,10 @@ meta_patch_fields! {
         /// New status (IPAM-05 transitions apply).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub status: Option<Status>,
+        /// New DHCP lease time in seconds (`dhcp_pool` ranges only); `null` clears it.
+        #[serde(default, deserialize_with = "nullable", skip_serializing_if = "Option::is_none")]
+        #[schema(value_type = Option<u32>, nullable)]
+        pub lease_secs: Option<Option<u32>>,
     }
 }
 
