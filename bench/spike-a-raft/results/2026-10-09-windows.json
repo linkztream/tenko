@@ -1,0 +1,730 @@
+{
+  "date": "2026-10-09",
+  "machine": {
+    "os": "Windows 11 Enterprise",
+    "cpu_brand": "13th Gen Intel(R) Core(TM) i9-13900K",
+    "logical_cpus": 32,
+    "total_memory_bytes": 68387840000,
+    "rustc_version": "unknown"
+  },
+  "deps": [
+    {
+      "name": "openraft",
+      "version": "0.9.25"
+    },
+    {
+      "name": "redb",
+      "version": "4.3.0"
+    },
+    {
+      "name": "tokio",
+      "version": "1.53.2"
+    },
+    {
+      "name": "clap",
+      "version": "4.6.7"
+    },
+    {
+      "name": "serde",
+      "version": "1.0.229"
+    },
+    {
+      "name": "postcard",
+      "version": "1.1.3"
+    },
+    {
+      "name": "serde_bytes",
+      "version": "0.11.19"
+    },
+    {
+      "name": "serde_json",
+      "version": "1.0.151"
+    },
+    {
+      "name": "sysinfo",
+      "version": "0.39.6"
+    },
+    {
+      "name": "hdrhistogram",
+      "version": "7.6.0"
+    },
+    {
+      "name": "rand",
+      "version": "0.10.3"
+    },
+    {
+      "name": "anyhow",
+      "version": "1.0.104"
+    },
+    {
+      "name": "tracing",
+      "version": "0.1.44"
+    },
+    {
+      "name": "tracing-subscriber",
+      "version": "0.3.23"
+    }
+  ],
+  "config": {
+    "mode": "openraft",
+    "voters": 3,
+    "batch_records": 10000,
+    "ptr_percent": 20,
+    "redb_cache_bytes": 268435456,
+    "log_store": "redb, separate log.redb per node (page cache 64 MiB); sm.redb page cache 256 MiB",
+    "log_durability": "Immediate: one fsynced redb commit per append() call",
+    "sm_durability": "Immediate: one fsynced redb commit per apply() call",
+    "max_payload_entries": 4,
+    "network": "in-process: per-node RPC task fed by tokio mpsc channels, messages moved (not serialized); snapshots streamed as 1 MiB chunks into a file on the receiver; heartbeat 1000 ms (= AppendEntries timeout), election timeout 5000-10000 ms"
+  },
+  "bulk_loads": [
+    {
+      "disk": "C: Samsung 960 EVO NVMe SSD",
+      "forward_zone_records": 1000000,
+      "total_records": 1200000,
+      "voters": 3,
+      "batch_records": 10000,
+      "raft_entries": 120,
+      "wall_secs": 5.3557447,
+      "records_per_sec": 224058.47687250664,
+      "peak_rss_bytes": 1712197632,
+      "rss_after_bytes": 1702588416,
+      "rss_before_bytes": 12623872,
+      "raw_kv_bytes": 178700819,
+      "avg_entry_bytes": 148.91734916666667,
+      "per_node": [
+        {
+          "node_id": 1,
+          "log_file_bytes": 335810560,
+          "sm_file_bytes": 538972160,
+          "sm_allocated_bytes": 334315520,
+          "sm_stored_bytes": 178700925,
+          "sm_fragmented_bytes": 346876567
+        },
+        {
+          "node_id": 2,
+          "log_file_bytes": 335810560,
+          "sm_file_bytes": 538972160,
+          "sm_allocated_bytes": 334315520,
+          "sm_stored_bytes": 178700925,
+          "sm_fragmented_bytes": 346876567
+        },
+        {
+          "node_id": 3,
+          "log_file_bytes": 335810560,
+          "sm_file_bytes": 538972160,
+          "sm_allocated_bytes": 334315520,
+          "sm_stored_bytes": 178700925,
+          "sm_fragmented_bytes": 346876567
+        }
+      ],
+      "index_entries": 1200000,
+      "index_estimated_bytes": 178763264,
+      "process_written_bytes": 2092982934,
+      "compaction": {
+        "node_id": 2,
+        "file_bytes_before": 538955776,
+        "file_bytes_after": 366350336,
+        "compact_secs": 9.7778019
+      }
+    },
+    {
+      "disk": "C: Samsung 960 EVO NVMe SSD",
+      "forward_zone_records": 5000000,
+      "total_records": 6000000,
+      "voters": 3,
+      "batch_records": 10000,
+      "raft_entries": 600,
+      "wall_secs": 82.0030974,
+      "records_per_sec": 73167.96792117269,
+      "peak_rss_bytes": 3651526656,
+      "rss_after_bytes": 3633258496,
+      "rss_before_bytes": 12648448,
+      "raw_kv_bytes": 904195075,
+      "avg_entry_bytes": 150.69917916666665,
+      "per_node": [
+        {
+          "node_id": 1,
+          "log_file_bytes": 1343229952,
+          "sm_file_bytes": 2155876352,
+          "sm_allocated_bytes": 1806708736,
+          "sm_stored_bytes": 904195182,
+          "sm_fragmented_bytes": 1183019571
+        },
+        {
+          "node_id": 2,
+          "log_file_bytes": 1343229952,
+          "sm_file_bytes": 2155876352,
+          "sm_allocated_bytes": 1806708736,
+          "sm_stored_bytes": 904195182,
+          "sm_fragmented_bytes": 1183019571
+        },
+        {
+          "node_id": 3,
+          "log_file_bytes": 1343229952,
+          "sm_file_bytes": 2155876352,
+          "sm_allocated_bytes": 1806708736,
+          "sm_stored_bytes": 904195182,
+          "sm_fragmented_bytes": 1183019571
+        }
+      ],
+      "index_entries": 6000000,
+      "index_estimated_bytes": 834029056,
+      "process_written_bytes": 11343978854,
+      "compaction": {
+        "node_id": 2,
+        "file_bytes_before": 2155876352,
+        "file_bytes_after": 1838944256,
+        "compact_secs": 49.9246105
+      }
+    },
+    {
+      "disk": "C: Samsung 960 EVO NVMe SSD",
+      "forward_zone_records": 5000000,
+      "total_records": 6000000,
+      "voters": 1,
+      "batch_records": 10000,
+      "raft_entries": 600,
+      "wall_secs": 26.3733773,
+      "records_per_sec": 227502.14853977005,
+      "peak_rss_bytes": 1254023168,
+      "rss_after_bytes": 1238937600,
+      "rss_before_bytes": 12685312,
+      "raw_kv_bytes": 904195075,
+      "avg_entry_bytes": 150.69917916666665,
+      "per_node": [
+        {
+          "node_id": 1,
+          "log_file_bytes": 1343229952,
+          "sm_file_bytes": 2155876352,
+          "sm_allocated_bytes": 1819127808,
+          "sm_stored_bytes": 904195142,
+          "sm_fragmented_bytes": 1182885210
+        }
+      ],
+      "index_entries": 6000000,
+      "index_estimated_bytes": 834029056,
+      "process_written_bytes": 3802586466,
+      "compaction": {
+        "node_id": 2,
+        "file_bytes_before": 1077940224,
+        "file_bytes_after": 998903808,
+        "compact_secs": 14.6445831
+      }
+    },
+    {
+      "disk": "D: Seagate ST4000DM004 SATA HDD (SMR)",
+      "forward_zone_records": 1000000,
+      "total_records": 1200000,
+      "voters": 3,
+      "batch_records": 10000,
+      "raft_entries": 120,
+      "wall_secs": 500.836343,
+      "records_per_sec": 2395.992257295114,
+      "peak_rss_bytes": 1719062528,
+      "rss_after_bytes": 1717731328,
+      "rss_before_bytes": 12652544,
+      "raw_kv_bytes": 178700819,
+      "avg_entry_bytes": 148.91734916666667,
+      "per_node": [
+        {
+          "node_id": 1,
+          "log_file_bytes": 335810560,
+          "sm_file_bytes": 538972160,
+          "sm_allocated_bytes": 333848576,
+          "sm_stored_bytes": 178700925,
+          "sm_fragmented_bytes": 346882231
+        },
+        {
+          "node_id": 2,
+          "log_file_bytes": 335810560,
+          "sm_file_bytes": 538972160,
+          "sm_allocated_bytes": 333848576,
+          "sm_stored_bytes": 178700925,
+          "sm_fragmented_bytes": 346882231
+        },
+        {
+          "node_id": 3,
+          "log_file_bytes": 335810560,
+          "sm_file_bytes": 538972160,
+          "sm_allocated_bytes": 333848576,
+          "sm_stored_bytes": 178700925,
+          "sm_fragmented_bytes": 346882231
+        }
+      ],
+      "index_entries": 1200000,
+      "index_estimated_bytes": 178763264,
+      "process_written_bytes": 2093133561,
+      "compaction": {
+        "node_id": 2,
+        "file_bytes_before": 538972160,
+        "file_bytes_after": 333910016,
+        "compact_secs": 7.5938846
+      }
+    }
+  ],
+  "catch_ups": [
+    {
+      "disk": "C: Samsung 960 EVO NVMe SSD",
+      "total_records": 1200000,
+      "snapshot_build_secs": 0.6387435,
+      "snapshot_bytes": 185900827,
+      "snapshot_transfer_secs": 0.2608337,
+      "snapshot_install_secs": 2.7602997,
+      "index_rebuild_secs": 0.7293045,
+      "total_catch_up_secs": 3.0378623,
+      "theoretical_1gbit_secs": 1.487206616,
+      "learner_sm_file_bytes": 269488128,
+      "peak_rss_bytes": 2172973056
+    },
+    {
+      "disk": "C: Samsung 960 EVO NVMe SSD",
+      "total_records": 6000000,
+      "snapshot_build_secs": 3.6295745,
+      "snapshot_bytes": 940195083,
+      "snapshot_transfer_secs": 1.5651347,
+      "snapshot_install_secs": 17.5550957,
+      "index_rebuild_secs": 4.4165995,
+      "total_catch_up_secs": 19.1368344,
+      "theoretical_1gbit_secs": 7.521560664,
+      "learner_sm_file_bytes": 1077940224,
+      "peak_rss_bytes": 4588781568
+    },
+    {
+      "disk": "C: Samsung 960 EVO NVMe SSD",
+      "total_records": 6000000,
+      "snapshot_build_secs": 4.4759899,
+      "snapshot_bytes": 940195083,
+      "snapshot_transfer_secs": 1.0647565,
+      "snapshot_install_secs": 17.2594345,
+      "index_rebuild_secs": 4.3856845,
+      "total_catch_up_secs": 18.3799057,
+      "theoretical_1gbit_secs": 7.521560664,
+      "learner_sm_file_bytes": 1077940224,
+      "peak_rss_bytes": 2108858368
+    },
+    {
+      "disk": "D: Seagate ST4000DM004 SATA HDD (SMR)",
+      "total_records": 1200000,
+      "snapshot_build_secs": 4.939483,
+      "snapshot_bytes": 185900827,
+      "snapshot_transfer_secs": 3.144616,
+      "snapshot_install_secs": 13.0917891,
+      "index_rebuild_secs": 0.4637202,
+      "total_catch_up_secs": 18.0231104,
+      "theoretical_1gbit_secs": 1.487206616,
+      "learner_sm_file_bytes": 269488128,
+      "peak_rss_bytes": 2027388928
+    }
+  ],
+  "steady": [
+    {
+      "disk": "C: Samsung 960 EVO NVMe SSD",
+      "total_records": 1200000,
+      "baseline": {
+        "label": "round 1: baseline (no writes)",
+        "lookup_target_rate": 50000,
+        "lookup_achieved_rate": 49999.99991666667,
+        "duration_secs": 60.0000001,
+        "lookup_latency": {
+          "count": 3000000,
+          "min_ns": 1,
+          "p50_ns": 600,
+          "p90_ns": 800,
+          "p99_ns": 1200,
+          "p999_ns": 2801,
+          "max_ns": 945151,
+          "mean_ns": 631.2723970000009
+        },
+        "write_target_rate": 0,
+        "write_achieved_rate": 0.0,
+        "write_latency": null,
+        "write_errors": 0,
+        "other_cpu_busy": 22.58538379907608
+      },
+      "under_writes": {
+        "label": "round 1: under write load",
+        "lookup_target_rate": 50000,
+        "lookup_achieved_rate": 49999.99991666667,
+        "duration_secs": 60.0000001,
+        "lookup_latency": {
+          "count": 3000000,
+          "min_ns": 1,
+          "p50_ns": 500,
+          "p90_ns": 700,
+          "p99_ns": 1300,
+          "p999_ns": 5003,
+          "max_ns": 473599,
+          "mean_ns": 590.243059666666
+        },
+        "write_target_rate": 1000,
+        "write_achieved_rate": 998.0166650033055,
+        "write_latency": {
+          "count": 60000,
+          "min_ns": 15261696,
+          "p50_ns": 50003967,
+          "p90_ns": 136314879,
+          "p99_ns": 151126015,
+          "p999_ns": 186122239,
+          "max_ns": 200015871,
+          "mean_ns": 75453392.5546667
+        },
+        "write_errors": 0,
+        "other_cpu_busy": 14.720732394456864
+      }
+    },
+    {
+      "disk": "C: Samsung 960 EVO NVMe SSD",
+      "total_records": 1200000,
+      "baseline": {
+        "label": "round 2: baseline (no writes)",
+        "lookup_target_rate": 50000,
+        "lookup_achieved_rate": 49999.99991666667,
+        "duration_secs": 60.0000001,
+        "lookup_latency": {
+          "count": 3000000,
+          "min_ns": 1,
+          "p50_ns": 500,
+          "p90_ns": 700,
+          "p99_ns": 1100,
+          "p999_ns": 3501,
+          "max_ns": 472575,
+          "mean_ns": 579.1672016666658
+        },
+        "write_target_rate": 0,
+        "write_achieved_rate": 0.0,
+        "write_latency": null,
+        "write_errors": 0,
+        "other_cpu_busy": 13.39413712143898
+      },
+      "under_writes": {
+        "label": "round 2: under write load",
+        "lookup_target_rate": 50000,
+        "lookup_achieved_rate": 50000.0,
+        "duration_secs": 60.0,
+        "lookup_latency": {
+          "count": 3000000,
+          "min_ns": 1,
+          "p50_ns": 600,
+          "p90_ns": 800,
+          "p99_ns": 1300,
+          "p999_ns": 3901,
+          "max_ns": 963071,
+          "mean_ns": 626.6927596666673
+        },
+        "write_target_rate": 1000,
+        "write_achieved_rate": 997.9666650033888,
+        "write_latency": {
+          "count": 60000,
+          "min_ns": 33554432,
+          "p50_ns": 52232191,
+          "p90_ns": 134348799,
+          "p99_ns": 151257087,
+          "p999_ns": 190054399,
+          "max_ns": 204341247,
+          "mean_ns": 73080698.1973333
+        },
+        "write_errors": 0,
+        "other_cpu_busy": 24.192886474132536
+      }
+    },
+    {
+      "disk": "C: Samsung 960 EVO NVMe SSD",
+      "total_records": 1200000,
+      "baseline": {
+        "label": "round 3: baseline (no writes)",
+        "lookup_target_rate": 50000,
+        "lookup_achieved_rate": 50000.0,
+        "duration_secs": 60.0,
+        "lookup_latency": {
+          "count": 3000000,
+          "min_ns": 1,
+          "p50_ns": 500,
+          "p90_ns": 700,
+          "p99_ns": 1100,
+          "p999_ns": 5803,
+          "max_ns": 467967,
+          "mean_ns": 573.4250779999998
+        },
+        "write_target_rate": 0,
+        "write_achieved_rate": 0.0,
+        "write_latency": null,
+        "write_errors": 0,
+        "other_cpu_busy": 7.892862572669983
+      },
+      "under_writes": {
+        "label": "round 3: under write load",
+        "lookup_target_rate": 50000,
+        "lookup_achieved_rate": 49999.99991666667,
+        "duration_secs": 60.0000001,
+        "lookup_latency": {
+          "count": 3000000,
+          "min_ns": 1,
+          "p50_ns": 600,
+          "p90_ns": 800,
+          "p99_ns": 1400,
+          "p999_ns": 3301,
+          "max_ns": 493055,
+          "mean_ns": 639.6141950000011
+        },
+        "write_target_rate": 1000,
+        "write_achieved_rate": 997.4666666666668,
+        "write_latency": {
+          "count": 60000,
+          "min_ns": 31326208,
+          "p50_ns": 59441151,
+          "p90_ns": 142082047,
+          "p99_ns": 803209215,
+          "p999_ns": 915406847,
+          "max_ns": 958398463,
+          "mean_ns": 103915111.90186664
+        },
+        "write_errors": 0,
+        "other_cpu_busy": 24.02380148410797
+      }
+    },
+    {
+      "disk": "C: Samsung 960 EVO NVMe SSD",
+      "total_records": 6000000,
+      "baseline": {
+        "label": "round 1: baseline (no writes)",
+        "lookup_target_rate": 50000,
+        "lookup_achieved_rate": 50000.0,
+        "duration_secs": 60.0,
+        "lookup_latency": {
+          "count": 3000000,
+          "min_ns": 1,
+          "p50_ns": 600,
+          "p90_ns": 900,
+          "p99_ns": 1400,
+          "p999_ns": 6803,
+          "max_ns": 1500159,
+          "mean_ns": 690.3620010000006
+        },
+        "write_target_rate": 0,
+        "write_achieved_rate": 0.0,
+        "write_latency": null,
+        "write_errors": 0,
+        "other_cpu_busy": 13.543431693911554
+      },
+      "under_writes": {
+        "label": "round 1: under write load",
+        "lookup_target_rate": 50000,
+        "lookup_achieved_rate": 50000.0,
+        "duration_secs": 60.0,
+        "lookup_latency": {
+          "count": 3000000,
+          "min_ns": 1,
+          "p50_ns": 700,
+          "p90_ns": 1000,
+          "p99_ns": 1700,
+          "p999_ns": 8807,
+          "max_ns": 506367,
+          "mean_ns": 736.2683443333347
+        },
+        "write_target_rate": 1000,
+        "write_achieved_rate": 998.2499966725,
+        "write_latency": {
+          "count": 60000,
+          "min_ns": 37814272,
+          "p50_ns": 132710399,
+          "p90_ns": 153878527,
+          "p99_ns": 202113023,
+          "p999_ns": 577241087,
+          "max_ns": 611319807,
+          "mean_ns": 136313269.1797333
+        },
+        "write_errors": 0,
+        "other_cpu_busy": 14.003716617822649
+      }
+    },
+    {
+      "disk": "C: Samsung 960 EVO NVMe SSD",
+      "total_records": 6000000,
+      "baseline": {
+        "label": "round 2: baseline (no writes)",
+        "lookup_target_rate": 50000,
+        "lookup_achieved_rate": 50000.0,
+        "duration_secs": 60.0,
+        "lookup_latency": {
+          "count": 3000000,
+          "min_ns": 1,
+          "p50_ns": 700,
+          "p90_ns": 900,
+          "p99_ns": 1400,
+          "p999_ns": 5403,
+          "max_ns": 455423,
+          "mean_ns": 731.0971863333324
+        },
+        "write_target_rate": 0,
+        "write_achieved_rate": 0.0,
+        "write_latency": null,
+        "write_errors": 0,
+        "other_cpu_busy": 23.42598529815674
+      },
+      "under_writes": {
+        "label": "round 2: under write load",
+        "lookup_target_rate": 50000,
+        "lookup_achieved_rate": 50000.0,
+        "duration_secs": 60.0,
+        "lookup_latency": {
+          "count": 3000000,
+          "min_ns": 1,
+          "p50_ns": 600,
+          "p90_ns": 900,
+          "p99_ns": 1600,
+          "p999_ns": 8703,
+          "max_ns": 480767,
+          "mean_ns": 682.127081333333
+        },
+        "write_target_rate": 1000,
+        "write_achieved_rate": 998.15,
+        "write_latency": {
+          "count": 60000,
+          "min_ns": 36798464,
+          "p50_ns": 97714175,
+          "p90_ns": 136052735,
+          "p99_ns": 154009599,
+          "p999_ns": 168689663,
+          "max_ns": 187432959,
+          "mean_ns": 89302652.79146661
+        },
+        "write_errors": 0,
+        "other_cpu_busy": 9.202207970619202
+      }
+    },
+    {
+      "disk": "C: Samsung 960 EVO NVMe SSD",
+      "total_records": 6000000,
+      "baseline": {
+        "label": "round 3: baseline (no writes)",
+        "lookup_target_rate": 50000,
+        "lookup_achieved_rate": 50000.0,
+        "duration_secs": 60.0,
+        "lookup_latency": {
+          "count": 3000000,
+          "min_ns": 1,
+          "p50_ns": 700,
+          "p90_ns": 1000,
+          "p99_ns": 1600,
+          "p999_ns": 6003,
+          "max_ns": 1069055,
+          "mean_ns": 776.9534550000001
+        },
+        "write_target_rate": 0,
+        "write_achieved_rate": 0.0,
+        "write_latency": null,
+        "write_errors": 0,
+        "other_cpu_busy": 22.97465878725052
+      },
+      "under_writes": {
+        "label": "round 3: under write load",
+        "lookup_target_rate": 50000,
+        "lookup_achieved_rate": 50000.0,
+        "duration_secs": 60.0,
+        "lookup_latency": {
+          "count": 3000000,
+          "min_ns": 1,
+          "p50_ns": 600,
+          "p90_ns": 900,
+          "p99_ns": 1500,
+          "p999_ns": 8303,
+          "max_ns": 806911,
+          "mean_ns": 687.3884733333336
+        },
+        "write_target_rate": 1000,
+        "write_achieved_rate": 998.3666650027222,
+        "write_latency": {
+          "count": 60000,
+          "min_ns": 34865152,
+          "p50_ns": 58097663,
+          "p90_ns": 142606335,
+          "p99_ns": 160694271,
+          "p999_ns": 178257919,
+          "max_ns": 194772991,
+          "mean_ns": 80500890.55573326
+        },
+        "write_errors": 0,
+        "other_cpu_busy": 11.933694820404051
+      }
+    }
+  ],
+  "change_feed": [
+    {
+      "disk": "C: Samsung 960 EVO NVMe SSD",
+      "total_records": 1200000,
+      "changes_requested": 10000,
+      "approach": "change-journal table in the state machine (redb, written in the same transaction as the records)",
+      "journal_changes_read": 10000,
+      "journal_secs": 0.0025833,
+      "journal_bytes": 2886015,
+      "log_changes_read": 10000,
+      "log_secs": 0.0008935
+    },
+    {
+      "disk": "C: Samsung 960 EVO NVMe SSD",
+      "total_records": 6000000,
+      "changes_requested": 10000,
+      "approach": "change-journal table in the state machine (redb, written in the same transaction as the records)",
+      "journal_changes_read": 10000,
+      "journal_secs": 0.0018049,
+      "journal_bytes": 2912934,
+      "log_changes_read": 10000,
+      "log_secs": 0.2560795
+    }
+  ],
+  "criteria": [
+    {
+      "name": "[C: Samsung 960 EVO NVMe SSD] Peak RSS of one node at 5,000,000 forward-zone records (6,000,000 RRsets total)",
+      "threshold": "< 2 GB (2,000,000,000 bytes) at >= 5M records",
+      "measured": "1.17 GiB (1,254,023,168 bytes), single-voter process; whole 3-voter process (3 nodes in one process): 3.40 GiB",
+      "pass": true
+    },
+    {
+      "name": "[C: Samsung 960 EVO NVMe SSD] Learner catch-up in-process (6,000,000 RRsets)",
+      "threshold": "< 5 min",
+      "measured": "19.14 s",
+      "pass": true
+    },
+    {
+      "name": "[C: Samsung 960 EVO NVMe SSD] Snapshot transfer at 1 Gbit/s (6,000,000 RRsets)",
+      "threshold": "snapshot bytes / 125 MB/s < 5 min",
+      "measured": "896.64 MiB / 125 MB/s = 7.52 s",
+      "pass": true
+    },
+    {
+      "name": "[C: Samsung 960 EVO NVMe SSD] Lookup p99 under write load vs baseline (6,000,000 RRsets, median of 3 rounds)",
+      "threshold": "< 2x baseline p99",
+      "measured": "1.6 us vs 1.4 us (1.14x); per round (loaded vs baseline): 1.7 us vs 1.4 us; 1.6 us vs 1.4 us; 1.5 us vs 1.6 us",
+      "pass": true
+    },
+    {
+      "name": "[C: Samsung 960 EVO NVMe SSD] Lookup p99 under write load, absolute (6,000,000 RRsets)",
+      "threshold": "< 1 ms (every round)",
+      "measured": "median 1.6 us, worst round 1.7 us",
+      "pass": true
+    },
+    {
+      "name": "[D: Seagate ST4000DM004 SATA HDD (SMR)] Learner catch-up in-process (1,200,000 RRsets)",
+      "threshold": "< 5 min",
+      "measured": "18.02 s",
+      "pass": true
+    },
+    {
+      "name": "[D: Seagate ST4000DM004 SATA HDD (SMR)] Snapshot transfer at 1 Gbit/s (1,200,000 RRsets)",
+      "threshold": "snapshot bytes / 125 MB/s < 5 min",
+      "measured": "177.29 MiB / 125 MB/s = 1.49 s",
+      "pass": true
+    }
+  ],
+  "notes": [
+    "[C: Samsung 960 EVO NVMe SSD] Data disk fsync cost: 200 small redb commits with Durability::Immediate took p50 3.63 ms, p99 6.46 ms, max 6.87 ms (idle disk, before the cluster started).",
+    "[C: Samsung 960 EVO NVMe SSD] Steady state (1200000 RRsets, lookups on a follower's index, writes through the leader): 3 rounds of 60 s baseline + 60 s under writes. 180000 single-record updates were coalesced into 13079 Raft entries (13.8 updates per entry on average, at most 1000 per entry, 4 proposals in flight). Over the whole run the leader log writer made 13203 fsynced commits for 13201 log entries (openraft 0.9 hands the leader one append at a time and waits for its flush, so group commit cannot batch on the leader). The change journal held 100000 records afterwards.",
+    "[C: Samsung 960 EVO NVMe SSD] Per-entry write ceiling (1200000 RRsets): with one single-record Raft entry per client_write and 16 concurrent closed-loop writers for 10 s, the leader completed 114 writes/s (latency p50 136.31 ms, p99 182.32 ms, errors 0). openraft 0.9.25 awaits each log flush before it handles the next client request (RaftCore::append_to_log), so without coalescing this ceiling is set by the fsync latency of the data disk.",
+    "[C: Samsung 960 EVO NVMe SSD] Data disk fsync cost: 200 small redb commits with Durability::Immediate took p50 3.60 ms, p99 6.86 ms, max 7.41 ms (idle disk, before the cluster started).",
+    "[C: Samsung 960 EVO NVMe SSD] Steady state (6000000 RRsets, lookups on a follower's index, writes through the leader): 3 rounds of 60 s baseline + 60 s under writes. 180000 single-record updates were coalesced into 9811 Raft entries (18.3 updates per entry on average, at most 1000 per entry, 4 proposals in flight). Over the whole run the leader's log writer made 10415 fsynced commits for 10413 log entries (openraft 0.9 hands the leader one append at a time and waits for its flush, so group commit cannot batch on the leader). The change journal held 100000 records afterwards.",
+    "[C: Samsung 960 EVO NVMe SSD] Per-entry write ceiling (6000000 RRsets): with one single-record Raft entry per client_write and 16 concurrent closed-loop writers for 10 s, the leader completed 120 writes/s (latency p50 133.17 ms, p99 157.42 ms, errors 0). openraft 0.9.25 awaits each log flush before it handles the next client request (RaftCore::append_to_log), so without coalescing this ceiling is set by the fsync latency of the data disk.",
+    "[C: Samsung 960 EVO NVMe SSD] Data disk fsync cost: 200 small redb commits with Durability::Immediate took p50 1.73 ms, p99 2.32 ms, max 4.49 ms (idle disk, before the cluster started).",
+    "[D: Seagate ST4000DM004 SATA HDD (SMR)] Data disk fsync cost: 200 small redb commits with Durability::Immediate in data\\load-1000000-v3 took p50 44.53 ms, p99 206.96 ms, max 246.94 ms."
+  ]
+}

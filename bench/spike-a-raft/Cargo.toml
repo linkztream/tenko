@@ -1,0 +1,27 @@
+[package]
+name = "spike-a-raft"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Spike A: measure an in-process openraft cluster over redb for a 1M+ record DNS zone"
+
+[workspace]
+
+[dependencies]
+openraft = { version = "=0.9.25", features = ["serde", "storage-v2", "generic-snapshot-data"] }
+redb = "=4.3.0"
+tokio = { version = "1.53.2", features = ["full"] }
+clap = { version = "4.6.7", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
+postcard = { version = "1.1.3", features = ["use-std"] }
+serde_bytes = "0.11.19"
+serde_json = "1.0.151"
+sysinfo = "0.39.6"
+hdrhistogram = "7.6.0"
+rand = "0.10.3"
+anyhow = "1.0.104"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[profile.release]
+debug = 1
