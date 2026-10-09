@@ -1,11 +1,33 @@
 [package]
 name = "tenko-ipam"
 version = "0.0.1"
-description = "Address tree, intent/observation reconciler, import and export"
+description = "IPAM domain: commands, plan and apply over the store, the per-VRF prefix tree, next free allocation, utilization alarms, import and export"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+
+[dependencies]
+arc-swap = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+ipnet = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tenko-core = { workspace = true }
+tenko-jobs = { workspace = true }
+tenko-store = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+utoipa = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tenko-core = { workspace = true, features = ["testing"] }
+tenko-jobs = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true
