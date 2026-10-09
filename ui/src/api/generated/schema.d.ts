@@ -5285,6 +5285,15 @@ export interface components {
             /** @description The one-time token from the console or log. */
             setup_token: components["schemas"]["SecretString"];
         };
+        /**
+         * @description The answer of `POST /setup`: the administrator's new session, plus the SHA-256 fingerprint
+         *     of the internal CA root when the installation runs the internal CA, so that the wizard can
+         *     offer the root for installation and the fingerprint to compare it with.
+         */
+        SetupResponse: components["schemas"]["SessionInfo"] & {
+            /** @description SHA-256 fingerprint (hex) of the internal CA root; absent in the other TLS modes. */
+            ca_fingerprint?: string | null;
+        };
         /** @description `GET /setup`. */
         SetupState: {
             /** @description Whether setup is still open. */
@@ -13497,7 +13506,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionInfo"];
+                    "application/json": components["schemas"]["SetupResponse"];
                 };
             };
             /** @description The body is malformed (`sys.invalid_request`), or the host name, user name or language is invalid (`auth.setup.invalid_host_name`, `auth.invalid_request`) */

@@ -9559,7 +9559,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionInfo"
+                  "$ref": "#/components/schemas/SetupResponse"
                 }
               }
             }
@@ -23928,6 +23928,27 @@
             "description": "The one-time token from the console or log."
           }
         }
+      },
+      "SetupResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SessionInfo",
+            "description": "The session, with the members of `SessionInfo`."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ca_fingerprint": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "SHA-256 fingerprint (hex) of the internal CA root; absent in the other TLS modes."
+              }
+            }
+          }
+        ],
+        "description": "The answer of `POST /setup`: the administrator's new session, plus the SHA-256 fingerprint\nof the internal CA root when the installation runs the internal CA, so that the wizard can\noffer the root for installation and the fingerprint to compare it with."
       },
       "SetupState": {
         "type": "object",
