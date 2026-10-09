@@ -274,6 +274,7 @@ IPAM is the hub (ADR 0005). Everything it knows is either intent (what the admin
 | IPAM-20 | Topology map: a graph of routers, switches, APs, hosts, VMs/containers and hypervisors, with ports, wireless associations, uplinks and VM-to-host links as edges. Sources: UniFi, LLDP/CDP and bridge tables via SNMP, hypervisor connectors, and ARP/ND from probes. The interactive map filters by VLAN and site, opens the host view on click, highlights paths and answers "what is connected to this port". | 1 | Must |
 | IPAM-21 | Unified reconciliation view across the four truths (IPAM intent, DHCP leases, DNS records, scans), with ghost, rogue, orphan and PTR-mismatch views and "who wins" rules. | 3 | Must |
 | IPAM-22 | AD Sites and Services: bidirectional sync of site-to-subnet mappings (`CN=Subnets,CN=Sites,CN=Configuration`) with IPAM sites. It is a sync, not a storage model (CON-11). | 4 | Must |
+| IPAM-23 | IP conflict detection: the same address observed from two different MACs or DUIDs (ARP/ND, leases, scans), an observed address that collides with the intent of another host, a reservation that overlaps a dynamic pool, and overlapping prefixes inside one VRF are flagged as conflicts with an alert and shown in the host and prefix views. Intentional overlap is only allowed across VRFs (IPAM-01). | 1 | Must |
 
 Assignment modes (IPAM-14). The reconciler design and actuator drivers are described in ARCHITECTURE.md.
 
@@ -308,6 +309,7 @@ Discovery is passive first and active second. IDS/EDR products will alert on act
 | SCAN-06 | Scheduling, rate limits and blackout windows. | 1 | Must |
 | SCAN-07 | Documented IDS/EDR allow-listing and slow scan profiles. | 1 | Must |
 | SCAN-08 | Host view with open ports and OS. | 1 | Must |
+| SCAN-09 | On-demand scans: a network, prefix or single host can be scanned immediately from the UI, API and CLI (passive refresh, port scan, OS fingerprint, SNMP poll), independent of the schedule in SCAN-06. The scan runs as a job with progress and result diff against the previous scan. | 1 | Must |
 
 ## Identity and access
 
