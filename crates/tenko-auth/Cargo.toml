@@ -1,11 +1,48 @@
 [package]
 name = "tenko-auth"
 version = "0.0.1"
-description = "Users, passkeys, TOTP, password policy presets, RBAC and sessions"
+description = "Local authentication, password policy presets, TOTP, passkeys, sessions, personal tokens, roles and security settings"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+
+[features]
+# The online HIBP range source over HTTPS (IAM-04). Without it, the breached-password check
+# uses the offline filter or a range source supplied by the caller.
+online = ["dep:reqwest"]
+# Test helpers for other packages: a mock clock, an in-memory vault and a software
+# authenticator that produces WebAuthn registration and assertion responses.
+testing = ["tenko-vault/testing"]
+
+[dependencies]
+arc-swap = { workspace = true }
+argon2 = { workspace = true }
+async-trait = { workspace = true }
+aws-lc-rs = { workspace = true }
+bytes = { workspace = true }
+ciborium = { workspace = true }
+# Unicode classes (`\p{L}`) in Custom presets, whatever other crates enable.
+regex = { workspace = true, features = ["unicode"] }
+reqwest = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tenko-core = { workspace = true }
+tenko-store = { workspace = true }
+tenko-vault = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+unicode-normalization = { workspace = true }
+utoipa = { workspace = true }
+uuid = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+tenko-auth = { path = ".", features = ["testing"] }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

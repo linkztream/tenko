@@ -1,0 +1,276 @@
+//! Global roles of Slice 1 (`admin`, `operator`, `viewer`) and their permissions.
+//!
+//! Object scopes and delegation (IAM-01) come in Slice 3; until then every grant covers
+//! all objects of a kind, so [`Authorizer::scope`](tenko_core::Authorizer::scope) answers
+//! `All` or `Nothing`.
+
+use std::{fmt, str::FromStr};
+
+use serde::{Deserialize, Serialize};
+use tenko_core::{Action, AuthStrength, ObjectKind};
+use utoipa::ToSchema;
+
+use crate::settings::{MfaRequirement, SecuritySettings};
+
+/// A global role.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum RoleName {
+    /// Everything, including users, settings and the system.
+    Admin,
+    /// Day-to-day IPAM work: read, change and run, but no administration.
+    Operator,
+    /// Read-only access to the inventory.
+    Viewer,
+}
+
+impl RoleName {
+    /// Every role.
+    pub const ALL: [RoleName; 3] = [Self::Admin, Self::Operator, Self::Viewer];
+
+    /// The stable name.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Admin => "admin",
+            Self::Operator => "operator",
+            Self::Viewer => "viewer",
+        }
+    }
+
+    /// An English description for the role list.
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Admin => "Full access, including users, security settings and the system",
+            Self::Operator => {
+                "Reads and changes the IPAM inventory, runs imports and jobs; no administration"
+            }
+            Self::Viewer => "Reads the IPAM inventory, jobs and imports",
+        }
+    }
+
+    /// Whether the role grants `action` on objects of `kind`.
+    pub fn allows(self, action: Action, kind: ObjectKind) -> bool {
+        match self {
+            Self::Admin => true,
+            Self::Operator => operator_allows(action, kind),
+            Self::Viewer => action == Action::Read && is_inventory(kind),
+        }
+    }
+}
+
+impl fmt::Display for RoleName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for RoleName {
+    type Err = crate::AuthError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|role| role.as_str() == s)
+            .ok_or_else(|| crate::AuthError::invalid("roles", format!("unknown role `{s}`")))
+    }
+}
+
+/// Kinds a viewer may read and an operator may work with.
+fn is_inventory(kind: ObjectKind) -> bool {
+    matches!(
+        kind,
+        ObjectKind::Tenant
+            | ObjectKind::Vrf
+            | ObjectKind::Site
+            | ObjectKind::Vlan
+            | ObjectKind::Prefix
+            | ObjectKind::Range
+            | ObjectKind::Address
+            | ObjectKind::Host
+            | ObjectKind::Interface
+            | ObjectKind::CustomField
+            | ObjectKind::Job
+            | ObjectKind::Observation
+            | ObjectKind::Proposal
+            | ObjectKind::Import
+            | ObjectKind::Connector
+            | ObjectKind::Node
+            | ObjectKind::System
+    )
+}
+
+fn operator_allows(action: Action, kind: ObjectKind) -> bool {
+    match action {
+        Action::Read => {
+            is_inventory(kind) || matches!(kind, ObjectKind::User | ObjectKind::Settings)
+        }
+        Action::Create | Action::Update | Action::Delete => matches!(
+            kind,
+            ObjectKind::Tenant
+                | ObjectKind::Vrf
+                | ObjectKind::Site
+                | ObjectKind::Vlan
+                | ObjectKind::Prefix
+                | ObjectKind::Range
+                | ObjectKind::Address
+                | ObjectKind::Host
+                | ObjectKind::Interface
+                | ObjectKind::Import
+        ),
+        Action::Execute => matches!(
+            kind,
+            ObjectKind::Job
+                | ObjectKind::Import
+                | ObjectKind::Prefix
+                | ObjectKind::Host
+                | ObjectKind::Address
+        ),
+        Action::Approve => kind == ObjectKind::Proposal,
+        Action::Reveal | Action::Administer => false,
+    }
+}
+
+/// Administrative kinds that a personal token may never administer: changing users,
+/// settings, tokens, sessions or the system needs an interactive session.
+pub(crate) fn interactive_only(action: Action, kind: ObjectKind) -> bool {
+    matches!(action, Action::Administer | Action::Reveal)
+        || (matches!(action, Action::Create | Action::Update | Action::Delete)
+            && matches!(
+                kind,
+                ObjectKind::User
+                    | ObjectKind::Settings
+                    | ObjectKind::System
+                    | ObjectKind::ApiToken
+                    | ObjectKind::Session
+                    | ObjectKind::Secret
+            ))
+}
+
+/// The weakest session strength that may act with these roles under the settings
+/// (TGL-02, TGL-03), for `action`, and under the PIN coupling rule (IAM-07, CON-07): once
+/// the vault holds an operator secret, a PIN alone no longer serves an account that can
+/// reveal secrets, and revealing never works with a PIN alone.
+pub fn required_strength(
+    roles: &[RoleName],
+    settings: &SecuritySettings,
+    action: Action,
+    operator_secrets: bool,
+) -> AuthStrength {
+    let admin = roles.contains(&RoleName::Admin);
+    let mut required = AuthStrength::Pin;
+    let mfa = match settings.mfa {
+        MfaRequirement::Optional => false,
+        MfaRequirement::Administrators => admin,
+        MfaRequirement::Everyone => true,
+    };
+    if mfa {
+        required = required.max(AuthStrength::PasswordTotp);
+    }
+    if settings.passkey_for_admins && admin {
+        required = required.max(AuthStrength::Passkey);
+    }
+    let can_reveal = roles
+        .iter()
+        .any(|role| role.allows(Action::Reveal, ObjectKind::Secret));
+    if action == Action::Reveal || (operator_secrets && can_reveal) {
+        required = required.max(AuthStrength::Password);
+    }
+    required
+}
+
+/// Whether a session of `strength` satisfies `required`. A passkey satisfies a two-factor
+/// requirement: it combines possession with user verification.
+pub fn satisfies(strength: AuthStrength, required: AuthStrength) -> bool {
+    strength >= required
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::Profile;
+
+    #[test]
+    fn viewers_only_read_the_inventory() {
+        assert!(RoleName::Viewer.allows(Action::Read, ObjectKind::Prefix));
+        assert!(!RoleName::Viewer.allows(Action::Update, ObjectKind::Prefix));
+        assert!(!RoleName::Viewer.allows(Action::Read, ObjectKind::User));
+        assert!(!RoleName::Viewer.allows(Action::Read, ObjectKind::Settings));
+        assert!(!RoleName::Viewer.allows(Action::Read, ObjectKind::Secret));
+    }
+
+    #[test]
+    fn operators_change_the_inventory_but_do_not_administer() {
+        assert!(RoleName::Operator.allows(Action::Create, ObjectKind::Host));
+        assert!(RoleName::Operator.allows(Action::Execute, ObjectKind::Job));
+        assert!(RoleName::Operator.allows(Action::Approve, ObjectKind::Proposal));
+        assert!(!RoleName::Operator.allows(Action::Administer, ObjectKind::User));
+        assert!(!RoleName::Operator.allows(Action::Update, ObjectKind::Settings));
+        assert!(!RoleName::Operator.allows(Action::Reveal, ObjectKind::Secret));
+        assert!(!RoleName::Operator.allows(Action::Create, ObjectKind::CustomField));
+    }
+
+    #[test]
+    fn admins_may_do_everything() {
+        for &kind in ObjectKind::ALL {
+            assert!(RoleName::Admin.allows(Action::Administer, kind));
+        }
+    }
+
+    #[test]
+    fn required_strength_follows_the_toggles() {
+        let admin = [RoleName::Admin];
+        let viewer = [RoleName::Viewer];
+        let home = Profile::Home.defaults();
+        assert_eq!(
+            required_strength(&admin, &home, Action::Read, false),
+            AuthStrength::Pin
+        );
+        assert_eq!(
+            required_strength(&admin, &home, Action::Reveal, false),
+            AuthStrength::Password
+        );
+        let standard = Profile::Standard.defaults();
+        assert_eq!(
+            required_strength(&admin, &standard, Action::Read, false),
+            AuthStrength::PasswordTotp
+        );
+        assert_eq!(
+            required_strength(&viewer, &standard, Action::Read, false),
+            AuthStrength::Pin
+        );
+        let hardened = Profile::Hardened.defaults();
+        assert_eq!(
+            required_strength(&admin, &hardened, Action::Read, false),
+            AuthStrength::Passkey
+        );
+        assert_eq!(
+            required_strength(&viewer, &hardened, Action::Read, false),
+            AuthStrength::PasswordTotp
+        );
+        assert!(satisfies(AuthStrength::HardwareKey, AuthStrength::Passkey));
+        // IAM-07: with operator secrets in the vault a PIN alone no longer serves an admin.
+        assert_eq!(
+            required_strength(&admin, &home, Action::Read, true),
+            AuthStrength::Password
+        );
+        assert_eq!(
+            required_strength(&viewer, &home, Action::Read, true),
+            AuthStrength::Pin
+        );
+        assert!(!satisfies(
+            AuthStrength::Password,
+            AuthStrength::PasswordTotp
+        ));
+    }
+
+    #[test]
+    fn role_names_parse() {
+        assert_eq!(
+            "operator".parse::<RoleName>().expect("role"),
+            RoleName::Operator
+        );
+        assert!("root".parse::<RoleName>().is_err());
+    }
+}

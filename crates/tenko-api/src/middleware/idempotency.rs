@@ -713,7 +713,7 @@ mod tests {
         for (record, raw) in records {
             assert!(record.replay_unavailable);
             assert!(record.body.is_empty());
-            assert!(record.headers.is_empty());
+            assert_eq!(record.headers.len(), 0);
             assert_eq!(record.status, 201);
             let raw = String::from_utf8_lossy(&raw);
             assert!(!raw.contains("tko_s3cr3t_value") && !raw.contains("tenko_session"));
