@@ -1,0 +1,397 @@
+/*
+ * Tenko DDI design tokens
+ *
+ * One file, two themes. Light is the default; dark follows the operating
+ * system unless the user picked a theme, which is stored in localStorage
+ * ("tenko-theme") and written to <html data-theme="light|dark">.
+ *
+ * Dark values are declared twice on purpose: once under the OS media query
+ * (guarded so a light choice wins) and once under [data-theme="dark"]
+ * (so a dark choice wins on a light OS).
+ *
+ * Naming: --{role}[-{variant}]. Components use roles, never raw hex.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Theme-independent tokens                                            */
+/* ------------------------------------------------------------------ */
+:root {
+  /* Type. UI text uses the platform face: zero bytes, native rendering,
+     instant first paint. Identifiers (addresses, MACs, prefixes, DUIDs)
+     use one embedded face chosen for unambiguous glyphs: 0/O, 1/l/I, 5/S, 8/B. */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system,
+    BlinkMacSystemFont, "SF Pro Text", Roboto, "Noto Sans", "Helvetica Neue",
+    Arial, sans-serif;
+  --font-data: "Atkinson Hyperlegible Mono", ui-monospace, "Cascadia Mono",
+    "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Type scale (px). The classical scale, cut to what a dense tool needs. */
+  --fs-11: 11px;   /* micro: kbd hints, badge text, axis ticks */
+  --fs-12: 12px;   /* secondary: meta lines, column headers, status bar */
+  --fs-13: 13px;   /* body: grid cells, controls, panel text (default) */
+  --fs-14: 14px;   /* emphasis: panel titles, dialog body */
+  --fs-16: 16px;   /* section headings */
+  --fs-18: 18px;   /* page titles */
+  --fs-24: 24px;   /* stat tile values */
+  --fs-36: 36px;   /* wizard headings */
+  --fs-48: 48px;   /* hero figure, one per view at most */
+
+  --lh-tight: 1.2;
+  --lh-ui: 1.38;
+  --lh-text: 1.55;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* Spacing: 4 px base with a 2 px half-step for dense chrome. */
+  --sp-1: 2px;
+  --sp-2: 4px;
+  --sp-3: 6px;
+  --sp-4: 8px;
+  --sp-5: 12px;
+  --sp-6: 16px;
+  --sp-7: 20px;
+  --sp-8: 24px;
+  --sp-9: 32px;
+  --sp-10: 48px;
+
+  /* Density. "compact" is the default; the grid and lists read these. */
+  --row-h: 28px;
+  --cell-px: 8px;
+  --ctl-h: 28px;
+  --ctl-h-sm: 22px;
+
+  /* Radius: small things are nearly square, containers are softer.
+     Hierarchy is carried by radius, not by shadow. */
+  --r-1: 3px;     /* badges, checkboxes, kbd */
+  --r-2: 5px;     /* buttons, inputs, menu items */
+  --r-3: 8px;     /* popovers, panels, toasts */
+  --r-4: 12px;    /* dialogs, wizard card */
+  --r-pill: 999px;
+
+  /* Motion. Short and only in answer to an action, except the live-update flash. */
+  --dur-1: 80ms;
+  --dur-2: 160ms;
+  --dur-3: 240ms;
+  --dur-flash: 1400ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Layout. */
+  --topbar-h: 44px;
+  --rail-w: 72px;
+  --tree-w: 300px;
+  --panel-w: 460px;
+  --statusbar-h: 26px;
+
+  /* Elevation: one shadow for floating layers only (menus, palette, toasts,
+     drag ghosts). Panels docked in the layout use a hairline, not a shadow. */
+  --z-sticky: 10;
+  --z-panel: 20;
+  --z-overlay: 40;
+  --z-palette: 50;
+  --z-toast: 60;
+  --z-drag: 70;
+
+  /* Status palette for charts and meters (fixed in both themes). Always paired
+     with an icon and a label; never carries meaning alone. */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+}
+
+/* Density variants: set data-density on <html>. */
+:root[data-density="dense"] {
+  --row-h: 24px;
+  --cell-px: 6px;
+  --ctl-h: 24px;
+}
+:root[data-density="comfortable"] {
+  --row-h: 34px;
+  --cell-px: 10px;
+  --ctl-h: 32px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Light theme (default)                                               */
+/* ------------------------------------------------------------------ */
+:root {
+  color-scheme: light;
+
+  /* Surfaces: canvas behind everything, surface for content, two steps up. */
+  --bg: #F3F4F7;
+  --surface: #FFFFFF;
+  --surface-2: #F7F8FA;      /* grid header, rail, quiet fills */
+  --surface-3: #EEF0F4;      /* hover, pressed */
+  --surface-inverse: #1B1E26; /* tooltips, kbd on dark */
+  --scrim: rgba(22, 25, 33, 0.32);
+
+  /* Hairlines. --control-line meets 3:1 for form-control boundaries. */
+  --line: #E2E5EB;
+  --line-strong: #CBD0D9;
+  --control-line: #8E96A5;
+
+  /* Ink. ink-3 is the lowest step allowed for text that must be read. */
+  --ink: #161921;
+  --ink-2: #464D5C;
+  --ink-3: #626A7C;
+  --ink-4: #9CA3B0;          /* placeholders and disabled only */
+  --ink-inverse: #F3F4F7;
+
+  /* Accent (kikyo, bellflower blue-violet): selection, focus, primary action,
+     links, running work. Nothing else is this color. */
+  --accent: #4B44CF;
+  --accent-strong: #3A33B0;
+  --accent-ink: #FFFFFF;
+  --accent-wash: #EDECFC;    /* selected rows */
+  --accent-wash-2: #DEDCFA;  /* selected + hover, drop target */
+  --focus: #4B44CF;
+  --flash: #E4E2FD;          /* live-update cell flash start color */
+
+  /* Assignment modes (IPAM-14). Saturation tracks how much Tenko controls
+     the host: reserved and static in color, dynamic and unmanaged in gray.
+     Each mode also has a glyph (see README), so color is never alone. */
+  --mode-reserved: #0B7F75;
+  --mode-reserved-wash: #E3F4F1;
+  --mode-static: #3D64A8;
+  --mode-static-wash: #E7EEF8;
+  --mode-dynamic: #6B7486;
+  --mode-dynamic-wash: #EEF0F3;
+  --mode-unmanaged: #8D94A1;
+  --mode-unmanaged-wash: transparent;
+
+  /* Exceptions: the only loud colors in a healthy grid. */
+  --proposal: #B03A86;        /* discovered host, orphaned record: drawn dashed */
+  --proposal-wash: #FBEAF4;
+  --conflict: #C8322F;        /* IP conflict, overlap inside a VRF */
+  --conflict-wash: #FDECEB;
+  --discrepancy: #9A5A00;     /* intent and observation disagree (text-safe amber) */
+  --discrepancy-mark: #F0A31A;/* the amber of the marker itself */
+  --discrepancy-wash: #FFF4DE;
+  --locked: #464D5C;          /* lock glyph; automation stopped */
+  --locked-wash: #EEF0F3;
+
+  /* Job states (IPAM-17). Running and waiting share the accent hue:
+     running is filled, waiting is a hollow ring with a countdown. */
+  --job-queued: #7C8496;
+  --job-running: #4B44CF;
+  --job-waiting: #4B44CF;
+  --job-done: #1E7F3A;
+  --job-failed: #C8322F;
+  --job-rolledback: #B0521A;
+  --job-done-wash: #E6F4EA;
+  --job-failed-wash: #FDECEB;
+  --job-rolledback-wash: #FCEEE4;
+
+  /* Text-safe status inks for UI copy (WCAG 4.5:1 on surface). */
+  --ok-ink: #1E7F3A;
+  --warn-ink: #9A5A00;
+  --danger-ink: #C8322F;
+  --danger: #C8322F;
+  --danger-wash: #FDECEB;
+  --warn-wash: #FFF4DE;
+  --ok-wash: #E6F4EA;
+
+  /* Charts (validated with the dataviz palette checks on #FFFFFF). */
+  --chart-surface: #FFFFFF;
+  --chart-grid: #E8EAEF;
+  --chart-axis: #C3C8D1;
+  --chart-ink: #626A7C;
+  --series-1: #2a78d6;  /* blue */
+  --series-2: #eb6834;  /* orange */
+  --series-3: #1baf7a;  /* aqua */
+  --series-4: #eda100;  /* yellow */
+  --series-5: #e87ba4;  /* magenta */
+  --series-6: #008300;  /* green */
+  --series-7: #4a3aa7;  /* violet */
+  --series-8: #e34948;  /* red */
+  --seq-100: #cde2fb;
+  --seq-300: #6da7ec;
+  --seq-500: #256abf;
+  --seq-700: #0d366b;
+
+  /* VLAN identity for the sample network. Assigned from the categorical order.
+     All-pairs views (topology) color at most three VLANs; the rest are drawn
+     neutral with a dashed outline and always carry their VLAN tag. */
+  --vlan-lan: var(--series-1);
+  --vlan-lab: var(--series-2);
+  --vlan-iot: var(--series-3);
+  --vlan-dmz: #8D94A1;  /* neutral + dashed: the fourth VLAN in view */
+
+  /* Brand: the mark is one color (currentColor); the two-tone variant uses the accent. */
+  --brand-ink: var(--ink);
+
+  --shadow-float: 0 1px 2px rgba(22, 25, 33, 0.08), 0 8px 24px rgba(22, 25, 33, 0.14);
+  --shadow-drag: 0 2px 4px rgba(22, 25, 33, 0.10), 0 14px 32px rgba(22, 25, 33, 0.22);
+}
+
+/* ------------------------------------------------------------------ */
+/* Dark theme: OS preference, unless the user chose light              */
+/* ------------------------------------------------------------------ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111318;
+    --surface: #171A21;
+    --surface-2: #1C2028;
+    --surface-3: #252A34;
+    --surface-inverse: #E6E9EF;
+    --scrim: rgba(5, 6, 9, 0.56);
+    --line: #2A303B;
+    --line-strong: #3A414F;
+    --control-line: #687184;
+    --ink: #E6E9EF;
+    --ink-2: #B0B7C4;
+    --ink-3: #8C95A6;
+    --ink-4: #5B6372;
+    --ink-inverse: #161921;
+    --accent: #9C97FF;
+    --accent-strong: #B6B2FF;
+    --accent-ink: #14122E;
+    --accent-wash: #25234A;
+    --accent-wash-2: #2F2C5E;
+    --focus: #9C97FF;
+    --flash: #3A3670;
+    --mode-reserved: #3CC2B2;
+    --mode-reserved-wash: #13302D;
+    --mode-static: #84A8E6;
+    --mode-static-wash: #1A2638;
+    --mode-dynamic: #9AA3B3;
+    --mode-dynamic-wash: #232832;
+    --mode-unmanaged: #6E7686;
+    --mode-unmanaged-wash: transparent;
+    --proposal: #E883C5;
+    --proposal-wash: #3A1C30;
+    --conflict: #FF7A72;
+    --conflict-wash: #3D1A1A;
+    --discrepancy: #F2B544;
+    --discrepancy-mark: #F2B544;
+    --discrepancy-wash: #362A12;
+    --locked: #B0B7C4;
+    --locked-wash: #232832;
+    --job-queued: #8D96A6;
+    --job-running: #9C97FF;
+    --job-waiting: #9C97FF;
+    --job-done: #4CC27A;
+    --job-failed: #FF7A72;
+    --job-rolledback: #F0965A;
+    --job-done-wash: #15301F;
+    --job-failed-wash: #3D1A1A;
+    --job-rolledback-wash: #3A2416;
+    --ok-ink: #4CC27A;
+    --warn-ink: #F2B544;
+    --danger-ink: #FF7A72;
+    --danger: #FF7A72;
+    --danger-wash: #3D1A1A;
+    --warn-wash: #362A12;
+    --ok-wash: #15301F;
+    --chart-surface: #171A21;
+    --chart-grid: #252A34;
+    --chart-axis: #3A414F;
+    --chart-ink: #8C95A6;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --seq-100: #0d366b;
+    --seq-300: #256abf;
+    --seq-500: #5598e7;
+    --seq-700: #b7d3f6;
+    --vlan-dmz: #6E7686;
+    --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.5);
+    --shadow-drag: 0 2px 4px rgba(0, 0, 0, 0.4), 0 14px 32px rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* Dark theme: explicit user choice */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111318;
+  --surface: #171A21;
+  --surface-2: #1C2028;
+  --surface-3: #252A34;
+  --surface-inverse: #E6E9EF;
+  --scrim: rgba(5, 6, 9, 0.56);
+  --line: #2A303B;
+  --line-strong: #3A414F;
+  --control-line: #687184;
+  --ink: #E6E9EF;
+  --ink-2: #B0B7C4;
+  --ink-3: #8C95A6;
+  --ink-4: #5B6372;
+  --ink-inverse: #161921;
+  --accent: #9C97FF;
+  --accent-strong: #B6B2FF;
+  --accent-ink: #14122E;
+  --accent-wash: #25234A;
+  --accent-wash-2: #2F2C5E;
+  --focus: #9C97FF;
+  --flash: #3A3670;
+  --mode-reserved: #3CC2B2;
+  --mode-reserved-wash: #13302D;
+  --mode-static: #84A8E6;
+  --mode-static-wash: #1A2638;
+  --mode-dynamic: #9AA3B3;
+  --mode-dynamic-wash: #232832;
+  --mode-unmanaged: #6E7686;
+  --mode-unmanaged-wash: transparent;
+  --proposal: #E883C5;
+  --proposal-wash: #3A1C30;
+  --conflict: #FF7A72;
+  --conflict-wash: #3D1A1A;
+  --discrepancy: #F2B544;
+  --discrepancy-mark: #F2B544;
+  --discrepancy-wash: #362A12;
+  --locked: #B0B7C4;
+  --locked-wash: #232832;
+  --job-queued: #8D96A6;
+  --job-running: #9C97FF;
+  --job-waiting: #9C97FF;
+  --job-done: #4CC27A;
+  --job-failed: #FF7A72;
+  --job-rolledback: #F0965A;
+  --job-done-wash: #15301F;
+  --job-failed-wash: #3D1A1A;
+  --job-rolledback-wash: #3A2416;
+  --ok-ink: #4CC27A;
+  --warn-ink: #F2B544;
+  --danger-ink: #FF7A72;
+  --danger: #FF7A72;
+  --danger-wash: #3D1A1A;
+  --warn-wash: #362A12;
+  --ok-wash: #15301F;
+  --chart-surface: #171A21;
+  --chart-grid: #252A34;
+  --chart-axis: #3A414F;
+  --chart-ink: #8C95A6;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --seq-100: #0d366b;
+  --seq-300: #256abf;
+  --seq-500: #5598e7;
+  --seq-700: #b7d3f6;
+  --vlan-dmz: #6E7686;
+  --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-drag: 0 2px 4px rgba(0, 0, 0, 0.4), 0 14px 32px rgba(0, 0, 0, 0.6);
+}
+
+/* High contrast / forced colors: let the system palette win, keep focus visible. */
+@media (forced-colors: active) {
+  :root {
+    --focus: Highlight;
+    --accent: Highlight;
+  }
+}

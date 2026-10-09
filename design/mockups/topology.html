@@ -1,0 +1,1169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Topology - Tenko DDI</title>
+<link rel="icon" href="../logo/tenko-favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;700&amp;display=swap">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="shell.css">
+<script>try{var t=localStorage.getItem('tenko-theme');if(t)document.documentElement.dataset.theme=t;var d=localStorage.getItem('tenko-density');if(d&&d!=='compact')document.documentElement.dataset.density=d;}catch(e){}</script>
+<script src="shell.js" defer></script>
+<style>
+  /* Topology page. Page-level only; every color comes from a token. */
+  [hidden] { display: none !important; }
+
+  /* Stage: canvas on the left, docked panel on the right. The canvas narrows when the panel opens,
+     so the map is never hidden behind it. */
+  .stage { --panel-w: 380px; position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--bg); }
+  .canvas { position: absolute; inset: 0; overflow: hidden; }
+  .stage.panel-open .canvas { right: var(--panel-w); }
+  svg.map { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+  svg.map.panning { cursor: grabbing; }
+  .filterbar .query { flex: 1 1 200px; max-width: 300px; min-width: 170px; }
+  .filterbar .query .count { font-size: var(--fs-11); white-space: nowrap; }
+  .filterbar .select { width: auto; }
+  .filterbar .switch { gap: var(--sp-3); font-size: var(--fs-12); color: var(--ink-2); font-weight: var(--fw-medium); }
+  .filterbar .zoomval { min-width: 38px; text-align: right; font-size: var(--fs-12); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .chip[aria-pressed="false"] .vlan { opacity: 0.6; }
+  .chip[aria-pressed="false"] .n { color: var(--ink-3); font-weight: var(--fw-regular); }
+  .head-note { color: var(--ink-3); font-size: var(--fs-12); }
+
+  /* ---------- Map: nodes ---------- */
+  .map text { font-family: var(--font-ui); pointer-events: none; }
+  .node, .wan { transition: transform var(--dur-3) var(--ease-out), opacity var(--dur-2) var(--ease-out); }
+  .node { cursor: pointer; outline: none; --v: var(--ink-3); }
+  .node .body { fill: var(--surface); stroke: var(--v); stroke-width: 1.5; }
+  .node.leaf .body { fill: color-mix(in srgb, var(--v) 9%, var(--surface)); }
+  .node .stack { fill: var(--surface-2); stroke: var(--v); stroke-width: 1; opacity: 0.8; }
+  .node .halo { fill: none; stroke: var(--accent); stroke-width: 7; stroke-opacity: 0; transition: stroke-opacity var(--dur-1); }
+  .v-lan { --v: var(--vlan-lan); }
+  .v-lab { --v: var(--vlan-lab); }
+  .v-iot { --v: var(--vlan-iot); }
+  .v-dmz { --v: var(--vlan-dmz); }
+  .node.leaf.v-dmz .body { fill: var(--surface); }
+  .v-dmz .body { stroke-dasharray: 4 3; }
+  .v-dmz .stack { stroke-dasharray: 4 3; }
+  .node:hover .body, .node.hov .body { stroke-width: 2.25; }
+  .node.sel .body, .node.onpath .body { stroke: var(--accent); stroke-width: 2.25; stroke-dasharray: none; }
+  .node.sel .body, .node.sel.leaf .body { fill: var(--accent-wash); }
+  .node.sel .halo, .node:focus-visible .halo { stroke-opacity: 0.22; }
+  .node:focus-visible .body { stroke: var(--focus); stroke-width: 2.5; }
+  .node .nm { font-size: 12px; font-weight: 500; fill: var(--ink); }
+  .node .ip { font-family: var(--font-data); font-size: 11px; fill: var(--ink-3); font-variant-ligatures: none; }
+  .node .more { font-size: 11px; fill: var(--ink-3); }
+  .node .vt { font-size: 11px; font-weight: 500; fill: var(--ink-2); }
+  .node .vsw { fill: var(--v); }
+  .v-dmz .vsw { fill: none; stroke: var(--vlan-dmz); stroke-width: 1.25; stroke-dasharray: 2 1.5; }
+  .nicon { fill: none; stroke: var(--ink-2); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .node.sel .nicon { stroke: var(--accent); }
+  .map.radial .node .more { display: none; }
+  .wan .wtx { font-size: 12px; font-weight: 500; fill: var(--ink-2); }
+  .wan .nicon { stroke: var(--ink-3); }
+
+  /* Dimmed (filtered out), gone (outside focus), off (not part of the graph right now) */
+  .dim { opacity: 0.2; }
+  .gone { opacity: 0; pointer-events: none; }
+  .off { display: none; }
+
+  /* ---------- Map: edges ---------- */
+  .edge { fill: none; stroke: var(--control-line); stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; transition: opacity var(--dur-2) var(--ease-out); }
+  .edge.uplink { stroke-width: 2.5; }
+  .edge.wifi { stroke-width: 2; stroke-dasharray: 0.1 4.5; }
+  .edge.vmlink { stroke-dasharray: 5 3.5; }
+  .edge.hl { stroke: var(--accent); stroke-width: 3; }
+  .edge.hl.wifi { stroke-dasharray: 0.1 5.5; stroke-width: 3.5; }
+  .map.relayout .edge, .map.relayout .port { opacity: 0; }
+
+  /* ---------- Map: port badges (the switch end of an edge) ---------- */
+  .port { cursor: pointer; outline: none; transition: opacity var(--dur-2) var(--ease-out); }
+  .port .phit { fill: transparent; }
+  .port .pbg { fill: var(--surface); stroke: var(--control-line); stroke-width: 1; }
+  .port .ptx { font-family: var(--font-data); font-size: 11px; font-weight: 700; fill: var(--ink-2); text-anchor: middle; font-variant-ligatures: none; }
+  .port:hover .pbg { stroke: var(--accent); }
+  .port.sel .pbg { fill: var(--accent); stroke: var(--accent); }
+  .port.sel .ptx { fill: var(--accent-ink); }
+  .port:focus-visible .pbg { stroke: var(--focus); stroke-width: 2; }
+
+  /* Level of detail: labels only above a zoom threshold. Color and shape stay. */
+  .map[data-lod="mid"] .nsub { display: none; }
+  .map[data-lod="low"] .nsub, .map[data-lod="low"] .nm, .map[data-lod="low"] .more, .map[data-lod="low"] .port, .map[data-lod="low"] .wtx { display: none; }
+
+  /* ---------- Canvas overlays ---------- */
+  .legend { position: absolute; left: var(--sp-5); top: var(--sp-5); z-index: var(--z-sticky); max-width: 420px; border: 1px solid var(--line); border-radius: var(--r-3); background: color-mix(in srgb, var(--surface) 94%, transparent); color: var(--ink-2); font-size: var(--fs-11); }
+  .legend summary { display: flex; align-items: center; gap: var(--sp-3); padding: 4px 10px; cursor: pointer; list-style: none; font-size: var(--fs-12); font-weight: var(--fw-medium); color: var(--ink-2); }
+  .legend summary::-webkit-details-marker { display: none; }
+  .legend summary svg.i { transition: rotate var(--dur-2); }
+  .legend[open] summary svg.i { rotate: 90deg; }
+  .legend[open] summary { border-bottom: 1px solid var(--line); }
+  .legend .rows { display: grid; gap: 6px; padding: 7px 10px 9px; }
+  .lg-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+  .lg-h { width: 36px; color: var(--ink-3); }
+  .lg-item { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .lg-item svg { width: 22px; height: 14px; overflow: visible; flex: none; }
+  .lg-item svg .lgs { fill: var(--surface); stroke: var(--ink-3); stroke-width: 1.25; }
+  .lg-item svg .lgs.dash { stroke-dasharray: 3 2; }
+  .lg-item .vlan { font-size: var(--fs-11); }
+
+  .map-note { position: absolute; right: var(--sp-5); top: var(--sp-5); z-index: var(--z-sticky); display: flex; align-items: center; gap: var(--sp-3); padding: 3px 4px 3px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-3); background: var(--surface); font-size: var(--fs-12); color: var(--ink-2); }
+  .map-note b { color: var(--ink); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+
+  /* Selection bar: shared .actionbar, pinned bottom left so it never covers the VM column. */
+  .canvas .actionbar { left: var(--sp-5); bottom: var(--sp-5); transform: none; max-width: calc(100% - 2 * var(--sp-5)); flex-wrap: wrap; }
+  .actionbar .count { margin-right: var(--sp-3); }
+  .actionbar .count .addr { font-weight: var(--fw-regular); color: var(--ink-3); }
+  .actionbar .chip { height: 22px; }
+  .actionbar .seg { padding: 1px; }
+  .actionbar .seg button { height: 20px; }
+
+  /* Hover card: a floating layer, so it gets the shadow */
+  .hovercard { position: absolute; z-index: var(--z-overlay); width: 256px; padding: var(--sp-4) var(--sp-5) var(--sp-5); border: 1px solid var(--line-strong); border-radius: var(--r-3); background: var(--surface); box-shadow: var(--shadow-float); pointer-events: none; }
+  .hc-head { display: flex; align-items: center; gap: var(--sp-3); }
+  .hc-head svg.i { color: var(--ink-2); }
+  .hc-head b { font-size: var(--fs-14); font-weight: var(--fw-semibold); }
+  .hc-head .domain { color: var(--ink-3); font-size: var(--fs-12); }
+  .hc-sub { display: flex; align-items: center; gap: var(--sp-3); margin: 1px 0 var(--sp-3) 22px; color: var(--ink-3); font-size: var(--fs-12); }
+  .hc-sub .tag { margin-left: auto; }
+  .hovercard .kv { grid-template-columns: 66px minmax(0, 1fr); gap: 3px var(--sp-4); font-size: var(--fs-12); }
+  .hovercard .kv dd { font-size: var(--fs-12); }
+  .hc-via { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--line); color: var(--ink); font-size: var(--fs-12); display: flex; gap: var(--sp-3); align-items: flex-start; }
+  .hc-via svg.i { color: var(--ink-3); margin-top: 1px; }
+  .hc-hint { margin-top: var(--sp-3); display: flex; align-items: center; gap: var(--sp-3); color: var(--ink-3); font-size: var(--fs-11); }
+  .hc-keys { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-1); }
+  .hc-keys span:first-child { margin-right: var(--sp-2); }
+
+  /* ---------- Side panel content ---------- */
+  .panel .kv { grid-template-columns: 96px minmax(0, 1fr); }
+  .panel .kv dd .tag { margin-left: 4px; }
+  .panel .meta .mono { color: var(--ink-2); }
+  .guard { display: flex; gap: var(--sp-4); align-items: flex-start; margin: var(--sp-5) var(--sp-6) 0; padding: var(--sp-4) var(--sp-5); border: 1px solid var(--line-strong); border-radius: var(--r-2); background: var(--locked-wash); color: var(--ink); }
+  .guard svg.i { color: var(--locked); margin-top: 1px; }
+  .guard b { font-weight: var(--fw-semibold); }
+  .vlan-diff { display: grid; gap: var(--sp-2); }
+  .vlan-diff > div { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+  .vlan-diff .when { width: 38px; color: var(--ink-3); font-size: var(--fs-12); }
+  .vlan-diff .old { text-decoration: line-through; text-decoration-color: var(--ink-4); }
+  .panel-actions { display: flex; gap: var(--sp-3); flex-wrap: wrap; }
+  .panel .grid tbody tr { cursor: pointer; }
+  .panel .grid tbody tr:focus-visible td { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .panel .grid td .addr, .panel .grid td .hostname { overflow: hidden; text-overflow: ellipsis; }
+  .panel .grid tr[aria-selected="true"] td:first-child { font-weight: var(--fw-semibold); }
+  .portn { font-family: var(--font-data); font-variant-numeric: tabular-nums; color: var(--ink); font-weight: var(--fw-bold); }
+
+  /* Mockup-only scene switcher: dashed, so it never reads as product UI */
+  .statusbar .scenes { display: flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; border: 1px dashed var(--control-line); border-width: 0 1px; color: var(--ink-3); }
+  .statusbar .scenes .seg { padding: 1px; }
+  .statusbar .scenes .seg button { height: 18px; padding: 0 8px; font-size: var(--fs-11); }
+
+  @media (max-width: 1280px) {
+    .stage { --panel-w: 340px; }
+    .head-note { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <a class="brand" href="index.html" aria-label="Tenko DDI home"><span class="mark-cell"><svg class="mark" viewBox="0 2 48 48" aria-hidden="true"><defs><mask id="tenko-knock" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="52"><rect width="48" height="52" fill="#fff"/><path d="M15 30.5L17.6 19.8L21.6 23.9L26.4 23.9L30.4 19.8L33 30.5L24 40.5Z" fill="#000" stroke="#000" stroke-width="3" stroke-linejoin="round"/></mask></defs><path mask="url(#tenko-knock)" fill="currentColor" d="M20.06 33.69L19.59 33.22L19.13 33.06L18.66 32.97L18.19 32.91L17.72 32.88L17.25 32.87L16.77 32.87L16.3 32.9L15.83 32.93L15.36 32.99L14.9 33.05L14.43 33.13L13.97 33.22L13.51 33.32L13.05 33.44L12.6 33.56L12.15 33.7L11.7 33.84L11.26 34L10.83 34.16L10.39 34.34L9.97 34.52L9.55 34.72L9.13 34.92L8.73 35.13L8.32 35.36L7.93 35.59L7.54 35.83L7.16 36.08L6.81 36.36L6.53 36.73L6.27 37.1L6.03 37.48L5.8 37.86L5.58 38.25L5.38 38.63L5.2 39.02L5.03 39.42L4.88 39.81L4.75 40.2L4.64 40.6L4.55 40.99L4.48 41.39L4.44 41.78L4.41 42.17L4.42 42.56L4.46 42.94L4.58 43.33L4.58 43.33L5.09 43.15L5.5 42.97L5.89 42.81L6.26 42.65L6.62 42.51L6.98 42.38L7.33 42.27L7.68 42.16L8.02 42.06L8.37 41.97L8.71 41.89L9.06 41.82L9.4 41.76L9.74 41.7L10.08 41.65L10.43 41.6L10.77 41.56L11.12 41.53L11.33 41.35L11.52 41.11L11.72 40.88L11.94 40.64L12.16 40.4L12.38 40.17L12.62 39.93L12.87 39.7L13.13 39.47L13.39 39.24L13.67 39.01L13.95 38.78L14.23 38.55L14.53 38.33L14.83 38.1L15.14 37.88L15.45 37.66L15.77 37.44L16.1 37.23L16.43 37.01L16.77 36.79L17.12 36.57L17.46 36.35L17.82 36.13L18.18 35.89L18.55 35.65L18.92 35.38L19.3 35.08L19.68 34.69L20.06 33.69ZM20.14 31.96L19.9 31.33L19.52 30.99L19.12 30.7L18.71 30.45L18.28 30.21L17.85 30L17.4 29.8L16.95 29.62L16.49 29.45L16.03 29.3L15.57 29.16L15.1 29.03L14.63 28.91L14.16 28.81L13.68 28.72L13.21 28.64L12.73 28.57L12.25 28.51L11.78 28.46L11.3 28.43L10.82 28.41L10.35 28.39L9.87 28.39L9.4 28.4L8.93 28.43L8.46 28.46L7.99 28.5L7.53 28.56L7.07 28.62L6.62 28.73L6.21 28.95L5.8 29.18L5.41 29.43L5.03 29.68L4.66 29.94L4.31 30.21L3.97 30.49L3.65 30.78L3.34 31.07L3.05 31.38L2.77 31.7L2.51 32.02L2.28 32.35L2.06 32.69L1.87 33.04L1.71 33.4L1.58 33.77L1.51 34.18L1.51 34.18L2.06 34.23L2.52 34.24L2.94 34.24L3.35 34.26L3.74 34.28L4.12 34.31L4.5 34.34L4.87 34.39L5.23 34.44L5.59 34.51L5.94 34.57L6.29 34.65L6.64 34.73L6.98 34.82L7.32 34.92L7.66 35.02L8 35.13L8.33 35.24L8.62 35.16L8.9 35.03L9.19 34.9L9.49 34.77L9.8 34.65L10.12 34.53L10.45 34.42L10.78 34.31L11.12 34.21L11.47 34.11L11.83 34.02L12.19 33.93L12.56 33.85L12.94 33.77L13.32 33.7L13.7 33.63L14.1 33.57L14.49 33.51L14.89 33.45L15.3 33.39L15.71 33.34L16.13 33.29L16.56 33.24L16.99 33.19L17.43 33.14L17.88 33.07L18.34 32.99L18.83 32.88L19.36 32.7L20.14 31.96ZM20.94 30.43L20.97 29.73L20.76 29.25L20.5 28.81L20.22 28.38L19.91 27.98L19.59 27.58L19.25 27.2L18.91 26.84L18.55 26.48L18.18 26.13L17.8 25.8L17.41 25.47L17.02 25.16L16.62 24.85L16.21 24.56L15.8 24.27L15.38 24L14.95 23.74L14.53 23.49L14.09 23.25L13.65 23.02L13.21 22.8L12.77 22.59L12.32 22.39L11.87 22.21L11.41 22.03L10.96 21.87L10.5 21.72L10.04 21.58L9.57 21.49L9.09 21.51L8.61 21.55L8.14 21.6L7.67 21.66L7.22 21.74L6.77 21.84L6.33 21.95L5.9 22.07L5.48 22.21L5.07 22.37L4.68 22.54L4.3 22.73L3.93 22.93L3.58 23.15L3.25 23.39L2.94 23.65L2.65 23.93L2.41 24.28L2.41 24.28L2.89 24.55L3.31 24.74L3.71 24.93L4.08 25.11L4.44 25.29L4.79 25.48L5.13 25.67L5.45 25.86L5.77 26.06L6.08 26.27L6.38 26.48L6.68 26.7L6.97 26.92L7.26 27.15L7.54 27.38L7.82 27.62L8.09 27.86L8.36 28.11L8.67 28.16L8.99 28.16L9.33 28.17L9.67 28.19L10.02 28.21L10.37 28.25L10.73 28.29L11.09 28.34L11.46 28.4L11.84 28.47L12.22 28.54L12.6 28.62L12.98 28.71L13.37 28.81L13.77 28.91L14.16 29.03L14.56 29.14L14.96 29.27L15.37 29.4L15.78 29.53L16.19 29.67L16.61 29.82L17.03 29.97L17.46 30.12L17.9 30.27L18.35 30.42L18.83 30.56L19.33 30.68L19.9 30.75L20.94 30.43ZM22.31 29.37L22.63 28.74L22.64 28.2L22.58 27.68L22.5 27.16L22.39 26.65L22.25 26.14L22.1 25.64L21.94 25.15L21.76 24.66L21.56 24.18L21.36 23.7L21.14 23.23L20.91 22.77L20.67 22.31L20.41 21.86L20.15 21.42L19.88 20.98L19.6 20.55L19.31 20.14L19.01 19.72L18.7 19.32L18.39 18.93L18.06 18.54L17.73 18.17L17.39 17.8L17.05 17.44L16.69 17.09L16.34 16.76L15.97 16.43L15.58 16.14L15.12 15.95L14.66 15.78L14.21 15.62L13.75 15.47L13.3 15.35L12.84 15.24L12.39 15.15L11.94 15.08L11.49 15.03L11.05 14.99L10.61 14.98L10.17 14.98L9.75 15.01L9.33 15.06L8.92 15.14L8.52 15.24L8.13 15.37L7.76 15.58L7.76 15.58L8.09 16.04L8.4 16.39L8.69 16.72L8.96 17.05L9.21 17.37L9.46 17.68L9.69 18L9.91 18.32L10.12 18.64L10.32 18.96L10.52 19.28L10.7 19.61L10.88 19.94L11.05 20.27L11.22 20.61L11.38 20.94L11.53 21.28L11.68 21.63L11.94 21.81L12.24 21.96L12.55 22.11L12.86 22.28L13.17 22.46L13.49 22.65L13.8 22.84L14.12 23.05L14.44 23.27L14.76 23.5L15.07 23.74L15.39 23.98L15.71 24.24L16.03 24.5L16.35 24.77L16.67 25.05L16.99 25.34L17.31 25.63L17.63 25.93L17.95 26.24L18.27 26.56L18.6 26.88L18.92 27.21L19.26 27.54L19.6 27.87L19.95 28.21L20.33 28.56L20.74 28.89L21.23 29.22L22.31 29.37ZM24 29L24.74 28.5L25.01 28L25.21 27.5L25.38 26.99L25.52 26.49L25.65 25.99L25.77 25.49L25.88 24.99L25.98 24.49L26.08 23.99L26.17 23.5L26.26 23.01L26.34 22.52L26.42 22.03L26.5 21.54L26.57 21.06L26.64 20.58L26.71 20.11L26.78 19.63L26.84 19.17L26.91 18.71L26.97 18.25L27.03 17.8L27.09 17.35L27.14 16.91L27.2 16.47L27.25 16.05L27.31 15.62L27.36 15.21L27.36 14.8L27.21 14.4L27.06 14.01L26.91 13.62L26.75 13.25L26.59 12.88L26.43 12.52L26.27 12.17L26.1 11.83L25.93 11.5L25.76 11.18L25.58 10.87L25.4 10.56L25.21 10.28L25.01 10L24.8 9.73L24.58 9.47L24.33 9.23L24 9L24 9L23.67 9.23L23.42 9.47L23.2 9.73L22.99 10L22.79 10.28L22.6 10.56L22.42 10.87L22.24 11.18L22.07 11.5L21.9 11.83L21.73 12.17L21.57 12.52L21.41 12.88L21.25 13.25L21.09 13.62L20.94 14.01L20.79 14.4L20.64 14.8L20.64 15.21L20.69 15.62L20.75 16.05L20.8 16.47L20.86 16.91L20.91 17.35L20.97 17.8L21.03 18.25L21.09 18.71L21.16 19.17L21.22 19.63L21.29 20.11L21.36 20.58L21.43 21.06L21.5 21.54L21.58 22.03L21.66 22.52L21.74 23.01L21.83 23.5L21.92 23.99L22.02 24.49L22.12 24.99L22.23 25.49L22.35 25.99L22.48 26.49L22.62 26.99L22.79 27.5L22.99 28L23.26 28.5L24 29ZM25.69 29.37L26.77 29.22L27.26 28.89L27.67 28.56L28.05 28.21L28.4 27.87L28.74 27.54L29.08 27.21L29.4 26.88L29.73 26.56L30.05 26.24L30.37 25.93L30.69 25.63L31.01 25.34L31.33 25.05L31.65 24.77L31.97 24.5L32.29 24.24L32.61 23.98L32.93 23.74L33.24 23.5L33.56 23.27L33.88 23.05L34.2 22.84L34.51 22.65L34.83 22.46L35.14 22.28L35.45 22.11L35.76 21.96L36.06 21.81L36.32 21.63L36.47 21.28L36.62 20.94L36.78 20.61L36.95 20.27L37.12 19.94L37.3 19.61L37.48 19.28L37.68 18.96L37.88 18.64L38.09 18.32L38.31 18L38.54 17.68L38.79 17.37L39.04 17.05L39.31 16.72L39.6 16.39L39.91 16.04L40.24 15.58L40.24 15.58L39.87 15.37L39.48 15.24L39.08 15.14L38.67 15.06L38.25 15.01L37.83 14.98L37.39 14.98L36.95 14.99L36.51 15.03L36.06 15.08L35.61 15.15L35.16 15.24L34.7 15.35L34.25 15.47L33.79 15.62L33.34 15.78L32.88 15.95L32.42 16.14L32.03 16.43L31.66 16.76L31.31 17.09L30.95 17.44L30.61 17.8L30.27 18.17L29.94 18.54L29.61 18.93L29.3 19.32L28.99 19.72L28.69 20.14L28.4 20.55L28.12 20.98L27.85 21.42L27.59 21.86L27.33 22.31L27.09 22.77L26.86 23.23L26.64 23.7L26.44 24.18L26.24 24.66L26.06 25.15L25.9 25.64L25.75 26.14L25.61 26.65L25.5 27.16L25.42 27.68L25.36 28.2L25.37 28.74L25.69 29.37ZM27.06 30.43L28.1 30.75L28.67 30.68L29.17 30.56L29.65 30.42L30.1 30.27L30.54 30.12L30.97 29.97L31.39 29.82L31.81 29.67L32.22 29.53L32.63 29.4L33.04 29.27L33.44 29.14L33.84 29.03L34.23 28.91L34.63 28.81L35.02 28.71L35.4 28.62L35.78 28.54L36.16 28.47L36.54 28.4L36.91 28.34L37.27 28.29L37.63 28.25L37.98 28.21L38.33 28.19L38.67 28.17L39.01 28.16L39.33 28.16L39.64 28.11L39.91 27.86L40.18 27.62L40.46 27.38L40.74 27.15L41.03 26.92L41.32 26.7L41.62 26.48L41.92 26.27L42.23 26.06L42.55 25.86L42.87 25.67L43.21 25.48L43.56 25.29L43.92 25.11L44.29 24.93L44.69 24.74L45.11 24.55L45.59 24.28L45.59 24.28L45.35 23.93L45.06 23.65L44.75 23.39L44.42 23.15L44.07 22.93L43.7 22.73L43.32 22.54L42.93 22.37L42.52 22.21L42.1 22.07L41.67 21.95L41.23 21.84L40.78 21.74L40.33 21.66L39.86 21.6L39.39 21.55L38.91 21.51L38.43 21.49L37.96 21.58L37.5 21.72L37.04 21.87L36.59 22.03L36.13 22.21L35.68 22.39L35.23 22.59L34.79 22.8L34.35 23.02L33.91 23.25L33.47 23.49L33.05 23.74L32.62 24L32.2 24.27L31.79 24.56L31.38 24.85L30.98 25.16L30.59 25.47L30.2 25.8L29.82 26.13L29.45 26.48L29.09 26.84L28.75 27.2L28.41 27.58L28.09 27.98L27.78 28.38L27.5 28.81L27.24 29.25L27.03 29.73L27.06 30.43ZM27.86 31.96L28.64 32.7L29.17 32.88L29.66 32.99L30.12 33.07L30.57 33.14L31.01 33.19L31.44 33.24L31.87 33.29L32.29 33.34L32.7 33.39L33.11 33.45L33.51 33.51L33.9 33.57L34.3 33.63L34.68 33.7L35.06 33.77L35.44 33.85L35.81 33.93L36.17 34.02L36.53 34.11L36.88 34.21L37.22 34.31L37.55 34.42L37.88 34.53L38.2 34.65L38.51 34.77L38.81 34.9L39.1 35.03L39.38 35.16L39.67 35.24L40 35.13L40.34 35.02L40.68 34.92L41.02 34.82L41.36 34.73L41.71 34.65L42.06 34.57L42.41 34.51L42.77 34.44L43.13 34.39L43.5 34.34L43.88 34.31L44.26 34.28L44.65 34.26L45.06 34.24L45.48 34.24L45.94 34.23L46.49 34.18L46.49 34.18L46.42 33.77L46.29 33.4L46.13 33.04L45.94 32.69L45.72 32.35L45.49 32.02L45.23 31.7L44.95 31.38L44.66 31.07L44.35 30.78L44.03 30.49L43.69 30.21L43.34 29.94L42.97 29.68L42.59 29.43L42.2 29.18L41.79 28.95L41.38 28.73L40.93 28.62L40.47 28.56L40.01 28.5L39.54 28.46L39.07 28.43L38.6 28.4L38.13 28.39L37.65 28.39L37.18 28.41L36.7 28.43L36.22 28.46L35.75 28.51L35.27 28.57L34.79 28.64L34.32 28.72L33.84 28.81L33.37 28.91L32.9 29.03L32.43 29.16L31.97 29.3L31.51 29.45L31.05 29.62L30.6 29.8L30.15 30L29.72 30.21L29.29 30.45L28.88 30.7L28.48 30.99L28.1 31.33L27.86 31.96ZM27.94 33.69L28.32 34.69L28.7 35.08L29.08 35.38L29.45 35.65L29.82 35.89L30.18 36.13L30.54 36.35L30.88 36.57L31.23 36.79L31.57 37.01L31.9 37.23L32.23 37.44L32.55 37.66L32.86 37.88L33.17 38.1L33.47 38.33L33.77 38.55L34.05 38.78L34.33 39.01L34.61 39.24L34.87 39.47L35.13 39.7L35.38 39.93L35.62 40.17L35.84 40.4L36.06 40.64L36.28 40.88L36.48 41.11L36.67 41.35L36.88 41.53L37.23 41.56L37.57 41.6L37.92 41.65L38.26 41.7L38.6 41.76L38.94 41.82L39.29 41.89L39.63 41.97L39.98 42.06L40.32 42.16L40.67 42.27L41.02 42.38L41.38 42.51L41.74 42.65L42.11 42.81L42.5 42.97L42.91 43.15L43.42 43.33L43.42 43.33L43.54 42.94L43.58 42.56L43.59 42.17L43.56 41.78L43.52 41.39L43.45 40.99L43.36 40.6L43.25 40.2L43.12 39.81L42.97 39.42L42.8 39.02L42.62 38.63L42.42 38.25L42.2 37.86L41.97 37.48L41.73 37.1L41.47 36.73L41.19 36.36L40.84 36.08L40.46 35.83L40.07 35.59L39.68 35.36L39.27 35.13L38.87 34.92L38.45 34.72L38.03 34.52L37.61 34.34L37.17 34.16L36.74 34L36.3 33.84L35.85 33.7L35.4 33.56L34.95 33.44L34.49 33.32L34.03 33.22L33.57 33.13L33.1 33.05L32.64 32.99L32.17 32.93L31.7 32.9L31.23 32.87L30.75 32.87L30.28 32.88L29.81 32.91L29.34 32.97L28.87 33.06L28.41 33.22L27.94 33.69Z"/><path fill="currentColor" fill-rule="evenodd" d="M15 30.5L17.6 19.8L21.6 23.9L26.4 23.9L30.4 19.8L33 30.5L24 40.5ZM17.9 29.2L21.6 30.5L21 31.7L18.6 30.7ZM30.1 29.2L26.4 30.5L27 31.7L29.4 30.7Z"/></svg></span><svg class="wordmark" viewBox="55 13 133 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="3.6" stroke-linejoin="round" d="M56 15.8H73M64.5 14V36M77.2 28H89.6A6.2 6.2 0 1 0 88.15 31.99M96.4 20V36M96.4 28A6.2 6.2 0 0 1 108.8 28V36M115.6 14V36M126.4 20.6L117.4 29.2M120.7 26L127.4 36M145.2 28A6.2 6.2 0 1 1 132.8 28A6.2 6.2 0 1 1 145.2 28Z"/><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round" stroke-opacity="0.62" d="M156.3 20V36M156.3 21.3H158.8A6.7 6.7 0 0 1 158.8 34.7H156.3M170.7 20V36M170.7 21.3H173.2A6.7 6.7 0 0 1 173.2 34.7H170.7M185.1 20V36"/></svg></a>
+    <button class="cmd" data-action="palette" aria-label="Open command palette">
+      <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
+      <span class="hint">Search addresses, hosts, MACs, records or run a command</span>
+      <span class="kbd">Ctrl</span><span class="kbd">K</span>
+    </button>
+    <span class="spacer"></span>
+    <div class="top-group">
+      <a class="pill" href="dashboard.html" title="Cluster health: 3 of 3 controllers reachable, replication lag 4 ms">
+        <span class="dot live"></span><span>Cluster <strong>3/3</strong></span>
+        <span style="width:1px;height:14px;background:var(--line)"></span>
+        <span>tenko1 <strong>leader</strong></span>
+      </a>
+      <a class="pill" href="wizard.html" title="Security profile: Home. No settings weaker than the profile.">
+        <svg class="i sm" aria-hidden="true"><use href="#i-shield"/></svg><span>Home profile</span>
+      </a>
+      <button class="icon-btn" data-action="keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg></button>
+      <button class="icon-btn" data-action="theme" aria-label="Theme"></button>
+      <button class="avatar" title="Signed in as alex (administrator)" aria-label="Account menu for alex">AK</button>
+    </div>
+  </header>
+
+
+  <nav class="rail" aria-label="Main">
+    <a href="dashboard.html" title="Dashboard (G then B)"><svg class="i" aria-hidden="true"><use href="#i-dashboard"/></svg>Dashboard</a>
+    <a href="shell-and-ipam.html" title="IPAM (G then I)"><svg class="i" aria-hidden="true"><use href="#i-ipam"/></svg>IPAM</a>
+    <a href="#" data-soon="DNS" title="DNS (G then D)"><svg class="i" aria-hidden="true"><use href="#i-dns"/></svg>DNS</a>
+    <a href="#" data-soon="DHCP" title="DHCP (G then H)"><svg class="i" aria-hidden="true"><use href="#i-dhcp"/></svg>DHCP</a>
+    <a href="topology.html" aria-current="page" title="Topology (G then T)"><svg class="i" aria-hidden="true"><use href="#i-topology"/></svg>Topology</a>
+    <a href="move-job.html" title="Jobs (G then J)"><svg class="i" aria-hidden="true"><use href="#i-jobs"/></svg>Jobs<span class="badge-count">2</span></a>
+    <a href="#" data-soon="Settings" class="bottom" title="Settings (G then S)"><svg class="i" aria-hidden="true"><use href="#i-settings"/></svg>Settings</a>
+  </nav>
+
+  <main class="main">
+    <div class="page-head">
+      <div>
+        <div class="crumbs"><a href="#">Home</a><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg><span>Topology</span></div>
+        <h1>Topology <span class="sub">Home site, 25 devices, 4 VLANs</span></h1>
+      </div>
+      <div class="actions">
+        <span class="head-note" title="Links come from UniFi, LLDP, Proxmox and ARP scans"><span class="dot live" style="display:inline-block;margin-right:6px"></span>Links read from UniFi and Proxmox 12 s ago</span>
+        <button class="btn" id="rescan"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg>Rescan links</button>
+        <button class="btn" id="export"><svg class="i" aria-hidden="true"><use href="#i-export"/></svg>Export SVG</button>
+      </div>
+    </div>
+
+    <div class="filterbar" role="toolbar" aria-label="Map filters and view">
+      <label class="query"><svg class="i sm" aria-hidden="true"><use href="#i-search"/></svg><input id="q" placeholder="Find host, IP, MAC or port" aria-label="Find host, IP, MAC or port" autocomplete="off" spellcheck="false"><span class="count muted num" id="q-count" hidden></span><span class="kbd">/</span></label>
+      <select class="select" id="site" aria-label="Site"><option>Site: Home</option></select>
+      <select class="select" id="layout" aria-label="Layout"><option value="layered">Layout: Layered</option><option value="radial">Layout: Radial</option></select>
+      <span class="divider"></span>
+      <button class="chip" data-vlan="10" aria-pressed="true" title="VLAN 10 LAN. Click to show only LAN, click again to show all. Shift+click adds or removes it."><span class="vlan lan">LAN</span><span class="n">12</span></button>
+      <button class="chip" data-vlan="20" aria-pressed="true" title="VLAN 20 Lab. Click to show only Lab, click again to show all. Shift+click adds or removes it."><span class="vlan lab">Lab</span><span class="n">5</span></button>
+      <button class="chip" data-vlan="30" aria-pressed="true" title="VLAN 30 IoT. Click to show only IoT, click again to show all. Shift+click adds or removes it."><span class="vlan iot">IoT</span><span class="n">6</span></button>
+      <button class="chip" data-vlan="40" aria-pressed="true" title="VLAN 40 DMZ. Click to show only DMZ, click again to show all. Shift+click adds or removes it."><span class="vlan dmz">DMZ</span><span class="n">2</span></button>
+      <span class="divider"></span>
+      <div class="seg" role="group" aria-label="Device types">
+        <button data-type="router" aria-pressed="true" title="Routers" aria-label="Routers"><svg class="i sm" aria-hidden="true"><use href="#i-router"/></svg></button>
+        <button data-type="switch" aria-pressed="true" title="Switches" aria-label="Switches"><svg class="i sm" aria-hidden="true"><use href="#i-cable"/></svg></button>
+        <button data-type="ap" aria-pressed="true" title="Access points" aria-label="Access points"><svg class="i sm" aria-hidden="true"><use href="#i-wifi"/></svg></button>
+        <button data-type="hypervisor" aria-pressed="true" title="Hypervisors" aria-label="Hypervisors"><svg class="i sm" aria-hidden="true"><use href="#i-server"/></svg></button>
+        <button data-type="vm" aria-pressed="true" title="VMs and containers" aria-label="VMs and containers"><svg class="i sm" aria-hidden="true"><use href="#i-vm"/></svg></button>
+        <button data-type="client" aria-pressed="true" title="Clients and other hosts" aria-label="Clients and other hosts"><svg class="i sm" aria-hidden="true"><use href="#i-rdp"/></svg></button>
+      </div>
+      <span class="divider"></span>
+      <label class="switch" title="Show only the selected node and its neighbours"><input type="checkbox" id="focus-sw" role="switch"><span>Focus mode</span><span class="kbd">F</span></label>
+      <div class="right">
+        <div class="seg" role="group" aria-label="Zoom">
+          <button id="z-out" title="Zoom out (-)" aria-label="Zoom out">&minus;</button>
+          <button id="z-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
+          <button id="z-fit" title="Fit to view (0)" aria-label="Fit to view"><svg class="i sm" aria-hidden="true"><use href="#i-expand"/></svg>Fit</button>
+        </div>
+        <span class="zoomval" id="z-val" aria-live="off">100%</span>
+      </div>
+    </div>
+
+    <div class="stage" id="stage">
+      <div class="canvas" id="canvas">
+        <svg class="map" id="map" viewBox="0 0 988 600" role="group" aria-label="Network topology of site Home. Select a node to highlight its path, select a port badge to see what is connected to it.">
+    <!-- Edges first, then nodes, then port badges, so badges stay clickable. Layered positions are stored as CSS transforms; Radial moves the same nodes. -->
+    <g class="edges">
+    <path class="edge uplink" data-id="wan~gw" d="M494,26V76"/>
+    <path class="edge uplink" data-id="gw~sw-core" d="M494,96V164"/>
+    <path class="edge uplink" data-id="sw-core~sw-desk" d="M68,186V264"/>
+    <path class="edge uplink" data-id="sw-core~ap-hall" d="M230,186V264"/>
+    <path class="edge uplink" data-id="sw-core~ap-garage" d="M392,186V264"/>
+    <path class="edge" data-id="sw-core~nas" d="M514,186V264"/>
+    <path class="edge" data-id="sw-core~pve1" d="M636,186V264"/>
+    <path class="edge" data-id="sw-core~hub-zigbee" d="M798,186V264"/>
+    <path class="edge" data-id="sw-core~cam-door" d="M920,186V264"/>
+    <path class="edge" data-id="sw-desk~desk-01" d="M26,286V329Q26,335 32,335H60"/>
+    <path class="edge" data-id="sw-desk~printer-1" d="M26,286V375Q26,381 32,381H60"/>
+    <path class="edge" data-id="sw-desk~lab-ws01" d="M26,286V421Q26,427 32,427H60"/>
+    <path class="edge wifi" data-id="ap-hall~laptop-02" d="M188,286V329Q188,335 194,335H222"/>
+    <path class="edge wifi" data-id="ap-hall~thermostat-1" d="M188,286V375Q188,381 194,381H222"/>
+    <path class="edge wifi" data-id="ap-hall~plug-kitchen" d="M188,286V421Q188,427 194,427H222"/>
+    <path class="edge wifi" data-id="ap-hall~speaker-den" d="M188,286V467Q188,473 194,473H222"/>
+    <path class="edge wifi" data-id="ap-garage~doorbell" d="M392,286V324"/>
+    <path class="edge vmlink" data-id="pve1~ha" d="M594,286V329Q594,335 600,335H628"/>
+    <path class="edge vmlink" data-id="pve1~tenko1" d="M594,286V375Q594,381 600,381H628"/>
+    <path class="edge vmlink" data-id="pve1~web-dmz" d="M594,286V421Q594,427 600,427H628"/>
+    <path class="edge vmlink" data-id="pve1~proxy-dmz" d="M594,286V467Q594,473 600,473H628"/>
+    <path class="edge vmlink" data-id="pve1~lab-dc01" d="M594,286V513Q594,519 600,519H628"/>
+    <path class="edge vmlink" data-id="pve1~lab-k8s" d="M594,286V559Q594,565 600,565H628"/>
+    <path class="edge vmlink off" data-id="pve1~lab-k8s-1" d="M594,286V559Q594,565 600,565H628"/>
+    <path class="edge vmlink off" data-id="pve1~lab-k8s-2" d="M594,286V605Q594,611 600,611H628"/>
+    <path class="edge vmlink off" data-id="pve1~lab-k8s-3" d="M594,286V651Q594,657 600,657H628"/>
+    </g>
+    <g class="nodes">
+    <g class="wan" data-id="wan" style="transform:translate(469px,4px)"><use class="nicon" href="#i-dns" x="0" y="2" width="16" height="16"/><text class="wtx" x="22" y="15">WAN</text></g>
+    <g class="node infra" data-id="gw" data-kind="router" role="button" tabindex="0" aria-pressed="false" aria-label="gw, router, management VLAN 10 LAN, 192.0.2.1" style="transform:translate(440px,66px)">
+      <polygon class="halo" points="12,0 96,0 108,19 96,38 12,38 0,19"/>
+      <polygon class="body" points="12,0 96,0 108,19 96,38 12,38 0,19"/>
+      <use class="nicon" href="#i-router" x="13" y="11" width="16" height="16"/>
+      <text class="nm" x="33" y="16">gw</text>
+      <text class="ip nsub" x="33" y="31">192.0.2.1</text>
+    </g>
+    <g class="node infra" data-id="sw-core" data-kind="switch" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core, switch, management VLAN 10 LAN, 192.0.2.2" style="transform:translate(14px,156px)">
+      <rect class="halo" data-bar width="960" height="38" rx="2"/>
+      <rect class="body" data-bar width="960" height="38" rx="2"/>
+      <use class="nicon" href="#i-cable" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">sw-core</text>
+      <text class="ip nsub" x="28" y="31">192.0.2.2</text>
+      <text class="more nsub" x="102" y="31">UniFi 24-port PoE, 8 of 24 ports in use</text>
+    </g>
+    <g class="node infra" data-id="sw-desk" data-kind="switch" role="button" tabindex="0" aria-pressed="false" aria-label="sw-desk, switch, management VLAN 10 LAN, 192.0.2.3" style="transform:translate(14px,256px)">
+      <rect class="halo" width="108" height="38" rx="2"/>
+      <rect class="body" width="108" height="38" rx="2"/>
+      <use class="nicon" href="#i-cable" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">sw-desk</text>
+      <text class="ip nsub" x="28" y="31">192.0.2.3</text>
+    </g>
+    <g class="node infra" data-id="ap-hall" data-kind="ap" role="button" tabindex="0" aria-pressed="false" aria-label="ap-hall, access point, management VLAN 10 LAN, 192.0.2.4" style="transform:translate(176px,256px)">
+      <rect class="halo" width="108" height="38" rx="19"/>
+      <rect class="body" width="108" height="38" rx="19"/>
+      <use class="nicon" href="#i-wifi" x="12" y="11" width="16" height="16"/>
+      <text class="nm" x="32" y="16">ap-hall</text>
+      <text class="ip nsub" x="32" y="31">192.0.2.4</text>
+    </g>
+    <g class="node infra" data-id="ap-garage" data-kind="ap" role="button" tabindex="0" aria-pressed="false" aria-label="ap-garage, access point, management VLAN 10 LAN, 192.0.2.5" style="transform:translate(338px,256px)">
+      <rect class="halo" width="108" height="38" rx="19"/>
+      <rect class="body" width="108" height="38" rx="19"/>
+      <use class="nicon" href="#i-wifi" x="12" y="11" width="16" height="16"/>
+      <text class="nm" x="32" y="16">ap-garage</text>
+      <text class="ip nsub" x="32" y="31">192.0.2.5</text>
+    </g>
+    <g class="node leaf v-lan" data-id="nas" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="nas, client, VLAN 10 LAN, 192.0.2.11" style="transform:translate(460px,256px)">
+      <rect class="halo" width="108" height="38" rx="8"/>
+      <rect class="body" width="108" height="38" rx="8"/>
+      <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">nas</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">10 LAN</text></g>
+    </g>
+    <g class="node infra" data-id="pve1" data-kind="hypervisor" role="button" tabindex="0" aria-pressed="false" aria-label="pve1, hypervisor, management VLAN 10 LAN, 192.0.2.10" style="transform:translate(582px,256px)">
+      <rect class="stack" x="5" y="5" width="108" height="38" rx="6"/>
+      <rect class="halo" width="108" height="38" rx="6"/>
+      <rect class="body" width="108" height="38" rx="6"/>
+      <use class="nicon" href="#i-server" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">pve1</text>
+      <text class="ip nsub" x="28" y="31">192.0.2.10</text>
+    </g>
+    <g class="node leaf v-iot" data-id="hub-zigbee" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="hub-zigbee, client, VLAN 30 IoT, 198.51.100.20" style="transform:translate(744px,256px)">
+      <rect class="halo" width="108" height="38" rx="8"/>
+      <rect class="body" width="108" height="38" rx="8"/>
+      <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">hub-zigbee</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">30 IoT</text></g>
+    </g>
+    <g class="node leaf v-iot" data-id="cam-door" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="cam-door, client, VLAN 30 IoT, 198.51.100.43" style="transform:translate(866px,256px)">
+      <rect class="halo" width="108" height="38" rx="8"/>
+      <rect class="body" width="108" height="38" rx="8"/>
+      <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">cam-door</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">30 IoT</text></g>
+    </g>
+    <g class="node leaf v-lan" data-id="desk-01" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="desk-01, client, VLAN 10 LAN, 192.0.2.20" style="transform:translate(54px,316px)">
+      <rect class="halo" width="108" height="38" rx="8"/>
+      <rect class="body" width="108" height="38" rx="8"/>
+      <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">desk-01</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">10 LAN</text></g>
+    </g>
+    <g class="node leaf v-lan" data-id="printer-1" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="printer-1, client, VLAN 10 LAN, 192.0.2.30" style="transform:translate(54px,362px)">
+      <rect class="halo" width="108" height="38" rx="8"/>
+      <rect class="body" width="108" height="38" rx="8"/>
+      <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">printer-1</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">10 LAN</text></g>
+    </g>
+    <g class="node leaf v-lab" data-id="lab-ws01" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="lab-ws01, client, VLAN 20 Lab, 203.0.113.21" style="transform:translate(54px,408px)">
+      <rect class="halo" width="108" height="38" rx="8"/>
+      <rect class="body" width="108" height="38" rx="8"/>
+      <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">lab-ws01</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">20 Lab</text></g>
+    </g>
+    <g class="node leaf v-lan" data-id="laptop-02" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="laptop-02, client, VLAN 10 LAN, 192.0.2.21" style="transform:translate(216px,316px)">
+      <rect class="halo" width="108" height="38" rx="8"/>
+      <rect class="body" width="108" height="38" rx="8"/>
+      <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">laptop-02</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">10 LAN</text></g>
+    </g>
+    <g class="node leaf v-iot" data-id="thermostat-1" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="thermostat-1, client, VLAN 30 IoT, 198.51.100.41" style="transform:translate(216px,362px)">
+      <rect class="halo" width="108" height="38" rx="8"/>
+      <rect class="body" width="108" height="38" rx="8"/>
+      <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">thermostat-1</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">30 IoT</text></g>
+    </g>
+    <g class="node leaf v-iot" data-id="plug-kitchen" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="plug-kitchen, client, VLAN 30 IoT, 198.51.100.42" style="transform:translate(216px,408px)">
+      <rect class="halo" width="108" height="38" rx="8"/>
+      <rect class="body" width="108" height="38" rx="8"/>
+      <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">plug-kitchen</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">30 IoT</text></g>
+    </g>
+    <g class="node leaf v-iot" data-id="speaker-den" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="speaker-den, client, VLAN 30 IoT, 198.51.100.45" style="transform:translate(216px,454px)">
+      <rect class="halo" width="108" height="38" rx="8"/>
+      <rect class="body" width="108" height="38" rx="8"/>
+      <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">speaker-den</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">30 IoT</text></g>
+    </g>
+    <g class="node leaf v-iot" data-id="doorbell" data-kind="client" role="button" tabindex="0" aria-pressed="false" aria-label="doorbell, client, VLAN 30 IoT, 198.51.100.60" style="transform:translate(338px,316px)">
+      <rect class="halo" width="108" height="38" rx="8"/>
+      <rect class="body" width="108" height="38" rx="8"/>
+      <use class="nicon" href="#i-rdp" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">doorbell</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">30 IoT</text></g>
+    </g>
+    <g class="node leaf v-lan" data-id="ha" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="ha, VM, VLAN 10 LAN, 192.0.2.12" style="transform:translate(622px,316px)">
+      <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">ha</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">10 LAN</text></g>
+    </g>
+    <g class="node leaf v-lan" data-id="tenko1" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="tenko1, VM, VLAN 10 LAN, 192.0.2.13" style="transform:translate(622px,362px)">
+      <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">tenko1</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">10 LAN</text></g>
+    </g>
+    <g class="node leaf v-dmz" data-id="web-dmz" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="web-dmz, VM, VLAN 40 DMZ, 203.0.113.140" style="transform:translate(622px,408px)">
+      <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">web-dmz</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">40 DMZ</text></g>
+    </g>
+    <g class="node leaf v-dmz" data-id="proxy-dmz" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="proxy-dmz, VM, VLAN 40 DMZ, 203.0.113.141" style="transform:translate(622px,454px)">
+      <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">proxy-dmz</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">40 DMZ</text></g>
+    </g>
+    <g class="node leaf v-lab" data-id="lab-dc01" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="lab-dc01, VM, VLAN 20 Lab, 203.0.113.10" style="transform:translate(622px,500px)">
+      <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">lab-dc01</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">20 Lab</text></g>
+    </g>
+    <g class="node leaf v-lab" data-id="lab-k8s" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="lab-k8s ×3, VM, VLAN 20 Lab, 203.0.113.31 to 203.0.113.33" style="transform:translate(622px,546px)">
+      <polygon class="stack" points="16,8 116,8 116,38 108,46 8,46 8,16"/>
+      <polygon class="stack" points="12,4 112,4 112,34 104,42 4,42 4,12"/>
+      <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">lab-k8s ×3</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">20 Lab</text></g>
+    </g>
+    <g class="node leaf v-lab off" data-id="lab-k8s-1" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="lab-k8s-1, VM, VLAN 20 Lab, 203.0.113.31" style="transform:translate(622px,546px)">
+      <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">lab-k8s-1</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">20 Lab</text></g>
+    </g>
+    <g class="node leaf v-lab off" data-id="lab-k8s-2" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="lab-k8s-2, VM, VLAN 20 Lab, 203.0.113.32" style="transform:translate(622px,592px)">
+      <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">lab-k8s-2</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">20 Lab</text></g>
+    </g>
+    <g class="node leaf v-lab off" data-id="lab-k8s-3" data-kind="vm" role="button" tabindex="0" aria-pressed="false" aria-label="lab-k8s-3, VM, VLAN 20 Lab, 203.0.113.33" style="transform:translate(622px,638px)">
+      <polygon class="halo" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <polygon class="body" points="8,0 108,0 108,30 100,38 0,38 0,8"/>
+      <use class="nicon" href="#i-vm" x="9" y="11" width="16" height="16"/>
+      <text class="nm" x="28" y="16">lab-k8s-3</text>
+      <g class="nsub"><rect class="vsw" x="28" y="23" width="8" height="8" rx="2"/><text class="vt" x="40" y="31">20 Lab</text></g>
+    </g>
+    </g>
+    <g class="ports">
+    <g class="port" data-sw="sw-core" data-port="1" data-pl="494,141" transform="translate(494 141)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 1, gw"><title>sw-core port 1, gw</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">1</text></g>
+    <g class="port" data-sw="sw-core" data-port="3" data-pl="68,208" transform="translate(68 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 3, sw-desk"><title>sw-core port 3, sw-desk</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">3</text></g>
+    <g class="port" data-sw="sw-core" data-port="4" data-pl="230,208" transform="translate(230 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 4, ap-hall"><title>sw-core port 4, ap-hall</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">4</text></g>
+    <g class="port" data-sw="sw-core" data-port="5" data-pl="392,208" transform="translate(392 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 5, ap-garage"><title>sw-core port 5, ap-garage</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">5</text></g>
+    <g class="port" data-sw="sw-core" data-port="6" data-pl="514,208" transform="translate(514 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 6, nas"><title>sw-core port 6, nas</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">6</text></g>
+    <g class="port" data-sw="sw-core" data-port="8" data-pl="636,208" transform="translate(636 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 8, pve1"><title>sw-core port 8, pve1</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">8</text></g>
+    <g class="port" data-sw="sw-core" data-port="12" data-pl="798,208" transform="translate(798 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 12, hub-zigbee"><title>sw-core port 12, hub-zigbee</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">12</text></g>
+    <g class="port" data-sw="sw-core" data-port="14" data-pl="920,208" transform="translate(920 208)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-core port 14, cam-door"><title>sw-core port 14, cam-door</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">14</text></g>
+    <g class="port" data-sw="sw-desk" data-port="2" data-pl="41,335" transform="translate(41 335)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-desk port 2, desk-01"><title>sw-desk port 2, desk-01</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">2</text></g>
+    <g class="port" data-sw="sw-desk" data-port="5" data-pl="41,381" transform="translate(41 381)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-desk port 5, printer-1"><title>sw-desk port 5, printer-1</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">5</text></g>
+    <g class="port" data-sw="sw-desk" data-port="7" data-pl="41,427" transform="translate(41 427)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-desk port 7, lab-ws01"><title>sw-desk port 7, lab-ws01</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">7</text></g>
+    </g>
+        </svg>
+
+        <details class="legend" open>
+          <summary><svg class="i xs" aria-hidden="true"><use href="#i-chev-r"/></svg>Legend</summary>
+          <div class="rows">
+            <div class="lg-row"><span class="lg-h">Nodes</span>
+              <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><polygon class="lgs" points="3.5,1 18.5,1 21,7 18.5,13 3.5,13 1,7"/></svg>Router</span>
+              <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><rect class="lgs" x="1" y="2" width="20" height="10" rx="1"/></svg>Switch</span>
+              <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><rect class="lgs" x="1" y="2" width="20" height="10" rx="5"/></svg>AP</span>
+              <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><rect class="lgs" x="4" y="3.5" width="17" height="10" rx="3"/><rect class="lgs" x="1" y="0.5" width="17" height="10" rx="3"/></svg>Hypervisor</span>
+              <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><polygon class="lgs" points="4,2 21,2 21,9.5 18,12 1,12 1,5"/></svg>VM</span>
+              <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><rect class="lgs" x="1" y="2" width="20" height="10" rx="3.5"/></svg>Client</span>
+            </div>
+            <div class="lg-row"><span class="lg-h">Links</span>
+              <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><path class="edge" d="M1 7H21"/></svg>Wired port</span>
+              <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><path class="edge uplink" d="M1 7H21"/></svg>Uplink</span>
+              <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><path class="edge wifi" d="M1 7H21"/></svg>Wireless</span>
+              <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><path class="edge vmlink" d="M1 7H21"/></svg>VM to host</span>
+            </div>
+            <div class="lg-row"><span class="lg-h">VLAN</span>
+              <span class="lg-item"><span class="vlan lan"><span class="id">10</span> LAN</span></span>
+              <span class="lg-item"><span class="vlan lab"><span class="id">20</span> Lab</span></span>
+              <span class="lg-item"><span class="vlan iot"><span class="id">30</span> IoT</span></span>
+              <span class="lg-item"><span class="vlan dmz"><span class="id">40</span> DMZ</span></span>
+              <span class="lg-item muted">Switches and routers are neutral: they carry several VLANs</span>
+            </div>
+          </div>
+        </details>
+
+        <div class="map-note" id="map-note" role="status" hidden>
+          <span id="map-note-text"></span>
+          <button class="btn sm ghost" id="clear-filters">Clear filters</button>
+        </div>
+
+        <div class="actionbar" id="actionbar" role="toolbar" aria-label="Selected node" hidden>
+          <span class="count"><span id="ab-name"></span><span class="addr" id="ab-ip"></span></span>
+          <a class="btn sm primary" id="ab-open" href="host.html"><svg class="i sm" aria-hidden="true"><use href="#i-ext"/></svg>Open host<span class="kbd">Shift</span><span class="kbd">Enter</span></a>
+          <button class="chip" id="ab-path" aria-pressed="false" title="Highlight the path to the gateway">Path to gw<span class="kbd">P</span></button>
+          <button class="chip" id="ab-focus" aria-pressed="false" title="Show only this node and its neighbours">Focus<span class="kbd">F</span></button>
+          <span class="seg" id="ab-hops" role="group" aria-label="Neighbour distance" hidden><button data-hops="1" aria-pressed="false">1 hop</button><button data-hops="2" aria-pressed="true">2 hops</button></span>
+          <button class="btn sm ghost" id="ab-port" hidden></button>
+          <button class="btn sm ghost" id="ab-expand" hidden></button>
+          <span class="sep"></span>
+          <button class="icon-btn" id="ab-clear" title="Clear selection (Esc)" aria-label="Clear selection"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+        </div>
+
+        <div class="hovercard" id="hovercard" role="tooltip" hidden></div>
+      </div>
+
+      <aside class="panel" id="panel" aria-label="What is connected to this port" hidden>
+        <div class="panel-head">
+          <div>
+            <h2 id="panel-title">What is connected to this port</h2>
+            <div class="meta" id="panel-meta"></div>
+          </div>
+          <div class="acts">
+            <button class="icon-btn" id="panel-close" title="Close (Esc)" aria-label="Close panel"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+          </div>
+        </div>
+        <div class="panel-body" id="panel-body"></div>
+      </aside>
+    </div>
+  </main>
+
+  <footer class="statusbar">
+    <span title="Live updates over SSE"><span class="dot live"></span>Live</span>
+    <span>Last event <strong class="num" id="last-event">0.4 s</strong> ago</span>
+    <a href="move-job.html" style="display:flex;align-items:center;gap:6px;color:inherit;text-decoration:none;padding:0 var(--sp-5);border-right:1px solid var(--line)"><span class="jstate running" style="--p:60%">1 running</span><span class="jstate waiting">1 waiting</span></a>
+    <span id="map-status">25 of 25 devices shown</span>
+    <span class="grow"></span>
+    <span>Phase 1 build</span>
+    <div class="scenes" role="group" aria-label="Mockup scene">
+      Mockup scene
+      <div class="seg">
+        <button data-scene="hover" aria-pressed="true">Hover and port panel</button>
+        <button data-scene="path" aria-pressed="false">Path highlight</button>
+        <button data-scene="iot" aria-pressed="false">Filtered: IoT only</button>
+      </div>
+    </div>
+    <button data-action="notes" aria-expanded="false" aria-controls="notes">Mockup notes</button>
+  </footer>
+</div>
+
+<aside class="notes" id="notes" aria-label="Mockup notes">
+  <h2>Mockup notes: topology <button class="icon-btn" data-action="notes" aria-label="Close notes"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></h2>
+  <p class="sub">Try it: hover a node, click a port badge (14 or 1), click desk-01 and press <span class="kbd">P</span>, click a VLAN chip to show only that VLAN (Shift+click adds or removes one), type "port 14" in the search, switch the layout to Radial, zoom out below 75 % and click the lab-k8s node. The three scenes in the status bar jump to the interesting states.</p>
+  <ol>
+    <li>Layered is the default because a home or branch network is a tree. Real sites add redundant links and aggregation, which a strict tree hides. Keep Layered as the default and offer Radial only as an overview, or default to whichever fits the data?</li>
+    <li>Routers, switches and APs are drawn neutral because they carry several VLANs, and only clients and VMs take a VLAN color. Is that right, or should a switch show a small stack of VLAN swatches for what its trunk carries?</li>
+    <li>Filters dim, they do not hide, so positions never move. At a few hundred nodes dimmed clutter becomes noise. Dim up to a limit and then hide automatically, or let the user choose?</li>
+    <li>Path highlight always ends at the gateway. Should it also work between any two nodes (Shift+click a second node), for questions like "how does lab-ws01 reach web-dmz"?</li>
+    <li>Port numbers sit on every wired edge. Always visible helps the "which port is that" question but adds noise. Show them always, only on hover and selection, or only above a zoom level?</li>
+    <li>The port panel is read only and links to the job that last changed the port. Should it also offer "change port profile", or must every L2 change go through the move preview?</li>
+    <li>Click selects and the bar offers Open host (<span class="kbd">Shift</span><span class="kbd">Enter</span>). Would you rather double-click to open the host and keep single click for select only? Clicking a switch opens its port list automatically; is that too eager?</li>
+    <li>Wireless edges are dotted and carry no label. Do you want band and signal strength on the edge, or only in the hover card?</li>
+  </ol>
+  <h3 style="font-size:var(--fs-13);color:var(--ink);margin:var(--sp-5) 0 0">How it scales to thousands of nodes</h3>
+  <p class="sub" style="margin-top:var(--sp-2)">This page is a static SVG of 23 nodes, for review only. The product behavior is below; the controls on this page are the same ones the product keeps.</p>
+  <ul>
+    <li><strong>Clustering.</strong> A switch's clients collapse into a count bubble such as "24 clients" and expand on click. The lab-k8s node shows the pattern (select it, then Expand).</li>
+    <li><strong>Search first.</strong> Type a host, IP, MAC or port, press <span class="kbd">Enter</span> to jump to the node, then show N hops around it. Nothing needs the whole map on screen.</li>
+    <li><strong>Focus mode.</strong> The selected node plus 1 to 2 hops, everything else removed and the view refitted. This is the default way to read a large site.</li>
+    <li><strong>Level of detail.</strong> Labels only above a zoom threshold (zoom out below 75 % and below 50 % to see it). VLAN colors are used for at most three VLANs in focus; any further VLAN is neutral with a dashed outline and always carries its label.</li>
+    <li><strong>Rendering.</strong> WebGL with sigma.js and graphology, and an ELK layered layout, chosen in the phase 1 spike. Plain SVG gets sluggish in the low thousands of elements and WebGL stays smooth well beyond that, so the spike decides by measuring.</li>
+    <li><strong>Position memory.</strong> Layout is computed once, then positions are stored per user and site, so the map does not reshuffle between visits. New nodes are placed next to their neighbours, and "Reset layout" is the only thing that recomputes.</li>
+  </ul>
+</aside>
+
+<div class="toasts" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  'use strict';
+  var DATA = {
+    vbw: 988,
+    nodes: {
+    "wan": {"id":"wan","type":"wan","name":"WAN","dom":"","ip":"","mac":"","model":"","via":"","parent":null,"kids":["gw"],"pos":{"l":[469,4],"r":[-25,-308]},"w":{"l":52,"r":52}},
+    "gw": {"id":"gw","type":"router","name":"gw","dom":".example.test","ip":"192.0.2.1","mac":"00-00-5E-00-53-01","vlan":"10","mode":"static","seen":"now","model":"OPNsense router","via":"WAN on port wan1, LAN on sw-core port 1","parent":"wan","kids":["sw-core"],"edge":"uplink","pos":{"l":[440,66],"r":[-54,-189]},"w":{"l":108,"r":108}},
+    "sw-core": {"id":"sw-core","type":"switch","name":"sw-core","dom":".example.test","ip":"192.0.2.2","mac":"00-00-5E-00-53-02","vlan":"10","mode":"static","seen":"4 s","model":"UniFi 24-port PoE switch","via":"Uplink to gw on port 1","parent":"gw","kids":["sw-desk","ap-hall","ap-garage","nas","pve1","hub-zigbee","cam-door"],"edge":"uplink","port":1,"pk":"sw-core:1","pos":{"l":[14,156],"r":[-54,-19]},"w":{"l":960,"r":108}},
+    "sw-desk": {"id":"sw-desk","type":"switch","name":"sw-desk","dom":".example.test","ip":"192.0.2.3","mac":"00-00-5E-00-53-03","vlan":"10","mode":"static","seen":"2 s","model":"UniFi 8-port switch","via":"Uplink via sw-core port 3","parent":"sw-core","kids":["desk-01","printer-1","lab-ws01"],"edge":"uplink","port":3,"pk":"sw-core:3","pos":{"l":[14,256],"r":[-332.2,-38]},"w":{"l":108,"r":108}},
+    "ap-hall": {"id":"ap-hall","type":"ap","name":"ap-hall","dom":".example.test","ip":"192.0.2.4","mac":"00-00-5E-00-53-04","vlan":"10","mode":"reserved","seen":"1 s","model":"UniFi access point","via":"Connected via sw-core port 4, uplink, PoE 7.8 W","parent":"sw-core","kids":["laptop-02","thermostat-1","plug-kitchen","speaker-den"],"edge":"uplink","port":4,"pk":"sw-core:4","pos":{"l":[176,256],"r":[-146.5,141.5]},"w":{"l":108,"r":108}},
+    "ap-garage": {"id":"ap-garage","type":"ap","name":"ap-garage","dom":".example.test","ip":"192.0.2.5","mac":"00-00-5E-00-53-05","vlan":"10","mode":"reserved","seen":"1 s","model":"UniFi access point","via":"Connected via sw-core port 5, uplink, PoE 7.2 W","parent":"sw-core","kids":["doorbell"],"edge":"uplink","port":5,"pk":"sw-core:5","pos":{"l":[338,256],"r":[-272.9,-125]},"w":{"l":108,"r":108}},
+    "nas": {"id":"nas","type":"client","name":"nas","dom":".example.test","ip":"192.0.2.11","mac":"00-00-5E-00-53-0B","vlan":"10","mode":"static","seen":"12 s","model":"Network storage","via":"Connected via sw-core port 6, 1 Gb/s","parent":"sw-core","kids":[],"edge":"wired","port":6,"pk":"sw-core:6","pos":{"l":[460,256],"r":[-306.3,54.8]},"w":{"l":108,"r":108}},
+    "pve1": {"id":"pve1","type":"hypervisor","name":"pve1","dom":".example.test","ip":"192.0.2.10","mac":"00-00-5E-00-53-0A","vlan":"10","mode":"static","seen":"now","model":"Proxmox VE host","via":"Connected via sw-core port 8, trunk VLAN 10, 20 and 40","parent":"sw-core","kids":["ha","tenko1","web-dmz","proxy-dmz","lab-dc01","lab-k8s","lab-k8s-1","lab-k8s-2","lab-k8s-3"],"edge":"wired","port":8,"pk":"sw-core:8","pos":{"l":[582,256],"r":[219,-56.8]},"w":{"l":108,"r":108}},
+    "hub-zigbee": {"id":"hub-zigbee","type":"client","name":"hub-zigbee","dom":".iot.example.test","ip":"198.51.100.20","mac":"00-00-5E-00-53-28","vlan":"30","mode":"static","seen":"3 s","model":"Zigbee hub","via":"Connected via sw-core port 12, 100 Mb/s","parent":"sw-core","kids":[],"edge":"wired","port":12,"pk":"sw-core:12","pos":{"l":[744,256],"r":[-175.5,-172.2]},"w":{"l":108,"r":108}},
+    "cam-door": {"id":"cam-door","type":"client","name":"cam-door","dom":".iot.example.test","ip":"198.51.100.43","mac":"00-00-5E-00-53-2B","vlan":"30","mode":"reserved","seen":"2 s","model":"IP camera","via":"Connected via sw-core port 14, PoE 6.1 W","parent":"sw-core","kids":[],"edge":"wired","port":14,"pk":"sw-core:14","pos":{"l":[866,256],"r":[67.5,134.2]},"w":{"l":108,"r":108}},
+    "desk-01": {"id":"desk-01","type":"client","name":"desk-01","dom":".example.test","ip":"192.0.2.20","mac":"00-00-5E-00-53-14","vlan":"10","mode":"reserved","seen":"now","model":"Workstation","via":"Connected via sw-desk port 2, 1 Gb/s","parent":"sw-desk","kids":[],"edge":"wired","port":2,"pk":"sw-desk:2","pos":{"l":[54,316],"r":[-531,14.6]},"w":{"l":108,"r":108}},
+    "printer-1": {"id":"printer-1","type":"client","name":"printer-1","dom":".example.test","ip":"192.0.2.30","mac":"00-00-5E-00-53-1E","vlan":"10","mode":"static","seen":"40 s","model":"Network printer","via":"Connected via sw-desk port 5, 100 Mb/s","parent":"sw-desk","kids":[],"edge":"wired","port":5,"pk":"sw-desk:5","pos":{"l":[54,362],"r":[-531,-52.6]},"w":{"l":108,"r":108}},
+    "lab-ws01": {"id":"lab-ws01","type":"client","name":"lab-ws01","dom":".lab.example.test","ip":"203.0.113.21","mac":"00-00-5E-00-53-54","vlan":"20","mode":"dynamic","seen":"9 s","model":"Workstation","via":"Connected via sw-desk port 7, 1 Gb/s","parent":"sw-desk","kids":[],"edge":"wired","port":7,"pk":"sw-desk:7","pos":{"l":[54,408],"r":[-507.1,-118.1]},"w":{"l":108,"r":108}},
+    "laptop-02": {"id":"laptop-02","type":"client","name":"laptop-02","dom":".example.test","ip":"192.0.2.21","mac":"00-00-5E-00-53-15","vlan":"10","mode":"dynamic","seen":"6 min","model":"Laptop","via":"Wireless on ap-hall, 5 GHz, -56 dBm","parent":"ap-hall","kids":[],"edge":"wifi","pos":{"l":[216,316],"r":[-13.7,279.9]},"w":{"l":108,"r":108}},
+    "thermostat-1": {"id":"thermostat-1","type":"client","name":"thermostat-1","dom":".iot.example.test","ip":"198.51.100.41","mac":"00-00-5E-00-53-29","vlan":"30","mode":"reserved","seen":"8 s","model":"Thermostat","via":"Wireless on ap-hall, 2.4 GHz, -61 dBm","parent":"ap-hall","kids":[],"edge":"wifi","pos":{"l":[216,362],"r":[-147.6,275.2]},"w":{"l":108,"r":108}},
+    "plug-kitchen": {"id":"plug-kitchen","type":"client","name":"plug-kitchen","dom":".iot.example.test","ip":"198.51.100.42","mac":"00-00-5E-00-53-2A","vlan":"30","mode":"reserved","seen":"31 s","model":"Smart plug","via":"Wireless on ap-hall, 2.4 GHz, -67 dBm","parent":"ap-hall","kids":[],"edge":"wifi","pos":{"l":[216,408],"r":[-274.3,247.5]},"w":{"l":108,"r":108}},
+    "speaker-den": {"id":"speaker-den","type":"client","name":"speaker-den","dom":".iot.example.test","ip":"198.51.100.45","mac":"00-00-5E-00-53-2C","vlan":"30","mode":"reserved","seen":"5 s","model":"Speaker","via":"Wireless on ap-hall, 5 GHz, -58 dBm","parent":"ap-hall","kids":[],"edge":"wifi","pos":{"l":[216,454],"r":[-383.8,199]},"w":{"l":108,"r":108}},
+    "doorbell": {"id":"doorbell","type":"client","name":"doorbell","dom":".iot.example.test","ip":"198.51.100.60","mac":"00-00-5E-00-53-3C","vlan":"30","mode":"reserved","seen":"14 s","model":"Video doorbell","via":"Wireless on ap-garage, 2.4 GHz, -63 dBm","parent":"ap-garage","kids":[],"edge":"wifi","pos":{"l":[338,316],"r":[-429.3,-206]},"w":{"l":108,"r":108}},
+    "ha": {"id":"ha","type":"vm","name":"ha","dom":".example.test","ip":"192.0.2.12","mac":"00-00-5E-00-53-0C","vlan":"10","mode":"reserved","seen":"3 s","model":"Home automation hub, VM","via":"Runs on pve1, bridge vmbr0","parent":"pve1","kids":[],"edge":"vmlink","pos":{"l":[622,316],"r":[117.2,-299.3]},"w":{"l":108,"r":108}},
+    "tenko1": {"id":"tenko1","type":"vm","name":"tenko1","dom":".example.test","ip":"192.0.2.13","mac":"00-00-5E-00-53-0D","vlan":"10","mode":"static","seen":"now","model":"Tenko controller, LXC container","via":"Runs on pve1, bridge vmbr0","parent":"pve1","kids":[],"edge":"vmlink","pos":{"l":[622,362],"r":[234.6,-258.7]},"w":{"l":108,"r":108}},
+    "web-dmz": {"id":"web-dmz","type":"vm","name":"web-dmz","dom":".dmz.example.test","ip":"203.0.113.140","mac":"00-00-5E-00-53-60","vlan":"40","mode":"static","seen":"5 s","model":"Web server, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 40","parent":"pve1","kids":[],"edge":"vmlink","pos":{"l":[622,408],"r":[329.5,-199.4]},"w":{"l":108,"r":108}},
+    "proxy-dmz": {"id":"proxy-dmz","type":"vm","name":"proxy-dmz","dom":".dmz.example.test","ip":"203.0.113.141","mac":"00-00-5E-00-53-61","vlan":"40","mode":"static","seen":"5 s","model":"Reverse proxy, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 40","parent":"pve1","kids":[],"edge":"vmlink","pos":{"l":[622,454],"r":[394.4,-126]},"w":{"l":108,"r":108}},
+    "lab-dc01": {"id":"lab-dc01","type":"vm","name":"lab-dc01","dom":".lab.example.test","ip":"203.0.113.10","mac":"00-00-5E-00-53-50","vlan":"20","mode":"static","seen":"2 s","model":"Domain controller, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 20","parent":"pve1","kids":[],"edge":"vmlink","pos":{"l":[622,500],"r":[424.3,-44.2]},"w":{"l":108,"r":108}},
+    "lab-k8s": {"id":"lab-k8s","type":"vm","name":"lab-k8s","dom":".lab.example.test","ip":"203.0.113.31","mac":"00-00-5E-00-53-51","vlan":"20","mode":"static","seen":"2 s","model":"Kubernetes nodes, 3 VMs","via":"Runs on pve1, bridge vmbr0, VLAN tag 20","parent":"pve1","kids":[],"edge":"vmlink","group":true,"memberIds":["lab-k8s-1","lab-k8s-2","lab-k8s-3"],"count":3,"pos":{"l":[622,546],"r":[372.5,118.7]},"w":{"l":108,"r":108}},
+    "lab-k8s-1": {"id":"lab-k8s-1","type":"vm","name":"lab-k8s-1","dom":".lab.example.test","ip":"203.0.113.31","mac":"00-00-5E-00-53-51","vlan":"20","mode":"static","seen":"2 s","model":"Kubernetes node, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 20","parent":"pve1","kids":[],"edge":"vmlink","member":true,"pos":{"l":[622,546],"r":[416.8,39.5]},"w":{"l":108,"r":108}},
+    "lab-k8s-2": {"id":"lab-k8s-2","type":"vm","name":"lab-k8s-2","dom":".lab.example.test","ip":"203.0.113.32","mac":"00-00-5E-00-53-52","vlan":"20","mode":"static","seen":"3 s","model":"Kubernetes node, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 20","parent":"pve1","kids":[],"edge":"vmlink","member":true,"pos":{"l":[622,592],"r":[372.5,118.7]},"w":{"l":108,"r":108}},
+    "lab-k8s-3": {"id":"lab-k8s-3","type":"vm","name":"lab-k8s-3","dom":".lab.example.test","ip":"203.0.113.33","mac":"00-00-5E-00-53-53","vlan":"20","mode":"static","seen":"2 s","model":"Kubernetes node, VM","via":"Runs on pve1, bridge vmbr0, VLAN tag 20","parent":"pve1","kids":[],"edge":"vmlink","member":true,"pos":{"l":[622,638],"r":[294.8,187.1]},"w":{"l":108,"r":108}}
+    },
+    edges: [{"id":"wan~gw","from":"wan","to":"gw"},{"id":"gw~sw-core","from":"gw","to":"sw-core","sw":"sw-core","port":1},{"id":"sw-core~sw-desk","from":"sw-core","to":"sw-desk","sw":"sw-core","port":3},{"id":"sw-core~ap-hall","from":"sw-core","to":"ap-hall","sw":"sw-core","port":4},{"id":"sw-core~ap-garage","from":"sw-core","to":"ap-garage","sw":"sw-core","port":5},{"id":"sw-core~nas","from":"sw-core","to":"nas","sw":"sw-core","port":6},{"id":"sw-core~pve1","from":"sw-core","to":"pve1","sw":"sw-core","port":8},{"id":"sw-core~hub-zigbee","from":"sw-core","to":"hub-zigbee","sw":"sw-core","port":12},{"id":"sw-core~cam-door","from":"sw-core","to":"cam-door","sw":"sw-core","port":14},{"id":"sw-desk~desk-01","from":"sw-desk","to":"desk-01","sw":"sw-desk","port":2},{"id":"sw-desk~printer-1","from":"sw-desk","to":"printer-1","sw":"sw-desk","port":5},{"id":"sw-desk~lab-ws01","from":"sw-desk","to":"lab-ws01","sw":"sw-desk","port":7},{"id":"ap-hall~laptop-02","from":"ap-hall","to":"laptop-02"},{"id":"ap-hall~thermostat-1","from":"ap-hall","to":"thermostat-1"},{"id":"ap-hall~plug-kitchen","from":"ap-hall","to":"plug-kitchen"},{"id":"ap-hall~speaker-den","from":"ap-hall","to":"speaker-den"},{"id":"ap-garage~doorbell","from":"ap-garage","to":"doorbell"},{"id":"pve1~ha","from":"pve1","to":"ha"},{"id":"pve1~tenko1","from":"pve1","to":"tenko1"},{"id":"pve1~web-dmz","from":"pve1","to":"web-dmz"},{"id":"pve1~proxy-dmz","from":"pve1","to":"proxy-dmz"},{"id":"pve1~lab-dc01","from":"pve1","to":"lab-dc01"},{"id":"pve1~lab-k8s","from":"pve1","to":"lab-k8s"},{"id":"pve1~lab-k8s-1","from":"pve1","to":"lab-k8s-1"},{"id":"pve1~lab-k8s-2","from":"pve1","to":"lab-k8s-2"},{"id":"pve1~lab-k8s-3","from":"pve1","to":"lab-k8s-3"}]
+  };
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+
+  var NODE = DATA.nodes, EDGES = DATA.edges;
+  var VL = { '10': { key: 'lan', name: 'LAN' }, '20': { key: 'lab', name: 'Lab' }, '30': { key: 'iot', name: 'IoT' }, '40': { key: 'dmz', name: 'DMZ' } };
+  var TYPE_ICON = { router: 'router', switch: 'cable', ap: 'wifi', hypervisor: 'server', vm: 'vm', client: 'rdp' };
+  var TYPE_NAME = { router: 'Router', switch: 'Switch', ap: 'Access point', hypervisor: 'Hypervisor', vm: 'VM', client: 'Client' };
+  var NODE_H = 38;
+
+  /* What is connected to each port that has a badge, plus the uplink ports of the downstream switches. */
+  var GUARD = 'Guardrail: moves never change this port.';
+  var PORTS = {
+    'sw-core:1': { sw: 'sw-core', port: 1, peer: 'gw', mode: 'Trunk, native VLAN 10, VLANs 20, 30 and 40 tagged', link: '2.5 Gb/s full duplex', guard: 'Uplink to gw. ' + GUARD, change: 'No change by Tenko. Set in UniFi 5 months ago.' },
+    'sw-core:3': { sw: 'sw-core', port: 3, peer: 'sw-desk', mode: 'Trunk, native VLAN 10, VLANs 20 and 30 tagged', link: '1 Gb/s full duplex', guard: 'Uplink to sw-desk. ' + GUARD, change: 'No change by Tenko. Set in UniFi 5 months ago.' },
+    'sw-core:4': { sw: 'sw-core', port: 4, peer: 'ap-hall', mode: 'Trunk, native VLAN 10, VLAN 30 tagged for the IoT network', link: '1 Gb/s full duplex', poe: [7.8, 15.4], guard: 'Access point uplink. ' + GUARD, change: 'No change by Tenko. Set in UniFi 5 months ago.' },
+    'sw-core:5': { sw: 'sw-core', port: 5, peer: 'ap-garage', mode: 'Trunk, native VLAN 10, VLAN 30 tagged for the IoT network', link: '1 Gb/s full duplex', poe: [7.2, 15.4], guard: 'Access point uplink. ' + GUARD, change: 'No change by Tenko. Set in UniFi 5 months ago.' },
+    'sw-core:6': { sw: 'sw-core', port: 6, peer: 'nas', access: '10', profile: 'LAN', link: '1 Gb/s full duplex', change: 'No change by Tenko. Set in UniFi 5 months ago.' },
+    'sw-core:8': { sw: 'sw-core', port: 8, peer: 'pve1', mode: 'Trunk, native VLAN 10, VLANs 20 and 40 tagged', link: '1 Gb/s full duplex', guard: 'Hypervisor trunk. ' + GUARD, change: 'No change by Tenko. Set in UniFi 5 months ago.' },
+    'sw-core:12': { sw: 'sw-core', port: 12, peer: 'hub-zigbee', access: '30', profile: 'IoT', link: '100 Mb/s full duplex', change: 'Port profile set to IoT in UniFi 3 months ago.' },
+    'sw-core:14': { sw: 'sw-core', port: 14, peer: 'cam-door', access: '30', before: '10', profile: 'IoT', profileBefore: 'LAN', link: '100 Mb/s full duplex', poe: [6.1, 15.4], job: '221', changeWhen: '4 min ago', change: 'Port profile changed from LAN to IoT by {job}, move 3 hosts to IoT.' },
+    'sw-desk:1': { sw: 'sw-desk', port: 1, peer: 'sw-core', mode: 'Trunk, native VLAN 10, VLANs 20 and 30 tagged', link: '1 Gb/s full duplex', guard: 'Uplink to sw-core port 3. ' + GUARD, change: 'No change by Tenko. Set in UniFi 5 months ago.' },
+    'sw-desk:2': { sw: 'sw-desk', port: 2, peer: 'desk-01', access: '10', profile: 'LAN', link: '1 Gb/s full duplex', change: 'No change by Tenko. Set in UniFi 5 months ago.' },
+    'sw-desk:5': { sw: 'sw-desk', port: 5, peer: 'printer-1', access: '10', profile: 'LAN', link: '100 Mb/s full duplex', change: 'No change by Tenko. Set in UniFi 5 months ago.' },
+    'sw-desk:7': { sw: 'sw-desk', port: 7, peer: 'lab-ws01', access: '20', profile: 'Lab', link: '1 Gb/s full duplex', change: 'Port profile set to Lab in UniFi 2 months ago.' }
+  };
+  var PORT_COUNT = { 'sw-core': 24, 'sw-desk': 8 };
+
+  /* ---------- Small formatters ---------- */
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function ic(name, cls) { return '<svg class="i ' + (cls || '') + '" aria-hidden="true"><use href="#i-' + name + '"/></svg>'; }
+  function addrHtml(ip) { var i = ip.lastIndexOf('.'); return '<span class="addr"><span class="net">' + ip.slice(0, i + 1) + '</span><span class="host">' + ip.slice(i + 1) + '</span></span>'; }
+  function vlanHtml(id) { var v = VL[id]; return '<span class="vlan ' + v.key + '"><span class="id">' + id + '</span> ' + v.name + '</span>'; }
+  function modeHtml(m) { return '<span class="mode ' + m + '">' + m + '</span>'; }
+  function seenHtml(s) { return s === 'now' ? '<span class="seen now">now</span>' : '<span class="seen">' + s + ' ago</span>'; }
+  function hostHtml(n) { return '<span class="hostname"><b>' + n.name + '</b><span class="domain">' + n.dom + '</span></span>'; }
+  function isInfra(n) { return n.type === 'router' || n.type === 'switch' || n.type === 'ap' || n.type === 'hypervisor'; }
+
+  /* ---------- State ---------- */
+  var S = null;
+  function freshState() {
+    return {
+      vlans: { '10': true, '20': true, '30': true, '40': true },
+      types: { router: true, 'switch': true, ap: true, hypervisor: true, vm: true, client: true },
+      q: '', sel: null, selPort: null, path: false, focus: false, hops: 2,
+      layout: 'layered', expanded: false, panel: null
+    };
+  }
+  S = freshState();
+  var G = { lit: {}, gone: {}, path: null, matches: [] };
+
+  /* ---------- Element index ---------- */
+  var svg = $('#map'), stage = $('#stage'), canvas = $('#canvas');
+  var gNode = {}, gEdge = {}, gPort = {};
+  $$('.node, .wan', svg).forEach(function (el) { gNode[el.dataset.id] = el; });
+  $$('.edge', svg).forEach(function (el) { gEdge[el.dataset.id] = el; });
+  $$('.port', svg).forEach(function (el) { gPort[el.dataset.sw + ':' + el.dataset.port] = el; });
+  EDGES.forEach(function (e) { e.d = gEdge[e.id].getAttribute('d'); });
+  Object.keys(gPort).forEach(function (k) { var p = gPort[k].dataset.pl.split(','); gPort[k]._l = [+p[0], +p[1]]; });
+
+  /* Search text per node */
+  Object.keys(NODE).forEach(function (id) {
+    var n = NODE[id], extra = '';
+    if (n.group) extra = ' ' + n.memberIds.map(function (m) { return NODE[m].name + ' ' + NODE[m].ip + ' ' + NODE[m].mac; }).join(' ');
+    Object.keys(PORTS).forEach(function (k) { if (PORTS[k].sw === id) extra += ' port ' + PORTS[k].port; });
+    n.hay = (n.name + n.dom + ' ' + (n.ip || '') + ' ' + (n.mac || '') + ' ' + (n.model || '') + ' ' + (n.via || '') + extra).toLowerCase();
+  });
+
+  /* ---------- Graph helpers ---------- */
+  function active(id) { var n = NODE[id]; if (!n) return false; if (n.member) return S.expanded; if (n.group) return !S.expanded; return true; }
+  function kidsOf(id) { return NODE[id].kids.filter(active); }
+  function leavesUnder(id, out) { out = out || []; kidsOf(id).forEach(function (k) { if (kidsOf(k).length) leavesUnder(k, out); else out.push(NODE[k]); }); return out; }
+  function pathTo(id) { var out = [], n = NODE[id]; while (n && n.id !== 'wan') { out.push(n.id); n = NODE[n.parent]; } return out; }
+  function within(id, hops) {
+    var d = {}; d[id] = 0; var q = [id];
+    while (q.length) {
+      var c = q.shift(); if (d[c] >= hops) continue;
+      var n = NODE[c], nb = kidsOf(c).slice();
+      if (n.parent && n.parent !== 'wan' && active(n.parent)) nb.push(n.parent);
+      nb.forEach(function (x) { if (d[x] == null) { d[x] = d[c] + 1; q.push(x); } });
+    }
+    return d;
+  }
+  function vlanFilterOn() { return Object.keys(S.vlans).some(function (k) { return !S.vlans[k]; }); }
+  function tokens() { return S.q.trim().toLowerCase().replace(/\bport\s*(\d+)/g, 'port_$1').split(/\s+/).filter(Boolean); }
+  /* "port 14" is matched as a whole phrase so it does not hit every address ending in 14 */
+  function hit(n, t) { var m = /^port_(\d+)$/.exec(t); return m ? new RegExp('port ' + m[1] + '(?!\\d)').test(n.hay) : n.hay.indexOf(t) >= 0; }
+  function isLit(n, toks) {
+    if (toks.length && !toks.every(function (t) { return hit(n, t); })) return false;
+    if (!S.types[n.type]) return false;
+    var ks = kidsOf(n.id);
+    if (ks.length) { return vlanFilterOn() ? leavesUnder(n.id).some(function (l) { return S.vlans[l.vlan]; }) : true; }
+    return !!S.vlans[n.vlan];
+  }
+  function lk() { return S.layout === 'radial' ? 'r' : 'l'; }
+
+  /* ---------- Render: one pass from state to DOM ---------- */
+  function render() {
+    var path = (S.path && S.sel) ? pathTo(S.sel) : null;
+    var hop = (S.focus && S.sel) ? within(S.sel, S.hops) : null;
+    var toks = tokens();
+    G.lit = {}; G.gone = {}; G.path = path; G.matches = [];
+    var shown = 0, total = 0;
+    Object.keys(NODE).forEach(function (id) {
+      if (id === 'wan') return;
+      var n = NODE[id], el = gNode[id], on = active(id);
+      el.classList.toggle('off', !on);
+      if (!on) return;
+      var onPath = !!path && path.indexOf(id) >= 0;
+      var lit = path ? onPath : isLit(n, toks);
+      var gone = hop ? (hop[id] == null && !onPath) : false;
+      G.lit[id] = lit; G.gone[id] = gone;
+      el.classList.toggle('dim', !lit);
+      el.classList.toggle('gone', gone);
+      el.classList.toggle('sel', S.sel === id);
+      el.classList.toggle('onpath', onPath && S.sel !== id);
+      el.setAttribute('aria-pressed', String(S.sel === id));
+      var w = n.count || 1;
+      total += w;
+      if (lit && !gone) shown += w;
+      if (toks.length && lit) G.matches.push(id);
+    });
+    G.lit.wan = path ? false : G.lit.gw; G.gone.wan = G.gone.gw;
+    gNode.wan.classList.toggle('dim', !G.lit.wan);
+    gNode.wan.classList.toggle('gone', !!G.gone.wan);
+
+    EDGES.forEach(function (e) {
+      var el = gEdge[e.id], on = active(e.from) && active(e.to);
+      el.classList.toggle('off', !on);
+      var pe = e.port ? gPort[e.sw + ':' + e.port] : null;
+      if (pe) pe.classList.toggle('off', !on);
+      if (!on) return;
+      var l = G.lit[e.from] && G.lit[e.to];
+      if (path) l = path.indexOf(e.from) >= 0 && path.indexOf(e.to) >= 0;
+      var psel = !!(S.selPort && e.port && S.selPort === e.sw + ':' + e.port);
+      var gone = !!(G.gone[e.from] || G.gone[e.to]);
+      el.classList.toggle('hl', (!!path && l) || psel);
+      el.classList.toggle('dim', !(l || psel));
+      el.classList.toggle('gone', gone);
+      if (pe) {
+        pe.classList.toggle('dim', !(l || psel));
+        pe.classList.toggle('gone', gone);
+        pe.classList.toggle('sel', psel);
+        pe.setAttribute('aria-pressed', String(psel));
+      }
+    });
+
+    /* Controls mirror the state */
+    $$('[data-vlan]').forEach(function (b) { b.setAttribute('aria-pressed', String(!!S.vlans[b.dataset.vlan])); });
+    $$('[data-type]').forEach(function (b) { b.setAttribute('aria-pressed', String(!!S.types[b.dataset.type])); });
+    $('#focus-sw').checked = S.focus;
+    $('#layout').value = S.layout;
+    var qi = $('#q'); if (qi.value !== S.q) qi.value = S.q;
+    var qc = $('#q-count'); qc.hidden = !toks.length;
+    if (toks.length) qc.textContent = G.matches.length + (G.matches.length === 1 ? ' match' : ' matches');
+    var typesOn = Object.keys(S.types).every(function (k) { return S.types[k]; });
+    var filtered = vlanFilterOn() || !typesOn || toks.length > 0 || !!hop;
+    var note = $('#map-note'); note.hidden = !filtered;
+    if (filtered) {
+      var why = hop ? 'Focus mode, ' + S.hops + (S.hops === 1 ? ' hop' : ' hops') + ' around ' + NODE[S.sel].name : toks.length ? 'Search' : 'Filtered';
+      $('#map-note-text').innerHTML = esc(why) + ': <b>' + shown + '</b> of <b>' + total + '</b> devices shown';
+    }
+    $('#map-status').textContent = shown + ' of ' + total + ' devices shown';
+    renderActionBar();
+    renderPanel();
+  }
+
+  function renderActionBar() {
+    var ab = $('#actionbar'), n = S.sel && NODE[S.sel];
+    ab.hidden = !n;
+    if (!n) return;
+    $('#ab-name').textContent = n.name + (n.group ? ' ×3' : '');
+    $('#ab-ip').innerHTML = addrHtml(n.ip);
+    var pb = $('#ab-path'); pb.setAttribute('aria-pressed', String(S.path)); pb.hidden = n.id === 'gw';
+    $('#ab-focus').setAttribute('aria-pressed', String(S.focus));
+    var hp = $('#ab-hops'); hp.hidden = !S.focus;
+    $$('[data-hops]').forEach(function (b) { b.setAttribute('aria-pressed', String(+b.dataset.hops === S.hops)); });
+    var port = $('#ab-port');
+    port.hidden = !n.pk;
+    if (n.pk) port.innerHTML = ic('cable', 'sm') + 'Show ' + PORTS[n.pk].sw + ' port ' + PORTS[n.pk].port;
+    var ex = $('#ab-expand');
+    ex.hidden = !(n.group || n.member);
+    if (!ex.hidden) ex.textContent = n.group ? 'Expand 3 hosts' : 'Collapse to one node';
+  }
+
+  /* ---------- Side panel ---------- */
+  var panelSig = '';
+  function renderPanel() {
+    var p = $('#panel');
+    stage.classList.toggle('panel-open', !!S.panel);
+    p.hidden = !S.panel;
+    if (!S.panel) { panelSig = ''; return; }
+    var sig = S.panel.kind + ':' + (S.panel.key || S.panel.id) + ':' + S.selPort;
+    if (sig !== panelSig) {
+      panelSig = sig;
+      if (S.panel.kind === 'port') portPanel(S.panel.key); else switchPanel(S.panel.id);
+    }
+    sizeChanged();
+  }
+  function portPanel(key) {
+    var P = PORTS[key], dev = NODE[P.peer], sw = NODE[P.sw];
+    $('#panel-title').textContent = 'What is connected to this port';
+    $('#panel-meta').innerHTML = '<span class="mono">' + P.sw + '</span> port <span class="mono">' + P.port + '</span>, ' + esc(sw.model) + ' <a href="#" data-sw="' + P.sw + '" style="margin-left:6px">All ports</a>';
+    var h = '';
+    if (P.guard) h += '<div class="guard">' + ic('lock') + '<div><b>' + esc(P.guard.split('. ')[0]) + '.</b> ' + esc(P.guard.slice(P.guard.indexOf('. ') + 2)) + '</div></div>';
+    h += '<div class="section"><h3>Connected device<a class="more" href="host.html">Open host</a></h3><dl class="kv">' +
+      '<dt>Device</dt><dd>' + hostHtml(dev) + '<span class="tag">' + TYPE_NAME[dev.type] + '</span></dd>' +
+      '<dt>Address</dt><dd>' + addrHtml(dev.ip) + '</dd>' +
+      '<dt>MAC</dt><dd class="mono">' + dev.mac + '</dd>' +
+      '<dt>Mode</dt><dd>' + modeHtml(dev.mode) + '</dd>' +
+      '<dt>Last seen</dt><dd>' + seenHtml(dev.seen) + '</dd></dl></div>';
+    h += '<div class="section"><h3>VLAN on this port</h3>';
+    if (P.access) {
+      if (P.before) {
+        h += '<div class="vlan-diff"><div><span class="when">Before</span><span class="old">' + vlanHtml(P.before) + '</span><span class="tag">untagged</span></div>' +
+          '<div><span class="when">Now</span>' + vlanHtml(P.access) + '<span class="tag accent">untagged</span></div></div>';
+      } else {
+        h += '<div class="vlan-diff"><div>' + vlanHtml(P.access) + '<span class="tag">untagged</span></div></div>';
+      }
+      h += '<dl class="kv" style="margin-top:8px"><dt>Port profile</dt><dd>' + esc(P.profile) + (P.profileBefore ? ' <span class="muted">(was ' + esc(P.profileBefore) + ')</span>' : '') + '</dd></dl>';
+    } else {
+      h += '<dl class="kv"><dt>Port mode</dt><dd>' + esc(P.mode) + '</dd></dl>';
+    }
+    h += '</div>';
+    h += '<div class="section"><h3>Link</h3><dl class="kv"><dt>Speed</dt><dd>' + esc(P.link) + '</dd>';
+    if (P.poe) {
+      var pct = Math.round(P.poe[0] / P.poe[1] * 100);
+      h += '<dt>PoE</dt><dd><span class="num">' + P.poe[0].toFixed(1) + ' W</span> <span class="muted">of ' + P.poe[1].toFixed(1) + ' W</span> <span class="meter" style="--v:' + pct + '%"><span class="bar"><i></i></span><span class="val">' + pct + '%</span></span></dd>';
+    } else {
+      h += '<dt>PoE</dt><dd class="muted">Not powered</dd>';
+    }
+    h += '</dl></div>';
+    h += '<div class="section"><h3>Last change</h3><p>' + (P.job ? esc(P.change).replace('{job}', '<a href="move-job.html">job #' + P.job + '</a>') : esc(P.change)) + (P.changeWhen ? ' <span class="muted">' + P.changeWhen + '</span>' : '') + '</p></div>';
+    h += '<div class="section"><div class="panel-actions"><a class="btn primary" href="host.html">Open ' + esc(dev.name) + '</a>' + (P.job ? '<a class="btn" href="move-job.html">Open job #' + P.job + '</a>' : '') + '</div></div>';
+    $('#panel-body').innerHTML = h;
+  }
+  function switchPanel(id) {
+    var n = NODE[id];
+    var keys = Object.keys(PORTS).filter(function (k) { return PORTS[k].sw === id; }).sort(function (a, b) { return PORTS[a].port - PORTS[b].port; });
+    $('#panel-title').textContent = 'What is connected to ' + n.name;
+    $('#panel-meta').innerHTML = '<span class="mono">' + n.ip + '</span>, ' + esc(n.model) + ', ' + keys.length + ' of ' + PORT_COUNT[id] + ' ports in use';
+    var rows = keys.map(function (k) {
+      var P = PORTS[k], d = NODE[P.peer];
+      var vcell = P.access ? vlanHtml(P.access) : '<span class="muted">Trunk</span>';
+      var poe = P.poe ? P.poe[0].toFixed(1) + ' W' : '<span class="muted">none</span>';
+      return '<tr tabindex="0" data-port="' + k + '" aria-selected="' + (S.selPort === k) + '"><td><span class="portn">' + P.port + '</span></td><td><span class="hostname">' + d.name + '</span></td><td>' + vcell + '</td><td class="num">' + poe + '</td></tr>';
+    }).join('');
+    $('#panel-body').innerHTML = '<table class="grid" aria-label="Ports in use on ' + n.name + '"><colgroup><col style="width:46px"><col><col style="width:92px"><col style="width:62px"></colgroup>' +
+      '<thead><tr><th>Port</th><th>Device</th><th>VLAN</th><th>PoE</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+      '<div class="section" style="border-bottom:0"><p class="muted">Select a port to see what is connected to it, which VLAN it carries and who changed it last.</p><div class="panel-actions" style="margin-top:8px"><a class="btn" href="host.html">Open ' + n.name + '</a></div></div>';
+  }
+  function openPort(key) { S.panel = { kind: 'port', key: key }; S.selPort = key; render(); }
+  function closePanel() { S.panel = null; S.selPort = null; render(); }
+
+  /* ---------- Hover card ---------- */
+  var hoverId = null;
+  function showHover(id) {
+    var n = NODE[id], el = gNode[id];
+    if (!n || id === 'wan' || !el || el.classList.contains('off')) return;
+    if (hoverId && gNode[hoverId]) gNode[hoverId].classList.remove('hov');
+    hoverId = id; el.classList.add('hov');
+    var h = $('#hovercard');
+    var vlanExtra = isInfra(n) ? ' <span class="muted">management</span>' : '';
+    var addr, mac;
+    if (n.group) { addr = addrHtml(n.ip) + ' <span class="muted">to</span> <span class="addr"><span class="net">.</span><span class="host">33</span></span>'; mac = '<span class="mono">' + n.mac + '</span> <span class="muted">and 2 more</span>'; }
+    else { addr = addrHtml(n.ip); mac = '<span class="mono">' + n.mac + '</span>'; }
+    h.innerHTML = '<div class="hc-head">' + ic(TYPE_ICON[n.type]) + '<b>' + n.name + (n.group ? ' ×3' : '') + '</b><span class="domain">' + n.dom + '</span></div>' +
+      '<div class="hc-sub"><span>' + esc(n.model) + '</span><span class="tag">' + TYPE_NAME[n.type] + '</span></div>' +
+      '<dl class="kv"><dt>Address</dt><dd>' + addr + '</dd><dt>MAC</dt><dd>' + mac + '</dd><dt>VLAN</dt><dd>' + vlanHtml(n.vlan) + vlanExtra + '</dd><dt>Mode</dt><dd>' + modeHtml(n.mode) + '</dd><dt>Last seen</dt><dd>' + seenHtml(n.seen) + '</dd></dl>' +
+      '<div class="hc-via">' + ic(n.edge === 'wifi' ? 'wifi' : n.edge === 'vmlink' ? 'link' : 'cable', 'sm') + '<span>' + esc(n.via) + '</span></div>' +
+      '<div class="hc-hint"><span>Click to select</span><span class="hc-keys"><span>Open host</span><span class="kbd">Shift</span><span class="kbd">Enter</span></span></div>';
+    h.hidden = false;
+    placeHover();
+  }
+  function placeHover() {
+    var h = $('#hovercard'); if (h.hidden || !hoverId) return;
+    var el = gNode[hoverId]; if (!el) return;
+    var r = el.getBoundingClientRect(), c = canvas.getBoundingClientRect();
+    var w = h.offsetWidth || 256, ht = h.offsetHeight || 215;
+    var left = r.left - c.left, top = r.bottom - c.top + 8;
+    if (left + w > c.width - 8) left = c.width - w - 8;
+    if (left < 8) left = 8;
+    if (top + ht > c.height - 8) top = r.top - c.top - ht - 8;
+    if (top < 8) top = 8;
+    h.style.left = Math.round(left) + 'px'; h.style.top = Math.round(top) + 'px';
+  }
+  function hideHover() { if (hoverId && gNode[hoverId]) gNode[hoverId].classList.remove('hov'); hoverId = null; $('#hovercard').hidden = true; }
+
+  /* ---------- View: fit, zoom, pan, level of detail ---------- */
+  var vb = { x: 0, y: 0, w: DATA.vbw, h: 600 };
+  function r1(v) { return Math.round(v * 10) / 10; }
+  function scaleNow() { var r = svg.getBoundingClientRect(); if (!r.width || !r.height) return 1; return Math.min(r.width / vb.w, r.height / vb.h); }
+  function setVB() {
+    svg.setAttribute('viewBox', [vb.x, vb.y, vb.w, vb.h].map(r1).join(' '));
+    var s = scaleNow();
+    $('#z-val').textContent = Math.round(s * 100) + '%';
+    svg.dataset.lod = s < 0.5 ? 'low' : s < 0.75 ? 'mid' : 'full';
+  }
+  function boxOf(id) { var n = NODE[id], k = lk(), p = n.pos[k]; return [p[0], p[1], p[0] + n.w[k] + (n.type === 'hypervisor' || n.group ? 8 : 0), p[1] + (id === 'wan' ? 20 : NODE_H) + (n.type === 'hypervisor' || n.group ? 8 : 0)]; }
+  function fit() {
+    var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, any = false;
+    Object.keys(NODE).forEach(function (id) {
+      if (!active(id) || G.gone[id]) return;
+      var b = boxOf(id); any = true;
+      x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]); x1 = Math.max(x1, b[2]); y1 = Math.max(y1, b[3]);
+    });
+    if (!any) return;
+    var m = 18;
+    /* a lone node would fill the screen: keep a sensible minimum span */
+    var w = Math.max(x1 - x0 + 2 * m, 420), h = Math.max(y1 - y0 + 2 * m, 240);
+    vb = { x: (x0 + x1) / 2 - w / 2, y: (y0 + y1) / 2 - h / 2, w: w, h: h };
+    setVB();
+  }
+  function toUser(cx, cy) {
+    var m = svg.getScreenCTM && svg.getScreenCTM();
+    if (!m || !svg.createSVGPoint) return { x: vb.x + vb.w / 2, y: vb.y + vb.h / 2 };
+    var pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy;
+    var q = pt.matrixTransform(m.inverse());
+    return { x: q.x, y: q.y };
+  }
+  function zoomBy(k, cx, cy) {
+    if (cx == null) { cx = vb.x + vb.w / 2; cy = vb.y + vb.h / 2; }
+    var next = { x: cx - (cx - vb.x) / k, y: cy - (cy - vb.y) / k, w: vb.w / k, h: vb.h / k };
+    var r = svg.getBoundingClientRect(), s = r.width ? Math.min(r.width / next.w, r.height / next.h) : 1;
+    if (s > 4 || s < 0.2) return;
+    vb = next; setVB(); placeHover();
+  }
+  function centerOn(id) {
+    var b = boxOf(id), r = svg.getBoundingClientRect();
+    var s = Math.max(scaleNow(), 1.15);
+    var w = r.width ? r.width / s : vb.w, h = r.height ? r.height / s : vb.h;
+    vb = { x: (b[0] + b[2]) / 2 - w / 2, y: (b[1] + b[3]) / 2 - h / 2, w: w, h: h };
+    setVB();
+  }
+  function sizeChanged() { setVB(); placeHover(); }
+
+  var pan = null;
+  svg.addEventListener('pointerdown', function (e) {
+    if (e.button !== 0 || e.target.closest('.node, .port')) return;
+    pan = { x: e.clientX, y: e.clientY, vx: vb.x, vy: vb.y, moved: false };
+    try { svg.setPointerCapture(e.pointerId); } catch (err) {}
+    svg.classList.add('panning'); hideHover();
+  });
+  svg.addEventListener('pointermove', function (e) {
+    if (!pan) return;
+    var s = scaleNow(), dx = e.clientX - pan.x, dy = e.clientY - pan.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) pan.moved = true;
+    vb.x = pan.vx - dx / s; vb.y = pan.vy - dy / s; setVB();
+  });
+  function deselect() {
+    if (!S.sel) return;
+    var wasFocus = S.focus;
+    S.sel = null; S.focus = false;
+    if (S.panel && S.panel.kind === 'switch') S.panel = null;
+    render(); if (wasFocus) fit();
+  }
+  function endPan() { if (!pan) return; var moved = pan.moved; pan = null; svg.classList.remove('panning'); if (!moved) deselect(); }
+  svg.addEventListener('pointerup', endPan);
+  svg.addEventListener('pointercancel', endPan);
+  svg.addEventListener('wheel', function (e) { e.preventDefault(); var p = toUser(e.clientX, e.clientY); zoomBy(e.deltaY < 0 ? 1.12 : 1 / 1.12, p.x, p.y); }, { passive: false });
+
+  /* ---------- Hover and click on the map ---------- */
+  svg.addEventListener('pointerover', function (e) { var n = e.target.closest('.node'); if (n && !pan) showHover(n.dataset.id); });
+  svg.addEventListener('pointerout', function (e) { var n = e.target.closest('.node'); if (n && !(e.relatedTarget && n.contains(e.relatedTarget))) hideHover(); });
+  svg.addEventListener('focusin', function (e) { var n = e.target.closest && e.target.closest('.node'); if (n) showHover(n.dataset.id); });
+  svg.addEventListener('focusout', function (e) { if (e.target.closest && e.target.closest('.node')) hideHover(); });
+  svg.addEventListener('click', function (e) {
+    var pt = e.target.closest('.port');
+    if (pt) { openPort(pt.dataset.sw + ':' + pt.dataset.port); return; }
+    var nd = e.target.closest('.node');
+    if (nd) selectNode(nd.dataset.id);
+  });
+  svg.addEventListener('dblclick', function (e) { var nd = e.target.closest('.node'); if (nd && (NODE[nd.dataset.id].group || NODE[nd.dataset.id].member)) toggleGroup(); });
+  svg.addEventListener('keydown', function (e) {
+    var el = e.target.closest && e.target.closest('.node, .port'); if (!el) return;
+    if (e.key === 'Enter' && e.shiftKey && el.classList.contains('node')) { location.href = 'host.html'; return; }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (el.classList.contains('port')) openPort(el.dataset.sw + ':' + el.dataset.port); else selectNode(el.dataset.id);
+    }
+  });
+
+  function selectNode(id) {
+    /* the open port panel stays when you select the device that is plugged into it */
+    var keep = S.panel && S.panel.kind === 'port' && PORTS[S.panel.key].peer === id;
+    S.sel = id;
+    if (NODE[id].type === 'switch') { S.panel = { kind: 'switch', id: id }; S.selPort = null; }
+    else if (!keep) { S.panel = null; S.selPort = null; }
+    render();
+    if (S.focus) fit();
+  }
+  function clearSelection() {
+    if (S.panel) { S.panel = null; S.selPort = null; render(); return true; }
+    if (S.sel) { deselect(); return true; }
+    return false;
+  }
+  function toggleGroup() {
+    S.expanded = !S.expanded;
+    S.sel = S.expanded ? 'lab-k8s-1' : 'lab-k8s';
+    render(); fit();
+  }
+  function setFocus(on) {
+    if (on && !S.sel) {
+      $('#focus-sw').checked = false;
+      tenko.toast({ title: 'Select a node first', body: 'Focus mode shows the selected node and the nodes 1 or 2 hops around it. Click a node, then press F.' });
+      return;
+    }
+    S.focus = on; render(); fit();
+  }
+
+  /* ---------- Layout switch ---------- */
+  function applyLayout(name, animate) {
+    S.layout = name;
+    var k = lk();
+    if (animate) svg.classList.add('relayout');
+    Object.keys(NODE).forEach(function (id) { var el = gNode[id]; if (!el) return; var p = NODE[id].pos[k]; el.style.transform = 'translate(' + p[0] + 'px,' + p[1] + 'px)'; });
+    var bw = NODE['sw-core'].w[k];
+    $$('[data-bar]', svg).forEach(function (r) { r.setAttribute('width', bw); });
+    svg.classList.toggle('radial', name === 'radial');
+    function route() { routeEdges(); svg.classList.remove('relayout'); }
+    if (animate) setTimeout(route, 220); else route();
+    fit();
+  }
+  function centerOfBox(id) { var n = NODE[id], k = lk(), p = n.pos[k]; return [p[0] + n.w[k] / 2, p[1] + (id === 'wan' ? 10 : NODE_H / 2)]; }
+  function routeEdges() {
+    var radial = S.layout === 'radial';
+    EDGES.forEach(function (e) {
+      var el = gEdge[e.id], pe = e.port ? gPort[e.sw + ':' + e.port] : null;
+      if (!radial) {
+        el.setAttribute('d', e.d);
+        if (pe) pe.setAttribute('transform', 'translate(' + pe._l[0] + ' ' + pe._l[1] + ')');
+        return;
+      }
+      var a = centerOfBox(e.from), b = centerOfBox(e.to);
+      el.setAttribute('d', 'M' + r1(a[0]) + ',' + r1(a[1]) + 'L' + r1(b[0]) + ',' + r1(b[1]));
+      if (pe) {
+        var swIsFrom = e.sw === e.from, s = swIsFrom ? a : b, t = swIsFrom ? b : a;
+        var dx = t[0] - s[0], dy = t[1] - s[1], len = Math.sqrt(dx * dx + dy * dy) || 1, ux = dx / len, uy = dy / len;
+        var tb = Math.min(ux ? 54 / Math.abs(ux) : 1e9, uy ? 19 / Math.abs(uy) : 1e9) + 15;
+        pe.setAttribute('transform', 'translate(' + r1(s[0] + ux * tb) + ' ' + r1(s[1] + uy * tb) + ')');
+      }
+    });
+  }
+
+  /* ---------- Controls ---------- */
+  $$('[data-vlan]').forEach(function (b) {
+    b.addEventListener('click', function (e) {
+      var id = b.dataset.vlan, keys = Object.keys(S.vlans);
+      var shown = keys.filter(function (k) { return S.vlans[k]; });
+      if (e.shiftKey || e.ctrlKey || e.metaKey) S.vlans[id] = !S.vlans[id];
+      else if (shown.length === 1 && S.vlans[id]) keys.forEach(function (k) { S.vlans[k] = true; });
+      else keys.forEach(function (k) { S.vlans[k] = (k === id); });
+      render();
+    });
+  });
+  $$('[data-type]').forEach(function (b) { b.addEventListener('click', function () { S.types[b.dataset.type] = !S.types[b.dataset.type]; render(); }); });
+  $('#focus-sw').addEventListener('change', function () { setFocus(this.checked); });
+  $('#layout').addEventListener('change', function () { applyLayout(this.value, true); render(); });
+  $('#z-in').addEventListener('click', function () { zoomBy(1.25); });
+  $('#z-out').addEventListener('click', function () { zoomBy(1 / 1.25); });
+  $('#z-fit').addEventListener('click', fit);
+  $('#clear-filters').addEventListener('click', function () {
+    S.vlans = { '10': true, '20': true, '30': true, '40': true };
+    Object.keys(S.types).forEach(function (k) { S.types[k] = true; });
+    S.q = ''; S.focus = false; render(); fit();
+  });
+  $('#ab-path').addEventListener('click', function () { S.path = !S.path; render(); });
+  $('#ab-focus').addEventListener('click', function () { setFocus(!S.focus); });
+  $$('[data-hops]').forEach(function (b) { b.addEventListener('click', function () { S.hops = +b.dataset.hops; render(); fit(); }); });
+  $('#ab-port').addEventListener('click', function () { var n = NODE[S.sel]; if (n && n.pk) openPort(n.pk); });
+  $('#ab-expand').addEventListener('click', toggleGroup);
+  $('#ab-clear').addEventListener('click', deselect);
+  $('#panel-close').addEventListener('click', closePanel);
+  $('#panel-meta').addEventListener('click', function (e) { var a = e.target.closest('a[data-sw]'); if (!a) return; e.preventDefault(); S.panel = { kind: 'switch', id: a.dataset.sw }; S.selPort = null; render(); });
+  $('#panel-body').addEventListener('click', function (e) { var tr = e.target.closest('tr[data-port]'); if (tr) openPort(tr.dataset.port); });
+  $('#panel-body').addEventListener('keydown', function (e) { var tr = e.target.closest('tr[data-port]'); if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openPort(tr.dataset.port); } });
+
+  /* Search: dims what does not match; Enter jumps to the first match */
+  var qi = $('#q');
+  qi.addEventListener('input', function () { S.q = qi.value; render(); });
+  qi.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!G.matches.length) { tenko.toast({ title: 'No match for "' + qi.value + '"', body: 'Try a host name, part of an address (".43"), a MAC fragment ("53-2b") or "port 14".' }); return; }
+      var pick = G.matches.filter(function (id) { return !kidsOf(id).length; })[0] || G.matches[0];
+      S.q = ''; qi.value = ''; S.sel = pick; S.selPort = null; S.panel = NODE[pick].type === 'switch' ? { kind: 'switch', id: pick } : null;
+      render(); centerOn(pick); qi.blur();
+    } else if (e.key === 'Escape') {
+      S.q = ''; qi.value = ''; render(); qi.blur();
+    }
+  });
+
+  $('#rescan').addEventListener('click', function () {
+    tenko.toast({ title: 'Link scan queued as job #' + 222, body: 'UniFi, LLDP and Proxmox links are read again. The map updates in place and keeps node positions.', actions: [{ label: 'Open job', href: 'move-job.html' }] });
+  });
+  $('#export').addEventListener('click', function () {
+    tenko.toast({ title: 'Export topology-home.svg', body: 'In the product this saves the current view, filters included, as SVG or PNG. Mockup only.' });
+  });
+  $$('.rail a[data-soon]').forEach(function (a) { a.addEventListener('click', function (e) { e.preventDefault(); tenko.toast({ title: a.dataset.soon + ' is not part of this spike', body: 'It reuses the grid, filter bar and side panel shown in IPAM.' }); }); });
+
+  /* ---------- Keyboard (never while typing in a field) ---------- */
+  function typing(e) { var t = e.target; return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable); }
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !typing(e)) { if (clearSelection()) return; }
+    if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === '/') { e.preventDefault(); qi.focus(); qi.select(); }
+    else if (e.key === '+' || e.key === '=') zoomBy(1.25);
+    else if (e.key === '-') zoomBy(1 / 1.25);
+    else if (e.key === '0') fit();
+    else if (e.key === 'p' || e.key === 'P') { if (S.sel && S.sel !== 'gw') { S.path = !S.path; render(); } }
+    else if (e.key === 'f' || e.key === 'F') { setFocus(!S.focus); }
+    else if ((e.key === 'Enter' && e.shiftKey) || e.key === '.') { if (S.sel) location.href = 'host.html'; }
+  });
+
+  /* ---------- Mockup scenes ---------- */
+  function setScene(name) {
+    $$('[data-scene]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.scene === name)); });
+    var wasRadial = S.layout === 'radial';
+    S = freshState();
+    if (name === 'hover') { S.panel = { kind: 'port', key: 'sw-core:14' }; S.selPort = 'sw-core:14'; }
+    else if (name === 'path') { S.sel = 'desk-01'; S.path = true; }
+    else if (name === 'iot') { S.vlans = { '10': false, '20': false, '30': true, '40': false }; }
+    hideHover();
+    if (wasRadial) applyLayout('layered', false);
+    render(); fit();
+    if (name === 'hover') showHover('cam-door');
+  }
+  $$('[data-scene]').forEach(function (b) { b.addEventListener('click', function () { setScene(b.dataset.scene); }); });
+
+  /* ---------- Status bar clock (simulated live updates) ---------- */
+  var lastEvt = 0;
+  setInterval(function () { lastEvt += 0.5; $('#last-event').textContent = lastEvt.toFixed(1) + ' s'; if (lastEvt >= 6) lastEvt = 0; }, 500);
+
+  window.addEventListener('resize', sizeChanged);
+  if (window.ResizeObserver) new ResizeObserver(function () { setVB(); placeHover(); }).observe(canvas);
+  function start() {
+    setScene('hover');
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { placeHover(); });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+})();
+</script>
+</body>
+</html>
