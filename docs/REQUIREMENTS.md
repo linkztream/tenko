@@ -376,7 +376,7 @@ The REST API is the only interface the UI uses. This section also holds product-
 | API-05 | Event stream over Server-Sent Events (SSE) for live UI updates. | 1 | Must |
 | API-06 | Webhooks. | 5 | Should |
 | API-07 | Terraform provider and Ansible collection. | 5 | Should |
-| API-08 | UI: keyboard-driven bulk grids, live updates via SSE, dark mode, Swedish and English, and WCAG accessibility. | 1 | Must |
+| API-08 | UI: keyboard-driven bulk grids, live updates via SSE, dark mode and WCAG accessibility. Localized: Swedish and English are built in; the UI language follows the browser Accept-Language header, falls back to English, can be fixed per user account, and an administrator can set the installation default. Logs, CLI output and API error texts stay in English; API errors carry stable codes that the UI translates. | 1 | Must |
 | API-09 | Change UI: multiselect and drag and drop, a preview before every apply, a job panel with per-item status, and undo where possible. | 1 | Must |
 | API-10 | First-run wizard with security profile selection (Home, Standard, Hardened, Lab). Insecure settings are loudly visible in the UI. | 1 | Must |
 | API-11 | RDP/SSH handoff: the host view produces an `.rdp` file or an `ssh://` URI with host, port and user, and the password is copied to the clipboard from the vault, with audit. | 1 | Must |
@@ -389,6 +389,7 @@ The REST API is the only interface the UI uses. This section also holds product-
 | API-18 | Windows interop lab: a test domain on Windows Server 2016 or later (Query Resolution Policies require 2016+) for domain join, DC locator, GPO retrieval and Netlogon re-registration against DDI with GSS-TSIG. | 4 | Must |
 | API-19 | Signed releases (Sigstore, Authenticode) and SBOM. | 5 | Must |
 | API-20 | License decision (Apache-2.0 or AGPL-3.0) before any publication. | 5 | Must |
+| API-21 | Language packs: every UI string is externalized under a stable key. Additional languages are XLIFF 2.0 files (XML) named by BCP 47 tag (for example `fr.xlf`, `fr-CA.xlf`) with display name, author, version and source language as metadata inside the file. A pack is uploaded in the UI or dropped in the data directory and activated at runtime without a rebuild. Upload validates the schema, reports missing and extra keys and a completeness percentage, and previews before activation. Missing strings fall back to English; translations are rendered as text (no markup injection) and use ICU MessageFormat for plurals, gender and placeholders; dates, numbers and sort order come from the locale. The built-in Swedish and English ship in the same format and double as templates, and the current key set can be exported with one click. The layout supports right-to-left languages. | 1 | Must |
 
 ## Connectors and integrations
 

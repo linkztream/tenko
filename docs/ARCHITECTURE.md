@@ -63,7 +63,7 @@ Design principles:
 - **Memory safety** (ADR 0001, API-16). Rust throughout, `unsafe` forbidden except where an ADR allows it, and a fuzz target for every network parser (API-15).
 - **Performance is I/O bound** (CON-01). The design invests in socket sharding, batching and lock-free caches, not in hand-tuned CPU code.
 - **Measure before assuming.** Phase 0 spikes A, B and C decide the replication design, the DNS library and I/O strategy, and the embedded UI approach before later phases build on them.
-- **Language.** Code, comments and documentation are in English and the repository is written as if it were public (API-13). The UI is available in Swedish and English (API-08).
+- **Language.** Code, comments and documentation are in English and the repository is written as if it were public (API-13). The UI is available in Swedish and English, follows the browser language with English as fallback, and accepts additional languages as XLIFF 2.0 packs at runtime (API-08, API-21).'
 
 ## Single binary and roles
 
