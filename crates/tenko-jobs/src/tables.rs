@@ -203,6 +203,7 @@ mod tests {
                     args: BTreeMap::from([("step".to_owned(), "2".to_owned())]),
                     undo: None,
                 },
+                deadline: None,
             }),
             note: Some("done by hand".to_owned()),
             ..row(4, TransitionEvent::Job, JobState::RollingBack)

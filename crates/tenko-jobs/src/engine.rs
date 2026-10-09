@@ -396,6 +396,7 @@ impl JobEngine {
             state: JobState::Queued,
             steps,
             created: Stamp::new(self.inner.clock.now(), cx.principal.clone()),
+            started: None,
             runner: None,
             revision: Revision::ZERO,
             cancel_requested: None,

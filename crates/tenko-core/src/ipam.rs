@@ -608,6 +608,10 @@ impl CustomValue {
 }
 
 fn is_iso_date(text: &str) -> bool {
+    // Only digits and separators: `parse` would accept signed components such as `+026`.
+    if !text.bytes().all(|b| b.is_ascii_digit() || b == b'-') {
+        return false;
+    }
     let parts: Vec<&str> = text.split('-').collect();
     let [year, month, day] = parts.as_slice() else {
         return false;

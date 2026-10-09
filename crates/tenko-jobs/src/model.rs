@@ -165,6 +165,9 @@ pub struct Job {
     pub steps: Vec<StepRecord>,
     /// Submission.
     pub created: Stamp,
+    /// When the first step started (`None` while queued).
+    #[serde(default)]
+    pub started: Option<Timestamp>,
     /// The controller running the job (lease holder).
     #[serde(default)]
     pub runner: Option<NodeId>,
@@ -230,7 +233,9 @@ pub enum JobState {
 }
 
 /// Events that move a job between states.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum JobAction {
     /// The engine starts a queued job.
@@ -365,6 +370,9 @@ pub enum StepState {
     WaitingForManual {
         /// The task.
         task: ManualTask,
+        /// When waiting stops and the job rolls back (`None`: the step timeout applies).
+        #[serde(default)]
+        deadline: Option<Timestamp>,
     },
     /// Failed.
     Failed {
@@ -685,6 +693,26 @@ pub enum JobError {
     /// A step failed.
     #[error(transparent)]
     Step(StepError),
+    /// The spec is not valid (empty, inconsistent steps, a bad timeout).
+    #[error("invalid job spec: {0}")]
+    InvalidSpec(String),
+    /// An inline job must have exactly one step.
+    #[error("an inline job must have exactly one step")]
+    InlineOneStep,
+    /// No such step in the job.
+    #[error("job {job} has no step {step}")]
+    StepNotFound {
+        /// The job.
+        job: JobId,
+        /// The step index.
+        step: u16,
+    },
+    /// A note exceeds the allowed length.
+    #[error("note exceeds {max} characters")]
+    NoteTooLong {
+        /// The limit.
+        max: usize,
+    },
     /// A store error.
     #[error(transparent)]
     Store(#[from] StoreError),
@@ -701,17 +729,24 @@ impl Coded for JobError {
             JobError::UnknownStepKind(_) => "jobs.unknown_step_kind",
             JobError::Step(error) => error.code(),
             JobError::Store(error) => error.code(),
+            JobError::InvalidSpec(_) => "jobs.spec.invalid",
+            JobError::InlineOneStep => "jobs.spec.inline_one_step",
+            JobError::StepNotFound { .. } => "jobs.step.not_found",
+            JobError::NoteTooLong { .. } => "jobs.note.too_long",
             JobError::Timeout => "jobs.timeout",
         }
     }
 
     fn http_status(&self) -> u16 {
         match self {
-            JobError::NotFound(_) => 404,
+            JobError::NotFound(_) | JobError::StepNotFound { .. } => 404,
             JobError::InvalidTransition { .. } => 409,
             JobError::UnknownStepKind(_) => 500,
             JobError::Step(error) => error.http_status(),
             JobError::Store(error) => error.http_status(),
+            JobError::InvalidSpec(_) | JobError::InlineOneStep | JobError::NoteTooLong { .. } => {
+                400
+            }
             JobError::Timeout => 504,
         }
     }
@@ -726,7 +761,12 @@ impl Coded for JobError {
             JobError::UnknownStepKind(kind) => BTreeMap::from([("kind", kind.to_string())]),
             JobError::Step(error) => error.params(),
             JobError::Store(error) => error.params(),
-            JobError::Timeout => BTreeMap::new(),
+            JobError::InvalidSpec(reason) => BTreeMap::from([("reason", reason.clone())]),
+            JobError::StepNotFound { job, step } => {
+                BTreeMap::from([("job", job.to_string()), ("step", step.to_string())])
+            }
+            JobError::NoteTooLong { max } => BTreeMap::from([("max", max.to_string())]),
+            JobError::InlineOneStep | JobError::Timeout => BTreeMap::new(),
         }
     }
 
@@ -973,6 +1013,7 @@ mod tests {
                 group: Some(GroupKey::new("connect.unifi:lab").expect("group")),
                 idempotency: None,
             },
+            started: None,
             state: JobState::Waiting,
             steps: vec![StepRecord {
                 index: 0,

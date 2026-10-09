@@ -365,7 +365,13 @@ impl<'a> Machine<'a> {
                     return false;
                 }
                 let task = self.undo_task(*step, None);
-                self.set_step(*step, S::WaitingForManual { task });
+                self.set_step(
+                    *step,
+                    S::WaitingForManual {
+                        task,
+                        deadline: None,
+                    },
+                );
                 true
             }
             ResultOp::CompensationFailed { step, error } => {
@@ -402,7 +408,13 @@ impl<'a> Machine<'a> {
             }
             StepOutcome::Skip => self.set_step(step, StepState::Skipped),
             StepOutcome::Manual(task) => {
-                self.set_step(step, StepState::WaitingForManual { task: task.clone() });
+                self.set_step(
+                    step,
+                    StepState::WaitingForManual {
+                        task: task.clone(),
+                        deadline: None,
+                    },
+                );
                 self.wait();
             }
             StepOutcome::Wait {
@@ -709,7 +721,13 @@ impl<'a> Machine<'a> {
             match manual {
                 Some(task) if task.undo.is_some() => {
                     let task = self.undo_task(step, Some(task));
-                    self.set_step(step, StepState::WaitingForManual { task });
+                    self.set_step(
+                        step,
+                        StepState::WaitingForManual {
+                            task,
+                            deadline: None,
+                        },
+                    );
                     undo_pending = true;
                 }
                 _ => {

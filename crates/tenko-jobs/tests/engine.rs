@@ -450,7 +450,7 @@ async fn steps_that_cannot_be_compensated_become_manual_undo_tasks() {
         })
         .await;
     assert_eq!(job.state, JobState::RollingBack);
-    let StepState::WaitingForManual { task } = &job.steps[1].state else {
+    let StepState::WaitingForManual { task, .. } = &job.steps[1].state else {
         panic!("undo task expected: {:?}", job.steps[1].state);
     };
     assert_eq!(task.instruction.as_str(), "jobs.undo.step");
@@ -497,7 +497,7 @@ async fn a_completed_manual_task_with_an_undo_message_becomes_that_undo_task() {
                 && matches!(job.steps[0].state, StepState::WaitingForManual { .. })
         })
         .await;
-    let StepState::WaitingForManual { task } = &job.steps[0].state else {
+    let StepState::WaitingForManual { task, .. } = &job.steps[0].state else {
         unreachable!()
     };
     assert_eq!(

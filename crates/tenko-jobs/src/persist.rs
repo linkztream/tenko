@@ -83,7 +83,9 @@ pub(crate) fn forward_manual_tasks(rows: &[Transition]) -> BTreeMap<u16, ManualT
     rows.iter()
         .filter(|row| row.state != JobState::RollingBack)
         .filter_map(|row| match (&row.step, &row.step_state) {
-            (Some(step), Some(StepState::WaitingForManual { task })) => Some((*step, task.clone())),
+            (Some(step), Some(StepState::WaitingForManual { task, .. })) => {
+                Some((*step, task.clone()))
+            }
             _ => None,
         })
         .collect()

@@ -451,7 +451,7 @@ async fn running_wait() {
 
     assert_eq!(job.state, JobState::Waiting);
     assert_eq!(job.finished, None);
-    let StepState::WaitingForManual { task } = &job.steps[0].state else {
+    let StepState::WaitingForManual { task, .. } = &job.steps[0].state else {
         panic!("the manual step waits for a person: {job:#?}");
     };
     assert_eq!(task.instruction.as_str(), HAND_OVER);
@@ -913,7 +913,7 @@ async fn manual_undo_task_finishes_a_rollback() {
 
     // The second step failed; the first one now asks for an undo by hand.
     assert_eq!(parked.state, JobState::RollingBack);
-    let StepState::WaitingForManual { task } = &parked.steps[0].state else {
+    let StepState::WaitingForManual { task, .. } = &parked.steps[0].state else {
         panic!("the undo task waits for a person: {parked:#?}");
     };
     assert_eq!(task.instruction.as_str(), TAKE_BACK);
@@ -963,7 +963,7 @@ async fn manual_undo_task_finishes_a_cancel() {
     let parked = drive(&t, id).await;
 
     assert_eq!(parked.state, JobState::RollingBack);
-    let StepState::WaitingForManual { task } = &parked.steps[0].state else {
+    let StepState::WaitingForManual { task, .. } = &parked.steps[0].state else {
         panic!("the undo task waits for a person: {parked:#?}");
     };
     assert_eq!(task.instruction.as_str(), TAKE_BACK);
