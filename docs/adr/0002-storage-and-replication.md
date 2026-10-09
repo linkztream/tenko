@@ -44,13 +44,26 @@ Recorded for reference:
 - Index memory: about 139 bytes per RRset (computed estimate), so one node holds roughly 9 to 11 M RRsets within the 2 GB budget; 24 M RRsets would need about 3.7 GiB.
 - Same load on a Seagate ST4000DM004 SMR hard disk: 1.2 M RRsets took 501 s instead of 5.4 s (93x slower, fsync p50 44.5 ms, p99 207 ms), and the leader lost leadership under write load. This is the reason for condition 7.
 
+### Phase 1 store results (WP1.1 and WP1.1b, 2026-10-09)
+
+Measured in `bench/phase1-store` on the same machine, on the real `RaftStore` of `tenko-store`; the full tables and notes are in `bench/phase1-store/results/2026-10-09-windows.md`.
+
+| Measurement | Threshold | Measured | Result |
+|---|---|---|---|
+| M1 atomic index swap during a snapshot install | No empty reads; lookup p99 during install below 2x baseline | 0 empty reads in about 2 M lookups at 1 M records and 6 M lookups at 6 M records; p99 1.00x and 1.17x of baseline; install windows 4.6 s and 34.8 s | Pass |
+| M2 crash and restart | No lost commit or partial batch; the audit chain verifies | 160 process kills over three campaigns (deferred and immediate durability, kills during recovery), 0 violations; restart p99 below 1 s; a further 120 kills after WP1.1b, 40 of them during a re-seed, all clean | Pass |
+| M5 write coalescer ceiling | At least 1,000 updates/s sustained, zero errors | 1,000/s achieved in both durability modes with 0 errors; p99 290 ms deferred and 167 ms immediate; closed loop 6,271/s and 3,156/s | Pass |
+| M6 disk growth after re-seed | State file below 2x raw after re-seed | First pass at defaults: 2.05x and 2.74x (fail). After WP1.1b: 1.26x at 1 M and 1.24x at 1.5 M records at rest, journal held to 31 MiB under the 32 MiB limit. The running file can read up to about 2.5x right after a re-seed because redb grows a file by doubling | Pass at rest |
+| M10 fsync probe | Warns on SMR, silent on NVMe | p50 3.7 ms on NVMe, silent; p50 44.5 ms on the SMR disk, warned | Pass |
+| M2 VM power cut | No lost commit or partial batch | Not measured; belongs to the Slice 3 run | Open |
+
 ### Conditions and follow-ups
 
 - SSD or NVMe is mandatory for the store (decision 7); the first-run wizard warns when the data directory is on a rotating disk.
 - Updates are coalesced into Raft entries (decision 4); the DNS UPDATE path returns to the client after the entry is applied, so dynamic-update latency is expected in the 50 to 200 ms range under heavy load.
-- Disk usage is managed by an explicit snapshot-and-purge log policy and by re-seeding a node from a snapshot when `sm.redb` has grown past about 2x raw, rather than by online compaction.
+- Disk usage is managed by an explicit snapshot-and-purge log policy, a journal bounded by bytes, and by re-seeding a node into a fresh compacted state file (`RaftStore::reseed_in_place`, or rejoining with an empty data directory) when the state ratio at open exceeds about 2x raw. The running ratio is judged at about 4x, because redb grows a file by doubling below 4 GiB. Online compaction is not used.
 - A compact index layout is needed before zones beyond about 10 M RRsets per node are supported.
-- Still to build and measure in Phase 1: swapping the index in atomically during a snapshot install instead of clearing it, crash and restart recovery, failover, and a real network transport with serialization.
+- Measured in Phase 1 (WP1.1, WP1.1b): the atomic index swap during an install (M1) and crash and restart recovery (M2). Still to measure in Slice 3: failover, a real network transport with serialization, the VM power cut and the two-host UI and SSE run (M7).
 
 ### Fallback (not needed)
 
@@ -63,7 +76,7 @@ If the gate had failed, Raft would hold only configuration, IPAM and policies, a
 - Data plane independence follows directly: DNS and DHCP serve from local copies, and only configuration changes need a controller quorum.
 - Two replication paths exist by design: Raft for control-plane state, and the failover protocol for leases. Backup and restore must be consistent across both, plus the vault keys (OPS-07).
 - Raft membership changes, snapshot streaming, log purging and the write coalescer are Tenko's responsibility rather than a database vendor's.
-- The store needs about 4x the raw data size on disk per node and about 200 bytes of RAM per RRset including the index; capacity planning documents both.
+- The state file needs about 1.3x the raw data size at rest after a re-seed and up to about 4x while it is written incrementally, plus the log (bounded by the purge policy) and one snapshot; RAM is about 200 bytes per RRset including the index. Capacity planning documents both.
 - Home-lab hardware with only rotating disks must place the data directory on an SSD, or run the store on another node.
 
 ## Alternatives considered

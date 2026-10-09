@@ -14,8 +14,8 @@
 | WP1.7 API platform | FINAL, committed locally | `86cefb9`, `636e97b`, `c22c988` | 328 tests; idempotency never stores secret-bearing responses; `docs/api/openapi.json` generated |
 | WP1.2 Authentication | FINAL, committed locally | `0e1e4ad` | 438 tests + 45 route tests; ADR 0010 (in-house WebAuthn on aws-lc-rs); HIBP fixtures keep CRLF (`.gitattributes`) |
 | WP1.1 Store | FINAL, committed locally | `5085010` | 102 tests, conformance 26/26 on `RaftStore`, 120 crash kills clean; M1, M2, M5, M10 pass, M6 fails at defaults (2.05x and 2.74x) |
-| WP1.1b Store follow-up | In progress | worktree | Snapshot install into a fresh compacted file; journal bounded by bytes; re-run M6, M1, crash test; fills `sm_file_bytes` |
-| WP1.4 IPAM domain | In progress, final pass | worktree (`crates/tenko-ipam`, five route files) | Known open items: contention retries, `routes/tenancy.rs` test target, clippy in `routes/{prefixes,common}.rs`, one failing search test, OpenAPI regeneration |
+| WP1.1b Store follow-up | FINAL, committed locally | `b38a92e` | 107 tests, conformance 26/26; a snapshot install writes a fresh `sm-<id>.redb` behind the `sm.current` pointer; `RaftStore::reseed_in_place`; journal bounded by bytes (32 MiB default); M6 at rest 1.26x and 1.24x of raw (was 2.05x and 2.74x), M1 pass at 1 M and 6 M records, 120 crash kills clean |
+| WP1.4 IPAM domain | FINAL, committed locally | `573dd70` | 107 domain tests, 255 route tests, 83 operations, none at 501; the commit carries `crates/tenko-ipam/Cargo.toml` and `src/lib.rs` without WP1.5's lines, which land with WP1.5. Known limits: lists scan the table and sort in memory; a supernet's address list includes the addresses of its child prefixes |
 | WP1.5 Import and export | In progress | worktree | Spec in `import-fixtures.md`; builds on `IpamService::plan` |
 | WP1.8 Server and CLI | In progress | worktree (`crates/tenko`, `deploy/`) | Start order and wiring notes from every package are in its brief; `tenko.toml`, Windows service, systemd, client subcommands, M9 |
 | WP1.9 UI shell, auth, setup | FINAL, committed locally | `4c3778c`, `0bebd53` | 552 tests in 26 files; first-load bundle 68.9 KB gzip; XLIFF 2.0 en/sv compiled at build; typed client from `docs/api/openapi.json` with drift check; msw mock API; the CI `ui` job now runs lint and test |
@@ -23,7 +23,7 @@
 | WP1.11 Acceptance and E2E | Not started | | After M3 |
 | Design spike | Done, committed locally | `4880d8c` | All 16 owner decisions applied; mockups served from `design/` |
 
-The workspace does not compile at this moment because four packages are mid-edit; each builder keeps its own crate compiling at every save, and the lead verifies the whole workspace at each merge.
+The workspace does not compile at this moment because two packages (WP1.5, WP1.8) are mid-edit; each builder keeps its own crate compiling at every save, and the lead verifies the whole workspace at each merge.
 
 ## Conventions decided during Slice 1
 
@@ -34,19 +34,18 @@ The workspace does not compile at this moment because four packages are mid-edit
 - Every edit is an inline one-step job (`JobEngine::run_inline`), staged through `tenko_jobs::stage` in the handler's own batch.
 - Secrets: `Vault::stage_put` in the same batch as the owning row; system keys never count for the PIN rule; the idempotency cache stores only a marker for `no-store` or `Set-Cookie` responses.
 - Connectors are plugins (ADR 0012); Slice 2 starts with the SDK and host runner, UniFi first.
+- Store data directory: `log.redb`, `sm-<id>.redb` and the pointer file `sm.current`; never copy one without the other, backups go through `current_snapshot()`. Re-seed when `disk_usage().state_ratio_at_open` exceeds about 2.0, or the running `sm_file_ratio` about 4 (redb grows a file by doubling), through `reseed_in_place()` or by rejoining with an empty data directory.
 - Process: one owner per file; contract changes only through the lead; every builder uses its own `CARGO_TARGET_DIR` under `F:\`; a crate must compile at every save (in-progress modules behind a feature or a stub); the lead commits a package only after reading the test summary line, never on the exit status of a pipeline.
 
 ## Push state
 
-Every commit on `main` after `02a6d96` is local. They are not pushed because CI runs `cargo … --locked` and the shared `Cargo.lock` carries the dependencies of the in-progress packages; pushing before their manifests are committed would turn CI red. Push happens after WP1.1b, WP1.4, WP1.5 and WP1.8 are committed, with `docs/api/openapi.json` regenerated (`cargo run -p tenko -- openapi > docs/api/openapi.json`) and `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, `cargo deny check`, `cargo audit` and the attribution grep green.
+Every commit on `main` after `02a6d96` is local. They are not pushed because CI runs `cargo … --locked` and the shared `Cargo.lock` carries the dependencies of the in-progress packages; pushing before their manifests are committed would turn CI red. Push happens after WP1.5 and WP1.8 are committed, with `docs/api/openapi.json` regenerated (`cargo run -p tenko -- openapi > docs/api/openapi.json`) and `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, `cargo deny check`, `cargo audit` and the attribution grep green.
 
 ## Follow-ups recorded
 
-- ADR 0002 gets the measured M-series results and the M6 outcome added once WP1.1b reports.
 - M7 (UI and SSE on Linux, two hosts, TLS, HTTP/2) and the M2 VM power cut belong to the Slice 3 run.
 - `JobEngine` staging stays a task-local for Slice 1; an explicit sink on `StepContext` is added when a handler needs to stage from a spawned task.
 - `password_change_required` is enforced only by the UI; the API enforcement is a Slice 2 item.
-- `docs/api/openapi.json` references the schema(s) `SortOrder`, `Deleted` without defining them; the UI's generated types fall back to `unknown` there. The owner of the type registers it with utoipa (WP1.7 list helpers or the WP1.4 routes) before the OpenAPI document is regenerated for the push.
 - The embedded UI server should send long-lived cache headers for `/fonts/` (hashed file names) once WP1.8 wires the static routes.
 - TOTP enrolment shows the secret and the otpauth URI as text; a QR code is a WP1.10 item.
 - WebAuthn: the relying-party id is the installation host name; pending ceremonies are in memory, so Slice 3 clustering needs sticky routing or replicated challenges; Hardened deployments should load vendor attestation roots (MDS3 in Slice 3).
