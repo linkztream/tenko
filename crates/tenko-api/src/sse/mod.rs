@@ -178,7 +178,11 @@ impl Default for EventRoutes {
                 Topic::Ipam,
                 Some(ObjectKind::Prefix),
             )
-            .table(TableName::from_static("ipam.obs.facts"), Topic::Discovery, None)
+            .table(
+                TableName::from_static("ipam.obs.facts"),
+                Topic::Discovery,
+                None,
+            )
             .table(
                 TableName::from_static("ipam.obs.last_seen"),
                 Topic::Discovery,
