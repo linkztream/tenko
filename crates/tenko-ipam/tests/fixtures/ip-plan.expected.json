@@ -1,0 +1,1975 @@
+{
+  "loss": {
+    "entries": [
+      {
+        "code": "import.credential.suspicious",
+        "detail": "the login `Acme SG-2448` of sw_attic contains spaces and may be a description; it is stored as the login",
+        "location": {
+          "column": "C",
+          "row": 3,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "code": "import.column.unmapped",
+        "detail": "column E has no header; 1 value is not imported: `rack 2`",
+        "location": {
+          "column": "E",
+          "row": 31,
+          "sheet": "203.0.113.0"
+        }
+      },
+      {
+        "code": "import.address.unparsable",
+        "detail": "`TBD` is not an address, a network or a range; the row (old-scanner) is not imported",
+        "location": {
+          "column": "A",
+          "row": 51,
+          "sheet": "203.0.113.0"
+        }
+      },
+      {
+        "code": "import.prefix.unlisted",
+        "detail": "sheet `192.0.2.64` is the network 192.0.2.64/29, which the Index sheet does not list; the length /29 was inferred from the rows (choose another in the mapping if it is wrong)",
+        "location": {
+          "column": null,
+          "row": null,
+          "sheet": "192.0.2.64"
+        }
+      },
+      {
+        "code": "import.name.normalized",
+        "detail": "`Wifi Controller Hall` is not a valid host name; the host is named `wifi-controller-hall` and keeps the label as its description",
+        "location": {
+          "column": "A",
+          "row": 4,
+          "sheet": "198.51.100.0"
+        }
+      },
+      {
+        "code": "import.name.normalized",
+        "detail": "`idrac - host1` is not a valid host name; the host is named `idrac-host1` and keeps the label as its description",
+        "location": {
+          "column": "B",
+          "row": 1,
+          "sheet": "192.0.2.128"
+        }
+      },
+      {
+        "code": "import.name.normalized",
+        "detail": "`idrac - host2` is not a valid host name; the host is named `idrac-host2` and keeps the label as its description",
+        "location": {
+          "column": "B",
+          "row": 2,
+          "sheet": "192.0.2.128"
+        }
+      },
+      {
+        "code": "import.credential.numeric",
+        "detail": "the password of mx-9200 is a number; a spreadsheet may have dropped leading zeros, so check it before relying on it",
+        "location": {
+          "column": "D",
+          "row": 2,
+          "sheet": "192.0.2.9"
+        }
+      },
+      {
+        "code": "import.prefix.unlisted",
+        "detail": "sheet `203.0.113.128` is the network 203.0.113.128/29, which the Index sheet does not list; the length /29 was inferred from the rows (choose another in the mapping if it is wrong)",
+        "location": {
+          "column": null,
+          "row": null,
+          "sheet": "203.0.113.128"
+        }
+      },
+      {
+        "code": "import.sheet.empty",
+        "detail": "sheet `198.51.100.128` is empty",
+        "location": {
+          "column": null,
+          "row": null,
+          "sheet": "198.51.100.128"
+        }
+      },
+      {
+        "code": "import.prefix.proposed",
+        "detail": "198.51.100.67 lies outside every known network; the import proposes the prefix 198.51.100.64/26",
+        "location": {
+          "column": "C",
+          "row": 2,
+          "sheet": "198.51.100.0"
+        }
+      },
+      {
+        "code": "import.prefix.proposed",
+        "detail": "2001:db8::10 lies outside every known network; the import proposes the prefix 2001:db8::/64",
+        "location": {
+          "column": "C",
+          "row": 4,
+          "sheet": "198.51.100.0"
+        }
+      },
+      {
+        "code": "import.address.is_network",
+        "detail": "192.0.2.64 is the network address of 192.0.2.64/29 and cannot be a host address; the host lab-gw is imported without it (choose a wider network for the sheet to keep it)",
+        "location": {
+          "column": "A",
+          "row": 2,
+          "sheet": "192.0.2.64"
+        }
+      }
+    ]
+  },
+  "mapping": {
+    "options": {
+      "conflict": "update",
+      "credentials": "import"
+    },
+    "sheets": [
+      {
+        "columns": [
+          {
+            "column": "A",
+            "target": "prefix"
+          },
+          {
+            "column": "B",
+            "target": "description"
+          }
+        ],
+        "kind": "index",
+        "sheet": "Index"
+      },
+      {
+        "cidr": "192.0.2.0/24",
+        "columns": [
+          {
+            "column": "A",
+            "target": "address"
+          },
+          {
+            "column": "B",
+            "target": "host"
+          },
+          {
+            "column": "C",
+            "target": "login"
+          },
+          {
+            "column": "D",
+            "target": "password"
+          }
+        ],
+        "header_row": 1,
+        "kind": "network",
+        "sheet": "192.0.2.0"
+      },
+      {
+        "cidr": "203.0.113.0/25",
+        "columns": [
+          {
+            "column": "A",
+            "target": "address"
+          },
+          {
+            "column": "B",
+            "target": "host"
+          },
+          {
+            "column": "C",
+            "target": "login"
+          },
+          {
+            "column": "D",
+            "target": "password"
+          }
+        ],
+        "header_row": 1,
+        "kind": "network",
+        "sheet": "203.0.113.0"
+      },
+      {
+        "cidr": "192.0.2.64/29",
+        "columns": [
+          {
+            "column": "A",
+            "target": "address"
+          },
+          {
+            "column": "B",
+            "target": "host"
+          },
+          {
+            "column": "C",
+            "target": "login"
+          },
+          {
+            "column": "D",
+            "target": "password"
+          }
+        ],
+        "header_row": 1,
+        "kind": "network",
+        "sheet": "192.0.2.64"
+      },
+      {
+        "cidr": "198.51.100.0/26",
+        "columns": [
+          {
+            "column": "A",
+            "target": "host"
+          },
+          {
+            "column": "B",
+            "interface": "nic1",
+            "target": "address"
+          },
+          {
+            "column": "C",
+            "interface": "nic2",
+            "target": "address"
+          },
+          {
+            "column": "D",
+            "interface": "nic3",
+            "target": "address"
+          },
+          {
+            "column": "E",
+            "interface": "nic4",
+            "target": "address"
+          },
+          {
+            "column": "F",
+            "target": "login"
+          },
+          {
+            "column": "G",
+            "target": "password"
+          }
+        ],
+        "header_row": 1,
+        "kind": "network",
+        "sheet": "198.51.100.0"
+      },
+      {
+        "cidr": "192.0.2.128/26",
+        "columns": [
+          {
+            "column": "A",
+            "target": "address"
+          },
+          {
+            "column": "B",
+            "target": "host"
+          },
+          {
+            "column": "C",
+            "target": "login"
+          },
+          {
+            "column": "D",
+            "target": "password"
+          }
+        ],
+        "kind": "network",
+        "sheet": "192.0.2.128"
+      },
+      {
+        "columns": [
+          {
+            "column": "A",
+            "target": "address"
+          },
+          {
+            "column": "B",
+            "target": "host"
+          },
+          {
+            "column": "C",
+            "target": "login"
+          },
+          {
+            "column": "D",
+            "target": "password"
+          }
+        ],
+        "header_row": 1,
+        "kind": "host",
+        "sheet": "192.0.2.9"
+      },
+      {
+        "cidr": "203.0.113.128/29",
+        "columns": [
+          {
+            "column": "A",
+            "target": "address"
+          },
+          {
+            "column": "B",
+            "target": "host"
+          },
+          {
+            "column": "C",
+            "target": "login"
+          },
+          {
+            "column": "D",
+            "target": "password"
+          }
+        ],
+        "header_row": 1,
+        "kind": "network",
+        "sheet": "203.0.113.128"
+      },
+      {
+        "cidr": "192.0.2.192/26",
+        "columns": [
+          {
+            "column": "A",
+            "target": "address"
+          },
+          {
+            "column": "B",
+            "target": "host"
+          },
+          {
+            "column": "C",
+            "target": "login"
+          },
+          {
+            "column": "D",
+            "target": "password"
+          }
+        ],
+        "header_row": 1,
+        "kind": "network",
+        "sheet": "192.0.2.192"
+      },
+      {
+        "cidr": "198.51.100.128/26",
+        "columns": [],
+        "kind": "network",
+        "sheet": "198.51.100.128"
+      }
+    ]
+  },
+  "model": {
+    "addresses": [
+      {
+        "host": "gateway",
+        "interface": "nic1",
+        "ip": "192.0.2.1",
+        "origin": {
+          "column": "A",
+          "row": 2,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "sw_attic",
+        "interface": "nic1",
+        "ip": "192.0.2.2",
+        "origin": {
+          "column": "A",
+          "row": 3,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "hyper3",
+        "interface": "nic4",
+        "ip": "192.0.2.3",
+        "origin": {
+          "column": "A",
+          "row": 4,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "pve02",
+        "interface": "nic1",
+        "ip": "192.0.2.4",
+        "origin": {
+          "column": "A",
+          "row": 5,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "pve03",
+        "interface": "nic1",
+        "ip": "192.0.2.5",
+        "origin": {
+          "column": "A",
+          "row": 6,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "ups41",
+        "interface": "nic1",
+        "ip": "192.0.2.6",
+        "origin": {
+          "column": "A",
+          "row": 7,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "ap-hall",
+        "interface": "nic1",
+        "ip": "192.0.2.7",
+        "origin": {
+          "column": "A",
+          "row": 8,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "ap-office",
+        "interface": "nic1",
+        "ip": "192.0.2.8",
+        "origin": {
+          "column": "A",
+          "row": 9,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "mx-9200",
+        "interface": "nic1",
+        "ip": "192.0.2.9",
+        "origin": {
+          "column": "A",
+          "row": 2,
+          "sheet": "192.0.2.9"
+        }
+      },
+      {
+        "description": "DHCP pool",
+        "ip": "192.0.2.10",
+        "origin": {
+          "column": "A",
+          "row": 257,
+          "sheet": "192.0.2.0"
+        },
+        "status": "reserved"
+      },
+      {
+        "description": "DHCP pool",
+        "ip": "192.0.2.11",
+        "origin": {
+          "column": "A",
+          "row": 257,
+          "sheet": "192.0.2.0"
+        },
+        "status": "reserved"
+      },
+      {
+        "description": "DHCP pool",
+        "ip": "192.0.2.12",
+        "origin": {
+          "column": "A",
+          "row": 257,
+          "sheet": "192.0.2.0"
+        },
+        "status": "reserved"
+      },
+      {
+        "description": "DHCP pool",
+        "ip": "192.0.2.13",
+        "origin": {
+          "column": "A",
+          "row": 257,
+          "sheet": "192.0.2.0"
+        },
+        "status": "reserved"
+      },
+      {
+        "description": "DHCP pool",
+        "ip": "192.0.2.14",
+        "origin": {
+          "column": "A",
+          "row": 257,
+          "sheet": "192.0.2.0"
+        },
+        "status": "reserved"
+      },
+      {
+        "description": "DHCP pool",
+        "ip": "192.0.2.15",
+        "origin": {
+          "column": "A",
+          "row": 257,
+          "sheet": "192.0.2.0"
+        },
+        "status": "reserved"
+      },
+      {
+        "description": "DHCP pool",
+        "ip": "192.0.2.16",
+        "origin": {
+          "column": "A",
+          "row": 257,
+          "sheet": "192.0.2.0"
+        },
+        "status": "reserved"
+      },
+      {
+        "description": "DHCP pool",
+        "ip": "192.0.2.17",
+        "origin": {
+          "column": "A",
+          "row": 257,
+          "sheet": "192.0.2.0"
+        },
+        "status": "reserved"
+      },
+      {
+        "description": "DHCP pool",
+        "ip": "192.0.2.18",
+        "origin": {
+          "column": "A",
+          "row": 257,
+          "sheet": "192.0.2.0"
+        },
+        "status": "reserved"
+      },
+      {
+        "description": "DHCP pool",
+        "ip": "192.0.2.19",
+        "origin": {
+          "column": "A",
+          "row": 257,
+          "sheet": "192.0.2.0"
+        },
+        "status": "reserved"
+      },
+      {
+        "description": "DHCP pool",
+        "ip": "192.0.2.20",
+        "origin": {
+          "column": "A",
+          "row": 257,
+          "sheet": "192.0.2.0"
+        },
+        "status": "reserved"
+      },
+      {
+        "host": "printer01",
+        "interface": "nic1",
+        "ip": "192.0.2.22",
+        "origin": {
+          "column": "A",
+          "row": 23,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "printer02",
+        "interface": "nic1",
+        "ip": "192.0.2.23",
+        "origin": {
+          "column": "A",
+          "row": 24,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "files-old",
+        "interface": "nic1",
+        "ip": "192.0.2.24",
+        "origin": {
+          "column": "A",
+          "row": 25,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "backup01",
+        "interface": "nic1",
+        "ip": "192.0.2.25",
+        "origin": {
+          "column": "A",
+          "row": 26,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "kvm-switch",
+        "interface": "nic1",
+        "ip": "192.0.2.30",
+        "origin": {
+          "column": "A",
+          "row": 31,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "pdu01",
+        "interface": "nic1",
+        "ip": "192.0.2.31",
+        "origin": {
+          "column": "A",
+          "row": 32,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "camera01",
+        "interface": "nic1",
+        "ip": "192.0.2.40",
+        "origin": {
+          "column": "A",
+          "row": 41,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "camera02",
+        "interface": "nic1",
+        "ip": "192.0.2.41",
+        "origin": {
+          "column": "A",
+          "row": 42,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "tv-livingroom",
+        "interface": "nic1",
+        "ip": "192.0.2.50",
+        "origin": {
+          "column": "A",
+          "row": 51,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "sonos-kitchen",
+        "interface": "nic1",
+        "ip": "192.0.2.51",
+        "origin": {
+          "column": "A",
+          "row": 52,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "hass",
+        "interface": "nic1",
+        "ip": "192.0.2.60",
+        "origin": {
+          "column": "A",
+          "row": 61,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "zigbee-bridge",
+        "interface": "nic1",
+        "ip": "192.0.2.61",
+        "origin": {
+          "column": "A",
+          "row": 62,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "lab-sw",
+        "interface": "nic1",
+        "ip": "192.0.2.65",
+        "origin": {
+          "column": "A",
+          "row": 3,
+          "sheet": "192.0.2.64"
+        }
+      },
+      {
+        "host": "lab-ap",
+        "interface": "nic1",
+        "ip": "192.0.2.66",
+        "origin": {
+          "column": "A",
+          "row": 4,
+          "sheet": "192.0.2.64"
+        }
+      },
+      {
+        "host": "lab-nvr",
+        "interface": "nic1",
+        "ip": "192.0.2.67",
+        "origin": {
+          "column": "A",
+          "row": 5,
+          "sheet": "192.0.2.64"
+        }
+      },
+      {
+        "host": "lab-cam",
+        "interface": "nic1",
+        "ip": "192.0.2.68",
+        "origin": {
+          "column": "A",
+          "row": 6,
+          "sheet": "192.0.2.64"
+        }
+      },
+      {
+        "host": "laptop01",
+        "interface": "nic1",
+        "ip": "192.0.2.100",
+        "origin": {
+          "column": "A",
+          "row": 101,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "host": "idrac-host1",
+        "interface": "nic1",
+        "ip": "192.0.2.130",
+        "origin": {
+          "column": "A",
+          "row": 1,
+          "sheet": "192.0.2.128"
+        }
+      },
+      {
+        "host": "idrac-host2",
+        "interface": "nic1",
+        "ip": "192.0.2.131",
+        "origin": {
+          "column": "A",
+          "row": 2,
+          "sheet": "192.0.2.128"
+        }
+      },
+      {
+        "host": "dhcp01",
+        "interface": "nic1",
+        "ip": "192.0.2.193",
+        "origin": {
+          "column": "A",
+          "row": 2,
+          "sheet": "192.0.2.192"
+        }
+      },
+      {
+        "host": "fw01",
+        "interface": "nic1",
+        "ip": "198.51.100.1",
+        "origin": {
+          "column": "B",
+          "row": 3,
+          "sheet": "198.51.100.0"
+        }
+      },
+      {
+        "host": "hyper3",
+        "interface": "nic1",
+        "ip": "198.51.100.3",
+        "origin": {
+          "column": "B",
+          "row": 2,
+          "sheet": "198.51.100.0"
+        }
+      },
+      {
+        "host": "wifi-controller-hall",
+        "interface": "nic1",
+        "ip": "198.51.100.5",
+        "origin": {
+          "column": "B",
+          "row": 4,
+          "sheet": "198.51.100.0"
+        }
+      },
+      {
+        "host": "nvr01",
+        "interface": "nic1",
+        "ip": "198.51.100.6",
+        "origin": {
+          "column": "B",
+          "row": 5,
+          "sheet": "198.51.100.0"
+        }
+      },
+      {
+        "host": "hyper3",
+        "interface": "nic2",
+        "ip": "198.51.100.67",
+        "origin": {
+          "column": "C",
+          "row": 2,
+          "sheet": "198.51.100.0"
+        }
+      },
+      {
+        "host": "fw01",
+        "interface": "nic2",
+        "ip": "203.0.113.1",
+        "origin": {
+          "column": "C",
+          "row": 3,
+          "sheet": "198.51.100.0"
+        }
+      },
+      {
+        "host": "hyper3",
+        "interface": "nic3",
+        "ip": "203.0.113.3",
+        "origin": {
+          "column": "D",
+          "row": 2,
+          "sheet": "198.51.100.0"
+        }
+      },
+      {
+        "host": "dc-a1",
+        "interface": "nic1",
+        "ip": "203.0.113.10",
+        "origin": {
+          "column": "A",
+          "row": 11,
+          "sheet": "203.0.113.0"
+        }
+      },
+      {
+        "host": "dc-a2",
+        "interface": "nic1",
+        "ip": "203.0.113.11",
+        "origin": {
+          "column": "A",
+          "row": 12,
+          "sheet": "203.0.113.0"
+        }
+      },
+      {
+        "host": "store7",
+        "interface": "nic1",
+        "ip": "203.0.113.20",
+        "origin": {
+          "column": "A",
+          "row": 21,
+          "sheet": "203.0.113.0"
+        }
+      },
+      {
+        "host": "ws01",
+        "interface": "nic1",
+        "ip": "203.0.113.129",
+        "origin": {
+          "column": "A",
+          "row": 2,
+          "sheet": "203.0.113.128"
+        }
+      },
+      {
+        "host": "ws02",
+        "interface": "nic1",
+        "ip": "203.0.113.130",
+        "origin": {
+          "column": "A",
+          "row": 3,
+          "sheet": "203.0.113.128"
+        }
+      },
+      {
+        "host": "ws03",
+        "interface": "nic1",
+        "ip": "203.0.113.131",
+        "origin": {
+          "column": "A",
+          "row": 4,
+          "sheet": "203.0.113.128"
+        }
+      },
+      {
+        "host": "ws04",
+        "interface": "nic1",
+        "ip": "203.0.113.132",
+        "origin": {
+          "column": "A",
+          "row": 5,
+          "sheet": "203.0.113.128"
+        }
+      },
+      {
+        "host": "wifi-controller-hall",
+        "interface": "nic2",
+        "ip": "2001:db8::10",
+        "origin": {
+          "column": "C",
+          "row": 4,
+          "sheet": "198.51.100.0"
+        }
+      }
+    ],
+    "credentials": [
+      {
+        "host": "fw01",
+        "login": true,
+        "origin": {
+          "column": null,
+          "row": 3,
+          "sheet": "198.51.100.0"
+        },
+        "password": true
+      },
+      {
+        "host": "gateway",
+        "login": true,
+        "origin": {
+          "column": null,
+          "row": 2,
+          "sheet": "192.0.2.0"
+        },
+        "password": true
+      },
+      {
+        "host": "hyper3",
+        "login": true,
+        "origin": {
+          "column": null,
+          "row": 2,
+          "sheet": "198.51.100.0"
+        },
+        "password": true
+      },
+      {
+        "host": "idrac-host1",
+        "login": true,
+        "origin": {
+          "column": null,
+          "row": 1,
+          "sheet": "192.0.2.128"
+        },
+        "password": true
+      },
+      {
+        "host": "idrac-host2",
+        "login": true,
+        "origin": {
+          "column": null,
+          "row": 2,
+          "sheet": "192.0.2.128"
+        },
+        "password": true
+      },
+      {
+        "host": "lab-ap",
+        "login": true,
+        "origin": {
+          "column": null,
+          "row": 4,
+          "sheet": "192.0.2.64"
+        },
+        "password": true
+      },
+      {
+        "host": "mx-9200",
+        "login": true,
+        "origin": {
+          "column": null,
+          "row": 2,
+          "sheet": "192.0.2.9"
+        },
+        "password": true
+      },
+      {
+        "host": "pve02",
+        "login": true,
+        "origin": {
+          "column": null,
+          "row": 5,
+          "sheet": "192.0.2.0"
+        },
+        "password": true
+      },
+      {
+        "host": "sw_attic",
+        "login": true,
+        "origin": {
+          "column": null,
+          "row": 3,
+          "sheet": "192.0.2.0"
+        },
+        "password": false
+      }
+    ],
+    "hosts": [
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 8,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "ap-hall",
+        "origin": {
+          "column": null,
+          "row": 8,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 9,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "ap-office",
+        "origin": {
+          "column": null,
+          "row": 9,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 26,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "backup01",
+        "origin": {
+          "column": null,
+          "row": 26,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 41,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "camera01",
+        "origin": {
+          "column": null,
+          "row": 41,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 42,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "camera02",
+        "origin": {
+          "column": null,
+          "row": 42,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 11,
+              "sheet": "203.0.113.0"
+            }
+          }
+        ],
+        "name": "dc-a1",
+        "origin": {
+          "column": null,
+          "row": 11,
+          "sheet": "203.0.113.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 12,
+              "sheet": "203.0.113.0"
+            }
+          }
+        ],
+        "name": "dc-a2",
+        "origin": {
+          "column": null,
+          "row": 12,
+          "sheet": "203.0.113.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 2,
+              "sheet": "192.0.2.192"
+            }
+          }
+        ],
+        "name": "dhcp01",
+        "origin": {
+          "column": null,
+          "row": 2,
+          "sheet": "192.0.2.192"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 25,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "files-old",
+        "origin": {
+          "column": null,
+          "row": 25,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "B",
+              "row": 3,
+              "sheet": "198.51.100.0"
+            }
+          },
+          {
+            "name": "nic2",
+            "origin": {
+              "column": "C",
+              "row": 3,
+              "sheet": "198.51.100.0"
+            }
+          }
+        ],
+        "name": "fw01",
+        "origin": {
+          "column": null,
+          "row": 3,
+          "sheet": "198.51.100.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 2,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "gateway",
+        "origin": {
+          "column": null,
+          "row": 2,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 61,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "hass",
+        "origin": {
+          "column": null,
+          "row": 61,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "B",
+              "row": 2,
+              "sheet": "198.51.100.0"
+            }
+          },
+          {
+            "name": "nic2",
+            "origin": {
+              "column": "C",
+              "row": 2,
+              "sheet": "198.51.100.0"
+            }
+          },
+          {
+            "name": "nic3",
+            "origin": {
+              "column": "D",
+              "row": 2,
+              "sheet": "198.51.100.0"
+            }
+          },
+          {
+            "name": "nic4",
+            "origin": {
+              "column": "E",
+              "row": 2,
+              "sheet": "198.51.100.0"
+            }
+          }
+        ],
+        "name": "hyper3",
+        "origin": {
+          "column": null,
+          "row": 4,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "description": "idrac - host1",
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 1,
+              "sheet": "192.0.2.128"
+            }
+          }
+        ],
+        "name": "idrac-host1",
+        "origin": {
+          "column": null,
+          "row": 1,
+          "sheet": "192.0.2.128"
+        }
+      },
+      {
+        "description": "idrac - host2",
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 2,
+              "sheet": "192.0.2.128"
+            }
+          }
+        ],
+        "name": "idrac-host2",
+        "origin": {
+          "column": null,
+          "row": 2,
+          "sheet": "192.0.2.128"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 31,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "kvm-switch",
+        "origin": {
+          "column": null,
+          "row": 31,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 4,
+              "sheet": "192.0.2.64"
+            }
+          }
+        ],
+        "name": "lab-ap",
+        "origin": {
+          "column": null,
+          "row": 4,
+          "sheet": "192.0.2.64"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 6,
+              "sheet": "192.0.2.64"
+            }
+          }
+        ],
+        "name": "lab-cam",
+        "origin": {
+          "column": null,
+          "row": 6,
+          "sheet": "192.0.2.64"
+        }
+      },
+      {
+        "name": "lab-gw",
+        "origin": {
+          "column": null,
+          "row": 2,
+          "sheet": "192.0.2.64"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 5,
+              "sheet": "192.0.2.64"
+            }
+          }
+        ],
+        "name": "lab-nvr",
+        "origin": {
+          "column": null,
+          "row": 5,
+          "sheet": "192.0.2.64"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 3,
+              "sheet": "192.0.2.64"
+            }
+          }
+        ],
+        "name": "lab-sw",
+        "origin": {
+          "column": null,
+          "row": 3,
+          "sheet": "192.0.2.64"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 101,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "laptop01",
+        "origin": {
+          "column": null,
+          "row": 101,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "description": "NAS",
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 2,
+              "sheet": "192.0.2.9"
+            }
+          }
+        ],
+        "name": "mx-9200",
+        "origin": {
+          "column": null,
+          "row": 2,
+          "sheet": "192.0.2.9"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "B",
+              "row": 5,
+              "sheet": "198.51.100.0"
+            }
+          }
+        ],
+        "name": "nvr01",
+        "origin": {
+          "column": null,
+          "row": 5,
+          "sheet": "198.51.100.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 32,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "pdu01",
+        "origin": {
+          "column": null,
+          "row": 32,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 23,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "printer01",
+        "origin": {
+          "column": null,
+          "row": 23,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 24,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "printer02",
+        "origin": {
+          "column": null,
+          "row": 24,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 5,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "pve02",
+        "origin": {
+          "column": null,
+          "row": 5,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 6,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "pve03",
+        "origin": {
+          "column": null,
+          "row": 6,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 52,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "sonos-kitchen",
+        "origin": {
+          "column": null,
+          "row": 52,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 21,
+              "sheet": "203.0.113.0"
+            }
+          }
+        ],
+        "name": "store7",
+        "origin": {
+          "column": null,
+          "row": 21,
+          "sheet": "203.0.113.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 3,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "sw_attic",
+        "origin": {
+          "column": null,
+          "row": 3,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 51,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "tv-livingroom",
+        "origin": {
+          "column": null,
+          "row": 51,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 7,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "ups41",
+        "origin": {
+          "column": null,
+          "row": 7,
+          "sheet": "192.0.2.0"
+        }
+      },
+      {
+        "description": "Wifi Controller Hall",
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "B",
+              "row": 4,
+              "sheet": "198.51.100.0"
+            }
+          },
+          {
+            "name": "nic2",
+            "origin": {
+              "column": "C",
+              "row": 4,
+              "sheet": "198.51.100.0"
+            }
+          }
+        ],
+        "name": "wifi-controller-hall",
+        "origin": {
+          "column": null,
+          "row": 4,
+          "sheet": "198.51.100.0"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 2,
+              "sheet": "203.0.113.128"
+            }
+          }
+        ],
+        "name": "ws01",
+        "origin": {
+          "column": null,
+          "row": 2,
+          "sheet": "203.0.113.128"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 3,
+              "sheet": "203.0.113.128"
+            }
+          }
+        ],
+        "name": "ws02",
+        "origin": {
+          "column": null,
+          "row": 3,
+          "sheet": "203.0.113.128"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 4,
+              "sheet": "203.0.113.128"
+            }
+          }
+        ],
+        "name": "ws03",
+        "origin": {
+          "column": null,
+          "row": 4,
+          "sheet": "203.0.113.128"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 5,
+              "sheet": "203.0.113.128"
+            }
+          }
+        ],
+        "name": "ws04",
+        "origin": {
+          "column": null,
+          "row": 5,
+          "sheet": "203.0.113.128"
+        }
+      },
+      {
+        "interfaces": [
+          {
+            "name": "nic1",
+            "origin": {
+              "column": "A",
+              "row": 62,
+              "sheet": "192.0.2.0"
+            }
+          }
+        ],
+        "name": "zigbee-bridge",
+        "origin": {
+          "column": null,
+          "row": 62,
+          "sheet": "192.0.2.0"
+        }
+      }
+    ],
+    "prefixes": [
+      {
+        "cidr": "192.0.2.0/24",
+        "description": "Network gear, hypervisors",
+        "origin": {
+          "column": null,
+          "row": null,
+          "sheet": "192.0.2.0"
+        },
+        "role": "supernet",
+        "source": "sheet"
+      },
+      {
+        "cidr": "192.0.2.64/29",
+        "origin": {
+          "column": null,
+          "row": null,
+          "sheet": "192.0.2.64"
+        },
+        "source": "sheet"
+      },
+      {
+        "cidr": "192.0.2.128/26",
+        "description": "Alarm",
+        "origin": {
+          "column": null,
+          "row": null,
+          "sheet": "192.0.2.128"
+        },
+        "source": "sheet"
+      },
+      {
+        "cidr": "192.0.2.192/26",
+        "description": "DHCP",
+        "origin": {
+          "column": null,
+          "row": null,
+          "sheet": "192.0.2.192"
+        },
+        "source": "sheet"
+      },
+      {
+        "cidr": "198.51.100.0/26",
+        "description": "Appliances",
+        "origin": {
+          "column": null,
+          "row": null,
+          "sheet": "198.51.100.0"
+        },
+        "source": "sheet"
+      },
+      {
+        "cidr": "198.51.100.64/26",
+        "origin": {
+          "column": "C",
+          "row": 2,
+          "sheet": "198.51.100.0"
+        },
+        "source": "proposal"
+      },
+      {
+        "cidr": "198.51.100.128/26",
+        "description": "Printers",
+        "origin": {
+          "column": null,
+          "row": null,
+          "sheet": "198.51.100.128"
+        },
+        "source": "sheet"
+      },
+      {
+        "cidr": "203.0.113.0/25",
+        "description": "Servers",
+        "origin": {
+          "column": null,
+          "row": null,
+          "sheet": "203.0.113.0"
+        },
+        "source": "sheet"
+      },
+      {
+        "cidr": "203.0.113.128/29",
+        "origin": {
+          "column": null,
+          "row": null,
+          "sheet": "203.0.113.128"
+        },
+        "source": "sheet"
+      },
+      {
+        "cidr": "2001:db8::/64",
+        "origin": {
+          "column": "C",
+          "row": 4,
+          "sheet": "198.51.100.0"
+        },
+        "source": "proposal"
+      }
+    ],
+    "vlans": []
+  },
+  "proposals": [
+    {
+      "accepted": true,
+      "addresses": [
+        "198.51.100.67"
+      ],
+      "cidr": "198.51.100.64/26",
+      "origin": {
+        "column": "C",
+        "row": 2,
+        "sheet": "198.51.100.0"
+      }
+    },
+    {
+      "accepted": true,
+      "addresses": [
+        "2001:db8::10"
+      ],
+      "cidr": "2001:db8::/64",
+      "origin": {
+        "column": "C",
+        "row": 4,
+        "sheet": "198.51.100.0"
+      }
+    }
+  ],
+  "sheets": [
+    {
+      "free": 0,
+      "imported": 7,
+      "kind": "index",
+      "rows": 7,
+      "sheet": "Index",
+      "skipped": 0
+    },
+    {
+      "cidr": "192.0.2.0/24",
+      "free": 234,
+      "imported": 22,
+      "kind": "network",
+      "rows": 256,
+      "sheet": "192.0.2.0",
+      "skipped": 0
+    },
+    {
+      "cidr": "203.0.113.0/25",
+      "free": 121,
+      "imported": 3,
+      "kind": "network",
+      "rows": 125,
+      "sheet": "203.0.113.0",
+      "skipped": 1
+    },
+    {
+      "cidr": "192.0.2.64/29",
+      "free": 0,
+      "imported": 5,
+      "kind": "network",
+      "rows": 5,
+      "sheet": "192.0.2.64",
+      "skipped": 0
+    },
+    {
+      "cidr": "198.51.100.0/26",
+      "free": 0,
+      "imported": 4,
+      "kind": "network",
+      "rows": 4,
+      "sheet": "198.51.100.0",
+      "skipped": 0
+    },
+    {
+      "cidr": "192.0.2.128/26",
+      "free": 0,
+      "imported": 2,
+      "kind": "network",
+      "rows": 2,
+      "sheet": "192.0.2.128",
+      "skipped": 0
+    },
+    {
+      "free": 0,
+      "imported": 1,
+      "kind": "host",
+      "rows": 1,
+      "sheet": "192.0.2.9",
+      "skipped": 0
+    },
+    {
+      "cidr": "203.0.113.128/29",
+      "free": 0,
+      "imported": 4,
+      "kind": "network",
+      "rows": 4,
+      "sheet": "203.0.113.128",
+      "skipped": 0
+    },
+    {
+      "cidr": "192.0.2.192/26",
+      "free": 0,
+      "imported": 1,
+      "kind": "network",
+      "rows": 1,
+      "sheet": "192.0.2.192",
+      "skipped": 0
+    },
+    {
+      "cidr": "198.51.100.128/26",
+      "free": 0,
+      "imported": 0,
+      "kind": "network",
+      "rows": 0,
+      "sheet": "198.51.100.128",
+      "skipped": 0
+    }
+  ]
+}

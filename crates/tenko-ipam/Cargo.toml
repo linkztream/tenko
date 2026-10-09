@@ -10,7 +10,13 @@ publish = false
 [dependencies]
 arc-swap = { workspace = true }
 async-trait = { workspace = true }
+# Encryption of staged uploads with a key held only in memory (WP1.5).
+aws-lc-rs = { workspace = true }
 bytes = { workspace = true }
+# Import readers (WP1.5): workbooks, CSV and its encodings.
+calamine = { workspace = true }
+csv = { workspace = true }
+encoding_rs = { workspace = true }
 ipnet = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -18,16 +24,23 @@ sha2 = { workspace = true }
 tenko-core = { workspace = true }
 tenko-jobs = { workspace = true }
 tenko-store = { workspace = true }
+# Credential columns of an import become operator secrets (WP1.5).
+tenko-vault = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 utoipa = { workspace = true }
 uuid = { workspace = true }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
 tenko-core = { workspace = true, features = ["testing"] }
+# Import tests (WP1.5): the job engine and vault test helpers, and the fixture writers.
+rust_xlsxwriter = { workspace = true }
+zip = { workspace = true }
 tenko-jobs = { workspace = true, features = ["testing"] }
+tenko-vault = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true

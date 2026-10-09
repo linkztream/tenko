@@ -1,0 +1,5 @@
+﻿Enhet,Nic1,Nic2,Nic3,Nic4,login,pass
+hyper3,198.51.100.3,198.51.100.67,203.0.113.3,192.0.2.3,root,example-pve1-pass
+fw01,198.51.100.1,203.0.113.1,,,admin,example-fw-pass
+Wifi Controller Hall,198.51.100.5,2001:db8::10
+nvr01,198.51.100.6

@@ -1,0 +1,7 @@
+﻿192.0.2.0/24,"Network gear, hypervisors"
+192.0.2.9,NAS
+203.0.113.0/25,Servers
+198.51.100.0/26,Appliances
+192.0.2.128/26,Alarm
+192.0.2.192/26,DHCP
+198.51.100.128/26,Printers

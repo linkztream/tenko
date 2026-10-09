@@ -33,3 +33,4 @@
 
 # HIBP range fixtures reproduce the API response byte for byte, including CRLF line ends.
 crates/tenko-auth/tests/fixtures/hibp/*.txt -text
+crates/tenko-ipam/tests/fixtures/** -text

@@ -1,0 +1,6 @@
+﻿IP,Beteckning,Login,Pass
+192.0.2.64,lab-gw
+192.0.2.65,lab-sw
+192.0.2.66,lab-ap,admin,example-lab-pass
+192.0.2.67,lab-nvr
+192.0.2.68,lab-cam
