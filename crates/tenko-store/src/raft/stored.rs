@@ -52,6 +52,9 @@ pub(crate) struct SmMeta {
     pub journal_oldest: Option<Revision>,
     /// Change sets in the journal.
     pub journal_len: u64,
+    /// Encoded bytes of the change sets in the journal (bounded by the byte limit).
+    #[serde(default)]
+    pub journal_bytes: u64,
     /// Bytes of live keys and values over all tables (without the revision prefix).
     pub data_bytes: u64,
 }

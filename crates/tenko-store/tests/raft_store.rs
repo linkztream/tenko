@@ -1,6 +1,7 @@
 //! Behaviour of `RaftStore` beyond the shared conformance suite: restart and recovery, the
-//! write coalescer, snapshot-and-purge, and snapshot installs that swap derived indexes
-//! without ever exposing an empty one.
+//! write coalescer, snapshot-and-purge, snapshot installs that write a fresh state file and
+//! swap derived indexes without ever exposing an empty one, the in-place re-seed, and the
+//! journal's byte limit.
 
 use std::{
     collections::BTreeMap,
@@ -251,6 +252,7 @@ async fn batches_in_one_entry_apply_in_order_and_fail_alone() {
         .put(ROWS, key(4), Bytes::from_static(b"d"));
     let proposal = Proposal {
         journal_retention: 1_000,
+        journal_max_bytes: 0,
         batches: [&first, &second, &third, &fourth]
             .into_iter()
             .map(proposed)
@@ -603,4 +605,246 @@ async fn three_voters_replicate_and_fail_over() {
     for node in nodes {
         node.shutdown().await.expect("shutdown");
     }
+}
+
+/// The state files in a data directory and the name `sm.current` holds, if any.
+fn state_files(dir: &Path) -> (Vec<String>, Option<String>) {
+    let mut files: Vec<String> = std::fs::read_dir(dir)
+        .expect("list the data directory")
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| {
+            name.starts_with("sm")
+                && Path::new(name)
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("redb"))
+        })
+        .collect();
+    files.sort();
+    let pointer = std::fs::read_to_string(dir.join("sm.current"))
+        .ok()
+        .map(|name| name.trim().to_owned());
+    (files, pointer)
+}
+
+/// Writes `rows` records of `size` bytes in batches of 500, then rewrites every third one.
+async fn load_and_churn(store: &RaftStore, rows: u64, size: usize) {
+    for chunk in (0..rows).collect::<Vec<_>>().chunks(500) {
+        let mut b = batch();
+        for n in chunk {
+            b.put(ROWS, key(*n), vec![1_u8; size]);
+        }
+        store.propose(b).await.expect("load");
+    }
+    for chunk in (0..rows).step_by(3).collect::<Vec<_>>().chunks(500) {
+        let mut b = batch();
+        for n in chunk {
+            b.put(ROWS, key(*n), vec![2_u8; size]);
+        }
+        store.propose(b).await.expect("churn");
+    }
+}
+
+/// A snapshot install writes the state into a fresh, compacted state file named by
+/// `sm.current`; the old file is gone, and the node restarts from the new one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn install_writes_a_fresh_state_file_that_survives_restart() {
+    let dir = TestDir::new("fresh-install");
+    let network = InProcessNetwork::new();
+    let leader = RaftStore::open_with(node_config(&dir, 1), Arc::new(network.clone()))
+        .await
+        .expect("leader");
+    network.register(&leader);
+    load_and_churn(&leader, 6_000, 512).await;
+    leader.snapshot_now().await.expect("snapshot");
+    let target = leader.status().revision;
+    let (meta, path) = leader.current_snapshot().expect("snapshot file");
+    let vote = leader.raft().metrics().borrow().vote;
+
+    let follower_config = node_config(&dir, 2);
+    let follower = RaftStore::open_with(follower_config.clone(), Arc::new(network.clone()))
+        .await
+        .expect("follower");
+    let index = Arc::new(RecordingIndex::new(ROWS));
+    follower.register_index(index.clone()).expect("register");
+    assert_eq!(
+        state_files(&dir.node(2)),
+        (vec!["sm.redb".to_owned()], None),
+        "a new store starts with sm.redb and no pointer"
+    );
+    let mut receiver = follower.receive_snapshot().expect("receiver");
+    receiver
+        .write_chunk(&std::fs::read(&path).expect("read the snapshot"))
+        .await
+        .expect("chunk");
+    receiver.install(vote, meta).await.expect("install");
+    wait_for_revision(&follower, target).await;
+
+    let (files, pointer) = state_files(&dir.node(2));
+    let pointer = pointer.expect("sm.current after an install");
+    assert_eq!(
+        files,
+        vec![pointer.clone()],
+        "only the new state file remains"
+    );
+    assert!(pointer.starts_with("sm-"));
+    let leader_view = leader.read(ReadConsistency::Local).await.expect("view");
+    let expected = rows(leader_view.as_ref());
+    drop(leader_view);
+    let view = follower.read(ReadConsistency::Local).await.expect("view");
+    assert_eq!(rows(view.as_ref()), expected);
+    drop(view);
+    assert_eq!(index.image().rows, expected, "the index was rebuilt aside");
+    assert!(follower.engine_stats().last_compact_micros > 0);
+    // The installed file is compact: no doubling slack around the live data.
+    let usage = follower.disk_usage();
+    let file = std::fs::metadata(dir.node(2).join(&pointer))
+        .expect("state file")
+        .len();
+    assert!(
+        file < 2 * usage.data_bytes,
+        "fresh state file of {file} bytes for {} bytes of data",
+        usage.data_bytes
+    );
+
+    follower.shutdown().await.expect("shutdown");
+    drop(follower);
+    let follower = RaftStore::open_with(follower_config, Arc::new(network.clone()))
+        .await
+        .expect("reopen the follower");
+    assert_eq!(follower.status().revision, target);
+    let view = follower.read(ReadConsistency::Local).await.expect("view");
+    assert_eq!(rows(view.as_ref()), expected);
+    drop(view);
+    assert_eq!(state_files(&dir.node(2)).1, Some(pointer));
+    follower.shutdown().await.expect("shutdown");
+    leader.shutdown().await.expect("shutdown");
+}
+
+/// A node re-seeds itself in place: same state, fresh file, indexes untouched, writes
+/// continue afterwards, and a restart opens the new file.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reseed_in_place_rewrites_the_state_file() {
+    let dir = TestDir::new("reseed");
+    let cfg = config(dir.path());
+    let store = RaftStore::open(cfg.clone()).await.expect("open");
+    let index = Arc::new(RecordingIndex::new(ROWS));
+    store.register_index(index.clone()).expect("register");
+    load_and_churn(&store, 6_000, 512).await;
+    let revision = store.status().revision;
+    let before = rows(
+        store
+            .read(ReadConsistency::Local)
+            .await
+            .expect("view")
+            .as_ref(),
+    );
+    let image_before = index.image();
+
+    let reseeded = store.reseed_in_place().await.expect("re-seed");
+    assert!(
+        reseeded.bytes_after <= reseeded.bytes_before,
+        "{reseeded:?}"
+    );
+    assert_eq!(store.engine_stats().reseeds_in_place, 1);
+    assert_eq!(
+        store.status().revision,
+        revision,
+        "the state does not change"
+    );
+    let view = store.read(ReadConsistency::Local).await.expect("view");
+    assert_eq!(rows(view.as_ref()), before);
+    drop(view);
+    assert_eq!(index.image(), image_before, "indexes keep their image");
+    let status = store.status();
+    assert_eq!(status.sm_file_bytes, Some(reseeded.bytes_after));
+    assert!(status.sm_file_ratio().is_some_and(|ratio| ratio < 2.0));
+    let (files, pointer) = state_files(dir.path());
+    assert_eq!(files, vec![pointer.clone().expect("pointer")]);
+
+    let next = put(&store, 99_999, "after").await;
+    assert_eq!(next, revision.next());
+    assert_eq!(index.image().revision, next);
+    store.shutdown().await.expect("shutdown");
+    drop(store);
+
+    let store = RaftStore::open(cfg).await.expect("reopen");
+    assert_eq!(store.status().revision, next);
+    let usage = store.disk_usage();
+    assert!(
+        usage.state_ratio_at_open.is_some_and(|ratio| ratio < 2.0),
+        "the re-seeded file is compact at start-up: {usage:?}"
+    );
+    let view = store.read(ReadConsistency::Local).await.expect("view");
+    assert_eq!(rows(view.as_ref()).len(), before.len() + 1);
+    drop(view);
+    assert_eq!(state_files(dir.path()).1, pointer);
+    store.shutdown().await.expect("shutdown");
+}
+
+/// The journal's byte limit comes from the entry, so a follower configured differently
+/// trims exactly like the leader; the newest change set always stays.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn journal_byte_limit_is_applied_identically_on_every_replica() {
+    let dir = TestDir::new("journal-bytes");
+    let network = InProcessNetwork::new();
+    let mut leader_config = node_config(&dir, 1);
+    leader_config.journal_max_bytes = 64 * 1024;
+    let leader = RaftStore::open_with(leader_config, Arc::new(network.clone()))
+        .await
+        .expect("leader");
+    network.register(&leader);
+    let follower = RaftStore::open_with(node_config(&dir, 2), Arc::new(network.clone()))
+        .await
+        .expect("follower");
+    network.register(&follower);
+    leader
+        .add_learner(NodeId(2), "in-process-2", true)
+        .await
+        .expect("learner");
+
+    // 40 batches of 200 keys: each change set is several KiB.
+    for round in 0..40_u64 {
+        let mut b = batch();
+        for n in 0..200 {
+            b.put(ROWS, key(round * 1_000 + n), vec![3_u8; 16]);
+        }
+        leader.propose(b).await.expect("commit");
+    }
+    let target = leader.status().revision;
+    wait_for_revision(&follower, target).await;
+    let (on_leader, on_follower) = (leader.status(), follower.status());
+    assert!(
+        on_leader.journal_len < 40,
+        "the byte limit trimmed the journal: {} change sets",
+        on_leader.journal_len
+    );
+    assert!(on_leader.journal_len >= 1);
+    assert_eq!(on_leader.journal_len, on_follower.journal_len);
+    assert_eq!(on_leader.journal_oldest, on_follower.journal_oldest);
+    assert!(matches!(
+        leader.watch(Some(Revision(1)), WatchFilter::all()),
+        Err(StoreError::Compacted { .. })
+    ));
+    // One change set larger than the limit on its own still stays.
+    let mut big = batch();
+    for n in 0..5_000 {
+        big.put(ROWS, key(10_000_000 + n), vec![4_u8; 8]);
+    }
+    let last = leader.propose(big).await.expect("commit").revision;
+    assert_eq!(leader.status().journal_len, 1);
+    assert_eq!(leader.status().journal_oldest, Some(last));
+    let mut watch = leader
+        .watch(Some(Revision(last.get() - 1)), WatchFilter::all())
+        .expect("watch the newest change set");
+    let change_set = tokio::time::timeout(Duration::from_secs(10), watch.next())
+        .await
+        .expect("in time")
+        .expect("open")
+        .expect("change set");
+    assert_eq!(change_set.revision, last);
+    assert_eq!(change_set.changes.len(), 5_000);
+    drop(watch);
+    follower.shutdown().await.expect("shutdown");
+    leader.shutdown().await.expect("shutdown");
 }

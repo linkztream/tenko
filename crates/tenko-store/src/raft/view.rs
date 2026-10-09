@@ -9,7 +9,7 @@
 //! The apply path uses it to hand each derived index a view at exactly the revision of the
 //! change set it applies, although several batches commit in one redb transaction.
 
-use std::{collections::BTreeMap, ops::Bound};
+use std::{collections::BTreeMap, ops::Bound, sync::Arc};
 
 use bytes::Bytes;
 use redb::{AccessGuard, Database, ReadOnlyTable, ReadTransaction, ReadableDatabase, TableError};
@@ -32,14 +32,21 @@ type RawRow<'a> = (
 pub(crate) struct RedbView {
     txn: ReadTransaction,
     meta: SmMeta,
+    /// Keeps the database open while the view reads it, also after the store switched to
+    /// a fresh state file (fields drop in order: the transaction first).
+    _db: Arc<Database>,
 }
 
 impl RedbView {
     /// Opens a view at the last committed state.
-    pub(crate) fn open(db: &Database) -> Result<Self, StoreError> {
+    pub(crate) fn open(db: &Arc<Database>) -> Result<Self, StoreError> {
         let txn = db.begin_read().map_err(storage)?;
         let meta = read_meta(&txn)?;
-        Ok(Self { txn, meta })
+        Ok(Self {
+            txn,
+            meta,
+            _db: Arc::clone(db),
+        })
     }
 
     /// The metadata as of this view.

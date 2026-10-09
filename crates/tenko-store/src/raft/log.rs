@@ -1036,6 +1036,7 @@ mod tests {
     fn proposal(seed: u8) -> Proposal {
         Proposal {
             journal_retention: 0,
+            journal_max_bytes: 0,
             batches: vec![ProposedBatch {
                 batch: Bytes::from(vec![seed; 16 + usize::from(seed)]),
                 fingerprint: None,

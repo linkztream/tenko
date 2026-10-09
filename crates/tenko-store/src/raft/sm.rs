@@ -1,4 +1,4 @@
-//! The Raft state machine over `sm.redb`: apply, snapshots, derived indexes, durability.
+//! The Raft state machine: apply, snapshots, derived indexes, durability and the state file.
 //!
 //! # Apply
 //!
@@ -20,26 +20,43 @@
 //! committed write is lost and no batch is half applied. A snapshot always starts with a
 //! checkpoint, so the log is never purged beyond the durable state.
 //!
+//! # The state file
+//!
+//! The state lives in one redb file in the data directory: `sm.redb` until the first
+//! snapshot install, then the file the pointer file `sm.current` names (`sm-<id>.redb`).
+//! Installing a snapshot never rewrites the live file. It writes the new state into a new
+//! file in one durable transaction, compacts that file while nothing else uses it (redb
+//! grows a file by doubling, so a freshly written file is up to half free space; ADR 0002
+//! M6), and then switches: the pointer file is replaced atomically (written aside, synced,
+//! renamed), the store moves to the new database, and the old file is removed once its last
+//! reader is gone (at the latest at the next start). A crash before the rename leaves the old
+//! state and pointer untouched; a crash after it finds the new state. The same path rewrites
+//! a node's own state into a fresh file ([`StateMachine::rewrite_in_place`]), which is how a
+//! single node re-seeds itself.
+//!
 //! # Snapshots
 //!
 //! A snapshot streams a redb read transaction to a file (`snapshot`) while applies
-//! continue. Installing one replaces every store table in one durable transaction, then
-//! builds every registered index aside from the new state and installs it atomically: a
-//! reader of an index sees the old image until the new one is complete, never an empty one
-//! (ADR 0002 condition).
+//! continue. After an install every registered index is built aside from the new state and
+//! installed atomically: a reader of an index sees the old image until the new one is
+//! complete, never an empty one (ADR 0002 condition).
 
 use std::{
     fs,
+    io::Write as _,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, MutexGuard, PoisonError,
+        Arc, Mutex, MutexGuard, PoisonError, RwLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use openraft::{EntryPayload, RaftSnapshotBuilder, storage::RaftStateMachine};
-use redb::{Database, Durability, TableDefinition, TableHandle};
+use redb::{
+    Database, Durability, ReadTransaction, ReadableTable, TableDefinition, TableHandle,
+    WriteTransaction,
+};
 use tenko_core::{
     AuditSeq, Revision, TableName,
     audit::{AuditRecord, ChainVerifier},
@@ -61,10 +78,17 @@ use super::{
 };
 use crate::api::{DerivedIndex, IndexStatus, KeyRange, ReadView, StoreError, tables};
 
+/// The pointer file naming the active state file.
+const POINTER: &str = "sm.current";
+/// The pointer file while it is written.
+const POINTER_PART: &str = "sm.current.part";
+/// The state file of a store that never installed a snapshot.
+const INITIAL_FILE: &str = "sm.redb";
+
 /// State machine settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SmOptions {
-    /// redb page cache of `sm.redb`.
+    /// redb page cache of the state file.
     pub(crate) cache_bytes: usize,
     /// Fsync every apply instead of at checkpoints.
     pub(crate) durable_apply: bool,
@@ -81,15 +105,32 @@ pub(crate) struct SmStats {
     pub(crate) last_snapshot_bytes: AtomicU64,
     pub(crate) last_install_micros: AtomicU64,
     pub(crate) last_index_rebuild_micros: AtomicU64,
+    pub(crate) last_compact_micros: AtomicU64,
     pub(crate) checkpoints: AtomicU64,
+    pub(crate) rewrites: AtomicU64,
+}
+
+/// The result of rewriting the state into a fresh file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Rewritten {
+    pub(crate) bytes_before: u64,
+    pub(crate) bytes_after: u64,
+    pub(crate) micros: u64,
 }
 
 struct Shared {
-    db: Database,
+    dir: PathBuf,
+    /// The active state database; replaced when a fresh state file takes over.
+    db: RwLock<Arc<Database>>,
+    /// The active state file.
+    file: Mutex<PathBuf>,
+    /// Replaced state files that could not be removed yet (a reader still had them open).
+    retired: Mutex<Vec<PathBuf>>,
     options: SmOptions,
     /// The committed metadata.
     state: Mutex<SmMeta>,
-    /// Indexes and the registration capture; held across every apply transaction.
+    /// Indexes and the registration capture; held across every apply transaction and every
+    /// switch of the state file.
     registry: Mutex<Registry>,
     /// One registration at a time.
     registration: Mutex<()>,
@@ -146,21 +187,158 @@ fn unique_suffix() -> String {
     format!("{nanos:x}-{}", COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
+/// Whether a file name is a state file (`sm.redb` or `sm-<id>.redb`, the id made of ASCII
+/// letters, digits and dashes as `unique_suffix` writes it).
+fn is_state_file(name: &str) -> bool {
+    name == INITIAL_FILE
+        || name
+            .strip_prefix("sm-")
+            .and_then(|rest| rest.strip_suffix(".redb"))
+            .is_some_and(|id| {
+                !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+            })
+}
+
+/// The active state file of `dir`: the one `sm.current` names, or `sm.redb`.
+fn active_file(dir: &Path) -> Result<String, StoreError> {
+    match fs::read_to_string(dir.join(POINTER)) {
+        Ok(name) => {
+            let name = name.trim().to_owned();
+            if !is_state_file(&name) {
+                return Err(StoreError::Storage(format!(
+                    "{} names {name:?}, which is not a state file",
+                    dir.join(POINTER).display()
+                )));
+            }
+            if !dir.join(&name).is_file() {
+                return Err(StoreError::Storage(format!(
+                    "{} names {name}, which does not exist",
+                    dir.join(POINTER).display()
+                )));
+            }
+            Ok(name)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(INITIAL_FILE.to_owned()),
+        Err(error) => Err(storage(error)),
+    }
+}
+
+/// Points `sm.current` at `name`: written aside, synced and renamed over the old pointer, so
+/// a crash leaves either the old or the new pointer.
+fn write_pointer(dir: &Path, name: &str) -> Result<(), StoreError> {
+    let part = dir.join(POINTER_PART);
+    {
+        let mut file = fs::File::create(&part).map_err(storage)?;
+        file.write_all(name.as_bytes()).map_err(storage)?;
+        file.sync_all().map_err(storage)?;
+    }
+    fs::rename(&part, dir.join(POINTER)).map_err(storage)?;
+    sync_dir(dir);
+    Ok(())
+}
+
+/// Makes a rename in `dir` durable where the platform allows it (directories cannot be
+/// opened for syncing on Windows; NTFS journals the rename).
+#[cfg(unix)]
+fn sync_dir(dir: &Path) {
+    if let Ok(dir) = fs::File::open(dir) {
+        let _ = dir.sync_all();
+    }
+}
+
+#[cfg(not(unix))]
+fn sync_dir(_dir: &Path) {}
+
+/// Removes state files other than the active one (left by an install that stopped before
+/// switching, or replaced while a reader still had them open) and a partial pointer.
+fn remove_stale_files(dir: &Path, active: &str) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if (is_state_file(&name) && name != active) || name == POINTER_PART {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+fn open_database(path: &Path, cache_bytes: usize) -> Result<Database, StoreError> {
+    Database::builder()
+        .set_cache_size(cache_bytes)
+        .create(path)
+        .map_err(storage)
+}
+
+/// Compacts a database nobody else uses until redb reports nothing left to do.
+fn compact(database: &mut Database) -> Result<(), StoreError> {
+    for _ in 0..16 {
+        if !database.compact().map_err(storage)? {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// Copies every store table of `source` into `target`, in key order.
+fn copy_tables(source: &ReadTransaction, target: &WriteTransaction) -> Result<(), StoreError> {
+    let names: Vec<String> = source
+        .list_tables()
+        .map_err(storage)?
+        .map(|handle| handle.name().to_owned())
+        .filter(|name| is_store_table(name))
+        .collect();
+    for name in &names {
+        let definition = TableDefinition::<&[u8], &[u8]>::new(name);
+        let from = source.open_table(definition).map_err(storage)?;
+        let mut to = target.open_table(definition).map_err(storage)?;
+        for item in from.iter().map_err(storage)? {
+            let (key, value) = item.map_err(storage)?;
+            to.insert(key.value(), value.value()).map_err(storage)?;
+        }
+    }
+    Ok(())
+}
+
+/// Writes every record of a snapshot file into `target`.
+fn copy_snapshot(reader: &mut SnapshotReader, target: &WriteTransaction) -> Result<(), StoreError> {
+    let mut table = None;
+    while let Some(record) = reader.next_record()? {
+        match record {
+            Record::Table(name) => {
+                drop(table.take());
+                let name = TableName::new(name.to_owned()).map_err(storage)?;
+                table = Some(target.open_table(data_table(&name)).map_err(storage)?);
+            }
+            Record::Row(key, value) => {
+                let Some(table) = table.as_mut() else {
+                    return Err(StoreError::Storage(
+                        "snapshot row before any table".to_owned(),
+                    ));
+                };
+                table.insert(key, value).map_err(storage)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 impl StateMachine {
-    /// Opens or creates `sm.redb` and the snapshot directory under `dir`, verifies the audit
-    /// chain and finds the current snapshot.
+    /// Opens or creates the state file and the snapshot directory under `dir`, removes
+    /// state files left behind, verifies the audit chain and finds the current snapshot.
     pub(crate) fn open(dir: &Path, options: SmOptions) -> Result<Self, StoreError> {
         let snapshot_dir = dir.join("snapshots");
         fs::create_dir_all(&snapshot_dir).map_err(storage)?;
-        let db = Database::builder()
-            .set_cache_size(options.cache_bytes)
-            .create(dir.join("sm.redb"))
-            .map_err(storage)?;
+        let active = active_file(dir)?;
+        remove_stale_files(dir, &active);
+        let file = dir.join(&active);
+        let db = open_database(&file, options.cache_bytes)?;
         {
             let txn = db.begin_write().map_err(storage)?;
             txn.open_table(META).map_err(storage)?;
             txn.commit().map_err(storage)?;
         }
+        let db = Arc::new(db);
         let view = RedbView::open(&db)?;
         let meta = view.meta().clone();
         verify_audit(&view, options.verify_full_chain)?;
@@ -169,7 +347,10 @@ impl StateMachine {
         let (applied, _) = watch::channel(meta.revision);
         Ok(Self {
             shared: Arc::new(Shared {
-                db,
+                dir: dir.to_path_buf(),
+                db: RwLock::new(db),
+                file: Mutex::new(file),
+                retired: Mutex::new(Vec::new()),
                 options,
                 state: Mutex::new(meta),
                 registry: Mutex::new(Registry::new()),
@@ -184,6 +365,22 @@ impl StateMachine {
         })
     }
 
+    /// The active state database.
+    fn db(&self) -> Arc<Database> {
+        Arc::clone(
+            &self
+                .shared
+                .db
+                .read()
+                .unwrap_or_else(PoisonError::into_inner),
+        )
+    }
+
+    /// The active state file.
+    pub(crate) fn file_path(&self) -> PathBuf {
+        lock(&self.shared.file).clone()
+    }
+
     /// The committed metadata.
     pub(crate) fn meta(&self) -> SmMeta {
         lock(&self.shared.state).clone()
@@ -191,7 +388,7 @@ impl StateMachine {
 
     /// A read view at the committed state.
     pub(crate) fn view(&self) -> Result<RedbView, StoreError> {
-        RedbView::open(&self.shared.db)
+        RedbView::open(&self.db())
     }
 
     /// Notifications of the applied revision.
@@ -224,19 +421,21 @@ impl StateMachine {
         lock(&self.shared.snapshots).current.clone()
     }
 
-    /// Bytes of the snapshot files.
+    /// The snapshot directory.
     pub(crate) fn snapshot_dir(&self) -> &Path {
         &self.shared.snapshot_dir
     }
 
-    /// Makes every commit so far durable (no-op when nothing changed since the last one).
+    /// Makes every commit so far durable (no-op when nothing changed since the last one),
+    /// and removes replaced state files whose readers are gone.
     pub(crate) fn checkpoint(&self) -> Result<(), StoreError> {
+        self.remove_retired();
         if !self.shared.dirty.swap(false, Ordering::SeqCst) {
             return Ok(());
         }
         let result = (|| {
             // An empty durable commit persists every earlier non-durable one.
-            let txn = self.shared.db.begin_write().map_err(storage)?;
+            let txn = self.db().begin_write().map_err(storage)?;
             txn.commit().map_err(storage)
         })();
         if result.is_err() {
@@ -250,6 +449,10 @@ impl StateMachine {
         result
     }
 
+    fn remove_retired(&self) {
+        lock(&self.shared.retired).retain(|path| fs::remove_file(path).is_err() && path.exists());
+    }
+
     /// Applies committed entries in one transaction (blocking).
     pub(crate) fn apply_entries(
         &self,
@@ -257,8 +460,10 @@ impl StateMachine {
     ) -> Result<Vec<ApplyResponse>, StoreError> {
         let shared = &*self.shared;
         let mut registry = lock(&shared.registry);
+        // The state file only switches under the registry lock, so `db` stays the active one.
+        let db = self.db();
         let mut meta = lock(&shared.state).clone();
-        let mut txn = shared.db.begin_write().map_err(storage)?;
+        let mut txn = db.begin_write().map_err(storage)?;
         let durability = if shared.options.durable_apply {
             Durability::Immediate
         } else {
@@ -281,7 +486,11 @@ impl StateMachine {
                     EntryPayload::Normal(proposal) => {
                         let mut outcomes = Vec::with_capacity(proposal.batches.len());
                         for batch in &proposal.batches {
-                            outcomes.push(applier.apply(batch, proposal.journal_retention)?);
+                            outcomes.push(applier.apply(
+                                batch,
+                                proposal.journal_retention,
+                                proposal.journal_max_bytes,
+                            )?);
                         }
                         responses.push(ApplyResponse { outcomes });
                     }
@@ -296,7 +505,7 @@ impl StateMachine {
         }
         let revision = meta.revision;
         if !applied.is_empty() {
-            let base = RedbView::open(&shared.db).map_err(storage)?;
+            let base = RedbView::open(&db).map_err(storage)?;
             registry.absorb(&base, applied);
             *lock(&shared.index_status) = registry.statuses();
         }
@@ -323,7 +532,7 @@ impl StateMachine {
             let view = {
                 let mut registry = lock(&shared.registry);
                 registry.capture = Capture::Capturing(Vec::new());
-                RedbView::open(&shared.db)
+                self.view()
             };
             let view = match view {
                 Ok(view) => view,
@@ -344,7 +553,7 @@ impl StateMachine {
                 // A snapshot replaced the state during the build.
                 continue;
             };
-            let base = RedbView::open(&shared.db)?;
+            let base = self.view()?;
             let memory_bytes = image.memory_bytes();
             index.install(image);
             let mut registered = vec![Registered {
@@ -361,7 +570,7 @@ impl StateMachine {
 
         // Snapshots kept replacing the state: build while holding the registry lock.
         let mut registry = lock(&shared.registry);
-        let view = RedbView::open(&shared.db)?;
+        let view = self.view()?;
         let image = index.build(&view)?;
         let memory_bytes = image.memory_bytes();
         index.install(image);
@@ -381,7 +590,7 @@ impl StateMachine {
         let started = Instant::now();
         // The log is purged up to the snapshot, so the state it covers must be durable.
         self.checkpoint().map_err(storage)?;
-        let view = RedbView::open(&shared.db).map_err(storage)?;
+        let view = self.view().map_err(storage)?;
         let state = view.meta().clone();
         let index = state.last_applied.as_ref().map_or(0, |log_id| log_id.index);
         let snapshot_id = format!("{index}-{}", unique_suffix());
@@ -427,8 +636,66 @@ impl StateMachine {
         })
     }
 
-    /// Installs a complete snapshot file (blocking): replaces the state, then rebuilds every
-    /// index aside and swaps it in.
+    /// Writes a complete state into a new state file in one durable transaction and
+    /// compacts it while nothing else uses it. `fill` copies the store tables and returns
+    /// the metadata to store with them. Returns the file's name, path and database; on
+    /// failure the file is removed.
+    fn write_fresh(
+        &self,
+        fill: impl FnOnce(&WriteTransaction) -> Result<SmMeta, StoreError>,
+    ) -> Result<(String, PathBuf, Database), StoreError> {
+        let name = format!("sm-{}.redb", unique_suffix());
+        let path = self.shared.dir.join(&name);
+        let written = (|| {
+            let mut database = open_database(&path, self.shared.options.cache_bytes)?;
+            let txn = database.begin_write().map_err(storage)?;
+            let state = fill(&txn)?;
+            write_meta(&txn, &state)?;
+            txn.commit().map_err(storage)?;
+            let started = Instant::now();
+            compact(&mut database)?;
+            self.shared
+                .stats
+                .last_compact_micros
+                .store(micros_since(started), Ordering::Relaxed);
+            Ok(database)
+        })();
+        match written {
+            Ok(database) => Ok((name, path, database)),
+            Err(error) => {
+                let _ = fs::remove_file(&path);
+                Err(error)
+            }
+        }
+    }
+
+    /// Makes a fresh state file the active one: pointer first, then the database handle;
+    /// the replaced file goes once its readers are gone. Called with the registry lock held.
+    fn switch_to(&self, name: &str, path: PathBuf, database: Database) -> Result<(), StoreError> {
+        if let Err(error) = write_pointer(&self.shared.dir, name) {
+            drop(database);
+            let _ = fs::remove_file(&path);
+            return Err(error);
+        }
+        let old_path = std::mem::replace(&mut *lock(&self.shared.file), path);
+        let old = std::mem::replace(
+            &mut *self
+                .shared
+                .db
+                .write()
+                .unwrap_or_else(PoisonError::into_inner),
+            Arc::new(database),
+        );
+        // The new file is durable, so nothing of the old one needs a checkpoint any more.
+        self.shared.dirty.store(false, Ordering::SeqCst);
+        drop(old);
+        lock(&self.shared.retired).push(old_path);
+        self.remove_retired();
+        Ok(())
+    }
+
+    /// Installs a complete snapshot file (blocking): writes it into a fresh, compacted state
+    /// file, switches to that file, then rebuilds every index aside and swaps it in.
     pub(crate) fn install(&self, meta: &SnapshotMeta, path: &Path) -> Result<(), StoreError> {
         let shared = &*self.shared;
         let started = Instant::now();
@@ -445,41 +712,12 @@ impl StateMachine {
         state.last_applied = meta.last_log_id;
         state.membership = meta.last_membership.clone();
 
-        let txn = shared.db.begin_write().map_err(storage)?;
-        {
-            let names: Vec<String> = txn
-                .list_tables()
-                .map_err(storage)?
-                .map(|handle| handle.name().to_owned())
-                .filter(|name| is_store_table(name))
-                .collect();
-            for name in &names {
-                txn.delete_table(TableDefinition::<&[u8], &[u8]>::new(name))
-                    .map_err(storage)?;
-            }
-            let mut table = None;
-            while let Some(record) = reader.next_record().map_err(storage)? {
-                match record {
-                    Record::Table(name) => {
-                        drop(table.take());
-                        let name = TableName::new(name.to_owned()).map_err(storage)?;
-                        table = Some(txn.open_table(data_table(&name)).map_err(storage)?);
-                    }
-                    Record::Row(key, value) => {
-                        let Some(table) = table.as_mut() else {
-                            return Err(StoreError::Storage(
-                                "snapshot row before any table".to_owned(),
-                            ));
-                        };
-                        table.insert(key, value).map_err(storage)?;
-                    }
-                }
-            }
-        }
-        write_meta(&txn, &state)?;
-        // Durable: an installed snapshot replaces log entries that may be purged.
-        txn.commit().map_err(storage)?;
-        shared.dirty.store(false, Ordering::SeqCst);
+        // The trailing hash is checked before the transaction commits.
+        let (name, file, database) = self.write_fresh(|txn| {
+            copy_snapshot(&mut reader, txn)?;
+            Ok(state.clone())
+        })?;
+        self.switch_to(&name, file, database)?;
         let revision = state.revision;
         if matches!(registry.capture, Capture::Capturing(_)) {
             registry.capture = Capture::Invalidated;
@@ -488,7 +726,7 @@ impl StateMachine {
         // Build every index aside from the new state, then swap; readers keep the old image.
         let rebuild_started = Instant::now();
         if !registry.indexes.is_empty() {
-            let view = RedbView::open(&shared.db).map_err(storage)?;
+            let view = self.view().map_err(storage)?;
             for registered in &mut registry.indexes {
                 let image = registered.index.build(&view).map_err(storage)?;
                 registered.memory_bytes = image.memory_bytes();
@@ -529,6 +767,32 @@ impl StateMachine {
         Ok(())
     }
 
+    /// Rewrites the current state into a fresh, compacted state file and switches to it: a
+    /// re-seed of the node from its own state (blocking). Applies wait until it is done;
+    /// reads continue. The state does not change, so indexes keep their images.
+    pub(crate) fn rewrite_in_place(&self) -> Result<Rewritten, StoreError> {
+        let started = Instant::now();
+        let registry = lock(&self.shared.registry);
+        let bytes_before = fs::metadata(self.file_path()).map_or(0, |m| m.len());
+        let view = self.view()?;
+        let state = view.meta().clone();
+        let (name, file, database) = self.write_fresh(|txn| {
+            copy_tables(view.txn(), txn)?;
+            Ok(state)
+        })?;
+        drop(view);
+        self.switch_to(&name, file.clone(), database)?;
+        drop(registry);
+        self.shared.stats.rewrites.fetch_add(1, Ordering::Relaxed);
+        let bytes_after = fs::metadata(&file).map_or(0, |m| m.len());
+        tracing::info!(bytes_before, bytes_after, "store state file rewritten");
+        Ok(Rewritten {
+            bytes_before,
+            bytes_after,
+            micros: micros_since(started),
+        })
+    }
+
     /// A fresh file in the snapshot directory to receive a snapshot into.
     pub(crate) fn receive_path(&self) -> PathBuf {
         self.shared
@@ -553,7 +817,7 @@ impl StateMachine {
     }
 }
 
-fn write_meta(txn: &redb::WriteTransaction, meta: &SmMeta) -> Result<(), StoreError> {
+fn write_meta(txn: &WriteTransaction, meta: &SmMeta) -> Result<(), StoreError> {
     let encoded = meta.encode()?;
     let mut table = txn.open_table(META).map_err(storage)?;
     table.insert(META_STATE, &encoded[..]).map_err(storage)?;
@@ -744,5 +1008,57 @@ impl RaftStateMachine<TypeConfig> for StateMachine {
             meta,
             snapshot: Box::new(SnapshotFile { path }),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "tenko-sm-test-{name}-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn state_file_names() {
+        assert!(is_state_file("sm.redb"));
+        assert!(is_state_file("sm-18dce4-3.redb"));
+        assert!(!is_state_file("log.redb"));
+        assert!(!is_state_file("sm-x.redb.part"));
+        assert!(!is_state_file("sm-../x.redb"));
+    }
+
+    #[test]
+    fn pointer_selects_the_active_file_and_stale_files_go() {
+        let dir = temp_dir("pointer");
+        assert_eq!(active_file(&dir).expect("default"), INITIAL_FILE);
+        fs::write(dir.join("sm.redb"), b"old").expect("write");
+        fs::write(dir.join("sm-1.redb"), b"new").expect("write");
+        fs::write(dir.join("sm-2.redb"), b"abandoned install").expect("write");
+        fs::write(dir.join(POINTER_PART), b"sm-2.redb").expect("write");
+        fs::write(dir.join("log.redb"), b"log").expect("write");
+        write_pointer(&dir, "sm-1.redb").expect("pointer");
+        let active = active_file(&dir).expect("active");
+        assert_eq!(active, "sm-1.redb");
+        remove_stale_files(&dir, &active);
+        let mut left: Vec<String> = fs::read_dir(&dir)
+            .expect("list")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(left, vec!["log.redb", "sm-1.redb", "sm.current"]);
+        fs::remove_file(dir.join("sm-1.redb")).expect("remove");
+        assert!(
+            active_file(&dir).is_err(),
+            "a pointer to a missing file is an error, never an empty store"
+        );
+        fs::remove_dir_all(&dir).expect("clean up");
     }
 }

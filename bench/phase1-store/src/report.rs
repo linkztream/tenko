@@ -122,7 +122,12 @@ fn observations(dir: &Path, name: &str) -> String {
 // M1
 // ---------------------------------------------------------------------------------------------
 
-fn m1_section(report: Option<&m1::Report>, dir: &Path, summary: &mut Vec<Summary>) -> String {
+fn m1_section(
+    report: Option<&m1::Report>,
+    dir: &Path,
+    notes_name: &str,
+    summary: &mut Vec<Summary>,
+) -> String {
     let threshold = "No empty reads; lookup p99 during install below 2x the baseline p99";
     let mut out = String::from("## M1: index swap on snapshot install\n\n");
     let Some(report) = report else {
@@ -277,6 +282,11 @@ fn m1_section(report: Option<&m1::Report>, dir: &Path, summary: &mut Vec<Summary
                     format!("{:.2} s", r.window_secs),
                     format!("{:.2} s", r.learner_install_secs),
                     format!("{:.2} s", r.index_rebuild_secs),
+                    if r.compact_secs > 0.0 {
+                        format!("{:.2} s", r.compact_secs)
+                    } else {
+                        "-".to_owned()
+                    },
                     format!(
                         "{:.0} -> {:.0} MiB",
                         r.rss_before_mib, r.rss_peak_install_mib
@@ -296,6 +306,7 @@ fn m1_section(report: Option<&m1::Report>, dir: &Path, summary: &mut Vec<Summary
                 "Install window",
                 "Learner install (engine_stats)",
                 "Index rebuild (engine_stats)",
+                "Compaction of the new state file (engine_stats)",
                 "RSS before -> peak",
                 "Installs in window",
                 "Index current after",
@@ -365,7 +376,7 @@ fn m1_section(report: Option<&m1::Report>, dir: &Path, summary: &mut Vec<Summary
         });
     }
     summary.extend(results);
-    out.push_str(&observations(dir, "m1"));
+    out.push_str(&observations(dir, notes_name));
     out
 }
 
@@ -846,6 +857,19 @@ fn m6_block(report: &m6::Report, threshold: &str, summary: &mut Vec<Summary>) ->
     } else {
         format!("journal retention {retention} change sets")
     };
+    let retention_note = if config.journal_max_bytes > 0 {
+        format!(
+            "{retention_note}, journal limit {}",
+            mib(config.journal_max_bytes)
+        )
+    } else {
+        retention_note
+    };
+    let leader_label = if report.leader_reseed.is_some() {
+        "leader (after the week and an in-place re-seed)"
+    } else {
+        "leader (after the week)"
+    };
     let mut out = format!(
         "### {} records, {retention_note}\n\n",
         thousands(config.records)
@@ -918,6 +942,19 @@ fn m6_block(report: &m6::Report, threshold: &str, summary: &mut Vec<Summary>) ->
         yes_no(report.reseed.revisions_equal),
         yes_no(report.reseed.data_bytes_equal),
     );
+    if let Some(r) = &report.leader_reseed {
+        let _ = writeln!(
+            out,
+            "In-place re-seed of the leader after the week (`RaftStore::reseed_in_place`, \
+             the single-node path): state file {} -> {} in {:.1} s, writes waiting meanwhile; \
+             {:.2}x all tables, {:.2}x user table.\n",
+            mib(r.bytes_before),
+            mib(r.bytes_after),
+            r.secs,
+            r.over_data,
+            r.over_user,
+        );
+    }
     out.push_str("After a clean shutdown of both nodes (files at rest):\n\n");
     out.push_str(&table(
         &[
@@ -930,7 +967,7 @@ fn m6_block(report: &m6::Report, threshold: &str, summary: &mut Vec<Summary>) ->
         ],
         &[
             vec![
-                "leader (after the week)".to_owned(),
+                leader_label.to_owned(),
                 mib(rest.leader.sm_redb),
                 mib(rest.leader.log_redb),
                 mib(rest.leader.snapshots),
@@ -948,7 +985,7 @@ fn m6_block(report: &m6::Report, threshold: &str, summary: &mut Vec<Summary>) ->
         ],
     ));
     let stats: Vec<Vec<String>> = [
-        ("leader (after the week)", &rest.leader_redb),
+        (leader_label, &rest.leader_redb),
         ("learner (re-seeded)", &rest.learner_redb),
     ]
     .into_iter()
@@ -1013,7 +1050,7 @@ fn m6_block(report: &m6::Report, threshold: &str, summary: &mut Vec<Summary>) ->
         ));
     }
     let compacted: Vec<Vec<String>> = [
-        ("leader (after the week)", &rest.leader_compacted),
+        (leader_label, &rest.leader_compacted),
         ("learner (re-seeded)", &rest.learner_compacted),
     ]
     .into_iter()
@@ -1047,10 +1084,14 @@ fn m6_block(report: &m6::Report, threshold: &str, summary: &mut Vec<Summary>) ->
         ));
     }
     if !compacted.is_empty() {
-        out.push_str(
+        out.push_str(if config.journal_max_bytes > 0 {
             "\nThe closed files after an offline `redb::Database::compact()` (run by the benchmark \
-             after the measurement above; not something the store does today):\n\n",
-        );
+             after the measurement above; since WP1.1b the store compacts every fresh state \
+             file itself):\n\n"
+        } else {
+            "\nThe closed files after an offline `redb::Database::compact()` (run by the benchmark \
+             after the measurement above; not something the store did at the time):\n\n"
+        });
         out.push_str(&table(
             &[
                 "Node",
@@ -1083,10 +1124,13 @@ fn m6_block(report: &m6::Report, threshold: &str, summary: &mut Vec<Summary>) ->
         ),
         threshold: threshold.to_owned(),
         measured: format!(
-            "sm.redb / raw after re-seed {:.2}x (all tables), {:.2}x (user table); before \
-             re-seed {:.2}x and {:.2}x",
+            "sm.redb / raw after re-seed {:.2}x (all tables), {:.2}x (user table) while \
+             running, {:.2}x and {:.2}x at rest after a clean shutdown; before re-seed {:.2}x \
+             and {:.2}x",
             report.ratio_after_reseed_data,
             report.ratio_after_reseed_user,
+            report.at_rest.learner_sm_over_data,
+            report.at_rest.learner_sm_over_user,
             report.ratio_before_reseed_data,
             report.ratio_before_reseed_user,
         ),
@@ -1101,6 +1145,66 @@ fn m6_block(report: &m6::Report, threshold: &str, summary: &mut Vec<Summary>) ->
 
 fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
+}
+
+// ---------------------------------------------------------------------------------------------
+// After WP1.1b
+// ---------------------------------------------------------------------------------------------
+
+/// Moves every Markdown heading one level down.
+fn demote(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            if line.starts_with('#') {
+                format!("#{line}")
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
+}
+
+fn after_section(
+    m1: Option<&m1::Report>,
+    m6: &[&m6::Report],
+    dir: &Path,
+    summary: &mut Vec<Summary>,
+) -> String {
+    if m1.is_none() && m6.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(
+        "## After WP1.1b: fresh state file on install, byte-bounded journal\n\n\
+         The sections above measure the store as first built. WP1.1b then changed two things \
+         the M6 observations recommended, and the measurements below were repeated with the \
+         changed store and its defaults: a snapshot install (and the new in-place re-seed, \
+         `RaftStore::reseed_in_place`) writes the state into a fresh file, compacts it while it \
+         is private and switches to it through the pointer file `sm.current`, instead of \
+         rewriting the live `sm.redb`; and the journal is bounded by bytes (default 32 MiB) as \
+         well as by its change-set count, with the limit carried in every Raft entry. The \
+         method and configuration of each measurement are unchanged otherwise. The earlier \
+         figures stay above for comparison.\n\n",
+    );
+    let start = summary.len();
+    if !m6.is_empty() {
+        out.push_str("### M6 after WP1.1b\n\n");
+        let threshold = "`sm.redb` below 2x raw after re-seed";
+        for report in m6 {
+            out.push_str(&demote(&m6_block(report, threshold, summary)));
+            out.push('\n');
+        }
+    }
+    if let Some(m1) = m1 {
+        out.push_str(&demote(&m1_section(Some(m1), dir, "m1-after", summary)));
+        out.push('\n');
+    }
+    for row in &mut summary[start..] {
+        row.measurement.push_str(" (after WP1.1b)");
+    }
+    out.push_str(&observations(dir, "after"));
+    out
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1340,6 +1444,10 @@ fn provenance(machine: Option<&Machine>, runs: &[RunRow], dir: &Path) -> String 
          phase1-store m5 --durability deferred --rates 1000 --closed-secs 0 --checkpoint-ms 10000 --out-name m5-ckpt-10000\n\
          phase1-store m2 --bulk-kills 0 --steady-kills 0 --immediate-bulk-kills 0 --immediate-steady-kills 0 --recovery-kills 40 --out-name m2-recovery\n\
          phase1-store m10\n\
+         # After WP1.1b (fresh state file on install, byte-bounded journal):\n\
+         phase1-store m6 --out-name m6-wp11b\n\
+         phase1-store m6 --records 1500000 --out-name m6-1500k-wp11b\n\
+         phase1-store m1 --records 1000000,6000000 --out-name m1-wp11b\n\
          phase1-store report",
     ));
     out.push_str(
@@ -1387,16 +1495,29 @@ pub fn run(ctx: &Ctx) -> Result<()> {
             m5_sensitivity_runs.push(report);
         }
     }
+    let m1_after: Option<m1::Report> = ctx.out.read("m1-wp11b")?;
+    let mut m6_after: Vec<m6::Report> = Vec::new();
+    for name in ["m6-wp11b", "m6-1500k-wp11b"] {
+        if let Some(report) = ctx.out.read::<m6::Report>(name)? {
+            m6_after.push(report);
+        }
+    }
     let m10: Option<m10::Report> = ctx.out.read("m10")?;
     let m10_first: Option<m10::Report> = ctx.out.read("m10-first")?;
 
     let mut summary = Vec::new();
     let sections = [
-        m1_section(m1.as_ref(), &dir, &mut summary),
+        m1_section(m1.as_ref(), &dir, "m1", &mut summary),
         m2_section(m2.as_ref(), &dir, &mut summary),
         m5_section(m5.as_ref(), &m5_sensitivity_runs, &dir, &mut summary),
         m6_section(&m6_all.iter().collect::<Vec<_>>(), &dir, &mut summary),
         m10_section(m10.as_ref(), m10_first.as_ref(), &dir, &mut summary),
+        after_section(
+            m1_after.as_ref(),
+            &m6_after.iter().collect::<Vec<_>>(),
+            &dir,
+            &mut summary,
+        ),
     ];
     // The summary is ordered by measurement number.
     let order = |text: &str| -> u32 {
@@ -1462,6 +1583,19 @@ pub fn run(ctx: &Ctx) -> Result<()> {
         add(name, m5_sensitivity_runs.get(index).map(|r| r.meta.clone()));
     }
     add("M2 (100 + 20 kills)", m2.as_ref().map(|r| r.meta.clone()));
+    add(
+        "M1 after WP1.1b (1,000,000 and 6,000,000 records)",
+        m1_after.as_ref().map(|r| r.meta.clone()),
+    );
+    for report in &m6_after {
+        add(
+            &format!(
+                "M6 after WP1.1b ({} records)",
+                thousands(report.config.records)
+            ),
+            Some(report.meta.clone()),
+        );
+    }
     runs.sort_by(|a, b| a.meta.started.cmp(&b.meta.started));
 
     let mut doc = String::new();

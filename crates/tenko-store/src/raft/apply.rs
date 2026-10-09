@@ -51,6 +51,13 @@ struct IdempotencyRecord {
     committed: Committed,
 }
 
+/// The journal after a batch: oldest revision, change sets and their bytes.
+struct JournalBounds {
+    oldest: Revision,
+    len: u64,
+    bytes: u64,
+}
+
 /// One key written by an applied batch, with its values before and after.
 #[derive(Debug, Clone)]
 pub(crate) struct Write {
@@ -102,6 +109,15 @@ impl<'txn> TxnTables<'txn> {
         let table = self.table(name)?;
         let value = table.get(key).map_err(storage)?;
         value.map(|value| decode_stored(value.value())).transpose()
+    }
+
+    /// The length of a stored value (without its revision), without copying it.
+    fn value_len(&mut self, name: &TableName, key: &[u8]) -> Result<Option<usize>, StoreError> {
+        Ok(self
+            .table(name)?
+            .get(key)
+            .map_err(storage)?
+            .map(|value| stored_value_len(value.value())))
     }
 
     fn exists(&mut self, name: &TableName, key: &[u8]) -> Result<bool, StoreError> {
@@ -181,6 +197,7 @@ impl<'a, 'txn> Applier<'a, 'txn> {
         &mut self,
         proposed: &ProposedBatch,
         journal_retention: u64,
+        journal_max_bytes: u64,
     ) -> Result<BatchOutcome, StoreError> {
         let batch: WriteBatch = match from_cbor(&proposed.batch) {
             Ok(batch) => batch,
@@ -230,7 +247,7 @@ impl<'a, 'txn> Applier<'a, 'txn> {
             return Ok(BatchOutcome::PreconditionFailed(failures));
         }
 
-        self.commit_batch(&batch, idempotency, journal_retention)
+        self.commit_batch(&batch, idempotency, (journal_retention, journal_max_bytes))
     }
 
     /// Stages and writes a batch whose preconditions hold.
@@ -238,7 +255,7 @@ impl<'a, 'txn> Applier<'a, 'txn> {
         &mut self,
         batch: &WriteBatch,
         idempotency: Option<(Bytes, Digest)>,
-        journal_retention: u64,
+        (journal_retention, journal_max_bytes): (u64, u64),
     ) -> Result<BatchOutcome, StoreError> {
         // 3. Stage everything; nothing may fail once writing starts.
         let revision = self.meta.revision.next();
@@ -269,11 +286,25 @@ impl<'a, 'txn> Applier<'a, 'txn> {
             at: batch.proposed_at,
             changes: self.change_list(&staged)?,
         };
-        let (journal_oldest, journal_len) =
-            match stage_journal(self.meta, &change_set, journal_retention, &mut staged) {
-                Ok(bounds) => bounds,
-                Err(error) => return Ok(BatchOutcome::Codec(error.to_string())),
-            };
+        let encoded = match tables::JOURNAL.encode(&change_set) {
+            Ok(encoded) => encoded,
+            Err(error) => return Ok(BatchOutcome::Codec(error.to_string())),
+        };
+        let added = encoded.len();
+        staged.insert(
+            (
+                tables::JOURNAL.name().clone(),
+                tables::JOURNAL.key(&revision),
+            ),
+            Some(encoded),
+        );
+        let journal = self.trim_journal(
+            revision,
+            added,
+            journal_retention,
+            journal_max_bytes,
+            &mut staged,
+        )?;
 
         // 4. Write.
         let mut writes = Vec::new();
@@ -300,13 +331,45 @@ impl<'a, 'txn> Applier<'a, 'txn> {
         }
         self.meta.revision = revision;
         self.meta.audit_head = head;
-        self.meta.journal_oldest = Some(journal_oldest);
-        self.meta.journal_len = journal_len;
+        self.meta.journal_oldest = Some(journal.oldest);
+        self.meta.journal_len = journal.len;
+        self.meta.journal_bytes = journal.bytes;
         self.meta.data_bytes = data_bytes;
         if self.capture {
             self.applied.push(AppliedBatch { change_set, writes });
         }
         Ok(BatchOutcome::Committed(committed))
+    }
+
+    /// Stages the removal of the oldest journal entries while the journal, including the
+    /// entry just staged for `revision` (`added` bytes), holds more than `retention` change
+    /// sets or more than `max_bytes` bytes (`0`: no byte limit). The newest change set always
+    /// stays. Both limits come from the entry, so every replica trims identically.
+    fn trim_journal(
+        &mut self,
+        revision: Revision,
+        added: usize,
+        retention: u64,
+        max_bytes: u64,
+        staged: &mut Staged,
+    ) -> Result<JournalBounds, StoreError> {
+        let retention = retention.max(1);
+        let max_bytes = if max_bytes == 0 { u64::MAX } else { max_bytes };
+        let mut oldest = self.meta.journal_oldest.unwrap_or(revision);
+        let mut len = self.meta.journal_len + 1;
+        let mut bytes = self.meta.journal_bytes.saturating_add(len_u64(added));
+        while len > 1 && (len > retention || bytes > max_bytes) {
+            let key = tables::JOURNAL.key(&oldest);
+            let size = self
+                .tables
+                .value_len(tables::JOURNAL.name(), &key)?
+                .unwrap_or(0);
+            staged.insert((tables::JOURNAL.name().clone(), key), None);
+            bytes = bytes.saturating_sub(len_u64(size));
+            oldest = oldest.next();
+            len -= 1;
+        }
+        Ok(JournalBounds { oldest, len, bytes })
     }
 
     fn check_preconditions(
@@ -445,34 +508,4 @@ fn stage_audit(
         sequence.push(seq);
     }
     Ok((head, sequence))
-}
-
-/// Stages the journal entry and the removal of entries beyond the retention; returns the
-/// oldest retained revision and the journal length after the batch.
-fn stage_journal(
-    meta: &SmMeta,
-    change_set: &ChangeSet,
-    retention: u64,
-    staged: &mut Staged,
-) -> Result<(Revision, u64), CodecError> {
-    let revision = change_set.revision;
-    staged.insert(
-        (
-            tables::JOURNAL.name().clone(),
-            tables::JOURNAL.key(&revision),
-        ),
-        Some(tables::JOURNAL.encode(change_set)?),
-    );
-    let retention = retention.max(1);
-    let mut oldest = meta.journal_oldest.unwrap_or(revision);
-    let mut len = meta.journal_len + 1;
-    while len > retention {
-        staged.insert(
-            (tables::JOURNAL.name().clone(), tables::JOURNAL.key(&oldest)),
-            None,
-        );
-        oldest = oldest.next();
-        len -= 1;
-    }
-    Ok((oldest, len))
 }

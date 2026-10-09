@@ -19,7 +19,10 @@
 //! 6. the recovered store still takes writes and shuts down cleanly.
 //!
 //! The writers use small snapshot and journal limits, so snapshots, log purges and journal
-//! trims happen while they are killed.
+//! trims happen while they are killed. Some campaigns also re-seed the store in place in a
+//! loop (`RaftStore::reseed_in_place`), so kills land while a fresh state file is written,
+//! compacted and switched to; recovery must then find exactly one state file, the one the
+//! pointer names, with the state intact.
 
 use std::{
     collections::{BTreeMap, HashSet},
@@ -58,6 +61,8 @@ const ENV_MODE: &str = "TENKO_CRASH_MODE";
 const ENV_DURABILITY: &str = "TENKO_CRASH_DURABILITY";
 const ENV_SEED: &str = "TENKO_CRASH_SEED";
 const ENV_ATTEMPT: &str = "TENKO_CRASH_ATTEMPT";
+/// Child side: `1` re-seeds the store in place in a loop while the writers run.
+const ENV_RESEED: &str = "TENKO_CRASH_RESEED";
 /// Parent side: fixes the seed all iteration seeds derive from (printed by every run).
 const ENV_BASE_SEED: &str = "TENKO_CRASH_BASE_SEED";
 
@@ -75,7 +80,7 @@ const WRITER_LIFETIME: Duration = Duration::from_secs(300);
 const PAGE: usize = 2_000;
 const GOLDEN: u64 = 0x9E37_79B9_7F4A_7C15;
 
-const SHORT_KILLS: usize = 6;
+const SHORT_KILLS: usize = 8;
 const LONG_KILLS: usize = 120;
 
 /// Splitmix64: a tiny deterministic generator, seeded per iteration and per writer task.
@@ -356,7 +361,7 @@ fn crash_child() {
         std::io::stdout()
             .flush()
             .unwrap_or_else(|error| child_fatal(format!("flush: {error}")));
-        let tasks: Vec<_> = (0..mode.writers())
+        let mut tasks: Vec<_> = (0..mode.writers())
             .map(|task| {
                 tokio::spawn(writer_task(
                     store.clone(),
@@ -368,6 +373,17 @@ fn crash_child() {
                 ))
             })
             .collect();
+        if std::env::var(ENV_RESEED).is_ok_and(|value| value == "1") {
+            let store = store.clone();
+            tasks.push(tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(40)).await;
+                    if let Err(error) = store.reseed_in_place().await {
+                        child_fatal(format!("re-seed in place: {error}"));
+                    }
+                }
+            }));
+        }
         let (ended, which, _) = futures::future::select_all(tasks).await;
         child_fatal(format!("writer task {which} ended: {ended:?}"));
     });
@@ -426,6 +442,7 @@ struct Ctx {
     mode: Mode,
     seed: u64,
     dir: PathBuf,
+    reseed: bool,
 }
 
 impl Ctx {
@@ -467,6 +484,7 @@ impl Writer {
             .env(ENV_DURABILITY, durability.name())
             .env(ENV_SEED, ctx.seed.to_string())
             .env(ENV_ATTEMPT, ctx.iteration.to_string())
+            .env(ENV_RESEED, if ctx.reseed { "1" } else { "0" })
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .spawn()
@@ -941,6 +959,8 @@ struct Outcome {
 struct Campaign {
     label: &'static str,
     durability: Durability,
+    /// Re-seed in place in a loop while the writers run.
+    reseed: bool,
     dir: TestDir,
     iterations: u32,
     /// The store's revision at the end of the previous iteration.
@@ -952,10 +972,17 @@ impl Campaign {
         Self {
             label,
             durability,
+            reseed: false,
             dir: TestDir::new(label),
             iterations: 0,
             revision: Revision(0),
         }
+    }
+
+    /// Makes the writer process re-seed the store in place in a loop.
+    fn reseeding(mut self) -> Self {
+        self.reseed = true;
+        self
     }
 
     async fn iterate(&mut self, mode: Mode, seed: u64) -> Outcome {
@@ -966,6 +993,7 @@ impl Campaign {
             mode,
             seed,
             dir: self.dir.path().to_path_buf(),
+            reseed: self.reseed,
         };
         let kill_after = Duration::from_millis(u64::from(Rng(seed).between(30, 600)));
         let mut writer = Writer::spawn(&ctx, self.durability);
@@ -979,12 +1007,20 @@ impl Campaign {
     }
 
     async fn recover(&mut self, ctx: &Ctx) -> Outcome {
+        let stale = stale_state_files(ctx);
+        if !stale.is_empty() {
+            eprintln!(
+                "[{}] iteration {:>3}: the kill left {stale:?} behind (a re-seed was in progress)",
+                ctx.label, ctx.iteration
+            );
+        }
         // Invariant 1.
         let started = Instant::now();
         let store = RaftStore::open(store_config(self.dir.path(), self.durability, true))
             .await
             .unwrap_or_else(|error| ctx.violated("the store opens after the kill", error));
         let open = started.elapsed();
+        check_state_files(ctx);
 
         let view = store
             .read(ReadConsistency::Local)
@@ -1091,6 +1127,52 @@ fn summarize(what: &str, opens: &mut [Duration]) {
 
 /// Runs `kills` iterations over `campaigns` in turn; within each campaign the modes
 /// alternate.
+/// State files other than the active one (an interrupted re-seed or install leaves them).
+fn stale_state_files(ctx: &Ctx) -> Vec<String> {
+    let active = std::fs::read_to_string(ctx.dir.join("sm.current"))
+        .map_or_else(|_| "sm.redb".to_owned(), |name| name.trim().to_owned());
+    std::fs::read_dir(&ctx.dir)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .filter(|name| {
+                    name.starts_with("sm")
+                        && Path::new(name)
+                            .extension()
+                            .is_some_and(|extension| extension.eq_ignore_ascii_case("redb"))
+                        && *name != active
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// After an open exactly one state file exists: the one `sm.current` names, or `sm.redb`
+/// when no snapshot install or re-seed has switched files yet.
+fn check_state_files(ctx: &Ctx) {
+    let mut files: Vec<String> = std::fs::read_dir(&ctx.dir)
+        .unwrap_or_else(|error| ctx.violated("list the data directory", error))
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| {
+            name.starts_with("sm")
+                && Path::new(name)
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("redb"))
+        })
+        .collect();
+    files.sort();
+    let active = std::fs::read_to_string(ctx.dir.join("sm.current"))
+        .map_or_else(|_| "sm.redb".to_owned(), |name| name.trim().to_owned());
+    if files != [active.clone()] {
+        ctx.violated(
+            "one state file",
+            format!("the active file is {active}, the directory holds {files:?}"),
+        );
+    }
+}
+
 async fn run(campaigns: &mut [Campaign], kills: usize) {
     let base = base_seed();
     eprintln!("crash recovery: {kills} kills, base seed {base} ({ENV_BASE_SEED} repeats it)");
@@ -1122,7 +1204,10 @@ async fn run(campaigns: &mut [Campaign], kills: usize) {
 /// A few kills, alternating the two workloads, with deferred state-machine durability.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn crash_recovery_short() {
-    let mut campaigns = [Campaign::new("short", Durability::Deferred)];
+    let mut campaigns = [
+        Campaign::new("short", Durability::Deferred),
+        Campaign::new("short-reseed", Durability::Deferred).reseeding(),
+    ];
     run(&mut campaigns, SHORT_KILLS).await;
 }
 
@@ -1133,6 +1218,7 @@ async fn crash_recovery_long() {
     let mut campaigns = [
         Campaign::new("long-deferred", Durability::Deferred),
         Campaign::new("long-immediate", Durability::Immediate),
+        Campaign::new("long-reseed", Durability::Deferred).reseeding(),
     ];
     run(&mut campaigns, LONG_KILLS).await;
 }

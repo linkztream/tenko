@@ -54,6 +54,9 @@ pub struct Args {
     /// Share of the records updated before each install, in percent.
     #[arg(long, default_value_t = 10)]
     pub update_percent: u64,
+    /// Name of the result file in `raw/` (without extension).
+    #[arg(long, default_value = "m1")]
+    pub out_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +74,9 @@ pub struct Round {
     pub window_secs: f64,
     pub learner_install_secs: f64,
     pub index_rebuild_secs: f64,
+    /// Compaction of the fresh state file written by the install (0 before WP1.1b).
+    #[serde(default)]
+    pub compact_secs: f64,
     pub installs_during_window: u64,
     pub rss_before_mib: f64,
     pub rss_peak_install_mib: f64,
@@ -215,10 +221,10 @@ pub async fn run(args: Args, ctx: &Ctx) -> Result<()> {
         print_run(&run);
         report.runs.push(run);
         report.meta = clock.finish();
-        ctx.out.write("m1", &report)?;
+        ctx.out.write(&args.out_name, &report)?;
     }
     report.meta = clock.finish();
-    ctx.out.write("m1", &report)
+    ctx.out.write(&args.out_name, &report)
 }
 
 #[allow(clippy::too_many_lines, reason = "one linear scenario")]
@@ -410,6 +416,7 @@ async fn run_round(
         window_secs,
         learner_install_secs: secs(stats.last_install_micros),
         index_rebuild_secs: secs(stats.last_index_rebuild_micros),
+        compact_secs: secs(stats.last_compact_micros),
         installs_during_window: stats.snapshots_installed - installs_before,
         rss_before_mib,
         rss_peak_install_mib,

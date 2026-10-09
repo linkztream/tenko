@@ -60,6 +60,10 @@ pub struct Proposal {
     /// Change sets the journal keeps (from the leader's configuration, so every replica
     /// trims its journal identically).
     pub journal_retention: u64,
+    /// Bytes of change sets the journal keeps at most (`0`: no byte limit; entries written
+    /// before the limit existed), also from the leader's configuration.
+    #[serde(default)]
+    pub journal_max_bytes: u64,
     /// The batches, applied in this order.
     pub batches: Vec<ProposedBatch>,
 }

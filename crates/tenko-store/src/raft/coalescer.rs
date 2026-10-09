@@ -37,17 +37,17 @@ pub(crate) struct CoalescerStats {
 pub(crate) fn spawn(
     raft: Raft,
     config: CoalescerConfig,
-    journal_retention: u64,
+    journal: (u64, u64),
     queue: mpsc::Receiver<Queued>,
     stats: Arc<CoalescerStats>,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(run(raft, config, journal_retention, queue, stats))
+    tokio::spawn(run(raft, config, journal, queue, stats))
 }
 
 async fn run(
     raft: Raft,
     config: CoalescerConfig,
-    journal_retention: u64,
+    (journal_retention, journal_max_bytes): (u64, u64),
     mut queue: mpsc::Receiver<Queued>,
     stats: Arc<CoalescerStats>,
 ) {
@@ -95,6 +95,7 @@ async fn run(
             .unzip();
         let proposal = Proposal {
             journal_retention,
+            journal_max_bytes,
             batches,
         };
         let Ok(response) = raft.client_write_ff(proposal).await else {

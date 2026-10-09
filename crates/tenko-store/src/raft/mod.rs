@@ -7,7 +7,9 @@
 //! | Path | Content |
 //! |---|---|
 //! | `log.redb` | The Raft log, vote and committed id (`log`), fsynced by group commit |
-//! | `sm.redb` | The state machine: one redb table per store table plus `_meta` (`stored`) |
+//! | `sm.redb` | The state machine: one redb table per store table plus `_meta` (`stored`), until the first snapshot install |
+//! | `sm-<id>.redb` | The state machine after a snapshot install or an in-place re-seed: a fresh, compacted file |
+//! | `sm.current` | Names the active state file once it is not `sm.redb` (replaced atomically) |
 //! | `snapshots/` | The current snapshot file and the one before it (`snapshot`) |
 //!
 //! The directory must be on SSD or `NVMe` storage (ADR 0002 condition 7); [`RaftStore::open`]
@@ -40,6 +42,30 @@
 //! machine before it returns, verifies the head of the audit chain (or all of it,
 //! [`RaftStoreConfig::verify_full_audit_chain`]) and, should the durable state ever lag
 //! behind the purged log, reinstalls the current snapshot first.
+//!
+//! # Disk usage and re-seeding
+//!
+//! redb never repacks a file in place: under incremental writes the state file keeps free
+//! pages, and below 4 GiB it grows by doubling. A snapshot install therefore never writes
+//! into the live file: it writes the state into a fresh file in one transaction, compacts it
+//! and switches to it atomically (`sm`). The journal is bounded by
+//! [`RaftStoreConfig::journal_max_bytes`] as well as by its change-set count, because the
+//! change set of a bulk batch lists every key it wrote.
+//!
+//! **Re-seed rule (ADR 0002), for the server's maintenance task:** re-seed a node when its
+//! state file passes about twice the live data. Apply the rule to the size at start-up,
+//! [`DiskUsage::state_ratio_at_open`]: a clean shutdown leaves the file holding only the
+//! pages in use (redb trims the rest when it closes). While the store runs, redb keeps up to
+//! as much free space again as it has pages in use (it grows a file below 4 GiB by
+//! doubling), so the running ratio ([`StoreStatus::sm_file_ratio`], [`DiskUsage::state_ratio`])
+//! can read up to about twice the figure at rest: in M6 a freshly re-seeded file read 2.53x
+//! after its first write and 1.26x at rest. A running ratio above about 4 corresponds to the
+//! 2x rule. All these figures are cached; reading them costs nothing. A member of a cluster
+//! can be re-seeded by rejoining with an empty data directory (it catches up by snapshot);
+//! any node, a single voter included, can call [`RaftStore::reseed_in_place`], which rewrites
+//! its own state into a fresh, compacted file. Writes wait while that runs (it copies the
+//! whole state: about 4 s for 1,000,000 records in M6); reads continue. The measured effect is
+//! in `bench/phase1-store/results/2026-10-09-windows.md` (M6).
 //!
 //! # Cluster readiness
 //!
@@ -168,8 +194,13 @@ pub struct RaftStoreConfig {
     pub bootstrap: bool,
     /// Write coalescing limits and the batch size limit.
     pub coalescer: CoalescerConfig,
-    /// Change sets the journal keeps for `watch` replay (at least 1).
+    /// Change sets the journal keeps for `watch` replay (at least 1); the upper bound by
+    /// count.
     pub journal_retention: usize,
+    /// Bytes of change sets the journal keeps at most (home profile default 32 MiB); the
+    /// newest change set always stays. Carried in every Raft entry, so every replica trims
+    /// its journal identically.
+    pub journal_max_bytes: u64,
     /// Revisions a live watcher may fall behind before its stream ends with `Lagged`.
     pub watch_max_lag: u64,
     /// How long `AtLeast` and `Linearizable` reads wait.
@@ -204,6 +235,7 @@ impl RaftStoreConfig {
             bootstrap: true,
             coalescer: CoalescerConfig::default(),
             journal_retention: 100_000,
+            journal_max_bytes: 32 * 1024 * 1024,
             watch_max_lag: 10_000,
             read_wait: Duration::from_secs(5),
             write_timeout: Duration::from_secs(60),
@@ -259,8 +291,55 @@ pub struct EngineStats {
     pub last_install_micros: u64,
     /// Duration of the index rebuild of the last install.
     pub last_index_rebuild_micros: u64,
-    /// Durable checkpoints of `sm.redb` (deferred durability).
+    /// Duration of the compaction of the last fresh state file (install or re-seed).
+    pub last_compact_micros: u64,
+    /// In-place re-seeds ([`RaftStore::reseed_in_place`]).
+    pub reseeds_in_place: u64,
+    /// Durable checkpoints of the state file (deferred durability).
     pub checkpoints: u64,
+}
+
+/// Bytes on disk of a store, from the size cache (refreshed every
+/// [`RaftStoreConfig::status_refresh`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DiskUsage {
+    /// `log.redb`.
+    pub log_bytes: u64,
+    /// The active state file.
+    pub state_bytes: u64,
+    /// The snapshot directory.
+    pub snapshot_bytes: u64,
+    /// Live keys and values of all tables (`StoreStatus::data_bytes`).
+    pub data_bytes: u64,
+    /// `state_bytes / data_bytes` while running; includes redb's growth slack (see the module
+    /// documentation).
+    pub state_ratio: Option<f64>,
+    /// The state file when the store opened (before any write of this run).
+    pub state_bytes_at_open: u64,
+    /// `state_bytes_at_open` over the live data at open; the figure the re-seed rule (about
+    /// 2.0, ADR 0002) applies to after a clean shutdown.
+    pub state_ratio_at_open: Option<f64>,
+}
+
+/// `numerator / denominator` for byte counts, `None` without data.
+fn byte_ratio(numerator: u64, denominator: u64) -> Option<f64> {
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "a ratio of byte counts; f64 is exact far beyond any disk"
+    )]
+    let ratio = (denominator > 0).then(|| numerator as f64 / denominator as f64);
+    ratio
+}
+
+/// The result of [`RaftStore::reseed_in_place`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reseeded {
+    /// The state file before.
+    pub bytes_before: u64,
+    /// The fresh state file.
+    pub bytes_after: u64,
+    /// How long writes waited.
+    pub duration: Duration,
 }
 
 /// The openraft-over-redb store. Cloning is cheap and shares the store.
@@ -292,7 +371,11 @@ struct Inner {
     closed: AtomicBool,
     fsync: Option<FsyncProbe>,
     disk_bytes: AtomicU64,
+    log_bytes: AtomicU64,
     sm_file_bytes: AtomicU64,
+    snapshot_bytes: AtomicU64,
+    /// State file bytes and live data bytes when the store opened.
+    at_open: (u64, u64),
     coalescer: Arc<CoalescerStats>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
     /// A temporary data directory removed when the store is dropped.
@@ -518,6 +601,11 @@ impl RaftStore {
             .await
             .map_err(|error| open_error("state machine", error))??;
         recover_purged_gap(&log, &sm).await?;
+        // Before Raft re-applies anything: the size the re-seed rule is judged on.
+        let at_open = (
+            fs::metadata(sm.file_path()).map_or(0, |metadata| metadata.len()),
+            sm.meta().data_bytes,
+        );
 
         let raft_config = Arc::new(raft_config(&config)?);
         let node = config.node_id.0;
@@ -537,7 +625,10 @@ impl RaftStore {
 
         let (queue, receiver) = mpsc::channel(4_096);
         let coalescer_stats = Arc::new(CoalescerStats::default());
-        let retention = u64::try_from(config.journal_retention.max(1)).unwrap_or(u64::MAX);
+        let retention = (
+            u64::try_from(config.journal_retention.max(1)).unwrap_or(u64::MAX),
+            config.journal_max_bytes,
+        );
         let coalescer = coalescer::spawn(
             raft.clone(),
             config.coalescer,
@@ -555,7 +646,10 @@ impl RaftStore {
             closed: AtomicBool::new(false),
             fsync,
             disk_bytes: AtomicU64::new(0),
+            log_bytes: AtomicU64::new(0),
             sm_file_bytes: AtomicU64::new(0),
+            snapshot_bytes: AtomicU64::new(0),
+            at_open,
             coalescer: coalescer_stats,
             tasks: Mutex::new(vec![coalescer]),
             temp_dir,
@@ -616,8 +710,50 @@ impl RaftStore {
             snapshots_installed: load(&sm.snapshots_installed),
             last_install_micros: load(&sm.last_install_micros),
             last_index_rebuild_micros: load(&sm.last_index_rebuild_micros),
+            last_compact_micros: load(&sm.last_compact_micros),
+            reseeds_in_place: load(&sm.rewrites),
             checkpoints: load(&sm.checkpoints),
         }
+    }
+
+    /// Bytes on disk and the state file ratio, from the size cache.
+    pub fn disk_usage(&self) -> DiskUsage {
+        let inner = &self.inner;
+        let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
+        let state_bytes = load(&inner.sm_file_bytes);
+        let data_bytes = inner.sm.meta().data_bytes;
+        DiskUsage {
+            log_bytes: load(&inner.log_bytes),
+            state_bytes,
+            snapshot_bytes: load(&inner.snapshot_bytes),
+            data_bytes,
+            state_ratio: byte_ratio(state_bytes, data_bytes),
+            state_bytes_at_open: inner.at_open.0,
+            state_ratio_at_open: byte_ratio(inner.at_open.0, inner.at_open.1),
+        }
+    }
+
+    /// Re-seeds this node from its own state: rewrites the state into a fresh, compacted
+    /// file and switches to it atomically (see the module documentation for when to do it).
+    /// Writes wait until it is done; reads, watches and indexes are not interrupted, and the
+    /// state does not change.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::ShuttingDown`], or a storage error; the old file then stays in
+    /// use unchanged.
+    pub async fn reseed_in_place(&self) -> Result<Reseeded, StoreError> {
+        self.inner.check_running()?;
+        let sm = self.inner.sm.clone();
+        let rewritten = tokio::task::spawn_blocking(move || sm.rewrite_in_place())
+            .await
+            .map_err(|error| StoreError::Storage(error.to_string()))??;
+        self.inner.refresh_sizes();
+        Ok(Reseeded {
+            bytes_before: rewritten.bytes_before,
+            bytes_after: rewritten.bytes_after,
+            duration: Duration::from_micros(rewritten.micros),
+        })
     }
 
     /// Builds a snapshot now and waits until it is current (the log behind it is then
@@ -874,12 +1010,15 @@ impl Inner {
     }
 
     fn refresh_sizes(&self) {
-        let dir = &self.config.data_dir;
-        let file = |name: &str| fs::metadata(dir.join(name)).map_or(0, |m| m.len());
-        let sm_file = file("sm.redb");
-        let bytes = file("log.redb") + sm_file + sm::dir_bytes(self.sm.snapshot_dir());
-        self.disk_bytes.store(bytes, Ordering::Relaxed);
-        self.sm_file_bytes.store(sm_file, Ordering::Relaxed);
+        let size = |path: &std::path::Path| fs::metadata(path).map_or(0, |m| m.len());
+        let log = size(&self.config.data_dir.join("log.redb"));
+        let state = size(&self.sm.file_path());
+        let snapshots = sm::dir_bytes(self.sm.snapshot_dir());
+        self.log_bytes.store(log, Ordering::Relaxed);
+        self.sm_file_bytes.store(state, Ordering::Relaxed);
+        self.snapshot_bytes.store(snapshots, Ordering::Relaxed);
+        self.disk_bytes
+            .store(log + state + snapshots, Ordering::Relaxed);
     }
 }
 

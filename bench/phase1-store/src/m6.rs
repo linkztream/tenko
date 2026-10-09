@@ -21,7 +21,7 @@ use crate::{
     Ctx,
     common::{
         DiskSizes, Machine, Rng, RunClock, RunMeta, ScratchDir, bytes_f64, disk_sizes, machine,
-        propose_all, purged_index, push_snapshot, secs, wait_for_revision,
+        propose_all, purged_index, push_snapshot, secs, state_file, wait_for_revision,
     },
     data::{self, BULK_BATCH, RRSETS},
 };
@@ -101,6 +101,19 @@ pub struct Config {
     /// Change sets the journal keeps.
     #[serde(default = "default_journal_retention")]
     pub journal_retention: usize,
+    /// Bytes of change sets the journal keeps (0: no byte limit, before WP1.1b).
+    #[serde(default)]
+    pub journal_max_bytes: u64,
+}
+
+/// An in-place re-seed of the leader (`RaftStore::reseed_in_place`) after the week.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LeaderReseed {
+    pub bytes_before: u64,
+    pub bytes_after: u64,
+    pub secs: f64,
+    pub over_data: f64,
+    pub over_user: f64,
 }
 
 /// redb's own accounting of one closed `sm.redb`, read offline with redb 4.3.0.
@@ -254,6 +267,8 @@ pub struct Report {
     pub ratio_after_reseed_user: f64,
     pub pass: bool,
     pub at_rest: AtRest,
+    #[serde(default)]
+    pub leader_reseed: Option<LeaderReseed>,
 }
 
 fn ratio(sm_bytes: u64, raw: u64) -> f64 {
@@ -410,6 +425,7 @@ pub async fn run(args: Args, ctx: &Ctx) -> Result<()> {
     learner_config.bootstrap = false;
     learner_config.fsync_probe_samples = 0;
     learner_config.journal_retention = defaults.journal_retention;
+    learner_config.journal_max_bytes = defaults.journal_max_bytes;
     learner_config.timings = RaftTimings {
         heartbeat_ms: 50,
         election_min_ms: 1_500,
@@ -467,6 +483,7 @@ pub async fn run(args: Args, ctx: &Ctx) -> Result<()> {
                 .to_owned(),
             durability: "Deferred, 1 s checkpoint interval (the default)".to_owned(),
             journal_retention: defaults.journal_retention,
+            journal_max_bytes: defaults.journal_max_bytes,
         },
         ratio_before_reseed_data: before.sm_over_data,
         ratio_before_reseed_user: before.sm_over_user,
@@ -477,9 +494,28 @@ pub async fn run(args: Args, ctx: &Ctx) -> Result<()> {
             && reseed.data_bytes_equal
             && reseed.revisions_equal,
         at_rest: AtRest::default(),
+        leader_reseed: None,
         points,
         reseed,
     };
+    // The single-node path: the leader re-seeds itself from its own state.
+    let reseeded = leader.reseed_in_place().await?;
+    let leader_reseed = LeaderReseed {
+        bytes_before: reseeded.bytes_before,
+        bytes_after: reseeded.bytes_after,
+        secs: reseeded.duration.as_secs_f64(),
+        over_data: ratio(reseeded.bytes_after, before.data_bytes),
+        over_user: ratio(reseeded.bytes_after, before.user_bytes),
+    };
+    println!(
+        "M6: leader reseed_in_place: {:.1} -> {:.1} MiB in {:.1} s ({:.2}x data, {:.2}x user)",
+        bytes_f64(leader_reseed.bytes_before) / 1_048_576.0,
+        bytes_f64(leader_reseed.bytes_after) / 1_048_576.0,
+        leader_reseed.secs,
+        leader_reseed.over_data,
+        leader_reseed.over_user,
+    );
+    report.leader_reseed = Some(leader_reseed);
     println!(
         "M6: sm.redb / raw before re-seed {:.2}x (all tables) {:.2}x (user table); after re-seed \
          {:.2}x and {:.2}x: {}",
@@ -504,15 +540,15 @@ pub async fn run(args: Args, ctx: &Ctx) -> Result<()> {
         leader_sm_over_user: ratio(leader_rest.sm_redb, before.user_bytes),
         learner_sm_over_data: ratio(learner_rest.sm_redb, after.data_bytes),
         learner_sm_over_user: ratio(learner_rest.sm_redb, after.user_bytes),
-        leader_redb: redb_stats(&dir.node(1).join("sm.redb")),
-        learner_redb: redb_stats(&dir.node(2).join("sm.redb")),
+        leader_redb: redb_stats(&state_file(&dir.node(1))),
+        learner_redb: redb_stats(&state_file(&dir.node(2))),
         leader_compacted: compact_file(
-            &dir.node(1).join("sm.redb"),
+            &state_file(&dir.node(1)),
             before.data_bytes,
             before.user_bytes,
         ),
         learner_compacted: compact_file(
-            &dir.node(2).join("sm.redb"),
+            &state_file(&dir.node(2)),
             after.data_bytes,
             after.user_bytes,
         ),

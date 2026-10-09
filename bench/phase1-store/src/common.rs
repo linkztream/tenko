@@ -207,10 +207,19 @@ pub fn dir_bytes(dir: &Path) -> u64 {
         .sum()
 }
 
+/// The active state file of a store data directory: the one `sm.current` names (after a
+/// snapshot install or an in-place re-seed), else `sm.redb`.
+pub fn state_file(data_dir: &Path) -> std::path::PathBuf {
+    fs::read_to_string(data_dir.join("sm.current")).map_or_else(
+        |_| data_dir.join("sm.redb"),
+        |name| data_dir.join(name.trim()),
+    )
+}
+
 pub fn disk_sizes(data_dir: &Path) -> DiskSizes {
     let file = |name: &str| fs::metadata(data_dir.join(name)).map_or(0, |m| m.len());
     DiskSizes {
-        sm_redb: file("sm.redb"),
+        sm_redb: fs::metadata(state_file(data_dir)).map_or(0, |m| m.len()),
         log_redb: file("log.redb"),
         snapshots: dir_bytes(&data_dir.join("snapshots")),
     }
