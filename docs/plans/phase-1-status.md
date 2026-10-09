@@ -37,7 +37,7 @@
 |---|---|---|---|
 | WP2.10 Releases, upgrades, modules | In progress | `crates/tenko/src/{upgrade,modules.rs}`, `crates/tenko-store/src/format.rs`, `CHANGELOG.md`, `ui/src/updates` | Started 2026-10-09 night; OPS-23, OPS-24, OPS-25, TGL-23; CI and release workflow steps come as contract requests to the lead |
 | WP2.0 Plugin SDK and host | FINAL, committed locally | `e3e0482` | Protocol `tenko.connect.v1` (handshake over stdio, gRPC over a private socket or pipe), manifest with settings schema and secret purposes, host supervisor with backoff and circuit breaker, per-call secret injection with audit, conformance suite, `tenko plugin list|run|test`, sample plugin bundled, connector API with inline edit jobs and run jobs, `connectors` start step and SSE topic; 226 crate tests, 5 route tests, an end-to-end CLI test; `docs/plugins.md` |
-| WP2.4 Reconciler | Next | | After WP1.11 reports |
+| WP2.4 Reconciler | In progress | `crates/tenko-ipam/src/{observe,reconcile,proposals}`, `routes/{observations,proposals}.rs` | Started 2026-10-10 early: observations per source, proposals (discovered host, orphaned intent, mismatch, conflict, outside known prefixes), adoption policy per prefix, approve and reject routes, the observation sink the connector host expects |
 | WP2.6 UniFi, WP2.5 Proxmox and Home Assistant | Waiting for the owner | | Need the UniFi API key or local admin and the Proxmox token |
 
 The committed tree compiles and `Cargo.lock` matches the committed manifests since `7f8a2f1`; every Slice 1 package is committed; each builder keeps its own crate compiling at every save, and the lead verifies the whole workspace at each merge.
