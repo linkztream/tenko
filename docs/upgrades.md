@@ -1560,7 +1560,10 @@ that restarting the unit completes a manual upgrade (section 7.3, step 5). It ne
 `current` back.
 
 Status 12 is a request for a restart (an installed update, a switch back, a changed
-module set) and is always restarted. The statuses 2, 3 and 4 (usage, invalid configuration
+module set) and is always restarted. The unit sets `TENKO_SUPERVISED=1`, which tells tenko
+that a restart after status 12 happens (section 9.4); tenko does not infer it from the
+variables systemd passes to every process (`INVOCATION_ID`, `NOTIFY_SOCKET`), because a
+shell or a CI runner inside another service inherits them. The statuses 2, 3 and 4 (usage, invalid configuration
 or a newer data format, a failed start step) are not, because the same start would fail
 again. At most five starts in 300 seconds are allowed, after which systemd leaves the unit
 failed until `systemctl reset-failed tenko`.
@@ -1613,9 +1616,10 @@ export TENKO_SUPERVISED=1
 exec /var/lib/tenko/updates/current/tenko serve --config /etc/tenko/tenko.toml
 ```
 
-Without `TENKO_SUPERVISED=1`, and outside systemd and the Windows service, the UI shows
+Without `TENKO_SUPERVISED=1`, and outside the Windows service, the UI shows
 `unsupervised`: a server that stopped itself for a switch would stay stopped. The variable
-is a promise by the administrator that something restarts the process.
+is a promise by the administrator that something restarts the process; the systemd unit of
+`deploy/` sets it, and a custom unit must set it too.
 
 ### 9.5 Existing installations
 

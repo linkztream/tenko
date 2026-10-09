@@ -68,6 +68,10 @@ Restart=on-failure
 RestartSec=5s
 # 12: stopped to be restarted (an installed update, a module change, a switch back).
 RestartForceExitStatus=12
+# Tells tenko that this unit restarts it after status 12, so that it may install updates
+# from the web UI and apply a module change by restarting itself. tenko does not infer this
+# from the variables systemd passes to every process (INVOCATION_ID, NOTIFY_SOCKET).
+Environment=TENKO_SUPERVISED=1
 # 2 usage, 3 invalid configuration or a newer data format, 4 a start step failed (key,
 # store, port, ...): the same start would fail again, so do not loop. 1 (unexpected
 # failure) is retried.

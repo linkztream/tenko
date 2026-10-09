@@ -18,15 +18,22 @@ pub fn set_windows_service() {
     WINDOWS_SERVICE.store(true, Ordering::SeqCst);
 }
 
-/// Whether a service manager starts this process again after it exits with status 12: a
-/// systemd unit (`INVOCATION_ID` or `NOTIFY_SOCKET` is set), the Windows service, or another
-/// supervisor that declares it with `TENKO_SUPERVISED=1` (s6, runit, a container restart
-/// policy, a test harness).
+/// The variable with which a supervisor declares that it starts the process again after
+/// exit status 12.
+pub const SUPERVISED_VAR: &str = "TENKO_SUPERVISED";
+
+/// Whether a service manager starts this process again after it exits with status 12: the
+/// Windows service, or a supervisor that says so explicitly with `TENKO_SUPERVISED=1` (the
+/// systemd unit of `deploy/` sets it; s6, runit, a container restart policy or a test
+/// harness can too).
+///
+/// Variables that systemd passes to every process of a unit (`INVOCATION_ID`,
+/// `JOURNAL_STREAM`, `NOTIFY_SOCKET`) are deliberately not taken as a sign: a shell, a CI
+/// runner or any other service inherits them, and a server started from there that stopped
+/// itself for a restart would stay stopped.
 pub fn supervised() -> bool {
     WINDOWS_SERVICE.load(Ordering::SeqCst)
-        || std::env::var_os("INVOCATION_ID").is_some()
-        || std::env::var_os("NOTIFY_SOCKET").is_some()
-        || std::env::var_os("TENKO_SUPERVISED").is_some_and(|value| value == "1")
+        || std::env::var_os(SUPERVISED_VAR).is_some_and(|value| value == "1")
 }
 
 /// A shared request to restart: set once, read by `tenko serve` to stop and exit with

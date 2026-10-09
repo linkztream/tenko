@@ -30,4 +30,4 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - An in-app update notice with release notes, a what's-new page after an upgrade, and installation from the UI on single native nodes with an automatic switch back (security profile toggle TGL-23).
 - A module switch: `modules` in `tenko.toml` and a first-run choice of what the installation is for.
 - The release manifest `releases.json` with SHA-256 checksums, and this changelog checked in CI.
-- A version layout under `<data_dir>/updates` with a `current` link: the systemd unit and `tenko service install` run the version it points at, `tenko upgrade layout` sets it up, and a restart requested with exit status 12 is restarted by both.
+- A version layout under `<data_dir>/updates` with a `current` link: the systemd unit and `tenko service install` run the version it points at, `tenko upgrade layout` sets it up, and a restart requested with exit status 12 is restarted by both. A server counts as supervised only when the Windows service runs it or `TENKO_SUPERVISED=1` says so (the systemd unit sets it); variables that systemd passes to every process are not taken as a sign.

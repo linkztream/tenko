@@ -1,14 +1,30 @@
 //! The module switch against the real binary (OPS-25): with IPAM off, the IPAM routes
 //! answer 404 like unknown paths, import and moves are gone with them, the status reports
-//! the running modules, and the installation's choice applies at the next start.
+//! the running modules, and the installation's choice applies at the next start: after a
+//! restart by hand without a supervisor, or by the server itself under one.
+//!
+//! The servers run without the variables a service manager passes on (`INVOCATION_ID`,
+//! `JOURNAL_STREAM`, `NOTIFY_SOCKET`), which a CI runner inside a systemd service inherits,
+//! so that only `TENKO_SUPERVISED=1` decides whether a server counts as supervised.
 
 mod serve_support;
+
+use std::time::Duration;
 
 use serde_json::json;
 use serve_support::{Node, Proc, api::Api, wait_for_setup_token};
 
-/// Writes the node's configuration with `top` among the top-level keys and starts it.
+/// How long a supervised server may take to stop by itself after a module change.
+const RESTART_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Writes the node's configuration with `top` among the top-level keys and starts it,
+/// unsupervised.
 fn start_with(node: &mut Node, top: &str) -> Proc {
+    start_as(node, top, false)
+}
+
+/// The same, with `TENKO_SUPERVISED=1` when `supervised`.
+fn start_as(node: &mut Node, top: &str, supervised: bool) -> Proc {
     loop {
         let text = node.config_text().replacen(
             "roles = \"controller\"
@@ -21,7 +37,19 @@ fn start_with(node: &mut Node, top: &str) -> Proc {
             1,
         );
         std::fs::write(node.config_path(), text).expect("write tenko.toml");
-        let mut server = Proc::spawn(node.serve_command());
+        let mut command = node.serve_command();
+        for name in [
+            "INVOCATION_ID",
+            "JOURNAL_STREAM",
+            "NOTIFY_SOCKET",
+            "TENKO_SUPERVISED",
+        ] {
+            command.env_remove(name);
+        }
+        if supervised {
+            command.env("TENKO_SUPERVISED", "1");
+        }
+        let mut server = Proc::spawn(command);
         if server
             .wait_stdout_line(serve_support::READY_TIMEOUT, |line| {
                 line.contains(" ready at ")
@@ -132,5 +160,44 @@ fn the_installation_choice_applies_at_the_next_start() {
     let audit = api.get("/audit?action=sys.modules.update").ok();
     let items = audit["items"].as_array().expect("items");
     assert_eq!(items.len(), 1, "{audit}");
+    server.stop().assert_code(0);
+}
+
+#[test]
+fn a_supervised_server_restarts_itself_to_apply_the_choice() {
+    let mut node = Node::new();
+    let mut server = start_as(&mut node, "", true);
+    let mut api = Api::new(&node);
+    api.setup(&wait_for_setup_token(&server));
+    assert_eq!(api.get("/prefixes").status, 200);
+
+    // Under a supervisor the server restarts itself: it stops with exit status 12.
+    let changed = api
+        .put("/system/modules", &json!({ "modules": ["discovery"] }))
+        .ok();
+    assert_eq!(changed["configured"], json!(["discovery"]));
+    assert_eq!(changed["restart"], "scheduled");
+    let cookie = api.cookie().map(str::to_owned);
+    let outcome = server.finish(RESTART_TIMEOUT);
+    assert_eq!(
+        outcome.code,
+        Some(12),
+        "the server stops for its restart\n{}",
+        outcome.diagnostics()
+    );
+    assert!(
+        outcome.stderr.contains("the modules changed to discovery"),
+        "{}",
+        outcome.diagnostics()
+    );
+
+    // The supervisor starts it again, with the new set.
+    let mut server = start_as(&mut node, "", true);
+    let mut api = Api::new(&node);
+    api.set_cookie(cookie);
+    assert_ipam_absent(&api);
+    let modules = api.get("/system/modules").ok();
+    assert_eq!(modules["running"], json!(["discovery"]));
+    assert_eq!(modules["restart"], "none");
     server.stop().assert_code(0);
 }
