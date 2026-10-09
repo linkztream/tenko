@@ -9,7 +9,7 @@
 // Editing the mapping on the preview page (proposals) saves it and previews again; the
 // preview is only applied when the server says it can be (`can_apply`) and every warning
 // that needs an acknowledgement has one.
-import { MAX_PREVIEW_ROWS, PREVIEW_ROWS } from "./api";
+import { MAX_ROWS_PAGE, PREVIEW_ROWS, type ImportRowsPage, type RowsRequest } from "./api";
 import type {
   ColumnMapping,
   ImportOptions,
@@ -32,6 +32,11 @@ export interface WizardState {
   /** The mapping differs from the one the server has. */
   dirty: boolean;
   preview: ImportPreview | null;
+  /**
+   * The cursor of the next page of the row list (GET /imports/{id}/rows); null before the
+   * first page past the preview, and after the last.
+   */
+  rowsCursor: string | null;
   acknowledged: readonly string[];
   jobId: string | null;
   /** The apply job ended: true when it succeeded. */
@@ -44,8 +49,8 @@ export type WizardEvent =
   | { type: "edit"; mapping: Mapping }
   | { type: "saved"; view: ImportView }
   | { type: "previewed"; preview: ImportPreview }
-  /** The same preview with more of its rows listed. */
-  | { type: "rows"; preview: ImportPreview }
+  /** A page of the rows of the same preview, read from the first row or at the cursor. */
+  | { type: "rows"; page: ImportRowsPage; fromStart: boolean }
   | { type: "acknowledge"; code: string; on: boolean }
   | { type: "applying"; jobId: string }
   | { type: "finished"; succeeded: boolean }
@@ -58,6 +63,7 @@ export const INITIAL: WizardState = {
   mapping: null,
   dirty: false,
   preview: null,
+  rowsCursor: null,
   acknowledged: [],
   jobId: null,
   succeeded: null,
@@ -103,21 +109,29 @@ export function reduce(state: WizardState, event: WizardEvent): WizardState {
         mapping: clone(event.view.mapping),
         dirty: false,
         preview: null,
+        rowsCursor: null,
       };
     case "previewed":
       if (state.step !== "preview") return state;
       return {
         ...state,
         preview: event.preview,
+        rowsCursor: null,
         // Acknowledgements of warnings the new preview no longer has are dropped.
         acknowledged: state.acknowledged.filter((c) => event.preview.warnings.some((w) => w.code === c)),
       };
-    case "rows":
-      if (state.step !== "preview" || !state.preview) return state;
-      // The store changed since: the whole preview is new.
-      if (event.preview.base_revision !== state.preview.base_revision) return reduce(state, { type: "previewed", preview: event.preview });
-      if (event.preview.rows.length <= state.preview.rows.length) return state;
-      return { ...state, preview: { ...state.preview, rows: event.preview.rows, total_rows: event.preview.total_rows } };
+    case "rows": {
+      // A page of another preview (the store changed since) is not merged: the wizard
+      // previews again instead (see isCurrentPage).
+      if (state.step !== "preview" || !state.preview || !isCurrentPage(state, event.page)) return state;
+      const rows = event.fromStart ? event.page.items : [...state.preview.rows, ...event.page.items];
+      if (rows.length < state.preview.rows.length) return state;
+      return {
+        ...state,
+        rowsCursor: event.page.next_cursor ?? null,
+        preview: { ...state.preview, rows, total_rows: event.page.total_rows },
+      };
+    }
     case "acknowledge": {
       const set = new Set(state.acknowledged);
       if (event.on) set.add(event.code);
@@ -131,7 +145,7 @@ export function reduce(state: WizardState, event: WizardEvent): WizardState {
       if (state.step !== "apply") return state;
       return { ...state, step: "done", succeeded: event.succeeded };
     case "back":
-      if (state.step === "preview") return { ...state, step: "mapping", preview: null };
+      if (state.step === "preview") return { ...state, step: "mapping", preview: null, rowsCursor: null };
       if (state.step === "mapping") return INITIAL;
       if (state.step === "done" && state.succeeded === false) return { ...state, step: "preview", preview: null };
       return state;
@@ -155,18 +169,36 @@ export function unacknowledged(state: WizardState): string[] {
   return [...new Set(preview.warnings.filter((w) => w.requires_ack && !w.acknowledged && !given.has(w.code)).map((w) => w.code))];
 }
 
-/** How many source rows the next page of the row list asks for; 0 when all are listed. */
-export function nextRows(state: WizardState): number {
-  const preview = state.preview;
-  if (!preview) return 0;
-  const listed = preview.rows.length;
-  const reachable = Math.min(preview.total_rows, MAX_PREVIEW_ROWS);
-  return listed < reachable ? Math.min(reachable, listed + PREVIEW_ROWS) : 0;
+/** Whether a page of rows belongs to the preview on show (the same store revision). */
+export function isCurrentPage(state: WizardState, page: ImportRowsPage): boolean {
+  return !!state.preview && page.base_revision === state.preview.base_revision;
 }
 
-/** Every source row the server can list is listed (all, or the first MAX_PREVIEW_ROWS). */
+/**
+ * The request for the next page of the row list, `size` rows more; null when every row is
+ * listed. The preview carries no cursor, so the first page past it reads from the first row
+ * (the rows the preview listed come again, once); later pages follow the cursor.
+ */
+export function rowsRequest(state: WizardState, size: number = PREVIEW_ROWS): RowsRequest | null {
+  const preview = state.preview;
+  if (!preview || allRowsListed(state)) return null;
+  const listed = preview.rows.length;
+  if (state.rowsCursor) return { limit: Math.min(MAX_ROWS_PAGE, size), cursor: state.rowsCursor };
+  return { limit: Math.min(MAX_ROWS_PAGE, listed + size) };
+}
+
+/** How many rows are listed once the next page arrived; 0 when every row is listed. */
+export function nextRows(state: WizardState): number {
+  const request = rowsRequest(state);
+  const preview = state.preview;
+  if (!request || !preview) return 0;
+  const after = request.cursor ? preview.rows.length + request.limit : request.limit;
+  return Math.min(preview.total_rows, after);
+}
+
+/** Every source row of the preview is listed. */
 export function allRowsListed(state: WizardState): boolean {
-  return nextRows(state) === 0;
+  return !state.preview || state.preview.rows.length >= state.preview.total_rows;
 }
 
 /** The plan blocker that the acknowledgements sent with apply can clear. */

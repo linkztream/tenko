@@ -10,8 +10,8 @@ import { isApiError } from "../api/problem";
 import { ErrorNotice } from "../components/Notice";
 import { t } from "../i18n";
 import { IpamNav } from "../ipam/IpamNav";
-import { applyImport, discardImport, MAX_PREVIEW_ROWS, previewImport, readImport, saveMapping, uploadImport } from "./api";
-import { allRowsListed, INITIAL, nextRows, reduce, STEPS, type Step, type WizardEvent, type WizardState } from "./model";
+import { applyImport, discardImport, listImportRows, MAX_ROWS_PAGE, PREVIEW_ROWS as PREVIEW_PAGE, previewImport, readImport, saveMapping, uploadImport } from "./api";
+import { allRowsListed, INITIAL, isCurrentPage, reduce, rowsRequest, STEPS, type Step, type WizardEvent, type WizardState } from "./model";
 import { ExportPanel } from "./steps/ExportPanel";
 import { MappingStep } from "./steps/MappingStep";
 import { PreviewStep } from "./steps/PreviewStep";
@@ -80,17 +80,40 @@ export default function Wizard() {
     save();
   };
 
-  // The next page of the row list: the preview again, with more rows listed.
+  // The next page of the row list, from the rows of the latest preview.
   const [loadingRows, setLoadingRows] = createSignal(false);
   const [rowsError, setRowsError] = createSignal<unknown>(null);
-  const moreRows = async () => {
+
+  /**
+   * Reads the next page of rows (`size` rows more) into the state. False when the preview
+   * changed meanwhile (another mapping, or a store change): the preview is read again and
+   * paging starts over.
+   */
+  const readRows = async (size: number): Promise<boolean> => {
     const s = state();
-    const rows = nextRows(s);
-    if (!s.view || rows === 0 || loadingRows()) return;
+    const request = rowsRequest(s, size);
+    if (!s.view || !request) return true;
+    try {
+      const page = await listImportRows(s.view.id, request);
+      if (!isCurrentPage(state(), page)) {
+        send({ type: "previewed", preview: await previewImport(s.view.id) });
+        return false;
+      }
+      send({ type: "rows", page, fromStart: !request.cursor });
+      return true;
+    } catch (err) {
+      if (!isApiError(err, "import.preview.stale")) throw err;
+      send({ type: "previewed", preview: await previewImport(s.view.id) });
+      return false;
+    }
+  };
+
+  const moreRows = async () => {
+    if (loadingRows() || allRowsListed(state())) return;
     setLoadingRows(true);
     setRowsError(null);
     try {
-      send({ type: "rows", preview: await previewImport(s.view.id, rows) });
+      await readRows(PREVIEW_PAGE);
     } catch (err) {
       setRowsError(err);
     } finally {
@@ -101,18 +124,15 @@ export default function Wizard() {
   const apply = () =>
     // eslint-disable-next-line solid/reactivity -- an event handler: reads the state when it runs
     void run(async () => {
-      let s = state();
-      if (!s.view) return;
-      // List every row first, so the result links to everything the import creates.
-      if (!allRowsListed(s)) {
-        const full = await previewImport(s.view.id, Math.min(s.preview?.total_rows ?? 0, MAX_PREVIEW_ROWS));
-        const before = s.preview?.base_revision;
-        send({ type: "rows", preview: full });
-        // The store changed meanwhile: the person checks the new preview before applying.
-        if (full.base_revision !== before) return;
-        s = state();
+      // List every row first (the cursor to its end), so the result links to everything
+      // the import creates. When the preview changed meanwhile, the person checks the new
+      // one before applying.
+      while (!allRowsListed(state())) {
+        if (!(await readRows(MAX_ROWS_PAGE))) return;
       }
-      const jobId = await applyImport(s.view!.id, s.acknowledged, applyKey);
+      const s = state();
+      if (!s.view) return;
+      const jobId = await applyImport(s.view.id, s.acknowledged, applyKey);
       applyKey = newIdempotencyKey();
       send({ type: "applying", jobId });
     });

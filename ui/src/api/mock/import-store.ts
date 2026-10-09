@@ -5,6 +5,9 @@ import type { Analysis } from "./import-analysis";
 import type { SourceFile } from "./import-cells";
 import type { Mapping } from "./import-mapping";
 import { onMockReset } from "./db";
+import type { components } from "../generated/schema";
+
+type PreviewRow = components["schemas"]["PreviewRow"];
 
 export type ImportState = "uploaded" | "mapped" | "applying" | "applied" | "failed";
 
@@ -26,6 +29,17 @@ export interface ImportRecord {
   jobId: string | null;
   /** The Idempotency-Key of the apply request, so a retry gets the same job. */
   applyKey: string | null;
+  /** Counts mapping changes; a rows cursor is valid for one revision only. */
+  mappingRevision: number;
+  /** Every row of the latest preview, for paging without computing it again. */
+  stored: StoredPreview | null;
+}
+
+/** The rows of the latest preview of an import (GET /imports/{id}/rows pages them). */
+export interface StoredPreview {
+  mappingRevision: number;
+  baseRevision: number;
+  rows: PreviewRow[];
 }
 
 const imports = new Map<string, ImportRecord>();

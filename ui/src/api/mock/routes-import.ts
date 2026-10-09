@@ -145,6 +145,8 @@ const upload = route("post", "/api/v1/imports", async (ctx) => {
     state: "uploaded",
     jobId: null,
     applyKey: null,
+    mappingRevision: 0,
+    stored: null,
   };
   importRecords().set(record.id, record);
   appendAudit({
@@ -176,6 +178,7 @@ const mapping = route("put", "/api/v1/imports/{id}/mapping", async (ctx) => {
   }
   try {
     record.mapping = readMapping(body, sheetShapes(record.analysis.sheets));
+    record.mappingRevision += 1;
   } catch (error) {
     if (error instanceof MappingError) {
       throw problem(PROBLEM.mappingInvalid, 422, "Mapping does not fit the upload", error.message, {
@@ -220,7 +223,97 @@ const preview = route("get", "/api/v1/imports/{id}/preview", (ctx) => {
   const principal = requireSession();
   const rows = previewRows(ctx.url);
   const record = find(ctx.params.id, principal);
-  return ok(buildPreview(record, evaluate(record), rows, credentialGate(principal)));
+  // Every row is kept with the upload, so the rows endpoint pages them without computing
+  // the preview again.
+  const full = buildPreview(record, evaluate(record), Number.MAX_SAFE_INTEGER, credentialGate(principal));
+  record.stored = { mappingRevision: record.mappingRevision, baseRevision: full.base_revision, rows: full.rows };
+  return ok({ ...full, rows: full.rows.slice(0, rows) });
+});
+
+// ---------------------------------------------------------------------------------
+// Rows of the latest preview, page by page
+
+const DEFAULT_ROWS_PAGE = 200;
+const MAX_ROWS_PAGE = 1000;
+
+/** What a rows cursor carries: the import, the mapping revision and the next row. */
+interface RowsCursor {
+  i: string;
+  r: number;
+  o: number;
+}
+
+function encodeRowsCursor(cursor: RowsCursor): string {
+  return btoa(JSON.stringify(cursor)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function decodeRowsCursor(raw: string, id: string): RowsCursor {
+  try {
+    const value = JSON.parse(atob(raw.replace(/-/g, "+").replace(/_/g, "/"))) as Partial<RowsCursor>;
+    if (value.i === id && Number.isInteger(value.r) && Number.isInteger(value.o) && (value.o ?? -1) >= 0) return value as RowsCursor;
+  } catch {
+    // Not a cursor of this endpoint.
+  }
+  throw new Problem("sys.invalid_cursor", { status: 400, detail: "the cursor is malformed or belongs to another list", params: { cursor: raw } });
+}
+
+function rowsLimit(url: URL): number {
+  for (const name of url.searchParams.keys()) {
+    if (name !== "limit" && name !== "cursor") {
+      throw new Problem("sys.invalid_query", {
+        status: 400,
+        detail: `query parameter \`${name}\`: unknown parameter`,
+        params: { parameter: name },
+        errors: [fieldError(name, "sys.invalid_query")],
+      });
+    }
+  }
+  const raw = url.searchParams.get("limit");
+  if (raw === null) return DEFAULT_ROWS_PAGE;
+  const limit = Number(raw);
+  if (!/^[0-9]+$/.test(raw) || limit < 1 || limit > MAX_ROWS_PAGE) {
+    throw new Problem("sys.invalid_query", {
+      status: 400,
+      detail: `query parameter \`limit\`: must be from 1 to ${MAX_ROWS_PAGE}`,
+      params: { parameter: "limit" },
+      errors: [fieldError("limit", "sys.invalid_query")],
+    });
+  }
+  return limit;
+}
+
+function previewStale(record: ImportRecord, detail: string): Problem {
+  return problem(PROBLEM.previewStale, 409, "Preview out of date", detail, { params: { mapping_revision: String(record.mappingRevision) } });
+}
+
+/** A page of the rows of the stored preview (`ImportRowsPage`). */
+export function rowsPage(record: ImportRecord, url: URL): S["ImportRowsPage"] {
+  const limit = rowsLimit(url);
+  const raw = url.searchParams.get("cursor");
+  const cursor = raw ? decodeRowsCursor(raw, record.id) : null;
+  if (cursor && cursor.r !== record.mappingRevision) {
+    throw previewStale(record, "the mapping changed since this page was listed; preview the import again");
+  }
+  const stored = record.stored;
+  if (!stored) throw previewStale(record, "no preview was computed for the current mapping; preview the import first");
+  if (stored.mappingRevision !== record.mappingRevision) {
+    throw previewStale(record, "the mapping changed since the preview; preview the import again");
+  }
+  const offset = cursor?.o ?? 0;
+  const items = stored.rows.slice(offset, offset + limit);
+  const next = offset + items.length;
+  return {
+    items,
+    next_cursor: items.length > 0 && next < stored.rows.length ? encodeRowsCursor({ i: record.id, r: stored.mappingRevision, o: next }) : null,
+    total_rows: stored.rows.length,
+    base_revision: stored.baseRevision,
+  };
+}
+
+const rows = route("get", "/api/v1/imports/{id}/rows", (ctx) => {
+  const principal = requireSession();
+  const record = find(ctx.params.id, principal);
+  return ok(rowsPage(record, ctx.url));
 });
 
 const apply = route("post", "/api/v1/imports/{id}/apply", async (ctx) => {
@@ -341,6 +434,7 @@ export const importRoutes: HttpHandler[] = [
   get,
   mapping,
   preview,
+  rows,
   apply,
   discard,
   ...EXPORT_KINDS.map((kind) => exportRoute(`/api/v1/exports/${kind}.csv`, kind)),

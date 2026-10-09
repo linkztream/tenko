@@ -13,7 +13,7 @@ import { toCsv } from "../../ipam/address/csv";
 import { warningText } from "../../ipam/plan/describe";
 import { kindWord } from "../../ipam/words";
 import { saveTextFile } from "../../hosts/handoff";
-import { MAX_PREVIEW_ROWS, type ItemAction, type ItemKey, type LossItem, type Mapping, type PreviewRow, type Severity } from "../api";
+import type { ItemAction, ItemKey, LossItem, Mapping, PreviewRow, Severity } from "../api";
 import { blockersOf, canApply, decideProposal, nextRows, UNACKNOWLEDGED_BLOCKER, unacknowledged, type WizardState } from "../model";
 
 const ACTIONS: readonly ItemAction[] = ["create", "update", "unchanged", "kept"];
@@ -395,11 +395,6 @@ export function PreviewStep(props: {
                     {t("import.rows.more", { count: more() })}
                   </button>
                 </div>
-              </Show>
-              <Show when={preview().total_rows > MAX_PREVIEW_ROWS}>
-                <p class="muted" data-testid="import-rows-limit">
-                  {t("import.rows.limit", { limit: MAX_PREVIEW_ROWS, total: preview().total_rows })}
-                </p>
               </Show>
             </section>
 

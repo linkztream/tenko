@@ -1155,6 +1155,9 @@
       <unit id="errors.import.conflict.kept">
         <segment><source>Existing objects differ and the conflict policy keeps them; choose Update or remove the rows.</source></segment>
       </unit>
+      <unit id="errors.import.preview.stale">
+        <segment><source>The mapping changed since the preview. Preview the import again.</source></segment>
+      </unit>
     </group>
     <group id="account">
       <unit id="account.title">
@@ -6128,9 +6131,6 @@
       </unit>
       <unit id="import.rows.more">
         <segment><source>{count, plural, one {Show # more row} other {Show # more rows}}</source></segment>
-      </unit>
-      <unit id="import.rows.limit">
-        <segment><source>The list stops at the first {limit, number} rows. The counts, the outcome per sheet and the loss report cover all {total, number}.</source></segment>
       </unit>
       <unit id="import.rows.where">
         <segment><source>Sheet and row</source></segment>

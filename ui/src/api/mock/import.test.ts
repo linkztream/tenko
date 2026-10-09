@@ -588,6 +588,89 @@ describe("GET /imports/{id}/preview", () => {
   });
 });
 
+describe("GET /imports/{id}/rows", () => {
+  interface RowsPage {
+    items: Preview["rows"];
+    next_cursor: string | null;
+    total_rows: number;
+    base_revision: number;
+  }
+  const rows = (id: string, query = "") => send<RowsPage & { code?: string }>("GET", `/api/v1/imports/${id}/rows${query ? `?${query}` : ""}`);
+
+  /** Every row, following next_cursor from the first page to the end. */
+  async function walk(id: string, limit: number): Promise<{ items: RowsPage["items"]; pages: number }> {
+    const items: RowsPage["items"] = [];
+    let pages = 0;
+    let query = `limit=${limit}`;
+    for (;;) {
+      const page = await rows(id, query);
+      expect(page.status).toBe(200);
+      pages += 1;
+      expect(page.body.items.length).toBeLessThanOrEqual(limit);
+      items.push(...page.body.items);
+      if (!page.body.next_cursor) break;
+      query = `limit=${limit}&cursor=${page.body.next_cursor}`;
+      expect(pages).toBeLessThan(100);
+    }
+    return { items, pages };
+  }
+
+  it("pages through every row of the latest preview with the cursor, as the preview lists them", async () => {
+    const view = await uploaded("ip-plan.xlsx", "x");
+    const full = (await preview(view.id, 1000)).body;
+    expect(full.total_rows).toBeGreaterThan(200);
+    const { items, pages } = await walk(view.id, 100);
+    expect(items).toEqual(full.rows);
+    expect(pages).toBe(Math.ceil(full.total_rows / 100));
+    const first = (await rows(view.id)).body;
+    expect(first.items).toHaveLength(200);
+    expect(first).toMatchObject({ total_rows: full.total_rows, base_revision: full.base_revision });
+    expect(first.next_cursor).toEqual(expect.any(String));
+  });
+
+  it("needs a preview of the current mapping: 409 import.preview.stale before it and after a mapping change", async () => {
+    const view = await uploaded("ip-plan.csv", planCsv());
+    const before = await rows(view.id);
+    expect(before.status).toBe(409);
+    expect(before.body.code).toBe("import.preview.stale");
+    await preview(view.id, 1);
+    const page = await rows(view.id, "limit=2");
+    expect(page.status).toBe(200);
+    expect(page.body.items).toHaveLength(2);
+    const cursor = page.body.next_cursor as string;
+    await remap(view, (m) => {
+      m.options = { ...m.options, conflict: "skip" };
+    });
+    for (const query of [`limit=2&cursor=${cursor}`, "limit=2"]) {
+      const stale = await rows(view.id, query);
+      expect(stale.status, query).toBe(409);
+      expect(stale.body.code).toBe("import.preview.stale");
+    }
+    // A new preview makes the rows readable again, from the first row.
+    await preview(view.id, 1);
+    expect((await rows(view.id, "limit=2")).status).toBe(200);
+  });
+
+  it("refuses a bad limit, an unknown parameter and a cursor that is not its own", async () => {
+    const view = await uploaded("ip-plan.csv", planCsv());
+    const other = await uploaded("ip-plan.csv", planCsv());
+    await preview(view.id, 1);
+    await preview(other.id, 1);
+    for (const query of ["limit=0", "limit=1001", "limit=ten", "rows=2"]) {
+      const res = await rows(view.id, query);
+      expect(res.status, query).toBe(400);
+      expect(res.body.code).toBe("sys.invalid_query");
+    }
+    const foreign = (await rows(other.id, "limit=1")).body.next_cursor as string;
+    for (const cursor of ["not-a-cursor", foreign]) {
+      const res = await rows(view.id, `cursor=${cursor}`);
+      expect(res.status, cursor).toBe(400);
+      expect(res.body.code).toBe("sys.invalid_cursor");
+    }
+    expect((await rows("0190d1c2-0000-7000-8000-00000000ffff")).status).toBe(404);
+  });
+});
+
 describe("the preview of the canned workbook", () => {
   async function previewed(edit?: (m: Mapping) => void): Promise<{ view: View; p: Preview }> {
     const view = await uploaded("ip-plan.xlsx", "x");

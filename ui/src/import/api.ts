@@ -6,7 +6,10 @@
 //                                the 20 MB of an upload -> 201 ImportView
 //   GET    /imports/{id}         ImportView (410 once the staged upload expired)
 //   PUT    /imports/{id}/mapping Mapping -> ImportView
-//   GET    /imports/{id}/preview?rows=N -> ImportPreview
+//   GET    /imports/{id}/preview?rows=N -> ImportPreview (the first N rows listed)
+//   GET    /imports/{id}/rows?limit&cursor -> ImportRowsPage, the rows of the latest
+//                                preview page by page (409 import.preview.stale once the
+//                                mapping changed: preview again and start over)
 //   POST   /imports/{id}/apply   { acknowledge } -> 202 { job_id }
 //   DELETE /imports/{id}         204
 //   GET    /exports/{prefixes,addresses,hosts}.csv  streamed CSV in the import vocabulary
@@ -28,6 +31,7 @@ export type MaskSource = S["MaskSource"];
 export type TargetInfo = S["TargetInfo"];
 export type ImportPreview = S["ImportPreview"];
 export type PreviewRow = S["PreviewRow"];
+export type ImportRowsPage = S["ImportRowsPage"];
 export type ItemKey = S["ItemKey"];
 export type ItemAction = S["ItemAction"];
 export type LossItem = S["LossItem"];
@@ -44,11 +48,15 @@ export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 export const ACCEPTED = [".csv", ".txt", ".xlsx", ".xls", ".ods"] as const;
 /** Source rows of the preview's row list per page. */
 export const PREVIEW_ROWS = 200;
-/**
- * The most rows one preview lists (the server's limit). The preview has no cursor: a page
- * more asks for the preview again with more rows, up to this limit.
- */
-export const MAX_PREVIEW_ROWS = 1000;
+/** The most rows one request lists (preview `rows`, rows `limit`). */
+export const MAX_ROWS_PAGE = 1000;
+
+
+/** Where a page of rows starts: from the first row, or at a cursor. */
+export interface RowsRequest {
+  limit: number;
+  cursor?: string;
+}
 
 export function uploadImport(files: readonly File[], signal?: AbortSignal): Promise<ImportView> {
   const form = new FormData();
@@ -68,7 +76,17 @@ export function saveMapping(id: string, mapping: Mapping): Promise<ImportView> {
 export function previewImport(id: string, rows: number = PREVIEW_ROWS, signal?: AbortSignal): Promise<ImportPreview> {
   return api.get("/api/v1/imports/{id}/preview", {
     path: { id },
-    query: { rows: Math.max(1, Math.min(MAX_PREVIEW_ROWS, rows)) },
+    query: { rows: Math.max(1, Math.min(MAX_ROWS_PAGE, rows)) },
+    signal,
+  });
+}
+
+/** A page of the rows of the latest preview: from the first row, or at `cursor`. */
+export function listImportRows(id: string, request: RowsRequest, signal?: AbortSignal): Promise<ImportRowsPage> {
+  const limit = Math.max(1, Math.min(MAX_ROWS_PAGE, request.limit));
+  return api.get("/api/v1/imports/{id}/rows", {
+    path: { id },
+    query: request.cursor ? { limit, cursor: request.cursor } : { limit },
     signal,
   });
 }

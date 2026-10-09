@@ -319,4 +319,5 @@ export const PROBLEM = {
   stateConflict: "import.state.conflict",
   vaultRequired: "import.credentials.vault_required",
   planBlocked: "import.plan.blocked",
+  previewStale: "import.preview.stale",
 } as const;

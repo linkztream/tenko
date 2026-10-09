@@ -421,6 +421,7 @@ export type MessageKey =
   | "errors.import.mapping.invalid"
   | "errors.import.not_found"
   | "errors.import.plan.blocked"
+  | "errors.import.preview.stale"
   | "errors.import.state.conflict"
   | "errors.import.unavailable"
   | "errors.import.upload.empty"
@@ -718,7 +719,6 @@ export type MessageKey =
   | "import.result.show_all"
   | "import.rows.count"
   | "import.rows.items"
-  | "import.rows.limit"
   | "import.rows.more"
   | "import.rows.none"
   | "import.rows.nothing"
@@ -2189,7 +2189,6 @@ export interface MessageArgs {
   "import.result.progress": { done: number; total: number };
   "import.result.show_all": { count: number };
   "import.rows.count": { shown: number; total: number };
-  "import.rows.limit": { limit: number; total: number };
   "import.rows.more": { count: number };
   "import.shape.count": { count: number; shape: string | number };
   "import.sheet.roles_from": { sheet: string | number };
@@ -2899,6 +2898,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.import.mapping.invalid",
   "errors.import.not_found",
   "errors.import.plan.blocked",
+  "errors.import.preview.stale",
   "errors.import.state.conflict",
   "errors.import.unavailable",
   "errors.import.upload.empty",
@@ -3196,7 +3196,6 @@ export const messageKeys: readonly MessageKey[] = [
   "import.result.show_all",
   "import.rows.count",
   "import.rows.items",
-  "import.rows.limit",
   "import.rows.more",
   "import.rows.none",
   "import.rows.nothing",
