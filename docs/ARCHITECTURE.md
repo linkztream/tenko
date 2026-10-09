@@ -232,6 +232,19 @@ Performance is I/O bound, not CPU bound (CON-01). Hand-written assembly was cons
 
 `unsafe` code is allowed only where an ADR permits it, which is expected to be limited to the I/O layer (API-16).
 
+## Observability without a hot-path tax
+
+The UI shows live gauges (queries per second, latency percentiles, cache hit ratio, RCODE mix, DHCP lease rate, pool utilization, store size, Raft health) per node and for the cluster (OPS-20). The rule is that measuring must not cost the data plane anything measurable, so the design follows four principles (OPS-21):
+
+1. **Counters are per shard, not shared.** Every worker (one per core in the sharded I/O design) owns its own set of plain counters and fixed-bucket latency histograms in its own cache line. Incrementing one is a single relaxed atomic add to memory that no other core touches: no locks, no contention, no allocation, and the branch is unconditional so it is predictable. Nothing in the query, DORA or renew path formats, logs or sends anything.
+2. **Aggregation happens off the hot path.** A collector task sums the per-shard counters once per second (or when `/metrics` is scraped) and derives rates and percentiles from the deltas. The UI gauge is this one-per-second snapshot pushed over the existing SSE channel (ADR 0008), so a thousand dashboards cost one aggregation, not a thousand.
+3. **Expensive gauges are lazy and cached.** Store size on disk, index memory, zone and lease counts and Raft lag are computed on a timer (default every 30 s) or when a UI asks and the cached value is older than the timer, never on request. The same goes for per-zone and per-scope breakdowns, which are summed from per-shard tables only when that view is open.
+4. **Per-query logging is a separate, opt-in, asynchronous feature.** Query logs and dnstap (DNS-26) write a fixed-size record into a per-shard ring buffer; a dedicated thread drains, formats and ships it. When the ring is full, records are dropped and the drop counter rises, so the data plane is never blocked by a slow disk or collector. Logging is off by default and supports sampling (1 in N), and its cost is shown as a gauge of its own, which is also where the GDPR controls (OPS-06) live.
+
+The overhead budget is a measured number, not an intention: Spike B's load generator runs with metrics on and off, and the difference at saturation must stay below 2 percent throughput and must not move p99 latency. The result is recorded in `bench/` and tracked per release (OPS-15 covers idle resources, OPS-21 the hot-path cost).
+
+What the first dashboard shows, per node and cluster-wide, is deliberately small: a QPS gauge with a 60 s sparkline, p50/p99 latency, cache hit ratio, RCODE mix, DHCP leases per second and pool utilization per scope, store size on disk and in memory, Raft role and replication lag, and the drop counters of the logging rings. Everything on it is also available at `/metrics` for Prometheus and Grafana, so the built-in view is a convenience for the home user and a first look for the enterprise operator, never the only way to see the numbers.
+
 ## IPAM as the intent hub
 
 IPAM is the hub of the system (ADR 0005). Intent recorded in IPAM propagates to DHCP, DNS and network controllers through actuators, and observations from DHCP, DNS, scans, hypervisors and network controllers flow back. The address model itself (tenants and VRFs, the supernet, prefix, range and address tree, VLANs, sites, tags) is specified in [REQUIREMENTS.md](REQUIREMENTS.md). The `ddi-ipam` crate holds the address tree and reconciliation logic, and the `ddi-jobs` crate holds the job engine.

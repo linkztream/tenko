@@ -347,7 +347,7 @@ The data plane survives the control plane. At home, all roles run in one process
 | OPS-02 | The data plane never depends on the control plane: each DNS and DHCP node keeps a durable local copy of zones, leases and configuration and keeps answering when the database, UI or controllers are down, with no database round trip in the DHCP DORA path or the DNS query path. | 1 | Must |
 | OPS-03 | The controller store runs single-node and as a 3-node cluster, and the cluster survives the loss of a controller. | 1 | Must |
 | OPS-04 | Node-to-node communication over gRPC with mTLS, an internal CA and enrollment tokens. The same mechanism serves Docker, LXC and native installs. | 1 | Must |
-| OPS-05 | Observability: OpenMetrics (QPS, RCODE mix, latency histograms, cache hit ratio, lease rate, pool utilization), OpenTelemetry traces and health endpoints. | 1 | Must |
+| OPS-05 | Observability: OpenMetrics (QPS, RCODE mix, latency histograms, cache hit ratio, lease rate, pool utilization), OpenTelemetry traces and health endpoints. The built-in UI dashboard (OPS-20) and the cost budget (OPS-21) build on the same counters. | 1 | Must |
 | OPS-06 | Query logs are personal data (GDPR): configurable retention, pseudonymization, and the ability to disable logging. | 2 | Must |
 | OPS-07 | Backup and restore are consistent across the database, leases and keys. | 1 | Must |
 | OPS-08 | Rolling upgrades with protocol version negotiation between nodes. | 1 | Should |
@@ -362,6 +362,8 @@ The data plane survives the control plane. At home, all roles run in one process
 | OPS-17 | Health hooks that drive anycast route withdrawal (BGP via FRR or BIRD). Anycast is the supported way to distribute DNS load across nodes (CON-04). | 5 | Should |
 | OPS-18 | Autoscaling hooks for orchestrators (Kubernetes, Nomad, Proxmox API), driven by metrics and kept outside the core (CON-06). | 5 | Could |
 | OPS-19 | The replicated store runs on SSD or NVMe storage only. Rotating and SMR disks are unsupported for the data directory; the first-run wizard and the node health check warn when the data directory is on a rotating disk (ADR 0002: 93x slower load and lost leadership on an SMR disk). | 1 | Must |
+| OPS-20 | Built-in dashboard in the UI, per node and cluster-wide: queries per second with a 60 s sparkline, p50/p99 latency, cache hit ratio, RCODE mix, DHCP leases per second, pool utilization per scope, store size on disk and in memory, Raft role and replication lag, and logging-ring drop counters. It is fed by the same metrics as OPS-05, pushed once per second over SSE, and never by a separate code path in the data plane. | 1 | Must |
+| OPS-21 | Observability cost budget: metrics are per-shard counters and fixed-bucket histograms updated with relaxed atomics, with no locks, allocation, formatting or I/O in the query, DORA or renew path; aggregation runs off the hot path once per second or on scrape; expensive gauges (store size, counts, lag) are computed on a timer and cached; per-query logging and dnstap are opt-in, sampled and asynchronous through per-shard ring buffers that drop rather than block. The overhead with metrics enabled is measured in bench/ and must stay below 2 percent throughput at saturation without moving p99 latency; the number is tracked per release. | 1 | Must |
 
 ## API and product
 
