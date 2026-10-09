@@ -26,6 +26,15 @@
 | WP1.11 Acceptance and E2E | In progress | `crates/tenko/tests/acceptance_*.rs`, `ui/e2e/**`, `ui/playwright.config.ts` | Started 2026-10-09 night: E1, E3, the move flow, persistence and the CA root against the real binary; Playwright scenarios for the wizard, password with TOTP and passkey (virtual authenticator), IPAM, import, move, audit and language; an `e2e` CI job proposed to the lead; `/test` 1.64.0 (Apache-2.0) |
 | Design spike | Done, committed locally | `4880d8c` | All 16 owner decisions applied; mockups served from `design/` |
 
+## Slice 2 work packages
+
+| WP | State | Where | Notes |
+|---|---|---|---|
+| WP2.10 Releases, upgrades, modules | In progress | `crates/tenko/src/{upgrade,modules.rs}`, `crates/tenko-store/src/format.rs`, `CHANGELOG.md`, `ui/src/updates` | Started 2026-10-09 night; OPS-23, OPS-24, OPS-25, TGL-23; CI and release workflow steps come as contract requests to the lead |
+| WP2.0 Plugin SDK and host | In progress | `crates/tenko-connect`, `crates/tenko/src/plugin`, `routes/connectors.rs` | Started 2026-10-09 night; ADR 0012, CONN-19, CONN-20; protobuf compiled without protoc; dependencies come as a contract request |
+| WP2.4 Reconciler | Next | | After WP1.11 reports |
+| WP2.6 UniFi, WP2.5 Proxmox and Home Assistant | Waiting for the owner | | Need the UniFi API key or local admin and the Proxmox token |
+
 The committed tree compiles and `Cargo.lock` matches the committed manifests since `7f8a2f1`; every Slice 1 package is committed; each builder keeps its own crate compiling at every save, and the lead verifies the whole workspace at each merge.
 
 ## Conventions decided during Slice 1
