@@ -960,6 +960,48 @@ async fn start(
                 let _ = stop.wait_for(|stopped| *stopped).await;
             })));
     }
+    // The reconciler compares intent with observation (ADR 0005) while the IPAM module runs.
+    let reconciler = match &ipam {
+        Some(ipam) => Some(
+            tenko_ipam::reconcile::Reconciler::new(
+                Arc::clone(ipam),
+                tenko_ipam::reconcile::ReconcilerConfig::default(),
+            )
+            .map_err(|error| StartError::coded("ipam", &error))?,
+        ),
+        None => None,
+    };
+    if let Some(reconciler) = &reconciler {
+        let mut stop = running.stop.subscribe();
+        running
+            .tasks
+            .push(tokio::spawn(Arc::clone(reconciler).run(async move {
+                let _ = stop.wait_for(|stopped| *stopped).await;
+            })));
+    }
+    let sink: Arc<dyn tenko_connect::host::normalize::ObservationSink> = match &reconciler {
+        Some(reconciler) => {
+            let reconciler = Arc::clone(reconciler);
+            tenko_connect::host::normalize::sink_fn(
+                move |batch: tenko_connect::host::normalize::ObservationBatch| {
+                    let reconciler = Arc::clone(&reconciler);
+                    async move {
+                        reconciler
+                            .ingest(tenko_ipam::observe::IngestBatch {
+                                source: batch.source,
+                                observations: batch.observations,
+                                complete: batch.complete,
+                                received_at: batch.received_at,
+                            })
+                            .await
+                            .map(drop)
+                            .map_err(tenko_ipam::IpamError::into_coded)
+                    }
+                },
+            )
+        }
+        None => Arc::new(tenko_connect::host::normalize::DiscardSink),
+    };
 
     // In-app updates (OPS-24): the service and the steps of its install job, registered
     // before the runner starts.
@@ -1022,6 +1064,7 @@ async fn start(
                 &engine,
                 &resolved.data_dir,
                 running.stop.subscribe(),
+                sink,
             ),
         )
         .await?;
@@ -1094,6 +1137,9 @@ async fn start(
                 imports.register(&mut server);
             }
             connectors.register(&mut server);
+            if let Some(reconciler) = &reconciler {
+                server.extensions.insert(Arc::clone(reconciler));
+            }
             let running = tenko_api::start(server, state).await.map_err(|error| {
                 let code = match &error {
                     tenko_api::ServeError::Bind { .. } => "start.api.bind",

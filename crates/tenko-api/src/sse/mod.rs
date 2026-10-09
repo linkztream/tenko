@@ -168,6 +168,22 @@ impl Default for EventRoutes {
                 Some(ObjectKind::Connector),
             )
             .namespace("connect", Topic::Connectors)
+            .table(
+                TableName::from_static("ipam.proposals"),
+                Topic::Ipam,
+                Some(ObjectKind::Proposal),
+            )
+            .table(
+                TableName::from_static("ipam.adoption"),
+                Topic::Ipam,
+                Some(ObjectKind::Prefix),
+            )
+            .table(TableName::from_static("ipam.obs.facts"), Topic::Discovery, None)
+            .table(
+                TableName::from_static("ipam.obs.last_seen"),
+                Topic::Discovery,
+                None,
+            )
             .namespace("auth", Topic::Admin)
             .namespace("users", Topic::Admin);
         routes

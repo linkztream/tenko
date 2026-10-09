@@ -230,6 +230,18 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/system/status", "system_status"),
     ("GET", "/openapi.json", "openapi_document"),
     ("GET", "/metrics", "metrics"),
+    // observations
+    ("GET", "/observations", "list_observations"),
+    ("GET", "/observations/{subject}", "get_observation"),
+    // proposals
+    ("GET", "/proposals", "list_proposals"),
+    ("POST", "/proposals/reconcile", "reconcile_proposals"),
+    ("GET", "/proposals/{id}", "get_proposal"),
+    ("POST", "/proposals/{id}/approve", "approve_proposal"),
+    ("POST", "/proposals/{id}/reject", "reject_proposal"),
+    ("GET", "/prefixes/{id}/adoption", "get_adoption_policy"),
+    ("PUT", "/prefixes/{id}/adoption", "set_adoption_policy"),
+    ("DELETE", "/prefixes/{id}/adoption", "clear_adoption_policy"),
     // connectors
     ("GET", "/connectors/plugins", "list_connector_plugins"),
     ("GET", "/connectors", "list_connectors"),
@@ -253,6 +265,7 @@ fn concrete(template: &str) -> String {
         .replace("{key}", "owner")
         .replace("{seq}", "1")
         .replace("{index}", "0")
+        .replace("{subject}", "00-00-5E-00-53-01")
 }
 
 fn request(method: &str, uri: &str) -> Request<Body> {
@@ -438,7 +451,7 @@ fn operations_have_a_declared_tag_and_a_summary() {
         .flatten()
         .map(|tag| tag.name.as_str())
         .collect();
-    assert_eq!(tags.len(), 17, "one tag per area");
+    assert_eq!(tags.len(), 19, "one tag per area");
     for (path, item) in &document.paths.paths {
         for (method, operation) in operations(item) {
             let operation_tags = operation.tags.as_deref().unwrap_or_default();

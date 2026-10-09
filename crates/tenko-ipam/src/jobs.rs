@@ -172,6 +172,34 @@ pub trait JobSink: Send + Sync + 'static {
             "background jobs need the job engine, which this server does not run",
         )))))
     }
+
+    /// Hands an observation to the jobs that wait for one (`AddressSeen`,
+    /// `LeaseInPrefix`); the reconciler calls it for every address it ingests (WP2.4).
+    /// Without an engine nothing waits, so nothing happens.
+    async fn on_observation(&self, observation: &tenko_core::observe::Observation) {
+        let _ = observation;
+    }
+
+    /// Completes a manual step of a waiting job, as `cx`: the reconciler confirms the
+    /// observation step of a move when it sees the device at its new address (WP2.4).
+    ///
+    /// # Errors
+    ///
+    /// The engine's errors; without an engine, `ipam.move.no_engine` (503).
+    async fn complete_manual(
+        &self,
+        job: JobId,
+        step: u16,
+        note: Option<String>,
+        cx: &RequestCtx,
+    ) -> Result<(), JobError> {
+        let _ = (job, step, note, cx);
+        Err(JobError::Step(StepError::Coded(Box::new(CodedError::new(
+            crate::moves::codes::NO_ENGINE,
+            503,
+            "background jobs need the job engine, which this server does not run",
+        )))))
+    }
 }
 
 /// The job engine runs the inline job and commits the staged batch together with the job
@@ -185,6 +213,20 @@ impl JobSink for tenko_jobs::JobEngine {
 
     async fn submit(&self, spec: JobSpec, cx: &RequestCtx) -> Result<JobId, JobError> {
         tenko_jobs::JobEngine::submit(self, spec, cx).await
+    }
+
+    async fn on_observation(&self, observation: &tenko_core::observe::Observation) {
+        tenko_jobs::JobEngine::on_observation(self, observation).await;
+    }
+
+    async fn complete_manual(
+        &self,
+        job: JobId,
+        step: u16,
+        note: Option<String>,
+        cx: &RequestCtx,
+    ) -> Result<(), JobError> {
+        tenko_jobs::JobEngine::complete_manual(self, job, step, note, cx).await
     }
 }
 

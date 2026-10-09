@@ -5,9 +5,7 @@
 use std::{path::Path, sync::Arc};
 
 use tenko_connect::host::{
-    ConnectorHost, HostConfig,
-    normalize::{DiscardSink, ObservationSink},
-    registry::PluginRegistry,
+    ConnectorHost, HostConfig, normalize::ObservationSink, registry::PluginRegistry,
 };
 use tenko_jobs::JobEngine;
 use tenko_store::Store;
@@ -47,8 +45,9 @@ pub fn registry(plugins_dir: Option<std::path::PathBuf>) -> Result<PluginRegistr
 }
 
 /// Builds the connector service, registers its job steps and starts its supervisor task,
-/// which stops every plugin when `stop` turns true. Observations go nowhere until the
-/// reconciler (WP2.4) provides its sink; each run still records its counts.
+/// which stops every plugin when `stop` turns true. Observations go to `sink`: the
+/// reconciler's ingest when the IPAM module runs, else a sink that keeps nothing (each run
+/// still records its counts).
 ///
 /// # Errors
 ///
@@ -59,6 +58,7 @@ pub async fn start(
     engine: &JobEngine,
     data_dir: &Path,
     stop: watch::Receiver<bool>,
+    sink: Arc<dyn ObservationSink>,
 ) -> Result<(Connectors, String), StartError> {
     let plugins_dir = data_dir.join(PLUGINS_DIR);
     let registry = registry(Some(plugins_dir.clone()))
@@ -83,7 +83,7 @@ pub async fn start(
         Some(Arc::clone(vault) as Arc<dyn Vault>),
         registry,
         HostConfig::default(),
-        Arc::new(DiscardSink) as Arc<dyn ObservationSink>,
+        sink,
     );
     host.register_steps(engine);
     let task = host.start(stop);

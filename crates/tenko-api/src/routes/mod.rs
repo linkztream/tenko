@@ -23,6 +23,8 @@
 //! | [`jobs`] | jobs and manual steps | WP1.6 |
 //! | [`moves`] | preview and start moves to another network (IPAM-19) | WP1.4b |
 //! | [`connectors`] | connector plugins and instances | WP2.0 |
+//! | [`observations`] | observations of connectors and probes, per source and across sources | WP2.4 |
+//! | [`proposals`] | proposals, decisions, reconcile runs, adoption policies | WP2.4 |
 //! | [`audit`] | audit log and chain verification | WP1.7 |
 //! | [`events`] | server-sent events | WP1.7 |
 //! | [`system`] | health, status, OpenAPI document, metrics | WP1.7 |
@@ -54,7 +56,9 @@ pub mod hosts;
 pub mod import;
 pub mod jobs;
 pub mod moves;
+pub mod observations;
 pub mod prefixes;
+pub mod proposals;
 pub mod settings;
 pub mod setup;
 pub mod system;
@@ -86,6 +90,8 @@ pub mod users;
         (name = "events", description = "Server-sent events"),
         (name = "system", description = "Health, status, the OpenAPI document and metrics"),
         (name = "connectors", description = "Connector plugins and connector instances"),
+        (name = "observations", description = "Observations of connectors and probes, per source and across sources"),
+        (name = "proposals", description = "Proposals of the reconciler, their decisions and adoption policies"),
     ),
     components(schemas(ProblemDetails, crate::dto::SortOrder, tenko_ipam::query::Deleted)),
     modifiers(&SecurityAddon)
@@ -157,7 +163,9 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
             .merge(common::routes())
             .merge(import::routes())
             .merge(export::routes())
-            .merge(moves::routes());
+            .merge(moves::routes())
+            .merge(observations::routes())
+            .merge(proposals::routes());
     }
     router
 }

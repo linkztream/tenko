@@ -1,7 +1,8 @@
 //! Observation normalization: what a plugin reports becomes observations in the IPAM shape
 //! (`tenko_core::observe`), with the host's clock and limits applied. The host hands them to
-//! an [`ObservationSink`]; the reconciler (WP2.4) implements the sink that ingests them into
-//! `ipam.obs.*`.
+//! an [`ObservationSink`]; the reconciler (WP2.4) ingests them into `ipam.obs.*` through a
+//! [`sink_fn`] the server wires. Every batch names its source, so a complete batch that is
+//! empty still tells which facts are gone.
 //!
 //! Rules: the source time of a batch is kept unless it lies more than five minutes in the
 //! future (then the host's receive time is used, with a warning); every observation expires
@@ -28,6 +29,10 @@ pub const MIN_TTL: Duration = Duration::from_secs(900);
 pub struct ObservationBatch {
     /// The connector instance.
     pub connector: ConnectorId,
+    /// The source the batch covers (inventory or network controller of the instance); a
+    /// complete batch expires the facts of this source that it no longer reports, even when
+    /// it is empty.
+    pub source: ObservationSource,
     /// The observations.
     pub observations: Vec<Observation>,
     /// Whether they are the whole inventory of the source: hosts of this source absent
@@ -58,6 +63,38 @@ impl ObservationSink for DiscardSink {
     async fn ingest(&self, _batch: ObservationBatch) -> Result<(), tenko_core::CodedError> {
         Ok(())
     }
+}
+
+/// A sink that hands every batch to an async function: the server wires the reconciler of
+/// `tenko-ipam` this way, without either crate depending on the other.
+pub struct FnSink<F> {
+    f: F,
+}
+
+impl<F> std::fmt::Debug for FnSink<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FnSink").finish_non_exhaustive()
+    }
+}
+
+#[async_trait::async_trait]
+impl<F, Fut> ObservationSink for FnSink<F>
+where
+    F: Fn(ObservationBatch) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = Result<(), tenko_core::CodedError>> + Send + 'static,
+{
+    async fn ingest(&self, batch: ObservationBatch) -> Result<(), tenko_core::CodedError> {
+        (self.f)(batch).await
+    }
+}
+
+/// The sink that calls `f` with every batch.
+pub fn sink_fn<F, Fut>(f: F) -> std::sync::Arc<dyn ObservationSink>
+where
+    F: Fn(ObservationBatch) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = Result<(), tenko_core::CodedError>> + Send + 'static,
+{
+    std::sync::Arc::new(FnSink { f })
 }
 
 /// The lifetime of observations polled every `interval`.
@@ -117,6 +154,7 @@ pub fn inventory(
     (
         ObservationBatch {
             connector,
+            source: ObservationSource::Inventory { connector },
             observations,
             complete: batch.complete,
             received_at: now,
@@ -167,6 +205,7 @@ pub fn topology(
     (
         ObservationBatch {
             connector,
+            source: ObservationSource::NetworkController { connector },
             observations,
             complete: true,
             received_at: now,
@@ -210,6 +249,34 @@ mod tests {
         assert_eq!(host.macs.len(), 1);
     }
 
+    #[tokio::test]
+    async fn batches_name_their_source_and_reach_a_function_sink() {
+        let connector = ConnectorId::generate();
+        let now: Timestamp = "2026-10-09T12:00:00Z".parse().expect("time");
+        let (empty, _) = inventory(
+            connector,
+            &InventoryBatch::complete(now, Vec::new()),
+            now,
+            Duration::from_secs(300),
+        );
+        assert_eq!(empty.source, ObservationSource::Inventory { connector });
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let seen = std::sync::Arc::clone(&seen);
+            sink_fn(move |batch: ObservationBatch| {
+                let seen = std::sync::Arc::clone(&seen);
+                async move {
+                    seen.lock().expect("lock").push(batch.source.clone());
+                    Ok(())
+                }
+            })
+        };
+        sink.ingest(empty).await.expect("ingest");
+        assert_eq!(
+            *seen.lock().expect("lock"),
+            vec![ObservationSource::Inventory { connector }]
+        );
+    }
     #[test]
     fn a_source_clock_far_ahead_is_replaced() {
         let now: Timestamp = "2026-10-09T12:00:00Z".parse().expect("time");
