@@ -18,8 +18,8 @@
 | WP1.4 IPAM domain | In progress, final pass | worktree (`crates/tenko-ipam`, five route files) | Known open items: contention retries, `routes/tenancy.rs` test target, clippy in `routes/{prefixes,common}.rs`, one failing search test, OpenAPI regeneration |
 | WP1.5 Import and export | In progress | worktree | Spec in `import-fixtures.md`; builds on `IpamService::plan` |
 | WP1.8 Server and CLI | In progress | worktree (`crates/tenko`, `deploy/`) | Start order and wiring notes from every package are in its brief; `tenko.toml`, Windows service, systemd, client subcommands, M9 |
-| WP1.9 UI shell, auth, setup | In progress, final pass | worktree (`ui/`) | Three view subagents were cut off at typecheck; the lead verifies |
-| WP1.10 UI IPAM, import, audit | Not started | | Starts after WP1.9 reports the conventions |
+| WP1.9 UI shell, auth, setup | FINAL, committed locally | `4c3778c`, `0bebd53` | 552 tests in 26 files; first-load bundle 68.9 KB gzip; XLIFF 2.0 en/sv compiled at build; typed client from `docs/api/openapi.json` with drift check; msw mock API; the CI `ui` job now runs lint and test |
+| WP1.10 UI IPAM, import, audit | Ready to start | | Follows the conventions of WP1.9 (`ui/` layout, i18n, client, SSE, test kit) |
 | WP1.11 Acceptance and E2E | Not started | | After M3 |
 | Design spike | Done, committed locally | `4880d8c` | All 16 owner decisions applied; mockups served from `design/` |
 
@@ -38,7 +38,7 @@ The workspace does not compile at this moment because four packages are mid-edit
 
 ## Push state
 
-Eighteen commits on `main` are local. They are not pushed because CI runs `cargo … --locked` and the shared `Cargo.lock` carries the dependencies of the in-progress packages; pushing before their manifests are committed would turn CI red. Push happens after WP1.1b, WP1.4, WP1.5, WP1.8 and WP1.9 are committed, with `docs/api/openapi.json` regenerated (`cargo run -p tenko -- openapi > docs/api/openapi.json`) and `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, `cargo deny check`, `cargo audit` and the attribution grep green.
+Every commit on `main` after `02a6d96` is local. They are not pushed because CI runs `cargo … --locked` and the shared `Cargo.lock` carries the dependencies of the in-progress packages; pushing before their manifests are committed would turn CI red. Push happens after WP1.1b, WP1.4, WP1.5 and WP1.8 are committed, with `docs/api/openapi.json` regenerated (`cargo run -p tenko -- openapi > docs/api/openapi.json`) and `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, `cargo deny check`, `cargo audit` and the attribution grep green.
 
 ## Follow-ups recorded
 
@@ -46,5 +46,8 @@ Eighteen commits on `main` are local. They are not pushed because CI runs `cargo
 - M7 (UI and SSE on Linux, two hosts, TLS, HTTP/2) and the M2 VM power cut belong to the Slice 3 run.
 - `JobEngine` staging stays a task-local for Slice 1; an explicit sink on `StepContext` is added when a handler needs to stage from a spawned task.
 - `password_change_required` is enforced only by the UI; the API enforcement is a Slice 2 item.
+- `docs/api/openapi.json` references the schema(s) `SortOrder`, `Deleted` without defining them; the UI's generated types fall back to `unknown` there. The owner of the type registers it with utoipa (WP1.7 list helpers or the WP1.4 routes) before the OpenAPI document is regenerated for the push.
+- The embedded UI server should send long-lived cache headers for `/fonts/` (hashed file names) once WP1.8 wires the static routes.
+- TOTP enrolment shows the secret and the otpauth URI as text; a QR code is a WP1.10 item.
 - WebAuthn: the relying-party id is the installation host name; pending ceremonies are in memory, so Slice 3 clustering needs sticky routing or replicated challenges; Hardened deployments should load vendor attestation roots (MDS3 in Slice 3).
 - Plugin security (R16) and KEK directory trust (R15) stay open until the hub and the Slice 3 hardening.
