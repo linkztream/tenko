@@ -4,9 +4,8 @@
 // write goes through the plan dialog, and every result is checked in the UI and through the
 // public API. Documentation ranges only: 192.0.2.0/24, 2001:db8::/32, MAC 00-00-5E-00-53-xx.
 //
-// Two tests are fixme until the application changes (each names the gap): a fresh
-// installation has no default VRF yet (WP1.4d), and the host form cannot clear a custom value
-// (WP1.10b).
+// Setup creates the tenant and VRF `default`, so a fresh installation takes its first prefix
+// straight from the IPAM view.
 // Moving objects and importing spreadsheets belong to other scenarios.
 
 import type { Schemas } from "./support/api";
@@ -14,7 +13,6 @@ import { expect, test } from "./support/fixtures";
 import {
   actionsOf,
   confirmPlan,
-  createDefaultVrf,
   historyActions,
   hostByName,
   openRowMenu,
@@ -30,11 +28,15 @@ function macDigits(text: string): string {
   return text.replace(/[^0-9a-f]/gi, "").toLowerCase();
 }
 
-// WP1.4d: setup creates the `default` tenant and VRF, so a fresh installation takes its
-// first prefix straight from the IPAM view. Enable once WP1.4d is committed.
-test.fixme("a fresh installation takes its first prefix without creating a VRF first", async ({ page, api, signedIn }) => {
+test("a fresh installation takes its first prefix without creating a VRF first", async ({ page, api, signedIn }) => {
   expect(signedIn.session.user.name).toBe("admin");
+  // Setup created the tenant and the VRF `default`; the tenancy page lists the VRF.
   expect((await api.get<Schemas["Page_Vrf"]>("/vrfs")).items.map((v) => v.name)).toEqual(["default"]);
+  expect((await api.get<Schemas["Page_Tenant"]>("/tenants")).items.map((t) => t.name)).toEqual(["default"]);
+  await page.goto("/ipam/tenants");
+  await expect(page.getByTestId("page-ipam-tenancy")).toBeVisible();
+  await expect(gridRow(page, "vrfs", "default")).toBeVisible();
+
   await page.goto("/ipam");
   await expect(page.getByTestId("page-ipam")).toBeVisible();
   await expect(page.getByTestId("ipam-add-prefix")).toBeEnabled();
@@ -49,18 +51,6 @@ test.fixme("a fresh installation takes its first prefix without creating a VRF f
 
 test("a prefix is created through the plan dialog and its next free address is claimed", async ({ page, api, signedIn }) => {
   expect(signedIn.session.user.name).toBe("admin");
-
-  // A fresh installation has no VRF yet and the tree cannot take a prefix without one: the
-  // operator creates the VRF `default` on the tenants page first.
-  await page.goto("/ipam/tenants");
-  await expect(page.getByTestId("page-ipam-tenancy")).toBeVisible();
-  await page.getByTestId("vrf-create").click();
-  const vrfForm = page.getByTestId("dialog-vrf-form");
-  await vrfForm.getByTestId("field-name").fill("default");
-  await vrfForm.getByTestId("form-submit").click();
-  await confirmPlan(page);
-  await expect(gridRow(page, "vrfs", "default")).toBeVisible();
-  expect((await api.get<Schemas["Page_Vrf"]>("/vrfs")).items.map((v) => v.name)).toEqual(["default"]);
 
   // Create 192.0.2.0/24: the form, then the plan with its summary, then the apply.
   await page.goto("/ipam");
@@ -118,7 +108,6 @@ test("a prefix is created through the plan dialog and its next free address is c
 
 test("a reserved host with a MAC but no DUID is warned about once an IPv6 address is bound to it", async ({ page, api, signedIn }) => {
   expect(signedIn.session.user.name).toBe("admin");
-  await createDefaultVrf(api);
   await api.post("/prefixes", { cidr: "192.0.2.0/24" });
   await api.post("/prefixes", { cidr: "2001:db8::/64" });
 
@@ -267,11 +256,9 @@ test("a custom field is defined, then a value and tags are set on a host", async
   expect((await api.get<Schemas["ListBody_TagCount"]>("/tags")).items.map((t) => t.tag)).toEqual(["edge"]);
 });
 
-// The host form sends its whole map of custom values as the patch, and the API merges a
-// patch (`null` removes a value), so clearing a value does nothing. The prefix, range and
-// address forms build their patch with `customPatch`; HostForm needs the same (contract
-// request for ui/src/hosts/HostForm.tsx, the `patch.custom` line).
-test.fixme("clearing a custom value in the host form removes it", async ({ page, api, signedIn }) => {
+// The API merges a patch of custom values (`null` removes one); the host form sends the
+// cleared value as `null`.
+test("clearing a custom value in the host form removes it", async ({ page, api, signedIn }) => {
   expect(signedIn.session.user.name).toBe("admin");
   await api.post("/custom-fields", { key: "rack_unit", kind: { type: "integer" }, applies_to: ["host"] });
   const created = await api.post<{ item: Schemas["Host"] }>("/hosts", {
@@ -291,7 +278,6 @@ test.fixme("clearing a custom value in the host form removes it", async ({ page,
 
 test("an IPv6 prefix off a nibble boundary needs an acknowledgement before it applies", async ({ page, api, signedIn }) => {
   expect(signedIn.session.user.name).toBe("admin");
-  await createDefaultVrf(api);
 
   await page.goto("/ipam");
   await expect(page.getByTestId("page-ipam")).toBeVisible();
@@ -392,7 +378,6 @@ test("a host that was changed and deleted comes back from its page", async ({ pa
 
 test("an address that was changed and deleted is restored from its history", async ({ page, api, signedIn }) => {
   expect(signedIn.session.user.name).toBe("admin");
-  await createDefaultVrf(api);
   await api.post("/prefixes", { cidr: "192.0.2.0/24" });
   const created = await api.post<{ item: Schemas["Address"] }>("/addresses", { ip: "192.0.2.20", dns_name: "scanner.example.com" });
   const id = created.item.id;

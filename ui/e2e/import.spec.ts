@@ -21,6 +21,8 @@ import { cell, withKey } from "./support/ui";
 
 type Preview = Schemas["ImportPreview"];
 type View = Schemas["ImportView"];
+type Row = Schemas["PreviewRow"];
+type ItemKey = Schemas["ItemKey"];
 
 const WORKBOOK = "ip-plan.xlsx";
 const ACTIONS = ["create", "update", "unchanged", "kept"] as const;
@@ -180,6 +182,71 @@ async function stored(api: Api): Promise<{ prefixes: string[]; hosts: string[]; 
   };
 }
 
+/** Every source row of the latest preview, page by page through `GET /imports/{id}/rows`. */
+async function allRows(api: Api, id: string): Promise<Row[]> {
+  const rows: Row[] = [];
+  let cursor: string | null | undefined;
+  do {
+    const page: Schemas["ImportRowsPage"] = await api.get(`/imports/${id}/rows`, cursor ? { limit: 1000, cursor } : { limit: 1000 });
+    rows.push(...page.items);
+    cursor = page.next_cursor;
+  } while (cursor);
+  return rows;
+}
+
+/** The label the wizard shows for an item (`itemLabel` of the preview step). */
+function label(key: ItemKey): string {
+  switch (key.kind) {
+    case "vlan":
+      return key.site ? `${key.vid} (${key.site})` : String(key.vid);
+    case "prefix":
+      return `${key.cidr} (${key.vrf})`;
+    case "address":
+      return `${key.ip} (${key.vrf})`;
+    case "interface":
+      return `${key.host} ${key.name}`;
+    case "host":
+      return key.name;
+    case "credential":
+      return key.host;
+  }
+}
+
+/** Where the result step links a created item, decoded; null for kinds it does not link. */
+function linkOf(key: ItemKey): string | null {
+  switch (key.kind) {
+    case "prefix":
+      return `/ipam/prefixes/${key.cidr}`;
+    case "address":
+      return `/ipam/addresses/${key.ip}`;
+    case "host":
+      return `/ipam/hosts/${key.name}`;
+    case "interface":
+    case "credential":
+      return `/ipam/hosts/${key.host}`;
+    default:
+      return null;
+  }
+}
+
+/** The distinct items the rows create, by `kind:label` as the page keys them. */
+function createdItems(rows: Row[]): Map<string, ItemKey> {
+  const items = new Map<string, ItemKey>();
+  for (const row of rows) {
+    for (const item of row.items) {
+      if (item.action === "create") items.set(`${item.key.kind}:${label(item.key)}`, item.key);
+    }
+  }
+  return items;
+}
+
+/** The labels of the change group `kind:create` of the page. */
+async function changeLabels(changes: Locator, kind: string): Promise<string[]> {
+  return withKey(changes, "import-group", `${kind}:create`)
+    .getByTestId("import-change")
+    .evaluateAll((items) => items.map((item) => item.getAttribute("data-key") ?? ""));
+}
+
 test("imports the IP plan workbook: mapping, preview, loss report, apply, job, exports", async ({ page, api, signedIn }) => {
   const expected = loadExpected();
   expect(expected.model.prefixes).toHaveLength(10);
@@ -234,7 +301,7 @@ test("imports the IP plan workbook: mapping, preview, loss report, apply, job, e
   expect(await textOf(page.getByTestId("import-rows-imported"))).toBe(preview.summary.rows.imported);
   expect(preview.total_rows).toBe(sum("rows"));
 
-  // Rows, imported, free and skipped per sheet (the page does not list them; the API does).
+  // Rows, imported, free and skipped per sheet, in the API and on the page.
   expect(preview.sheets).toHaveLength(expected.sheets.length);
   for (const want of expected.sheets) {
     const got = preview.sheets.find((s) => s.sheet === want.sheet);
@@ -247,6 +314,22 @@ test("imports the IP plan workbook: mapping, preview, loss report, apply, job, e
       imported: want.imported,
       skipped: want.skipped,
     });
+  }
+
+  const outcomes = page.getByTestId("import-outcomes");
+  await expect(outcomes).toBeVisible();
+  await expect(outcomes.getByTestId("import-outcome")).toHaveCount(expected.sheets.length);
+  for (const want of expected.sheets) {
+    const row = withKey(outcomes, "import-outcome", want.sheet);
+    await expect(row, `outcome of ${want.sheet}`).toHaveAttribute("data-kind", want.kind);
+    await expect(cell(row, "cidr"), `network of ${want.sheet}`).toHaveText(want.cidr ?? "");
+    for (const field of ["rows", "imported", "free", "skipped"] as const) {
+      await expect(cell(row, field), `${field} of ${want.sheet}`).toHaveText(String(want[field]));
+    }
+    // The loss report entries of the sheet, by severity.
+    let notes = 0;
+    for (const severity of ["error", "warning", "info"]) notes += await textOf(cell(row, severity));
+    expect(notes, `loss entries of ${want.sheet}`).toBe(expected.loss.entries.filter((e) => e.location.sheet === want.sheet).length);
   }
 
   // The loss report: 13 entries, with the codes and places of the fixture.
@@ -279,33 +362,31 @@ test("imports the IP plan workbook: mapping, preview, loss report, apply, job, e
     expect(got?.addresses).toEqual(want.addresses);
   }
 
-  // The changes: grouped by kind and action. The list covers the rows the preview carries.
+  // The rows: the preview brings the first page, the rest comes through the rows endpoint
+  // until nothing is left to load.
+  const rows = await allRows(api, id);
+  expect(rows).toHaveLength(preview.total_rows);
+  const more = page.getByTestId("import-rows-more");
+  for (let pages = 0; (await more.count()) > 0; pages += 1) {
+    expect(pages, "the rows load in a few pages").toBeLessThan(10);
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes(`/imports/${id}/rows`) && response.ok()),
+      more.click(),
+    ]);
+    await expect.poll(async () => (await more.count()) === 0 || (await more.isEnabled())).toBe(true);
+  }
+  await expect(page.getByTestId("grid-import-rows")).toBeVisible();
+
+  // The changes, grouped by kind and action, now cover every row.
+  const created = createdItems(rows);
   const changes = page.getByTestId("import-changes");
   await expect(changes).toBeVisible();
-  const groups = changes.getByTestId("import-group");
-  await expect(withKey(changes, "import-group", "prefix:create")).toBeVisible();
-  await expect(withKey(changes, "import-group", "host:create")).toBeVisible();
-  await expect(withKey(changes, "import-group", "address:create")).toBeVisible();
-  expect(await groups.count()).toBeGreaterThanOrEqual(3);
-  const listed = (kind: string, name: (key: Record<string, unknown>) => string) =>
-    new Set(
-      preview.rows
-        .flatMap((row) => row.items)
-        .filter((item) => item.key.kind === kind && item.action === "create")
-        .map((item) => name(item.key as Record<string, unknown>)),
-    ).size;
-  await expect(withKey(changes, "import-group", "host:create").getByTestId("import-change")).toHaveCount(
-    listed("host", (key) => String(key.name)),
-  );
-  await expect(withKey(changes, "import-group", "prefix:create").getByTestId("import-change")).toHaveCount(
-    listed("prefix", (key) => String(key.cidr)),
-  );
-  await expect(withKey(changes, "import-group", "address:create").getByTestId("import-change")).toHaveCount(
-    listed("address", (key) => String(key.ip)),
-  );
-  for (const key of await withKey(changes, "import-group", "host:create").getByTestId("import-change").evaluateAll((items) => items.map((i) => i.getAttribute("data-key") ?? ""))) {
-    expect(expected.model.hosts.map((h) => h.name)).toContain(key);
+  for (const kind of ["prefix", "host", "interface", "address"]) {
+    const wanted = [...created.keys()].filter((key) => key.startsWith(`${kind}:`)).map((key) => key.slice(kind.length + 1));
+    expect(sorted(await changeLabels(changes, kind)), `${kind} creates`).toEqual(sorted(wanted));
   }
+  expect(sorted(await changeLabels(changes, "host"))).toEqual(sorted(expected.model.hosts.map((h) => h.name)));
+  expect(sorted(await changeLabels(changes, "address"))).toEqual(sorted(expected.model.addresses.map((a) => `${a.ip} (default)`)));
 
   // Nothing needs an acknowledgement and nothing blocks the apply; the credentials are allowed.
   await expect(page.getByTestId("import-ack")).toHaveCount(0);
@@ -315,6 +396,22 @@ test("imports the IP plan workbook: mapping, preview, loss report, apply, job, e
 
   // Apply: the job runs and the result links to it.
   const result = await applyAndWaitForResult(page);
+
+  // Every created item is listed with a link to where it can be seen (credentials go to the
+  // vault and are not listed). Past the first fifty the rest come with "show all".
+  const linked = [...created.entries()].filter(([, key]) => key.kind !== "credential");
+  expect(linked.length).toBeGreaterThan(50);
+  await result.getByTestId("import-created-all").click();
+  const shownLinks = await result
+    .getByTestId("import-created")
+    .getByTestId("import-created-item")
+    .evaluateAll((items) => items.map((item) => ({ key: item.getAttribute("data-key") ?? "", href: item.querySelector("a")?.getAttribute("href") ?? null })));
+  expect(sorted(shownLinks.map((link) => link.key))).toEqual(sorted(linked.map(([key]) => key)));
+  for (const link of shownLinks) {
+    const key = created.get(link.key);
+    expect(link.href, `${link.key} has a link`).not.toBeNull();
+    expect(decodeURIComponent((link.href ?? "").split("?")[0] ?? ""), link.key).toBe(key ? linkOf(key) : null);
+  }
   const jobLink = result.getByTestId("import-open-job");
   const href = (await jobLink.getAttribute("href")) ?? "";
   expect(href).toMatch(/^\/jobs\/[0-9a-f-]{36}$/);

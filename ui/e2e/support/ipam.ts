@@ -70,16 +70,6 @@ export async function historyActions(api: Api, collection: "hosts" | "addresses"
   return [...page.items].reverse().map((entry) => entry.action);
 }
 
-/**
- * The VRF `default` of the tenant `default`. A fresh installation has neither: the server
- * creates them with the first write that needs them, and the IPAM views work in the VRF
- * `default` once it exists.
- */
-export async function createDefaultVrf(api: Api): Promise<Schemas["Vrf"]> {
-  const created = await api.post<{ item: Schemas["Vrf"] }>("/vrfs", { name: "default" });
-  return created.item;
-}
-
 /** The `data-action` of every history entry in `entries`, in the order shown (newest first). */
 export async function actionsOf(entries: Locator): Promise<Array<string | null>> {
   return entries.evaluateAll((els) => els.map((el) => el.getAttribute("data-action")));
