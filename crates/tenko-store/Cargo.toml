@@ -1,7 +1,7 @@
 [package]
 name = "tenko-store"
 version = "0.0.1"
-description = "Replicated store contract, in-memory store and conformance suite; Raft over redb lands in WP1.1"
+description = "Replicated store: contract, in-memory store, conformance suite and the openraft-over-redb store"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -10,20 +10,26 @@ publish = false
 [features]
 # The conformance suite (`tenko_store::testing`) for any `Store` implementation.
 testing = ["dep:arc-swap"]
+# The production store (`tenko_store::raft::RaftStore`): openraft over redb (WP1.1).
+raft = ["dep:openraft", "dep:redb", "dep:sha2", "dep:tracing"]
 
 [dependencies]
 arc-swap = { workspace = true, optional = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
+openraft = { workspace = true, optional = true }
+redb = { workspace = true, optional = true }
 serde = { workspace = true }
+sha2 = { workspace = true, optional = true }
 tenko-core = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 # Enables the conformance suite for this package's own integration tests.
-tenko-store = { path = ".", features = ["testing"] }
+tenko-store = { path = ".", features = ["testing", "raft"] }
 
 [lints]
 workspace = true

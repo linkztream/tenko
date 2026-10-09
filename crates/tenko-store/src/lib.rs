@@ -41,6 +41,8 @@
 
 pub mod api;
 pub mod mem;
+#[cfg(feature = "raft")]
+pub mod raft;
 #[cfg(feature = "testing")]
 pub mod testing;
 
