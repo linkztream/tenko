@@ -555,6 +555,7 @@ pub fn spec(steps: Vec<StepSpec>) -> JobSpec {
         steps,
         timeout: Duration::from_secs(3600),
         group: None,
+        group_limit: None,
         idempotency: None,
     }
 }

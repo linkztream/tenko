@@ -134,6 +134,10 @@ pub struct JobSpec {
     /// Parallelism group (CONN-09).
     #[serde(default)]
     pub group: Option<GroupKey>,
+    /// Parallelism of the job's group when the engine has no configured limit for it; the
+    /// jobs of one group carry the same value (a move job group, IPAM-19, CONN-09).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_limit: Option<u32>,
     /// Idempotency key of the submitting request (API-04).
     #[serde(default)]
     pub idempotency: Option<IdempotencyKey>,
@@ -1011,6 +1015,7 @@ mod tests {
                 }],
                 timeout: Duration::from_secs(3600),
                 group: Some(GroupKey::new("connect.unifi:lab").expect("group")),
+                group_limit: None,
                 idempotency: None,
             },
             started: None,

@@ -167,3 +167,36 @@ async fn waiting_jobs_keep_their_group_slot_and_other_jobs_run() {
         JobState::Cancelled
     );
 }
+
+#[tokio::test]
+async fn a_job_carried_group_limit_applies_when_the_engine_has_none() {
+    let t = TestEngine::with_config(EngineConfig::default());
+    let _runner = t.engine.start().expect("runner");
+    let mut jobs = Vec::new();
+    for _ in 0..3 {
+        let mut job = spec(vec![manual("jobs.test.move_port", None, None)]);
+        job.group = Some(group("ipam.move:test"));
+        job.group_limit = Some(1);
+        jobs.push(t.engine.submit(job, &t.ctx()).await.expect("submit"));
+    }
+    t.wait_for_state(jobs[0], JobState::Waiting).await;
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    for id in &jobs[1..] {
+        assert_eq!(
+            t.engine.job(*id).await.expect("job").state,
+            JobState::Queued
+        );
+    }
+    // Finishing the first job frees the single slot for the next in submission order.
+    t.engine
+        .complete_manual(jobs[0], 0, None, &t.ctx())
+        .await
+        .expect("complete");
+    t.wait_for_state(jobs[0], JobState::Succeeded).await;
+    t.wait_for_state(jobs[1], JobState::Waiting).await;
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(
+        t.engine.job(jobs[2]).await.expect("job").state,
+        JobState::Queued
+    );
+}

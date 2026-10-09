@@ -206,6 +206,10 @@ pub struct Range {
     pub last: IpAddr,
     /// What the range is for.
     pub role: RangeRole,
+    /// DHCP lease time in seconds of a `dhcp_pool` range. Informational until Tenko DHCP
+    /// exists, and the source of the default move timeout (IPAM-19).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_secs: Option<u32>,
     /// Lifecycle status.
     pub status: Status,
     /// Metadata.

@@ -644,6 +644,7 @@ mod tests {
             steps: vec![ManualStep::spec(&task, None).expect("task encodes")],
             timeout: Duration::from_secs(3600),
             group: None,
+            group_limit: None,
             idempotency: None,
         }
     }

@@ -247,6 +247,8 @@ enum Phase {
 #[derive(Debug)]
 struct Tracked {
     group: Option<GroupKey>,
+    /// The group limit the job carries, used when the engine has none configured.
+    limit: Option<usize>,
     slot: bool,
     phase: Phase,
     revision: Revision,
@@ -401,11 +403,13 @@ impl Actor {
             }
         }
         let group = job.spec.group.clone();
+        let limit = job.spec.group_limit.and_then(|n| usize::try_from(n).ok());
         if job.state == JobState::Queued {
             self.tracked.insert(
                 id,
                 Tracked {
                     group: group.clone(),
+                    limit,
                     slot: false,
                     phase: Phase::Queued,
                     revision: loaded.revision,
@@ -422,6 +426,7 @@ impl Actor {
                 id,
                 Tracked {
                     group,
+                    limit,
                     slot,
                     phase: Phase::Ready,
                     revision: loaded.revision,
@@ -679,10 +684,11 @@ fn next_queued(
         let Some(front) = queue.front().copied() else {
             continue;
         };
-        if let Some(group) = group
-            && in_use.get(group).copied().unwrap_or(0) >= config.group_limit(group)
-        {
-            continue;
+        if let Some(group) = group {
+            let limit = config.limit_for(group, tracked.get(&front).and_then(|job| job.limit));
+            if in_use.get(group).copied().unwrap_or(0) >= limit {
+                continue;
+            }
         }
         if best.as_ref().is_none_or(|(oldest, _)| front < *oldest) {
             best = Some((front, group.clone()));

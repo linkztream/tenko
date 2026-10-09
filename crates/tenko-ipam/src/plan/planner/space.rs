@@ -687,6 +687,7 @@ impl Planner<'_> {
             first: input.first,
             last: input.last,
             role: input.role,
+            lease_secs: None,
             status,
             meta,
         };

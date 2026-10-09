@@ -84,13 +84,20 @@ impl Default for EngineConfig {
 }
 
 impl EngineConfig {
-    /// The parallelism limit of a group.
-    pub fn group_limit(&self, group: &GroupKey) -> usize {
+    /// The parallelism limit of a group: the configured limit, else the limit the queued
+    /// job carries (`JobSpec::group_limit`), else the default; never below 1.
+    pub fn limit_for(&self, group: &GroupKey, job_limit: Option<usize>) -> usize {
         self.group_limits
             .get(group)
             .copied()
+            .or(job_limit)
             .unwrap_or(self.default_group_limit)
             .max(1)
+    }
+
+    /// The configured parallelism limit of a group, ignoring limits carried by jobs.
+    pub fn group_limit(&self, group: &GroupKey) -> usize {
+        self.limit_for(group, None)
     }
 }
 

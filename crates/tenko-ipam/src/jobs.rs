@@ -140,6 +140,7 @@ pub fn edit_job(params: &WriteStepParams) -> Result<JobSpec, tenko_core::codec::
         }],
         timeout: Duration::from_secs(60),
         group: None,
+        group_limit: None,
         // Replays of the request are answered from `ipam.receipts` before a job exists.
         idempotency: None,
     })
