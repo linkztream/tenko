@@ -17,14 +17,15 @@
 | WP1.1b Store follow-up | FINAL, committed locally | `b38a92e` | 107 tests, conformance 26/26; a snapshot install writes a fresh `sm-<id>.redb` behind the `sm.current` pointer; `RaftStore::reseed_in_place`; journal bounded by bytes (32 MiB default); M6 at rest 1.26x and 1.24x of raw (was 2.05x and 2.74x), M1 pass at 1 M and 6 M records, 120 crash kills clean |
 | WP1.4 IPAM domain | FINAL, committed locally | `573dd70` | 107 domain tests, 255 route tests, 83 operations, none at 501; the commit carries `crates/tenko-ipam/Cargo.toml` and `src/lib.rs` without WP1.5's lines, which land with WP1.5. Known limits: lists scan the table and sort in memory; a supernet's address list includes the addresses of its child prefixes |
 | WP1.4b Move API | In progress | worktree (`crates/tenko-ipam/src/moves.rs`, `routes/moves.rs`) | `POST /moves` dry run and submit: same host part or next free, steps ipam.intent, then the ticked tasks dhcp.manual or device.manual by mode and dns.manual, then l2.move (manual in Slice 1), observe (timeout: half the longest lease of the target's DHCP pools, else 3,600 s, minimum 300 s), cleanup; one job per object in a group with parallelism 2 by default (design decision 8), rollback on timeout; contract additions `Range.lease_secs` and `JobSpec.group_limit` landed in `04b2879` |
-| WP1.5 Import and export | FINAL reported, commit pending | worktree | 137 crate tests, 41 route tests, E1 round trip and M11 green per the builder; the fixtures are regenerated from `import-fixtures.md` before the lead verifies and commits |
-| WP1.8 Server and CLI | In progress | worktree (`crates/tenko`, `deploy/`) | Start order and wiring notes from every package are in its brief; `tenko.toml`, Windows service, systemd, client subcommands, M9 |
+| WP1.5 Import and export | FINAL, committed locally | `9ecfe26` | 137 crate tests, 41 route tests, E1 round trip (export, re-import, zero changes), M11 (10,000 rows: upload and preview 1.0 to 1.7 s, apply 2.5 to 3.6 s in release); fixtures generated from `import-fixtures.md` kept byte-stable by `.gitattributes` |
+| WP1.8 Server and CLI | FINAL, committed locally | `64c67a8` | 124 tests (125 with import), 36 client tests; `tenko.toml` documented in `deploy/tenko.example.toml`, precedence defaults, file, `TENKO_*`, flags; start order KEK, store, vault, TLS, auth, IPAM, jobs, API in 375 ms cold and 293 ms warm; exit codes in `exit.rs`; M9 pass (Windows 47.6 MiB working set, Linux 75.1 MiB RSS after 10 min idle with 200 prefixes) |
+| WP1.8b CA root route | In progress | `routes/system.rs`, `crates/tenko` | `GET /system/ca-root` (PEM, internal CA mode only) and `tenko ca-root` for the setup wizard |
 | WP1.9 UI shell, auth, setup | FINAL, committed locally | `4c3778c`, `0bebd53` | 552 tests in 26 files; first-load bundle 68.9 KB gzip; XLIFF 2.0 en/sv compiled at build; typed client from `docs/api/openapi.json` with drift check; msw mock API; the CI `ui` job now runs lint and test |
 | WP1.10 UI IPAM, import, audit | In progress | worktree (`ui/`) | Started 2026-10-09 late evening: grid, IPAM, hosts, move preview, jobs, audit, dashboard, then import behind mocks until WP1.5 lands; TOTP QR code included; `ui/README.md` with the `data-testid` convention for WP1.11 |
 | WP1.11 Acceptance and E2E | Not started | | After M3 |
 | Design spike | Done, committed locally | `4880d8c` | All 16 owner decisions applied; mockups served from `design/` |
 
-The workspace does not compile at this moment because two packages (WP1.5, WP1.8) are mid-edit; each builder keeps its own crate compiling at every save, and the lead verifies the whole workspace at each merge.
+The committed tree compiles and `Cargo.lock` matches the committed manifests since `64c67a8`; the working tree carries WP1.4b, WP1.8b and WP1.10 in progress; each builder keeps its own crate compiling at every save, and the lead verifies the whole workspace at each merge.
 
 ## Conventions decided during Slice 1
 
@@ -40,7 +41,7 @@ The workspace does not compile at this moment because two packages (WP1.5, WP1.8
 
 ## Push state
 
-Every commit on `main` after `02a6d96` is local. They are not pushed because CI runs `cargo … --locked` and the shared `Cargo.lock` carries the dependencies of the in-progress packages; pushing before their manifests are committed would turn CI red. Push happens after WP1.5 and WP1.8 are committed, with `docs/api/openapi.json` regenerated (`cargo run -p tenko -- openapi > docs/api/openapi.json`) and `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, `cargo deny check`, `cargo audit` and the attribution grep green.
+Every commit on `main` after `02a6d96` is local. They are not pushed because CI runs `cargo … --locked` and the shared `Cargo.lock` carries the dependencies of the in-progress packages; pushing before their manifests are committed would turn CI red. Push happens after WP1.4b, WP1.4c, WP1.8b and WP1.10 are committed, with `docs/api/openapi.json` regenerated (`cargo run -p tenko -- openapi > docs/api/openapi.json`) and `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, `cargo deny check`, `cargo audit` and the attribution grep green.
 
 ## Follow-ups recorded
 
@@ -57,3 +58,7 @@ Every commit on `main` after `02a6d96` is local. They are not pushed because CI 
 - WP1.4c after the move API: `expand=host` on `GET /addresses` and `GET /prefixes/{id}/addresses` adding `interface { id, name, mac, duid }` and `host { id, name, mode, lock }` per row, so the address grids stop resolving rows one by one.
 - The hand-written multipart parser of `POST /imports` gets a fuzz target when the fuzz harness arrives with the Phase 2 parsers (CONTRIBUTING rule on parsers of network input); until then its robustness rests on the route tests.
 - Uploads to `POST /imports` are sent without `Idempotency-Key`: the idempotency middleware buffers keyed POSTs under a smaller limit than `max_upload`.
+- Windows service: install, start and stop under the Service Control Manager were not exercised (needs an elevated shell); the Event Log sink is a Slice 3 item and the service logs to `<data_dir>ogs	enko.log` until then.
+- systemd: the unit uses `LoadCredentialEncrypted=` with the `file` KEK provider; a systemd-credential protection kind in tenko-vault (Slice 3 hardening) removes the plain-file warnings. The root `systemd-creds encrypt` path was not run end to end.
+- M9 margins: RSS grows about 14 KiB per prefix on Linux (86.4 MiB at 1,000 prefixes) and glibc keeps about 19 MiB of Argon2 buffers after the first login; an allocator trim or a compact index layout is needed before the 100 MB target holds at a few thousand prefixes.
+- `reverse_proxy` mode: a client that speaks plain HTTP to the listener needs its origin in `server.allowed_origins` (documented in the example configuration).
