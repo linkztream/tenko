@@ -557,6 +557,7 @@ Results go to `bench/phase1-*/results/` with scripts, machine and versions, as i
 | R12 | nmap's OS database is not permissive; Npcap may not be redistributed, and raw sockets need it to build | Own fingerprint signatures plus connector data; users install Npcap; active scanning behind a feature |
 | R13 | The workstation's repository drive is SMR (store tests 93x slower) | Tests use the OS temp directory, override `TENKO_TEST_DATA_DIR` (proposed) |
 | R14 | API-03 "shares the client library" cannot be literal across Rust and TypeScript | Both derive from one OpenAPI document |
+| R15 | KEK directory trust: a plain-file KEK generation stays readable when a sealed provider (DPAPI, systemd-creds) is active, so anyone who can write the KEK directory could drop in a higher-numbered plain generation and make it active | Directory permissions (0700, service account only) from Slice 1; in Slice 3 refuse plain generations once a sealed one exists unless explicitly allowed, and alarm on a provider downgrade |
 
 ### 9.3 Decisions taken on 2026-10-09
 
