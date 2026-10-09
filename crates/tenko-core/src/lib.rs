@@ -18,6 +18,7 @@
 //! | [`timestamp`] | [`Timestamp`] (UTC, RFC 3339) |
 //! | [`object`] | [`ObjectKind`], [`ObjectRef`] |
 //! | [`principal`] | [`Principal`], [`RequestCtx`], [`Authorizer`], [`Action`], [`Denied`] |
+//! | [`auth`] | [`Credentials`], [`Authenticated`], [`Authenticator`], [`AuthFailure`] |
 //! | [`names`] | namespaces, [`TableName`], [`CounterKey`], [`MessageKey`], [`IdempotencyKey`] |
 //! | [`error`] | [`Coded`], [`CodedError`], [`FieldError`], [`InvalidValue`] |
 //! | [`codec`] | order-preserving keys, CBOR values, canonical CBOR for hashing |
@@ -40,6 +41,7 @@ pub mod __private {
 }
 
 pub mod audit;
+pub mod auth;
 pub mod codec;
 pub mod error;
 pub mod id;
@@ -56,6 +58,7 @@ pub mod serde_util;
 pub mod table;
 pub mod timestamp;
 
+pub use auth::{AuthFailure, AuthFlags, Authenticated, Authenticator, Credentials};
 pub use error::{Coded, CodedError, FieldError, InvalidValue};
 pub use id::{
     AddressId, ApiTokenId, AuditSeq, ConnectorId, CustomFieldId, HostId, ImportId, InterfaceId,

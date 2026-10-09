@@ -6,14 +6,15 @@
 use std::net::SocketAddr;
 
 use axum::{
-    extract::{ConnectInfo, FromRequestParts},
-    http::request::Parts,
+    extract::{ConnectInfo, FromRef, FromRequestParts},
+    http::{header, request::Parts},
 };
 use tenko_core::{
-    IdempotencyKey, InvalidValue, Principal, RequestCtx, RequestId, SystemComponent, Timestamp,
+    Authenticated, Credentials, IdempotencyKey, InvalidValue, Principal, RequestCtx, RequestId,
+    SystemComponent, Timestamp, auth::SESSION_COOKIE,
 };
 
-use crate::problem::ApiError;
+use crate::{problem::ApiError, state::AppState};
 
 /// Name of the header that carries the client's idempotency key (API-04).
 const IDEMPOTENCY_HEADER: &str = "idempotency-key";
@@ -28,50 +29,82 @@ const IDEMPOTENCY_HEADER: &str = "idempotency-key";
 ///   here.
 /// - `idempotency` is the `Idempotency-Key` header. A value that is not valid UTF-8, or that
 ///   [`IdempotencyKey::new`] rejects, is refused with 400 `sys.invalid_value`.
-/// - `principal` is a placeholder, see below.
+/// - `principal` comes from the [`Authenticator`](tenko_core::Authenticator) in the
+///   [`AppState`], which resolves the session cookie or bearer token. Without credentials, or
+///   with rejected ones, the request fails with the authenticator's problem details (401 or
+///   503). When the state has no authenticator (development and tests), the request acts as
+///   the API itself. The full [`Authenticated`] record is stored in the request extensions
+///   for handlers that need roles or flags.
 #[derive(Debug, Clone)]
 pub struct Ctx(pub RequestCtx);
 
-impl<S: Send + Sync> FromRequestParts<S> for Ctx {
+impl<S> FromRequestParts<S> for Ctx
+where
+    S: Send + Sync,
+    AppState: FromRef<S>,
+{
     type Rejection = ApiError;
 
-    // Nothing here awaits yet, so the future is already complete. WP1.2 turns this into an
-    // `async fn` when it resolves the session or token.
-    fn from_request_parts(
-        parts: &mut Parts,
-        _state: &S,
-    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
-        std::future::ready(Self::from_parts(parts))
-    }
-}
-
-impl Ctx {
-    /// Builds the context from the head of a request.
-    fn from_parts(parts: &Parts) -> Result<Self, ApiError> {
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let app = AppState::from_ref(state);
         let idempotency = idempotency_key(parts)?;
         let source_ip = parts
             .extensions
             .get::<ConnectInfo<SocketAddr>>()
             .map(|ConnectInfo(peer)| peer.ip());
+        let now = Timestamp::now();
+        let principal = match &app.auth {
+            None => placeholder_principal(),
+            Some(authenticator) => {
+                let credentials = credentials(parts);
+                let authenticated = authenticator
+                    .authenticate(&credentials, source_ip, now)
+                    .await?;
+                let principal = authenticated.principal.clone();
+                parts.extensions.insert(authenticated);
+                principal
+            }
+        };
         Ok(Self(RequestCtx {
-            principal: placeholder_principal(),
+            principal,
             request: RequestId::generate(),
-            now: Timestamp::now(),
+            now,
             source_ip,
             idempotency,
         }))
     }
 }
 
-/// The principal of every request until authentication exists: the API acting on its own.
-///
-/// WP1.2 replaces this with the session or token principal, and refuses requests without
-/// one.
+/// The principal of every request while no authenticator is configured: the API acting on
+/// its own. Development and tests only.
 fn placeholder_principal() -> Principal {
     Principal::System {
         component: SystemComponent::Api,
         on_behalf_of: None,
     }
+}
+
+/// Reads the session cookie and the `Authorization` header.
+fn credentials(parts: &Parts) -> Credentials {
+    let authorization = parts
+        .headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok());
+    let session = parts
+        .headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find_map(session_cookie);
+    Credentials::from_headers(session, authorization)
+}
+
+/// Finds the session cookie in one `Cookie` header value.
+fn session_cookie(header: &str) -> Option<&str> {
+    header.split(';').map(str::trim).find_map(|pair| {
+        pair.strip_prefix(SESSION_COOKIE)
+            .and_then(|rest| rest.strip_prefix('='))
+    })
 }
 
 /// Reads and validates the `Idempotency-Key` header.
@@ -89,14 +122,27 @@ fn idempotency_key(parts: &Parts) -> Result<Option<IdempotencyKey>, ApiError> {
     Ok(Some(IdempotencyKey::new(text)?))
 }
 
+/// The [`Authenticated`] record of the current request, when an authenticator resolved it.
+///
+/// Available after [`Ctx`] ran; returns `None` while the state has no authenticator.
+#[must_use]
+pub fn authenticated(parts: &Parts) -> Option<&Authenticated> {
+    parts.extensions.get::<Authenticated>()
+}
+
 #[cfg(test)]
 mod tests {
+    use std::{collections::BTreeSet, net::IpAddr, sync::Arc};
+
     use axum::{
         body::{Body, to_bytes},
         http::{HeaderValue, Request, StatusCode, header},
         response::IntoResponse,
     };
     use serde_json::Value;
+    use tenko_core::{
+        AuthFailure, AuthFlags, AuthStrength, Authenticator, SessionId, UserId, auth::AuthFuture,
+    };
 
     use super::*;
     use crate::problem::PROBLEM_JSON;
@@ -113,7 +159,57 @@ mod tests {
     }
 
     async fn extract(parts: &mut Parts) -> Result<Ctx, ApiError> {
-        Ctx::from_request_parts(parts, &()).await
+        Ctx::from_request_parts(parts, &AppState::default()).await
+    }
+
+    /// Accepts exactly one session value and one bearer token.
+    struct FakeAuthenticator {
+        session: &'static str,
+        token: &'static str,
+        user: UserId,
+    }
+
+    impl Authenticator for FakeAuthenticator {
+        fn authenticate<'a>(
+            &'a self,
+            credentials: &'a Credentials,
+            _source_ip: Option<IpAddr>,
+            _now: Timestamp,
+        ) -> AuthFuture<'a> {
+            Box::pin(async move {
+                let strength = match credentials {
+                    Credentials::Session(value) if value == self.session => AuthStrength::Passkey,
+                    Credentials::Bearer(value) if value == self.token => AuthStrength::Password,
+                    Credentials::None => return Err(AuthFailure::Missing),
+                    Credentials::Session(_) | Credentials::Bearer(_) => {
+                        return Err(AuthFailure::Invalid);
+                    }
+                };
+                Ok(Authenticated {
+                    principal: Principal::User {
+                        id: self.user,
+                        session: SessionId::generate(),
+                        strength,
+                    },
+                    user: Some(self.user),
+                    roles: BTreeSet::from(["admin".to_owned()]),
+                    strength,
+                    expires_at: None,
+                    flags: AuthFlags::default(),
+                })
+            })
+        }
+    }
+
+    fn state_with_auth(user: UserId) -> AppState {
+        AppState {
+            auth: Some(Arc::new(FakeAuthenticator {
+                session: "s3ss10n",
+                token: "t0k3n",
+                user,
+            })),
+            authorizer: None,
+        }
     }
 
     #[tokio::test]
@@ -182,5 +278,69 @@ mod tests {
         parts.extensions.insert(ConnectInfo(peer));
         let Ctx(ctx) = extract(&mut parts).await.expect("ctx");
         assert_eq!(ctx.source_ip, Some(peer.ip()));
+    }
+
+    #[tokio::test]
+    async fn resolves_the_session_cookie_through_the_authenticator() {
+        let user = UserId::generate();
+        let mut parts = parts(None);
+        parts.headers.insert(
+            header::COOKIE,
+            HeaderValue::from_static("theme=dark; tenko_session=s3ss10n; other=1"),
+        );
+        let Ctx(ctx) = Ctx::from_request_parts(&mut parts, &state_with_auth(user))
+            .await
+            .expect("ctx");
+        assert!(matches!(
+            ctx.principal,
+            Principal::User { id, strength: AuthStrength::Passkey, .. } if id == user
+        ));
+        let record = authenticated(&parts).expect("record");
+        assert_eq!(record.user, Some(user));
+        assert!(record.roles.contains("admin"));
+    }
+
+    #[tokio::test]
+    async fn a_bearer_token_wins_over_the_cookie() {
+        let user = UserId::generate();
+        let mut parts = parts(None);
+        parts.headers.insert(
+            header::COOKIE,
+            HeaderValue::from_static("tenko_session=s3ss10n"),
+        );
+        parts.headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer t0k3n"),
+        );
+        let Ctx(ctx) = Ctx::from_request_parts(&mut parts, &state_with_auth(user))
+            .await
+            .expect("ctx");
+        assert!(matches!(
+            ctx.principal,
+            Principal::User {
+                strength: AuthStrength::Password,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn missing_or_wrong_credentials_are_refused_with_401() {
+        let user = UserId::generate();
+        for cookie in [None, Some("tenko_session=wrong")] {
+            let mut parts = parts(None);
+            if let Some(cookie) = cookie {
+                parts.headers.insert(
+                    header::COOKIE,
+                    HeaderValue::from_str(cookie).expect("cookie"),
+                );
+            }
+            let error = Ctx::from_request_parts(&mut parts, &state_with_auth(user))
+                .await
+                .expect_err("must be refused");
+            assert_eq!(error.coded_error().code, "auth.unauthenticated");
+            assert_eq!(error.into_response().status(), StatusCode::UNAUTHORIZED);
+            assert!(authenticated(&parts).is_none());
+        }
     }
 }

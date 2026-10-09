@@ -295,7 +295,16 @@ async fn every_endpoint_answers_with_the_expected_status() {
             continue;
         }
 
-        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{label}");
+        // Every endpoint of the table is routed. An implemented endpoint answers with its own
+        // status (the area's tests cover it); a stub answers 501 with the stub body.
+        let status = response.status();
+        assert!(
+            status != StatusCode::NOT_FOUND && status != StatusCode::METHOD_NOT_ALLOWED,
+            "{label}: not routed ({status})"
+        );
+        if status != StatusCode::NOT_IMPLEMENTED {
+            continue;
+        }
         assert_eq!(content_type(&response), PROBLEM_JSON, "{label}");
         let body = body_json(response).await;
         assert_eq!(body["type"], "about:blank", "{label}");
