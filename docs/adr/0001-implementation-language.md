@@ -5,7 +5,7 @@
 
 ## Context
 
-DDI replaces AD-integrated Windows DNS and DHCP and must scale from a single home-lab box to enterprise deployments. The language choice is driven by four forces:
+Tenko DDI replaces AD-integrated Windows DNS and DHCP and must scale from a single home-lab box to enterprise deployments. The language choice is driven by four forces:
 
 1. **Attack surface.** The DNS and DHCP engines parse unfiltered packets straight from the network. Parsers of this kind are where the recurring memory-safety CVEs in BIND, Kea and dnsmasq live. Every network parser is reachable by an unauthenticated attacker.
 2. **Performance and footprint.** Targets are maximum throughput with minimal resources: more than 100k QPS per core for DNS (DNS-27), idle below 100 MB RSS with all roles on one node (OPS-15), and predictable p99 latency.
@@ -14,7 +14,7 @@ DDI replaces AD-integrated Windows DNS and DHCP and must scale from a single hom
 
 ## Decision
 
-All DDI components (data plane, control plane, CLI) are written in **Rust**.
+All Tenko components (data plane, control plane, CLI) are written in **Rust**.
 
 - `#![forbid(unsafe_code)]` applies to every crate. `unsafe` is allowed only where a dedicated ADR permits it, which is expected only in the I/O layer (API-16).
 - Every parser of network data has a `cargo-fuzz` target before it is merged (API-15).
@@ -29,7 +29,7 @@ All DDI components (data plane, control plane, CLI) are written in **Rust**.
 - C-class throughput is achievable; the remaining performance work is I/O design, measured in Spike B.
 - A mature ecosystem exists for the hard parts: DNS wire format (`domain`, `hickory-proto`), DHCP wire format (`dhcproto`), Raft (`openraft`), TLS (`rustls`), HTTP and web (`hyper`, `axum`).
 - Static linking and cross-compilation for Windows and Linux are well supported.
-- Windows-specific integration (RIO, SSPI for Kerberos, the Service Control Manager) depends on crates that wrap system APIs. Any need for `unsafe` in DDI code there requires an ADR.
+- Windows-specific integration (RIO, SSPI for Kerberos, the Service Control Manager) depends on crates that wrap system APIs. Any need for `unsafe` in Tenko code there requires an ADR.
 - Compile times and the learning curve are higher than for garbage-collected languages.
 - Third-party crates are part of the attack surface; `cargo-deny` and `cargo-audit` run in CI and fail the build (API-14).
 

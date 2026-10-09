@@ -1,6 +1,6 @@
 # Spike C: embedded UI and SSE
 
-Spike C of the DDI project (DNS + DHCP + IPAM in Rust) validates
+Spike C of the Tenko DDI project (DNS + DHCP + IPAM in Rust) validates
 [ADR 0003](../../docs/adr/0003-embedded-spa-ui.md): the SolidJS single-page app is embedded in the
 server binary and served by the Rust API process, and live updates reach the browser over
 Server-Sent Events (SSE). The spike answers how to embed the UI (which crate, which compression,
@@ -78,11 +78,11 @@ Implemented in `src/web.rs` for the embedded mode:
   without variants are always sent as identity.
 - `Content-Type` by file extension (`src/mime.rs`); text types carry `charset=utf-8`, unknown
   extensions are `application/octet-stream`.
-- SPA fallback: a miss outside `/assets/` returns `index.html` with `200`. DDI routes contain FQDNs
-  and IP addresses (`/dns/zones/example.com`, `/ipam/192.0.2.0/24`), so "the path has a dot" cannot
-  tell a file from a route. A miss under `/assets/` (including `/assets` and `/assets/`) is `404`,
-  so a missing hashed file never turns into HTML. `/api/*` misses are a JSON `404`, never the UI.
-  There is no directory listing: directories are not entries of the table.
+- SPA fallback: a miss outside `/assets/` returns `index.html` with `200`. Tenko routes contain
+  FQDNs and IP addresses (`/dns/zones/example.com`, `/ipam/192.0.2.0/24`), so "the path has a dot"
+  cannot tell a file from a route. A miss under `/assets/` (including `/assets` and `/assets/`) is
+  `404`, so a missing hashed file never turns into HTML. `/api/*` misses are a JSON `404`, never the
+  UI. There is no directory listing: directories are not entries of the table.
 - Security headers on every response (UI, API, SSE, errors), unless a handler already set one:
 
   ```text

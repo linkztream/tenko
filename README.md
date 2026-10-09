@@ -1,6 +1,8 @@
-# DDI
+# Tenko DDI
 
-DDI is a DNS + DHCP + IPAM stack. It is built to replace Active Directory-integrated
+Tenko (天狐) is the celestial fox of Japanese folklore, the oldest and wisest of the kitsune, said to watch over everything in its domain.
+
+Tenko DDI is a DNS, DHCP and IPAM stack. It is built to replace Active Directory-integrated
 Windows DNS and DHCP, and to scale from a single home-lab node to a multi-site
 enterprise deployment. It ships as one Rust binary that runs any combination of four
 roles: `controller` (API, UI, replicated store, job engine), `dns`, `dhcp`, and `probe`
@@ -43,7 +45,7 @@ cd ui && npm ci && npm run build
 Run the server with a subset of roles:
 
 ```sh
-cargo run -p ddi-server -- --roles controller,dns
+cargo run -p tenko-server -- --roles controller,dns
 ```
 
 ## Licence

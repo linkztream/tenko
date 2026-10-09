@@ -47,8 +47,8 @@ wildcards = "deny"
 allow-wildcard-paths = true
 highlight = "all"
 deny = [
-  { crate = "openssl", reason = "DDI uses rustls; OpenSSL must not enter the dependency graph" },
-  { crate = "openssl-sys", reason = "DDI uses rustls; OpenSSL must not enter the dependency graph" },
+  { crate = "openssl", reason = "Tenko uses rustls; OpenSSL must not enter the dependency graph" },
+  { crate = "openssl-sys", reason = "Tenko uses rustls; OpenSSL must not enter the dependency graph" },
 ]
 skip = []
 skip-tree = []

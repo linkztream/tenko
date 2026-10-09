@@ -1,0 +1,74 @@
+# Hardened systemd unit for tenko-server.
+#
+# Install:
+#   1. Place the binary at /usr/local/bin/tenko-server.
+#   2. Create the system user first:
+#        useradd --system --home-dir /var/lib/tenko --shell /usr/sbin/nologin tenko
+#   3. Put the configuration in /etc/tenko/tenko.toml.
+#   4. Install this file as /etc/systemd/system/tenko-server.service, then run:
+#        systemctl daemon-reload && systemctl enable --now tenko-server
+
+[Unit]
+Description=Tenko DDI server (DNS, DHCP and IPAM)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Type=notify will replace Type=simple once the server implements sd_notify
+# readiness.
+Type=simple
+ExecStart=/usr/local/bin/tenko-server --roles controller,dns,dhcp --config /etc/tenko/tenko.toml
+Restart=on-failure
+RestartSec=2s
+
+# Identity
+User=tenko
+Group=tenko
+DynamicUser=no
+# Bind DNS/DHCP ports below 1024 and use raw sockets for DHCP without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW
+NoNewPrivileges=yes
+
+# Filesystem
+StateDirectory=tenko
+StateDirectoryMode=0750
+ConfigurationDirectory=tenko
+ConfigurationDirectoryMode=0750
+RuntimeDirectory=tenko
+UMask=0077
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+
+# Kernel and process isolation
+ProtectHostname=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RemoveIPC=yes
+
+# Network
+# AF_PACKET is needed by the DHCP role for raw layer-2 replies; AF_NETLINK for interface discovery.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
+
+# System calls
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+# Limits
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

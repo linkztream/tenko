@@ -22,7 +22,7 @@ must_use_candidate = "allow"
 
 [workspace.dependencies]
 # Internal crates.
-ddi-core = { path = "crates/ddi-core" }
+tenko-core = { path = "crates/tenko-core" }
 
 # External crates. Only dependencies that a crate actually uses are listed here, so that
 # `cargo deny` and `cargo audit` see the real graph.
@@ -36,11 +36,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Planned dependencies, added by the first crate that needs them:
-#   axum, tower, tower-http       HTTP API (ddi-api)
+#   axum, tower, tower-http       HTTP API (tenko-api)
 #   utoipa                        OpenAPI schema for public API types
-#   uuid (v7, serde)              identifiers (ddi-core)
-#   time (serde, formatting)      timestamps (ddi-core)
-#   bytes                         wire buffers (ddi-dns, ddi-dhcp)
-#   ipnet, macaddr                address and prefix types (ddi-core, ddi-ipam)
-#   include_dir                   embedding ui/dist (ddi-api)
+#   uuid (v7, serde)              identifiers (tenko-core)
+#   time (serde, formatting)      timestamps (tenko-core)
+#   bytes                         wire buffers (tenko-dns, tenko-dhcp)
+#   ipnet, macaddr                address and prefix types (tenko-core, tenko-ipam)
+#   include_dir                   embedding ui/dist (tenko-api)
 #   Raft implementation and embedded KV engine: decided by spikes, see docs/adr/

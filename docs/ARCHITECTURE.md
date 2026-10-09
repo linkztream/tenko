@@ -1,6 +1,6 @@
-# DDI Architecture
+# Tenko DDI Architecture
 
-DDI is a DNS, DHCP and IPAM stack written in Rust with an embedded SolidJS web UI. It replaces Active Directory-integrated Windows DNS and DHCP and scales from a single home-lab box to an enterprise deployment with controller clusters, anycast DNS and DHCP failover pairs. This document describes the runtime architecture: roles, storage and replication, the intent and reconciliation model, the connector framework, the device move job, the repository layout and the engineering rules.
+Tenko DDI is a DNS, DHCP and IPAM stack written in Rust with an embedded SolidJS web UI. It replaces Active Directory-integrated Windows DNS and DHCP and scales from a single home-lab box to an enterprise deployment with controller clusters, anycast DNS and DHCP failover pairs. This document describes the runtime architecture: roles, storage and replication, the intent and reconciliation model, the connector framework, the device move job, the repository layout and the engineering rules.
 
 Requirements and design constraints are cited by ID and defined in [REQUIREMENTS.md](REQUIREMENTS.md). Security profile toggles are defined in [SECURITY-PROFILES.md](SECURITY-PROFILES.md), migration sources and runbooks in [MIGRATION.md](MIGRATION.md), RFC targets in [CONFORMANCE.md](CONFORMANCE.md) and phases with their done-when criteria in [ROADMAP.md](ROADMAP.md). Decisions are recorded as ADRs:
 
@@ -16,14 +16,14 @@ Requirements and design constraints are cited by ID and defined in [REQUIREMENTS
 
 ## Overview and principles
 
-DDI separates three concerns, all of them roles of one binary (ADR 0004):
+Tenko separates three concerns, all of them roles of one binary (ADR 0004):
 
 - **Control plane** (`controller` role): API, UI, Raft membership, authentication, vault, IPAM logic and scheduler. It holds the replicated state, makes decisions and runs jobs.
 - **Data plane** (`dns` and `dhcp` roles): answers DNS queries and serves DHCP leases from durable local copies of zones, leases and configuration.
 - **Discovery** (`probe` role): passive and active scanning and SNMP polling inside one network segment. It reports observations to the controllers.
 
 ```
-  UI (SolidJS SPA)      ddi CLI      Terraform, Ansible, webhooks (Phase 5)
+  UI (SolidJS SPA)     tenko CLI    Terraform, Ansible, webhooks (Phase 5)
          |                 |                      |
          +-----------------+----------------------+
                            | public REST API (OpenAPI, SSE)
@@ -67,7 +67,7 @@ Design principles:
 
 ## Single binary and roles
 
-`ddi` is one statically linked binary that runs any combination of roles on a node (ADR 0004, OPS-01). The `ddi-server` crate orchestrates the roles inside the process and integrates with the Windows Service Control Manager or systemd.
+`tenko` is one statically linked binary that runs any combination of roles on a node (ADR 0004, OPS-01). The `tenko-server` crate orchestrates the roles inside the process and integrates with the Windows Service Control Manager or systemd.
 
 | Role | Responsibility |
 |---|---|
@@ -125,7 +125,7 @@ The design is an embedded Raft store (`openraft`) over an embedded KV store (`re
 3. **The write rate is low.** 100k AD clients re-registering every 24 h produce about 1.2 updates per second, three orders of magnitude below what the coalesced write path sustained in Spike A.
 4. **DHCP leases do not go through global Raft.** They are hot, because every DORA is a write. They are synchronized between failover partners with the failover protocol (DHCP-12) and kept in a local WAL per node (DHCP-07).
 
-Precedent: etcd recommends staying under 8 GB per cluster, and TiKV and CockroachDB run terabytes through multi-Raft. DDI stays far below the etcd limit even with several zones of 1 M records.
+Precedent: etcd recommends staying under 8 GB per cluster, and TiKV and CockroachDB run terabytes through multi-Raft. Tenko stays far below the etcd limit even with several zones of 1 M records.
 
 ### What lives where
 
@@ -161,7 +161,7 @@ Scripts and results live in `bench/spike-a-raft/`. The fallback (Raft for config
 
 ## Cluster communication
 
-Node-to-node communication uses gRPC over mTLS with an internal CA (`ddi-cluster`) and enrollment tokens. The mechanism is identical for Docker, LXC and native installs (OPS-04). Nodes negotiate the protocol version so that a cluster can be upgraded one node at a time (OPS-08).
+Node-to-node communication uses gRPC over mTLS with an internal CA (`tenko-cluster`) and enrollment tokens. The mechanism is identical for Docker, LXC and native installs (OPS-04). Nodes negotiate the protocol version so that a cluster can be upgraded one node at a time (OPS-08).
 
 mTLS between nodes is structural. It is not a security-profile toggle, and no profile disables it. TLS on the API and UI is a separate matter and is a toggle (TGL-08).
 
@@ -177,7 +177,7 @@ Match rules can test the client subnet, the transport, the interface IP address 
 
 The same model expresses Windows zone scopes with Query Resolution Policies, BIND views and the simple internal/external split, so migration maps constructs directly instead of translating them.
 
-| Source construct | DDI construct |
+| Source construct | Tenko construct |
 |---|---|
 | Windows zone scope | Zone scope |
 | Windows client subnet | Client-subnet match rule |
@@ -196,7 +196,7 @@ The Lab profile may disable everything except secrets encryption at rest (NEVER-
 
 ## Secrets and the vault
 
-The vault (`ddi-vault`) uses envelope encryption (IAM-15, IAM-16):
+The vault (`tenko-vault`) uses envelope encryption (IAM-15, IAM-16):
 
 - A data encryption key (DEK) protects each secret.
 - A key encryption key (KEK) protects the DEKs. The KEK comes from the OS key store: DPAPI on Windows, TPM or keyring on Linux.
@@ -249,7 +249,7 @@ What the first dashboard shows, per node and cluster-wide, is deliberately small
 
 ## IPAM as the intent hub
 
-IPAM is the hub of the system (ADR 0005). Intent recorded in IPAM propagates to DHCP, DNS and network controllers through actuators, and observations from DHCP, DNS, scans, hypervisors and network controllers flow back. The address model itself (tenants and VRFs, the supernet, prefix, range and address tree, VLANs, sites, tags) is specified in [REQUIREMENTS.md](REQUIREMENTS.md). The `ddi-ipam` crate holds the address tree and reconciliation logic, and the `ddi-jobs` crate holds the job engine.
+IPAM is the hub of the system (ADR 0005). Intent recorded in IPAM propagates to DHCP, DNS and network controllers through actuators, and observations from DHCP, DNS, scans, hypervisors and network controllers flow back. The address model itself (tenants and VRFs, the supernet, prefix, range and address tree, VLANs, sites, tags) is specified in [REQUIREMENTS.md](REQUIREMENTS.md). The `tenko-ipam` crate holds the address tree and reconciliation logic, and the `tenko-jobs` crate holds the job engine.
 
 ### Intent and observation
 
@@ -266,12 +266,12 @@ A reconciler compares the two layers continuously and drives actuators until the
 
 | Actuator | Does | Drivers and phase |
 |---|---|---|
-| DHCP | Creates, moves and deletes reservations, keyed by MAC or client-id for DHCPv4 and by DUID for DHCPv6 | DDI DHCP in Phase 3. External drivers (Windows DHCP via PowerShell, Kea via Control Agent) only in Phase 4, for coexistence (CONN-12) |
-| DNS | Creates A, AAAA, PTR and CNAME records according to intent | DDI DNS in Phase 2. External drivers (RFC 2136, Windows DNS via PowerShell) only in Phase 4 (CONN-13) |
+| DHCP | Creates, moves and deletes reservations, keyed by MAC or client-id for DHCPv4 and by DUID for DHCPv6 | Tenko DHCP in Phase 3. External drivers (Windows DHCP via PowerShell, Kea via Control Agent) only in Phase 4, for coexistence (CONN-12) |
+| DNS | Creates A, AAAA, PTR and CNAME records according to intent | Tenko DNS in Phase 2. External drivers (RFC 2136, Windows DNS via PowerShell) only in Phase 4 (CONN-13) |
 | Network controller | Creates VLANs and networks, port profiles, per-client VLAN assignments | UniFi in Phase 1, more controllers later (CONN-16) |
 | Hypervisor | Sets the guest IP for LXC containers (`pct set`) and cloud-init VMs | Proxmox in Phase 5 (CONN-15) |
 
-External DHCP and DNS actuators do not exist in Phase 1. The DDI engines of Phase 2 and 3 become the actuators, and the Windows connector arrives in Phase 4.
+External DHCP and DNS actuators do not exist in Phase 1. The Tenko engines of Phase 2 and 3 become the actuators, and the Windows connector arrives in Phase 4.
 
 ### Assignment modes
 
@@ -307,7 +307,7 @@ For a `static` host the job updates only DNS and adds the manual task. For a `dy
 
 ### Reconciliation views
 
-In Phase 3, when DDI DHCP exists, a unified view compares the four truths: IPAM intent, DHCP leases, DNS records and scans (IPAM-21). It provides ghost, rogue, orphan and PTR-mismatch views, together with "who wins" rules for resolving each kind of conflict.
+In Phase 3, when Tenko DHCP exists, a unified view compares the four truths: IPAM intent, DHCP leases, DNS records and scans (IPAM-21). It provides ghost, rogue, orphan and PTR-mismatch views, together with "who wins" rules for resolving each kind of conflict.
 
 ## Device move job
 
@@ -362,15 +362,15 @@ Devices pick up their new address only on a link flap or a lease renewal. DHCP F
 | Phase | Behavior |
 |---|---|
 | Phase 1 | The job performs the IPAM intent change, the UniFi L2 move and the observation. The reservation and DNS steps appear as manual tasks. |
-| Phase 2 | The DNS step becomes automatic (DDI DNS is the DNS actuator). |
-| Phase 3 | The job is fully automatic for `reserved` hosts (DDI DHCP is the DHCP actuator and leases are observations without polling). The IoT move becomes one click. |
+| Phase 2 | The DNS step becomes automatic (Tenko DNS is the DNS actuator). |
+| Phase 3 | The job is fully automatic for `reserved` hosts (Tenko DHCP is the DHCP actuator and leases are observations without polling). The IoT move becomes one click. |
 | Phase 5 | The hypervisor actuator (Proxmox `pct set` and cloud-init) moves `static` LXC and VM hosts automatically (CONN-15). |
 
 `static` hosts keep a manual reconfiguration step until a hypervisor actuator can perform it.
 
 ## VLANs and network controllers
 
-A VLAN is a first-class object in IPAM (id, name, site) linked to prefixes (IPAM-03). Creating a network and its VLAN in IPAM can create the matching UniFi network in the same job, with UniFi's own DHCP either disabled or relaying to DDI (CONN-06).
+A VLAN is a first-class object in IPAM (id, name, site) linked to prefixes (IPAM-03). Creating a network and its VLAN in IPAM can create the matching UniFi network in the same job, with UniFi's own DHCP either disabled or relaying to Tenko (CONN-06).
 
 ### Deployment detection
 
@@ -422,7 +422,7 @@ All inventory sources implement one `InventorySource` interface (CONN-02). A sou
 | VMware vSphere (CONN-11) | 4 | vSphere REST API, guest IP via VMware Tools |
 | Docker/Podman, Kubernetes, Incus/LXD (CONN-14) | 5 | Socket or API for containers and pods that have their own addresses |
 
-Proxmox VE runs no DNS of its own, so it is an inventory source. A DNS server running in a VM or container on Proxmox is imported through its own migration adapter (see [MIGRATION.md](MIGRATION.md)). Observations from inventory sources also catch fixed IP addresses that never appear in DHCP. In Phase 5, a NetBox-compatible API lets Proxmox SDN use DDI as its IPAM plugin (CONN-17).
+Proxmox VE runs no DNS of its own, so it is an inventory source. A DNS server running in a VM or container on Proxmox is imported through its own migration adapter (see [MIGRATION.md](MIGRATION.md)). Observations from inventory sources also catch fixed IP addresses that never appear in DHCP. In Phase 5, a NetBox-compatible API lets Proxmox SDN use Tenko as its IPAM plugin (CONN-17).
 
 ## Connector framework
 
@@ -431,13 +431,13 @@ All integrations plug into one framework with four traits (ADR 0006, CONN-01):
 | Trait | Purpose | Example drivers |
 |---|---|---|
 | `InventorySource` | Produces observations of hosts | Proxmox, Home Assistant, Hyper-V, vSphere |
-| `Actuator` | Applies intent to a system | DDI DHCP, DDI DNS, external Windows DHCP and DNS, Kea Control Agent, RFC 2136, Proxmox as hypervisor |
+| `Actuator` | Applies intent to a system | Tenko DHCP, Tenko DNS, external Windows DHCP and DNS, Kea Control Agent, RFC 2136, Proxmox as hypervisor |
 | `MigrationSource` | Produces the canonical intermediate representation (IR) plus a loss report | Windows DNS and DHCP, BIND, OPNsense, dnsmasq, Kea |
 | `NetworkController` | Reads topology and performs L2 writes | UniFi |
 
-The traits live in `ddi-connect` and drivers live in `ddi-connect-*` crates. One driver can implement several traits. `ddi-connect-proxmox` is an inventory source in Phase 1 and gains a hypervisor actuator later. `ddi-connect-windows` is a migration source and a coexistence actuator in Phase 4. The `NetworkController` drivers cover both topology reads and the L2 writes behind the network-controller actuator.
+The traits live in `tenko-connect` and drivers live in `tenko-connect-*` crates. One driver can implement several traits. `tenko-connect-proxmox` is an inventory source in Phase 1 and gains a hypervisor actuator later. `tenko-connect-windows` is a migration source and a coexistence actuator in Phase 4. The `NetworkController` drivers cover both topology reads and the L2 writes behind the network-controller actuator.
 
-The migration pipeline (`plan`, `apply`, `verify`) lives in `ddi-migrate` on top of the connectors, and it runs on the job engine (MIG-01, MIG-03). IR, loss reports, coexistence modes and runbooks are in [MIGRATION.md](MIGRATION.md).
+The migration pipeline (`plan`, `apply`, `verify`) lives in `tenko-migrate` on top of the connectors, and it runs on the job engine (MIG-01, MIG-03). IR, loss reports, coexistence modes and runbooks are in [MIGRATION.md](MIGRATION.md).
 
 ## API and UI
 
@@ -486,7 +486,7 @@ Policy: no `unsafe` code without an ADR.
 ## Repository layout
 
 ```
-DDI/
+tenko/
   Cargo.toml                 # workspace
   LICENSE                    # placeholder until the license decision
   docs/
@@ -499,26 +499,26 @@ DDI/
     ROADMAP.md               # phases, deliverables, done-when criteria
     adr/                     # architecture decision records
   crates/
-    ddi-core/                # data model (IPAM, zones, leases, policies), IR for migration
-    ddi-store/               # Raft + KV, snapshots, local cache
-    ddi-cluster/             # gRPC/mTLS, enrollment, internal CA
-    ddi-auth/                # users, passkeys, TOTP, password policy, RBAC, sessions
-    ddi-vault/               # envelope encryption, KEK providers
-    ddi-ipam/                # address tree, reconciliation, import/export
-    ddi-scan/                # probe role, passive/active discovery, SNMP
-    ddi-dns/                 # authoritative, forwarder, cache, RPZ, XFR, views
-    ddi-dhcp/                # v4/v6, failover, relay, DDNS
-    ddi-jobs/                # job engine: steps, state, timeouts, rollback
-    ddi-connect/             # traits: InventorySource, Actuator, MigrationSource, NetworkController
-    ddi-connect-proxmox/     # inventory (Phase 1), hypervisor actuator (later)
-    ddi-connect-unifi/       # network controller: read topology, write VLANs and port profiles
-    ddi-connect-windows/     # Phase 4: DNS/DHCP via PowerShell remoting + LDAP, migration source and coexistence actuator
-    ddi-connect-hass/        # Home Assistant inventory source
-    ddi-connect-*/           # bind, opnsense, dnsmasq, kea, hyperv, vmware (Phase 4 to 5)
-    ddi-migrate/             # plan/apply/verify pipeline on top of connectors
-    ddi-api/                 # axum, OpenAPI, SSE
-    ddi-cli/                 # `ddi` CLI, shares the client with the UI
-    ddi-server/              # the binary, role orchestration, Windows SCM / systemd
+    tenko-core/              # data model (IPAM, zones, leases, policies), IR for migration
+    tenko-store/             # Raft + KV, snapshots, local cache
+    tenko-cluster/           # gRPC/mTLS, enrollment, internal CA
+    tenko-auth/              # users, passkeys, TOTP, password policy, RBAC, sessions
+    tenko-vault/             # envelope encryption, KEK providers
+    tenko-ipam/              # address tree, reconciliation, import/export
+    tenko-scan/              # probe role, passive/active discovery, SNMP
+    tenko-dns/               # authoritative, forwarder, cache, RPZ, XFR, views
+    tenko-dhcp/              # v4/v6, failover, relay, DDNS
+    tenko-jobs/              # job engine: steps, state, timeouts, rollback
+    tenko-connect/           # traits: InventorySource, Actuator, MigrationSource, NetworkController
+    tenko-connect-proxmox/   # inventory (Phase 1), hypervisor actuator (later)
+    tenko-connect-unifi/     # network controller: read topology, write VLANs and port profiles
+    tenko-connect-windows/   # Phase 4: DNS/DHCP via PowerShell remoting + LDAP, migration source and coexistence actuator
+    tenko-connect-hass/      # Home Assistant inventory source
+    tenko-connect-*/         # bind, opnsense, dnsmasq, kea, hyperv, vmware (Phase 4 to 5)
+    tenko-migrate/           # plan/apply/verify pipeline on top of connectors
+    tenko-api/               # axum, OpenAPI, SSE
+    tenko-cli/               # `tenko` CLI, shares the client with the UI
+    tenko-server/            # the binary, role orchestration, Windows SCM / systemd
   ui/                        # SolidJS + TypeScript + Vite, embedded via build.rs (ADR 0008)
   fuzz/                      # cargo-fuzz targets per parser
   bench/                     # Phase 0 spikes, dnsperf/perfdhcp scenarios

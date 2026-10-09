@@ -1,9 +1,9 @@
 {
-  "name": "ddi-ui",
+  "name": "tenko-ui",
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "Web UI for DDI, built into ui/dist and embedded in the server binary",
+  "description": "Web UI for Tenko DDI, built into ui/dist and embedded in the server binary",
   "engines": {
     "node": ">=22"
   },

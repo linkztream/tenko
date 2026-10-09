@@ -1,6 +1,6 @@
-# DDI Requirements
+# Tenko DDI Requirements
 
-DDI is a DNS + DHCP + IPAM stack written in Rust with an embedded SolidJS UI. It replaces Active Directory-integrated Windows DNS and DHCP and scales from a home lab (three LANs plus a DMZ) to enterprise. The goals are maximum performance, minimal resource consumption, a fast UI, and security that can be relaxed for lab use. IPAM replaces an existing IPAM spreadsheet and populates itself through network scanning. This is a living specification, maintained under the change rules below.
+Tenko DDI is a DNS + DHCP + IPAM stack written in Rust with an embedded SolidJS UI. It replaces Active Directory-integrated Windows DNS and DHCP and scales from a home lab (three LANs plus a DMZ) to enterprise. The goals are maximum performance, minimal resource consumption, a fast UI, and security that can be relaxed for lab use. IPAM replaces an existing IPAM spreadsheet and populates itself through network scanning. This is a living specification, maintained under the change rules below.
 
 ## How to read this document
 
@@ -51,13 +51,13 @@ Change rules:
 | Area | Decision | Recorded in |
 |---|---|---|
 | Language, data plane | Rust | ADR 0001 |
-| Storage and replication | Embedded Raft store over an embedded KV store, conditional on more than 1M records per zone working (go/no-go in Phase 0, Spike A: RSS under 2 GB at 5M records, new node caught up in under 5 minutes on 1 Gbit, p99 query latency unaffected). Fallback: Raft only for configuration, IPAM and policies, with zone data replicated between DDI nodes by built-in IXFR/NOTIFY (primary/secondary) | ADR 0002 (Proposed, pending Spike A) |
+| Storage and replication | Embedded Raft store over an embedded KV store, conditional on more than 1M records per zone working (go/no-go in Phase 0, Spike A: RSS under 2 GB at 5M records, new node caught up in under 5 minutes on 1 Gbit, p99 query latency unaffected). Fallback: Raft only for configuration, IPAM and policies, with zone data replicated between Tenko nodes by built-in IXFR/NOTIFY (primary/secondary) | ADR 0002 (Proposed, pending Spike A) |
 | GUI | SPA (SolidJS + TypeScript) embedded in the binary | ADR 0003 |
-| Deployment model | One statically linked binary, `ddi`, running any combination of the roles `controller`, `dns`, `dhcp` and `probe` | ADR 0004 |
+| Deployment model | One statically linked binary, `tenko`, running any combination of the roles `controller`, `dns`, `dhcp` and `probe` | ADR 0004 |
 | IPAM's role | IPAM is the hub: intent in IPAM propagates to DHCP, DNS and network controllers; observations from DHCP, DNS, scanning, hypervisors and network controllers flow back | ADR 0005 |
 | Migration | Connector architecture for mixed sources, built around a canonical intermediate representation | ADR 0006 |
 | External systems | Connectors for hypervisors (Proxmox first, Hyper-V and VMware later), Home Assistant and network controllers (UniFi first, self-hosted controller, read and write with guardrails), with VLAN control and a topology map | ADR 0006 |
-| External DHCP/DNS actuators | Not in Phase 1. DDI's own engines in Phases 2 and 3 become the actuators; the Windows connector arrives in Phase 4 as a migration source | ADR 0005 |
+| External DHCP/DNS actuators | Not in Phase 1. Tenko's own engines in Phases 2 and 3 become the actuators; the Windows connector arrives in Phase 4 as a migration source | ADR 0005 |
 | Delivery order | Platform and IPAM first, then DNS, DHCP, AD integration and migration, then enterprise | ADR 0007 |
 | RDP/SSH | URI handoff first; HTML5 gateway as an opt-in module in a later phase | ADR 0007 |
 | Recursion | Forwarder + cache + RPZ first; own full recursive resolver later | ADR 0007 |
@@ -76,7 +76,7 @@ The reference home-lab environment is three LANs plus a DMZ, Active Directory, a
 
 ## Security profiles
 
-DDI offers four profiles: Home, Standard, Hardened and Lab. The administrator chooses one in the first-run wizard (API-10). A profile is a bundle of toggles (TGL-01 to TGL-22), not a separate code path; the full matrix is in SECURITY-PROFILES.md.
+Tenko offers four profiles: Home, Standard, Hardened and Lab. The administrator chooses one in the first-run wizard (API-10). A profile is a bundle of toggles (TGL-01 to TGL-22), not a separate code path; the full matrix is in SECURITY-PROFILES.md.
 
 Some behavior can never be switched off: secrets are encrypted at rest (NEVER-01, IAM-15), the audit log is always on (NEVER-02, IAM-18) and every admin action is attributable to an authenticated principal (NEVER-03, IAM-19). The PIN coupling rule (CON-07, IAM-07) applies in every profile. The Lab profile may relax everything else, but it means permissive configuration, never attack tooling (CON-09).
 
@@ -104,7 +104,7 @@ These are corrected premises: assumptions that were examined and replaced.
 
 **Premise.** "Secure updates" in AD can be replaced by TSIG keys or IP ACLs.
 
-**Constraint.** "Secure updates" in AD means GSS-TSIG (RFC 3645) over TKEY with Kerberos. DDI DNS needs an AD computer account with the SPN `DNS/<host>`, a keytab (Linux) or SSPI under that identity (Windows), and ownership per RRset. Without it, domain controllers fall back to insecure updates and protection is reduced to IP ACLs.
+**Constraint.** "Secure updates" in AD means GSS-TSIG (RFC 3645) over TKEY with Kerberos. Tenko DNS needs an AD computer account with the SPN `DNS/<host>`, a keytab (Linux) or SSPI under that identity (Windows), and ownership per RRset. Without it, domain controllers fall back to insecure updates and protection is reduced to IP ACLs.
 
 **Affects.** DNS-28, OPS-11.
 
@@ -142,9 +142,9 @@ These are corrected premises: assumptions that were examined and replaced.
 
 ### CON-08: Conformance is a matrix, not "all standards"
 
-**Premise.** DDI should implement all DNS standards.
+**Premise.** Tenko should implement all DNS standards.
 
-**Constraint.** DNS alone has roughly 300 RFCs. DDI publishes a conformance matrix (CONFORMANCE.md) with an explicit target phase per RFC and tests each as its engine lands.
+**Constraint.** DNS alone has roughly 300 RFCs. Tenko publishes a conformance matrix (CONFORMANCE.md) with an explicit target phase per RFC and tests each as its engine lands.
 
 **Affects.** API-17, CONFORMANCE.md.
 
@@ -152,7 +152,7 @@ These are corrected premises: assumptions that were examined and replaced.
 
 **Premise.** A pentest mode should include offensive capabilities.
 
-**Constraint.** Pentest mode means permissive configuration. DDI contains no Responder-like functionality (name-resolution poisoning, credential capture). The reason is liability.
+**Constraint.** Pentest mode means permissive configuration. Tenko contains no Responder-like functionality (name-resolution poisoning, credential capture). The reason is liability.
 
 **Affects.** SECURITY-PROFILES.md (Lab profile).
 
@@ -166,7 +166,7 @@ These are corrected premises: assumptions that were examined and replaced.
 
 ### CON-11: No AD-backed zone storage
 
-**Premise.** DDI needs a Samba-style mode that keeps zone data in AD.
+**Premise.** Tenko needs a Samba-style mode that keeps zone data in AD.
 
 **Constraint.** The connector model makes this mode unnecessary, so it is not built.
 
@@ -182,7 +182,7 @@ These are corrected premises: assumptions that were examined and replaced.
 
 ## DNS
 
-DDI DNS has three engines, not one, because AD clients expect a single server to be authoritative, to forward and cache and, later, to recurse.
+Tenko DNS has three engines, not one, because AD clients expect a single server to be authoritative, to forward and cache and, later, to recurse.
 
 | ID | Requirement | Phase | Priority |
 |---|---|---|---|
@@ -223,7 +223,7 @@ DDI DNS has three engines, not one, because AD clients expect a single server to
 
 ## DHCP
 
-DDI DHCP serves from a local lease store with no database round trip in the DORA path (OPS-02) and acts as an IPAM actuator (DHCP-16).
+Tenko DHCP serves from a local lease store with no database round trip in the DORA path (OPS-02) and acts as an IPAM actuator (DHCP-16).
 
 | ID | Requirement | Phase | Priority |
 |---|---|---|---|
@@ -238,11 +238,11 @@ DDI DHCP serves from a local lease store with no database round trip in the DORA
 | DHCP-09 | DHCPv6 per RFC 8415: IA_NA, IA_PD (prefix delegation), DUID and relay. | 3 | Must |
 | DHCP-10 | Router Advertisement interplay: the M and O flags must match the DHCPv6 service, and DHCPv6 cannot set a default route, which stays an RA function. | 3 | Should |
 | DHCP-11 | IPv4/IPv6 correlation per host using the client link-layer address option (RFC 6939). | 3 | Should |
-| DHCP-12 | Failover between DDI nodes: hash split (RFC 3074), MCLT, partner-down state, lease sync, and hot-standby and load-balance modes. DHCPv6 failover follows RFC 8156; DHCPv4 failover has no RFC and is DDI's own protocol, not interoperable with Windows or ISC (CON-05). | 3 | Must |
+| DHCP-12 | Failover between Tenko nodes: hash split (RFC 3074), MCLT, partner-down state, lease sync, and hot-standby and load-balance modes. DHCPv6 failover follows RFC 8156; DHCPv4 failover has no RFC and is Tenko's own protocol, not interoperable with Windows or ISC (CON-05). | 3 | Must |
 | DHCP-13 | DDNS from DHCP: option 81 (RFC 4702) and DHCPv6 FQDN (RFC 4704), DHCID and name protection (RFC 4701, RFC 4703), updates on commit, expire and release, PTR records, and "update for legacy clients". | 3 | Must |
 | DHCP-14 | Passive OS fingerprinting from options 55 and 60 feeds the IPAM OS field without active scanning. | 3 | Should |
 | DHCP-15 | NTP servers via option 42, because Kerberos and DNSSEC depend on time synchronization (OPS-09). | 3 | Must |
-| DHCP-16 | DDI DHCP is an IPAM actuator: reservations are created directly from IPAM intent (MAC or client-id for v4, DUID for v6), and leases become observations without polling. This makes the move job fully automatic for `reserved` hosts (IPAM-19). | 3 | Must |
+| DHCP-16 | Tenko DHCP is an IPAM actuator: reservations are created directly from IPAM intent (MAC or client-id for v4, DUID for v6), and leases become observations without polling. This makes the move job fully automatic for `reserved` hosts (IPAM-19). | 3 | Must |
 | DHCP-17 | Performance measured with kea perfdhcp; results documented. | 3 | Should |
 | DHCP-18 | Failover chaos test: the partner is killed under load and no duplicate leases result. | 3 | Must |
 
@@ -270,7 +270,7 @@ IPAM is the hub (ADR 0005). Everything it knows is either intent (what the admin
 | IPAM-16 | Intent wins for managed hosts. A per-host `lock` flag stops all automation. | 1 | Must |
 | IPAM-17 | Every change is a job with steps, status, timeout and rollback, visible in the UI and API. Nothing happens silently. | 1 | Must |
 | IPAM-18 | IPAM warns when the MAC (v4) or DUID (v6) is missing before a reservation can be created. | 1 | Must |
-| IPAM-19 | Move job: select one or many hosts and drag them to another network. A per-device preview shows old IP to new IP, the DNS change, the L2 action and manual steps. Confirmation runs one job per device (steps below the assignment-mode table) under the guardrails of CONN-09. Phase 1 performs IPAM intent + UniFi L2 move + observation, with DHCP and DNS steps as manual tasks; the DNS step becomes automatic with DDI DNS (Phase 2) and `reserved` hosts fully automatic with DDI DHCP (Phase 3). | 1 | Must |
+| IPAM-19 | Move job: select one or many hosts and drag them to another network. A per-device preview shows old IP to new IP, the DNS change, the L2 action and manual steps. Confirmation runs one job per device (steps below the assignment-mode table) under the guardrails of CONN-09. Phase 1 performs IPAM intent + UniFi L2 move + observation, with DHCP and DNS steps as manual tasks; the DNS step becomes automatic with Tenko DNS (Phase 2) and `reserved` hosts fully automatic with Tenko DHCP (Phase 3). | 1 | Must |
 | IPAM-20 | Topology map: a graph of routers, switches, APs, hosts, VMs/containers and hypervisors, with ports, wireless associations, uplinks and VM-to-host links as edges. Sources: UniFi, LLDP/CDP and bridge tables via SNMP, hypervisor connectors, and ARP/ND from probes. The interactive map filters by VLAN and site, opens the host view on click, highlights paths and answers "what is connected to this port". | 1 | Must |
 | IPAM-21 | Unified reconciliation view across the four truths (IPAM intent, DHCP leases, DNS records, scans), with ghost, rogue, orphan and PTR-mismatch views and "who wins" rules. | 3 | Must |
 | IPAM-22 | AD Sites and Services: bidirectional sync of site-to-subnet mappings (`CN=Subnets,CN=Sites,CN=Configuration`) with IPAM sites. It is a sync, not a storage model (CON-11). | 4 | Must |
@@ -353,7 +353,7 @@ The data plane survives the control plane. At home, all roles run in one process
 | OPS-08 | Rolling upgrades with protocol version negotiation between nodes. | 1 | Should |
 | OPS-09 | Time synchronization is treated as a dependency: Kerberos tolerates 5 minutes of skew and DNSSEC signatures have validity windows. NTP is distributed via DHCP option 42 (DHCP-15). | 2 | Should |
 | OPS-10 | Windows service: Service Control Manager integration and Windows Event Log. | 1 | Must |
-| OPS-11 | On Windows, DDI runs as a gMSA or domain account so that Kerberos works (CON-03). | 4 | Must |
+| OPS-11 | On Windows, Tenko runs as a gMSA or domain account so that Kerberos works (CON-03). | 4 | Must |
 | OPS-12 | MSI and winget packaging. | 4 | Should |
 | OPS-13 | Linux: systemd unit, capabilities instead of root, seccomp and a non-root user. | 1 | Must |
 | OPS-14 | Containers: Docker bridge NAT breaks DHCP broadcast and DNS source addresses, so macvlan or host networking is required. This is documented with examples (compose with macvlan, LXC notes). | 1 | Must |
@@ -373,7 +373,7 @@ The REST API is the only interface the UI uses. This section also holds product-
 |---|---|---|---|
 | API-01 | REST API with an OpenAPI specification derived from the code's types. | 1 | Must |
 | API-02 | The UI uses only the public API. | 1 | Must |
-| API-03 | A `ddi` CLI that shares the client library. | 1 | Must |
+| API-03 | A `tenko` CLI that shares the client library. | 1 | Must |
 | API-04 | Bulk operations and idempotency keys. | 1 | Must |
 | API-05 | Event stream over Server-Sent Events (SSE) for live UI updates. | 1 | Must |
 | API-06 | Webhooks. | 5 | Should |
@@ -388,7 +388,7 @@ The REST API is the only interface the UI uses. This section also holds product-
 | API-15 | Every parser of network data has a cargo-fuzz target before it is merged. | 0 | Must |
 | API-16 | `#![forbid(unsafe_code)]` in all crates unless an ADR allows `unsafe` (I/O layer). | 0 | Must |
 | API-17 | Published conformance matrix (CONFORMANCE.md) with a target phase per RFC, and conformance tests per RFC as engines land (CON-08). | 0 | Must |
-| API-18 | Windows interop lab: a test domain on Windows Server 2016 or later (Query Resolution Policies require 2016+) for domain join, DC locator, GPO retrieval and Netlogon re-registration against DDI with GSS-TSIG. | 4 | Must |
+| API-18 | Windows interop lab: a test domain on Windows Server 2016 or later (Query Resolution Policies require 2016+) for domain join, DC locator, GPO retrieval and Netlogon re-registration against Tenko with GSS-TSIG. | 4 | Must |
 | API-19 | Signed releases (Sigstore, Authenticode) and SBOM. | 5 | Must |
 | API-20 | License decision (Apache-2.0 or AGPL-3.0) before any publication. | 5 | Must |
 | API-21 | Language packs: every UI string is externalized under a stable key. Additional languages are XLIFF 2.0 files (XML) named by BCP 47 tag (for example `fr.xlf`, `fr-CA.xlf`) with display name, author, version and source language as metadata inside the file. A pack is uploaded in the UI or dropped in the data directory and activated at runtime without a rebuild. Upload validates the schema, reports missing and extra keys and a completeness percentage, and previews before activation. Missing strings fall back to English; translations are rendered as text (no markup injection) and use ICU MessageFormat for plurals, gender and placeholders; dates, numbers and sort order come from the locale. The built-in Swedish and English ship in the same format and double as templates, and the current key set can be exported with one click. The layout supports right-to-left languages. | 1 | Must |
@@ -404,18 +404,18 @@ Connectors are pluggable drivers behind common traits (ADR 0006). They bring obs
 | CONN-03 | Proxmox VE inventory through a read-only API token: `/cluster/resources`, QEMU guest agent `network-get-interfaces`, LXC config and interfaces, and SDN vnets. This captures fixed IPs that never appear in DHCP. | 1 | Must |
 | CONN-04 | Home Assistant inventory through the REST/WebSocket API with a long-lived token. The device registry provides MAC, IP, manufacturer and model for IoT devices that nmap cannot fingerprint. | 1 | Must |
 | CONN-05 | UniFi read: devices, clients, ports, LLDP, uplinks and client-to-AP/port associations. | 1 | Must |
-| CONN-06 | UniFi write: networks and VLANs (UniFi's own DHCP disabled or relaying to DDI), port profiles (`rest/portconf`) and per-client VLAN override (`rest/user`, where `network_id` is the network's `_id`, not the VLAN number). A Phase 1 spike decides which writes go through which API family. | 1 | Must |
+| CONN-06 | UniFi write: networks and VLANs (UniFi's own DHCP disabled or relaying to Tenko), port profiles (`rest/portconf`) and per-client VLAN override (`rest/user`, where `network_id` is the network's `_id`, not the VLAN number). A Phase 1 spike decides which writes go through which API family. | 1 | Must |
 | CONN-07 | UniFi deployment detection and API families. A self-hosted Network Application serves its API on port 8443 without the `/proxy/network/` prefix, with login at `/api/login` using a local account for the classic API; UDM/UCG and Cloud Key deployments use the proxy prefix and are autodetected. The Integration API (`/proxy/network/integration/v1`, `X-API-Key`) is official and versioned and reads sites, devices, clients and networks; network creation is likely supported but only GET is verified in the official documentation. The classic API (`/api/s/{site}/rest/...`) alone offers port profiles and per-client VLAN override, and whether an API key works there varies by controller. Fallback: a local admin account in the vault. | 1 | Must |
 | CONN-08 | Verify before write: a network-controller connector never writes anything it has not first read back and diffed. All writes are previewed, audited and available as dry-run. | 1 | Must |
-| CONN-09 | Guardrails: never touch the port or VLAN through which DDI or the controller is reached, and never uplinks. Bulk operations run with configurable parallelism so that dozens of IoT devices cannot overwhelm DHCP or the controller. | 1 | Must |
+| CONN-09 | Guardrails: never touch the port or VLAN through which Tenko or the controller is reached, and never uplinks. Bulk operations run with configurable parallelism so that dozens of IoT devices cannot overwhelm DHCP or the controller. | 1 | Must |
 | CONN-10 | Hyper-V inventory via WinRM/PowerShell: `Get-VM` and `Get-VMNetworkAdapter` (MAC, and IP via integration services). | 4 | Should |
 | CONN-11 | VMware vSphere inventory via the vSphere REST API, with the guest IP from VMware Tools. | 4 | Should |
-| CONN-12 | External DHCP actuators for coexistence: Windows DHCP via PowerShell and Kea via the Control Agent. Before Phase 4, DDI's own DHCP is the only DHCP actuator. | 4 | Should |
-| CONN-13 | External DNS actuators for coexistence: RFC 2136 and Windows DNS via PowerShell. Before Phase 4, DDI's own DNS is the only DNS actuator. | 4 | Should |
+| CONN-12 | External DHCP actuators for coexistence: Windows DHCP via PowerShell and Kea via the Control Agent. Before Phase 4, Tenko's own DHCP is the only DHCP actuator. | 4 | Should |
+| CONN-13 | External DNS actuators for coexistence: RFC 2136 and Windows DNS via PowerShell. Before Phase 4, Tenko's own DNS is the only DNS actuator. | 4 | Should |
 | CONN-14 | Container and orchestrator inventory (Docker/Podman, Kubernetes, Incus/LXD) through sockets and APIs, for containers and pods that have their own addresses. | 5 | Could |
 | CONN-15 | Proxmox hypervisor actuator: sets the guest IP for LXC (`pct set`) and cloud-init VMs, so that `static` hosts can be moved automatically. | 5 | Should |
 | CONN-16 | Additional network controllers beyond UniFi. | 5 | Could |
-| CONN-17 | NetBox-compatible API, so that Proxmox SDN can use DDI as its IPAM plugin. | 5 | Could |
+| CONN-17 | NetBox-compatible API, so that Proxmox SDN can use Tenko as its IPAM plugin. | 5 | Could |
 
 ## Migration
 
@@ -425,13 +425,13 @@ Migration from mixed sources (AD-integrated, file-based, BIND, OPNsense, Proxmox
 |---|---|---|---|
 | MIG-01 | Every migration source is an adapter that produces the canonical intermediate representation (IR) plus a loss report listing what could not be mapped. | 4 | Must |
 | MIG-02 | AXFR is the universal baseline for DNS data from any authoritative server (Windows, BIND, PowerDNS, Knot, NSD, Unbound auth zones). Adapters add what AXFR loses: ownership, timestamps, forwarders, views and policies, and DHCP. | 4 | Must |
-| MIG-03 | One pipeline for all sources: `plan` (dry-run diff), `apply`, and `verify` (parity check against the old server), exposed as `ddi migrate plan`, `ddi migrate apply` and `ddi migrate verify`. It runs on the job engine (IPAM-17). | 4 | Must |
-| MIG-04 | Coexistence modes, selected per zone or scope in the UI: secondary (DDI is an AXFR secondary and stays in sync until the flip, with a nightly parity diff), forward (DDI forwards some zones to the old server while taking over others) and flip (DDI becomes primary; the old server becomes its secondary or is switched off after a rollback window). | 4 | Must |
+| MIG-03 | One pipeline for all sources: `plan` (dry-run diff), `apply`, and `verify` (parity check against the old server), exposed as `tenko migrate plan`, `tenko migrate apply` and `tenko migrate verify`. It runs on the job engine (IPAM-17). | 4 | Must |
+| MIG-04 | Coexistence modes, selected per zone or scope in the UI: secondary (Tenko is an AXFR secondary and stays in sync until the flip, with a nightly parity diff), forward (Tenko forwards some zones to the old server while taking over others) and flip (Tenko becomes primary; the old server becomes its secondary or is switched off after a rollback window). | 4 | Must |
 | MIG-05 | Verify by query replay: sampled live queries (dnstap or query log) are asked of both servers and the RCODE and answers are diffed, ignoring TTL drift. | 4 | Must |
 | MIG-06 | Source: Windows DNS, AD-integrated. AXFR or `Get-DnsServerResourceRecord`, plus an LDAP read of `dnsRecord` in `DomainDnsZones` and `ForestDnsZones` for ownership per RRset, aging timestamps and tombstones, plus PowerShell remoting (DnsServer module) for forwarders, conditional forwarders, root hints, zone scopes, client subnets, recursion scopes, Query Resolution Policies, aging settings, GQBL and RRL. | 4 | Must |
 | MIG-07 | Source: Windows DNS, file-backed. The same cmdlets (they do not distinguish storage) or `%SystemRoot%\System32\dns\*.dns` files. The zone file parser understands the Windows `[AGE:n]` comment so that timestamps are kept. | 4 | Must |
 | MIG-08 | Source: Windows DHCP. `Export-DhcpServer -Leases` (XML) plus the `Get-DhcpServerv4*` cmdlets for scopes, reservations, options at all levels, policies, filters, superscopes, DNS settings and failover relationships (the shared secret is recreated, not exported). Coexistence uses split scopes (CON-05). | 4 | Must |
-| MIG-09 | Source: BIND. AXFR or zone files (RFC 1035) plus a `named.conf` parser: `view` becomes DDI views, `acl` becomes client subnets, and `forwarders`, `also-notify`, `allow-transfer` and RPZ zones are carried over. | 4 | Must |
+| MIG-09 | Source: BIND. AXFR or zone files (RFC 1035) plus a `named.conf` parser: `view` becomes Tenko views, `acl` becomes client subnets, and `forwarders`, `also-notify`, `allow-transfer` and RPZ zones are carried over. | 4 | Must |
 | MIG-10 | Source: OPNsense. REST API or `config.xml` backup: Unbound host and domain overrides, Dnsmasq, ISC dhcpd static maps, Kea subnets and reservations, interfaces and VLANs (become IPAM networks) and firewall aliases. | 4 | Must |
 | MIG-11 | Source: dnsmasq / Pi-hole. Config files and `/etc/hosts`: `dhcp-host`, `address=`, `host-record`, and blocklists (become RPZ). | 4 | Should |
 | MIG-12 | Source: Kea / ISC dhcpd. Kea JSON plus lease file or database; `dhcpd.conf` plus `dhcpd.leases`: subnets, pools, reservations, classes and options. | 4 | Should |
@@ -440,7 +440,7 @@ Migration from mixed sources (AD-integrated, file-based, BIND, OPNsense, Proxmox
 | MIG-15 | Exit: export to standard zone files. | 2 | Must |
 | MIG-16 | Exit: export to Kea-compatible JSON. Together with MIG-14 and MIG-15 this ensures there is no lock-in. | 3 | Must |
 | MIG-17 | Migration runbooks in MIGRATION.md. | 4 | Must |
-| MIG-18 | Hands-off acceptance: a Windows Server 2016+ test domain with QRPs, zone scopes, aging and DHCP failover migrates in the lab without manual intervention; domain join, GPO and DC locator work against DDI; Windows DNS is switched off and clients notice nothing. | 4 | Must |
+| MIG-18 | Hands-off acceptance: a Windows Server 2016+ test domain with QRPs, zone scopes, aging and DHCP failover migrates in the lab without manual intervention; domain join, GPO and DC locator work against Tenko; Windows DNS is switched off and clients notice nothing. | 4 | Must |
 
 ## Non-goals
 

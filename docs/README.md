@@ -1,6 +1,6 @@
-# DDI Documentation
+# Tenko DDI Documentation
 
-DDI is a DNS, DHCP and IPAM stack written in Rust with an embedded web UI. It replaces Active Directory-integrated Windows DNS and DHCP and scales from a single home-lab box to enterprise deployments. This directory holds the project's living documentation.
+Tenko DDI is a DNS, DHCP and IPAM stack written in Rust with an embedded web UI. It replaces Active Directory-integrated Windows DNS and DHCP and scales from a single home-lab box to enterprise deployments. This directory holds the project's living documentation.
 
 ## Documents
 

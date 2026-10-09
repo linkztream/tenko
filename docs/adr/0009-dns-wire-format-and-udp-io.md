@@ -26,18 +26,18 @@ Reference points from published measurements over a real 10 GbE link (Lencse, IE
 
 ## Decision
 
-1. **`domain` is the DNS wire-format crate** for parsing, building, name handling, zone file parsing, TSIG and DNSSEC record types. It is used behind an internal `Codec` trait in `ddi-dns`, so the crate can be replaced without touching the server, and `hickory-proto` stays available as a second implementation of the trait for differential tests.
+1. **`domain` is the DNS wire-format crate** for parsing, building, name handling, zone file parsing, TSIG and DNSSEC record types. It is used behind an internal `Codec` trait in `tenko-dns`, so the crate can be replaced without touching the server, and `hickory-proto` stays available as a second implementation of the trait for differential tests.
 2. **The UDP fast path runs on dedicated blocking worker threads, not on a multi-threaded tokio runtime.** tokio remains the runtime for everything else: TCP, DoT, DoH, DoQ, the control plane, connectors and the API.
 3. **On Linux, each worker owns its own `SO_REUSEPORT` socket**, pinned one per core by default. Because the kernel spreads by flow hash, the worker count is configurable and a BPF steering program (`SO_ATTACH_REUSEPORT_CBPF`) is a later optimization, as are `recvmmsg` and UDP GSO; none of them is assumed.
 4. **On Windows, workers share one socket.** Blocking threads and tokio tasks measured the same; threads are used for symmetry with Linux and lower idle CPU. The worker count defaults to the core count and throughput plateaus around 8 to 16 workers on this hardware.
 5. **No allocation per query is a rule, not a result.** The responder reuses receive and send buffers per worker, and the criterion bench with the counting allocator runs in CI so a regression to allocating paths fails the build.
-6. **The zone tree, cache and policy engine are DDI's own** (they live in the replicated store and the in-memory index of ADR 0002); `domain`'s `zonetree`, server transport and resolver modules are not used.
+6. **The zone tree, cache and policy engine are Tenko DDI's own** (they live in the replicated store and the in-memory index of ADR 0002); `domain`'s `zonetree`, server transport and resolver modules are not used.
 
 ## Consequences
 
 - `domain` is pre-1.0 with an API rework in progress, and signing, validation, XFR and zone-tree helpers sit behind `unstable-*` features. The `Codec` trait, a pinned version in `Cargo.lock`, the differential tests against `hickory-proto` and the fuzz targets (API-15) are the mitigation; DNSSEC signing and XFR message handling are implemented against the stable record types with their own tests rather than against the unstable modules.
 - The octets-generic builder API is easy to misuse (rewinding a section silently drops records); the spike caught one such bug in tests, so every builder path keeps a byte-exact test.
-- Two threading models exist in `ddi-dns` (blocking UDP workers, async everything else); the boundary is the lock-free in-memory index and the per-worker metrics counters (OPS-21), and it is documented in the crate.
+- Two threading models exist in `tenko-dns` (blocking UDP workers, async everything else); the boundary is the lock-free in-memory index and the per-worker metrics counters (OPS-21), and it is documented in the crate.
 - Worker-to-socket layout differs per platform and is reported in the node's health view so an operator can see uneven `SO_REUSEPORT` distribution.
 - The loopback figures are an upper bound. A two-host measurement over a real link is a Phase 2 exit criterion before any absolute number is published (DNS-27).
 

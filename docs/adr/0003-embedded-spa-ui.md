@@ -5,7 +5,7 @@
 
 ## Context
 
-DDI needs a fast UI that serves both a home user and an enterprise administrator. The UI has demanding interaction patterns:
+Tenko DDI needs a fast UI that serves both a home user and an enterprise administrator. The UI has demanding interaction patterns:
 
 - keyboard-driven bulk grids over thousands of addresses and records (API-08);
 - live updates of leases, jobs and scan results;
@@ -13,7 +13,7 @@ DDI needs a fast UI that serves both a home user and an enterprise administrator
 - an interactive topology map that must handle thousands of nodes (IPAM-20);
 - dark mode, Swedish and English, WCAG accessibility.
 
-DDI ships as one binary (ADR 0004), so the UI must not require a separate web server or runtime. The product is API-first: the CLI, a future Terraform provider and the UI must all be able to do the same things (API-01 to API-03).
+Tenko ships as one binary (ADR 0004), so the UI must not require a separate web server or runtime. The product is API-first: the CLI, a future Terraform provider and the UI must all be able to do the same things (API-01 to API-03).
 
 ## Decision
 

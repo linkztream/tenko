@@ -1,0 +1,11 @@
+[package]
+name = "tenko-connect-hass"
+version = "0.0.1"
+description = "Home Assistant connector"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

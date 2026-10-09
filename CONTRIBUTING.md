@@ -1,9 +1,9 @@
-# Contributing to DDI
+# Contributing to Tenko DDI
 
-DDI is a DNS + DHCP + IPAM stack written in Rust. One binary runs any combination of the
-`controller`, `dns`, `dhcp`, and `probe` roles, with a SolidJS web UI embedded in it. It
-replaces Active Directory-integrated Windows DNS and DHCP and scales from a single home-lab
-node to a multi-site enterprise deployment.
+Tenko DDI is a DNS + DHCP + IPAM stack written in Rust. One binary runs any combination of
+the `controller`, `dns`, `dhcp`, and `probe` roles, with a SolidJS web UI embedded in it.
+It replaces Active Directory-integrated Windows DNS and DHCP and scales from a single
+home-lab node to a multi-site enterprise deployment.
 
 Read before changing anything substantial:
 
@@ -54,27 +54,27 @@ Read before changing anything substantial:
 
 ## Workspace layout
 
-| Crate                 | Purpose                                                              |
-|-----------------------|----------------------------------------------------------------------|
-| `ddi-core`            | Shared data model (IPAM tree, zones, leases, policies), migration IR |
-| `ddi-store`           | Raft-replicated store, embedded KV, snapshots, local cache           |
-| `ddi-cluster`         | Node-to-node gRPC over mTLS, enrolment, internal CA                  |
-| `ddi-auth`            | Users, passkeys, TOTP, password policy presets, RBAC, sessions       |
-| `ddi-vault`           | Envelope encryption, KEK providers (DPAPI, keyring, PKCS#11)         |
-| `ddi-ipam`            | Address tree, intent/observation reconciler, import/export           |
-| `ddi-scan`            | Probe role: passive/active discovery, SNMP polling                   |
-| `ddi-dns`             | Authoritative, forwarder/cache, RPZ, XFR, views                      |
-| `ddi-dhcp`            | DHCPv4/v6, failover, relay handling, DDNS                            |
-| `ddi-jobs`            | Job engine: steps, state, timeouts, rollback                         |
-| `ddi-connect`         | Connector traits: `InventorySource`, `Actuator`, `MigrationSource`, `NetworkController` |
-| `ddi-connect-proxmox` | Proxmox VE connector (stub)                                          |
-| `ddi-connect-unifi`   | UniFi connector (stub)                                               |
-| `ddi-connect-hass`    | Home Assistant connector (stub)                                      |
-| `ddi-connect-windows` | Windows DNS/DHCP Server connector (stub)                             |
-| `ddi-migrate`         | Plan/apply/verify migration pipeline over connectors                 |
-| `ddi-api`             | axum HTTP API, OpenAPI, SSE                                          |
-| `ddi-cli`             | The `ddi` command-line client                                        |
-| `ddi-server`          | The `ddi-server` binary; selects roles with `--roles`                |
+| Crate                   | Purpose                                                              |
+|-------------------------|----------------------------------------------------------------------|
+| `tenko-core`            | Shared data model (IPAM tree, zones, leases, policies), migration IR |
+| `tenko-store`           | Raft-replicated store, embedded KV, snapshots, local cache           |
+| `tenko-cluster`         | Node-to-node gRPC over mTLS, enrolment, internal CA                  |
+| `tenko-auth`            | Users, passkeys, TOTP, password policy presets, RBAC, sessions       |
+| `tenko-vault`           | Envelope encryption, KEK providers (DPAPI, keyring, PKCS#11)         |
+| `tenko-ipam`            | Address tree, intent/observation reconciler, import/export           |
+| `tenko-scan`            | Probe role: passive/active discovery, SNMP polling                   |
+| `tenko-dns`             | Authoritative, forwarder/cache, RPZ, XFR, views                      |
+| `tenko-dhcp`            | DHCPv4/v6, failover, relay handling, DDNS                            |
+| `tenko-jobs`            | Job engine: steps, state, timeouts, rollback                         |
+| `tenko-connect`         | Connector traits: `InventorySource`, `Actuator`, `MigrationSource`, `NetworkController` |
+| `tenko-connect-proxmox` | Proxmox VE connector (stub)                                          |
+| `tenko-connect-unifi`   | UniFi connector (stub)                                               |
+| `tenko-connect-hass`    | Home Assistant connector (stub)                                      |
+| `tenko-connect-windows` | Windows DNS/DHCP Server connector (stub)                             |
+| `tenko-migrate`         | Plan/apply/verify migration pipeline over connectors                 |
+| `tenko-api`             | axum HTTP API, OpenAPI, SSE                                          |
+| `tenko-cli`             | The `tenko` command-line client                                      |
+| `tenko-server`          | The `tenko-server` binary; selects roles with `--roles`              |
 
 Other top-level directories: `ui/` (SolidJS web UI), `fuzz/` (fuzz targets), `bench/`
 (spikes and benchmarks, excluded from the workspace), `deploy/` (container, systemd and
@@ -89,5 +89,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 cargo deny check
 cargo audit
+cargo run -p tenko-server -- --roles controller,dns
 cd ui && npm ci && npm run build
 ```

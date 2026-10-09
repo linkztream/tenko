@@ -5,7 +5,7 @@
 
 ## Context
 
-DDI replaces an IPAM spreadsheet that drifts from reality because nothing connects it to DHCP, DNS or the network. There are four sources of truth that disagree: IPAM intent, DHCP leases, DNS records and scan results. Hypervisor inventories and network-controller client tables add more observations.
+Tenko DDI replaces an IPAM spreadsheet that drifts from reality because nothing connects it to DHCP, DNS or the network. There are four sources of truth that disagree: IPAM intent, DHCP leases, DNS records and scan results. Hypervisor inventories and network-controller client tables add more observations.
 
 Typical changes span several systems. Moving a device to another network needs a new address, a DHCP reservation, DNS records and an L2 change on the switch or access point, and it completes only when the device actually renews (CON-10). Doing this by hand is error-prone; doing it with silent automation is dangerous.
 
@@ -26,8 +26,8 @@ Typical changes span several systems. Moving a device to another network needs a
 
 6. **Observations without intent become proposals, never intent.** An unknown MAC in a lease becomes a "discovered host"; a DNS record without a host becomes an "orphaned record". An administrator approves with one click, or sets an explicit rule such as "auto-adopt in network Z" (IPAM-15).
 7. **Intent wins for managed hosts.** A per-host `lock` flag stops all automation for that host (IPAM-16).
-8. **Every change is a job** in the job engine (`ddi-jobs`): steps, status, timeout and rollback, visible in the UI and the API, and written to the audit log. Nothing happens silently (IPAM-17). A missing MAC or DUID produces a warning before a reservation can be created (IPAM-18).
-9. **Actuator rollout follows the delivery order (ADR 0007).** DDI's own engines are the DHCP and DNS actuators: DNS from Phase 2, DHCP from Phase 3. The network-controller actuator (UniFi) ships in Phase 1. External DHCP and DNS actuators (Windows DHCP and Windows DNS via PowerShell, Kea via its Control Agent, RFC 2136) are deferred to Phase 4, where they serve coexistence during migration (CONN-12, CONN-13). Until the own engines exist, DHCP and DNS steps in jobs are manual tasks.
+8. **Every change is a job** in the job engine (`tenko-jobs`): steps, status, timeout and rollback, visible in the UI and the API, and written to the audit log. Nothing happens silently (IPAM-17). A missing MAC or DUID produces a warning before a reservation can be created (IPAM-18).
+9. **Actuator rollout follows the delivery order (ADR 0007).** Tenko's own engines are the DHCP and DNS actuators: DNS from Phase 2, DHCP from Phase 3. The network-controller actuator (UniFi) ships in Phase 1. External DHCP and DNS actuators (Windows DHCP and Windows DNS via PowerShell, Kea via its Control Agent, RFC 2136) are deferred to Phase 4, where they serve coexistence during migration (CONN-12, CONN-13). Until the own engines exist, DHCP and DNS steps in jobs are manual tasks.
 
 ## Consequences
 

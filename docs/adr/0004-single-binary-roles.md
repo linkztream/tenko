@@ -5,7 +5,7 @@
 
 ## Context
 
-DDI must cover very different deployment shapes:
+Tenko DDI must cover very different deployment shapes:
 
 - **Home lab:** one box runs everything, with an idle target below 100 MB RSS (OPS-15).
 - **Enterprise:** 3 to 5 controllers, N DNS nodes behind anycast, DHCP failover pairs per site, and one discovery probe per network segment.
@@ -14,7 +14,7 @@ Discovery has a hard topological constraint: ARP and ND do not cross routers, so
 
 ## Decision
 
-1. DDI ships as **one statically linked binary**, `ddi`.
+1. Tenko ships as **one statically linked binary**, `tenko`.
 2. The binary runs **any combination of four roles** on a node:
 
    | Role | Responsibility |

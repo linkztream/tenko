@@ -1,0 +1,11 @@
+[package]
+name = "tenko-migrate"
+version = "0.0.1"
+description = "Plan, apply and verify migrations over connectors"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

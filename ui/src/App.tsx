@@ -23,7 +23,7 @@ export default function App() {
   return (
     <div class="app">
       <header class="app-header">
-        <span class="brand">DDI</span>
+        <span class="brand">Tenko DDI</span>
         <span class="subtitle">DNS · DHCP · IPAM</span>
       </header>
       <nav class="app-nav" aria-label="Main">

@@ -1,0 +1,18 @@
+[package]
+name = "tenko-server"
+version = "0.0.1"
+description = "The Tenko DDI server binary: controller, dns, dhcp and probe roles in one executable"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+tenko-core = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true

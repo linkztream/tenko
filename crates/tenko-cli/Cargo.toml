@@ -1,0 +1,19 @@
+[package]
+name = "tenko-cli"
+version = "0.0.1"
+description = "The tenko command-line client"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "tenko"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+tenko-core = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,6 +1,6 @@
-# DDI Roadmap
+# Tenko DDI Roadmap
 
-DDI is delivered in six phases (Phase 0 to 5), in the order recorded in [ADR 0007](adr/0007-delivery-order.md): platform and IPAM first, then DNS, DHCP, AD integration and migration, and finally enterprise features. The order follows dependencies. IPAM replaces the existing IPAM spreadsheet immediately and builds the intent model that the engines act on later. The DNS and DHCP engines then become the actuators of that model. AD integration and migration need both engines in place.
+Tenko DDI is delivered in six phases (Phase 0 to 5), in the order recorded in [ADR 0007](adr/0007-delivery-order.md): platform and IPAM first, then DNS, DHCP, AD integration and migration, and finally enterprise features. The order follows dependencies. IPAM replaces the existing IPAM spreadsheet immediately and builds the intent model that the engines act on later. The DNS and DHCP engines then become the actuators of that model. AD integration and migration need both engines in place.
 
 The reference home-lab environment (three LANs plus a DMZ, Active Directory, a self-hosted UniFi Network Application, Proxmox VE, Home Assistant) is the first acceptance environment. The Phase 1 to 3 criteria below are stated in terms of it. Phase 4 acceptance uses a separate Windows Server test domain.
 
@@ -12,8 +12,8 @@ Per-requirement phase assignments live in [REQUIREMENTS.md](REQUIREMENTS.md). It
 |---|---|---|---|
 | 0 | Foundation and spikes | Decide with measurements before committing to the architecture | All three spikes have reproducible data in `bench/`; the Raft gate decision is recorded in ADR 0002 |
 | 1 | Platform and IPAM | Control plane, IPAM as intent hub, discovery, connectors | The existing IPAM spreadsheet is replaced; all four networks are scanned; UniFi VLANs and a manual-step IoT move work |
-| 2 | DNS | Authoritative, forwarder/cache and DNSSEC engines | A home network sends all queries through DDI; BIND interop works in both directions |
-| 3 | DHCP | DHCPv4/v6, failover, DDI as IPAM actuator | The failover pair survives the chaos test; the reference environment runs DHCP through DDI |
+| 2 | DNS | Authoritative, forwarder/cache and DNSSEC engines | A home network sends all queries through Tenko; BIND interop works in both directions |
+| 3 | DHCP | DHCPv4/v6, failover, Tenko as IPAM actuator | The failover pair survives the chaos test; the reference environment runs DHCP through Tenko |
 | 4 | AD integration and migration | Secure AD updates and hands-off migration | A Windows Server test domain is migrated without manual intervention |
 | 5 | Enterprise and ecosystem | Own resolver, SSO, ecosystem, publication | Exit criteria are defined when Phase 4 completes |
 
@@ -110,7 +110,7 @@ Replaces the existing IPAM spreadsheet.
 - **Connectors**: Proxmox inventory; UniFi (read topology, write VLANs, port profiles and per-client VLAN with guardrails); Home Assistant inventory (CONN-01 to CONN-09).
 - **VLAN objects, topology map and move job** with preview and rollback (IPAM-03, IPAM-19, IPAM-20).
 
-In Phase 1 the move job performs the IPAM intent change, the UniFi L2 move and the observation. The reservation and DNS steps are manual tasks until DDI's own engines exist (Phase 2 to 3), at which point the same job becomes fully automatic.
+In Phase 1 the move job performs the IPAM intent change, the UniFi L2 move and the observation. The reservation and DNS steps are manual tasks until Tenko's own engines exist (Phase 2 to 3), at which point the same job becomes fully automatic.
 
 ### Spike: UniFi API families and topology graph library
 
@@ -152,8 +152,8 @@ From this phase the move job's DNS step is automatic.
 ### Done when
 
 - dnsperf numbers are documented.
-- A home network sends all of its queries through DDI.
-- BIND as secondary receives DDI's zones, and the reverse direction works too.
+- A home network sends all of its queries through Tenko.
+- BIND as secondary receives Tenko's zones, and the reverse direction works too.
 - Fuzz targets for wire format, zone file and TSIG run in CI.
 
 ## Phase 3: DHCP
@@ -165,7 +165,7 @@ From this phase the move job's DNS step is automatic.
 - **Failover**: hash split, MCLT, hot-standby and load-balance modes, partner-down state and lease sync between pairs (DHCP-12).
 - **DDNS**: option 81, DHCID and name protection, PTR records, and updates on commit, expire and release (DHCP-13).
 - **IPAM reconciliation**: leases, DNS, scans and intent in one view with conflict rules (IPAM-21). Fingerprinting from options 55 and 60 feeds the OS field (DHCP-14).
-- **DDI DHCP as actuator**: reservations are created directly from IPAM intent, and leases become observations without polling (DHCP-16).
+- **Tenko DHCP as actuator**: reservations are created directly from IPAM intent, and leases become observations without polling (DHCP-16).
 
 The move job becomes fully automatic for `reserved` hosts (the DNS step was already automatic in Phase 2). This is where the IoT move becomes one click.
 
@@ -173,7 +173,7 @@ The move job becomes fully automatic for `reserved` hosts (the DNS step was alre
 
 - kea perfdhcp numbers are documented.
 - The failover pair passes the chaos test: a partner is killed mid-load and no duplicate leases result (DHCP-18).
-- The reference home-lab environment runs DHCP through DDI for all four networks via relay.
+- The reference home-lab environment runs DHCP through Tenko for all four networks via relay.
 
 ## Phase 4: AD integration and migration
 
@@ -182,7 +182,7 @@ The move job becomes fully automatic for `reserved` hosts (the DNS step was alre
 - **GSS-TSIG**: TKEY exchange via SSPI on Windows and krb5 on Linux, computer account and SPN setup in a wizard, ownership per RRset, and a "secure only" mode per zone (DNS-28).
 - **AD behaviors**: aging and scavenging with Windows semantics (DNS-29), DC locator validation of SRV records in `_msdcs` and `_sites` (DNS-30), and AD Sites and Services sync with IPAM sites (IPAM-22).
 - **Migration connectors** as specified in MIGRATION.md: Windows DNS (cmdlets, LDAP and `.dns` files), Windows DHCP (XML and cmdlets), BIND, OPNsense, dnsmasq and Pi-hole, Kea and dhcpd, and NetBox and phpIPAM. Proxmox inventory already exists from Phase 1 (MIG-01, MIG-06 to MIG-13).
-- **Migration pipeline**: `ddi migrate plan`, `ddi migrate apply` and `ddi migrate verify`; coexistence modes (secondary, forward, flip); query-replay parity; runbooks in MIGRATION.md (MIG-03 to MIG-05, MIG-17).
+- **Migration pipeline**: `tenko migrate plan`, `tenko migrate apply` and `tenko migrate verify`; coexistence modes (secondary, forward, flip); query-replay parity; runbooks in MIGRATION.md (MIG-03 to MIG-05, MIG-17).
 - **Inventory sources**: Hyper-V and VMware vSphere (CONN-10, CONN-11).
 - **External actuators for coexistence**: DHCP (CONN-12) and DNS (CONN-13).
 - **Windows interop lab**: a Windows Server 2016 or later test domain (API-18).
@@ -193,23 +193,23 @@ Migration runs through one pipeline for every source. Each source adapter produc
 
 Coexistence modes are selected per zone or scope (MIG-04):
 
-1. Secondary: DDI is an AXFR secondary and stays in sync until the flip, with a nightly parity diff.
-2. Forward: DDI forwards some zones to the old server while it takes over others.
-3. Flip: DDI becomes primary and the old server becomes its secondary, or is switched off after a rollback window.
+1. Secondary: Tenko is an AXFR secondary and stays in sync until the flip, with a nightly parity diff.
+2. Forward: Tenko forwards some zones to the old server while it takes over others.
+3. Flip: Tenko becomes primary and the old server becomes its secondary, or is switched off after a rollback window.
 
 Verification is by query replay (MIG-05): live queries are sampled from dnstap or the query log, asked of both servers, and the RCODE and answers are diffed with TTL drift ignored. No AD-backed zone storage mode is built (CON-11).
 
 ### Done when
 
 - A Windows Server test domain (2016 or later) with Query Resolution Policies, zone scopes, aging and DHCP failover is migrated in the lab without manual intervention (MIG-18).
-- Domain join, GPO processing and DC locator work against DDI.
+- Domain join, GPO processing and DC locator work against Tenko.
 - Windows DNS is switched off and clients notice nothing.
 
 ## Phase 5: Enterprise and ecosystem
 
 ### Deliverables
 
-- **Recursive resolver**: DDI's own recursive resolver with DNSSEC validation, QNAME minimization, aggressive NSEC and RFC 5011 trust anchor maintenance (DNS-03, DNS-13, DNS-34). Until then, recursion is served by the forwarder, cache and RPZ combination from Phase 2.
+- **Recursive resolver**: Tenko's own recursive resolver with DNSSEC validation, QNAME minimization, aggressive NSEC and RFC 5011 trust anchor maintenance (DNS-03, DNS-13, DNS-34). Until then, recursion is served by the forwarder, cache and RPZ combination from Phase 2.
 - **Identity**: OIDC and SAML, LDAP group mapping, SPNEGO and SCIM; PKCS#11 and KMS support for the KEK (IAM-11 to IAM-14, IAM-17).
 - **Scaling hooks**: anycast health hooks (BGP withdrawal) and autoscaling hooks for the Kubernetes, Nomad and Proxmox APIs (OPS-17, OPS-18).
 - **Ecosystem**: Terraform provider, Ansible collection, webhooks, and a NetBox-compatible API for Proxmox SDN (API-06, API-07, CONN-17).
@@ -233,7 +233,7 @@ Each phase is verified with the methods below. Measurements are reproducible and
 | IPAM and scanner | Compose topology with four segments and one probe per segment; verify that the inventory matches the expected answer key. Spreadsheet import round trip. | 1 |
 | IoT move, end to end | Lab with UniFi and five devices: one wireless, one `static`, the rest `reserved`. Drag all to a new network and verify reservation, DNS, VLAN and observed lease within the timeout. The `static` device must stop at its manual step. Block step 5 for one device and verify rollback. Verify that the guardrail refuses to touch the uplink and the management port. | 1 (manual DHCP/DNS steps), 3 (fully automatic) |
 | Connectors | Proxmox inventory against the real node with a read-only API token. UniFi read against the reference controller. Dry-run of writes before the first real change. | 1 |
-| AD | Windows Server 2016 or later test domain in a VM: domain join, DC locator, GPO retrieval, Netlogon re-registration against DDI with GSS-TSIG, and migration per the Phase 4 criteria. | 4 |
+| AD | Windows Server 2016 or later test domain in a VM: domain join, DC locator, GPO retrieval, Netlogon re-registration against Tenko with GSS-TSIG, and migration per the Phase 4 criteria. | 4 |
 | Platform | 3-node cluster: kill a controller and verify that DNS and DHCP keep serving. Windows service and systemd start, stop and upgrade. Passkey, TOTP and PIN policy end to end in the UI. | 1 |
 | Resources | RSS and CPU of the single-node home-lab profile measured and documented per release. Target: idle below 100 MB RSS with all roles on one node (OPS-15). | 1 onward, every release |
 
@@ -243,7 +243,7 @@ These are non-blocking and are resolved during Phase 0.
 
 | Question | Impact |
 |---|---|
-| Product name | `ddi` is the working name for the workspace and binary. Rename early if desired. |
+| Product name | Resolved: the name Tenko DDI was decided on 2026-10-09. |
 | Windows Server version in the reference environment | Query Resolution Policies require 2016 or later. Affects only the test lab. |
 | IPv6 in the reference home network today | Affects priority within Phase 3, not the data model. |
 | License for a possible publication (Apache-2.0 or AGPL-3.0) | Must be decided before any publication (API-20). |

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Spike B of the DDI project (DNS + DHCP + IPAM in Rust). It answers two questions:
+Spike B of the Tenko DDI project (DNS + DHCP + IPAM in Rust). It answers two questions:
 
 1. What request/response throughput and latency does raw UDP DNS reach with the chosen I/O
    design, and how does it scale with the number of workers? Measured on Windows and on Linux

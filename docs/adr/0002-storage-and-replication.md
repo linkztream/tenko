@@ -54,7 +54,7 @@ Recorded for reference:
 
 ### Fallback (not needed)
 
-If the gate had failed, Raft would hold only configuration, IPAM and policies, and zone data would be replicated between DDI nodes with built-in IXFR/NOTIFY in a primary/secondary arrangement (DNS-09). It is kept here for reference: it would avoid the Raft log copy of zone data and the per-entry flush serialization, but lose atomic IPAM and DNS commits across nodes and require a second replication system with its own per-zone primary election. The IXFR journal is needed in either design and is cheap.
+If the gate had failed, Raft would hold only configuration, IPAM and policies, and zone data would be replicated between Tenko DDI nodes with built-in IXFR/NOTIFY in a primary/secondary arrangement (DNS-09). It is kept here for reference: it would avoid the Raft log copy of zone data and the per-entry flush serialization, but lose atomic IPAM and DNS commits across nodes and require a second replication system with its own per-zone primary election. The IXFR journal is needed in either design and is cheap.
 
 ## Consequences
 
@@ -62,7 +62,7 @@ If the gate had failed, Raft would hold only configuration, IPAM and policies, a
 - One consistency model for all control-plane data, with linearizable writes and snapshot-based catch-up.
 - Data plane independence follows directly: DNS and DHCP serve from local copies, and only configuration changes need a controller quorum.
 - Two replication paths exist by design: Raft for control-plane state, and the failover protocol for leases. Backup and restore must be consistent across both, plus the vault keys (OPS-07).
-- Raft membership changes, snapshot streaming, log purging and the write coalescer are DDI's responsibility rather than a database vendor's.
+- Raft membership changes, snapshot streaming, log purging and the write coalescer are Tenko's responsibility rather than a database vendor's.
 - The store needs about 4x the raw data size on disk per node and about 200 bytes of RAM per RRset including the index; capacity planning documents both.
 - Home-lab hardware with only rotating disks must place the data directory on an SSD, or run the store on another node.
 

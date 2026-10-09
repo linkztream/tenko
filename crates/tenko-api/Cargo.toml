@@ -1,0 +1,11 @@
+[package]
+name = "tenko-api"
+version = "0.0.1"
+description = "HTTP API (axum), OpenAPI document and server-sent events"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

@@ -1,6 +1,6 @@
-# DDI Conformance Matrix
+# Tenko DDI Conformance Matrix
 
-DNS alone has roughly 300 RFCs, so DDI does not claim "all standards". Instead, this matrix publishes an explicit target phase for every specification DDI implements, depends on, or deliberately skips (CON-08, API-17). Conformance tests per RFC are added as the engines land: Phase 2 for DNS, Phase 3 for DHCP.
+DNS alone has roughly 300 RFCs, so Tenko DDI does not claim "all standards". Instead, this matrix publishes an explicit target phase for every specification Tenko implements, depends on, or deliberately skips (CON-08, API-17). Conformance tests per RFC are added as the engines land: Phase 2 for DNS, Phase 3 for DHCP.
 
 Requirement IDs refer to [REQUIREMENTS.md](REQUIREMENTS.md). Phases are defined in [ROADMAP.md](ROADMAP.md).
 
@@ -60,7 +60,7 @@ Area is one of DNS, DHCP or Other. Rows are sorted by RFC number.
 | 5155 | DNS Security (DNSSEC) Hashed Authenticated Denial of Existence | DNS | 2 | Planned | DNS-12 | NSEC3 |
 | 5424 | The Syslog Protocol | Other | 1 | Planned | IAM-18 | Audit export |
 | 6238 | TOTP: Time-Based One-Time Password Algorithm | Other | 1 | Planned | IAM-06 | |
-| 6762 | Multicast DNS | Other | 1 | Planned | SCAN-02 | Passive discovery only; DDI is not an mDNS responder |
+| 6762 | Multicast DNS | Other | 1 | Planned | SCAN-02 | Passive discovery only; Tenko is not an mDNS responder |
 | 6891 | Extension Mechanisms for DNS (EDNS(0)) | DNS | 2 | Planned | DNS-06 | Default UDP buffer size 1232 |
 | 6939 | Client Link-Layer Address Option in DHCPv6 | DHCP | 3 | Planned | DHCP-11 | |
 | 7344 | Automating DNSSEC Delegation Trust Maintenance | DNS | 2 | Planned | DNS-12 | CDS and CDNSKEY |
@@ -84,7 +84,7 @@ Area is one of DNS, DHCP or Other. Rows are sorted by RFC number.
 
 ## Superseded RFCs
 
-DDI tracks conformance against the replacing RFC only.
+Tenko tracks conformance against the replacing RFC only.
 
 | Obsoleted RFC | Replaced by | Note |
 |---|---|---|
@@ -97,13 +97,13 @@ DDI tracks conformance against the replacing RFC only.
 
 ## Other specifications
 
-Standards and de facto behaviors outside the RFC series that DDI depends on, implements, or deliberately skips.
+Standards and de facto behaviors outside the RFC series that Tenko depends on, implements, or deliberately skips.
 
 | Spec | Area | Target phase | Status | Requirements | Notes |
 |---|---|---|---|---|---|
 | DNS Response Policy Zones (RPZ), draft-vixie-dnsop-dns-rpz | DNS | 2 | Planned | DNS-21 | |
 | dnstap | DNS | 2 | Planned | DNS-26 | |
-| DHCPv4 failover | DHCP | 3 | Planned | DHCP-12, CON-05 | No RFC exists; DDI uses its own partner protocol between DDI nodes only; Windows and ISC failover are proprietary and not interoperable, so coexistence uses split scopes |
+| DHCPv4 failover | DHCP | 3 | Planned | DHCP-12, CON-05 | No RFC exists; Tenko uses its own partner protocol between Tenko nodes only; Windows and ISC failover are proprietary and not interoperable, so coexistence uses split scopes |
 | Active Directory DC locator DNS records (`_msdcs`, `_sites` SRV) | DNS | 4 | Planned | DNS-30 | |
 | Windows DNS aging and scavenging semantics | DNS | 4 | Planned | DNS-29 | |
 | Windows Global Query Block List and GlobalNames zone | DNS | 4 | Planned | DNS-31, DNS-32 | |
