@@ -169,6 +169,21 @@ pub enum AuthStrength {
     HardwareKey,
 }
 
+impl AuthStrength {
+    /// The serde name of the variant (`pin`, `password`, `password_totp`, `passkey`,
+    /// `hardware_key`), the one form used in error parameters and on the wire.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pin => "pin",
+            Self::Password => "password",
+            Self::PasswordTotp => "password_totp",
+            Self::Passkey => "passkey",
+            Self::HardwareKey => "hardware_key",
+        }
+    }
+}
+
 /// Context of one request or unit of background work, passed to every domain call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestCtx {
@@ -335,7 +350,7 @@ impl Coded for Denied {
             ("kind", self.object.kind.as_str().to_owned()),
         ]);
         if let DenyReason::StepUpRequired { required } = self.reason {
-            params.insert("required", format!("{required:?}"));
+            params.insert("required", required.as_str().to_owned());
         }
         params
     }
