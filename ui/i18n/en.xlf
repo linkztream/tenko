@@ -1,0 +1,2969 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <mda:metadata>
+      <mda:metaGroup category="language-pack">
+        <mda:meta type="displayName">English</mda:meta>
+        <mda:meta type="author">Tenko DDI</mda:meta>
+        <mda:meta type="version">0.1.0</mda:meta>
+        <mda:meta type="sourceLanguage">en</mda:meta>
+      </mda:metaGroup>
+    </mda:metadata>
+    <group id="common">
+      <unit id="common.action.cancel">
+        <notes><note category="description">Button that abandons the current dialog or edit.</note></notes>
+        <segment><source>Cancel</source></segment>
+      </unit>
+      <unit id="common.action.save">
+        <notes><note category="description">Button that stores the changes made in the current dialog or form.</note></notes>
+        <segment><source>Save</source></segment>
+      </unit>
+      <unit id="common.action.close">
+        <notes><note category="description">Button that closes the current dialog or panel without further action.</note></notes>
+        <segment><source>Close</source></segment>
+      </unit>
+      <unit id="common.loading">
+        <notes><note category="description">Status text shown while content is being fetched.</note></notes>
+        <segment><source>Loading…</source></segment>
+      </unit>
+      <unit id="common.count.items">
+        <notes><note category="description">Number of items in a list or table. The argument count is the number of items.</note></notes>
+        <segment><source>{count, plural, one {# item} other {# items}}</source></segment>
+      </unit>
+      <unit id="common.greeting">
+        <notes><note category="description">Shows who is signed in. The argument name is the display name of the user.</note></notes>
+        <segment><source>Signed in as {name}</source></segment>
+      </unit>
+      <unit id="common.action.dismiss">
+        <notes><note category="description">Closes a toast message.</note></notes>
+        <segment><source>Dismiss</source></segment>
+      </unit>
+      <unit id="common.action.continue">
+        <segment><source>Continue</source></segment>
+      </unit>
+      <unit id="common.action.back">
+        <segment><source>Back</source></segment>
+      </unit>
+      <unit id="common.action.retry">
+        <segment><source>Try again</source></segment>
+      </unit>
+      <unit id="common.action.copy">
+        <segment><source>Copy</source></segment>
+      </unit>
+      <unit id="common.action.copied">
+        <segment><source>Copied</source></segment>
+      </unit>
+      <unit id="common.action.download">
+        <segment><source>Download</source></segment>
+      </unit>
+      <unit id="common.action.print">
+        <segment><source>Print</source></segment>
+      </unit>
+      <unit id="common.action.delete">
+        <segment><source>Delete</source></segment>
+      </unit>
+      <unit id="common.action.remove">
+        <segment><source>Remove</source></segment>
+      </unit>
+      <unit id="common.action.edit">
+        <segment><source>Edit</source></segment>
+      </unit>
+      <unit id="common.action.create">
+        <segment><source>Create</source></segment>
+      </unit>
+      <unit id="common.action.add">
+        <segment><source>Add</source></segment>
+      </unit>
+      <unit id="common.action.revoke">
+        <segment><source>Revoke</source></segment>
+      </unit>
+      <unit id="common.action.show">
+        <segment><source>Show</source></segment>
+      </unit>
+      <unit id="common.action.hide">
+        <segment><source>Hide</source></segment>
+      </unit>
+      <unit id="common.yes">
+        <segment><source>Yes</source></segment>
+      </unit>
+      <unit id="common.no">
+        <segment><source>No</source></segment>
+      </unit>
+      <unit id="common.never">
+        <segment><source>Never</source></segment>
+      </unit>
+      <unit id="common.none">
+        <segment><source>None</source></segment>
+      </unit>
+      <unit id="common.unknown">
+        <segment><source>Unknown</source></segment>
+      </unit>
+      <unit id="common.optional">
+        <segment><source>Optional</source></segment>
+      </unit>
+      <unit id="common.required">
+        <segment><source>Required</source></segment>
+      </unit>
+      <unit id="common.recommended">
+        <segment><source>Recommended</source></segment>
+      </unit>
+    </group>
+    <group id="profile">
+      <unit id="profile.home.name">
+        <notes><note category="description">Name of the Home security profile.</note></notes>
+        <segment><source>Home</source></segment>
+      </unit>
+      <unit id="profile.standard.name">
+        <notes><note category="description">Name of the Standard security profile.</note></notes>
+        <segment><source>Standard</source></segment>
+      </unit>
+      <unit id="profile.hardened.name">
+        <notes><note category="description">Name of the Hardened security profile.</note></notes>
+        <segment><source>Hardened</source></segment>
+      </unit>
+      <unit id="profile.lab.name">
+        <notes><note category="description">Name of the Lab security profile.</note></notes>
+        <segment><source>Lab</source></segment>
+      </unit>
+      <unit id="profile.home.description">
+        <segment><source>One box runs all roles. Minimal friction.</source></segment>
+      </unit>
+      <unit id="profile.standard.description">
+        <segment><source>Business AD environment. The default for organizations.</source></segment>
+      </unit>
+      <unit id="profile.hardened.description">
+        <segment><source>Regulated environments: strict authentication, audit export, least privilege.</source></segment>
+      </unit>
+      <unit id="profile.lab.description">
+        <segment><source>Permissive configuration for testing and training.</source></segment>
+      </unit>
+    </group>
+    <group id="role">
+      <unit id="role.admin.name">
+        <segment><source>Administrator</source></segment>
+      </unit>
+      <unit id="role.operator.name">
+        <segment><source>Operator</source></segment>
+      </unit>
+      <unit id="role.viewer.name">
+        <segment><source>Viewer</source></segment>
+      </unit>
+      <unit id="role.admin.description">
+        <segment><source>Everything, including users, settings and the system.</source></segment>
+      </unit>
+      <unit id="role.operator.description">
+        <segment><source>Day-to-day IPAM work: read, change and run, but no administration.</source></segment>
+      </unit>
+      <unit id="role.viewer.description">
+        <segment><source>Read-only access to the inventory.</source></segment>
+      </unit>
+    </group>
+    <group id="node">
+      <unit id="node.role.controller">
+        <notes><note category="description">The node role that runs the API, UI, store and jobs.</note></notes>
+        <segment><source>Controller</source></segment>
+      </unit>
+      <unit id="node.role.dns">
+        <segment><source>DNS</source></segment>
+      </unit>
+      <unit id="node.role.dhcp">
+        <segment><source>DHCP</source></segment>
+      </unit>
+      <unit id="node.role.probe">
+        <notes><note category="description">The node role that discovers devices on attached networks.</note></notes>
+        <segment><source>Probe</source></segment>
+      </unit>
+    </group>
+    <group id="auth">
+      <unit id="auth.strength.pin">
+        <notes><note category="description">How a session was authenticated, completes a sentence.</note></notes>
+        <segment><source>a PIN</source></segment>
+      </unit>
+      <unit id="auth.strength.password">
+        <segment><source>a password</source></segment>
+      </unit>
+      <unit id="auth.strength.password_totp">
+        <segment><source>a password and an authenticator code</source></segment>
+      </unit>
+      <unit id="auth.strength.passkey">
+        <segment><source>a passkey</source></segment>
+      </unit>
+      <unit id="auth.strength.hardware_key">
+        <segment><source>a security key</source></segment>
+      </unit>
+      <unit id="auth.signin.product">
+        <notes><note category="description">Accessible name of the mark on the sign-in page.</note></notes>
+        <segment><source>Tenko DDI</source></segment>
+      </unit>
+      <unit id="auth.signin.title">
+        <segment><source>Sign in</source></segment>
+      </unit>
+      <unit id="auth.signin.second_title">
+        <segment><source>Confirm it is you</source></segment>
+      </unit>
+      <unit id="auth.signin.break_glass_title">
+        <segment><source>Break-glass access</source></segment>
+      </unit>
+      <unit id="auth.signin.lead">
+        <segment><source>Use a passkey, or your user name and password.</source></segment>
+      </unit>
+      <unit id="auth.signin.second_lead_totp">
+        <segment><source>Enter the six-digit code from your authenticator app.</source></segment>
+      </unit>
+      <unit id="auth.signin.second_lead_recovery">
+        <segment><source>Enter one of your recovery codes. Each code works once.</source></segment>
+      </unit>
+      <unit id="auth.signin.break_glass_lead">
+        <segment><source>For emergencies when no administrator can sign in. Only the registered hardware security key works.</source></segment>
+      </unit>
+      <unit id="auth.signin.passkey">
+        <segment><source>Sign in with a passkey</source></segment>
+      </unit>
+      <unit id="auth.signin.waiting">
+        <segment><source>Waiting for your security key or phone</source></segment>
+      </unit>
+      <unit id="auth.signin.waiting_key">
+        <segment><source>Touch the break-glass security key</source></segment>
+      </unit>
+      <unit id="auth.signin.passkey_unsupported">
+        <segment><source>This browser does not support passkeys. Use your user name and password.</source></segment>
+      </unit>
+      <unit id="auth.signin.passkey_insecure">
+        <segment><source>Passkeys need an encrypted connection. Open Tenko DDI by its host name over HTTPS.</source></segment>
+      </unit>
+      <unit id="auth.signin.or">
+        <segment><source>or</source></segment>
+      </unit>
+      <unit id="auth.signin.use_password">
+        <segment><source>Use user name and password</source></segment>
+      </unit>
+      <unit id="auth.signin.user_name">
+        <segment><source>User name</source></segment>
+      </unit>
+      <unit id="auth.signin.password">
+        <segment><source>Password</source></segment>
+      </unit>
+      <unit id="auth.signin.submit">
+        <segment><source>Sign in</source></segment>
+      </unit>
+      <unit id="auth.signin.retry_in">
+        <segment><source>{seconds, plural, one {Try again in # second.} other {Try again in # seconds.}}</source></segment>
+      </unit>
+      <unit id="auth.signin.throttle_explain">
+        <segment><source>After several wrong attempts, each new attempt waits a little longer.</source></segment>
+      </unit>
+      <unit id="auth.signin.use_passkey">
+        <segment><source>Use a passkey instead</source></segment>
+      </unit>
+      <unit id="auth.signin.totp_code">
+        <segment><source>Authenticator code</source></segment>
+      </unit>
+      <unit id="auth.signin.recovery_code">
+        <segment><source>Recovery code</source></segment>
+      </unit>
+      <unit id="auth.signin.verify">
+        <segment><source>Verify</source></segment>
+      </unit>
+      <unit id="auth.signin.use_totp">
+        <segment><source>Use an authenticator code</source></segment>
+      </unit>
+      <unit id="auth.signin.use_recovery">
+        <segment><source>Use a recovery code</source></segment>
+      </unit>
+      <unit id="auth.signin.start_over">
+        <segment><source>Start over</source></segment>
+      </unit>
+      <unit id="auth.signin.break_glass_warning">
+        <segment><source>Every break-glass sign-in raises an alarm and is recorded in the audit log.</source></segment>
+      </unit>
+      <unit id="auth.signin.break_glass_button">
+        <segment><source>Sign in with the break-glass key</source></segment>
+      </unit>
+      <unit id="auth.signin.back_to_sign_in">
+        <segment><source>Back to sign-in</source></segment>
+      </unit>
+      <unit id="auth.signin.break_glass_link">
+        <segment><source>Break-glass access</source></segment>
+      </unit>
+      <unit id="auth.signin.secure">
+        <segment><source>Encrypted connection</source></segment>
+      </unit>
+      <unit id="auth.signin.insecure">
+        <segment><source>Unencrypted connection: passwords travel in plain text</source></segment>
+      </unit>
+      <unit id="auth.signin.ceremony.cancelled">
+        <segment><source>The passkey request was cancelled or timed out.</source></segment>
+      </unit>
+      <unit id="auth.signin.ceremony.unsupported">
+        <segment><source>This browser or device does not support passkeys.</source></segment>
+      </unit>
+      <unit id="auth.signin.ceremony.insecure">
+        <segment><source>Passkeys need HTTPS and the host name of this installation.</source></segment>
+      </unit>
+      <unit id="auth.signin.ceremony.exists">
+        <segment><source>This passkey is already registered for your account.</source></segment>
+      </unit>
+      <unit id="auth.signin.ceremony.failed">
+        <segment><source>The passkey could not be used. Try again or use your password.</source></segment>
+      </unit>
+    </group>
+    <group id="prefs">
+      <unit id="prefs.theme.system">
+        <segment><source>System</source></segment>
+      </unit>
+      <unit id="prefs.theme.light">
+        <segment><source>Light</source></segment>
+      </unit>
+      <unit id="prefs.theme.dark">
+        <segment><source>Dark</source></segment>
+      </unit>
+      <unit id="prefs.density.dense">
+        <segment><source>Dense</source></segment>
+      </unit>
+      <unit id="prefs.density.compact">
+        <segment><source>Compact</source></segment>
+      </unit>
+      <unit id="prefs.density.comfortable">
+        <segment><source>Comfortable</source></segment>
+      </unit>
+    </group>
+    <group id="shell">
+      <unit id="shell.nav.label">
+        <notes><note category="description">Accessible name of the navigation rail.</note></notes>
+        <segment><source>Main</source></segment>
+      </unit>
+      <unit id="shell.nav.dashboard">
+        <segment><source>Dashboard</source></segment>
+      </unit>
+      <unit id="shell.nav.ipam">
+        <segment><source>IPAM</source></segment>
+      </unit>
+      <unit id="shell.nav.dns">
+        <segment><source>DNS</source></segment>
+      </unit>
+      <unit id="shell.nav.dhcp">
+        <segment><source>DHCP</source></segment>
+      </unit>
+      <unit id="shell.nav.topology">
+        <segment><source>Topology</source></segment>
+      </unit>
+      <unit id="shell.nav.jobs">
+        <segment><source>Jobs</source></segment>
+      </unit>
+      <unit id="shell.nav.settings">
+        <segment><source>Settings</source></segment>
+      </unit>
+      <unit id="shell.nav.tooltip">
+        <notes><note category="description">Tooltip of a rail item: the area and its keyboard chord.</note></notes>
+        <segment><source>{area} (G then {key})</source></segment>
+      </unit>
+      <unit id="shell.nav.jobs_badge">
+        <segment><source>{count, plural, one {# active job} other {# active jobs}}</source></segment>
+      </unit>
+      <unit id="shell.skip_to_content">
+        <segment><source>Skip to content</source></segment>
+      </unit>
+      <unit id="shell.brand.home">
+        <segment><source>Tenko DDI, start page</source></segment>
+      </unit>
+      <unit id="shell.top.command_hint">
+        <segment><source>Search addresses, hosts, MACs, records or run a command</source></segment>
+      </unit>
+      <unit id="shell.top.command_open">
+        <segment><source>Open command palette</source></segment>
+      </unit>
+      <unit id="shell.top.node">
+        <segment><source>This node</source></segment>
+      </unit>
+      <unit id="shell.top.role.leader">
+        <notes><note category="description">Role of this node in the replicated store.</note></notes>
+        <segment><source>leader</source></segment>
+      </unit>
+      <unit id="shell.top.role.follower">
+        <segment><source>follower</source></segment>
+      </unit>
+      <unit id="shell.top.role.learner">
+        <segment><source>learner</source></segment>
+      </unit>
+      <unit id="shell.top.role.candidate">
+        <segment><source>candidate</source></segment>
+      </unit>
+      <unit id="shell.top.role.memory">
+        <segment><source>in memory</source></segment>
+      </unit>
+      <unit id="shell.top.role.shutdown">
+        <segment><source>stopping</source></segment>
+      </unit>
+      <unit id="shell.top.role.unknown">
+        <segment><source>unknown</source></segment>
+      </unit>
+      <unit id="shell.top.node_title">
+        <segment><source>Store revision {revision}, {lag, plural, =0 {in step with the leader} one {# revision behind the leader} other {# revisions behind the leader}}</source></segment>
+      </unit>
+      <unit id="shell.top.node_unreachable">
+        <segment><source>Node status is not available.</source></segment>
+      </unit>
+      <unit id="shell.top.profile">
+        <segment><source>{profile} profile</source></segment>
+      </unit>
+      <unit id="shell.top.profile_title">
+        <segment><source>Security profile: {profile}. Open the security settings.</source></segment>
+      </unit>
+      <unit id="shell.top.shortcuts_title">
+        <segment><source>Keyboard shortcuts (?)</source></segment>
+      </unit>
+      <unit id="shell.theme.system">
+        <segment><source>Theme: follows the system ({mode})</source></segment>
+      </unit>
+      <unit id="shell.theme.light">
+        <segment><source>Theme: light</source></segment>
+      </unit>
+      <unit id="shell.theme.dark">
+        <segment><source>Theme: dark</source></segment>
+      </unit>
+      <unit id="shell.theme.mode.light">
+        <segment><source>light</source></segment>
+      </unit>
+      <unit id="shell.theme.mode.dark">
+        <segment><source>dark</source></segment>
+      </unit>
+      <unit id="shell.theme.change">
+        <segment><source>{current}. Click to change.</source></segment>
+      </unit>
+      <unit id="shell.account.open">
+        <segment><source>Account menu for {name}</source></segment>
+      </unit>
+      <unit id="shell.account.title">
+        <segment><source>Account and preferences</source></segment>
+      </unit>
+      <unit id="shell.account.who">
+        <segment><source>{role}, signed in with {method}</source></segment>
+      </unit>
+      <unit id="shell.account.theme">
+        <segment><source>Theme</source></segment>
+      </unit>
+      <unit id="shell.account.density">
+        <segment><source>Row density</source></segment>
+      </unit>
+      <unit id="shell.account.emphasis">
+        <segment><source>Emphasize host part</source></segment>
+      </unit>
+      <unit id="shell.account.emphasis_hint">
+        <segment><source>Grays the network part of addresses and the vendor part of MACs. Off by default.</source></segment>
+      </unit>
+      <unit id="shell.account.language">
+        <segment><source>Language</source></segment>
+      </unit>
+      <unit id="shell.account.language_auto">
+        <segment><source>Follow the browser</source></segment>
+      </unit>
+      <unit id="shell.account.language_local">
+        <segment><source>The language is saved on this browser only.</source></segment>
+      </unit>
+      <unit id="shell.account.security">
+        <segment><source>Security and sign-in</source></segment>
+      </unit>
+      <unit id="shell.account.sign_out">
+        <segment><source>Sign out</source></segment>
+      </unit>
+      <unit id="shell.banner.lab_title">
+        <segment><source>Lab profile active.</source></segment>
+      </unit>
+      <unit id="shell.banner.lab_body">
+        <segment><source>Security controls are relaxed. This node must not serve a production network.</source></segment>
+      </unit>
+      <unit id="shell.banner.weak_title">
+        <segment><source>A security setting is weaker than the Home profile.</source></segment>
+      </unit>
+      <unit id="shell.banner.weak_body">
+        <segment><source>The warning stays until the setting is at least as strict as in Home.</source></segment>
+      </unit>
+      <unit id="shell.banner.break_glass_title">
+        <segment><source>Signed in with the break-glass account.</source></segment>
+      </unit>
+      <unit id="shell.banner.break_glass_body">
+        <segment><source>Every sign-in with this account raises an alarm. Sign out when the emergency is over.</source></segment>
+      </unit>
+      <unit id="shell.banner.review">
+        <segment><source>Review settings</source></segment>
+      </unit>
+      <unit id="shell.status.live">
+        <segment><source>Live</source></segment>
+      </unit>
+      <unit id="shell.status.connecting">
+        <segment><source>Connecting</source></segment>
+      </unit>
+      <unit id="shell.status.reconnecting">
+        <segment><source>Reconnecting</source></segment>
+      </unit>
+      <unit id="shell.status.offline">
+        <segment><source>Offline</source></segment>
+      </unit>
+      <unit id="shell.status.idle">
+        <segment><source>Not connected</source></segment>
+      </unit>
+      <unit id="shell.status.live_title">
+        <segment><source>Live updates over server-sent events</source></segment>
+      </unit>
+      <unit id="shell.status.last_event">
+        <notes><note category="description">The argument is a relative time such as 4 seconds ago.</note></notes>
+        <segment><source>Last event {ago}</source></segment>
+      </unit>
+      <unit id="shell.status.no_events">
+        <segment><source>No events yet</source></segment>
+      </unit>
+      <unit id="shell.status.running">
+        <segment><source>{count, plural, one {# running} other {# running}}</source></segment>
+      </unit>
+      <unit id="shell.status.waiting">
+        <segment><source>{count, plural, one {# waiting} other {# waiting}}</source></segment>
+      </unit>
+      <unit id="shell.status.jobs_title">
+        <segment><source>Show the jobs</source></segment>
+      </unit>
+      <unit id="shell.status.selection">
+        <segment><source>{selected, number} of {total, plural, one {# row} other {# rows}} selected</source></segment>
+      </unit>
+      <unit id="shell.status.version">
+        <segment><source>Tenko DDI {version}</source></segment>
+      </unit>
+      <unit id="shell.palette.label">
+        <segment><source>Command palette</source></segment>
+      </unit>
+      <unit id="shell.palette.placeholder">
+        <segment><source>Jump to an address, host, MAC, prefix or command</source></segment>
+      </unit>
+      <unit id="shell.palette.search_label">
+        <segment><source>Search</source></segment>
+      </unit>
+      <unit id="shell.palette.group.search">
+        <segment><source>Addresses and hosts</source></segment>
+      </unit>
+      <unit id="shell.palette.group.actions">
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="shell.palette.group.goto">
+        <segment><source>Go to</source></segment>
+      </unit>
+      <unit id="shell.palette.group.preferences">
+        <segment><source>Preferences</source></segment>
+      </unit>
+      <unit id="shell.palette.search_all">
+        <segment><source>Search everything for “{query}”</source></segment>
+      </unit>
+      <unit id="shell.palette.searching">
+        <segment><source>Searching…</source></segment>
+      </unit>
+      <unit id="shell.palette.no_match">
+        <segment><source>No match for “{query}”</source></segment>
+      </unit>
+      <unit id="shell.palette.no_match_hint">
+        <segment><source>Try part of an address (.41), a MAC fragment (53-2a) or a host name. Type &gt; to search commands only.</source></segment>
+      </unit>
+      <unit id="shell.palette.foot.move">
+        <segment><source>move</source></segment>
+      </unit>
+      <unit id="shell.palette.foot.open">
+        <segment><source>open</source></segment>
+      </unit>
+      <unit id="shell.palette.foot.commands">
+        <segment><source>commands only</source></segment>
+      </unit>
+      <unit id="shell.command.dashboard_hint">
+        <segment><source>Cluster and node health</source></segment>
+      </unit>
+      <unit id="shell.command.theme_system">
+        <segment><source>Follow the system theme</source></segment>
+      </unit>
+      <unit id="shell.command.theme_light">
+        <segment><source>Use the light theme</source></segment>
+      </unit>
+      <unit id="shell.command.theme_dark">
+        <segment><source>Use the dark theme</source></segment>
+      </unit>
+      <unit id="shell.command.density_dense">
+        <segment><source>Dense rows</source></segment>
+      </unit>
+      <unit id="shell.command.density_compact">
+        <segment><source>Compact rows</source></segment>
+      </unit>
+      <unit id="shell.command.density_comfortable">
+        <segment><source>Comfortable rows</source></segment>
+      </unit>
+      <unit id="shell.command.emphasis_on">
+        <segment><source>Emphasize the host part of addresses</source></segment>
+      </unit>
+      <unit id="shell.command.emphasis_off">
+        <segment><source>Show addresses plain</source></segment>
+      </unit>
+      <unit id="shell.command.shortcuts">
+        <segment><source>Show keyboard shortcuts</source></segment>
+      </unit>
+      <unit id="shell.search.title">
+        <segment><source>Search</source></segment>
+      </unit>
+      <unit id="shell.search.empty">
+        <segment><source>Type at least two characters in the command palette (Ctrl+K).</source></segment>
+      </unit>
+      <unit id="shell.search.results">
+        <segment><source>{count, plural, =0 {No results} one {# result} other {# results}} for “{query}”</source></segment>
+      </unit>
+      <unit id="shell.search.kind.address">
+        <segment><source>address</source></segment>
+      </unit>
+      <unit id="shell.search.kind.prefix">
+        <segment><source>prefix</source></segment>
+      </unit>
+      <unit id="shell.search.kind.host">
+        <segment><source>host</source></segment>
+      </unit>
+      <unit id="shell.search.kind.mac">
+        <segment><source>MAC address</source></segment>
+      </unit>
+      <unit id="shell.search.kind.vlan">
+        <segment><source>VLAN</source></segment>
+      </unit>
+      <unit id="shell.keys.title">
+        <segment><source>Keyboard shortcuts</source></segment>
+      </unit>
+      <unit id="shell.keys.section.anywhere">
+        <segment><source>Anywhere</source></segment>
+      </unit>
+      <unit id="shell.keys.section.grids">
+        <segment><source>Grids</source></segment>
+      </unit>
+      <unit id="shell.keys.section.changes">
+        <segment><source>Changes</source></segment>
+      </unit>
+      <unit id="shell.keys.section.tree">
+        <segment><source>Tree and panels</source></segment>
+      </unit>
+      <unit id="shell.keys.palette">
+        <segment><source>Command palette and search</source></segment>
+      </unit>
+      <unit id="shell.keys.goto">
+        <segment><source>Go to {area}</source></segment>
+      </unit>
+      <unit id="shell.keys.theme">
+        <segment><source>Change the theme</source></segment>
+      </unit>
+      <unit id="shell.keys.move_focus">
+        <segment><source>Move focus</source></segment>
+      </unit>
+      <unit id="shell.keys.move_focus_alt">
+        <segment><source>Also move focus</source></segment>
+      </unit>
+      <unit id="shell.keys.select_row">
+        <segment><source>Select row</source></segment>
+      </unit>
+      <unit id="shell.keys.extend">
+        <segment><source>Extend selection</source></segment>
+      </unit>
+      <unit id="shell.keys.select_all">
+        <segment><source>Select all in view</source></segment>
+      </unit>
+      <unit id="shell.keys.edit">
+        <segment><source>Edit cell</source></segment>
+      </unit>
+      <unit id="shell.keys.cancel">
+        <segment><source>Cancel edit or clear selection</source></segment>
+      </unit>
+      <unit id="shell.keys.filter">
+        <segment><source>Filter this view</source></segment>
+      </unit>
+      <unit id="shell.keys.details">
+        <segment><source>Open details panel</source></segment>
+      </unit>
+      <unit id="shell.keys.full_page">
+        <segment><source>Open as full page</source></segment>
+      </unit>
+      <unit id="shell.keys.move">
+        <segment><source>Move selection to network</source></segment>
+      </unit>
+      <unit id="shell.keys.mode">
+        <segment><source>Set assignment mode</source></segment>
+      </unit>
+      <unit id="shell.keys.lock">
+        <segment><source>Lock or unlock</source></segment>
+      </unit>
+      <unit id="shell.keys.claim">
+        <segment><source>Claim next free address</source></segment>
+      </unit>
+      <unit id="shell.keys.undo">
+        <segment><source>Undo last change</source></segment>
+      </unit>
+      <unit id="shell.keys.job_panel">
+        <segment><source>Open job panel</source></segment>
+      </unit>
+      <unit id="shell.keys.export">
+        <segment><source>Export CSV</source></segment>
+      </unit>
+      <unit id="shell.keys.focus_tree">
+        <segment><source>Focus prefix tree</source></segment>
+      </unit>
+      <unit id="shell.keys.focus_grid">
+        <segment><source>Focus grid</source></segment>
+      </unit>
+      <unit id="shell.keys.expand">
+        <segment><source>Expand or collapse node</source></segment>
+      </unit>
+      <unit id="shell.keys.close_panel">
+        <segment><source>Close panel</source></segment>
+      </unit>
+      <unit id="shell.keys.note">
+        <segment><source>Single-key shortcuts never fire while you type in a field. Every shortcut is listed in the command palette next to its command, so the palette is where you learn them.</source></segment>
+      </unit>
+      <unit id="shell.placeholder.title">
+        <segment><source>{area} arrives in a later build</source></segment>
+      </unit>
+      <unit id="shell.placeholder.body">
+        <segment><source>This part of Tenko DDI is not built yet. The rest of the interface works as usual.</source></segment>
+      </unit>
+      <unit id="shell.notfound.title">
+        <segment><source>Page not found</source></segment>
+      </unit>
+      <unit id="shell.notfound.body">
+        <segment><source>There is no page at {path}.</source></segment>
+      </unit>
+      <unit id="shell.notfound.home">
+        <segment><source>Go to the dashboard</source></segment>
+      </unit>
+      <unit id="shell.forbidden.title">
+        <segment><source>Administrators only</source></segment>
+      </unit>
+      <unit id="shell.forbidden.body">
+        <segment><source>Your account does not have the administrator role.</source></segment>
+      </unit>
+      <unit id="shell.splash">
+        <segment><source>Loading Tenko DDI…</source></segment>
+      </unit>
+      <unit id="shell.dashboard.sub">
+        <segment><source>This node at a glance</source></segment>
+      </unit>
+      <unit id="shell.dashboard.node">
+        <segment><source>This node</source></segment>
+      </unit>
+      <unit id="shell.dashboard.no_roles">
+        <segment><source>No roles reported</source></segment>
+      </unit>
+      <unit id="shell.dashboard.revision">
+        <segment><source>Store revision</source></segment>
+      </unit>
+      <unit id="shell.dashboard.revision_hint">
+        <segment><source>Every change advances it by one.</source></segment>
+      </unit>
+      <unit id="shell.dashboard.jobs">
+        <segment><source>Active jobs</source></segment>
+      </unit>
+      <unit id="shell.dashboard.jobs_hint">
+        <segment><source>Running or waiting for observation</source></segment>
+      </unit>
+      <unit id="shell.dashboard.uptime">
+        <segment><source>Running for</source></segment>
+      </unit>
+      <unit id="shell.dashboard.note">
+        <segment><source>Health charts for the cluster and each node arrive with the DNS and DHCP roles.</source></segment>
+      </unit>
+      <unit id="shell.banner.mfa_required">
+        <segment><source>Your security profile requires a second factor. Add a passkey or an authenticator app.</source></segment>
+      </unit>
+      <unit id="shell.banner.password_change">
+        <segment><source>Your password no longer meets the policy. Change it now.</source></segment>
+      </unit>
+      <unit id="shell.banner.fix">
+        <segment><source>Open security and sign-in</source></segment>
+      </unit>
+    </group>
+    <group id="errors">
+      <unit id="errors.generic.client">
+        <segment><source>The request was not accepted.</source></segment>
+      </unit>
+      <unit id="errors.generic.server">
+        <segment><source>The server could not complete the request. Try again in a moment.</source></segment>
+      </unit>
+      <unit id="errors.generic.not_implemented">
+        <segment><source>This function is not available on the server yet.</source></segment>
+      </unit>
+      <unit id="errors.generic.unexpected">
+        <segment><source>Something unexpected happened. Try again.</source></segment>
+      </unit>
+      <unit id="errors.generic.field">
+        <segment><source>This value is not valid.</source></segment>
+      </unit>
+      <unit id="errors.client.network">
+        <segment><source>The server cannot be reached. Check the connection and try again.</source></segment>
+      </unit>
+      <unit id="errors.client.aborted">
+        <segment><source>The request was cancelled.</source></segment>
+      </unit>
+      <unit id="errors.client.bad_response">
+        <segment><source>The server answered with status {status} and no explanation.</source></segment>
+      </unit>
+      <unit id="errors.sys.not_implemented">
+        <segment><source>This function is not available on the server yet.</source></segment>
+      </unit>
+      <unit id="errors.sys.internal">
+        <segment><source>The server ran into an internal error. The details are in its log.</source></segment>
+      </unit>
+      <unit id="errors.sys.invalid_request">
+        <segment><source>The request is not valid.</source></segment>
+      </unit>
+      <unit id="errors.sys.csrf_rejected">
+        <segment><source>The request came from another site and was refused.</source></segment>
+      </unit>
+      <unit id="errors.sys.rate_limited">
+        <segment><source>Too many requests. Wait a moment and try again.</source></segment>
+      </unit>
+      <unit id="errors.sys.not_ready">
+        <segment><source>The server is starting. Try again in a moment.</source></segment>
+      </unit>
+      <unit id="errors.sys.shutting_down">
+        <segment><source>The server is shutting down. Try again shortly.</source></segment>
+      </unit>
+      <unit id="errors.sys.store.precondition_failed">
+        <segment><source>Someone else changed this in the meantime. Reload and try again.</source></segment>
+      </unit>
+      <unit id="errors.sys.store.no_quorum">
+        <segment><source>The cluster cannot accept changes right now: too few controllers are reachable.</source></segment>
+      </unit>
+      <unit id="errors.auth.unauthenticated">
+        <segment><source>Sign in to continue.</source></segment>
+      </unit>
+      <unit id="errors.auth.session_expired">
+        <segment><source>Your session has ended. Sign in again.</source></segment>
+      </unit>
+      <unit id="errors.auth.forbidden">
+        <segment><source>Your account is not allowed to do this.</source></segment>
+      </unit>
+      <unit id="errors.auth.invalid_credentials">
+        <segment><source>The user name or password is wrong.</source></segment>
+      </unit>
+      <unit id="errors.auth.throttled">
+        <segment><source>Too many attempts. Try again in {retry_after} s.</source></segment>
+      </unit>
+      <unit id="errors.auth.challenge_invalid">
+        <segment><source>The sign-in took too long. Start again.</source></segment>
+      </unit>
+      <unit id="errors.auth.step_up_required">
+        <segment><source>Confirm it is you: sign in again with a stronger method.</source></segment>
+      </unit>
+      <unit id="errors.auth.password.incorrect">
+        <segment><source>The current password is wrong.</source></segment>
+      </unit>
+      <unit id="errors.auth.password.policy">
+        <segment><source>The password does not meet the policy.</source></segment>
+      </unit>
+      <unit id="errors.auth.password.too_short">
+        <segment><source>Use at least {min} characters.</source></segment>
+      </unit>
+      <unit id="errors.auth.password.too_long">
+        <segment><source>Use at most {max} characters.</source></segment>
+      </unit>
+      <unit id="errors.auth.password.pin_digits_only">
+        <segment><source>A PIN contains digits only.</source></segment>
+      </unit>
+      <unit id="errors.auth.password.trivial">
+        <segment><source>Avoid repeated or sequential characters such as 1234 or aaaa.</source></segment>
+      </unit>
+      <unit id="errors.auth.password.context_specific">
+        <segment><source>Do not use the user name, the display name, the host name or the product name.</source></segment>
+      </unit>
+      <unit id="errors.auth.password.pattern_mismatch">
+        <segment><source>The password does not match the pattern the administrator set.</source></segment>
+      </unit>
+      <unit id="errors.auth.password.breached">
+        <segment><source>This password appears in known data breaches. Choose another.</source></segment>
+      </unit>
+      <unit id="errors.auth.password.invalid_characters">
+        <segment><source>The password contains control characters.</source></segment>
+      </unit>
+      <unit id="errors.auth.setup.closed">
+        <segment><source>Setup is already complete. Sign in instead.</source></segment>
+      </unit>
+      <unit id="errors.auth.setup.token_invalid">
+        <segment><source>The setup token is wrong. Copy it again from the console or the log of this node.</source></segment>
+      </unit>
+      <unit id="errors.auth.setup.invalid_host_name">
+        <segment><source>{host_name} is not a valid host name. Use a DNS name, not an IP address.</source></segment>
+      </unit>
+      <unit id="errors.auth.token.lifetime_exceeded">
+        <segment><source>Tokens may live at most {max_days} days in this profile.</source></segment>
+      </unit>
+      <unit id="errors.auth.totp.code_mismatch">
+        <segment><source>The code does not match. Check the time on your phone and try the next code.</source></segment>
+      </unit>
+      <unit id="errors.auth.totp.already_enrolled">
+        <segment><source>An authenticator app is already set up for this account.</source></segment>
+      </unit>
+      <unit id="errors.auth.totp.not_enrolled">
+        <segment><source>No authenticator app is set up for this account.</source></segment>
+      </unit>
+      <unit id="errors.auth.webauthn.credential_exists">
+        <segment><source>This passkey is already registered.</source></segment>
+      </unit>
+      <unit id="errors.auth.webauthn.origin_mismatch">
+        <segment><source>The passkey was created for another address. Open Tenko DDI by its host name.</source></segment>
+      </unit>
+      <unit id="errors.auth.webauthn.rp_id_mismatch">
+        <segment><source>The passkey belongs to another host name.</source></segment>
+      </unit>
+      <unit id="errors.auth.webauthn.user_verification">
+        <segment><source>The security key did not verify you. Use its PIN or fingerprint.</source></segment>
+      </unit>
+      <unit id="errors.auth.webauthn.attestation_required">
+        <segment><source>This account needs a hardware security key that proves its model.</source></segment>
+      </unit>
+      <unit id="errors.auth.webauthn.backup_eligible_refused">
+        <segment><source>Synced passkeys are not allowed here. Use a hardware security key.</source></segment>
+      </unit>
+      <unit id="errors.auth.break_glass.hardware_key_only">
+        <segment><source>The break-glass account signs in with its hardware security key only.</source></segment>
+      </unit>
+      <unit id="errors.auth.conflict">
+        <segment><source>That is not possible in the current state. Reload and try again.</source></segment>
+      </unit>
+      <unit id="errors.settings.pin_coupling">
+        <segment><source>A PIN alone is not allowed while the vault holds secrets. Add a passkey or choose a password preset.</source></segment>
+      </unit>
+      <unit id="errors.users.last_administrator">
+        <segment><source>At least one active administrator must remain.</source></segment>
+      </unit>
+      <unit id="errors.users.name_taken">
+        <segment><source>That user name is taken.</source></segment>
+      </unit>
+      <unit id="errors.users.not_found">
+        <segment><source>The user no longer exists.</source></segment>
+      </unit>
+    </group>
+    <group id="account">
+      <unit id="account.title">
+        <segment><source>Security and sign-in</source></segment>
+      </unit>
+      <unit id="account.nav.methods">
+        <segment><source>Sign-in methods</source></segment>
+      </unit>
+      <unit id="account.nav.sessions">
+        <segment><source>Sessions</source></segment>
+      </unit>
+      <unit id="account.nav.tokens">
+        <segment><source>Personal tokens</source></segment>
+      </unit>
+      <unit id="account.nav.label">
+        <segment><source>Account sections</source></segment>
+      </unit>
+      <unit id="account.copy_failed">
+        <segment><source>Could not copy. Select the text and copy it by hand.</source></segment>
+      </unit>
+      <unit id="account.codes.title">
+        <segment><source>Save your recovery codes</source></segment>
+      </unit>
+      <unit id="account.codes.lede">
+        <segment><source>Store these codes away from this device, for example in a password manager or on paper. Each code works once, and Tenko cannot show them again.</source></segment>
+      </unit>
+      <unit id="account.methods.summary_label">
+        <segment><source>How you sign in</source></segment>
+      </unit>
+      <unit id="account.methods.signed_in_with">
+        <segment><source>This session signed in with {method}.</source></segment>
+      </unit>
+      <unit id="account.methods.requires">
+        <segment><source>The {profile} profile asks for at least {method} from your account.</source></segment>
+      </unit>
+      <unit id="account.methods.flag_password">
+        <segment><source>You must choose a new password or PIN before you continue. Change it below.</source></segment>
+      </unit>
+      <unit id="account.methods.flag_mfa">
+        <segment><source>Your profile asks for a stronger sign-in than this session used. Add a passkey or an authenticator app below, then sign in again.</source></segment>
+      </unit>
+      <unit id="account.methods.reauthenticate">
+        <segment><source>Your profile asks for a stronger sign-in than this session used. Sign out and sign in again with the new method to reach it.</source></segment>
+      </unit>
+      <unit id="account.password.title">
+        <segment><source>PIN or password</source></segment>
+      </unit>
+      <unit id="account.password.lede">
+        <segment><source>Changing it signs this account out of all its other sessions.</source></segment>
+      </unit>
+      <unit id="account.password.current">
+        <segment><source>Current PIN or password</source></segment>
+      </unit>
+      <unit id="account.password.current_help">
+        <segment><source>Leave it empty if this account has no password yet.</source></segment>
+      </unit>
+      <unit id="account.password.new">
+        <segment><source>New PIN or password</source></segment>
+      </unit>
+      <unit id="account.password.show">
+        <segment><source>Show the new password</source></segment>
+      </unit>
+      <unit id="account.password.checks">
+        <segment><source>Checks of the new password</source></segment>
+      </unit>
+      <unit id="account.password.confirm">
+        <segment><source>Repeat the new PIN or password</source></segment>
+      </unit>
+      <unit id="account.password.mismatch">
+        <segment><source>The two entries differ.</source></segment>
+      </unit>
+      <unit id="account.password.submit">
+        <segment><source>Change PIN or password</source></segment>
+      </unit>
+      <unit id="account.password.changed">
+        <segment><source>PIN or password changed</source></segment>
+      </unit>
+      <unit id="account.password.changed_others">
+        <segment><source>{count, plural, =0 {No other sessions were signed out.} one {# other session was signed out.} other {# other sessions were signed out.}}</source></segment>
+      </unit>
+      <unit id="account.password.rule.pin">
+        <segment><source>Digits only, at least {min}</source></segment>
+      </unit>
+      <unit id="account.password.rule.length">
+        <segment><source>At least {min} characters</source></segment>
+      </unit>
+      <unit id="account.password.rule.passphrase">
+        <segment><source>A passphrase of at least {min} characters</source></segment>
+      </unit>
+      <unit id="account.password.rule.pattern">
+        <segment><source>At least {min} characters, in the pattern the administrator set</source></segment>
+      </unit>
+      <unit id="account.password.rule.profile">
+        <segment><source>Meets the length rule of the {profile} profile</source></segment>
+      </unit>
+      <unit id="account.password.check.trivial">
+        <segment><source>No repeated or sequential characters, such as 1234 or aaaa</source></segment>
+      </unit>
+      <unit id="account.password.check.context">
+        <segment><source>Does not contain your user name, display name, host name or the product name</source></segment>
+      </unit>
+      <unit id="account.password.check.breach_clean">
+        <segment><source>Not found in known data breaches</source></segment>
+      </unit>
+      <unit id="account.password.check.breach_off">
+        <segment><source>The breached-password check is switched off in this profile</source></segment>
+      </unit>
+      <unit id="account.password.check.breach_unavailable">
+        <segment><source>The breach check could not run, so the password was not checked against known breaches</source></segment>
+      </unit>
+      <unit id="account.password.state.ok">
+        <segment><source>Met</source></segment>
+      </unit>
+      <unit id="account.password.state.bad">
+        <segment><source>Not met</source></segment>
+      </unit>
+      <unit id="account.password.state.pending">
+        <segment><source>Checking</source></segment>
+      </unit>
+      <unit id="account.password.state.idle">
+        <segment><source>Not checked yet</source></segment>
+      </unit>
+      <unit id="account.password.state.off">
+        <segment><source>Not applied</source></segment>
+      </unit>
+      <unit id="account.passkey.title">
+        <segment><source>Passkeys and security keys</source></segment>
+      </unit>
+      <unit id="account.passkey.lede">
+        <segment><source>Sign in without typing a password. A passkey lives on your phone or computer and may sync to your other devices; a security key is a separate hardware key you plug in or touch.</source></segment>
+      </unit>
+      <unit id="account.passkey.none">
+        <segment><source>You have not added a passkey or a security key yet.</source></segment>
+      </unit>
+      <unit id="account.passkey.kind.synced">
+        <segment><source>Synced passkey</source></segment>
+      </unit>
+      <unit id="account.passkey.kind.hardware">
+        <segment><source>Hardware security key</source></segment>
+      </unit>
+      <unit id="account.passkey.kind.device">
+        <segment><source>Passkey on one device</source></segment>
+      </unit>
+      <unit id="account.passkey.created">
+        <segment><source>Added {date}</source></segment>
+      </unit>
+      <unit id="account.passkey.last_used">
+        <segment><source>Last used {when}</source></segment>
+      </unit>
+      <unit id="account.passkey.never_used">
+        <segment><source>Never used</source></segment>
+      </unit>
+      <unit id="account.passkey.remove_named">
+        <segment><source>Remove {name}</source></segment>
+      </unit>
+      <unit id="account.passkey.remove_title">
+        <segment><source>Remove {name}?</source></segment>
+      </unit>
+      <unit id="account.passkey.remove_body">
+        <segment><source>You will no longer be able to sign in with it. Your other ways to sign in stay as they are. If your profile needs this one, Tenko refuses to remove it.</source></segment>
+      </unit>
+      <unit id="account.passkey.remove_refused">
+        <segment><source>Your profile needs this method and it is the only one you have. Add another passkey, a security key or an authenticator app first, then remove this one.</source></segment>
+      </unit>
+      <unit id="account.passkey.removed">
+        <segment><source>{name} removed</source></segment>
+      </unit>
+      <unit id="account.passkey.label">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="account.passkey.label_help">
+        <segment><source>Optional. Helps you tell your keys apart, for example Laptop or Office key.</source></segment>
+      </unit>
+      <unit id="account.passkey.add">
+        <segment><source>Add a passkey</source></segment>
+      </unit>
+      <unit id="account.passkey.add_key">
+        <segment><source>Add a security key</source></segment>
+      </unit>
+      <unit id="account.passkey.added">
+        <segment><source>Passkey added</source></segment>
+      </unit>
+      <unit id="account.passkey.added_key">
+        <segment><source>Security key added</source></segment>
+      </unit>
+      <unit id="account.passkey.waiting_passkey">
+        <segment><source>Follow the prompt on this device or your phone</source></segment>
+      </unit>
+      <unit id="account.passkey.waiting_key">
+        <segment><source>Touch your security key</source></segment>
+      </unit>
+      <unit id="account.totp.title">
+        <segment><source>Authenticator app</source></segment>
+      </unit>
+      <unit id="account.totp.name">
+        <segment><source>Authenticator app</source></segment>
+      </unit>
+      <unit id="account.totp.lede">
+        <segment><source>A code from an app on your phone, asked for after your password.</source></segment>
+      </unit>
+      <unit id="account.totp.status_on">
+        <segment><source>Set up</source></segment>
+      </unit>
+      <unit id="account.totp.status_off">
+        <segment><source>Not set up</source></segment>
+      </unit>
+      <unit id="account.totp.setup">
+        <segment><source>Set up an authenticator app</source></segment>
+      </unit>
+      <unit id="account.totp.setup_title">
+        <segment><source>Set up your authenticator app</source></segment>
+      </unit>
+      <unit id="account.totp.no_qr">
+        <segment><source>Enter the key in your app, or open the link on the device that has the app. Then enter the code the app shows.</source></segment>
+      </unit>
+      <unit id="account.totp.key">
+        <segment><source>Secret key</source></segment>
+      </unit>
+      <unit id="account.totp.params">
+        <segment><source>{digits} digits, a new code every {period} seconds, {algorithm}</source></segment>
+      </unit>
+      <unit id="account.totp.open_link">
+        <segment><source>Open in an authenticator app on this device</source></segment>
+      </unit>
+      <unit id="account.totp.code">
+        <segment><source>Code from the app</source></segment>
+      </unit>
+      <unit id="account.totp.verify">
+        <segment><source>Verify</source></segment>
+      </unit>
+      <unit id="account.totp.enabled">
+        <segment><source>Authenticator app set up</source></segment>
+      </unit>
+      <unit id="account.totp.expired">
+        <segment><source>The set-up took too long. Start again.</source></segment>
+      </unit>
+      <unit id="account.totp.removed">
+        <segment><source>Authenticator app removed</source></segment>
+      </unit>
+      <unit id="account.totp.remove_title">
+        <segment><source>Remove the authenticator app?</source></segment>
+      </unit>
+      <unit id="account.totp.remove_body">
+        <segment><source>You will no longer be asked for a code from the app when you sign in. If your profile asks for a second factor, add a passkey first.</source></segment>
+      </unit>
+      <unit id="account.totp.remove_refused">
+        <segment><source>Your profile needs a second factor and the authenticator app is the only one you have. Add a passkey first, then remove the app.</source></segment>
+      </unit>
+      <unit id="account.recovery.title">
+        <segment><source>Recovery codes</source></segment>
+      </unit>
+      <unit id="account.recovery.name">
+        <segment><source>Recovery codes</source></segment>
+      </unit>
+      <unit id="account.recovery.lede">
+        <segment><source>If you lose your passkey and your authenticator app, a recovery code gets you in. Each code works once. Generating new codes makes the old ones stop working.</source></segment>
+      </unit>
+      <unit id="account.recovery.left">
+        <segment><source>{count, plural, =0 {No codes left} one {# code left} other {# codes left}}</source></segment>
+      </unit>
+      <unit id="account.recovery.generate">
+        <segment><source>Generate new codes</source></segment>
+      </unit>
+      <unit id="account.recovery.needs_factor">
+        <segment><source>Set up a passkey or an authenticator app first.</source></segment>
+      </unit>
+      <unit id="account.recovery.confirm_title">
+        <segment><source>Generate new recovery codes?</source></segment>
+      </unit>
+      <unit id="account.recovery.confirm_body">
+        <segment><source>The codes you have now stop working at once. The new codes are shown once, so store them away from this device.</source></segment>
+      </unit>
+      <unit id="account.sessions.title">
+        <segment><source>Where you are signed in</source></segment>
+      </unit>
+      <unit id="account.sessions.lede">
+        <segment><source>Every browser and device with an open session on your account. Revoke the ones you do not recognise.</source></segment>
+      </unit>
+      <unit id="account.sessions.sign_out_others">
+        <segment><source>Sign out everywhere else</source></segment>
+      </unit>
+      <unit id="account.sessions.this">
+        <segment><source>This session</source></segment>
+      </unit>
+      <unit id="account.sessions.client">
+        <segment><source>{browser} on {os}</source></segment>
+      </unit>
+      <unit id="account.sessions.client_unknown">
+        <segment><source>Unknown client</source></segment>
+      </unit>
+      <unit id="account.sessions.col.client">
+        <segment><source>Client</source></segment>
+      </unit>
+      <unit id="account.sessions.col.address">
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="account.sessions.col.signed_in">
+        <segment><source>Signed in</source></segment>
+      </unit>
+      <unit id="account.sessions.col.last_activity">
+        <segment><source>Last activity</source></segment>
+      </unit>
+      <unit id="account.sessions.col.expires">
+        <segment><source>Expires</source></segment>
+      </unit>
+      <unit id="account.sessions.col.strength">
+        <segment><source>Sign-in method</source></segment>
+      </unit>
+      <unit id="account.sessions.col.actions">
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="account.sessions.strength.pin">
+        <segment><source>PIN</source></segment>
+      </unit>
+      <unit id="account.sessions.strength.password">
+        <segment><source>Password</source></segment>
+      </unit>
+      <unit id="account.sessions.strength.password_totp">
+        <segment><source>Password and app code</source></segment>
+      </unit>
+      <unit id="account.sessions.strength.passkey">
+        <segment><source>Passkey</source></segment>
+      </unit>
+      <unit id="account.sessions.strength.hardware_key">
+        <segment><source>Security key</source></segment>
+      </unit>
+      <unit id="account.sessions.sign_out">
+        <segment><source>Sign out</source></segment>
+      </unit>
+      <unit id="account.sessions.revoke_named">
+        <segment><source>Revoke the session from {client}</source></segment>
+      </unit>
+      <unit id="account.sessions.revoked">
+        <segment><source>Session revoked</source></segment>
+      </unit>
+      <unit id="account.sessions.revoked_many">
+        <segment><source>{count, plural, one {# session signed out} other {# sessions signed out}}</source></segment>
+      </unit>
+      <unit id="account.sessions.none_other">
+        <segment><source>You have no other open sessions.</source></segment>
+      </unit>
+      <unit id="account.sessions.confirm_title">
+        <segment><source>Sign out everywhere else?</source></segment>
+      </unit>
+      <unit id="account.sessions.confirm_body">
+        <segment><source>{count, plural, one {The # other session of this account ends at once.} other {The # other sessions of this account end at once.}} This session stays signed in.</source></segment>
+      </unit>
+      <unit id="account.sessions.confirm_button">
+        <segment><source>{count, plural, one {Sign out # other session} other {Sign out # other sessions}}</source></segment>
+      </unit>
+      <unit id="account.tokens.title">
+        <segment><source>Personal tokens</source></segment>
+      </unit>
+      <unit id="account.tokens.lede">
+        <segment><source>A token lets a script or the command line call the API as you. Treat it like a password: it is shown once, when you create it.</source></segment>
+      </unit>
+      <unit id="account.tokens.create">
+        <segment><source>Create token</source></segment>
+      </unit>
+      <unit id="account.tokens.none">
+        <segment><source>You have no personal tokens.</source></segment>
+      </unit>
+      <unit id="account.tokens.col.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="account.tokens.col.prefix">
+        <segment><source>Starts with</source></segment>
+      </unit>
+      <unit id="account.tokens.col.created">
+        <segment><source>Created</source></segment>
+      </unit>
+      <unit id="account.tokens.col.expires">
+        <segment><source>Expires</source></segment>
+      </unit>
+      <unit id="account.tokens.col.last_used">
+        <segment><source>Last used</source></segment>
+      </unit>
+      <unit id="account.tokens.expired">
+        <segment><source>Expired</source></segment>
+      </unit>
+      <unit id="account.tokens.revoke_named">
+        <segment><source>Revoke {name}</source></segment>
+      </unit>
+      <unit id="account.tokens.revoke_title">
+        <segment><source>Revoke {name}?</source></segment>
+      </unit>
+      <unit id="account.tokens.revoke_body">
+        <segment><source>Anything that uses this token stops working at once. This cannot be undone.</source></segment>
+      </unit>
+      <unit id="account.tokens.revoked">
+        <segment><source>{name} revoked</source></segment>
+      </unit>
+      <unit id="account.tokens.create_title">
+        <segment><source>Create a personal token</source></segment>
+      </unit>
+      <unit id="account.tokens.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="account.tokens.name_help">
+        <segment><source>What it is for, for example nightly export.</source></segment>
+      </unit>
+      <unit id="account.tokens.lifetime">
+        <segment><source>Lifetime</source></segment>
+      </unit>
+      <unit id="account.tokens.days">
+        <segment><source>{count, plural, one {# day} other {# days}}</source></segment>
+      </unit>
+      <unit id="account.tokens.no_expiry">
+        <segment><source>No expiry</source></segment>
+      </unit>
+      <unit id="account.tokens.max_days">
+        <segment><source>The {profile} profile allows tokens to live at most {days} days.</source></segment>
+      </unit>
+      <unit id="account.tokens.max_none">
+        <segment><source>The {profile} profile sets no maximum.</source></segment>
+      </unit>
+      <unit id="account.tokens.created_title">
+        <segment><source>Your new token</source></segment>
+      </unit>
+      <unit id="account.tokens.created_body">
+        <segment><source>Copy {name} now and store it safely. It is shown only once and cannot be retrieved later.</source></segment>
+      </unit>
+      <unit id="account.tokens.stored">
+        <segment><source>I have stored the token</source></segment>
+      </unit>
+    </group>
+    <group id="settings">
+      <unit id="settings.title">
+        <segment><source>Settings</source></segment>
+      </unit>
+      <unit id="settings.nav.security">
+        <segment><source>Security</source></segment>
+      </unit>
+      <unit id="settings.nav.users">
+        <segment><source>Users</source></segment>
+      </unit>
+      <unit id="settings.nav.label">
+        <segment><source>Settings sections</source></segment>
+      </unit>
+      <unit id="settings.reloaded">
+        <segment><source>The latest version has been loaded. Check it and try again.</source></segment>
+      </unit>
+      <unit id="settings.security.col.id">
+        <notes><note category="description">Column header: the toggle ID, for example TGL-04.</note></notes>
+        <segment><source>ID</source></segment>
+      </unit>
+      <unit id="settings.security.col.setting">
+        <segment><source>Setting</source></segment>
+      </unit>
+      <unit id="settings.security.col.value">
+        <segment><source>Current value</source></segment>
+      </unit>
+      <unit id="settings.security.col.profile">
+        <notes><note category="description">The value the selected security profile sets.</note></notes>
+        <segment><source>Profile value</source></segment>
+      </unit>
+      <unit id="settings.security.col.status">
+        <segment><source>Status</source></segment>
+      </unit>
+      <unit id="settings.security.col.actions">
+        <notes><note category="description">Hidden column header for the buttons of a row.</note></notes>
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="settings.security.toggles.heading">
+        <segment><source>Security settings</source></segment>
+      </unit>
+      <unit id="settings.security.toggles.range">
+        <segment><source>TGL-01 to TGL-07</source></segment>
+      </unit>
+      <unit id="settings.security.toggles.table">
+        <segment><source>Security settings and their values</source></segment>
+      </unit>
+      <unit id="settings.security.marker.differs">
+        <segment><source>Differs from the profile</source></segment>
+      </unit>
+      <unit id="settings.security.marker.weak">
+        <notes><note category="description">Home is the name of the Home security profile.</note></notes>
+        <segment><source>Weaker than Home</source></segment>
+      </unit>
+      <unit id="settings.security.marker.follows">
+        <segment><source>Follows the profile</source></segment>
+      </unit>
+      <unit id="settings.security.edit_row">
+        <notes><note category="description">Accessible name of the Edit button of a settings row.</note></notes>
+        <segment><source>Edit {name}</source></segment>
+      </unit>
+      <unit id="settings.security.edit_title">
+        <segment><source>Edit {name}</source></segment>
+      </unit>
+      <unit id="settings.security.reset">
+        <segment><source>Reset to profile</source></segment>
+      </unit>
+      <unit id="settings.security.reset_row">
+        <notes><note category="description">Accessible name of the Reset to profile button of a settings row.</note></notes>
+        <segment><source>Reset to profile: {name}</source></segment>
+      </unit>
+      <unit id="settings.security.reset_done">
+        <segment><source>Reset {name} to the profile</source></segment>
+      </unit>
+      <unit id="settings.security.save">
+        <segment><source>Save setting</source></segment>
+      </unit>
+      <unit id="settings.security.saved">
+        <segment><source>Saved {name}</source></segment>
+      </unit>
+      <unit id="settings.security.more">
+        <segment><source>{shown} of {total} settings are available in this version. The others appear when their features ship.</source></segment>
+      </unit>
+      <unit id="settings.security.vault.title">
+        <segment><source>The vault holds secrets</source></segment>
+      </unit>
+      <unit id="settings.security.vault.body">
+        <segment><source>A PIN alone cannot be the only way to sign in while the vault holds secrets. Every account that can reach them needs at least a passkey, or the PIN as a second factor next to another factor. This holds in every profile, so the PIN preset cannot be selected now (IAM-07).</source></segment>
+      </unit>
+      <unit id="settings.security.consequence.none">
+        <segment><source>Nothing changes yet. What a change would do appears here.</source></segment>
+      </unit>
+      <unit id="settings.security.consequence.weak_new">
+        <segment><source>Weaker than Home: the warning banner will show for everyone.</source></segment>
+      </unit>
+      <unit id="settings.security.consequence.weak_stays">
+        <segment><source>Weaker than Home: the warning banner stays on for everyone.</source></segment>
+      </unit>
+      <unit id="settings.security.consequence.raised_clears">
+        <segment><source>No longer weaker than Home. The warning banner will clear.</source></segment>
+      </unit>
+      <unit id="settings.security.consequence.raised_others">
+        <segment><source>No longer weaker than Home. The warning banner stays because other settings are weaker than Home.</source></segment>
+      </unit>
+      <unit id="settings.security.consequence.raised_lab">
+        <segment><source>No longer weaker than Home. The warning banner stays while the Lab profile is active.</source></segment>
+      </unit>
+      <unit id="settings.security.consequence.differs">
+        <segment><source>Differs from the {profile} profile: this setting will be marked as a deviation.</source></segment>
+      </unit>
+      <unit id="settings.security.consequence.matches">
+        <segment><source>Matches the {profile} profile: the deviation marker clears.</source></segment>
+      </unit>
+      <unit id="settings.security.passkey.hint">
+        <segment><source>Administrator accounts must use a passkey to sign in.</source></segment>
+      </unit>
+      <unit id="settings.security.policy.preset">
+        <segment><source>Preset</source></segment>
+      </unit>
+      <unit id="settings.security.policy.custom">
+        <segment><source>Custom</source></segment>
+      </unit>
+      <unit id="settings.security.policy.min">
+        <segment><source>Minimum length</source></segment>
+      </unit>
+      <unit id="settings.security.policy.min_help">
+        <segment><source>Characters, from 4 to 256.</source></segment>
+      </unit>
+      <unit id="settings.security.policy.min_error">
+        <segment><source>Enter a whole number from 4 to 256.</source></segment>
+      </unit>
+      <unit id="settings.security.policy.max">
+        <segment><source>Maximum length (optional)</source></segment>
+      </unit>
+      <unit id="settings.security.policy.max_help">
+        <segment><source>From 64 to 1024 characters. Leave empty for the default.</source></segment>
+      </unit>
+      <unit id="settings.security.policy.max_error">
+        <segment><source>Leave empty, or enter a whole number from 64 to 1024 that is not below the minimum.</source></segment>
+      </unit>
+      <unit id="settings.security.policy.pattern">
+        <segment><source>Required pattern (optional)</source></segment>
+      </unit>
+      <unit id="settings.security.policy.pattern_help">
+        <segment><source>A regular expression the whole password must match.</source></segment>
+      </unit>
+      <unit id="settings.security.policy.pattern_error">
+        <segment><source>This is not a valid regular expression.</source></segment>
+      </unit>
+      <unit id="settings.security.session.absolute">
+        <segment><source>Absolute lifetime</source></segment>
+      </unit>
+      <unit id="settings.security.session.absolute_help">
+        <segment><source>A session ends this long after sign-in, whatever it does.</source></segment>
+      </unit>
+      <unit id="settings.security.session.idle">
+        <segment><source>Idle lifetime</source></segment>
+      </unit>
+      <unit id="settings.security.session.idle_help">
+        <segment><source>A session ends after this long without activity. It cannot be longer than the absolute lifetime.</source></segment>
+      </unit>
+      <unit id="settings.security.session.number_error">
+        <segment><source>Enter a whole number of at least 1.</source></segment>
+      </unit>
+      <unit id="settings.security.session.order_error">
+        <segment><source>The idle lifetime cannot be longer than the absolute lifetime.</source></segment>
+      </unit>
+      <unit id="settings.security.unit.minutes">
+        <segment><source>minutes</source></segment>
+      </unit>
+      <unit id="settings.security.unit.hours">
+        <segment><source>hours</source></segment>
+      </unit>
+      <unit id="settings.security.unit.days">
+        <segment><source>days</source></segment>
+      </unit>
+      <unit id="settings.security.unit.label">
+        <notes><note category="description">Accessible name of the unit select next to a duration field.</note></notes>
+        <segment><source>Unit of {field}</source></segment>
+      </unit>
+      <unit id="settings.security.token.limited">
+        <segment><source>Limit to a number of days</source></segment>
+      </unit>
+      <unit id="settings.security.token.unlimited_hint">
+        <segment><source>Tokens can be created without an expiry date.</source></segment>
+      </unit>
+      <unit id="settings.security.token.days">
+        <segment><source>Maximum lifetime in days</source></segment>
+      </unit>
+      <unit id="settings.security.token.days_help">
+        <segment><source>From 1 to 36,500 days.</source></segment>
+      </unit>
+      <unit id="settings.security.token.days_error">
+        <segment><source>Enter a whole number from 1 to 36,500.</source></segment>
+      </unit>
+      <unit id="settings.security.profile.heading">
+        <segment><source>Security profile</source></segment>
+      </unit>
+      <unit id="settings.security.profile.change">
+        <segment><source>Change profile</source></segment>
+      </unit>
+      <unit id="settings.security.profile.current">
+        <segment><source>Current</source></segment>
+      </unit>
+      <unit id="settings.security.profile.deviations">
+        <segment><source>{count, plural, =0 {Every setting follows the profile.} one {# setting differs from the profile.} other {# settings differ from the profile.}}</source></segment>
+      </unit>
+      <unit id="settings.security.profile.lab_tag">
+        <segment><source>Permissive</source></segment>
+      </unit>
+      <unit id="settings.security.profile.lab_title">
+        <segment><source>The Lab profile is active</source></segment>
+      </unit>
+      <unit id="settings.security.profile.lab_body">
+        <segment><source>Settings are permissive, and the warning banner shows for everyone until another profile is selected. The never-off controls still apply: secrets stay encrypted, the audit log stays on and every change stays attributable.</source></segment>
+      </unit>
+      <unit id="settings.security.profile.weak_body">
+        <segment><source>{count, plural, one {This setting is weaker than the Home profile} other {These settings are weaker than the Home profile}}: {names}. The warning banner shows for everyone until {count, plural, one {it is} other {they are}} raised again.</source></segment>
+      </unit>
+      <unit id="settings.security.profile.dialog_title">
+        <segment><source>Change security profile</source></segment>
+      </unit>
+      <unit id="settings.security.profile.resets">
+        <segment><source>Switching to {profile} resets every setting to the {profile} values.</source></segment>
+      </unit>
+      <unit id="settings.security.profile.resets_same">
+        <segment><source>Resetting to {profile} puts every setting back to the {profile} values.</source></segment>
+      </unit>
+      <unit id="settings.security.profile.no_changes">
+        <segment><source>No setting changes.</source></segment>
+      </unit>
+      <unit id="settings.security.profile.changes">
+        <segment><source>{count, plural, one {# setting changes:} other {# settings change:}}</source></segment>
+      </unit>
+      <unit id="settings.security.profile.changes_table">
+        <segment><source>Settings that change</source></segment>
+      </unit>
+      <unit id="settings.security.profile.col_now">
+        <segment><source>Now</source></segment>
+      </unit>
+      <unit id="settings.security.profile.col_after">
+        <segment><source>After</source></segment>
+      </unit>
+      <unit id="settings.security.profile.lab_warning">
+        <segment><source>Lab turns off protections such as lockout and the breached-password check. The warning banner will show for everyone.</source></segment>
+      </unit>
+      <unit id="settings.security.profile.weak_warning">
+        <segment><source>Weaker than Home: {names}. The warning banner will show for everyone.</source></segment>
+      </unit>
+      <unit id="settings.security.profile.lab_ack">
+        <segment><source>I understand that Lab is permissive and the warning banner will show for everyone.</source></segment>
+      </unit>
+      <unit id="settings.security.profile.switch_to">
+        <segment><source>Switch to {profile}</source></segment>
+      </unit>
+      <unit id="settings.security.profile.reset_to">
+        <segment><source>Reset to {profile}</source></segment>
+      </unit>
+      <unit id="settings.security.profile.switch_done">
+        <segment><source>Switched to {profile}</source></segment>
+      </unit>
+      <unit id="settings.security.profile.reset_done">
+        <segment><source>Reset to {profile}</source></segment>
+      </unit>
+      <unit id="settings.users.count">
+        <segment><source>{count, plural, one {# user} other {# users}}</source></segment>
+      </unit>
+      <unit id="settings.users.table">
+        <segment><source>Users</source></segment>
+      </unit>
+      <unit id="settings.users.add_button">
+        <segment><source>Add user</source></segment>
+      </unit>
+      <unit id="settings.users.col.name">
+        <segment><source>User name</source></segment>
+      </unit>
+      <unit id="settings.users.col.display_name">
+        <segment><source>Display name</source></segment>
+      </unit>
+      <unit id="settings.users.col.roles">
+        <segment><source>Roles</source></segment>
+      </unit>
+      <unit id="settings.users.col.methods">
+        <segment><source>Sign-in methods</source></segment>
+      </unit>
+      <unit id="settings.users.col.status">
+        <segment><source>Status</source></segment>
+      </unit>
+      <unit id="settings.users.col.last_login">
+        <segment><source>Last sign-in</source></segment>
+      </unit>
+      <unit id="settings.users.you">
+        <notes><note category="description">Tag next to your own account in the user list.</note></notes>
+        <segment><source>You</source></segment>
+      </unit>
+      <unit id="settings.users.open">
+        <segment><source>Open</source></segment>
+      </unit>
+      <unit id="settings.users.added">
+        <segment><source>Added {name}</source></segment>
+      </unit>
+      <unit id="settings.users.crumbs">
+        <segment><source>Breadcrumb</source></segment>
+      </unit>
+      <unit id="settings.users.back">
+        <segment><source>Back to users</source></segment>
+      </unit>
+      <unit id="settings.users.created">
+        <segment><source>Created</source></segment>
+      </unit>
+      <unit id="settings.users.actions">
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="settings.users.add.title">
+        <segment><source>Add user</source></segment>
+      </unit>
+      <unit id="settings.users.add.submit">
+        <segment><source>Add user</source></segment>
+      </unit>
+      <unit id="settings.users.field.name">
+        <segment><source>User name</source></segment>
+      </unit>
+      <unit id="settings.users.field.name_help">
+        <segment><source>1 to 64 characters, no spaces.</source></segment>
+      </unit>
+      <unit id="settings.users.field.display_name">
+        <segment><source>Display name</source></segment>
+      </unit>
+      <unit id="settings.users.field.display_help">
+        <segment><source>Optional. Defaults to the user name.</source></segment>
+      </unit>
+      <unit id="settings.users.field.roles">
+        <segment><source>Roles</source></segment>
+      </unit>
+      <unit id="settings.users.field.password">
+        <segment><source>Initial password</source></segment>
+      </unit>
+      <unit id="settings.users.field.password_help">
+        <segment><source>Optional. The user must change it at the first sign-in.</source></segment>
+      </unit>
+      <unit id="settings.users.field.new_password">
+        <segment><source>New password</source></segment>
+      </unit>
+      <unit id="settings.users.field.language">
+        <segment><source>Language</source></segment>
+      </unit>
+      <unit id="settings.users.error.name_required">
+        <segment><source>Enter a user name.</source></segment>
+      </unit>
+      <unit id="settings.users.error.name_length">
+        <segment><source>Use at most 64 characters.</source></segment>
+      </unit>
+      <unit id="settings.users.error.name_spaces">
+        <segment><source>The user name cannot contain spaces.</source></segment>
+      </unit>
+      <unit id="settings.users.error.roles_required">
+        <segment><source>Choose at least one role.</source></segment>
+      </unit>
+      <unit id="settings.users.error.display_required">
+        <segment><source>Enter a display name.</source></segment>
+      </unit>
+      <unit id="settings.users.error.password_required">
+        <segment><source>Enter a password.</source></segment>
+      </unit>
+      <unit id="settings.users.methods.password">
+        <segment><source>Password</source></segment>
+      </unit>
+      <unit id="settings.users.methods.passkeys">
+        <segment><source>{count, plural, one {# passkey} other {# passkeys}}</source></segment>
+      </unit>
+      <unit id="settings.users.methods.security_keys">
+        <segment><source>{count, plural, one {# security key} other {# security keys}}</source></segment>
+      </unit>
+      <unit id="settings.users.methods.authenticator">
+        <segment><source>Authenticator app</source></segment>
+      </unit>
+      <unit id="settings.users.methods.recovery_codes">
+        <segment><source>{count, plural, one {# recovery code left} other {# recovery codes left}}</source></segment>
+      </unit>
+      <unit id="settings.users.status.active">
+        <segment><source>Active</source></segment>
+      </unit>
+      <unit id="settings.users.status.disabled">
+        <segment><source>Disabled</source></segment>
+      </unit>
+      <unit id="settings.users.status.locked">
+        <segment><source>Locked until {time}</source></segment>
+      </unit>
+      <unit id="settings.users.status.locked_manual">
+        <segment><source>Locked until an administrator unlocks it</source></segment>
+      </unit>
+      <unit id="settings.users.status.break_glass">
+        <segment><source>Break-glass account</source></segment>
+      </unit>
+      <unit id="settings.users.status.password_change">
+        <segment><source>Password change required</source></segment>
+      </unit>
+      <unit id="settings.users.action.details">
+        <segment><source>Details</source></segment>
+      </unit>
+      <unit id="settings.users.action.details_help">
+        <segment><source>The display name and the language of the account.</source></segment>
+      </unit>
+      <unit id="settings.users.action.edit">
+        <segment><source>Edit details</source></segment>
+      </unit>
+      <unit id="settings.users.action.roles">
+        <segment><source>Change roles</source></segment>
+      </unit>
+      <unit id="settings.users.action.roles_help">
+        <segment><source>Roles decide what the account may do. Now: {roles}.</source></segment>
+      </unit>
+      <unit id="settings.users.action.roles_break_glass">
+        <segment><source>The break-glass account is always an administrator.</source></segment>
+      </unit>
+      <unit id="settings.users.action.lock">
+        <segment><source>Locked</source></segment>
+      </unit>
+      <unit id="settings.users.action.unlock">
+        <segment><source>Unlock</source></segment>
+      </unit>
+      <unit id="settings.users.action.unlock_help">
+        <segment><source>{name} is locked after failed sign-ins. Unlocking lets {name} try again at once.</source></segment>
+      </unit>
+      <unit id="settings.users.action.access">
+        <segment><source>Access</source></segment>
+      </unit>
+      <unit id="settings.users.action.disable">
+        <segment><source>Disable</source></segment>
+      </unit>
+      <unit id="settings.users.action.enable">
+        <segment><source>Enable</source></segment>
+      </unit>
+      <unit id="settings.users.action.disable_help">
+        <segment><source>Disabling ends every session of {name} and blocks sign-in. Nothing is deleted.</source></segment>
+      </unit>
+      <unit id="settings.users.action.enable_help">
+        <segment><source>{name} is disabled. Enabling lets {name} sign in again.</source></segment>
+      </unit>
+      <unit id="settings.users.action.own_disable">
+        <segment><source>You cannot disable your own account here: you would lose access. Ask another administrator.</source></segment>
+      </unit>
+      <unit id="settings.users.action.sessions">
+        <segment><source>Sessions</source></segment>
+      </unit>
+      <unit id="settings.users.action.sign_out">
+        <segment><source>Sign out everywhere</source></segment>
+      </unit>
+      <unit id="settings.users.action.sign_out_help">
+        <segment><source>Ends every session of {name} on every device.</source></segment>
+      </unit>
+      <unit id="settings.users.action.password">
+        <segment><source>Set a new password</source></segment>
+      </unit>
+      <unit id="settings.users.action.password_help">
+        <segment><source>A temporary password. {name} must change it at the next sign-in, and every session of {name} ends.</source></segment>
+      </unit>
+      <unit id="settings.users.action.password_break_glass">
+        <segment><source>The break-glass account has no password: it signs in with a hardware security key only.</source></segment>
+      </unit>
+      <unit id="settings.users.action.break_glass_make">
+        <segment><source>Make break-glass account</source></segment>
+      </unit>
+      <unit id="settings.users.action.break_glass_remove">
+        <segment><source>Remove break-glass status</source></segment>
+      </unit>
+      <unit id="settings.users.action.break_glass_off">
+        <segment><source>Only a registered hardware security key signs in to the break-glass account, and every use raises an alarm.</source></segment>
+      </unit>
+      <unit id="settings.users.action.break_glass_on">
+        <segment><source>This is the break-glass account. Only its hardware security key signs in, and every use raises an alarm.</source></segment>
+      </unit>
+      <unit id="settings.users.action.remove">
+        <segment><source>Delete account</source></segment>
+      </unit>
+      <unit id="settings.users.action.delete">
+        <segment><source>Delete user</source></segment>
+      </unit>
+      <unit id="settings.users.action.delete_help">
+        <segment><source>Deletes {name}, its sign-in methods and personal tokens, and ends its sessions. This cannot be undone.</source></segment>
+      </unit>
+      <unit id="settings.users.action.own_delete">
+        <segment><source>You cannot delete your own account: you would lose access. Ask another administrator.</source></segment>
+      </unit>
+      <unit id="settings.users.edit.title">
+        <segment><source>Edit details</source></segment>
+      </unit>
+      <unit id="settings.users.edit.submit">
+        <segment><source>Save details</source></segment>
+      </unit>
+      <unit id="settings.users.saved_details">
+        <segment><source>Saved details of {name}</source></segment>
+      </unit>
+      <unit id="settings.users.roles.title">
+        <segment><source>Change roles</source></segment>
+      </unit>
+      <unit id="settings.users.roles.submit">
+        <segment><source>Save roles</source></segment>
+      </unit>
+      <unit id="settings.users.saved_roles">
+        <segment><source>Saved roles of {name}</source></segment>
+      </unit>
+      <unit id="settings.users.roles.own_admin">
+        <segment><source>You are removing your own administrator role. You will lose access to Settings.</source></segment>
+      </unit>
+      <unit id="settings.users.password.title">
+        <segment><source>Set a new password</source></segment>
+      </unit>
+      <unit id="settings.users.password.lead">
+        <segment><source>{name} must change this password at the next sign-in, and every session of {name} ends.</source></segment>
+      </unit>
+      <unit id="settings.users.password.help">
+        <segment><source>The password policy of the current security profile applies.</source></segment>
+      </unit>
+      <unit id="settings.users.password.submit">
+        <segment><source>Set password</source></segment>
+      </unit>
+      <unit id="settings.users.saved_password">
+        <segment><source>Set a new password for {name}</source></segment>
+      </unit>
+      <unit id="settings.users.disable.title">
+        <segment><source>Disable {name}?</source></segment>
+      </unit>
+      <unit id="settings.users.disable.body">
+        <segment><source>{name} can no longer sign in and every session of {name} ends. Nothing is deleted. You can enable the account again.</source></segment>
+      </unit>
+      <unit id="settings.users.disable.confirm">
+        <segment><source>Disable {name}</source></segment>
+      </unit>
+      <unit id="settings.users.disabled">
+        <segment><source>Disabled {name}</source></segment>
+      </unit>
+      <unit id="settings.users.enabled">
+        <segment><source>Enabled {name}</source></segment>
+      </unit>
+      <unit id="settings.users.unlocked">
+        <segment><source>Unlocked {name}</source></segment>
+      </unit>
+      <unit id="settings.users.sign_out.title">
+        <segment><source>Sign {name} out everywhere?</source></segment>
+      </unit>
+      <unit id="settings.users.sign_out.body">
+        <segment><source>Every session of {name} ends on every device. {name} can sign in again.</source></segment>
+      </unit>
+      <unit id="settings.users.sign_out.confirm">
+        <segment><source>Sign {name} out everywhere</source></segment>
+      </unit>
+      <unit id="settings.users.signed_out">
+        <segment><source>Signed {name} out everywhere</source></segment>
+      </unit>
+      <unit id="settings.users.break_glass.make_title">
+        <segment><source>Make {name} the break-glass account?</source></segment>
+      </unit>
+      <unit id="settings.users.break_glass.make_body">
+        <segment><source>Only a registered hardware security key signs in to the break-glass account, and every use raises an alarm. Keep it for emergencies when nothing else works.</source></segment>
+      </unit>
+      <unit id="settings.users.break_glass.no_key">
+        <segment><source>{name} has no hardware security key registered yet. Without one, nobody can sign in to this account.</source></segment>
+      </unit>
+      <unit id="settings.users.break_glass.make_confirm">
+        <segment><source>Make {name} the break-glass account</source></segment>
+      </unit>
+      <unit id="settings.users.break_glass.made">
+        <segment><source>Made {name} the break-glass account</source></segment>
+      </unit>
+      <unit id="settings.users.break_glass.remove_title">
+        <segment><source>Remove break-glass status from {name}?</source></segment>
+      </unit>
+      <unit id="settings.users.break_glass.remove_body">
+        <segment><source>{name} stops being the break-glass account. Emergency sign-in with its hardware security key no longer works for {name}.</source></segment>
+      </unit>
+      <unit id="settings.users.break_glass.remove_confirm">
+        <segment><source>Remove break-glass status from {name}</source></segment>
+      </unit>
+      <unit id="settings.users.break_glass.removed">
+        <segment><source>Removed break-glass status from {name}</source></segment>
+      </unit>
+      <unit id="settings.users.delete.title">
+        <segment><source>Delete {name}?</source></segment>
+      </unit>
+      <unit id="settings.users.delete.body">
+        <segment><source>This deletes the account {name} for good.</source></segment>
+      </unit>
+      <unit id="settings.users.delete.note">
+        <segment><source>Its sign-in methods and personal tokens are removed and its sessions end. This cannot be undone.</source></segment>
+      </unit>
+      <unit id="settings.users.delete.confirm">
+        <segment><source>Delete {name}</source></segment>
+      </unit>
+      <unit id="settings.users.deleted">
+        <segment><source>Deleted {name}</source></segment>
+      </unit>
+    </group>
+    <group id="setup">
+      <unit id="setup.title">
+        <segment><source>First-run setup</source></segment>
+      </unit>
+      <unit id="setup.banner.title">
+        <notes><note category="description">Bold start of the persistent warning banner shown while the Lab security profile is chosen in the first-run wizard.</note></notes>
+        <segment><source>Lab profile selected.</source></segment>
+      </unit>
+      <unit id="setup.banner.body">
+        <segment><source>Security controls are relaxed: plain HTTP, no lockout, open recursion. This node must not serve a production network.</source></segment>
+      </unit>
+      <unit id="setup.banner.review">
+        <notes><note category="description">Button in the Lab banner that jumps to the list of what Lab relaxes.</note></notes>
+        <segment><source>Review the list</source></segment>
+      </unit>
+      <unit id="setup.steps.label">
+        <notes><note category="description">Accessible name of the numbered step list of the first-run wizard.</note></notes>
+        <segment><source>Setup steps</source></segment>
+      </unit>
+      <unit id="setup.steps.item">
+        <notes><note category="description">Accessible name of a step button. number is the step number, name its title.</note></notes>
+        <segment><source>Step {number}: {name}</source></segment>
+      </unit>
+      <unit id="setup.steps.completed">
+        <notes><note category="description">Appended to the accessible name of a finished step.</note></notes>
+        <segment><source>completed</source></segment>
+      </unit>
+      <unit id="setup.steps.roles_meta">
+        <notes><note category="description">Short line under the Roles step: how many of the four node roles are chosen.</note></notes>
+        <segment><source>{count} of 4 roles</source></segment>
+      </unit>
+      <unit id="setup.stepno">
+        <notes><note category="description">Small line above the heading of each wizard step.</note></notes>
+        <segment><source>Step {step} of {total}</source></segment>
+      </unit>
+      <unit id="setup.step.welcome.name">
+        <notes><note category="description">Name of step 1 in the step list.</note></notes>
+        <segment><source>Welcome</source></segment>
+      </unit>
+      <unit id="setup.step.welcome.title">
+        <notes><note category="description">Heading of step 1.</note></notes>
+        <segment><source>Welcome to Tenko DDI</source></segment>
+      </unit>
+      <unit id="setup.step.profile.name">
+        <notes><note category="description">Name of step 2 in the step list.</note></notes>
+        <segment><source>Security profile</source></segment>
+      </unit>
+      <unit id="setup.step.profile.title">
+        <notes><note category="description">Heading of step 2.</note></notes>
+        <segment><source>Security profile</source></segment>
+      </unit>
+      <unit id="setup.step.admin.name">
+        <notes><note category="description">Name of step 3 in the step list.</note></notes>
+        <segment><source>Administrator</source></segment>
+      </unit>
+      <unit id="setup.step.admin.title">
+        <notes><note category="description">Heading of step 3.</note></notes>
+        <segment><source>Administrator</source></segment>
+      </unit>
+      <unit id="setup.step.host.name">
+        <notes><note category="description">Name of step 4 in the step list.</note></notes>
+        <segment><source>Host name and TLS</source></segment>
+      </unit>
+      <unit id="setup.step.host.title">
+        <notes><note category="description">Heading of step 4.</note></notes>
+        <segment><source>Host name and TLS</source></segment>
+      </unit>
+      <unit id="setup.step.disk.name">
+        <notes><note category="description">Name of step 5 in the step list.</note></notes>
+        <segment><source>Data directory</source></segment>
+      </unit>
+      <unit id="setup.step.disk.title">
+        <notes><note category="description">Heading of step 5.</note></notes>
+        <segment><source>Data directory</source></segment>
+      </unit>
+      <unit id="setup.step.roles.name">
+        <notes><note category="description">Name of step 6 in the step list.</note></notes>
+        <segment><source>Roles for this node</source></segment>
+      </unit>
+      <unit id="setup.step.roles.title">
+        <notes><note category="description">Heading of step 6.</note></notes>
+        <segment><source>Roles for this node</source></segment>
+      </unit>
+      <unit id="setup.step.done.name">
+        <notes><note category="description">Name of the last step in the step list.</note></notes>
+        <segment><source>Done</source></segment>
+      </unit>
+      <unit id="setup.step.done.title">
+        <notes><note category="description">Heading of the last step, before setup is finished.</note></notes>
+        <segment><source>Review and finish</source></segment>
+      </unit>
+      <unit id="setup.footer.finish">
+        <notes><note category="description">Primary button of the last step; sends the setup request.</note></notes>
+        <segment><source>Finish setup</source></segment>
+      </unit>
+      <unit id="setup.footer.finishing">
+        <notes><note category="description">Label of the finish button while the request is on its way.</note></notes>
+        <segment><source>Setting up…</source></segment>
+      </unit>
+      <unit id="setup.footer.open">
+        <notes><note category="description">Primary button after setup; leaves the wizard for the dashboard.</note></notes>
+        <segment><source>Open Tenko</source></segment>
+      </unit>
+      <unit id="setup.welcome.lede">
+        <notes><note category="description">count is the number of wizard steps.</note></notes>
+        <segment><source>Tenko DDI is DNS, DHCP and IP address management in one binary. Setup takes {count} short steps for this node, and you can change most choices later.</source></segment>
+      </unit>
+      <unit id="setup.welcome.found">
+        <segment><source>Found on this node</source></segment>
+      </unit>
+      <unit id="setup.welcome.found_none">
+        <segment><source>The node did not report any details about itself.</source></segment>
+      </unit>
+      <unit id="setup.welcome.fact.node">
+        <segment><source>This node</source></segment>
+      </unit>
+      <unit id="setup.welcome.fact.os">
+        <segment><source>Operating system</source></segment>
+      </unit>
+      <unit id="setup.welcome.fact.cpu">
+        <segment><source>Processor</source></segment>
+      </unit>
+      <unit id="setup.welcome.cores">
+        <notes><note category="description">Number of processor cores of the node.</note></notes>
+        <segment><source>{count, plural, one {# core} other {# cores}}</source></segment>
+      </unit>
+      <unit id="setup.welcome.fact.memory">
+        <segment><source>Memory</source></segment>
+      </unit>
+      <unit id="setup.welcome.fact.address">
+        <notes><note category="description">Label for the network addresses of the node; count is how many there are.</note></notes>
+        <segment><source>{count, plural, one {Address} other {Addresses}}</source></segment>
+      </unit>
+      <unit id="setup.welcome.handy">
+        <segment><source>Useful to have at hand</source></segment>
+      </unit>
+      <unit id="setup.welcome.handy.passkey">
+        <segment><source>A security key or a phone that supports passkeys. You add it right after setup, and the Hardened profile requires it.</source></segment>
+      </unit>
+      <unit id="setup.welcome.handy.host">
+        <segment><source>The host name administrators will use to reach Tenko, with a DNS record that points to this node (step 4).</source></segment>
+      </unit>
+      <unit id="setup.welcome.handy.disk">
+        <segment><source>A disk on SSD or NVMe for the data directory (step 5).</source></segment>
+      </unit>
+      <unit id="setup.welcome.token.title">
+        <segment><source>Show that you have access to this node</source></segment>
+      </unit>
+      <unit id="setup.welcome.token.label">
+        <notes><note category="description">Label of the field for the one-time token of first-run setup.</note></notes>
+        <segment><source>Setup token</source></segment>
+      </unit>
+      <unit id="setup.welcome.token.help">
+        <segment><source>Tenko printed the token to the console and wrote it to the log when this node started.</source></segment>
+      </unit>
+      <unit id="setup.welcome.restore">
+        <notes><note category="description">link is the next message as a button.</note></notes>
+        <segment><source>Already have a Tenko backup? {link}</source></segment>
+      </unit>
+      <unit id="setup.welcome.restore_link">
+        <segment><source>Restore from a backup instead</source></segment>
+      </unit>
+      <unit id="setup.welcome.restore_title">
+        <notes><note category="description">Title of the toast shown when the restore link is used.</note></notes>
+        <segment><source>Restore from a backup</source></segment>
+      </unit>
+      <unit id="setup.welcome.restore_body">
+        <segment><source>Restoring from a backup arrives in a later build. Continue with a new setup for now.</source></segment>
+      </unit>
+      <unit id="setup.profile.lede">
+        <segment><source>A profile sets the starting value of {total} security settings. Every profile runs the same code; only the settings differ.</source></segment>
+      </unit>
+      <unit id="setup.profile.group">
+        <notes><note category="description">Accessible name of the group of four profile choices.</note></notes>
+        <segment><source>Security profile</source></segment>
+      </unit>
+      <unit id="setup.profile.hint.home">
+        <notes><note category="description">Short hint at the right edge of the Home profile choice.</note></notes>
+        <segment><source>PIN sign-in allowed</source></segment>
+      </unit>
+      <unit id="setup.profile.hint.standard">
+        <notes><note category="description">Short hint at the right edge of the Standard profile choice.</note></notes>
+        <segment><source>MFA for administrators</source></segment>
+      </unit>
+      <unit id="setup.profile.hint.hardened">
+        <notes><note category="description">Short hint at the right edge of the Hardened profile choice.</note></notes>
+        <segment><source>Passkey required for administrators</source></segment>
+      </unit>
+      <unit id="setup.profile.hint.lab">
+        <notes><note category="description">Short hint at the right edge of the Lab profile choice.</note></notes>
+        <segment><source>Security relaxed</source></segment>
+      </unit>
+      <unit id="setup.lab.title">
+        <segment><source>Lab relaxes security controls. Do not use it on a production network.</source></segment>
+      </unit>
+      <unit id="setup.lab.relaxes">
+        <segment><source>What Lab relaxes</source></segment>
+      </unit>
+      <unit id="setup.lab.relax.http">
+        <segment><source>Plain HTTP is allowed for the API and UI</source></segment>
+      </unit>
+      <unit id="setup.lab.relax.lockout">
+        <segment><source>No account lockout</source></segment>
+      </unit>
+      <unit id="setup.lab.relax.recursion">
+        <segment><source>Open recursion is allowed</source></segment>
+      </unit>
+      <unit id="setup.lab.relax.ddns">
+        <segment><source>Unsigned dynamic DNS updates are accepted</source></segment>
+      </unit>
+      <unit id="setup.lab.relax.tokens">
+        <segment><source>API tokens never expire</source></segment>
+      </unit>
+      <unit id="setup.lab.relax.breach">
+        <segment><source>No breached-password check</source></segment>
+      </unit>
+      <unit id="setup.lab.relax.scan">
+        <segment><source>Unlimited scan rate</source></segment>
+      </unit>
+      <unit id="setup.lab.enforced">
+        <segment><source>Still enforced, in every profile</source></segment>
+      </unit>
+      <unit id="setup.lab.enforced.secrets">
+        <segment><source>Secrets are encrypted at rest</source></segment>
+      </unit>
+      <unit id="setup.lab.enforced.audit">
+        <segment><source>The audit log is immutable</source></segment>
+      </unit>
+      <unit id="setup.lab.enforced.attribution">
+        <segment><source>Every change is attributed to a signed-in person</source></segment>
+      </unit>
+      <unit id="setup.lab.never_title">
+        <segment><source>Lab never includes attack tooling.</source></segment>
+      </unit>
+      <unit id="setup.lab.never_body">
+        <segment><source>It is permissive configuration, not an offensive toolkit: no name poisoning, no credential capture, no exploit modules.</source></segment>
+      </unit>
+      <unit id="setup.lab.ack">
+        <notes><note category="description">Checkbox that must be ticked to continue with the Lab profile.</note></notes>
+        <segment><source>I understand this node must not serve a production network</source></segment>
+      </unit>
+      <unit id="setup.profile.table.title">
+        <notes><note category="description">profile is the name of the chosen profile.</note></notes>
+        <segment><source>Key settings in the {profile} profile</source></segment>
+      </unit>
+      <unit id="setup.profile.table.aside">
+        <segment><source>Showing {shown} of {total} settings</source></segment>
+      </unit>
+      <unit id="setup.profile.table.label">
+        <notes><note category="description">Accessible name of the table of key settings.</note></notes>
+        <segment><source>Key settings for the selected profile</source></segment>
+      </unit>
+      <unit id="setup.profile.table.setting">
+        <segment><source>Setting</source></segment>
+      </unit>
+      <unit id="setup.profile.table.id">
+        <segment><source>ID</source></segment>
+      </unit>
+      <unit id="setup.profile.table.value">
+        <segment><source>Value</source></segment>
+      </unit>
+      <unit id="setup.profile.weaker">
+        <notes><note category="description">Tag next to a setting value that is weaker than in the Home profile.</note></notes>
+        <segment><source>Weaker than Home</source></segment>
+      </unit>
+      <unit id="setup.profile.table.note">
+        <segment><source>You can change any setting later; the UI shows every deviation from the profile.</source></segment>
+      </unit>
+      <unit id="setup.admin.lede">
+        <segment><source>This account signs in first and can change every setting. Every change it makes is recorded under this name in the audit log.</source></segment>
+      </unit>
+      <unit id="setup.admin.user.label">
+        <segment><source>User name</source></segment>
+      </unit>
+      <unit id="setup.admin.user.help">
+        <segment><source>Lowercase letters, digits, dot, dash or underscore.</source></segment>
+      </unit>
+      <unit id="setup.admin.user.invalid">
+        <segment><source>Use 3 to 31 characters, starting with a lowercase letter: letters, digits, dot, dash or underscore.</source></segment>
+      </unit>
+      <unit id="setup.admin.name.label">
+        <segment><source>Display name</source></segment>
+      </unit>
+      <unit id="setup.admin.name.help">
+        <segment><source>Shown in the audit log next to every change.</source></segment>
+      </unit>
+      <unit id="setup.admin.password.label.pin">
+        <notes><note category="description">Label of the secret field when the profile uses the PIN preset.</note></notes>
+        <segment><source>PIN</source></segment>
+      </unit>
+      <unit id="setup.admin.password.label.password">
+        <segment><source>Password</source></segment>
+      </unit>
+      <unit id="setup.admin.password.label.passphrase">
+        <notes><note category="description">Label of the secret field when the profile uses the Hardened preset.</note></notes>
+        <segment><source>Passphrase</source></segment>
+      </unit>
+      <unit id="setup.admin.password.placeholder.pin">
+        <segment><source>At least 4 digits</source></segment>
+      </unit>
+      <unit id="setup.admin.password.placeholder.password">
+        <segment><source>At least 12 characters</source></segment>
+      </unit>
+      <unit id="setup.admin.password.placeholder.passphrase">
+        <segment><source>At least 16 characters</source></segment>
+      </unit>
+      <unit id="setup.admin.password.help.pin">
+        <notes><note category="description">profile is the name of the chosen profile.</note></notes>
+        <segment><source>The {profile} profile sets the rules below. A PIN is fine while the vault is empty; see the vault rule below.</source></segment>
+      </unit>
+      <unit id="setup.admin.password.help.password">
+        <segment><source>The {profile} profile sets the rules below. Generate offers a random 16-character password.</source></segment>
+      </unit>
+      <unit id="setup.admin.password.help.passphrase">
+        <segment><source>The {profile} profile sets the rules below. Generate offers a four-word passphrase.</source></segment>
+      </unit>
+      <unit id="setup.admin.password.help_generated">
+        <segment><source>Generated for you. Save it in your password manager now; Tenko does not show it again.</source></segment>
+      </unit>
+      <unit id="setup.admin.password.show">
+        <segment><source>Show password</source></segment>
+      </unit>
+      <unit id="setup.admin.password.hide">
+        <segment><source>Hide password</source></segment>
+      </unit>
+      <unit id="setup.admin.password.generate">
+        <segment><source>Generate</source></segment>
+      </unit>
+      <unit id="setup.admin.check.state.ok">
+        <notes><note category="description">Screen-reader word before a checklist item that is met.</note></notes>
+        <segment><source>Met</source></segment>
+      </unit>
+      <unit id="setup.admin.check.state.bad">
+        <notes><note category="description">Screen-reader word before a checklist item that is not met.</note></notes>
+        <segment><source>Not met</source></segment>
+      </unit>
+      <unit id="setup.admin.check.state.off">
+        <notes><note category="description">Screen-reader word before a checklist item that is switched off or could not be checked.</note></notes>
+        <segment><source>Off</source></segment>
+      </unit>
+      <unit id="setup.admin.check.state.idle">
+        <notes><note category="description">Screen-reader word before a checklist item while no password is typed.</note></notes>
+        <segment><source>Not yet met</source></segment>
+      </unit>
+      <unit id="setup.admin.check.state.pending">
+        <notes><note category="description">Screen-reader word before a checklist item while the server checks the password.</note></notes>
+        <segment><source>Checking</source></segment>
+      </unit>
+      <unit id="setup.admin.check.trivial">
+        <segment><source>Not a repeated or sequential pattern such as 1234 or aaaa</source></segment>
+      </unit>
+      <unit id="setup.admin.check.context">
+        <segment><source>Does not contain the user name, the host name or the product name</source></segment>
+      </unit>
+      <unit id="setup.admin.check.breach">
+        <segment><source>Not found in known breaches (checked with k-anonymity: only the first 5 characters of a hash leave this machine)</source></segment>
+      </unit>
+      <unit id="setup.admin.check.breach_found">
+        <segment><source>Found in known breaches. Choose another; only the first 5 characters of a hash left this machine.</source></segment>
+      </unit>
+      <unit id="setup.admin.check.breach_off">
+        <segment><source>The breached-password check is switched off in the {profile} profile</source></segment>
+      </unit>
+      <unit id="setup.admin.check.breach_unavailable">
+        <segment><source>The breached-password service could not be reached, so this password was not checked against known breaches</source></segment>
+      </unit>
+      <unit id="setup.admin.check.breach_pending">
+        <segment><source>Checking the password against known breaches</source></segment>
+      </unit>
+      <unit id="setup.admin.passkey.title">
+        <segment><source>Passkey</source></segment>
+      </unit>
+      <unit id="setup.admin.passkey.help.home">
+        <segment><source>Optional. You add it right after setup. A passkey lets you sign in without typing a PIN or password.</source></segment>
+      </unit>
+      <unit id="setup.admin.passkey.help.standard">
+        <segment><source>Recommended. Standard requires MFA for administrators: a passkey counts, otherwise Tenko asks for an authenticator app at first sign-in. You add it right after setup.</source></segment>
+      </unit>
+      <unit id="setup.admin.passkey.help.hardened">
+        <segment><source>Required for administrators in Hardened. You add it right after setup, before you open Tenko. It also satisfies the MFA requirement.</source></segment>
+      </unit>
+      <unit id="setup.admin.passkey.help.lab">
+        <segment><source>Optional. You add it right after setup. A passkey lets you sign in without typing a PIN or password.</source></segment>
+      </unit>
+      <unit id="setup.admin.vault.title">
+        <notes><note category="description">Bold start of a note about the PIN coupling rule.</note></notes>
+        <segment><source>The PIN and the vault.</source></segment>
+      </unit>
+      <unit id="setup.admin.vault.body">
+        <segment><source>A PIN alone is allowed only while the vault holds no secrets. Connecting UniFi or Proxmox stores credentials in the vault, and from then on you need a passkey.</source></segment>
+      </unit>
+      <unit id="setup.admin.codes_note">
+        <segment><source>Tenko shows recovery codes once, when you add your first passkey or authenticator app. Download or print them: each code works one time if you lose your password and your passkey.</source></segment>
+      </unit>
+      <unit id="setup.host.lede">
+        <segment><source>Administrators will open Tenko by this name. It goes into the TLS certificate and into every passkey, so pick the name you will keep.</source></segment>
+      </unit>
+      <unit id="setup.host.label">
+        <segment><source>Host name</source></segment>
+      </unit>
+      <unit id="setup.host.placeholder">
+        <notes><note category="description">Example host name; name is the node name.</note></notes>
+        <segment><source>{name}.example.test</source></segment>
+      </unit>
+      <unit id="setup.host.help">
+        <segment><source>A DNS name, not an IP address. It is the name in the certificate and the name passkeys are tied to, so administrators must reach Tenko by it.</source></segment>
+      </unit>
+      <unit id="setup.host.error.empty">
+        <segment><source>Enter a host name.</source></segment>
+      </unit>
+      <unit id="setup.host.error.address">
+        <segment><source>Use a DNS name, not an IP address: the certificate and the passkeys are tied to the name.</source></segment>
+      </unit>
+      <unit id="setup.host.error.chars">
+        <segment><source>Use letters, digits and dashes in each part of the name, with dots between the parts.</source></segment>
+      </unit>
+      <unit id="setup.host.error.length">
+        <segment><source>A name has at most 253 characters, and each part at most 63.</source></segment>
+      </unit>
+      <unit id="setup.tls.title">
+        <segment><source>Encryption of the API and UI (TLS)</source></segment>
+      </unit>
+      <unit id="setup.tls.default">
+        <segment><source>Default</source></segment>
+      </unit>
+      <unit id="setup.tls.internal_ca.name">
+        <segment><source>Internal certificate authority</source></segment>
+      </unit>
+      <unit id="setup.tls.internal_ca.description">
+        <segment><source>Tenko creates a certificate authority for this installation and signs the certificate of the API and UI. After setup, the root certificate is offered so you can trust it on your admin computers.</source></segment>
+      </unit>
+      <unit id="setup.tls.imported.name">
+        <segment><source>Imported certificate</source></segment>
+      </unit>
+      <unit id="setup.tls.imported.description">
+        <segment><source>You add your own certificate and key in the settings after setup. Until then the internal certificate authority covers the node.</source></segment>
+      </unit>
+      <unit id="setup.tls.reverse_proxy.name">
+        <segment><source>TLS in a reverse proxy</source></segment>
+      </unit>
+      <unit id="setup.tls.reverse_proxy.description">
+        <segment><source>A proxy such as HAProxy ends TLS, for example with ACME certificates, and passes plain HTTP on to Tenko. Only the proxies you list may send forwarded headers; Tenko refuses them from anyone else.</source></segment>
+      </unit>
+      <unit id="setup.tls.plain.name">
+        <segment><source>Plain HTTP</source></segment>
+      </unit>
+      <unit id="setup.tls.plain.description">
+        <segment><source>No encryption: passwords travel in plain text. For the Lab profile only.</source></segment>
+      </unit>
+      <unit id="setup.tls.plain.disabled">
+        <segment><source>Not available: plain HTTP is allowed only with the Lab profile.</source></segment>
+      </unit>
+      <unit id="setup.tls.proxies.label">
+        <segment><source>Trusted proxies</source></segment>
+      </unit>
+      <unit id="setup.tls.proxies.help">
+        <segment><source>One IPv4 or IPv6 address or prefix per line, for example 192.0.2.10 or 198.51.100.0/24. Forwarded headers from any other address are refused.</source></segment>
+      </unit>
+      <unit id="setup.tls.proxies.invalid">
+        <notes><note category="description">entries is the list of invalid lines; count how many.</note></notes>
+        <segment><source>{count, plural, one {This entry is not an IP address or prefix: {entries}} other {These entries are not IP addresses or prefixes: {entries}}}</source></segment>
+      </unit>
+      <unit id="setup.tls.passkey_note">
+        <segment><source>Passkeys work only over HTTPS, or on localhost, under the host name above. Open Tenko by that name after setup.</source></segment>
+      </unit>
+      <unit id="setup.tls.passkey_note_plain">
+        <segment><source>Passkeys do not work over plain HTTP, except on localhost. In the Lab profile, sign in with a PIN or password.</source></segment>
+      </unit>
+      <unit id="setup.disk.lede">
+        <segment><source>Tenko keeps its replicated store, leases and keys in one directory, and it needs a disk that can take constant small writes. This is the directory the node started with.</source></segment>
+      </unit>
+      <unit id="setup.disk.detected">
+        <segment><source>Detected on this node</source></segment>
+      </unit>
+      <unit id="setup.disk.unknown">
+        <segment><source>The node did not report its data directory.</source></segment>
+      </unit>
+      <unit id="setup.disk.on">
+        <notes><note category="description">Between a directory path and the device it lives on.</note></notes>
+        <segment><source>on</source></segment>
+      </unit>
+      <unit id="setup.disk.media.nvme">
+        <segment><source>NVMe SSD</source></segment>
+      </unit>
+      <unit id="setup.disk.media.ssd">
+        <segment><source>SSD</source></segment>
+      </unit>
+      <unit id="setup.disk.media.hdd">
+        <segment><source>Rotating disk (HDD)</source></segment>
+      </unit>
+      <unit id="setup.disk.media.smr">
+        <segment><source>SMR disk</source></segment>
+      </unit>
+      <unit id="setup.disk.media.unknown">
+        <segment><source>Unknown type of disk</source></segment>
+      </unit>
+      <unit id="setup.disk.media_free">
+        <segment><source>{media}, {size} free</source></segment>
+      </unit>
+      <unit id="setup.disk.fsync">
+        <notes><note category="description">How long the disk takes to confirm a durable write (fsync), measured at start-up.</note></notes>
+        <segment><source>Median write confirmation: {time}</source></segment>
+      </unit>
+      <unit id="setup.disk.tag.rotating">
+        <segment><source>Rotating disk</source></segment>
+      </unit>
+      <unit id="setup.disk.tag.slow">
+        <segment><source>Slow disk</source></segment>
+      </unit>
+      <unit id="setup.disk.warn.rotating_title">
+        <segment><source>This disk is not supported.</source></segment>
+      </unit>
+      <unit id="setup.disk.warn.rotating_body">
+        <segment><source>Rotating and SMR disks are not supported for the data directory. In testing, loading was 93 times slower and the node lost cluster leadership. Choose an SSD or NVMe disk.</source></segment>
+      </unit>
+      <unit id="setup.disk.warn.slow_title">
+        <segment><source>This disk is slow.</source></segment>
+      </unit>
+      <unit id="setup.disk.warn.slow_body">
+        <segment><source>The disk takes more than 10 ms to confirm a write, where an SSD takes well under 1 ms. A slow disk makes the node lose cluster leadership. Choose an SSD or NVMe disk.</source></segment>
+      </unit>
+      <unit id="setup.disk.move">
+        <notes><note category="description">command is a shell command in the data font.</note></notes>
+        <segment><source>To use another disk, restart the node with {command}.</source></segment>
+      </unit>
+      <unit id="setup.disk.move_path">
+        <notes><note category="description">Placeholder inside the command line that moves the data directory.</note></notes>
+        <segment><source>path on an SSD</source></segment>
+      </unit>
+      <unit id="setup.disk.override">
+        <segment><source>Use it anyway for a short test; the node health check will keep warning</source></segment>
+      </unit>
+      <unit id="setup.disk.contents">
+        <segment><source>What lives there</source></segment>
+      </unit>
+      <unit id="setup.disk.free_aside">
+        <segment><source>Free on this disk: {size}</source></segment>
+      </unit>
+      <unit id="setup.disk.table.label">
+        <segment><source>Contents of the data directory</source></segment>
+      </unit>
+      <unit id="setup.disk.table.item">
+        <segment><source>Item</source></segment>
+      </unit>
+      <unit id="setup.disk.table.contains">
+        <segment><source>Contains</source></segment>
+      </unit>
+      <unit id="setup.disk.table.size">
+        <segment><source>Estimated size</source></segment>
+      </unit>
+      <unit id="setup.disk.item.store">
+        <segment><source>Replicated store</source></segment>
+      </unit>
+      <unit id="setup.disk.item.store_contains">
+        <segment><source>Zones, IPAM data, configuration and job history</source></segment>
+      </unit>
+      <unit id="setup.disk.item.store_size">
+        <segment><source>about 800 MB</source></segment>
+      </unit>
+      <unit id="setup.disk.item.leases">
+        <segment><source>Leases</source></segment>
+      </unit>
+      <unit id="setup.disk.item.leases_contains">
+        <segment><source>DHCP leases and failover state</source></segment>
+      </unit>
+      <unit id="setup.disk.item.leases_size">
+        <segment><source>about 40 MB</source></segment>
+      </unit>
+      <unit id="setup.disk.item.keys">
+        <segment><source>Keys</source></segment>
+      </unit>
+      <unit id="setup.disk.item.keys_contains">
+        <segment><source>Internal certificate authority, node certificate and the encrypted vault</source></segment>
+      </unit>
+      <unit id="setup.disk.item.keys_size">
+        <segment><source>under 1 MB</source></segment>
+      </unit>
+      <unit id="setup.disk.item.audit">
+        <segment><source>Audit log</source></segment>
+      </unit>
+      <unit id="setup.disk.item.audit_contains">
+        <segment><source>Immutable, hash-chained history of every change</source></segment>
+      </unit>
+      <unit id="setup.disk.item.audit_size">
+        <segment><source>about 250 MB a year</source></segment>
+      </unit>
+      <unit id="setup.disk.total_note">
+        <segment><source>Estimate after the first year for a network of up to 500 hosts</source></segment>
+      </unit>
+      <unit id="setup.disk.total_size">
+        <segment><source>about 1.1 GB</source></segment>
+      </unit>
+      <unit id="setup.roles.lede">
+        <segment><source>Choose what this node does.</source></segment>
+      </unit>
+      <unit id="setup.roles.hint.home">
+        <segment><source>Home: one box runs all roles, so all four are selected.</source></segment>
+      </unit>
+      <unit id="setup.roles.hint.standard">
+        <segment><source>Standard: all four are selected on a first node. You can move roles to other nodes later.</source></segment>
+      </unit>
+      <unit id="setup.roles.hint.hardened">
+        <segment><source>Hardened: scanning is passive-only until you enable it per segment, so Probe starts unticked.</source></segment>
+      </unit>
+      <unit id="setup.roles.hint.lab">
+        <segment><source>Lab: one box runs all roles, so all four are selected.</source></segment>
+      </unit>
+      <unit id="setup.roles.group">
+        <notes><note category="description">Accessible name of the group of role checkboxes.</note></notes>
+        <segment><source>Roles</source></segment>
+      </unit>
+      <unit id="setup.roles.controller.description">
+        <segment><source>API, UI, replicated store and jobs.</source></segment>
+      </unit>
+      <unit id="setup.roles.dns.description">
+        <segment><source>Answers queries from a local copy.</source></segment>
+      </unit>
+      <unit id="setup.roles.dhcp.description">
+        <segment><source>Serves leases from a local copy.</source></segment>
+      </unit>
+      <unit id="setup.roles.probe.description">
+        <segment><source>Discovers devices in the networks it is attached to.</source></segment>
+      </unit>
+      <unit id="setup.roles.hint">
+        <notes><note category="description">amount is a size such as 250 MB.</note></notes>
+        <segment><source>About {amount} of memory</source></segment>
+      </unit>
+      <unit id="setup.roles.hint_probe">
+        <segment><source>About {amount} of memory, brief scan traffic</source></segment>
+      </unit>
+      <unit id="setup.roles.memory">
+        <segment><source>The selected roles need about {amount} of the {total} memory on this node.</source></segment>
+      </unit>
+      <unit id="setup.roles.memory_unknown_total">
+        <segment><source>The selected roles need about {amount} of memory.</source></segment>
+      </unit>
+      <unit id="setup.roles.memory_none">
+        <segment><source>No roles selected.</source></segment>
+      </unit>
+      <unit id="setup.roles.probe.title">
+        <segment><source>Probe networks</source></segment>
+      </unit>
+      <unit id="setup.roles.probe.aside">
+        <segment><source>The probe listens only on networks you tick</source></segment>
+      </unit>
+      <unit id="setup.roles.probe.none">
+        <segment><source>This node reported no networks to probe.</source></segment>
+      </unit>
+      <unit id="setup.roles.dmz.note">
+        <segment><source>The DMZ needs its own probe: it is a separate trust zone.</source></segment>
+      </unit>
+      <unit id="setup.roles.dmz.ticked">
+        <segment><source>Ticking it here lets this node see both the LAN and the DMZ.</source></segment>
+      </unit>
+      <unit id="setup.cluster.title">
+        <segment><source>Cluster</source></segment>
+      </unit>
+      <unit id="setup.cluster.new">
+        <segment><source>Start a new cluster</source></segment>
+      </unit>
+      <unit id="setup.cluster.new_description">
+        <segment><source>This node becomes the first controller of a new cluster.</source></segment>
+      </unit>
+      <unit id="setup.cluster.join">
+        <segment><source>Join an existing cluster</source></segment>
+      </unit>
+      <unit id="setup.cluster.later">
+        <notes><note category="description">Tag on a choice that is not available yet.</note></notes>
+        <segment><source>Later</source></segment>
+      </unit>
+      <unit id="setup.cluster.join_description">
+        <segment><source>The security profile and administrators come from the cluster. Joining arrives with multi-node clusters.</source></segment>
+      </unit>
+      <unit id="setup.done.lede">
+        <segment><source>Check your choices. Nothing is written until you finish setup; finishing creates the administrator, the certificate authority and the configuration of this node.</source></segment>
+      </unit>
+      <unit id="setup.done.choices">
+        <segment><source>Your choices</source></segment>
+      </unit>
+      <unit id="setup.done.profile">
+        <segment><source>Security profile</source></segment>
+      </unit>
+      <unit id="setup.done.admin">
+        <segment><source>Administrator</source></segment>
+      </unit>
+      <unit id="setup.done.passkey">
+        <segment><source>Passkey</source></segment>
+      </unit>
+      <unit id="setup.done.host">
+        <segment><source>Host name</source></segment>
+      </unit>
+      <unit id="setup.done.disk">
+        <segment><source>Data directory</source></segment>
+      </unit>
+      <unit id="setup.done.roles">
+        <segment><source>Roles</source></segment>
+      </unit>
+      <unit id="setup.done.cluster">
+        <segment><source>Cluster</source></segment>
+      </unit>
+      <unit id="setup.done.not_production">
+        <segment><source>Not for production</source></segment>
+      </unit>
+      <unit id="setup.done.passkey_optional">
+        <segment><source>Optional; you can add it right after setup</source></segment>
+      </unit>
+      <unit id="setup.done.passkey_required">
+        <segment><source>Required, added right after setup</source></segment>
+      </unit>
+      <unit id="setup.done.proxies">
+        <segment><source>{count, plural, one {# trusted proxy} other {# trusted proxies}}</source></segment>
+      </unit>
+      <unit id="setup.done.disk_unknown">
+        <segment><source>Not reported</source></segment>
+      </unit>
+      <unit id="setup.done.disk_override">
+        <segment><source>Unsupported disk, override on</source></segment>
+      </unit>
+      <unit id="setup.done.probe_on">
+        <segment><source>The probe listens on {networks}.</source></segment>
+      </unit>
+      <unit id="setup.done.probe_none">
+        <segment><source>The probe listens on no networks.</source></segment>
+      </unit>
+      <unit id="setup.done.lab_note">
+        <segment><source>Lab stays visible: a banner shows at the top of every page for as long as the profile is active.</source></segment>
+      </unit>
+      <unit id="setup.done.change">
+        <segment><source>Change</source></segment>
+      </unit>
+      <unit id="setup.done.change_item">
+        <notes><note category="description">Accessible name of a Change link in the summary; item is the row label.</note></notes>
+        <segment><source>Change {item}</source></segment>
+      </unit>
+      <unit id="setup.result.title">
+        <segment><source>Setup complete</source></segment>
+      </unit>
+      <unit id="setup.result.lede">
+        <segment><source>This node is set up. Tenko has not changed anything on your network yet, and every change from here on shows a preview first.</source></segment>
+      </unit>
+      <unit id="setup.result.codes.title">
+        <segment><source>Recovery codes</source></segment>
+      </unit>
+      <unit id="setup.result.codes.loading">
+        <segment><source>Creating recovery codes…</source></segment>
+      </unit>
+      <unit id="setup.result.codes.lede">
+        <segment><source>The administrator {user} exists. Store these recovery codes away from this machine. Each code works once, and Tenko cannot show them again after this step.</source></segment>
+      </unit>
+      <unit id="setup.result.codes.deferred">
+        <segment><source>Recovery codes are created together with your first passkey or authenticator app, and shown once. Add a passkey below and they appear here.</source></segment>
+      </unit>
+      <unit id="setup.result.passkey.title">
+        <segment><source>Passkey</source></segment>
+      </unit>
+      <unit id="setup.result.passkey.help.home">
+        <segment><source>Optional. A passkey lets you sign in without typing a PIN or password.</source></segment>
+      </unit>
+      <unit id="setup.result.passkey.help.standard">
+        <segment><source>Recommended. Standard requires MFA for administrators: a passkey counts, otherwise Tenko asks for an authenticator app at first sign-in.</source></segment>
+      </unit>
+      <unit id="setup.result.passkey.help.hardened">
+        <segment><source>Required for administrators in Hardened. It also satisfies the MFA requirement.</source></segment>
+      </unit>
+      <unit id="setup.result.passkey.help.lab">
+        <segment><source>Optional. A passkey lets you sign in without typing a PIN or password.</source></segment>
+      </unit>
+      <unit id="setup.result.passkey.add">
+        <segment><source>Add a passkey</source></segment>
+      </unit>
+      <unit id="setup.result.passkey.waiting">
+        <segment><source>Touch your security key</source></segment>
+      </unit>
+      <unit id="setup.result.passkey.added">
+        <segment><source>Passkey added</source></segment>
+      </unit>
+      <unit id="setup.result.passkey.unavailable">
+        <segment><source>This browser or connection cannot create passkeys. Open Tenko by its host name over HTTPS to add one.</source></segment>
+      </unit>
+      <unit id="setup.result.passkey_label">
+        <notes><note category="description">Name given to the passkey that is added at the end of setup.</note></notes>
+        <segment><source>First passkey</source></segment>
+      </unit>
+      <unit id="setup.result.ca.title">
+        <segment><source>Internal certificate authority</source></segment>
+      </unit>
+      <unit id="setup.result.ca.help">
+        <segment><source>SHA-256 fingerprint. It identifies the certificate; it is not a secret and is safe to share. Compare it when you add nodes or trust the CA in a browser.</source></segment>
+      </unit>
+      <unit id="setup.result.ca.copy">
+        <segment><source>Copy fingerprint</source></segment>
+      </unit>
+      <unit id="setup.result.ca.copied">
+        <segment><source>Fingerprint copied</source></segment>
+      </unit>
+      <unit id="setup.result.ca.copy_failed">
+        <segment><source>The fingerprint could not be copied. Select it and copy by hand.</source></segment>
+      </unit>
+      <unit id="setup.result.next.title">
+        <segment><source>What to do next</source></segment>
+      </unit>
+      <unit id="setup.result.next.ipam">
+        <segment><source>Open IPAM</source></segment>
+      </unit>
+      <unit id="setup.result.next.ipam_description">
+        <segment><source>See the networks and hosts Tenko already found.</source></segment>
+      </unit>
+      <unit id="setup.result.next.import">
+        <segment><source>Import your spreadsheet</source></segment>
+      </unit>
+      <unit id="setup.result.next.import_description">
+        <segment><source>Bring in networks and hosts from CSV or Excel, with a preview first.</source></segment>
+      </unit>
+      <unit id="setup.result.next.unifi">
+        <segment><source>Connect UniFi</source></segment>
+      </unit>
+      <unit id="setup.result.next.unifi_description">
+        <segment><source>Read clients and networks from your controller.</source></segment>
+      </unit>
+      <unit id="setup.result.next.proxmox">
+        <segment><source>Connect Proxmox</source></segment>
+      </unit>
+      <unit id="setup.result.next.proxmox_description">
+        <segment><source>Find virtual machines and containers and keep DNS and DHCP in step.</source></segment>
+      </unit>
+      <unit id="setup.result.next.passkey_first">
+        <notes><note category="description">Tag, and title of the toast, when a connector would need credentials in the vault but the account signs in with a PIN only.</note></notes>
+        <segment><source>Add a passkey first</source></segment>
+      </unit>
+      <unit id="setup.result.next.passkey_first_unifi">
+        <segment><source>You signed in with a PIN, and connecting UniFi stores credentials in the vault. A PIN alone is no longer allowed after that.</source></segment>
+      </unit>
+      <unit id="setup.result.next.passkey_first_proxmox">
+        <segment><source>You signed in with a PIN, and connecting Proxmox stores credentials in the vault. A PIN alone is no longer allowed after that.</source></segment>
+      </unit>
+      <unit id="setup.result.next.connector_later">
+        <segment><source>The connector arrives in a later build. Its credentials will be stored in the vault.</source></segment>
+      </unit>
+      <unit id="setup.gate.token">
+        <notes><note category="description">Why Continue is blocked; the text is shown next to the button.</note></notes>
+        <segment><source>Enter the setup token to continue.</source></segment>
+      </unit>
+      <unit id="setup.gate.lab_ack">
+        <segment><source>Tick the confirmation to continue with Lab.</source></segment>
+      </unit>
+      <unit id="setup.gate.user_name">
+        <segment><source>Enter a valid user name.</source></segment>
+      </unit>
+      <unit id="setup.gate.display_name">
+        <segment><source>Enter a display name.</source></segment>
+      </unit>
+      <unit id="setup.gate.password.pin">
+        <segment><source>Enter a PIN to continue.</source></segment>
+      </unit>
+      <unit id="setup.gate.password.password">
+        <segment><source>Enter a password to continue.</source></segment>
+      </unit>
+      <unit id="setup.gate.password.passphrase">
+        <segment><source>Enter a passphrase to continue.</source></segment>
+      </unit>
+      <unit id="setup.gate.password_pending">
+        <segment><source>Checking the password against the policy and known breaches</source></segment>
+      </unit>
+      <unit id="setup.gate.password_error">
+        <segment><source>The password could not be checked. Try again.</source></segment>
+      </unit>
+      <unit id="setup.gate.password_policy">
+        <segment><source>The password does not meet every item on the checklist yet.</source></segment>
+      </unit>
+      <unit id="setup.gate.tls_plain">
+        <segment><source>Plain HTTP is available only with the Lab profile.</source></segment>
+      </unit>
+      <unit id="setup.gate.host_empty">
+        <segment><source>Enter the host name administrators will use.</source></segment>
+      </unit>
+      <unit id="setup.gate.host_invalid">
+        <segment><source>Enter a valid DNS host name, not an IP address.</source></segment>
+      </unit>
+      <unit id="setup.gate.proxies_empty">
+        <segment><source>List at least one trusted proxy address or prefix.</source></segment>
+      </unit>
+      <unit id="setup.gate.proxies_invalid">
+        <segment><source>Fix the entries that are not IP addresses or prefixes.</source></segment>
+      </unit>
+      <unit id="setup.gate.disk">
+        <segment><source>Move the data directory to an SSD, or tick the override.</source></segment>
+      </unit>
+      <unit id="setup.gate.roles_none">
+        <segment><source>Select at least one role.</source></segment>
+      </unit>
+      <unit id="setup.gate.roles_controller">
+        <segment><source>A new cluster needs the Controller role on its first node.</source></segment>
+      </unit>
+      <unit id="setup.gate.probe_networks">
+        <segment><source>Tick a network for the probe, or untick the Probe role.</source></segment>
+      </unit>
+      <unit id="setup.gate.codes_loading">
+        <segment><source>Creating the recovery codes</source></segment>
+      </unit>
+      <unit id="setup.gate.codes_ack">
+        <segment><source>Confirm that you have saved the recovery codes.</source></segment>
+      </unit>
+      <unit id="setup.gate.passkey_waiting">
+        <segment><source>Waiting for your security key</source></segment>
+      </unit>
+      <unit id="setup.gate.passkey_required">
+        <segment><source>Hardened requires a passkey for administrators.</source></segment>
+      </unit>
+    </group>
+    <group id="toggles">
+      <unit id="toggles.password_policy.name">
+        <notes><note category="description">TGL-01</note></notes>
+        <segment><source>Password policy preset</source></segment>
+      </unit>
+      <unit id="toggles.password_policy.pin">
+        <segment><source>PIN: digits only, at least 4</source></segment>
+      </unit>
+      <unit id="toggles.password_policy.standard">
+        <segment><source>Standard: at least 12 characters</source></segment>
+      </unit>
+      <unit id="toggles.password_policy.hardened">
+        <segment><source>Hardened: a passphrase of at least 16 characters</source></segment>
+      </unit>
+      <unit id="toggles.password_policy.custom">
+        <segment><source>Custom: at least {min} characters</source></segment>
+      </unit>
+      <unit id="toggles.mfa.name">
+        <notes><note category="description">TGL-02</note></notes>
+        <segment><source>MFA requirement</source></segment>
+      </unit>
+      <unit id="toggles.mfa.optional">
+        <segment><source>Optional</source></segment>
+      </unit>
+      <unit id="toggles.mfa.administrators">
+        <segment><source>Required for administrators</source></segment>
+      </unit>
+      <unit id="toggles.mfa.everyone">
+        <segment><source>Required for all accounts</source></segment>
+      </unit>
+      <unit id="toggles.passkey_for_admins.name">
+        <notes><note category="description">TGL-03</note></notes>
+        <segment><source>Passkey required for administrators</source></segment>
+      </unit>
+      <unit id="toggles.session.name">
+        <notes><note category="description">TGL-04</note></notes>
+        <segment><source>Session lifetime (absolute / idle)</source></segment>
+      </unit>
+      <unit id="toggles.session.value">
+        <segment><source>{absolute} / {idle}</source></segment>
+      </unit>
+      <unit id="toggles.token_max_days.name">
+        <notes><note category="description">TGL-05</note></notes>
+        <segment><source>API token maximum lifetime</source></segment>
+      </unit>
+      <unit id="toggles.token_max_days.unlimited">
+        <segment><source>No maximum</source></segment>
+      </unit>
+      <unit id="toggles.token_max_days.days">
+        <segment><source>{days, plural, one {# day} other {# days}}</source></segment>
+      </unit>
+      <unit id="toggles.breach_check.name">
+        <notes><note category="description">TGL-06</note></notes>
+        <segment><source>Breached-password check</source></segment>
+      </unit>
+      <unit id="toggles.breach_check.off">
+        <segment><source>Off</source></segment>
+      </unit>
+      <unit id="toggles.breach_check.online">
+        <segment><source>On, online with k-anonymity</source></segment>
+      </unit>
+      <unit id="toggles.breach_check.offline">
+        <segment><source>On, offline list only</source></segment>
+      </unit>
+      <unit id="toggles.breach_check.offline_preferred">
+        <segment><source>On, offline list preferred</source></segment>
+      </unit>
+      <unit id="toggles.lockout.name">
+        <notes><note category="description">TGL-07</note></notes>
+        <segment><source>Lockout</source></segment>
+      </unit>
+      <unit id="toggles.lockout.off">
+        <segment><source>Off</source></segment>
+      </unit>
+      <unit id="toggles.lockout.progressive_delay">
+        <segment><source>Progressive delay</source></segment>
+      </unit>
+      <unit id="toggles.lockout.delay_then_temporary_lock">
+        <segment><source>Delay, then a temporary lock</source></segment>
+      </unit>
+      <unit id="toggles.lockout.lock_until_unlock">
+        <segment><source>Lock until an administrator unlocks it, with an alert</source></segment>
+      </unit>
+    </group>
+    <group id="recovery">
+      <unit id="recovery.list_label">
+        <segment><source>Recovery codes</source></segment>
+      </unit>
+      <unit id="recovery.download">
+        <segment><source>Download codes</source></segment>
+      </unit>
+      <unit id="recovery.print">
+        <segment><source>Print codes</source></segment>
+      </unit>
+      <unit id="recovery.copied">
+        <segment><source>Recovery codes copied</source></segment>
+      </unit>
+      <unit id="recovery.copy_failed">
+        <segment><source>The codes could not be copied. Select them and copy by hand.</source></segment>
+      </unit>
+      <unit id="recovery.saved">
+        <segment><source>I have saved the recovery codes</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

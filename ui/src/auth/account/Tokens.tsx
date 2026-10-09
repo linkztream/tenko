@@ -1,0 +1,327 @@
+import { createMemo, createSignal, For, Match, Show, Switch } from "solid-js";
+import { api } from "../../api/client";
+import { createLiveQuery } from "../../api/live";
+import { fetchAll } from "../../api/paginate";
+import type { CreatedToken, TokenInfo } from "../../api/types";
+import { ConfirmDialog, Dialog } from "../../components/Dialog";
+import { Icon } from "../../components/Icon";
+import { ErrorNotice, Notice } from "../../components/Notice";
+import { toast } from "../../components/toast";
+import { formatDate, formatNumber, formatRelative, t } from "../../i18n";
+import { session } from "../session";
+import { lifetimeChoices, tokenMaxDays } from "./client";
+import { copyText, describeError, latest } from "./shared";
+
+/** The value of the lifetime choice that creates a token without an expiry. */
+const NO_EXPIRY = "none";
+
+/** Personal API tokens (IAM-10): list, create (shown once) and revoke. */
+export default function Tokens() {
+  const query = createLiveQuery<TokenInfo[]>({
+    topics: ["admin"],
+    fetch: async (signal) => {
+      const all = await fetchAll<TokenInfo>("/api/v1/auth/tokens", { signal });
+      return { value: all.items, revision: all.revision };
+    },
+  });
+  const [creating, setCreating] = createSignal(false);
+  const [revoking, setRevoking] = createSignal<TokenInfo | null>(null);
+  const [revokeError, setRevokeError] = createSignal<string | null>(null);
+  const [busy, setBusy] = createSignal(false);
+
+  const tokens = () => latest(query);
+
+  const revoke = async (token: TokenInfo) => {
+    setRevokeError(null);
+    setBusy(true);
+    try {
+      await api.delete("/api/v1/auth/tokens/{id}", { path: { id: token.id } });
+      setRevoking(null);
+      toast({ title: t("account.tokens.revoked", { name: token.name }), kind: "ok" });
+      query.refetch();
+    } catch (err) {
+      setRevokeError(describeError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const expired = (token: TokenInfo) => !!token.expires_at && Date.parse(token.expires_at) <= Date.now();
+
+  return (
+    <div class="page-body acct-stack">
+      <section class="page-section" aria-labelledby="acct-tokens">
+        <div class="acct-head">
+          <h2 id="acct-tokens">{t("account.tokens.title")}</h2>
+          <button type="button" class="btn" onClick={() => setCreating(true)}>
+            <Icon name="plus" size="sm" />
+            {t("account.tokens.create")}
+          </button>
+        </div>
+        <p>{t("account.tokens.lede")}</p>
+
+        <Show when={query.value.error}>
+          <div class="note bad" role="alert">
+            <Icon name="alert" size="sm" />
+            <span class="grow">{describeError(query.value.error)}</span>
+            <button type="button" class="btn sm" onClick={() => query.refetch()}>
+              {t("common.action.retry")}
+            </button>
+          </div>
+        </Show>
+
+        <Show
+          when={tokens()}
+          fallback={
+            <Show when={!query.value.error}>
+              <p class="muted">{t("common.loading")}</p>
+            </Show>
+          }
+        >
+          {(list) => (
+            <Show when={list().length > 0} fallback={<p class="muted">{t("account.tokens.none")}</p>}>
+              <div class="table-wrap">
+                <table class="plain">
+                  <caption class="sr-only">{t("account.tokens.title")}</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">{t("account.tokens.col.name")}</th>
+                      <th scope="col">{t("account.tokens.col.prefix")}</th>
+                      <th scope="col">{t("account.tokens.col.created")}</th>
+                      <th scope="col">{t("account.tokens.col.expires")}</th>
+                      <th scope="col">{t("account.tokens.col.last_used")}</th>
+                      <th scope="col" class="r">
+                        <span class="sr-only">{t("account.sessions.col.actions")}</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For each={list()}>
+                      {(token) => (
+                        <tr>
+                          <td>{token.name}</td>
+                          <td>
+                            <span class="mono">{token.prefix}</span>
+                            <span aria-hidden="true">…</span>
+                          </td>
+                          <td class="num">{formatDate(token.created_at)}</td>
+                          <td class="num">
+                            <Show when={token.expires_at} fallback={t("common.never")}>
+                              {(at) => (
+                                <>
+                                  {formatDate(at())}
+                                  <Show when={expired(token)}>
+                                    <span class="tag conflict acct-this">{t("account.tokens.expired")}</span>
+                                  </Show>
+                                </>
+                              )}
+                            </Show>
+                          </td>
+                          <td class="num">
+                            <Show when={token.last_used_at} fallback={t("common.never")}>
+                              {(at) => <span title={formatDate(at(), { dateStyle: "medium", timeStyle: "short" })}>{formatRelative(at())}</span>}
+                            </Show>
+                          </td>
+                          <td class="r">
+                            <button
+                              type="button"
+                              class="btn sm"
+                              aria-label={t("account.tokens.revoke_named", { name: token.name })}
+                              onClick={() => {
+                                setRevokeError(null);
+                                setRevoking(token);
+                              }}
+                            >
+                              {t("common.action.revoke")}
+                            </button>
+                          </td>
+                        </tr>
+                      )}
+                    </For>
+                  </tbody>
+                </table>
+              </div>
+            </Show>
+          )}
+        </Show>
+      </section>
+
+      <Show when={creating()}>
+        <CreateTokenDialog onCreated={() => query.refetch()} onClose={() => setCreating(false)} />
+      </Show>
+
+      <Show when={revoking()}>
+        {(token) => (
+          <ConfirmDialog
+            title={t("account.tokens.revoke_title", { name: token().name })}
+            body={
+              <>
+                <p>{t("account.tokens.revoke_body")}</p>
+                <Show when={revokeError()}>
+                  <Notice kind="bad" role="alert">
+                    {revokeError()}
+                  </Notice>
+                </Show>
+              </>
+            }
+            confirmLabel={t("common.action.revoke")}
+            cancelLabel={t("common.action.cancel")}
+            danger
+            busy={busy()}
+            onConfirm={() => void revoke(token())}
+            onClose={() => setRevoking(null)}
+          />
+        )}
+      </Show>
+    </div>
+  );
+}
+
+/**
+ * Asks for a name and a lifetime, then shows the token once. The dialog stays open until
+ * the person confirms the token is stored.
+ */
+function CreateTokenDialog(props: { onCreated: () => void; onClose: () => void }) {
+  const max = createMemo(() => {
+    const profile = session()?.profile;
+    return profile ? tokenMaxDays(profile) : 30;
+  });
+  const choices = createMemo(() => lifetimeChoices(max()));
+  const [name, setName] = createSignal("");
+  const [lifetime, setLifetime] = createSignal(String(choices().includes(90) ? 90 : (choices()[0] ?? 30)));
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal<unknown>(null);
+  const [created, setCreated] = createSignal<CreatedToken | null>(null);
+  const [stored, setStored] = createSignal(false);
+  let nameInput!: HTMLInputElement;
+
+  const submit = async (e: Event) => {
+    e.preventDefault();
+    if (!name().trim()) {
+      nameInput.focus();
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    try {
+      const days = lifetime() === NO_EXPIRY ? null : Number(lifetime());
+      const token = await api.post("/api/v1/auth/tokens", { body: { name: name().trim(), expires_in_days: days } });
+      setCreated(token);
+      props.onCreated();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const closeWhenStored = () => {
+    if (!created() || stored()) props.onClose();
+  };
+
+  return (
+    <Switch>
+      <Match when={created()}>
+        {(token) => (
+          <Dialog label={t("account.tokens.created_title")} onClose={closeWhenStored} class="dialog wide">
+            <h2 class="dialog-title">{t("account.tokens.created_title")}</h2>
+            <div class="dialog-body">
+              <p>{t("account.tokens.created_body", { name: token().info.name })}</p>
+              <div class="form-row">
+                <code class="secret acct-token">
+                  {token().token}
+                </code>
+                <button type="button" class="btn sm" onClick={() => void copyText(token().token)}>
+                  <Icon name="copy" size="sm" />
+                  {t("common.action.copy")}
+                </button>
+              </div>
+              <label class="ackrow">
+                <input
+                  type="checkbox"
+                  class="cb"
+                  checked={stored()}
+                  onChange={(e) => setStored(e.currentTarget.checked)}
+                />
+                {t("account.tokens.stored")}
+              </label>
+            </div>
+            <div class="dialog-actions">
+              <button type="button" class="btn primary" disabled={!stored()} onClick={closeWhenStored}>
+                {t("common.action.close")}
+              </button>
+            </div>
+          </Dialog>
+        )}
+      </Match>
+      <Match when={true}>
+        <Dialog
+          label={t("account.tokens.create_title")}
+          onClose={props.onClose}
+          class="dialog"
+          initialFocus={() => nameInput}
+        >
+          <h2 class="dialog-title">{t("account.tokens.create_title")}</h2>
+          <form class="dialog-body" onSubmit={(e) => void submit(e)} novalidate>
+            <div class="field">
+              <label for="acct-token-name">{t("account.tokens.name")}</label>
+              <input
+                ref={nameInput}
+                id="acct-token-name"
+                class="input"
+                maxlength={100}
+                autocomplete="off"
+                aria-describedby="acct-token-name-help"
+                value={name()}
+                onInput={(e) => setName(e.currentTarget.value)}
+              />
+              <span class="help" id="acct-token-name-help">
+                {t("account.tokens.name_help")}
+              </span>
+            </div>
+            <div class="field">
+              <label for="acct-token-lifetime">{t("account.tokens.lifetime")}</label>
+              <select
+                id="acct-token-lifetime"
+                class="select"
+                aria-describedby="acct-token-lifetime-help"
+                value={lifetime()}
+                onChange={(e) => setLifetime(e.currentTarget.value)}
+              >
+                <For each={choices()}>
+                  {(days) => (
+                    <option value={String(days)} selected={lifetime() === String(days)}>
+                      {t("account.tokens.days", { count: days })}
+                    </option>
+                  )}
+                </For>
+                <Show when={max() === null}>
+                  <option value={NO_EXPIRY} selected={lifetime() === NO_EXPIRY}>
+                    {t("account.tokens.no_expiry")}
+                  </option>
+                </Show>
+              </select>
+              <span class="help" id="acct-token-lifetime-help">
+                {max() === null
+                  ? t("account.tokens.max_none", { profile: t(`profile.${session()?.profile ?? "lab"}.name`) })
+                  : t("account.tokens.max_days", {
+                      profile: t(`profile.${session()?.profile ?? "home"}.name`),
+                      days: formatNumber(max() ?? 0),
+                    })}
+              </span>
+            </div>
+            <ErrorNotice error={error()} />
+            <div class="dialog-actions">
+              <button type="button" class="btn ghost" onClick={() => props.onClose()}>
+                {t("common.action.cancel")}
+              </button>
+              <button type="submit" class="btn primary" disabled={busy()}>
+                {t("common.action.create")}
+              </button>
+            </div>
+          </form>
+        </Dialog>
+      </Match>
+    </Switch>
+  );
+}

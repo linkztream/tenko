@@ -1,0 +1,206 @@
+import { A } from "@solidjs/router";
+import { For, Show } from "solid-js";
+import { paths } from "../../app/paths";
+import { session } from "../../auth/session";
+import { webauthnAvailable } from "../../auth/webauthn";
+import { Icon } from "../../components/Icon";
+import { ErrorNotice, Notice } from "../../components/Notice";
+import { RecoveryCodes } from "../../components/RecoveryCodes";
+import { toast } from "../../components/toast";
+import { t } from "../../i18n";
+import { fingerprintRows, fingerprintText } from "../format";
+import { FOCUS } from "../gates";
+import { useWizard } from "../controller";
+
+/** After the request succeeded: recovery codes, the passkey, the CA fingerprint, what to do next. */
+export function Result() {
+  const w = useWizard();
+  const needsPasskey = () => session()?.strength === "pin" && w.after.passkey.status !== "added";
+  const passkeyTag = () =>
+    w.state.profile === "hardened" ? t("common.required") : w.state.profile === "standard" ? t("common.recommended") : t("common.optional");
+
+  const copyFingerprint = async () => {
+    try {
+      await navigator.clipboard.writeText(fingerprintText(w.after.caFingerprint ?? ""));
+      toast({ title: t("setup.result.ca.copied"), kind: "ok" });
+    } catch {
+      toast({ title: t("setup.result.ca.copy_failed"), kind: "bad" });
+    }
+  };
+
+  const connect = (which: "unifi" | "proxmox") =>
+    w.open(() => {
+      if (needsPasskey()) {
+        toast({
+          title: t("setup.result.next.passkey_first"),
+          body: t(which === "unifi" ? "setup.result.next.passkey_first_unifi" : "setup.result.next.passkey_first_proxmox"),
+          kind: "info",
+          actions: [{ label: t("setup.result.passkey.add"), primary: true, run: () => document.getElementById(FOCUS.passkey)?.focus() }],
+        });
+        return;
+      }
+      toast({
+        title: t(which === "unifi" ? "setup.result.next.unifi" : "setup.result.next.proxmox"),
+        body: t("setup.result.next.connector_later"),
+        kind: "info",
+      });
+    });
+
+  /** Leaving through a link would skip the recovery codes: ask for them first. */
+  const guard = (e: MouseEvent) => {
+    if (w.openGate()) {
+      e.preventDefault();
+      w.open();
+    }
+  };
+
+  return (
+    <div>
+      <p class="wz-lede">{t("setup.result.lede")}</p>
+
+      <div class="wz-blk tight">
+        <h2>{t("setup.result.codes.title")}</h2>
+        <div class="wz-codes" id={FOCUS.codesAck}>
+          <Show when={w.after.codes.status === "loading"}>
+            <p class="wz-help wz-loading" role="status">
+              {t("setup.result.codes.loading")}
+            </p>
+          </Show>
+          <Show when={w.after.codes.status === "ready"}>
+            <p class="wz-lede">{t("setup.result.codes.lede", { user: w.state.userName.trim() })}</p>
+            <RecoveryCodes
+              codes={w.after.codes.codes}
+              fileBase={w.state.hostName.trim()}
+              saved={w.after.codesSaved}
+              onSavedChange={(saved) => w.setCodesSaved(saved)}
+            />
+          </Show>
+          <Show when={w.after.codes.status === "deferred"}>
+            <Notice kind="info">{t("setup.result.codes.deferred")}</Notice>
+          </Show>
+          <Show when={w.after.codes.status === "error"}>
+            <ErrorNotice error={w.after.codes.error} />
+            <div class="form-row">
+              <button type="button" class="btn sm" onClick={() => void w.loadCodes()}>
+                {t("common.action.retry")}
+              </button>
+            </div>
+          </Show>
+        </div>
+      </div>
+
+      <div class="wz-blk">
+        <h2>
+          {t("setup.result.passkey.title")} <span class="tag" classList={{ accent: w.state.profile === "hardened" }}>{passkeyTag()}</span>
+        </h2>
+        <div class="wz-pk">
+          <div class="info">
+            <p class="wz-help ink">{t(`setup.result.passkey.help.${w.state.profile}`)}</p>
+            <Show when={!webauthnAvailable()}>
+              <p class="wz-help gap">{t("setup.result.passkey.unavailable")}</p>
+            </Show>
+            <Show when={w.after.passkey.error}>
+              {(message) => (
+                <p class="err" role="alert">
+                  {message()}
+                </p>
+              )}
+            </Show>
+          </div>
+          <div class="act">
+            <Show
+              when={w.after.passkey.status !== "added"}
+              fallback={
+                <span class="added" role="status">
+                  <Icon name="check" size="sm" />
+                  {t("setup.result.passkey.added")}
+                </span>
+              }
+            >
+              <button
+                type="button"
+                id={FOCUS.passkey}
+                class="btn"
+                aria-disabled={w.after.passkey.status === "waiting"}
+                onClick={() => void w.addPasskey()}
+              >
+                <Icon name="key" size="sm" />
+                {w.after.passkey.status === "waiting" ? t("setup.result.passkey.waiting") : t("setup.result.passkey.add")}
+              </button>
+            </Show>
+          </div>
+        </div>
+      </div>
+
+      <Show when={w.after.caFingerprint}>
+        {(fp) => (
+          <div class="wz-blk">
+            <h2 id="wz-ca-title">{t("setup.result.ca.title")}</h2>
+            <div class="wz-fp">
+              <div class="grow">
+                <div class="wz-help ink">{t("setup.result.ca.help")}</div>
+                <div class="hex" role="group" aria-labelledby="wz-ca-title">
+                  <For each={fingerprintRows(fp())}>
+                    {(row) => (
+                      <div>
+                        <For each={row}>{(pair, i) => <>{i() > 0 ? " " : ""}<span>{pair}</span></>}</For>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </div>
+              <button type="button" class="btn sm" onClick={() => void copyFingerprint()}>
+                <Icon name="copy" size="sm" />
+                {t("setup.result.ca.copy")}
+              </button>
+            </div>
+          </div>
+        )}
+      </Show>
+
+      <div class="wz-blk">
+        <h2>{t("setup.result.next.title")}</h2>
+        <div class="wz-nexts">
+          <A class="wz-next" href={paths.ipam()} onClick={guard}>
+            <Icon name="ipam" />
+            <span>
+              <span class="t">{t("setup.result.next.ipam")}</span>
+              <span class="d">{t("setup.result.next.ipam_description")}</span>
+            </span>
+          </A>
+          <A class="wz-next" href={paths.imports()} onClick={guard}>
+            <Icon name="folder" />
+            <span>
+              <span class="t">{t("setup.result.next.import")}</span>
+              <span class="d">{t("setup.result.next.import_description")}</span>
+            </span>
+          </A>
+          <button type="button" class="wz-next" onClick={() => connect("unifi")}>
+            <Icon name="wifi" />
+            <span>
+              <span class="t">
+                {t("setup.result.next.unifi")}
+                <Show when={needsPasskey()}>
+                  <span class="tag discrepancy">{t("setup.result.next.passkey_first")}</span>
+                </Show>
+              </span>
+              <span class="d">{t("setup.result.next.unifi_description")}</span>
+            </span>
+          </button>
+          <button type="button" class="wz-next" onClick={() => connect("proxmox")}>
+            <Icon name="vm" />
+            <span>
+              <span class="t">
+                {t("setup.result.next.proxmox")}
+                <Show when={needsPasskey()}>
+                  <span class="tag discrepancy">{t("setup.result.next.passkey_first")}</span>
+                </Show>
+              </span>
+              <span class="d">{t("setup.result.next.proxmox_description")}</span>
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

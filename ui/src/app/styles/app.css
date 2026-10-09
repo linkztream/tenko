@@ -1,0 +1,146 @@
+/*
+ * Product additions on top of design.css: what the mockups drew with inline styles or
+ * left implicit (page scaffolding, dialogs, focus helpers). Same tokens, same rules.
+ */
+
+/* The icon sprite lives in the DOM but takes no space. */
+.icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* The two-tone mark: tails in the accent (sign-in page and wizard only). */
+.mark-tails-duo { fill: var(--accent); }
+
+/* Skip link: first in the tab order, visible only when focused. */
+.skip-link {
+  position: absolute; left: var(--sp-4); top: -100px; z-index: var(--z-toast);
+  padding: var(--sp-3) var(--sp-5); border-radius: var(--r-2);
+  background: var(--accent); color: var(--accent-ink);
+}
+.skip-link:focus { top: var(--sp-4); text-decoration: none; }
+.main:focus { outline: none; }
+
+/* The rail highlights the area of the current page, not only its exact path. */
+.rail a.active { background: var(--accent-wash); color: var(--accent); }
+.rail a.active::before {
+  content: ""; position: absolute; left: -4px; top: 8px; bottom: 8px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--accent);
+}
+.rail a.bottom { margin-top: auto; }
+
+/* Lab profile pill in the top bar. */
+.pill.danger { color: var(--danger-ink); border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); background: var(--danger-wash); }
+.pill:hover { text-decoration: none; }
+
+/* Toasts: icon color by kind (was inline in the mockup script). */
+.toast-icon { color: var(--accent); display: inline-grid; place-items: center; }
+.toast-icon.ok { color: var(--job-done); }
+.toast-icon.bad { color: var(--job-failed); }
+.toast-close { width: 22px; height: 22px; }
+
+/* Status bar link to the jobs. */
+.statusbar a.status-jobs { display: flex; align-items: center; gap: 6px; color: inherit; text-decoration: none; }
+.statusbar a.status-jobs:hover { background: var(--surface-3); color: var(--ink); }
+
+/* Account menu additions. */
+.acct .row.items { padding: var(--sp-2) 0; }
+.acct .select { width: 100%; }
+
+/* Dialogs (confirmations); the palette and the sheet use their own classes. */
+.dialog {
+  position: absolute; left: 50%; top: 16vh; transform: translateX(-50%);
+  width: min(480px, calc(100vw - 32px));
+  display: grid; gap: var(--sp-5);
+  padding: var(--sp-7) var(--sp-8);
+  border: 1px solid var(--line-strong); border-radius: var(--r-4);
+  background: var(--surface); box-shadow: var(--shadow-drag);
+}
+.dialog:focus { outline: none; }
+.dialog-title { font-size: var(--fs-16); }
+.dialog-body { color: var(--ink-2); line-height: var(--lh-text); display: grid; gap: var(--sp-4); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: var(--sp-3); }
+.palette:focus, .sheet:focus { outline: none; }
+.sheet-note { margin-top: var(--sp-7); font-size: var(--fs-12); }
+.palette-empty { padding: var(--sp-8); }
+
+/* Pages inside the shell. */
+.page { display: flex; flex-direction: column; min-height: 0; flex: 1; overflow: auto; }
+.page-head h1:focus { outline: none; }
+.page-body { padding: var(--sp-6); display: grid; gap: var(--sp-6); align-content: start; max-width: 1100px; }
+.page-body.wide { max-width: none; }
+.page-section { display: grid; gap: var(--sp-4); }
+.page-section > h2 { font-size: var(--fs-14); display: flex; align-items: center; gap: var(--sp-4); }
+.page-section > h2 .aside { margin-left: auto; font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); }
+.page-section > p { color: var(--ink-2); line-height: var(--lh-text); max-width: 72ch; }
+
+/* Sub-navigation of settings and account pages (tabs as links). */
+.subnav { display: flex; gap: var(--sp-5); border-bottom: 1px solid var(--line); padding: 0 var(--sp-6); background: var(--surface); }
+.subnav a { position: relative; display: inline-flex; align-items: center; height: 36px; color: var(--ink-3); font-weight: var(--fw-medium); text-decoration: none; }
+.subnav a:hover { color: var(--ink); }
+.subnav a.active { color: var(--ink); }
+.subnav a.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--accent); border-radius: 2px 2px 0 0; }
+
+/* Dashboard tiles. */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-5); }
+.tile { padding: var(--sp-5) var(--sp-6); display: grid; gap: var(--sp-3); }
+.tile h2 { font-size: var(--fs-12); font-weight: var(--fw-medium); color: var(--ink-3); }
+.tile-value { font-size: var(--fs-24); font-weight: var(--fw-semibold); line-height: var(--lh-tight); }
+.tile p { font-size: var(--fs-12); }
+
+/* Simple lists and tables outside the data grid. */
+.list { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--sp-3); }
+table.plain { width: 100%; border-collapse: collapse; font-size: var(--fs-13); background: var(--surface); }
+table.plain th { padding: 0 var(--cell-px); height: 30px; text-align: left; color: var(--ink-3); font-size: var(--fs-12); font-weight: var(--fw-medium); background: var(--surface-2); border-bottom: 1px solid var(--line-strong); white-space: nowrap; }
+table.plain td { padding: 0 var(--cell-px); height: var(--row-h); border-bottom: 1px solid var(--line); vertical-align: middle; }
+table.plain td.r, table.plain th.r { text-align: right; }
+table.plain tr:hover td { background: var(--surface-2); }
+.table-wrap { border: 1px solid var(--line); border-radius: var(--r-3); overflow: auto; }
+
+/* Forms. */
+.form { display: grid; gap: var(--sp-5); max-width: 520px; }
+.form .input, .form .select { width: 100%; }
+.form-row { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.field .help.bad, .help.bad { color: var(--danger-ink); }
+.input.bad { border-color: var(--danger); }
+.input[aria-invalid="true"] { border-color: var(--danger); }
+textarea.input { height: auto; padding: var(--sp-3) var(--sp-4); line-height: var(--lh-ui); }
+
+/* Notes inside pages and cards (shared with the wizard). */
+.note { display: flex; gap: var(--sp-4); align-items: flex-start; padding: var(--sp-5) var(--sp-6); border: 1px solid var(--line); border-radius: var(--r-3); background: var(--surface-2); color: var(--ink-2); font-size: var(--fs-12); line-height: var(--lh-text); }
+.note > svg.i { margin-top: 2px; color: var(--ink-3); }
+.note .grow { flex: 1; min-width: 0; }
+.note strong { color: var(--ink); }
+.note.warn { background: var(--warn-wash); border-color: color-mix(in srgb, var(--discrepancy-mark) 60%, var(--line)); color: var(--ink); }
+.note.warn > svg.i, .note.warn strong { color: var(--warn-ink); }
+.note.bad { background: var(--danger-wash); border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); color: var(--ink); }
+.note.bad > svg.i, .note.bad strong { color: var(--danger-ink); }
+.note.ok > svg.i { color: var(--ok-ink); }
+
+/* One-time secrets (recovery codes, tokens): selectable, never truncated. */
+.secret { font-family: var(--font-data); font-variant-ligatures: none; user-select: all; overflow-wrap: anywhere; padding: var(--sp-4) var(--sp-5); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface-2); }
+.codes { list-style: none; counter-reset: c; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3) var(--sp-5); max-width: 440px; }
+.codes li { counter-increment: c; display: flex; align-items: baseline; gap: var(--sp-4); padding: 6px var(--sp-5); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface-2); font-family: var(--font-data); font-size: var(--fs-14); font-variant-ligatures: none; }
+.codes li::before { content: counter(c); min-width: 14px; text-align: right; color: var(--ink-3); font: var(--fw-regular) var(--fs-11) / 1 var(--font-ui); }
+
+/* Deviation markers on settings (SECURITY-PROFILES.md: the UI shows every deviation). */
+.deviation { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-11); font-weight: var(--fw-medium); color: var(--warn-ink); }
+.deviation.weak { color: var(--danger-ink); }
+
+/* Splash while the session is checked. */
+.splash { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: var(--sp-5); color: var(--ink-3); }
+.splash-mark { width: 48px; height: 48px; color: var(--ink-4); }
+
+/* Printing recovery codes: only the sheet. */
+@media print {
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area { position: absolute; left: 0; top: 0; }
+}
+
+/* Action banner: the account must add a factor or change its password. */
+.banner.warn { background: var(--warn-wash); color: var(--ink); }
+.banner.warn > svg.i { color: var(--warn-ink); }
+.banners { grid-area: banner; display: grid; }
+.banners:empty { display: none; }
+
+/* Recovery codes panel. */
+.recovery { display: grid; gap: var(--sp-5); }
+.ackrow { display: flex; align-items: center; gap: var(--sp-4); font-weight: var(--fw-medium); cursor: pointer; }

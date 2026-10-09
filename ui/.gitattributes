@@ -1,0 +1,5 @@
+# Generated files are compared byte for byte by `npm run lint`; keep them LF everywhere.
+src/api/generated/** text eol=lf
+src/i18n/generated/** text eol=lf
+i18n/*.xlf text eol=lf
+*.woff2 binary

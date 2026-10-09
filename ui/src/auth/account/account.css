@@ -1,0 +1,61 @@
+/* Account pages: sign-in methods, sessions and personal tokens. The factor rows (.factor)
+   and the waiting box (.wait) come from auth.css. Every color is a token. */
+
+.acct-stack { gap: var(--sp-8); }
+
+/* The summary at the top of the sign-in methods. */
+.acct-summary { display: grid; gap: var(--sp-4); max-width: 72ch; }
+.acct-summary > p { color: var(--ink-2); line-height: var(--lh-text); margin: 0; }
+
+/* A section head with an action on the right. */
+.acct-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); flex-wrap: wrap; }
+.acct-head > h2 { font-size: var(--fs-14); }
+
+/* A factor row whose name is the section heading (authenticator app, recovery codes). */
+.factor h2 { font-size: var(--fs-13); display: flex; align-items: center; gap: var(--sp-4); }
+
+/* Meta lines: facts side by side, with a hairline between them. */
+.acct-meta { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); margin: 0; }
+.acct-meta > span + span { padding-left: var(--sp-5); border-left: 1px solid var(--line-strong); }
+
+/* The form that adds a passkey or a security key. */
+.acct-add { padding-top: var(--sp-4); }
+
+/* Password field with its show button. */
+.acct-pwrow { display: flex; align-items: center; gap: var(--sp-3); }
+.acct-pwrow .input { flex: 1; }
+
+/* Live checklist of the password policy (the wizard's checks). */
+.pw-checks { list-style: none; margin: var(--sp-4) 0 0; padding: 0; display: grid; gap: var(--sp-3); }
+.pw-checks li { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: var(--sp-4); align-items: start; font-size: var(--fs-12); color: var(--ink-2); line-height: var(--lh-ui); }
+.pw-ck { display: grid; place-items: center; width: 14px; height: 14px; margin-top: 1px; border: 1.5px solid var(--control-line); border-radius: 50%; }
+.pw-ck svg.i { width: 9px; height: 9px; stroke-width: 2.5; }
+.pw-checks li.ok { color: var(--ink); }
+.pw-checks li.ok .pw-ck { background: var(--ok-ink); border-color: var(--ok-ink); color: var(--surface); }
+.pw-checks li.bad { color: var(--danger-ink); }
+.pw-checks li.bad .pw-ck { border-color: var(--danger); color: var(--danger-ink); }
+.pw-checks li.off { color: var(--warn-ink); }
+.pw-checks li.off .pw-ck { border-color: var(--discrepancy-mark); color: var(--warn-ink); }
+.pw-checks li.pending .pw-ck { border-style: dashed; border-color: var(--accent); animation: acct-spin 1s linear infinite; }
+@keyframes acct-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .pw-checks li.pending .pw-ck { animation: none; }
+}
+
+.acct-errlist { margin: var(--sp-3) 0 0; padding-left: var(--sp-7); color: var(--danger-ink); font-size: var(--fs-12); }
+
+/* Setting up the authenticator app. */
+.acct-panel { display: grid; gap: var(--sp-5); max-width: 560px; padding: var(--sp-6); border: 1px solid var(--line); border-radius: var(--r-3); background: var(--surface); }
+.acct-panel > h3 { font-size: var(--fs-13); }
+.acct-panel > p { margin: 0; color: var(--ink-2); line-height: var(--lh-text); }
+.acct-secret { font-size: var(--fs-14); word-spacing: 0.35em; user-select: all; }
+.acct-code { width: 14ch; letter-spacing: 0.1em; }
+.acct-link { display: inline-flex; align-items: center; gap: var(--sp-3); }
+
+/* Tables. */
+.acct-client { overflow-wrap: anywhere; }
+.acct-this { margin-left: var(--sp-4); }
+.acct-token { font-size: var(--fs-13); flex: 1; min-width: 0; }
+
+/* Dialogs that show a secret once are a little wider than a confirmation. */
+.dialog.wide { width: min(560px, calc(100vw - 32px)); }
