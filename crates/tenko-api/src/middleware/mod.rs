@@ -14,7 +14,9 @@
 //!   responses that set no caching themselves.
 //!
 //! Refusals are problem details: 403 `sys.csrf_rejected`, 429 `sys.rate_limited` with
-//! `Retry-After`, 422 `sys.idempotency_mismatch`, 409 `sys.idempotency_in_flight`.
+//! `Retry-After`, 422 `sys.idempotency_mismatch`, 409 `sys.idempotency_in_flight`, 409
+//! `sys.idempotency_not_replayable` (a secret-bearing response is never stored, see
+//! [`idempotency`]).
 
 pub(crate) mod csrf;
 pub mod headers;

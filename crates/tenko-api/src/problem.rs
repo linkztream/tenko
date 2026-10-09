@@ -42,6 +42,10 @@ pub mod codes {
     pub const IDEMPOTENCY_MISMATCH: &str = "sys.idempotency_mismatch";
     /// 409: a request with the same `Idempotency-Key` is still being processed.
     pub const IDEMPOTENCY_IN_FLIGHT: &str = "sys.idempotency_in_flight";
+    /// 409: a request with the same `Idempotency-Key` was already performed, and its
+    /// response carried a secret (`Cache-Control: no-store` or `Set-Cookie`) that is never
+    /// stored (NEVER-01), so it cannot be replayed; the handler does not run again.
+    pub const IDEMPOTENCY_NOT_REPLAYABLE: &str = "sys.idempotency_not_replayable";
     /// 413: the request body exceeds the limit.
     pub const BODY_TOO_LARGE: &str = "sys.body_too_large";
     /// 403: plain HTTP from a source that is not a trusted reverse proxy (TLS mode c).

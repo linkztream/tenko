@@ -16,6 +16,16 @@
 //!    `sys.idempotency_in_flight` with `Retry-After: 1`. Failed requests are not stored, so
 //!    they can be retried. Records older than the TTL are ignored and purged hourly.
 //!
+//! **Secret-bearing responses are never stored (NEVER-01).** A successful response that
+//! carries `Cache-Control: no-store` (set by every endpoint that returns a one-time secret:
+//! personal tokens, recovery codes, TOTP seeds) or any `Set-Cookie` header leaves only a
+//! bodiless marker: the record key, the status, the request fingerprint and the flag
+//! `replay_unavailable`, without headers or body. A retry with the same key and request is
+//! then answered 409 `sys.idempotency_not_replayable`: the handler does not run a second
+//! time (no second token) and the secret is not served again. The API middleware adds its
+//! default `Cache-Control: no-store` only after this check, so the rule sees what the
+//! handler set.
+//!
 //! The record is a separate store write after the handler's own batch. If the node fails
 //! between the two, a retry runs the handler again and the store's own idempotency decides
 //! (a replay of the same batch, or 422 when the batch differs).
@@ -76,9 +86,15 @@ impl Default for IdempotencyConfig {
 struct StoredResponse {
     fingerprint: Bytes,
     status: u16,
+    #[serde(default)]
     headers: Vec<(String, String)>,
+    #[serde(default)]
     body: Bytes,
     created: Timestamp,
+    /// A marker of a secret-bearing response: the request was performed, but its response
+    /// was not stored and cannot be replayed.
+    #[serde(default)]
+    replay_unavailable: bool,
 }
 
 /// Keys of requests being processed on this node.
@@ -230,7 +246,35 @@ async fn lookup(
             .into_response(),
         ));
     }
+    if stored.replay_unavailable {
+        return Err(Box::new(not_replayable().into_response()));
+    }
     Err(Box::new(replay(&stored)))
+}
+
+/// 409 `sys.idempotency_not_replayable`: the request was performed, and its response held a
+/// secret that was deliberately not stored.
+fn not_replayable() -> ApiError {
+    ApiError::from_coded_error(
+        tenko_core::CodedError::new(
+            codes::IDEMPOTENCY_NOT_REPLAYABLE,
+            409,
+            "a request with this Idempotency-Key was already performed; its response carried \
+             a secret and is not kept, so it cannot be replayed",
+        )
+        .with_title("Already performed; the original response cannot be replayed"),
+    )
+}
+
+/// Whether a response must not be stored: `Cache-Control: no-store` or a `Set-Cookie`.
+fn secret_bearing(headers: &HeaderMap) -> bool {
+    headers.contains_key(header::SET_COOKIE)
+        || headers
+            .get_all(header::CACHE_CONTROL)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .flat_map(|value| value.split(','))
+            .any(|directive| directive.trim().eq_ignore_ascii_case("no-store"))
 }
 
 /// What identifies the record of one request.
@@ -249,10 +293,27 @@ async fn remember(
     record: &Record<'_>,
     response: Response,
 ) -> Response {
+    if !response.status().is_success() {
+        return response;
+    }
+    if secret_bearing(response.headers()) {
+        let marker = StoredResponse {
+            fingerprint: Bytes::copy_from_slice(record.fingerprint),
+            status: response.status().as_u16(),
+            headers: Vec::new(),
+            body: Bytes::new(),
+            created: record.created,
+            replay_unavailable: true,
+        };
+        if let Err(error) = save(store, record, &marker).await {
+            tracing::warn!(%error, "could not store the marker of an idempotent request");
+        }
+        return response;
+    }
     let small = response.body().size_hint().exact().is_some_and(|size| {
         usize::try_from(size).is_ok_and(|size| size <= config.max_response_bytes)
     });
-    if !response.status().is_success() || !small {
+    if !small {
         return response;
     }
     let (parts, body) = response.into_parts();
@@ -271,6 +332,7 @@ async fn remember(
             .collect(),
         body: body.clone(),
         created: record.created,
+        replay_unavailable: false,
     };
     if let Err(error) = save(store, record, &stored).await {
         tracing::warn!(%error, "could not store the response of an idempotent request");
@@ -551,6 +613,152 @@ mod tests {
             tenko_core::Revision(0),
             "nothing stored"
         );
+    }
+
+    /// Runs the middleware around a handler that answers 201 with a secret in the body and
+    /// the given extra headers.
+    async fn run_secret(
+        store: &MemStore,
+        in_flight: &InFlight,
+        key: &str,
+        calls: &Arc<AtomicUsize>,
+        headers: &'static [(HeaderName, &'static str)],
+    ) -> Response {
+        let calls = Arc::clone(calls);
+        handle(
+            store,
+            in_flight,
+            IdempotencyConfig::default(),
+            Some(&principal()),
+            post(key, "{\"name\":\"ci\"}"),
+            move |_request| async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                let mut response =
+                    (StatusCode::CREATED, "{\"token\":\"tko_s3cr3t_value\"}").into_response();
+                for (name, value) in headers {
+                    response
+                        .headers_mut()
+                        .append(name.clone(), HeaderValue::from_static(value));
+                }
+                response
+            },
+        )
+        .await
+    }
+
+    /// Every stored record, decoded.
+    async fn stored_records(store: &MemStore) -> Vec<(StoredResponse, Bytes)> {
+        let view = store.read(ReadConsistency::Local).await.expect("view");
+        view.scan(&TABLE, KeyRange::all(), 100, false)
+            .expect("scan")
+            .into_iter()
+            .map(|(_, versioned)| {
+                (
+                    from_cbor::<StoredResponse>(&versioned.value).expect("record"),
+                    versioned.value,
+                )
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn secret_bearing_responses_leave_only_a_marker() {
+        static NO_STORE: [(HeaderName, &str); 1] = [(header::CACHE_CONTROL, "private, No-Store")];
+        static COOKIE: [(HeaderName, &str); 2] = [
+            (
+                header::SET_COOKIE,
+                "tenko_session=abc; HttpOnly; Secure; SameSite=Strict",
+            ),
+            (header::CACHE_CONTROL, "no-cache"),
+        ];
+        let store = MemStore::default();
+        let in_flight = InFlight::default();
+        for (key, headers) in [("token-1", &NO_STORE[..]), ("login-1", &COOKIE[..])] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let first = run_secret(&store, &in_flight, key, &calls, headers).await;
+            assert_eq!(first.status(), StatusCode::CREATED, "{key}");
+            assert!(
+                body(first).await.contains("tko_s3cr3t_value"),
+                "the caller gets it once"
+            );
+
+            let again = run_secret(&store, &in_flight, key, &calls, headers).await;
+            assert_eq!(again.status(), StatusCode::CONFLICT, "{key}");
+            assert!(again.headers().get(REPLAYED_HEADER).is_none());
+            let text = body(again).await;
+            assert!(text.contains(codes::IDEMPOTENCY_NOT_REPLAYABLE), "{text}");
+            assert!(text.contains("Already performed"), "{text}");
+            assert!(!text.contains("tko_s3cr3t_value"), "{text}");
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                1,
+                "the handler ran once for {key}"
+            );
+
+            // Another request under the same key is still a mismatch.
+            let other = handle(
+                &store,
+                &in_flight,
+                IdempotencyConfig::default(),
+                Some(&principal()),
+                post(key, "{\"name\":\"other\"}"),
+                |_request| async { StatusCode::CREATED.into_response() },
+            )
+            .await;
+            assert_eq!(other.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        }
+
+        let records = stored_records(&store).await;
+        assert_eq!(records.len(), 2);
+        for (record, raw) in records {
+            assert!(record.replay_unavailable);
+            assert!(record.body.is_empty());
+            assert!(record.headers.is_empty());
+            assert_eq!(record.status, 201);
+            let raw = String::from_utf8_lossy(&raw);
+            assert!(!raw.contains("tko_s3cr3t_value") && !raw.contains("tenko_session"));
+        }
+    }
+
+    #[tokio::test]
+    async fn ordinary_responses_still_replay_next_to_markers() {
+        static NO_STORE: [(HeaderName, &str); 1] = [(header::CACHE_CONTROL, "no-store")];
+        let store = MemStore::default();
+        let in_flight = InFlight::default();
+        let calls = Arc::new(AtomicUsize::new(0));
+        run_secret(&store, &in_flight, "secret", &calls, &NO_STORE).await;
+        let normal = Arc::new(AtomicUsize::new(0));
+        run(
+            &store,
+            &in_flight,
+            post("plain", "{}"),
+            &normal,
+            StatusCode::OK,
+        )
+        .await;
+        let replayed = run(
+            &store,
+            &in_flight,
+            post("plain", "{}"),
+            &normal,
+            StatusCode::OK,
+        )
+        .await;
+        assert_eq!(replayed.headers()[REPLAYED_HEADER], "true");
+        assert_eq!(normal.load(Ordering::SeqCst), 1);
+        let records = stored_records(&store).await;
+        assert_eq!(
+            records.iter().filter(|(r, _)| r.replay_unavailable).count(),
+            1
+        );
+        assert_eq!(
+            records
+                .iter()
+                .filter(|(r, _)| !r.replay_unavailable && !r.body.is_empty())
+                .count(),
+            1
+        );
+        assert!(!secret_bearing(&HeaderMap::new()));
     }
 
     #[tokio::test]
