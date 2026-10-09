@@ -243,7 +243,7 @@
             }
           },
           "400": {
-            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -264,6 +264,16 @@
           },
           "409": {
             "description": "The address exists in the VRF, no prefix contains it, it is a network or broadcast address, a DHCP pool covers it for a reserved host, the VRF or interface is missing, or the identifier is in use (`ipam.address.duplicate`, `ipam.address.no_prefix`, `ipam.address.network_or_broadcast`, `ipam.address.in_dhcp_pool`, `ipam.reference_missing`, `ipam.id_taken`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -449,7 +459,7 @@
             }
           },
           "400": {
-            "description": "Invalid parameter (`sys.invalid_query`)",
+            "description": "Invalid parameter (`sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -549,7 +559,7 @@
             }
           },
           "400": {
-            "description": "Invalid parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -689,7 +699,7 @@
             }
           },
           "400": {
-            "description": "Invalid body or parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid body or parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -730,6 +740,16 @@
           },
           "412": {
             "description": "`If-Match` is stale (`ipam.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1477,7 +1497,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1500,9 +1520,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -1546,7 +1563,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1599,9 +1616,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -1705,7 +1719,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1738,9 +1752,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -1764,7 +1775,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1787,9 +1798,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -1813,7 +1821,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1876,7 +1884,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1935,7 +1943,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2002,7 +2010,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2045,9 +2053,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -2085,7 +2090,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2137,7 +2142,7 @@
             "description": "TOTP was removed"
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2180,9 +2185,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -2226,7 +2228,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2259,9 +2261,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -2285,7 +2284,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2318,9 +2317,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -2344,7 +2340,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2397,7 +2393,7 @@
             "description": "The credential was deleted"
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2450,9 +2446,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -2643,7 +2636,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2686,9 +2679,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -2739,7 +2729,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2762,9 +2752,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -3009,6 +2996,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as `\"12\"`; the write fails with 412\n`ipam.revision_mismatch` when the object changed since.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -3034,6 +3033,16 @@
           },
           "409": {
             "description": "Objects still use the field (`ipam.in_use`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match is stale (`ipam.revision_mismatch`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3087,6 +3096,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as `\"12\"`; the write fails with 412\n`ipam.revision_mismatch` when the object changed since.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -3132,6 +3153,16 @@
           },
           "409": {
             "description": "Incompatible change (`ipam.custom_field.incompatible_change`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match is stale (`ipam.revision_mismatch`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3569,7 +3600,7 @@
             }
           },
           "400": {
-            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3590,6 +3621,16 @@
           },
           "409": {
             "description": "The name is taken in the tenant (or an interface name twice), the identifier is in use, or the tenant or site is missing (`ipam.name_taken`, `ipam.id_taken`, `ipam.reference_missing`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3765,7 +3806,7 @@
             }
           },
           "400": {
-            "description": "Invalid parameter (`sys.invalid_query`)",
+            "description": "Invalid parameter (`sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3874,7 +3915,7 @@
             }
           },
           "400": {
-            "description": "Invalid parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4014,7 +4055,7 @@
             }
           },
           "400": {
-            "description": "Invalid body or parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid body or parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4055,6 +4096,16 @@
           },
           "412": {
             "description": "`If-Match` is stale (`ipam.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4276,7 +4327,7 @@
             }
           },
           "400": {
-            "description": "Invalid parameter (`sys.invalid_query`, `sys.invalid_cursor`)",
+            "description": "Invalid parameter (`sys.invalid_request`, `sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4396,7 +4447,7 @@
             }
           },
           "400": {
-            "description": "Invalid body or parameter, or the `host` of the body is another host (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid body or parameter, or the `host` of the body is another host (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4417,6 +4468,16 @@
           },
           "409": {
             "description": "The host does not exist or is deleted, the name is taken on the host, or the identifier is in use (`ipam.reference_missing`, `ipam.name_taken`, `ipam.id_taken`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4893,7 +4954,7 @@
             }
           },
           "400": {
-            "description": "Invalid parameter (`sys.invalid_query`)",
+            "description": "Invalid parameter (`sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5002,7 +5063,7 @@
             }
           },
           "400": {
-            "description": "Invalid parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5142,7 +5203,7 @@
             }
           },
           "400": {
-            "description": "Invalid body or parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid body or parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5183,6 +5244,16 @@
           },
           "412": {
             "description": "`If-Match` is stale (`ipam.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6276,7 +6347,7 @@
           "prefixes"
         ],
         "summary": "Get the prefix tree with utilization and alarms",
-        "description": "Every node carries its parent, depth, number of child prefixes, the utilization\n(`capacity`, `used`, `reserved`, `free`, `covered` as decimal strings, and `percent`)\nand the alarm `level`. Without `vrf` the tree of the VRF `default` is shown.",
+        "description": "Every node carries its parent, depth, number of child prefixes, the utilization\n(`capacity`, `used`, `reserved`, `free`, `covered` as decimal strings, and `percent`)\nand the alarm `level`. `children` counts all direct child prefixes, also those that\n`depth` leaves out, so that the UI knows which nodes can be opened. Without `vrf` the tree\nof the VRF `default` is shown.",
         "operationId": "get_prefix_tree",
         "parameters": [
           {
@@ -8377,7 +8448,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8507,7 +8578,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8517,7 +8588,7 @@
             }
           },
           "403": {
-            "description": "The principal may not do this, or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8606,7 +8677,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8616,7 +8687,7 @@
             }
           },
           "403": {
-            "description": "The principal may not do this, or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8649,9 +8720,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -8972,7 +9040,7 @@
             }
           },
           "400": {
-            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8993,6 +9061,16 @@
           },
           "409": {
             "description": "The name is taken, the identifier is in use, or the parent is missing (`ipam.name_taken`, `ipam.id_taken`, `ipam.reference_missing`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9168,7 +9246,7 @@
             }
           },
           "400": {
-            "description": "Invalid parameter (`sys.invalid_query`)",
+            "description": "Invalid parameter (`sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9268,7 +9346,7 @@
             }
           },
           "400": {
-            "description": "Invalid parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9398,7 +9476,7 @@
             }
           },
           "400": {
-            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_query`), or `If-Match` is malformed",
+            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`), or `If-Match` is malformed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9439,6 +9517,16 @@
           },
           "412": {
             "description": "`If-Match` is stale (`ipam.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9702,7 +9790,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9712,7 +9800,7 @@
             }
           },
           "403": {
-            "description": "The principal may not do this, or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9755,9 +9843,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -10026,7 +10111,7 @@
             }
           },
           "400": {
-            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10047,6 +10132,16 @@
           },
           "409": {
             "description": "The name is taken, or the identifier is in use (`ipam.name_taken`, `ipam.id_taken`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10222,7 +10317,7 @@
             }
           },
           "400": {
-            "description": "Invalid parameter (`sys.invalid_query`)",
+            "description": "Invalid parameter (`sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10322,7 +10417,7 @@
             }
           },
           "400": {
-            "description": "Invalid parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10452,7 +10547,7 @@
             }
           },
           "400": {
-            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_query`), or `If-Match` is malformed",
+            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`), or `If-Match` is malformed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10493,6 +10588,16 @@
           },
           "412": {
             "description": "`If-Match` is stale (`ipam.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10728,7 +10833,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10738,7 +10843,7 @@
             }
           },
           "403": {
-            "description": "The principal may not do this, or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10819,7 +10924,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10829,7 +10934,7 @@
             }
           },
           "403": {
-            "description": "The principal may not do this, or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10872,9 +10977,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -10927,7 +11029,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10937,7 +11039,7 @@
             }
           },
           "403": {
-            "description": "The principal may not do this, or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11008,7 +11110,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11018,7 +11120,7 @@
             }
           },
           "403": {
-            "description": "The principal may not do this, or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11061,9 +11163,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       },
@@ -11136,7 +11235,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11146,7 +11245,7 @@
             }
           },
           "403": {
-            "description": "The principal may not do this, or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11199,9 +11298,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -11276,7 +11372,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11286,7 +11382,7 @@
             }
           },
           "403": {
-            "description": "The principal may not do this, or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11329,9 +11425,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -11369,7 +11462,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11379,7 +11472,7 @@
             }
           },
           "403": {
-            "description": "The principal may not do this, or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11412,9 +11505,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -11467,7 +11557,7 @@
             }
           },
           "401": {
-            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`)",
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11477,7 +11567,7 @@
             }
           },
           "403": {
-            "description": "The principal may not do this, or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11510,9 +11600,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -11714,7 +11801,7 @@
             }
           },
           "400": {
-            "description": "Invalid body or parameter: the VLAN id is outside 1 to 4094, or the VNI is too large (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid body or parameter: the VLAN id is outside 1 to 4094, or the VNI is too large (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11735,6 +11822,16 @@
           },
           "409": {
             "description": "The VLAN id exists at the site, the identifier is in use, or the site is missing (`ipam.vlan.duplicate`, `ipam.id_taken`, `ipam.reference_missing`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11910,7 +12007,7 @@
             }
           },
           "400": {
-            "description": "Invalid parameter (`sys.invalid_query`)",
+            "description": "Invalid parameter (`sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12010,7 +12107,7 @@
             }
           },
           "400": {
-            "description": "Invalid parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12140,7 +12237,7 @@
             }
           },
           "400": {
-            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_query`), or `If-Match` is malformed",
+            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`), or `If-Match` is malformed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12181,6 +12278,16 @@
           },
           "412": {
             "description": "`If-Match` is stale (`ipam.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12585,7 +12692,7 @@
             }
           },
           "400": {
-            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12606,6 +12713,16 @@
           },
           "409": {
             "description": "The name is taken in the tenant, the identifier is in use, or the tenant is missing (`ipam.name_taken`, `ipam.id_taken`, `ipam.reference_missing`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12781,7 +12898,7 @@
             }
           },
           "400": {
-            "description": "Invalid parameter (`sys.invalid_query`)",
+            "description": "Invalid parameter (`sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12881,7 +12998,7 @@
             }
           },
           "400": {
-            "description": "Invalid parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_query`)",
+            "description": "Invalid parameter, or `If-Match` is malformed (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13011,7 +13128,7 @@
             }
           },
           "400": {
-            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_query`), or `If-Match` is malformed",
+            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`), or `If-Match` is malformed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13052,6 +13169,16 @@
           },
           "412": {
             "description": "`If-Match` is stale (`ipam.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13452,7 +13579,8 @@
               }
             ]
           }
-        }
+        },
+        "additionalProperties": false
       },
       "AddressPatch": {
         "type": "object",
@@ -13521,7 +13649,8 @@
             "description": "Replaces the tags.",
             "uniqueItems": true
           }
-        }
+        },
+        "additionalProperties": false
       },
       "AlarmLevel": {
         "type": "string",
@@ -13650,7 +13779,8 @@
             "description": "Tags of the new address.",
             "uniqueItems": true
           }
-        }
+        },
+        "additionalProperties": false
       },
       "AllocatePrefix": {
         "type": "object",
@@ -13780,7 +13910,8 @@
               }
             ]
           }
-        }
+        },
+        "additionalProperties": false
       },
       "ApiTokenId": {
         "type": "string",
@@ -14815,7 +14946,8 @@
             "type": "boolean",
             "description": "Whether every object of those kinds must have a value."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "CustomFieldPatch": {
         "type": "object",
@@ -14849,7 +14981,8 @@
             ],
             "description": "New required flag."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "CustomKind": {
         "oneOf": [
@@ -14976,7 +15109,7 @@
               "string",
               "null"
             ],
-            "description": "A regular expression (Rust `regex` syntax) that the whole normalized password must\nmatch (it is anchored at both ends for you). Perl classes such as `\\d` and `\\w` work;\nUnicode property classes such as `\\p{L}` do not. Without a pattern, only the length\nlimits apply."
+            "description": "A regular expression (Rust `regex` syntax) that the whole normalized password must\nmatch (it is anchored at both ends for you). Perl classes such as `\\d` and `\\w` and\nUnicode property classes such as `\\p{L}` work. Without a pattern, only the length\nlimits apply."
           }
         }
       },
@@ -15574,7 +15707,8 @@
               }
             ]
           }
-        }
+        },
+        "additionalProperties": false
       },
       "HostName": {
         "type": "string",
@@ -15647,7 +15781,8 @@
             "description": "Replaces the tags.",
             "uniqueItems": true
           }
-        }
+        },
+        "additionalProperties": false
       },
       "IdempotencyKey": {
         "type": "string",
@@ -15824,7 +15959,8 @@
             "description": "Tags (IPAM-08).",
             "uniqueItems": true
           }
-        }
+        },
+        "additionalProperties": false
       },
       "InterfacePatch": {
         "type": "object",
@@ -15889,7 +16025,8 @@
             "description": "Replaces the tags.",
             "uniqueItems": true
           }
-        }
+        },
+        "additionalProperties": false
       },
       "IpamCommand": {
         "oneOf": [
@@ -16514,6 +16651,15 @@
                   "key"
                 ],
                 "properties": {
+                  "expected": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64",
+                    "description": "The revision of the definition the caller read (`If-Match`).",
+                    "minimum": 0
+                  },
                   "key": {
                     "$ref": "#/components/schemas/FieldKey",
                     "description": "The key."
@@ -20245,7 +20391,8 @@
               }
             ]
           }
-        }
+        },
+        "additionalProperties": false
       },
       "PrefixPatch": {
         "type": "object",
@@ -20348,7 +20495,8 @@
             ],
             "description": "New VLAN; `null` clears it."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "PrefixRole": {
         "type": "string",
@@ -20687,7 +20835,8 @@
             "description": "Tags (IPAM-08).",
             "uniqueItems": true
           }
-        }
+        },
+        "additionalProperties": false
       },
       "RangePatch": {
         "type": "object",
@@ -20760,7 +20909,8 @@
             "description": "Replaces the tags.",
             "uniqueItems": true
           }
-        }
+        },
+        "additionalProperties": false
       },
       "RangeRole": {
         "type": "string",
@@ -21591,7 +21741,8 @@
             "description": "Tags (IPAM-08).",
             "uniqueItems": true
           }
-        }
+        },
+        "additionalProperties": false
       },
       "SitePatch": {
         "type": "object",
@@ -21649,7 +21800,8 @@
             "description": "Replaces the tags.",
             "uniqueItems": true
           }
-        }
+        },
+        "additionalProperties": false
       },
       "Stamp": {
         "type": "object",
@@ -22383,7 +22535,8 @@
             "description": "Tags (IPAM-08).",
             "uniqueItems": true
           }
-        }
+        },
+        "additionalProperties": false
       },
       "TenantPatch": {
         "type": "object",
@@ -22427,7 +22580,8 @@
             "description": "Replaces the tags.",
             "uniqueItems": true
           }
-        }
+        },
+        "additionalProperties": false
       },
       "Timestamp": {
         "type": "string",
@@ -23025,7 +23179,8 @@
             "$ref": "#/components/schemas/AddressPatch",
             "description": "The changes."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "UpdateCustomField": {
         "type": "object",
@@ -23035,6 +23190,15 @@
           "patch"
         ],
         "properties": {
+          "expected": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The revision of the definition the caller read (`If-Match`).",
+            "minimum": 0
+          },
           "key": {
             "$ref": "#/components/schemas/FieldKey",
             "description": "The key."
@@ -23043,7 +23207,8 @@
             "$ref": "#/components/schemas/CustomFieldPatch",
             "description": "The changes."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "UpdateHost": {
         "type": "object",
@@ -23070,7 +23235,8 @@
             "$ref": "#/components/schemas/HostPatch",
             "description": "The changes."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "UpdateInterface": {
         "type": "object",
@@ -23097,7 +23263,8 @@
             "$ref": "#/components/schemas/InterfacePatch",
             "description": "The changes."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "UpdatePrefix": {
         "type": "object",
@@ -23124,7 +23291,8 @@
             "$ref": "#/components/schemas/PrefixPatch",
             "description": "The changes."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "UpdateRange": {
         "type": "object",
@@ -23151,7 +23319,8 @@
             "$ref": "#/components/schemas/RangePatch",
             "description": "The changes."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "UpdateSite": {
         "type": "object",
@@ -23178,7 +23347,8 @@
             "$ref": "#/components/schemas/SitePatch",
             "description": "The changes."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "UpdateTenant": {
         "type": "object",
@@ -23205,7 +23375,8 @@
             "$ref": "#/components/schemas/TenantPatch",
             "description": "The changes."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "UpdateVlan": {
         "type": "object",
@@ -23232,7 +23403,8 @@
             "$ref": "#/components/schemas/VlanPatch",
             "description": "The changes."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "UpdateVrf": {
         "type": "object",
@@ -23259,7 +23431,8 @@
             "$ref": "#/components/schemas/VrfPatch",
             "description": "The changes."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "UserCreate": {
         "type": "object",
@@ -23712,7 +23885,8 @@
             "description": "VXLAN network identifier, up to 16,777,215.",
             "minimum": 0
           }
-        }
+        },
+        "additionalProperties": false
       },
       "VlanPatch": {
         "type": "object",
@@ -23792,7 +23966,8 @@
             "description": "New VNI; `null` clears it.",
             "minimum": 0
           }
-        }
+        },
+        "additionalProperties": false
       },
       "Vrf": {
         "type": "object",
@@ -23899,7 +24074,8 @@
               }
             ]
           }
-        }
+        },
+        "additionalProperties": false
       },
       "VrfPatch": {
         "type": "object",
@@ -23950,7 +24126,8 @@
             "description": "Replaces the tags.",
             "uniqueItems": true
           }
-        }
+        },
+        "additionalProperties": false
       },
       "WebAuthnLoginFinish": {
         "type": "object",

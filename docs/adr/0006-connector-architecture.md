@@ -1,6 +1,6 @@
 # ADR 0006: Connector architecture
 
-- Status: Accepted
+- Status: Accepted (the in-process boundary is refined by ADR 0012: connectors are plugins over a published protocol)
 - Date: 2026-10-09
 
 ## Context

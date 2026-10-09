@@ -424,9 +424,11 @@ All inventory sources implement one `InventorySource` interface (CONN-02). A sou
 
 Proxmox VE runs no DNS of its own, so it is an inventory source. A DNS server running in a VM or container on Proxmox is imported through its own migration adapter (see [MIGRATION.md](MIGRATION.md)). Observations from inventory sources also catch fixed IP addresses that never appear in DHCP. In Phase 5, a NetBox-compatible API lets Proxmox SDN use Tenko as its IPAM plugin (CONN-17).
 
-## Connector framework
+## Connector framework and plugins
 
 All integrations plug into one framework with four traits (ADR 0006, CONN-01):
+
+**Connectors are plugins (ADR 0012).** The four interfaces are the contract; they are expressed as a versioned gRPC protocol in `tenko-connect`, which is the plugin SDK (protocol, host runner, Rust helper library, manifest schema, conformance test). Tenko starts each plugin as its own process (handshake over stdio, gRPC over a local socket or named pipe), supervises it (health, restart with backoff, timeouts) and keeps every policy decision on its side: verify-before-write, guardrails, rate limits, parallelism, observation normalization. A plugin never sees the vault; the host injects the secrets its manifest declares, per call, and audits it. The manifest also carries a JSON Schema for the plugin's settings, from which the UI builds the configuration form. The reference plugins (UniFi, Proxmox, Home Assistant; later the migration sources) are built on the same SDK and bundled in the binary as `tenko plugin run <name>`, so the home user installs nothing extra while third parties can write plugins in any language that speaks gRPC. A WebAssembly transport and a hub with signed packages follow in Phase 5 (CONN-21).
 
 | Trait | Purpose | Example drivers |
 |---|---|---|
@@ -509,12 +511,12 @@ tenko/
     tenko-dns/               # authoritative, forwarder, cache, RPZ, XFR, views
     tenko-dhcp/              # v4/v6, failover, relay, DDNS
     tenko-jobs/              # job engine: steps, state, timeouts, rollback
-    tenko-connect/           # traits: InventorySource, Actuator, MigrationSource, NetworkController
-    tenko-connect-proxmox/   # inventory (Phase 1), hypervisor actuator (later)
-    tenko-connect-unifi/     # network controller: read topology, write VLANs and port profiles
+    tenko-connect/           # plugin SDK: protocol, host runner, helper library, manifest, conformance test
+    tenko-connect-proxmox/   # reference plugin: inventory (Phase 1), hypervisor actuator (later)
+    tenko-connect-unifi/     # reference plugin: read topology and SSIDs, write VLANs and port profiles
     tenko-connect-windows/   # Phase 4: DNS/DHCP via PowerShell remoting + LDAP, migration source and coexistence actuator
-    tenko-connect-hass/      # Home Assistant inventory source
-    tenko-connect-*/         # bind, opnsense, dnsmasq, kea, hyperv, vmware (Phase 4 to 5)
+    tenko-connect-hass/      # reference plugin: Home Assistant inventory source
+    tenko-connect-*/         # migration-source plugins: bind, opnsense, dnsmasq, kea, hyperv, vmware (Phase 4 to 5)
     tenko-migrate/           # plan/apply/verify pipeline on top of connectors
     tenko-api/               # axum, OpenAPI, SSE
     tenko-cli/               # `tenko` CLI, shares the client with the UI

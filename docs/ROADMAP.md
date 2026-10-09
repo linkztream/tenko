@@ -107,7 +107,7 @@ Replaces the existing IPAM spreadsheet.
 - **UI shell**: navigation, keyboard-driven grids, dark mode, Swedish and English, and a first-run wizard with security profile selection (API-08, API-10).
 - **Deployment**: Docker with a macvlan example, a systemd unit and a Windows service (OPS-10, OPS-13, OPS-14).
 - **Intent/observation model, reconciler and job engine**: proposals, lock flag and audit (IPAM-12 to IPAM-17).
-- **Connectors**: Proxmox inventory; UniFi (read topology, write VLANs, port profiles and per-client VLAN with guardrails); Home Assistant inventory (CONN-01 to CONN-09).
+- **Connectors**: the plugin SDK and host runner first (ADR 0012: process plugins over gRPC, manifest, supervision, secret injection, conformance test), then the bundled reference plugins: UniFi (read topology and SSIDs, write VLANs, port profiles and per-client VLAN with guardrails), Proxmox inventory, Home Assistant inventory (CONN-01 to CONN-09).
 - **VLAN objects, topology map and move job** with preview and rollback (IPAM-03, IPAM-19, IPAM-20).
 
 In Phase 1 the move job performs the IPAM intent change, the UniFi L2 move and the observation. The reservation and DNS steps are manual tasks until Tenko's own engines exist (Phase 2 to 3), at which point the same job becomes fully automatic.
@@ -215,6 +215,7 @@ Verification is by query replay (MIG-05): live queries are sampled from dnstap o
 - **Ecosystem**: Terraform provider, Ansible collection, webhooks, and a NetBox-compatible API for Proxmox SDN (API-06, API-07, CONN-17).
 - **Remote access gateway**: HTML5 RDP/SSH gateway as an opt-in module with credential injection, session recording and just-in-time access (API-12).
 - **Actuators and inventory**: hypervisor actuators (Proxmox `pct set` and cloud-init) that move `static` hosts automatically, more network controllers, and inventory from Docker, Kubernetes and Incus (CONN-14 to CONN-16).
+- **Plugin hub**: signed plugin packages, `tenko plugin install`, the WebAssembly component transport beside the process transport, and the public plugin SDK repository (CONN-21).
 - **Release and licensing**: DoQ, signed releases, SBOM, the license decision and possible publication (DNS-16, API-19, API-20).
 
 ### Done when
