@@ -20,6 +20,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  # Smaller debug artifacts: the full test build of the workspace otherwise fills the
+  # runner disk.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   rust-linux:
@@ -31,6 +34,9 @@ jobs:
       TENKO_UI_STUB: "1"
     steps:
       - uses: actions/checkout@v5
+      - name: Free disk space
+        # The hosted runner ships toolchains this build never uses.
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -41,13 +47,6 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
-      - name: OpenAPI drift
-        # The committed document must equal the generated one (E3). Inert until WP1.7
-        # commits docs/api/openapi.json.
-        if: hashFiles('docs/api/openapi.json') != ''
-        run: |
-          cargo run -p tenko --locked --quiet -- openapi > "$RUNNER_TEMP/openapi.json"
-          diff -u docs/api/openapi.json "$RUNNER_TEMP/openapi.json"
 
   rust-windows:
     name: Rust (windows-latest, nightly schedule)
@@ -75,10 +74,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
         with:
-          command: check
-          arguments: --all-features
+          tool: cargo-deny
+      - run: cargo deny --all-features check
 
   audit:
     name: cargo-audit
@@ -183,3 +183,9 @@ jobs:
           path: ui/dist
       - name: Build
         run: cargo build -p tenko --locked
+      - name: OpenAPI drift
+        # The committed document must equal the generated one (E3); this job already
+        # built the binary.
+        run: |
+          ./target/debug/tenko openapi > "$RUNNER_TEMP/openapi.json"
+          diff -u docs/api/openapi.json "$RUNNER_TEMP/openapi.json"
