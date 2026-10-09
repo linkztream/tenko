@@ -28,6 +28,7 @@
 | WP1.10b UI fixes from E2E | FINAL, committed locally | `5997eed` | Host form sends only changed custom values (`null` clears); import preview shows the outcome per sheet, pages every listable row in a grid, loads all rows before apply; 1,495 UI tests; first load 64.1 KB gzip |
 | WP1.5c Paged preview rows | FINAL, committed locally | `46037b2` | `GET /imports/{id}/rows?limit&cursor` from the stored, encrypted preview; 409 `import.preview.stale` on a mapping change; `CredentialNotice.reason` is a code, text in `detail`; 4 route tests |
 | WP1.10c Preview paging in the UI | FINAL, committed locally | see the commit "page the import preview rows through the rows endpoint" | Cursor paging through `GET /imports/{id}/rows`, walk to the end before apply, restart on `import.preview.stale`; 1,502 UI tests; first load 64.1 KB gzip |
+| WP1.11b E2E follow-up | FINAL, committed locally | the commit "first prefix on a fresh installation, cleared custom values, per-sheet outcomes and every linked import item" | The two former `test.fixme`s run; per-sheet outcomes and every created link are asserted against `ip-plan.expected.json`; 25 Playwright scenarios, no flakes over three repeats |
 | Design spike | Done, committed locally | `4880d8c` | All 16 owner decisions applied; mockups served from `design/` |
 
 ## Slice 2 work packages
