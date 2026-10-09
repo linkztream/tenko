@@ -71,12 +71,13 @@ Conditions recorded in ADR 0002: SSD or NVMe is mandatory for the store (an SMR 
 
 The fallback (Raft for configuration, IPAM and policies only, zone data via built-in IXFR/NOTIFY) was not needed.
 
-### Spike B: UDP throughput and DNS wire-format crate
+### Spike B: UDP throughput and DNS wire-format crate (done)
 
-- Measure UDP echo-DNS throughput on Windows and Linux with SO_REUSEPORT sharding (one socket per core).
-- Compare parsing with `domain` (NLnet Labs) and `hickory-proto`. The result selects the DNS wire-format crate and is recorded in an ADR.
-- Windows has no SO_REUSEPORT load distribution. On Windows the spike measures the equivalent RIO/IOCP sharding strategy.
-- Measure `recvmmsg` on Linux. io_uring is evaluated as an option, not assumed.
+- Measured UDP DNS throughput on Windows (native) and Linux (WSL2, not bare metal) with a shared socket and, on Linux, one `SO_REUSEPORT` socket per worker; compared blocking worker threads with tokio tasks.
+- Compared `domain` (NLnet Labs) with `hickory-proto` behind one `Codec` trait, end to end and in criterion micro-benchmarks with a counting allocator.
+- `recvmmsg`, UDP GSO, RIO and io_uring were not measured and remain later optimizations.
+
+**Result (2026-10-09, loopback on an i9-13900K):** `domain` wins on every measure: zero allocations per query against 6 to 10, parse-plus-build 2.5 to 3.5 times faster, 6 to 17 percent more QPS end to end, 16 instead of 50 transitive dependencies, 0.3 MB smaller binary. One worker: 148k QPS on Windows, 204k on Linux. Peak: about 750k on Windows (shared socket, 8 to 16 workers), 4.04 M on Linux with `SO_REUSEPORT` at 32 workers (262k per core) against 3.28 M with a shared socket. A multi-threaded tokio runtime on the UDP path was the slowest arrangement. Decision in ADR 0009: `domain` behind a `Codec` trait, blocking UDP workers, `SO_REUSEPORT` per worker on Linux, one shared socket on Windows, tokio for everything else. Results: `bench/spike-b-udp/results/`.
 
 ### Spike C: Embedded SPA
 
@@ -86,8 +87,10 @@ Serve the SPA from the binary together with SSE, and measure cold start and bund
 
 ### Done when
 
-- All three spikes have measurement data with reproducible scripts in `bench/`.
-- The gate decision is documented in ADR 0002, with status Accepted, or in a superseding ADR that records the fallback. (Done: ADR 0002 is Accepted with conditions.)
+- All three spikes have measurement data with reproducible scripts in `bench/`. (Done 2026-10-09: Spike A in `bench/spike-a-raft`, Spike B in `bench/spike-b-udp`, Spike C in `bench/spike-c-embed`.)
+- The gate decision is documented in ADR 0002, with status Accepted, or in a superseding ADR that records the fallback. (Done: ADR 0002 is Accepted with conditions; ADR 0008 and ADR 0009 record the Spike C and Spike B decisions.)
+
+**Phase 0 completed on 2026-10-09.**
 
 ## Phase 1: Platform and IPAM
 

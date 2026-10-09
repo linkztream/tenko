@@ -217,18 +217,20 @@ Vault contents are coupled to the authentication policy (CON-07). A 4-digit PIN 
 
 Performance is I/O bound, not CPU bound (CON-01). Hand-written assembly was considered and rejected: DNS and DHCP parsers receive unfiltered packets from the network, which is exactly where the BIND, Kea and dnsmasq vulnerabilities have lived. Rust delivers C-class throughput without garbage-collection tails, and the remaining performance work is in how packets reach the parser, not in the parser's instruction selection.
 
-| Technique | Platform | Notes |
+| Technique | Platform | Status after Spike B (ADR 0009) |
 |---|---|---|
-| tokio runtime | All | Async I/O across all roles |
-| `SO_REUSEPORT` sharding | Linux | One socket per core, so the kernel spreads packets without a shared accept point |
-| `recvmmsg` | Linux | Batched receive of many datagrams per system call |
-| RIO and IOCP | Windows | Windows has no `SO_REUSEPORT` load distribution, so sharding relies on these APIs |
-| Zero-copy wire parsing | All | Parsers borrow from the receive buffer |
+| Dedicated blocking worker threads for UDP | All | Decided. A multi-threaded tokio runtime on the UDP path was the slowest arrangement from 8 workers up |
+| tokio runtime | All | Everything except the UDP fast path: TCP, DoT, DoH, DoQ, control plane, connectors, API |
+| `SO_REUSEPORT` sharding | Linux | Decided. One socket per worker thread; 4.04 M QPS at 32 workers against 3.28 M for a shared socket (loopback, WSL2). Balances by flow hash, so BPF steering is a later option |
+| One shared socket | Windows | Decided. Windows has no `SO_REUSEPORT` load distribution; threads and tokio tasks measured the same, plateau around 8 to 16 workers |
+| Zero-copy wire parsing, zero allocations per query | All | Decided. `domain` parses and builds without allocating; enforced by a counting-allocator bench in CI |
+| `recvmmsg`, UDP GSO | Linux | Not yet measured; later optimizations |
+| RIO | Windows | Not yet measured; later optimization |
 | `io_uring` (`tokio-uring`) | Linux | A measurable option, not an assumption |
-| Lock-free cache | All | No lock contention on the hot path |
+| Lock-free cache and index | All | No lock contention on the hot path (ADR 0002) |
 | SIMD | All | Only where profiling justifies it |
 
-**Spike B** (Phase 0) measures UDP-echo DNS throughput on Windows and Linux with sharding and compares the `domain` and `hickory-proto` parsers. Its results decide the DNS library and the I/O strategy. The performance target is more than 100k QPS on a single core, with dnsperf and flamethrower results documented (DNS-27). DNS latency usually sits upstream, so autoscaling is handled by orchestrator hooks and metrics outside the core (CON-06).
+**Spike B** (Phase 0) measured UDP DNS throughput on Windows and Linux (WSL2) and compared the `domain` and `hickory-proto` crates; the results and the decision are in ADR 0009. Headline figures, loopback on an i9-13900K: `domain` reached 148k QPS on one Windows worker (159k per core) and 204k on one Linux worker, 750k on Windows at 8 to 16 workers, and 4.04 M on Linux with `SO_REUSEPORT` at 32 workers (262k per core). `domain` beat `hickory-proto` by 6 to 17 percent end to end and by 2.5 to 3.5 times in parse-plus-build, with zero allocations per query against 6 to 10. The per-core target of more than 100k QPS (DNS-27) is met with margin on loopback; a two-host measurement over a real link is a Phase 2 exit criterion before absolute numbers are published. DNS latency usually sits upstream, so autoscaling is handled by orchestrator hooks and metrics outside the core (CON-06).
 
 `unsafe` code is allowed only where an ADR permits it, which is expected to be limited to the I/O layer (API-16).
 
@@ -465,7 +467,7 @@ These choices are candidates, to be confirmed in the Phase 0 spikes. Final choic
 
 | Concern | Candidates | Notes |
 |---|---|---|
-| DNS wire format, zone files, DNSSEC, XFR, TSIG | `domain` (NLnet Labs) or `hickory-proto` | Chosen after Spike B |
+| DNS wire format, zone files, TSIG, DNSSEC record types | `domain` (NLnet Labs) behind an internal `Codec` trait; `hickory-proto` kept as the second implementation for differential tests | Decided in ADR 0009 after Spike B |
 | DHCPv4 and DHCPv6 wire format | `dhcproto` | Kea is the semantic reference |
 | Raft | `openraft` 0.9 | Confirmed by Spike A (ADR 0002); writes coalesced into entries |
 | Embedded KV store | `redb` | Confirmed by Spike A (ADR 0002); SSD or NVMe required |
