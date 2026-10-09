@@ -718,7 +718,8 @@ describe("the preview of the canned workbook", () => {
     expect(view.id).not.toBe(own.id);
     const p = (await preview(own.id)).body;
     expect(p.credentials.allowed).toBe(false);
-    expect(p.credentials.reason).toContain("may not store or reveal operator secrets");
+    expect(p.credentials.reason).toBe("forbidden");
+    expect((p.credentials as { detail?: string }).detail).toContain("may not store or reveal operator secrets");
     expect(p.blockers).toContain("import.credentials.vault_required");
     expect(p.can_apply).toBe(false);
     const res = await apply(own.id);

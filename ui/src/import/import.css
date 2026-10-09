@@ -38,3 +38,8 @@
 .import-links { columns: 3 220px; list-style: none; margin: 0; padding: 0; }
 .import-result .progress .bar { width: 320px; height: 6px; }
 table.plain caption { text-align: left; font-weight: var(--fw-semibold); padding: var(--sp-3) var(--cell-px); }
+
+/* Outcome per sheet and the paged list of source rows */
+.import-outcomes th[scope="row"] { font-weight: var(--fw-medium); text-align: left; }
+.import-rows-grid { display: flex; flex-direction: column; height: min(420px, 60vh); min-height: 240px; }
+.import-row-item { display: inline-flex; align-items: baseline; gap: var(--sp-2); margin-right: var(--sp-5); }

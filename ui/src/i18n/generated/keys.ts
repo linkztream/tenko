@@ -715,6 +715,19 @@ export type MessageKey =
   | "import.result.progress"
   | "import.result.rolled_back"
   | "import.result.running"
+  | "import.result.show_all"
+  | "import.rows.count"
+  | "import.rows.items"
+  | "import.rows.limit"
+  | "import.rows.more"
+  | "import.rows.none"
+  | "import.rows.nothing"
+  | "import.rows.status"
+  | "import.rows.status_free"
+  | "import.rows.status_imported"
+  | "import.rows.status_skipped"
+  | "import.rows.title"
+  | "import.rows.where"
   | "import.severity.error"
   | "import.severity.info"
   | "import.severity.warning"
@@ -734,6 +747,16 @@ export type MessageKey =
   | "import.sheet.no_header"
   | "import.sheet.roles_from"
   | "import.sheet.summary"
+  | "import.sheets.errors"
+  | "import.sheets.free"
+  | "import.sheets.imported"
+  | "import.sheets.kind"
+  | "import.sheets.notes"
+  | "import.sheets.rows"
+  | "import.sheets.sheet"
+  | "import.sheets.skipped"
+  | "import.sheets.title"
+  | "import.sheets.warnings"
   | "import.step.apply"
   | "import.step.done"
   | "import.step.mapping"
@@ -2164,6 +2187,10 @@ export interface MessageArgs {
   "import.result.count": { action: string | number; count: number; kind: string | number };
   "import.result.more": { count: number };
   "import.result.progress": { done: number; total: number };
+  "import.result.show_all": { count: number };
+  "import.rows.count": { shown: number; total: number };
+  "import.rows.limit": { limit: number; total: number };
+  "import.rows.more": { count: number };
   "import.shape.count": { count: number; shape: string | number };
   "import.sheet.roles_from": { sheet: string | number };
   "import.sheet.summary": { file: string | number; rows: number; width: number };
@@ -3166,6 +3193,19 @@ export const messageKeys: readonly MessageKey[] = [
   "import.result.progress",
   "import.result.rolled_back",
   "import.result.running",
+  "import.result.show_all",
+  "import.rows.count",
+  "import.rows.items",
+  "import.rows.limit",
+  "import.rows.more",
+  "import.rows.none",
+  "import.rows.nothing",
+  "import.rows.status",
+  "import.rows.status_free",
+  "import.rows.status_imported",
+  "import.rows.status_skipped",
+  "import.rows.title",
+  "import.rows.where",
   "import.severity.error",
   "import.severity.info",
   "import.severity.warning",
@@ -3185,6 +3225,16 @@ export const messageKeys: readonly MessageKey[] = [
   "import.sheet.no_header",
   "import.sheet.roles_from",
   "import.sheet.summary",
+  "import.sheets.errors",
+  "import.sheets.free",
+  "import.sheets.imported",
+  "import.sheets.kind",
+  "import.sheets.notes",
+  "import.sheets.rows",
+  "import.sheets.sheet",
+  "import.sheets.skipped",
+  "import.sheets.title",
+  "import.sheets.warnings",
   "import.step.apply",
   "import.step.done",
   "import.step.mapping",

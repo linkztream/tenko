@@ -260,7 +260,8 @@ export function buildPreview(record: ImportRecord, ev: Evaluation, limit: number
       unchanged: counts.unchanged,
       statement: credentialStatement(hosts, counts, mapping.options.credentials),
       allowed: !blocked,
-      ...(blocked && !gate.allowed ? { reason: gate.detail } : {}),
+      // The machine code in `reason`, the English text in `detail` (as the server sends them).
+      ...(blocked && !gate.allowed ? { reason: gate.reason, detail: gate.detail } : {}),
     },
     warnings,
     ...(planError ? { plan_error: planError } : {}),

@@ -2,7 +2,7 @@
 // links to what was created. A failed import was rolled back; the person can go back to the
 // preview and try again.
 import { A } from "@solidjs/router";
-import { createMemo, For, Show } from "solid-js";
+import { createMemo, createSignal, For, Show } from "solid-js";
 import type { JobDetail } from "../../api/types";
 import { paths } from "../../app/paths";
 import { Icon } from "../../components/Icon";
@@ -38,6 +38,8 @@ export function ResultStep(props: { state: WizardState; job: JobDetail | null; o
   const total = () => job()?.steps.length ?? 0;
   const pct = () => (total() ? Math.round((done() / total()) * 100) : 0);
 
+  const [allLinks, setAllLinks] = createSignal(false);
+  const shownLinks = () => (allLinks() ? created() : created().slice(0, LINKS_SHOWN));
   const created = createMemo(() => {
     const seen = new Map<string, ItemKey>();
     for (const row of props.state.preview?.rows ?? []) {
@@ -73,9 +75,9 @@ export function ResultStep(props: { state: WizardState; job: JobDetail | null; o
         <Show when={created().length > 0}>
           <h3>{t("import.result.created")}</h3>
           <ul class="import-links" data-testid="import-created">
-            <For each={created().slice(0, LINKS_SHOWN)}>
+            <For each={shownLinks()}>
               {(key) => (
-                <li>
+                <li data-testid="import-created-item" data-key={`${key.kind}:${itemLabel(key)}`}>
                   <Show when={itemHref(key)} fallback={<span class="mono">{itemLabel(key)}</span>}>
                     {(href) => (
                       <A href={href()} class="mono">
@@ -87,8 +89,13 @@ export function ResultStep(props: { state: WizardState; job: JobDetail | null; o
               )}
             </For>
           </ul>
-          <Show when={created().length > LINKS_SHOWN}>
-            <p class="muted">{t("import.result.more", { count: created().length - LINKS_SHOWN })}</p>
+          <Show when={!allLinks() && created().length > LINKS_SHOWN}>
+            <p class="muted">
+              {t("import.result.more", { count: created().length - LINKS_SHOWN })}{" "}
+              <button type="button" class="btn sm ghost" data-testid="import-created-all" onClick={() => setAllLinks(true)}>
+                {t("import.result.show_all", { count: created().length })}
+              </button>
+            </p>
           </Show>
         </Show>
       </Show>

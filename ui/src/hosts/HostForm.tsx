@@ -9,7 +9,7 @@ import type { AssignmentMode, CustomValue, Host, HostInput, HostPatch, Interface
 import { ASSIGNMENT_MODES } from "../api/types";
 import { Dialog } from "../components/Dialog";
 import { t } from "../i18n";
-import { CustomFieldsEditor, TagsInput } from "../ipam/fields/CustomFieldsEditor";
+import { CustomFieldsEditor, customPatch, TagsInput } from "../ipam/fields/CustomFieldsEditor";
 import { writeQuery } from "../ipam/plan/describe";
 import { PlanDialog, useWriteToast, type SendOptions } from "../ipam/plan/PlanDialog";
 import { modeHint, modeWord } from "../ipam/words";
@@ -96,7 +96,10 @@ export function HostForm(props: { host?: Host; onDone: (host: Host) => void; onC
     if ((site() || null) !== (host.site ?? null)) patch.site = site() || null;
     if ((description().trim() || null) !== (host.meta.description ?? null)) patch.description = description().trim() || null;
     if (!sameList(tags(), host.meta.tags)) patch.tags = tags();
-    if (JSON.stringify(custom()) !== JSON.stringify(host.meta.custom ?? {})) patch.custom = custom();
+    // Only the changed values; a cleared value is sent as null, which removes it (the
+    // document says so, but its value type has no null, hence the cast as in AddressForm).
+    const values = customPatch(host.meta.custom ?? {}, custom());
+    if (values) patch.custom = values as HostPatch["custom"];
     return api.patch("/api/v1/hosts/{id}", {
       path: { id: host.id },
       query: writeQuery(o.dryRun, o.acknowledge),
@@ -145,7 +148,15 @@ export function HostForm(props: { host?: Host; onDone: (host: Host) => void; onC
               <For each={ASSIGNMENT_MODES}>
                 {(m) => (
                   <label class="radio-row">
-                    <input type="radio" name="host-mode" value={m} checked={mode() === m} onChange={() => setMode(m)} />
+                    <input
+                      type="radio"
+                      name="host-mode"
+                      value={m}
+                      checked={mode() === m}
+                      data-testid="field-mode"
+                      data-key={m}
+                      onChange={() => setMode(m)}
+                    />
                     <span class={`mode ${m}`}>{modeWord(m)}</span>
                     <span class="muted">{modeHint(m)}</span>
                   </label>
@@ -176,7 +187,13 @@ export function HostForm(props: { host?: Host; onDone: (host: Host) => void; onC
             </div>
             <div class="field">
               <label for="host-description">{t("ipam.col.description")}</label>
-              <input id="host-description" class="input" value={description()} onInput={(e) => setDescription(e.currentTarget.value)} />
+              <input
+                id="host-description"
+                class="input"
+                value={description()}
+                data-testid="field-description"
+                onInput={(e) => setDescription(e.currentTarget.value)}
+              />
             </div>
             <Show when={!host}>
               <fieldset class="field">

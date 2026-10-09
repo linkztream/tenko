@@ -6090,6 +6090,75 @@
       <unit id="import.credentials.reason.vault_unavailable">
         <segment><source>The vault cannot store secrets now. Leave the credentials out or try again later.</source></segment>
       </unit>
+      <unit id="import.sheets.title">
+        <segment><source>Outcome per sheet</source></segment>
+      </unit>
+      <unit id="import.sheets.sheet">
+        <segment><source>Sheet</source></segment>
+      </unit>
+      <unit id="import.sheets.kind">
+        <segment><source>Read as</source></segment>
+      </unit>
+      <unit id="import.sheets.rows">
+        <segment><source>Rows</source></segment>
+      </unit>
+      <unit id="import.sheets.imported">
+        <segment><source>Imported</source></segment>
+      </unit>
+      <unit id="import.sheets.free">
+        <segment><source>Free</source></segment>
+      </unit>
+      <unit id="import.sheets.skipped">
+        <segment><source>Left out</source></segment>
+      </unit>
+      <unit id="import.sheets.errors">
+        <segment><source>Errors</source></segment>
+      </unit>
+      <unit id="import.sheets.warnings">
+        <segment><source>Warnings</source></segment>
+      </unit>
+      <unit id="import.sheets.notes">
+        <segment><source>Notes</source></segment>
+      </unit>
+      <unit id="import.rows.title">
+        <segment><source>Source rows</source></segment>
+      </unit>
+      <unit id="import.rows.count">
+        <segment><source>{shown, number} of {total, number} rows listed</source></segment>
+      </unit>
+      <unit id="import.rows.more">
+        <segment><source>{count, plural, one {Show # more row} other {Show # more rows}}</source></segment>
+      </unit>
+      <unit id="import.rows.limit">
+        <segment><source>The list stops at the first {limit, number} rows. The counts, the outcome per sheet and the loss report cover all {total, number}.</source></segment>
+      </unit>
+      <unit id="import.rows.where">
+        <segment><source>Sheet and row</source></segment>
+      </unit>
+      <unit id="import.rows.status">
+        <segment><source>Outcome</source></segment>
+      </unit>
+      <unit id="import.rows.items">
+        <segment><source>Changes</source></segment>
+      </unit>
+      <unit id="import.rows.nothing">
+        <segment><source>Nothing</source></segment>
+      </unit>
+      <unit id="import.rows.none">
+        <segment><source>The import has no rows with data.</source></segment>
+      </unit>
+      <unit id="import.rows.status_imported">
+        <segment><source>Imported</source></segment>
+      </unit>
+      <unit id="import.rows.status_free">
+        <segment><source>Free address</source></segment>
+      </unit>
+      <unit id="import.rows.status_skipped">
+        <segment><source>Left out</source></segment>
+      </unit>
+      <unit id="import.result.show_all">
+        <segment><source>{count, plural, one {Show the # link} other {Show all # links}}</source></segment>
+      </unit>
     </group>
     <group id="dashboard">
       <unit id="dashboard.action.claim">

@@ -6090,6 +6090,75 @@
       <unit id="import.credentials.reason.vault_unavailable">
         <segment><source>The vault cannot store secrets now. Leave the credentials out or try again later.</source><target>Valvet kan inte lagra hemligheter just nu. Utelämna inloggningsuppgifterna eller försök igen senare.</target></segment>
       </unit>
+      <unit id="import.sheets.title">
+        <segment><source>Outcome per sheet</source><target>Utfall per blad</target></segment>
+      </unit>
+      <unit id="import.sheets.sheet">
+        <segment><source>Sheet</source><target>Blad</target></segment>
+      </unit>
+      <unit id="import.sheets.kind">
+        <segment><source>Read as</source><target>Läst som</target></segment>
+      </unit>
+      <unit id="import.sheets.rows">
+        <segment><source>Rows</source><target>Rader</target></segment>
+      </unit>
+      <unit id="import.sheets.imported">
+        <segment><source>Imported</source><target>Importerade</target></segment>
+      </unit>
+      <unit id="import.sheets.free">
+        <segment><source>Free</source><target>Lediga</target></segment>
+      </unit>
+      <unit id="import.sheets.skipped">
+        <segment><source>Left out</source><target>Utelämnade</target></segment>
+      </unit>
+      <unit id="import.sheets.errors">
+        <segment><source>Errors</source><target>Fel</target></segment>
+      </unit>
+      <unit id="import.sheets.warnings">
+        <segment><source>Warnings</source><target>Varningar</target></segment>
+      </unit>
+      <unit id="import.sheets.notes">
+        <segment><source>Notes</source><target>Noteringar</target></segment>
+      </unit>
+      <unit id="import.rows.title">
+        <segment><source>Source rows</source><target>Källrader</target></segment>
+      </unit>
+      <unit id="import.rows.count">
+        <segment><source>{shown, number} of {total, number} rows listed</source><target>{shown, number} av {total, number} rader listade</target></segment>
+      </unit>
+      <unit id="import.rows.more">
+        <segment><source>{count, plural, one {Show # more row} other {Show # more rows}}</source><target>{count, plural, one {Visa # rad till} other {Visa # rader till}}</target></segment>
+      </unit>
+      <unit id="import.rows.limit">
+        <segment><source>The list stops at the first {limit, number} rows. The counts, the outcome per sheet and the loss report cover all {total, number}.</source><target>Listan stannar vid de första {limit, number} raderna. Antalen, utfallet per blad och förlustrapporten omfattar alla {total, number}.</target></segment>
+      </unit>
+      <unit id="import.rows.where">
+        <segment><source>Sheet and row</source><target>Blad och rad</target></segment>
+      </unit>
+      <unit id="import.rows.status">
+        <segment><source>Outcome</source><target>Utfall</target></segment>
+      </unit>
+      <unit id="import.rows.items">
+        <segment><source>Changes</source><target>Ändringar</target></segment>
+      </unit>
+      <unit id="import.rows.nothing">
+        <segment><source>Nothing</source><target>Ingenting</target></segment>
+      </unit>
+      <unit id="import.rows.none">
+        <segment><source>The import has no rows with data.</source><target>Importen har inga rader med data.</target></segment>
+      </unit>
+      <unit id="import.rows.status_imported">
+        <segment><source>Imported</source><target>Importerad</target></segment>
+      </unit>
+      <unit id="import.rows.status_free">
+        <segment><source>Free address</source><target>Ledig adress</target></segment>
+      </unit>
+      <unit id="import.rows.status_skipped">
+        <segment><source>Left out</source><target>Utelämnad</target></segment>
+      </unit>
+      <unit id="import.result.show_all">
+        <segment><source>{count, plural, one {Show the # link} other {Show all # links}}</source><target>{count, plural, one {Visa länken} other {Visa alla # länkar}}</target></segment>
+      </unit>
     </group>
     <group id="dashboard">
       <unit id="dashboard.action.claim">
