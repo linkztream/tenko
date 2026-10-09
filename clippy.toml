@@ -1,0 +1,16 @@
+cognitive-complexity-threshold = 20
+too-many-arguments-threshold = 8
+# Domain terms that `clippy::doc_markdown` would otherwise ask to wrap in backticks.
+# ".." keeps the default list.
+doc-valid-idents = [
+  "DHCPv4",
+  "DHCPv6",
+  "SNMPv2c",
+  "SNMPv3",
+  "OpenAPI",
+  "SolidJS",
+  "UniFi",
+  "PowerShell",
+  "WebAuthn",
+  "..",
+]

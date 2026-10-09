@@ -1,0 +1,45 @@
+# Rust
+/target
+**/target
+# Cargo.lock is committed on purpose (binary workspace, reproducible builds).
+**/*.rs.bk
+
+# Fuzzing
+fuzz/artifacts/
+fuzz/corpus/
+fuzz/coverage/
+
+# Node / UI
+ui/node_modules/
+ui/dist/
+node_modules/
+
+# Environment and local overrides
+.env
+.env.*
+!.env.example
+*.local
+
+# Benchmarks
+bench/**/results/raw/
+
+# OS junk
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# IDE / editor
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+.fleet/
+.zed/
+
+# Logs
+*.log
+npm-debug.log*

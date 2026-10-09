@@ -1,0 +1,18 @@
+[package]
+name = "ddi-server"
+version = "0.0.1"
+description = "The DDI server binary: controller, dns, dhcp and probe roles in one executable"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+ddi-core = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true

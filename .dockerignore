@@ -1,0 +1,13 @@
+# Keep the build context small and free of local state.
+.git
+**/target
+ui/node_modules
+ui/dist
+fuzz/artifacts
+fuzz/corpus
+fuzz/coverage
+bench/**/results/raw
+.env
+.env.*
+!.env.example
+*.local

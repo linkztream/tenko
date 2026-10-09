@@ -1,0 +1,60 @@
+# cargo-deny configuration. Run with `cargo deny check`; enforced in CI.
+# Reference: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+all-features = true
+
+[output]
+feature-depth = 1
+
+# Security advisories from the RustSec database. Vulnerabilities are always errors.
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+unmaintained = "all"
+ignore = []
+
+# The project licence is not decided yet (Apache-2.0 or AGPL-3.0, see docs/adr/), so the
+# dependency graph must stay permissive-compatible. Anything not listed here is rejected,
+# which includes every GPL-* and AGPL-* licence.
+[licenses]
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  # Weak copyleft (file-level). Allowed, but every new MPL-2.0 dependency must be
+  # reviewed in its pull request. cargo-deny has no per-licence "warn" level.
+  "MPL-2.0",
+  "CC0-1.0",
+  "OpenSSL",
+]
+confidence-threshold = 0.9
+exceptions = []
+unused-allowed-license = "allow"
+
+# Workspace crates are `publish = false`; their placeholder licence is not checked.
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+deny = [
+  { crate = "openssl", reason = "DDI uses rustls; OpenSSL must not enter the dependency graph" },
+  { crate = "openssl-sys", reason = "DDI uses rustls; OpenSSL must not enter the dependency graph" },
+]
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

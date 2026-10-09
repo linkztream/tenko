@@ -1,0 +1,11 @@
+[package]
+name = "ddi-jobs"
+version = "0.0.1"
+description = "Job engine: steps, state, timeouts, rollback"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
