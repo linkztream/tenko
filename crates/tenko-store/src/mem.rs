@@ -944,6 +944,7 @@ impl Store for MemStore {
             journal_len: state.journal_len,
             data_bytes: state.data_bytes,
             disk_bytes: None,
+            fsync_p50_micros: None,
             indexes: state
                 .indexes
                 .iter()

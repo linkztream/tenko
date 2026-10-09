@@ -849,6 +849,10 @@ pub struct StoreStatus {
     pub data_bytes: u64,
     /// Bytes on disk (`None` for `MemStore`).
     pub disk_bytes: Option<u64>,
+    /// Median latency in microseconds of a durable commit on the data directory, measured
+    /// by the start-up probe (OPS-19; the store warns above 10 ms). `None` for `MemStore` or
+    /// when the probe did not run.
+    pub fsync_p50_micros: Option<u64>,
     /// Registered derived indexes.
     pub indexes: Vec<IndexStatus>,
 }

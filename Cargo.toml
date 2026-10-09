@@ -74,7 +74,8 @@ utoipa-axum = "0.3.0"
 
 # Cryptography. rustls uses the aws-lc-rs provider; OpenSSL is banned in deny.toml.
 argon2 = "0.6.0"
-aws-lc-rs = "1.18.1"
+# prebuilt-nasm: aws-lc-sys otherwise needs NASM on the Windows build machine and in CI.
+aws-lc-rs = { version = "1.18.1", features = ["prebuilt-nasm"] }
 # HTTP client for connectors, the online HIBP check and the CLI (rustls, no OpenSSL).
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 # Unicode NFKC normalization of passwords before hashing (NIST SP 800-63B).
