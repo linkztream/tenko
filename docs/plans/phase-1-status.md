@@ -22,11 +22,11 @@
 | WP1.8 Server and CLI | FINAL, committed locally | `7f8a2f1` | 124 tests (125 with import), 36 client tests; `tenko.toml` documented in `deploy/tenko.example.toml`, precedence defaults, file, `TENKO_*`, flags; start order KEK, store, vault, TLS, auth, IPAM, jobs, API in 375 ms cold and 293 ms warm; exit codes in `exit.rs`; M9 pass (Windows 47.6 MiB working set, Linux 75.1 MiB RSS after 10 min idle with 200 prefixes) |
 | WP1.8b CA root route | FINAL, committed locally | `69ec08e` | `GET /system/ca-root` (PEM, one hour public cache, 404 `tls.no_internal_ca` outside internal CA mode), fingerprint printed at readiness, `tenko ca-root [--fingerprint]`; 4 route tests, 4 CLI tests |
 | WP1.9 UI shell, auth, setup | FINAL, committed locally | `4c3778c`, `0bebd53` | 552 tests in 26 files; first-load bundle 68.9 KB gzip; XLIFF 2.0 en/sv compiled at build; typed client from `docs/api/openapi.json` with drift check; msw mock API; the CI `ui` job now runs lint and test |
-| WP1.10 UI IPAM, import, audit | In progress | worktree (`ui/`) | Started 2026-10-09 late evening: grid, IPAM, hosts, move preview, jobs, audit, dashboard, then import behind mocks until WP1.5 lands; TOTP QR code included; `ui/README.md` with the `data-testid` convention for WP1.11 |
-| WP1.11 Acceptance and E2E | Not started | | After M3 |
+| WP1.10 UI IPAM, import, audit | FINAL, committed locally | `fa95cae` | 1,485 tests in 67 files; first load 63.9 KB gzip with message packs per route; grid, IPAM, hosts, move preview, jobs, audit, dashboard, import wizard and export, CA root link, TOTP QR code (`uqr`, MIT); `data-testid` convention and layout in `ui/README.md` |
+| WP1.11 Acceptance and E2E | Next | `crates/tenko/tests/**`, `ui/e2e/**` | Starts after the push; uses the `data-testid` convention of `ui/README.md` |
 | Design spike | Done, committed locally | `4880d8c` | All 16 owner decisions applied; mockups served from `design/` |
 
-The committed tree compiles and `Cargo.lock` matches the committed manifests since `7f8a2f1`; the working tree carries WP1.10 in progress; each builder keeps its own crate compiling at every save, and the lead verifies the whole workspace at each merge.
+The committed tree compiles and `Cargo.lock` matches the committed manifests since `7f8a2f1`; every Slice 1 package is committed; each builder keeps its own crate compiling at every save, and the lead verifies the whole workspace at each merge.
 
 ## Conventions decided during Slice 1
 
@@ -42,7 +42,7 @@ The committed tree compiles and `Cargo.lock` matches the committed manifests sin
 
 ## Push state
 
-Every commit on `main` after `02a6d96` is local. The full locked verification of `a8b56cd` (check, fmt, clippy, 2,015 tests, deny, audit) was green on 2026-10-09 in the clean worktree. They are not pushed because CI runs `cargo … --locked` and the shared `Cargo.lock` carries the dependencies of the in-progress packages; pushing before their manifests are committed would turn CI red. Push happens after WP1.10 is committed, with `docs/api/openapi.json` regenerated (`cargo run -p tenko -- openapi > docs/api/openapi.json`) and `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, `cargo deny check`, `cargo audit` and the attribution grep green.
+Every commit on `main` after `02a6d96` is local. The full locked verification of `a8b56cd` (check, fmt, clippy, 2,015 tests, deny, audit) was green on 2026-10-09 in the clean worktree. They are not pushed because CI runs `cargo … --locked` and the shared `Cargo.lock` carries the dependencies of the in-progress packages; pushing before their manifests are committed would turn CI red. Push happens now, with `docs/api/openapi.json` regenerated (`cargo run -p tenko -- openapi > docs/api/openapi.json`) and `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, `cargo deny check`, `cargo audit` and the attribution grep green.
 
 ## Follow-ups recorded
 
@@ -50,7 +50,6 @@ Every commit on `main` after `02a6d96` is local. The full locked verification of
 - `JobEngine` staging stays a task-local for Slice 1; an explicit sink on `StepContext` is added when a handler needs to stage from a spawned task.
 - `password_change_required` is enforced only by the UI; the API enforcement is a Slice 2 item.
 - The embedded UI server should send long-lived cache headers for `/fonts/` (hashed file names) once WP1.8 wires the static routes.
-- TOTP enrolment shows the secret and the otpauth URI as text; a QR code is a WP1.10 item.
 - WebAuthn: the relying-party id is the installation host name; pending ceremonies are in memory, so Slice 3 clustering needs sticky routing or replicated challenges; Hardened deployments should load vendor attestation roots (MDS3 in Slice 3).
 - Plugin security (R16) and KEK directory trust (R15) stay open until the hub and the Slice 3 hardening.
 - `tenko_core::ir` lacks interfaces by name, VRF and tenant names, prefix roles and secret references; WP1.5 keeps a superset `ImportModel` with `to_ir()`. The IR is extended (IrInterface, interface on IrAddress, vrf on IrNetwork and IrAddress, IrSecretRef) when the Slice 2 migration plugins need it.
@@ -62,3 +61,6 @@ Every commit on `main` after `02a6d96` is local. The full locked verification of
 - systemd: the unit uses `LoadCredentialEncrypted=` with the `file` KEK provider; a systemd-credential protection kind in tenko-vault (Slice 3 hardening) removes the plain-file warnings. The root `systemd-creds encrypt` path was not run end to end.
 - M9 margins: RSS grows about 14 KiB per prefix on Linux (86.4 MiB at 1,000 prefixes) and glibc keeps about 19 MiB of Argon2 buffers after the first login; an allocator trim or a compact index layout is needed before the 100 MB target holds at a few thousand prefixes.
 - `reverse_proxy` mode: a client that speaks plain HTTP to the listener needs its origin in `server.allowed_origins` (documented in the example configuration).
+- `ImportPreview.credentials.reason` carries English detail; the UI translates the machine codes `forbidden`, `step_up_required`, `unauthenticated` and `vault_unavailable`, so the API should send those codes (small WP1.5 follow-up).
+- Jobs API: the kind of the current step in `JobSummary` and a job-group filter on `GET /jobs` would remove two derivations in the UI (Slice 2, with the job engine work).
+- Some UI tests assert the Swedish rendering of keys, following the WP1.9 precedent; acceptable while the two languages ship together, revisit when language packs become runtime files (API-21).
