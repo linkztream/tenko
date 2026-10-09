@@ -1,6 +1,6 @@
 # Phase 1 execution plan: Platform and IPAM
 
-- Status: Draft for the owner's review
+- Status: Accepted by the owner on 2026-10-09 (decisions in 9.3)
 - Date: 2026-10-09
 - Scope: Phase 1 of [ROADMAP.md](../ROADMAP.md). Requirement IDs refer to [REQUIREMENTS.md](../REQUIREMENTS.md), toggles (TGL) and never-off items (NEVER) to [SECURITY-PROFILES.md](../SECURITY-PROFILES.md).
 
@@ -21,7 +21,7 @@ ROADMAP "Done when" and its Phase 1 verification rows, as checks:
 | # | Check | Requirements | Slice |
 |---|---|---|---|
 | E1 | The owner's spreadsheet is imported, loss report empty or acknowledged; its CSV export re-imported into an empty instance previews zero changes | IPAM-11, MIG-14 | 1 |
-| E2 | Passkey login over HTTPS on the configured host name (platform authenticator and hardware key); TOTP and PIN preset pass end to end | IAM-03, IAM-06, IAM-09 | 1 |
+| E2 | Passkey login over HTTPS on the configured host name (platform authenticator and hardware key) in each TLS mode of OPS-22 (internal CA, imported certificate, HAProxy in front); TOTP and PIN preset pass end to end | IAM-03, IAM-06, IAM-09, OPS-22 | 1 |
 | E3 | OpenAPI served and committed under `docs/api/`; CI fails on drift | API-01 | 1 |
 | E4 | Three LANs and the DMZ scanned, one probe each; compose lab inventory matches its answer key | SCAN-01 to SCAN-09 | 2 |
 | E5 | Proxmox and HASS inventory visible in IPAM | CONN-02 to CONN-04 | 2 |
@@ -368,6 +368,7 @@ Shared files: only WP1.0 edits the root `Cargo.toml`. It pre-declares every Slic
 ### WP1.7 API platform (L)
 
 - axum on its own 2 to 4 worker runtime; rustls with HTTP/2; plain HTTP only where TGL-08 allows; headers, CSP, caching and `build.rs` embedding per ADR 0008. Extractors producing `RequestCtx`, `Origin`-based CSRF guard (proposed), problem details, pagination, idempotency, rate limits.
+- **TLS modes (OPS-22, decided 2026-10-09):** (a) the internal CA of WP1.3; (b) an imported certificate and key with hot reload on file change and expiry warnings in the health view; (c) **termination in a reverse proxy** such as HAProxy with ACME certificates in front of Tenko: the listener accepts plain HTTP or the PROXY protocol only from a configured list of trusted proxy addresses, takes the client address, scheme and host from `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` (or PROXY protocol), sets the WebAuthn relying-party ID and the `Secure` cookie flag from the public host name, and refuses forwarded headers from any other source. The wizard offers the three modes; certificate administration (upload, replace, expiry, renewal source) is one settings page. Built-in ACME is a Slice 3 Should.
 - SSE per ADR 0008, with journal fallback for replay, topic and authorization filters, cookie authentication.
 - OpenAPI via `utoipa`, dumped to `docs/api/openapi.json`; feature `client` gives the CLI the DTOs and a `reqwest` client without axum (API-03) (proposed).
 - Acceptance: Spike C serving tests ported; SSE replay across restart; every route in the OpenAPI document.
@@ -556,3 +557,16 @@ Results go to `bench/phase1-*/results/` with scripts, machine and versions, as i
 | R12 | nmap's OS database is not permissive; Npcap may not be redistributed, and raw sockets need it to build | Own fingerprint signatures plus connector data; users install Npcap; active scanning behind a feature |
 | R13 | The workstation's repository drive is SMR (store tests 93x slower) | Tests use the OS temp directory, override `TENKO_TEST_DATA_DIR` (proposed) |
 | R14 | API-03 "shares the client library" cannot be literal across Rust and TypeScript | Both derive from one OpenAPI document |
+
+### 9.3 Decisions taken on 2026-10-09
+
+| # | Decision |
+|---|---|
+| Q1 | Accepted: the four slice moves in 1.3 stand |
+| Q2 | `webauthn-rs` is confirmed to pull in OpenSSL and is out. WP1.2 evaluates the OpenSSL-free relying-party crates on crates.io (`webauthn_rp`, `passkey-auth`) against `cargo deny`, `cargo audit`, test coverage and maintenance; if neither passes, a minimal in-house verifier (ES256, EdDSA, RS256; attestation `none` and `packed`) is written. The choice is ADR 0010 |
+| Q3 | Accepted: system keys (TOTP seeds, CA and TLS keys) do not count as "the vault holds secrets" for IAM-07; only revealable operator secrets do |
+| Q4 | Accepted: every single edit is an inline one-step job committed with the change |
+| Q5 | Three TLS modes from Slice 1 (OPS-22): internal CA with a host name in AD DNS and the CA root installed on admin clients; an imported certificate with hot reload; and TLS termination in the owner's HAProxy with ACME certificates, which is the expected home deployment. Certificate administration must be a single, simple settings page. `localhost` is the relying-party ID during development |
+| Q6 | Accepted as ADR 0011 (store write model) |
+| Q7 | The owner places the real spreadsheet outside the repository (`C:\Users\plm\Documents\tenko-samples\`); the lead reads its structure there and writes anonymized fixtures into `tenko-ipam/tests/fixtures/`. The original is never committed |
+| Binary | One binary `tenko` with `serve` and client subcommands (ADR 0004); WP1.0 creates the skeleton and removes `tenko-server` and `tenko-cli` |

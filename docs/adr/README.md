@@ -62,3 +62,5 @@ The date is the date the ADR was written or last changed status.
 | [0007](0007-delivery-order.md) | Delivery order | Accepted | 2026-10-09 |
 | [0008](0008-ui-embedding-and-sse.md) | UI embedding, static serving and SSE | Accepted | 2026-10-09 |
 | [0009](0009-dns-wire-format-and-udp-io.md) | DNS wire-format crate and UDP I/O design | Accepted | 2026-10-09 |
+| 0010 | WebAuthn relying-party implementation without OpenSSL | Reserved (written by WP1.2) | |
+| [0011](0011-store-write-model.md) | Store write model | Accepted | 2026-10-09 |
