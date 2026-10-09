@@ -26,6 +26,7 @@
 | WP1.11 Acceptance and E2E | FINAL, committed locally | `b21d9a5` | 137 server tests (8 new acceptance files), 23 Playwright scenarios passing plus 2 `test.fixme` waiting for WP1.4d and WP1.10b, no flakes over three repeats; E1 and E3 verified automatically, E2 for PIN, TOTP and a virtual-authenticator passkey (hardware key, imported certificate and HAProxy stay manual), the manual-step parts of E8; `e2e` CI job added |
 | WP1.4d Default tenant and VRF at setup | In progress | `tenko-ipam`, `routes/setup.rs`, `serve/mod.rs` | Found by the E2E tests: a fresh installation had no tenant or VRF until the first write; `IpamService::ensure_defaults` at setup and at start |
 | WP1.10b UI fixes from E2E | FINAL, committed locally | `5997eed` | Host form sends only changed custom values (`null` clears); import preview shows the outcome per sheet, pages every listable row in a grid, loads all rows before apply; 1,495 UI tests; first load 64.1 KB gzip |
+| WP1.5c Paged preview rows | FINAL, committed locally | `46037b2` | `GET /imports/{id}/rows?limit&cursor` from the stored, encrypted preview; 409 `import.preview.stale` on a mapping change; `CredentialNotice.reason` is a code, text in `detail`; 4 route tests |
 | Design spike | Done, committed locally | `4880d8c` | All 16 owner decisions applied; mockups served from `design/` |
 
 ## Slice 2 work packages
@@ -73,7 +74,6 @@ The committed tree compiles and `Cargo.lock` matches the committed manifests sin
 - systemd: the unit uses `LoadCredentialEncrypted=` with the `file` KEK provider; a systemd-credential protection kind in tenko-vault (Slice 3 hardening) removes the plain-file warnings. The root `systemd-creds encrypt` path was not run end to end.
 - M9 margins: RSS grows about 14 KiB per prefix on Linux (86.4 MiB at 1,000 prefixes) and glibc keeps about 19 MiB of Argon2 buffers after the first login; an allocator trim or a compact index layout is needed before the 100 MB target holds at a few thousand prefixes.
 - `reverse_proxy` mode: a client that speaks plain HTTP to the listener needs its origin in `server.allowed_origins` (documented in the example configuration).
-- `ImportPreview.credentials.reason` carries English detail; the UI translates the machine codes `forbidden`, `step_up_required`, `unauthenticated` and `vault_unavailable`, so the API should send those codes (small WP1.5 follow-up).
 - Jobs API: the kind of the current step in `JobSummary` and a job-group filter on `GET /jobs` would remove two derivations in the UI (Slice 2, with the job engine work).
 - Some UI tests assert the Swedish rendering of keys, following the WP1.9 precedent; acceptable while the two languages ship together, revisit when language packs become runtime files (API-21).
 - `GET /api/v1/openapi.json` serves compact JSON while `docs/api/openapi.json` is pretty-printed; byte equality holds for the printed form only (`tenko openapi`). Decide whether the route should serve the committed bytes.
