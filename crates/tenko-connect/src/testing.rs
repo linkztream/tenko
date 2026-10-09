@@ -1,7 +1,6 @@
 //! Test doubles (feature `testing`).
 
 use std::{
-    borrow::Cow,
     collections::VecDeque,
     sync::{Mutex, PoisonError},
 };
@@ -9,8 +8,8 @@ use std::{
 use tenko_core::Timestamp;
 
 use crate::{
-    Capability, Connector, ConnectorError, Cursor, DriverInfo, Health, HealthReport,
-    InventoryBatch, InventorySource,
+    CallContext, Connector, ConnectorError, Cursor, Health, HealthReport, InventoryBatch,
+    InventorySource,
 };
 
 /// An inventory source that returns scripted poll results in order and records the
@@ -42,15 +41,7 @@ impl MockInventorySource {
 
 #[async_trait::async_trait]
 impl Connector for MockInventorySource {
-    fn info(&self) -> DriverInfo {
-        DriverInfo {
-            driver: Cow::Borrowed("mock"),
-            version: Cow::Borrowed(env!("CARGO_PKG_VERSION")),
-            capabilities: vec![Capability::Inventory],
-        }
-    }
-
-    async fn check(&self) -> Result<HealthReport, ConnectorError> {
+    async fn check(&self, _ctx: &CallContext) -> Result<HealthReport, ConnectorError> {
         Ok(HealthReport {
             health: Health::Healthy,
             checked_at: Timestamp::now(),
@@ -63,7 +54,11 @@ impl Connector for MockInventorySource {
 
 #[async_trait::async_trait]
 impl InventorySource for MockInventorySource {
-    async fn poll(&self, cursor: Option<Cursor>) -> Result<InventoryBatch, ConnectorError> {
+    async fn poll(
+        &self,
+        _ctx: &CallContext,
+        cursor: Option<Cursor>,
+    ) -> Result<InventoryBatch, ConnectorError> {
         self.polls
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -79,6 +74,7 @@ impl InventorySource for MockInventorySource {
                 hosts: Vec::new(),
                 complete: false,
                 cursor,
+                more: false,
             })
         })
     }
@@ -105,26 +101,38 @@ mod tests {
                 hosts: vec![host.clone()],
                 complete: true,
                 cursor: Some(Cursor("1".to_owned())),
+                more: false,
             }),
             Err(ConnectorError::Unreachable),
         ]);
-        let first = source.poll(None).await.expect("first poll");
+        let ctx = CallContext::default();
+        let first = source.poll(&ctx, None).await.expect("first poll");
         assert_eq!(first.hosts, vec![host]);
         assert!(first.complete);
         assert_eq!(
-            source.poll(first.cursor.clone()).await,
+            source.poll(&ctx, first.cursor.clone()).await,
             Err(ConnectorError::Unreachable)
         );
-        let idle = source.poll(first.cursor.clone()).await.expect("idle poll");
+        let idle = source
+            .poll(&ctx, first.cursor.clone())
+            .await
+            .expect("idle poll");
         assert_eq!(idle.hosts.len(), 0);
         assert_eq!(
             source.polls(),
             vec![None, first.cursor.clone(), first.cursor]
         );
         assert_eq!(
-            source.check().await.expect("health").health,
+            source.check(&ctx).await.expect("health").health,
             Health::Healthy
         );
-        assert!(source.webhook().is_none());
+        let webhook = crate::WebhookRequest {
+            headers: vec![],
+            body: bytes::Bytes::new(),
+        };
+        assert_eq!(
+            source.webhook(&ctx, webhook).await,
+            Err(ConnectorError::Unsupported)
+        );
     }
 }

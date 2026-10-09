@@ -48,10 +48,33 @@ pub mod api;
 /// The version the binary reports, which is the version of this package.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// The names of the start steps, in start order.
-pub const STEPS: [&str; 8] = [
-    "kek", "store", "vault", "tls", "auth", "ipam", "jobs", "api",
-];
+/// The number of start steps: the length of `tenko::serve::START_ORDER`, so that a new step
+/// does not break the tests that count them.
+pub const STEP_COUNT: usize = tenko::serve::START_ORDER.len();
+
+/// The names of the start steps, in start order, from `tenko::serve::START_ORDER`.
+pub const STEPS: [&str; STEP_COUNT] = step_names();
+
+const fn step_names() -> [&'static str; STEP_COUNT] {
+    let mut names = [""; STEP_COUNT];
+    let mut index = 0;
+    while index < STEP_COUNT {
+        names[index] = tenko::serve::START_ORDER[index].0;
+        index += 1;
+    }
+    names
+}
+
+/// The log marker of a start step, `step <n>/<count> <name> <what>`, for example
+/// `step 2/9 store failed` or `step 1/9 kek ready in `.
+pub fn step_marker(name: &str, what: &str) -> String {
+    let number = STEPS
+        .iter()
+        .position(|step| *step == name)
+        .expect("a start step")
+        + 1;
+    format!("step {number}/{STEP_COUNT} {name} {what}")
+}
 
 /// The lines `tenko serve` logs while it shuts down, in order.
 pub const SHUTDOWN_LINES: [&str; 5] = [
@@ -186,14 +209,9 @@ pub fn is_setup_token(token: &str) -> bool {
         })
 }
 
-/// The milliseconds a `step N/8 <name> ready in <ms> ms` line reports.
+/// The milliseconds a `step N/<count> <name> ready in <ms> ms` line reports.
 pub fn step_millis(stderr: &str, name: &str) -> u64 {
-    let number = STEPS
-        .iter()
-        .position(|step| *step == name)
-        .expect("a start step")
-        + 1;
-    let marker = format!("step {number}/8 {name} ready in ");
+    let marker = step_marker(name, "ready in ");
     let line = lines_with(stderr, &marker)
         .into_iter()
         .next()

@@ -7,7 +7,7 @@ mod serve_support;
 
 use std::path::{Path, PathBuf};
 
-use serve_support::{Outcome, run_tenko};
+use serve_support::{Outcome, run_tenko, step_marker};
 
 /// The configuration file shipped in `deploy/`.
 fn example_file() -> PathBuf {
@@ -119,7 +119,7 @@ fn assert_refused(what: &str, contents: &str, code: &str, word: &str) {
         served.diagnostics()
     );
     assert!(
-        served.stdout.is_empty() && !served.stderr.contains("step 1/8"),
+        served.stdout.is_empty() && !served.stderr.contains(&step_marker("kek", "")),
         "{what}: serve started something\n{}",
         served.diagnostics()
     );
@@ -341,7 +341,7 @@ fn roles_that_phase_1_does_not_implement_exit_with_status_2() {
         served.assert_stderr_contains("not implemented in Phase 1");
         served.assert_stderr_contains("tenko serve: role(s) ");
         assert!(
-            served.stdout.is_empty() && !served.stderr.contains("step 1/8"),
+            served.stdout.is_empty() && !served.stderr.contains(&step_marker("kek", "")),
             "{}",
             served.diagnostics()
         );

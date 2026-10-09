@@ -1,0 +1,105 @@
+// Tenko connector plugin protocol, major version 1: actuators (capability `actuator`),
+// which apply IPAM intent to systems Tenko does not own. The write discipline is the one of
+// network controllers: plan, preview, apply with the plan, verify.
+syntax = "proto3";
+
+package tenko.connect.v1;
+
+import "google/protobuf/timestamp.proto";
+import "tenko/connect/v1/common.proto";
+
+service Actuator {
+  // Reads back, diffs and fingerprints. Writes nothing.
+  rpc Plan(ActuatorPlanRequest) returns (ActuatorPlanResponse);
+  // Re-reads, refuses a stale plan (FAILED_PRECONDITION), writes only in WRITE_MODE_APPLY
+  // and verifies.
+  rpc Apply(ActuatorApplyRequest) returns (ActuatorApplyResponse);
+  // Undoes an applied change.
+  rpc Revert(ActuatorRevertRequest) returns (ActuatorRevertResponse);
+}
+
+// Intent an actuator applies. Identifiers of Tenko objects are UUIDs in text form.
+message ActuatorIntent {
+  oneof intent {
+    DhcpReservation dhcp_reservation = 1;
+    DhcpReservationRemove dhcp_reservation_remove = 2;
+    DnsRecords dns_records = 3;
+    DnsRecordsRemove dns_records_remove = 4;
+    GuestAddress guest_address = 5;
+  }
+}
+
+// Create or move a DHCP reservation (MAC address for DHCPv4, DUID for DHCPv6).
+message DhcpReservation {
+  string vrf = 1;
+  string ip = 2;
+  optional string mac = 3;
+  // The DUID in hexadecimal, with or without `:` separators.
+  optional string duid = 4;
+  // The host the reservation belongs to.
+  string host = 5;
+}
+
+// Remove a DHCP reservation.
+message DhcpReservationRemove {
+  string vrf = 1;
+  string ip = 2;
+}
+
+// Make the A and AAAA records (and optionally the PTR records) of a name match.
+message DnsRecords {
+  string name = 1;
+  repeated string addresses = 2;
+  bool ptr = 3;
+}
+
+// Remove the records of a name.
+message DnsRecordsRemove {
+  string name = 1;
+}
+
+// Set the address of a guest on a hypervisor.
+message GuestAddress {
+  string host = 1;
+  string ip = 2;
+}
+
+message ActuatorPlan {
+  ActuatorIntent intent = 1;
+  google.protobuf.Timestamp read_at = 2;
+  string fingerprint = 3;
+  repeated DiffLine diff = 4;
+}
+
+message ActuatorReceipt {
+  ActuatorPlan plan = 1;
+  WriteMode mode = 2;
+  google.protobuf.Timestamp applied_at = 3;
+  bool verified = 4;
+}
+
+message ActuatorPlanRequest {
+  CallContext context = 1;
+  ActuatorIntent intent = 2;
+}
+
+message ActuatorPlanResponse {
+  ActuatorPlan plan = 1;
+}
+
+message ActuatorApplyRequest {
+  CallContext context = 1;
+  ActuatorPlan plan = 2;
+  WriteMode mode = 3;
+}
+
+message ActuatorApplyResponse {
+  ActuatorReceipt receipt = 1;
+}
+
+message ActuatorRevertRequest {
+  CallContext context = 1;
+  ActuatorReceipt receipt = 2;
+}
+
+message ActuatorRevertResponse {}

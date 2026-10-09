@@ -1,4 +1,4 @@
-//! Black-box tests of the start and the stop of `tenko serve`: the eight start steps in
+//! Black-box tests of the start and the stop of `tenko serve`: the start steps in
 //! order, readiness, graceful shutdown by the end of standard input (and by `SIGTERM` on
 //! Unix), and the refusals of a second server on the same data directory and of a port that
 //! is already taken.
@@ -8,19 +8,19 @@ mod serve_support;
 use std::net::TcpListener;
 
 use serve_support::{
-    Kek, Node, READY_PATH, STEPS, STOP_TIMEOUT, Transport, VERSION, assert_in_order, lines_with,
-    step_millis,
+    Kek, Node, READY_PATH, STEP_COUNT, STEPS, STOP_TIMEOUT, Transport, VERSION, assert_in_order,
+    lines_with, step_marker, step_millis,
 };
 
 /// The log lines that announce the steps `from..=to` (1-based), each with its number.
 fn step_ready_lines(from: usize, to: usize) -> Vec<String> {
     (from..=to)
-        .map(|number| format!("step {number}/8 {} ready in ", STEPS[number - 1]))
+        .map(|number| step_marker(STEPS[number - 1], "ready in "))
         .collect()
 }
 
 #[test]
-fn the_eight_steps_run_in_order_and_the_api_becomes_ready() {
+fn the_start_steps_run_in_order_and_the_api_becomes_ready() {
     let mut node = Node::new();
     let mut server = node.start();
 
@@ -32,7 +32,7 @@ fn the_eight_steps_run_in_order_and_the_api_becomes_ready() {
     let outcome = server.stop();
     outcome.assert_graceful_shutdown();
 
-    let mut needles = step_ready_lines(1, 8);
+    let mut needles = step_ready_lines(1, STEP_COUNT);
     needles.push("started in ".to_owned());
     needles.push(format!("tenko {VERSION} ready"));
     assert_in_order(&outcome.stderr, &needles);
@@ -46,7 +46,7 @@ fn the_eight_steps_run_in_order_and_the_api_becomes_ready() {
         );
     }
     assert!(
-        lines_with(&outcome.stderr, "/8 ")
+        lines_with(&outcome.stderr, &format!("/{STEP_COUNT} "))
             .iter()
             .all(|line| !line.contains(" failed")),
         "{}",
@@ -99,7 +99,7 @@ fn a_second_server_on_the_same_data_directory_is_refused() {
     let mut second = node.spawn_second();
     let refused = second.finish(STOP_TIMEOUT);
     refused.assert_code(4);
-    refused.assert_stderr_contains("step 2/8 store failed");
+    refused.assert_stderr_contains(&step_marker("store", "failed"));
     refused.assert_stderr_contains("tenko serve: start step `store` failed [sys.store.");
     assert!(
         refused.stdout.is_empty(),
@@ -123,8 +123,8 @@ fn a_busy_port_fails_the_api_step_and_leaves_the_data_directory_usable() {
     let mut refused = node.spawn();
     let outcome = refused.finish(STOP_TIMEOUT);
     outcome.assert_code(4);
-    let mut needles = step_ready_lines(1, 7);
-    needles.push("step 8/8 api failed".to_owned());
+    let mut needles = step_ready_lines(1, STEP_COUNT - 1);
+    needles.push(step_marker("api", "failed"));
     assert_in_order(&outcome.stderr, &needles);
     outcome.assert_stderr_contains("tenko serve: start step `api` failed [start.api.bind]");
     assert!(
@@ -148,7 +148,7 @@ fn the_platform_default_kek_starts_the_server() {
     let outcome = server.stop();
     outcome.assert_graceful_shutdown();
 
-    let step = lines_with(&outcome.stderr, "step 1/8 kek ready in ");
+    let step = lines_with(&outcome.stderr, &step_marker("kek", "ready in "));
     assert_eq!(step.len(), 1, "{}", outcome.stderr);
     let weak = outcome.stderr.contains("THE KEY-ENCRYPTION KEY IS");
     assert_eq!(
@@ -203,7 +203,7 @@ fn internal_ca_mode_serves_https_with_the_published_ca_root() {
         "internal CA root (install it on admin clients): {}",
         ca_file.display()
     ));
-    outcome.assert_stderr_contains("step 4/8 tls ready in ");
+    outcome.assert_stderr_contains(&step_marker("tls", "ready in "));
     outcome.assert_stderr_contains("internal CA");
 }
 

@@ -1,0 +1,75 @@
+// Tenko connector plugin protocol, major version 1: messages shared by every service.
+//
+// A plugin is a separate process that the Tenko host starts and supervises. After the
+// handshake over standard input and output (see docs/plugins.md), the plugin serves the
+// services of this package over gRPC (HTTP/2 without TLS) on the local endpoint the host
+// named in the handshake, and the host calls them.
+//
+// Authentication: every call from the host carries the per-launch token of the handshake in
+// the metadata entry `x-tenko-plugin-token`. A plugin refuses a call without the exact token
+// with status UNAUTHENTICATED and the error code `connect.plugin.token`.
+//
+// Errors: a plugin answers a failed call with a gRPC status. It may add the metadata entry
+// `tenko-error-code` with one of the codes below; without it the host derives the code from
+// the status:
+//
+// | Status              | Code                      | Meaning                                       |
+// |---------------------|---------------------------|-----------------------------------------------|
+// | UNAVAILABLE         | connect.unreachable       | the remote system did not answer              |
+// | UNAUTHENTICATED     | connect.unauthorized      | the remote system rejected the credentials    |
+// | PERMISSION_DENIED   | connect.forbidden         | the credentials lack a permission             |
+// | NOT_FOUND           | connect.not_found         | the object does not exist on the system       |
+// | FAILED_PRECONDITION | connect.verify_mismatch   | stale plan or read-back differs from the plan |
+// | RESOURCE_EXHAUSTED  | connect.rate_limited      | slow down; `tenko-retry-after-ms` says when   |
+// | INVALID_ARGUMENT    | connect.invalid_settings  | the settings or the request are not usable    |
+// | UNIMPLEMENTED       | connect.unsupported       | the operation is not supported                |
+// | any other           | connect.plugin.failed     | the plugin failed                             |
+//
+// Evolution: within major version 1 every change is additive. New fields take new numbers;
+// no field, enum value or service method is removed, renamed or renumbered; a plugin and the
+// host ignore fields they do not know. A breaking change is a new package, tenko.connect.v2,
+// and a new protocol version in the handshake.
+syntax = "proto3";
+
+package tenko.connect.v1;
+
+// What the host sends with every call that may reach the remote system.
+message CallContext {
+  // The connector instance (a UUID), empty when the conformance suite calls.
+  string instance_id = 1;
+  // The settings of the instance as a JSON object, already validated by the host against
+  // the settings schema of the manifest.
+  string settings_json = 2;
+  // The secrets of the instance whose purposes the manifest declares. A plugin uses them
+  // for this call only: it never stores, logs or returns them.
+  repeated Secret secrets = 3;
+  // Correlation identifier for the log lines of the plugin.
+  string request_id = 4;
+}
+
+// One secret value, injected by the host for one call.
+message Secret {
+  // The purpose as declared in the manifest, for example `password` or `api_key`.
+  string purpose = 1;
+  // The value.
+  bytes value = 2;
+}
+
+// One line of a read-back diff.
+message DiffLine {
+  // What changes, for example `networks/iot/vlan`.
+  string path = 1;
+  // The current value.
+  optional string before = 2;
+  // The planned value.
+  optional string after = 3;
+}
+
+// Dry run or real write. A plugin treats an unspecified mode as a dry run.
+enum WriteMode {
+  WRITE_MODE_UNSPECIFIED = 0;
+  // Read back and diff only.
+  WRITE_MODE_DRY_RUN = 1;
+  // Write, then read back and verify.
+  WRITE_MODE_APPLY = 2;
+}

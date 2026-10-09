@@ -8,7 +8,7 @@ mod serve_support;
 use std::time::Duration;
 
 use serve_support::{
-    Node, is_setup_token, log_setup_tokens, stdout_setup_tokens, wait_for_setup_token,
+    Node, is_setup_token, log_setup_tokens, stdout_setup_tokens, step_marker, wait_for_setup_token,
 };
 
 /// The rule that frames the first-run block on standard output.
@@ -190,6 +190,6 @@ fn no_token_is_printed_once_setup_is_complete() {
         !outcome.stdout.contains(&token) && !outcome.stderr.contains(&token),
         "the old token is printed again"
     );
-    outcome.assert_stderr_contains("step 5/8 auth ready in ");
+    outcome.assert_stderr_contains(&step_marker("auth", "ready in "));
     outcome.assert_stderr_contains("installation localhost (profile home)");
 }

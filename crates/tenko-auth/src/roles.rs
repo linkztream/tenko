@@ -118,6 +118,7 @@ fn operator_allows(action: Action, kind: ObjectKind) -> bool {
                 | ObjectKind::Host
                 | ObjectKind::Interface
                 | ObjectKind::Import
+                | ObjectKind::Connector
         ),
         Action::Execute => matches!(
             kind,
@@ -126,6 +127,7 @@ fn operator_allows(action: Action, kind: ObjectKind) -> bool {
                 | ObjectKind::Prefix
                 | ObjectKind::Host
                 | ObjectKind::Address
+                | ObjectKind::Connector
         ),
         Action::Approve => kind == ObjectKind::Proposal,
         Action::Reveal | Action::Administer => false,

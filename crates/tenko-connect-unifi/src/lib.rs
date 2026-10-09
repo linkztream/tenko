@@ -1,6 +1,11 @@
-//! UniFi Network connector: client inventory and network configuration.
+//! UniFi Network reference plugin: a network controller that reads devices, clients, ports,
+//! LLDP, uplinks and wireless networks and performs the L2 writes the host has planned and
+//! checked against its guardrails (CONN-05 to CONN-09, CONN-18), built on the plugin SDK of
+//! `tenko-connect` and bundled in the `tenko` binary as `tenko plugin run unifi` (CONN-20,
+//! ADR 0012). It speaks the `tenko.connect.v1` protocol like any third-party plugin and
+//! never runs inside the controller.
 //!
-//! Placeholder crate: the implementation lands in a later phase (see `docs/ROADMAP.md`).
+//! Placeholder crate: the plugin lands in WP2.6 (see `docs/plans/phase-1-execution.md`).
 
 /// Name of this crate as declared in its manifest.
 pub const CRATE_NAME: &str = "tenko-connect-unifi";

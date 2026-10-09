@@ -1,7 +1,10 @@
-//! Windows Server connector: reads DNS zones and DHCP scopes from Windows DNS and DHCP
-//! servers, primarily as a migration source.
+//! Windows Server reference plugin: a migration source that reads DNS zones and DHCP scopes
+//! from Windows DNS and DHCP servers, and later a coexistence actuator (ADR 0006), built on
+//! the plugin SDK of `tenko-connect` and bundled in the `tenko` binary (CONN-20, ADR 0012).
+//! It speaks the `tenko.connect.v1` protocol like any third-party plugin and never runs
+//! inside the controller.
 //!
-//! Placeholder crate: the implementation lands in a later phase (see `docs/ROADMAP.md`).
+//! Placeholder crate: the plugin lands in Phase 4 (see `docs/ROADMAP.md`).
 
 /// Name of this crate as declared in its manifest.
 pub const CRATE_NAME: &str = "tenko-connect-windows";

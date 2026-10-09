@@ -31,6 +31,7 @@ serde_json = { workspace = true }
 tenko-api = { workspace = true, features = ["client"] }
 tenko-auth = { workspace = true, features = ["online"] }
 tenko-cluster = { workspace = true }
+tenko-connect = { workspace = true }
 tenko-core = { workspace = true }
 tenko-ipam = { workspace = true }
 tenko-jobs = { workspace = true }

@@ -1,0 +1,259 @@
+// Tenko connector plugin protocol, major version 1: network controllers (capability
+// `network_controller`).
+//
+// Policy stays in the host: before a write the host reads the topology, checks its
+// guardrails (uplinks, the management path, protected ports, networks, VLANs and clients),
+// asks the plugin for a plan, shows the plan as a preview, and only then calls Apply with
+// that plan. After an Apply in WRITE_MODE_APPLY the host plans the same change again and
+// expects an empty diff. A plugin performs the concrete calls and reports facts; it never
+// decides whether a write is allowed.
+syntax = "proto3";
+
+package tenko.connect.v1;
+
+import "google/protobuf/timestamp.proto";
+import "tenko/connect/v1/common.proto";
+
+// Reads topology from, and writes VLANs, port profiles and per-client VLANs to, a network
+// controller.
+service NetworkController {
+  // Devices, ports, links, clients, networks, port profiles and wireless networks.
+  rpc Topology(TopologyRequest) returns (TopologyResponse);
+  // Reads the current state back, diffs it against the change and fingerprints the state.
+  // Writes nothing.
+  rpc Plan(L2PlanRequest) returns (L2PlanResponse);
+  // Re-reads the state, refuses a stale plan (FAILED_PRECONDITION), writes only in
+  // WRITE_MODE_APPLY, reads back and reports whether the result matches the plan.
+  rpc Apply(L2ApplyRequest) returns (L2ApplyResponse);
+  // Undoes an applied change with the undo steps of its receipt.
+  rpc Revert(L2RevertRequest) returns (L2RevertResponse);
+}
+
+message TopologyRequest {
+  CallContext context = 1;
+}
+
+message TopologyResponse {
+  Topology topology = 1;
+}
+
+// The view of the network a controller has.
+message Topology {
+  // When it was read.
+  google.protobuf.Timestamp observed_at = 1;
+  repeated NetworkDevice devices = 2;
+  repeated TopologyLink links = 3;
+  repeated ClientAttachment clients = 4;
+  repeated ControllerNetwork networks = 5;
+  repeated PortProfile profiles = 6;
+  repeated WirelessNetwork wlans = 7;
+}
+
+enum DeviceKind {
+  DEVICE_KIND_UNSPECIFIED = 0;
+  DEVICE_KIND_SWITCH = 1;
+  DEVICE_KIND_ACCESS_POINT = 2;
+  DEVICE_KIND_GATEWAY = 3;
+  DEVICE_KIND_OTHER = 4;
+}
+
+// A managed device.
+message NetworkDevice {
+  // The reference of the controller (for UniFi the device MAC or `_id`).
+  string id = 1;
+  string name = 2;
+  optional string model = 3;
+  optional string mac = 4;
+  // Management address.
+  optional string ip = 5;
+  DeviceKind kind = 6;
+  repeated DevicePort ports = 7;
+}
+
+// A switch port.
+message DevicePort {
+  // The port index as the controller numbers it.
+  uint32 index = 1;
+  optional string name = 2;
+  // The assigned port profile.
+  optional string profile = 3;
+  // The untagged VLAN.
+  optional uint32 native_vlan = 4;
+  // Whether the port is an uplink. The host never touches uplinks.
+  bool uplink = 5;
+  // Link state.
+  bool up = 6;
+}
+
+// One end of a link.
+message Endpoint {
+  // The device, as the controller names it.
+  string device = 1;
+  optional string port = 2;
+}
+
+enum LinkKind {
+  LINK_KIND_UNSPECIFIED = 0;
+  LINK_KIND_LLDP = 1;
+  LINK_KIND_UPLINK = 2;
+  LINK_KIND_WIRED = 3;
+  LINK_KIND_WIRELESS = 4;
+}
+
+message TopologyLink {
+  Endpoint a = 1;
+  Endpoint b = 2;
+  LinkKind kind = 3;
+}
+
+// A client and where it is attached.
+message ClientAttachment {
+  string mac = 1;
+  optional string ip = 2;
+  // The switch or access point.
+  string device = 3;
+  // The switch port of a wired client.
+  optional uint32 port = 4;
+  // The wireless network of a wireless client.
+  optional string ssid = 5;
+  // The network reference.
+  optional string network = 6;
+  optional uint32 vlan = 7;
+}
+
+// The DHCP service of the controller for a network: Tenko serves DHCP, so it is off or
+// relays to Tenko.
+message ControllerDhcp {
+  oneof mode {
+    DhcpDisabled disabled = 1;
+    DhcpRelay relay = 2;
+  }
+}
+
+message DhcpDisabled {}
+
+message DhcpRelay {
+  // Relay targets as IPv4 or IPv6 text.
+  repeated string servers = 1;
+}
+
+// A network on the controller.
+message ControllerNetwork {
+  // The reference of the controller (for UniFi the network `_id`, not the VLAN number).
+  string id = 1;
+  string name = 2;
+  // The VLAN id; absent for the untagged default network.
+  optional uint32 vlan = 3;
+  // The gateway subnet in CIDR notation.
+  optional string subnet = 4;
+  ControllerDhcp dhcp = 5;
+  // Whether Tenko or the controller is managed through this network.
+  bool management = 6;
+}
+
+// A switch port profile.
+message PortProfile {
+  string id = 1;
+  string name = 2;
+  // The untagged network reference.
+  optional string native_network = 3;
+  // Tagged network references.
+  repeated string tagged = 4;
+}
+
+// A wireless network (SSID) and the network it carries.
+message WirelessNetwork {
+  string id = 1;
+  string ssid = 2;
+  // The network reference the SSID maps to.
+  optional string network = 3;
+  optional uint32 vlan = 4;
+  bool enabled = 5;
+  // Device references of the access points that broadcast it.
+  repeated string access_points = 6;
+}
+
+// A change the host asks the controller to make.
+message L2Change {
+  oneof change {
+    EnsureNetwork ensure_network = 1;
+    SetPortProfile set_port_profile = 2;
+    SetClientVlan set_client_vlan = 3;
+    ClearClientVlan clear_client_vlan = 4;
+  }
+}
+
+// Create or update the network of a VLAN.
+message EnsureNetwork {
+  uint32 vlan = 1;
+  string name = 2;
+  ControllerDhcp dhcp = 3;
+}
+
+// Assign a port profile to a switch port.
+message SetPortProfile {
+  string device = 1;
+  uint32 port = 2;
+  string profile = 3;
+}
+
+// Put a client into a network (per-client VLAN).
+message SetClientVlan {
+  string mac = 1;
+  // The network reference (for UniFi the network `_id`).
+  string network = 2;
+}
+
+// Remove a per-client VLAN override.
+message ClearClientVlan {
+  string mac = 1;
+}
+
+// What a change would do, made against the state the fingerprint identifies.
+message L2Plan {
+  L2Change change = 1;
+  google.protobuf.Timestamp read_at = 2;
+  // Fingerprint of the state the plan was made against; Apply refuses the plan when the
+  // state changed.
+  string fingerprint = 3;
+  repeated DiffLine diff = 4;
+  // English warnings for the preview.
+  repeated string warnings = 5;
+}
+
+// What Apply did.
+message L2Receipt {
+  L2Plan plan = 1;
+  WriteMode mode = 2;
+  google.protobuf.Timestamp applied_at = 3;
+  // Whether the read-back matched the plan.
+  bool verified = 4;
+  // Changes that restore the previous state, in order.
+  repeated L2Change undo = 5;
+}
+
+message L2PlanRequest {
+  CallContext context = 1;
+  L2Change change = 2;
+}
+
+message L2PlanResponse {
+  L2Plan plan = 1;
+}
+
+message L2ApplyRequest {
+  CallContext context = 1;
+  L2Plan plan = 2;
+  WriteMode mode = 3;
+}
+
+message L2ApplyResponse {
+  L2Receipt receipt = 1;
+}
+
+message L2RevertRequest {
+  CallContext context = 1;
+  L2Receipt receipt = 2;
+}
+
+message L2RevertResponse {}

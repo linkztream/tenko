@@ -31,17 +31,20 @@ pub enum Topic {
     System,
     /// Users, sessions, tokens and security settings.
     Admin,
+    /// Connector plugins and connector instances.
+    Connectors,
 }
 
 impl Topic {
     /// Every topic, in declaration order.
-    pub const ALL: [Topic; 6] = [
+    pub const ALL: [Topic; 7] = [
         Topic::Ipam,
         Topic::Jobs,
         Topic::Audit,
         Topic::Import,
         Topic::System,
         Topic::Admin,
+        Topic::Connectors,
     ];
 
     /// The stable lower-case name, also the SSE `event` field.
@@ -53,6 +56,7 @@ impl Topic {
             Topic::Import => "import",
             Topic::System => "system",
             Topic::Admin => "admin",
+            Topic::Connectors => "connectors",
         }
     }
 
@@ -85,7 +89,7 @@ pub struct TopicSet(u8);
 
 impl TopicSet {
     /// Every topic.
-    pub const ALL: TopicSet = TopicSet(0b11_1111);
+    pub const ALL: TopicSet = TopicSet(0b111_1111);
     /// No topic.
     pub const EMPTY: TopicSet = TopicSet(0);
 

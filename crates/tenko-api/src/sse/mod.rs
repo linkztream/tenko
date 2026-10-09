@@ -162,6 +162,12 @@ impl Default for EventRoutes {
                 Topic::Import,
                 Some(ObjectKind::Import),
             )
+            .table(
+                TableName::from_static("connect.instances"),
+                Topic::Connectors,
+                Some(ObjectKind::Connector),
+            )
+            .namespace("connect", Topic::Connectors)
             .namespace("auth", Topic::Admin)
             .namespace("users", Topic::Admin);
         routes

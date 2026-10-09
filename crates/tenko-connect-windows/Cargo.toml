@@ -1,7 +1,7 @@
 [package]
 name = "tenko-connect-windows"
 version = "0.0.1"
-description = "Windows DNS and DHCP Server connector"
+description = "Windows DNS and DHCP Server reference plugin (migration source)"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

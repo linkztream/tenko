@@ -1,0 +1,57 @@
+// Tenko connector plugin protocol, major version 1: the service every plugin implements.
+syntax = "proto3";
+
+package tenko.connect.v1;
+
+import "tenko/connect/v1/common.proto";
+
+// Liveness, remote health and shutdown. Every plugin serves this service.
+service Plugin {
+  // Answers at once without contacting the remote system. The host pings on a fixed
+  // interval and restarts a plugin that stops answering.
+  rpc Ping(PingRequest) returns (PingResponse);
+  // Checks reachability and credentials of the remote system without changing anything.
+  // An unhealthy but reachable system is a response with a degraded health, not an error.
+  rpc Check(CheckRequest) returns (CheckResponse);
+  // Asks the plugin to finish its calls and exit. The plugin answers first, then exits
+  // within a few seconds. A plugin also exits when its standard input closes.
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+message PingRequest {}
+
+message PingResponse {
+  // The plugin name of the manifest.
+  string name = 1;
+  // The plugin version of the manifest.
+  string version = 2;
+}
+
+message CheckRequest {
+  CallContext context = 1;
+}
+
+// Health of the remote system.
+enum Health {
+  HEALTH_UNSPECIFIED = 0;
+  // Reachable, authenticated, working.
+  HEALTH_HEALTHY = 1;
+  // Reachable with problems (missing permissions, an unsupported version, rate limits).
+  HEALTH_DEGRADED = 2;
+  // Not reachable.
+  HEALTH_UNREACHABLE = 3;
+}
+
+message CheckResponse {
+  Health health = 1;
+  // Round-trip time of the check in milliseconds.
+  optional uint64 latency_ms = 2;
+  // The version the remote system reports.
+  optional string remote_version = 3;
+  // English detail for the operator. Never contains a secret.
+  optional string detail = 4;
+}
+
+message ShutdownRequest {}
+
+message ShutdownResponse {}

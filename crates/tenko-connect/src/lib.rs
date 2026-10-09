@@ -1,55 +1,69 @@
-//! The connector framework (ADR 0006, CONN-01): the traits every integration implements
-//! and the types they exchange.
+//! The connector plugin SDK of Tenko DDI (ADR 0006, ADR 0012, CONN-01, CONN-19, CONN-20).
 //!
-//! | Trait | Purpose | First drivers |
+//! Connectors are plugins: separate processes started and supervised by Tenko, speaking a
+//! versioned gRPC protocol (`tenko.connect.v1`) over a local Unix socket or Windows named
+//! pipe. This crate holds both sides of that contract:
+//!
+//! | Module | Contents |
+//! |---|---|
+//! | [`proto`] | the compiled protocol code (`proto/tenko/connect/v1/*.proto`) |
+//! | [`manifest`] | `plugin.json`: the manifest, its validation and the settings schema |
+//! | [`handshake`] | the stdio handshake: protocol version, endpoint, per-launch token, manifest |
+//! | [`transport`] | local endpoints: Unix sockets in a private directory, named pipes |
+//! | [`sdk`] | the helper library for plugin authors: implement the traits, call [`sdk::Plugin::run`] |
+//! | [`host`] | the host: launch, handshake, supervision, typed calls, the connector service |
+//! | [`conformance`] | the conformance suite behind `tenko plugin test` |
+//! | [`sample`] | the sample inventory plugin (documentation data) used by the suite and the tests |
+//!
+//! The four interfaces of ADR 0006 are the traits a plugin implements:
+//!
+//! | Trait | gRPC service | Capability |
 //! |---|---|---|
-//! | [`InventorySource`] | Observed hosts, polled and by webhook (CONN-02) | Proxmox, Home Assistant (Slice 2) |
-//! | [`NetworkController`] | Topology reads and guarded L2 writes (CONN-05 to CONN-09) | UniFi (Slice 2) |
-//! | [`Actuator`] | Intent applied to systems Tenko does not own (ADR 0005) | Phase 2 onwards |
-//! | [`MigrationSource`] | IR plus loss report (MIG-01) | Phase 4 |
+//! | [`InventorySource`] | `Inventory` | `inventory`, `webhook` |
+//! | [`NetworkController`] | `NetworkController` | `network_controller` |
+//! | [`Actuator`] | `Actuator` | `actuator` |
+//! | [`MigrationSource`] | `Migration` | `migration` |
 //!
-//! Every driver is a [`Connector`]: it describes itself and reports health. Drivers live in
-//! `tenko-connect-*` crates and may implement several traits. Credentials are vault
-//! [`SecretRef`]s, resolved at call time through a [`SecretResolver`]; a driver never
-//! stores a secret value.
-//!
-//! Network-controller writes follow one discipline (CONN-08, CONN-09): `plan` reads the
-//! controller back, diffs and checks [`Guardrails`] (uplinks are always protected and the
-//! management path is derived from the topology inside `plan`); `apply` re-reads, rejects a
-//! stale plan, writes only in [`WriteMode::Apply`] and verifies; `revert` undoes a receipt.
-//! Guardrails therefore cannot be bypassed by calling `apply` directly.
-//!
-//! # Ownership
-//!
-//! WP1.0 (the lead builder) owns this crate: it is a contract. Other packages never edit
-//! it; contract changes go through the lead as a small pull request reviewed by every
-//! package that uses the item (plan rule 2.8). The connector scheduler (WP2.5) is added
-//! later by the lead on request.
+//! Every plugin also answers [`Connector::check`] (`Plugin.Check`). Every call receives a
+//! [`CallContext`]: the settings of the instance and the secrets the manifest declares,
+//! injected by the host for that call only. Policy stays in the host: verify-before-write,
+//! [`Guardrails`], rate limits, parallelism and observation normalization.
 
 mod actuator;
+pub mod conformance;
+pub mod context;
+pub mod convert;
 mod error;
+pub mod handshake;
+pub mod host;
 mod inventory;
+pub mod manifest;
 mod migration;
 mod network;
+pub mod proto;
+pub mod sample;
+pub mod sdk;
+pub mod status;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+pub mod transport;
 
 pub use actuator::{Actuator, ActuatorIntent, ActuatorPlan, ActuatorReceipt, DiffLine, WriteMode};
+pub use context::{CallContext, Secrets};
 pub use error::ConnectorError;
-pub use inventory::{Cursor, InventoryBatch, InventorySource, WebhookHandler, WebhookRequest};
+pub use inventory::{Cursor, InventoryBatch, InventorySource, WebhookRequest};
+pub use manifest::{Capability, Manifest};
 pub use migration::{MigrationArea, MigrationScope, MigrationSource};
 pub use network::{
     ClientAttachment, ControllerDhcp, ControllerNetwork, DeviceKind, DevicePort, DeviceRef,
     Guardrails, L2Change, L2Plan, L2Receipt, NetworkController, NetworkDevice, NetworkRef,
-    PortProfile, ProfileRef, ProtectedPath, TopologyLink, TopologySnapshot,
+    PortProfile, ProfileRef, ProtectedPath, TopologyLink, TopologySnapshot, WirelessNetwork,
 };
 pub use tenko_core::secret::SecretRef;
 
-use std::borrow::Cow;
-
 use serde::{Deserialize, Serialize};
 use tenko_core::Timestamp;
-use zeroize::Zeroizing;
+use utoipa::ToSchema;
 
 /// Name of this crate as declared in its manifest.
 pub const CRATE_NAME: &str = "tenko-connect";
@@ -59,50 +73,26 @@ pub const fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// Every driver: identity and health.
+/// The protocol major version of this build (`tenko.connect.v1`).
+pub const PROTOCOL_VERSION: u32 = 1;
+
+/// The protocol major versions this build speaks, as a host and as a plugin.
+pub const SUPPORTED_PROTOCOLS: &[u32] = &[PROTOCOL_VERSION];
+
+/// Remote health: every plugin answers it (`Plugin.Check`).
 #[async_trait::async_trait]
 pub trait Connector: Send + Sync + 'static {
-    /// What the driver is and can do.
-    fn info(&self) -> DriverInfo;
-
-    /// Checks reachability and credentials without changing anything.
+    /// Checks reachability and credentials of the remote system without changing anything.
     ///
     /// # Errors
     ///
     /// Returns a [`ConnectorError`] when the check itself cannot run; an unhealthy but
     /// reachable system is a [`HealthReport`] with [`Health::Degraded`].
-    async fn check(&self) -> Result<HealthReport, ConnectorError>;
-}
-
-/// Description of a driver.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DriverInfo {
-    /// Stable driver name, such as `proxmox` or `unifi`.
-    pub driver: Cow<'static, str>,
-    /// Driver version.
-    pub version: Cow<'static, str>,
-    /// The traits the driver implements.
-    pub capabilities: Vec<Capability>,
-}
-
-/// A connector trait a driver implements.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Capability {
-    /// [`InventorySource`].
-    Inventory,
-    /// [`InventorySource::webhook`] returns a handler.
-    Webhook,
-    /// [`NetworkController`].
-    NetworkController,
-    /// [`Actuator`].
-    Actuator,
-    /// [`MigrationSource`].
-    Migration,
+    async fn check(&self, ctx: &CallContext) -> Result<HealthReport, ConnectorError>;
 }
 
 /// Result of [`Connector::check`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct HealthReport {
     /// Overall health.
     pub health: Health,
@@ -119,8 +109,23 @@ pub struct HealthReport {
     pub detail: Option<String>,
 }
 
-/// Health of a connector.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+impl HealthReport {
+    /// A healthy report checked now.
+    pub fn healthy() -> Self {
+        Self {
+            health: Health::Healthy,
+            checked_at: Timestamp::now(),
+            latency_ms: None,
+            remote_version: None,
+            detail: None,
+        }
+    }
+}
+
+/// Health of a remote system.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Health {
     /// Reachable, authenticated, working.
@@ -131,20 +136,6 @@ pub enum Health {
     Unreachable,
 }
 
-/// Resolves vault secret references at call time (implemented by the vault, IAM-16).
-///
-/// The returned bytes are wiped when dropped; callers keep them no longer than one call.
-#[async_trait::async_trait]
-pub trait SecretResolver: Send + Sync + 'static {
-    /// Returns the secret's value.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ConnectorError::Unauthorized`] if the secret is missing or the caller may
-    /// not use it.
-    async fn resolve(&self, secret: &SecretRef) -> Result<Zeroizing<Vec<u8>>, ConnectorError>;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,19 +144,20 @@ mod tests {
     fn metadata_matches_manifest() {
         assert_eq!(CRATE_NAME, env!("CARGO_PKG_NAME"));
         assert!(version().starts_with(|c: char| c.is_ascii_digit()));
+        assert!(SUPPORTED_PROTOCOLS.contains(&PROTOCOL_VERSION));
     }
 
     #[test]
-    fn driver_info_round_trips() {
-        let info = DriverInfo {
-            driver: Cow::Borrowed("proxmox"),
-            version: Cow::Borrowed("0.0.1"),
-            capabilities: vec![Capability::Inventory, Capability::Webhook],
+    fn health_reports_round_trip() {
+        let report = HealthReport {
+            remote_version: Some("9.4.19".to_owned()),
+            ..HealthReport::healthy()
         };
-        let json = serde_json::to_string(&info).expect("json");
+        let json = serde_json::to_string(&report).expect("json");
         assert_eq!(
-            serde_json::from_str::<DriverInfo>(&json).expect("json"),
-            info
+            serde_json::from_str::<HealthReport>(&json).expect("json"),
+            report
         );
+        assert!(json.contains("\"healthy\""));
     }
 }

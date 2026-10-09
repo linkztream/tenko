@@ -74,7 +74,7 @@ pub const FSYNC_WARN_MICROS: u64 = 10_000;
 const RUNNER_STOP_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The start steps of the controller role, in order.
-pub const START_ORDER: [(&str, &str); 8] = [
+pub const START_ORDER: [(&str, &str); 9] = [
     ("kek", "key-encryption keys"),
     ("store", "replicated store (openraft over redb)"),
     ("vault", "envelope encryption of secrets"),
@@ -82,6 +82,7 @@ pub const START_ORDER: [(&str, &str); 8] = [
     ("auth", "users, sessions, passkeys and TOTP"),
     ("ipam", "IPAM domain and job engine"),
     ("jobs", "job runner"),
+    ("connectors", "connector plugins and their supervisor"),
     ("api", "HTTP API, web UI and server-sent events"),
 ];
 
@@ -800,6 +801,19 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
         })
         .await?;
     running.runner = Some(runner);
+    let mut connectors = steps
+        .run(
+            "connectors",
+            crate::plugin::start(
+                &store_dyn,
+                &vault,
+                &engine,
+                &resolved.data_dir,
+                running.stop.subscribe(),
+            ),
+        )
+        .await?;
+    running.tasks.push(connectors.task());
 
     let lab_plain_http = tls.lab_plain_http;
     let https = tls.https;
@@ -848,6 +862,7 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
                 )));
             }
             imports.register(&mut server);
+            connectors.register(&mut server);
             let running = tenko_api::start(server, state).await.map_err(|error| {
                 let code = match &error {
                     tenko_api::ServeError::Bind { .. } => "start.api.bind",
@@ -1138,7 +1153,7 @@ mod tests {
         assert_eq!(
             names,
             [
-                "kek", "store", "vault", "tls", "auth", "ipam", "jobs", "api"
+                "kek", "store", "vault", "tls", "auth", "ipam", "jobs", "connectors", "api"
             ]
         );
     }

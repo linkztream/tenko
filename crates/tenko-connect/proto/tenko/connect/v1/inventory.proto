@@ -1,0 +1,77 @@
+// Tenko connector plugin protocol, major version 1: inventory sources (capability
+// `inventory`, and `webhook` for HandleWebhook).
+syntax = "proto3";
+
+package tenko.connect.v1;
+
+import "google/protobuf/timestamp.proto";
+import "tenko/connect/v1/common.proto";
+
+// Supplies observed hosts: name, MAC and IP addresses, operating system, platform, parent
+// host and tags. The host polls on the schedule of the connector instance and normalizes
+// the answer into observations.
+service Inventory {
+  // Polls the source. Without a cursor the source returns everything (in pages, see
+  // `more`); with the cursor of the previous answer it may return only changes.
+  rpc Poll(PollRequest) returns (PollResponse);
+  // Verifies and parses a webhook call that the host received for this instance.
+  rpc HandleWebhook(WebhookRequest) returns (WebhookResponse);
+}
+
+message PollRequest {
+  CallContext context = 1;
+  // Where the previous poll or page ended; absent for a full poll.
+  optional string cursor = 2;
+}
+
+message PollResponse {
+  // When the source produced the data; the host uses its own clock when absent.
+  google.protobuf.Timestamp observed_at = 1;
+  // The hosts of this page.
+  repeated ObservedHost hosts = 2;
+  // Whether this answer, together with the pages before it, is the whole inventory: hosts
+  // absent from it are gone.
+  bool complete = 3;
+  // Where the next poll or page continues.
+  optional string cursor = 4;
+  // Another page is ready: the host polls again at once with `cursor`.
+  bool more = 5;
+}
+
+// A host as the source reports it.
+message ObservedHost {
+  // The identifier of the source (VM id, entity id), stable across polls. Required.
+  string external_id = 1;
+  // The name as the source shows it.
+  optional string name = 2;
+  // MAC addresses in the form 00:00:5e:00:53:01 (any case; `-` separators accepted).
+  repeated string macs = 3;
+  // IPv4 or IPv6 addresses in text form, without a prefix length.
+  repeated string ips = 4;
+  // Operating system.
+  optional string os = 5;
+  // Platform, such as `qemu`, `lxc` or `esphome`.
+  optional string platform = 6;
+  // The `external_id` of the parent host (the hypervisor node of a VM).
+  optional string parent = 7;
+  // Tags from the source.
+  repeated string tags = 8;
+}
+
+message WebhookRequest {
+  CallContext context = 1;
+  // Header names in lower case, with their values.
+  repeated Header headers = 2;
+  // The raw request body.
+  bytes body = 3;
+}
+
+message Header {
+  string name = 1;
+  string value = 2;
+}
+
+message WebhookResponse {
+  // The hosts the call reported; absent when the call carried nothing relevant.
+  optional PollResponse batch = 1;
+}

@@ -6,7 +6,9 @@ mod serve_support;
 
 use std::{fs, path::Path};
 
-use serve_support::{Kek, Node, Proc, STOP_TIMEOUT, Transport, lines_with, stdout_setup_tokens};
+use serve_support::{
+    Kek, Node, Proc, STOP_TIMEOUT, Transport, lines_with, stdout_setup_tokens, step_marker,
+};
 
 const FIRST: &str = "192.0.2.0/24";
 const SECOND: &str = "198.51.100.0/24";
@@ -32,7 +34,7 @@ fn populate(node: &Node, server: &Proc) {
 
 /// The revision and the audit head the `store` step reports when it opens the store.
 fn opened_store(stderr: &str) -> (u64, u64) {
-    let line = lines_with(stderr, "step 2/8 store ready in ")
+    let line = lines_with(stderr, &step_marker("store", "ready in "))
         .into_iter()
         .next()
         .unwrap_or_else(|| panic!("no store line\n{stderr}"));
@@ -172,7 +174,7 @@ fn a_missing_kek_file_refuses_the_start_and_restoring_it_recovers() {
     let mut refused = node.spawn();
     let outcome = refused.finish(STOP_TIMEOUT);
     outcome.assert_code(4);
-    outcome.assert_stderr_contains("step 1/8 kek failed");
+    outcome.assert_stderr_contains(&step_marker("kek", "failed"));
     outcome.assert_stderr_contains("tenko serve: start step `kek` failed [vault.");
     assert!(outcome.stdout.is_empty(), "{}", outcome.diagnostics());
     assert!(
@@ -204,7 +206,7 @@ fn a_different_kek_cannot_open_the_vault() {
     let mut refused = node.spawn();
     let outcome = refused.finish(STOP_TIMEOUT);
     outcome.assert_code(4);
-    outcome.assert_stderr_contains("step 3/8 vault failed");
+    outcome.assert_stderr_contains(&step_marker("vault", "failed"));
     outcome.assert_stderr_contains("tenko serve: start step `vault` failed [vault.");
     assert!(
         !outcome.stdout.contains(" ready at "),
@@ -231,7 +233,7 @@ fn a_missing_platform_kek_directory_refuses_the_start() {
     let mut refused = node.spawn();
     let outcome = refused.finish(STOP_TIMEOUT);
     outcome.assert_code(4);
-    outcome.assert_stderr_contains("step 1/8 kek failed");
+    outcome.assert_stderr_contains(&step_marker("kek", "failed"));
     outcome.assert_stderr_contains("tenko serve: start step `kek` failed [vault.");
     assert!(
         !node.kek_dir().exists()

@@ -1,0 +1,110 @@
+// Tenko connector plugin protocol, major version 1: migration sources (capability
+// `migration`), which read a system into the canonical intermediate representation (IR)
+// and report what they could not map.
+//
+// The IR grows with new sources: DNS zones and records and DHCP scopes are added to
+// MigrationItem as new members of its oneof, which is an additive change.
+syntax = "proto3";
+
+package tenko.connect.v1;
+
+import "tenko/connect/v1/common.proto";
+
+service Migration {
+  // Streams the IR of the scope item by item, followed by the loss entries.
+  rpc Read(MigrationReadRequest) returns (stream MigrationItem);
+}
+
+enum MigrationArea {
+  MIGRATION_AREA_UNSPECIFIED = 0;
+  // Networks, VLANs, hosts and addresses.
+  MIGRATION_AREA_IPAM = 1;
+  // Zones and records.
+  MIGRATION_AREA_DNS = 2;
+  // Scopes, reservations and options.
+  MIGRATION_AREA_DHCP = 3;
+}
+
+message MigrationScope {
+  // Areas to read; empty means everything the source has.
+  repeated MigrationArea areas = 1;
+  // DNS zones to read; empty means all.
+  repeated string zones = 2;
+}
+
+message MigrationReadRequest {
+  CallContext context = 1;
+  MigrationScope scope = 2;
+}
+
+// Where an item came from in the source.
+message SourceLocation {
+  optional string sheet = 1;
+  optional uint32 row = 2;
+  optional string column = 3;
+}
+
+// A network (prefix). `status` is one of `planned`, `active`, `reserved` or `deprecated`.
+message IrNetwork {
+  string cidr = 1;
+  optional string name = 2;
+  optional uint32 vlan = 3;
+  optional string site = 4;
+  optional string status = 5;
+  optional string description = 6;
+  repeated string tags = 7;
+  map<string, string> custom = 8;
+  SourceLocation origin = 9;
+}
+
+message IrVlan {
+  uint32 vid = 1;
+  optional string name = 2;
+  optional string site = 3;
+  optional string description = 4;
+  SourceLocation origin = 5;
+}
+
+// A host. `mode` is one of `static`, `reserved`, `dynamic` or `unmanaged`.
+message IrHost {
+  string name = 1;
+  optional string mode = 2;
+  repeated string macs = 3;
+  optional string site = 4;
+  optional string description = 5;
+  repeated string tags = 6;
+  map<string, string> custom = 7;
+  SourceLocation origin = 8;
+}
+
+// An address. `status` takes the values of IrNetwork.
+message IrAddress {
+  string ip = 1;
+  optional string dns_name = 2;
+  optional string host = 3;
+  optional string mac = 4;
+  optional string status = 5;
+  optional string description = 6;
+  repeated string tags = 7;
+  map<string, string> custom = 8;
+  SourceLocation origin = 9;
+}
+
+// Something the source has that the IR cannot carry.
+message LossEntry {
+  SourceLocation location = 1;
+  // A stable code, for example `migrate.bind.unsupported_record`.
+  string code = 2;
+  // English detail.
+  string detail = 3;
+}
+
+message MigrationItem {
+  oneof item {
+    IrNetwork network = 1;
+    IrVlan vlan = 2;
+    IrHost host = 3;
+    IrAddress address = 4;
+    LossEntry loss = 5;
+  }
+}

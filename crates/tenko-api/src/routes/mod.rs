@@ -22,6 +22,7 @@
 //! | [`export`] | CSV export | WP1.5 |
 //! | [`jobs`] | jobs and manual steps | WP1.6 |
 //! | [`moves`] | preview and start moves to another network (IPAM-19) | WP1.4b |
+//! | [`connectors`] | connector plugins and instances | WP2.0 |
 //! | [`audit`] | audit log and chain verification | WP1.7 |
 //! | [`events`] | server-sent events | WP1.7 |
 //! | [`system`] | health, status, OpenAPI document, metrics | WP1.7 |
@@ -45,6 +46,7 @@ pub mod addresses;
 pub mod audit;
 pub mod auth;
 pub mod common;
+pub mod connectors;
 pub mod events;
 pub mod export;
 pub mod hosts;
@@ -82,6 +84,7 @@ pub mod users;
         (name = "audit", description = "Audit log and chain verification"),
         (name = "events", description = "Server-sent events"),
         (name = "system", description = "Health, status, the OpenAPI document and metrics"),
+        (name = "connectors", description = "Connector plugins and connector instances"),
     ),
     components(schemas(ProblemDetails, crate::dto::SortOrder, tenko_ipam::query::Deleted)),
     modifiers(&SecurityAddon)
@@ -142,6 +145,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .merge(audit::routes())
         .merge(events::routes())
         .merge(system::routes())
+        .merge(connectors::routes())
 }
 
 /// The stub answer of an endpoint that is declared but not implemented yet.

@@ -74,7 +74,7 @@ const TABLE: [Row; 22] = [
     row(ObjectKind::Observation, true, "R"),
     row(ObjectKind::Proposal, true, "RA"),
     row(ObjectKind::Import, true, "RCUDX"),
-    row(ObjectKind::Connector, true, "R"),
+    row(ObjectKind::Connector, true, "RCUDX"),
     row(ObjectKind::Secret, false, ""),
     row(ObjectKind::Node, true, "R"),
     row(ObjectKind::Settings, false, "R"),

@@ -217,6 +217,17 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/system/status", "system_status"),
     ("GET", "/openapi.json", "openapi_document"),
     ("GET", "/metrics", "metrics"),
+    // connectors
+    ("GET", "/connectors/plugins", "list_connector_plugins"),
+    ("GET", "/connectors", "list_connectors"),
+    ("POST", "/connectors", "create_connector"),
+    ("GET", "/connectors/{id}", "get_connector"),
+    ("PATCH", "/connectors/{id}", "update_connector"),
+    ("DELETE", "/connectors/{id}", "delete_connector"),
+    ("POST", "/connectors/{id}/enable", "enable_connector"),
+    ("POST", "/connectors/{id}/disable", "disable_connector"),
+    ("POST", "/connectors/{id}/run", "run_connector"),
+    ("POST", "/connectors/{id}/check", "check_connector"),
 ];
 
 /// The only endpoint that is not a stub.
@@ -414,7 +425,7 @@ fn operations_have_a_declared_tag_and_a_summary() {
         .flatten()
         .map(|tag| tag.name.as_str())
         .collect();
-    assert_eq!(tags.len(), 16, "one tag per area");
+    assert_eq!(tags.len(), 17, "one tag per area");
     for (path, item) in &document.paths.paths {
         for (method, operation) in operations(item) {
             let operation_tags = operation.tags.as_deref().unwrap_or_default();

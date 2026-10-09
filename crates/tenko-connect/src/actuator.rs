@@ -1,12 +1,13 @@
-//! Actuators: intent applied to systems Tenko does not own (ADR 0005). Drivers arrive from
-//! Phase 2; the shape matches [`NetworkController`](crate::NetworkController) writes.
+//! Actuators: intent applied to systems Tenko does not own (ADR 0005). Plugins arrive from
+//! Phase 2; the write discipline matches [`NetworkController`](crate::NetworkController):
+//! plan, preview, apply with the plan, verify.
 
 use std::net::IpAddr;
 
 use serde::{Deserialize, Serialize};
 use tenko_core::{HostId, MacAddr, Timestamp, VrfId, net::Duid, net::Fqdn};
 
-use crate::{Connector, ConnectorError};
+use crate::{CallContext, ConnectorError};
 
 /// Dry run or real write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -31,15 +32,19 @@ pub struct DiffLine {
     pub after: Option<String>,
 }
 
-/// Applies intent to an external system as job steps.
+/// Applies intent to an external system as job steps (capability `actuator`).
 #[async_trait::async_trait]
-pub trait Actuator: Connector {
-    /// Reads back, diffs and validates.
+pub trait Actuator: Send + Sync + 'static {
+    /// Reads back, diffs and validates. Writes nothing.
     ///
     /// # Errors
     ///
     /// Returns a [`ConnectorError`].
-    async fn plan(&self, intent: &ActuatorIntent) -> Result<ActuatorPlan, ConnectorError>;
+    async fn plan(
+        &self,
+        ctx: &CallContext,
+        intent: &ActuatorIntent,
+    ) -> Result<ActuatorPlan, ConnectorError>;
 
     /// Re-reads, rejects a stale plan, writes (only in [`WriteMode::Apply`]) and verifies.
     ///
@@ -48,6 +53,7 @@ pub trait Actuator: Connector {
     /// Returns a [`ConnectorError`].
     async fn apply(
         &self,
+        ctx: &CallContext,
         plan: &ActuatorPlan,
         mode: WriteMode,
     ) -> Result<ActuatorReceipt, ConnectorError>;
@@ -57,7 +63,11 @@ pub trait Actuator: Connector {
     /// # Errors
     ///
     /// Returns a [`ConnectorError`].
-    async fn revert(&self, receipt: &ActuatorReceipt) -> Result<(), ConnectorError>;
+    async fn revert(
+        &self,
+        ctx: &CallContext,
+        receipt: &ActuatorReceipt,
+    ) -> Result<(), ConnectorError>;
 }
 
 /// Intent an actuator applies.

@@ -1,4 +1,4 @@
-//! Migration sources (ADR 0006, MIG-01): canonical IR plus a loss report. Drivers arrive in
+//! Migration sources (ADR 0006, MIG-01): canonical IR plus a loss report. Plugins arrive in
 //! Phase 4; the spreadsheet import of Slice 1 produces the same pair.
 
 use std::collections::BTreeSet;
@@ -9,17 +9,21 @@ use tenko_core::{
     net::Fqdn,
 };
 
-use crate::{Connector, ConnectorError};
+use crate::{CallContext, ConnectorError};
 
-/// Reads a system to migrate from.
+/// Reads a system to migrate from (capability `migration`).
 #[async_trait::async_trait]
-pub trait MigrationSource: Connector {
+pub trait MigrationSource: Send + Sync + 'static {
     /// Reads the scope into IR and reports what could not be mapped.
     ///
     /// # Errors
     ///
     /// Returns a [`ConnectorError`].
-    async fn read(&self, scope: &MigrationScope) -> Result<(Ir, LossReport), ConnectorError>;
+    async fn read(
+        &self,
+        ctx: &CallContext,
+        scope: &MigrationScope,
+    ) -> Result<(Ir, LossReport), ConnectorError>;
 }
 
 /// What to read.

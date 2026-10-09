@@ -23,6 +23,7 @@ server = [
   "dep:sha2",
   "dep:tenko-auth",
   "dep:tenko-cluster",
+  "dep:tenko-connect",
   "dep:tenko-ipam",
   "dep:tenko-jobs",
   "dep:tenko-store",
@@ -56,6 +57,7 @@ rustls = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 tenko-auth = { workspace = true, optional = true }
 tenko-cluster = { workspace = true, optional = true }
+tenko-connect = { workspace = true, optional = true }
 tenko-ipam = { workspace = true, optional = true }
 tenko-jobs = { workspace = true, optional = true }
 tenko-store = { workspace = true, optional = true }

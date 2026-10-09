@@ -9,6 +9,7 @@
 //! | [`platform`] | systemd `sd_notify` and the Windows service |
 //! | [`client`] | the client commands over the public API |
 //! | [`kek`] | `tenko kek rotate`: key-encryption key rotation with the server stopped |
+//! | [`plugin`] | `tenko plugin`: list, run a bundled plugin, conformance test; the connector service of `tenko serve` |
 //! | [`logging`] | `tracing` to standard error or a file, as text or JSON |
 //! | [`exit`] | the exit statuses |
 
@@ -24,6 +25,7 @@ pub mod exit;
 pub mod kek;
 pub mod logging;
 pub mod platform;
+pub mod plugin;
 pub mod serve;
 
 /// Name of this crate as declared in its manifest.
@@ -124,6 +126,13 @@ pub enum Command {
         action: client::hibp::HibpCommand,
     },
 
+    /// Connector plugins: list them, run a bundled one, test any plugin.
+    Plugin {
+        /// The `plugin` subcommand to run.
+        #[command(subcommand)]
+        action: plugin::PluginCommand,
+    },
+
     /// Print the OpenAPI document of the API (CI compares it with `docs/api/openapi.json`).
     #[command(hide = true)]
     Openapi,
@@ -188,6 +197,7 @@ impl Command {
             Command::Hibp {
                 action: client::hibp::HibpCommand::Build(_),
             } => "hibp build",
+            Command::Plugin { action } => action.name(),
             Command::Openapi => "openapi",
         }
     }
@@ -215,6 +225,7 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
             let _ = write!(out, "{}", client::render_roles());
             exit::OK
         }
+        Command::Plugin { action } => plugin::command(action, out, err),
         Command::Openapi => {
             let _ = write!(out, "{}", tenko_api::openapi_json());
             exit::OK
@@ -507,8 +518,9 @@ mod tests {
 
     #[test]
     fn command_names_match_the_command_line() {
-        let cases: [(&[&str], &str); 16] = [
+        let cases: [(&[&str], &str); 17] = [
             (&["kek", "rotate"], "kek rotate"),
+            (&["plugin", "list"], "plugin list"),
             (&["health"], "health"),
             (&["ca-root"], "ca-root"),
             (&["openapi"], "openapi"),

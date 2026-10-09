@@ -1,4 +1,11 @@
 //! Network controllers: topology reads and guarded L2 writes (CONN-05 to CONN-09).
+//!
+//! The plugin performs the concrete calls; the host keeps the policy. Before a write the
+//! host reads the [`TopologySnapshot`], checks its [`Guardrails`] (uplinks and management
+//! networks always, plus the configured protected paths), asks the plugin to
+//! [`plan`](NetworkController::plan) and shows the plan as a preview; only then does it
+//! call [`apply`](NetworkController::apply) with that plan, and after a real write it plans
+//! the same change again and expects an empty diff.
 
 use std::{fmt, net::IpAddr};
 
@@ -7,44 +14,48 @@ use serde::{Deserialize, Serialize};
 use tenko_core::{MacAddr, Timestamp, observe::Endpoint, observe::LinkKind};
 
 use crate::{
-    Connector, ConnectorError,
+    CallContext, ConnectorError,
     actuator::{DiffLine, WriteMode},
 };
 
 /// Reads topology from, and writes VLANs, port profiles and per-client VLANs to, a network
-/// controller.
+/// controller (capability `network_controller`).
 #[async_trait::async_trait]
-pub trait NetworkController: Connector {
-    /// Devices, ports, links, clients, networks and profiles.
+pub trait NetworkController: Send + Sync + 'static {
+    /// Devices, ports, links, clients, networks, profiles and wireless networks.
     ///
     /// # Errors
     ///
     /// Returns a [`ConnectorError`].
-    async fn topology(&self) -> Result<TopologySnapshot, ConnectorError>;
+    async fn topology(&self, ctx: &CallContext) -> Result<TopologySnapshot, ConnectorError>;
 
-    /// Reads back the current state, diffs it against the change and checks the
-    /// guardrails, deriving the management path from the topology.
+    /// Reads back the current state, diffs it against the change and fingerprints the
+    /// state. Writes nothing; the guardrails are checked by the host.
     ///
     /// # Errors
     ///
-    /// Returns [`ConnectorError::GuardrailRefused`] when a guardrail refuses the change.
-    async fn plan(&self, change: &L2Change) -> Result<L2Plan, ConnectorError>;
+    /// Returns a [`ConnectorError`].
+    async fn plan(&self, ctx: &CallContext, change: &L2Change) -> Result<L2Plan, ConnectorError>;
 
-    /// Re-reads, rejects a stale plan, writes (only in [`WriteMode::Apply`]) and verifies
-    /// the result.
+    /// Re-reads, rejects a stale plan with [`ConnectorError::VerifyMismatch`], writes (only
+    /// in [`WriteMode::Apply`]) and verifies the result by reading it back.
     ///
     /// # Errors
     ///
-    /// Returns [`ConnectorError::WritesDisabled`] when writes are off (TGL-20) and
-    /// [`ConnectorError::VerifyMismatch`] when the read-back differs.
-    async fn apply(&self, plan: &L2Plan, mode: WriteMode) -> Result<L2Receipt, ConnectorError>;
+    /// [`ConnectorError::VerifyMismatch`] when the plan is stale or the read-back differs.
+    async fn apply(
+        &self,
+        ctx: &CallContext,
+        plan: &L2Plan,
+        mode: WriteMode,
+    ) -> Result<L2Receipt, ConnectorError>;
 
-    /// Undoes an applied change.
+    /// Undoes an applied change with the undo steps of its receipt.
     ///
     /// # Errors
     ///
     /// Returns a [`ConnectorError`]; the job then asks for a manual undo.
-    async fn revert(&self, receipt: &L2Receipt) -> Result<(), ConnectorError>;
+    async fn revert(&self, ctx: &CallContext, receipt: &L2Receipt) -> Result<(), ConnectorError>;
 }
 
 macro_rules! controller_ref {
@@ -182,6 +193,9 @@ pub struct TopologySnapshot {
     pub networks: Vec<ControllerNetwork>,
     /// Port profiles.
     pub profiles: Vec<PortProfile>,
+    /// Wireless networks (CONN-18).
+    #[serde(default)]
+    pub wlans: Vec<WirelessNetwork>,
 }
 
 impl TopologySnapshot {
@@ -320,6 +334,27 @@ pub struct PortProfile {
     pub tagged: Vec<NetworkRef>,
 }
 
+/// A wireless network (SSID) and the network it carries (CONN-18).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WirelessNetwork {
+    /// Controller reference.
+    pub id: String,
+    /// The SSID.
+    pub ssid: String,
+    /// The network the SSID maps to.
+    #[serde(default)]
+    pub network: Option<NetworkRef>,
+    /// The VLAN it carries.
+    #[serde(default)]
+    pub vlan: Option<u16>,
+    /// Whether it is broadcast.
+    #[serde(default)]
+    pub enabled: bool,
+    /// The access points that broadcast it.
+    #[serde(default)]
+    pub access_points: Vec<DeviceRef>,
+}
+
 /// Paths a connector never touches (CONN-09).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -348,7 +383,7 @@ pub enum ProtectedPath {
     },
 }
 
-/// Guardrails for network-controller writes (CONN-09).
+/// Guardrails for network-controller writes (CONN-09), enforced by the host.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Guardrails {
     /// Configured and derived protected paths. Uplinks and management networks from the
@@ -489,6 +524,14 @@ mod tests {
                 management: true,
             }],
             profiles: vec![],
+            wlans: vec![WirelessNetwork {
+                id: "wlan-iot".to_owned(),
+                ssid: "iot.example.net".to_owned(),
+                network: Some(NetworkRef("iot".to_owned())),
+                vlan: Some(30),
+                enabled: true,
+                access_points: vec![DeviceRef("ap-a".to_owned())],
+            }],
         }
     }
 
