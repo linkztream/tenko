@@ -69,6 +69,10 @@ Design principles:
 
 `tenko` is one statically linked binary that runs any combination of roles on a node (ADR 0004, OPS-01). The `tenko` crate orchestrates the roles inside the process and integrates with the Windows Service Control Manager or systemd.
 
+### Roles and modules
+
+Roles and modules answer two different questions. **Roles** say where a component runs: `controller` is the management plane (API, UI, store, authentication, vault, jobs), `dns` and `dhcp` are the data plane, `probe` is discovery; any node runs any combination, so DHCP can sit on its own node apart from DNS and the controller (OPS-01). **Modules** say which parts of the product an installation has at all: IPAM, DNS, DHCP and Discovery can each be switched off (OPS-25). A disabled module registers no routes, no UI area and no tasks, and the integrations between modules (reverse zones from IPAM, DDNS from DHCP, reservations from intent, observations into IPAM) exist only when both sides are enabled. The controller role is therefore not "the IPAM": a DNS-only installation is `controller` plus `dns` on one node with the DNS module alone, and a DHCP-only installation the same with DHCP. Slimmer binaries through compile-time features are possible later but not planned; the runtime switch is enough for memory, because a disabled module allocates nothing.
+
 | Role | Responsibility |
 |---|---|
 | `controller` | API, UI, Raft member, authentication, vault, IPAM logic, scheduler |
