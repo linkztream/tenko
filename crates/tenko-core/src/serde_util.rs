@@ -93,7 +93,7 @@ pub(crate) fn deserialize_bytes_or_hex<'de, D: Deserializer<'de>>(
     if deserializer.is_human_readable() {
         deserializer.deserialize_str(Visitor(what))
     } else {
-        deserializer.deserialize_bytes(Visitor(what))
+        deserializer.deserialize_byte_buf(Visitor(what))
     }
 }
 
@@ -213,6 +213,16 @@ pub mod option_duration_ms {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ciborium serves byte strings longer than its 4 KiB scratch buffer only through
+    /// `deserialize_byte_buf`; a `deserialize_bytes` call fails for them.
+    #[test]
+    fn large_byte_values_round_trip_through_cbor() {
+        let value = HexBytes(vec![7; 10_000]);
+        let bytes = crate::codec::to_cbor(&value).expect("encode");
+        let back: HexBytes = crate::codec::from_cbor(&bytes).expect("decode");
+        assert_eq!(back, value);
+    }
 
     #[test]
     fn hex_round_trips_and_accepts_separators() {
