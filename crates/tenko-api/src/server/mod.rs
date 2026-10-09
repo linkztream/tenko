@@ -78,6 +78,10 @@ pub struct ServerConfig {
     pub header_read_timeout: Duration,
     /// Most open connections; more are closed at once.
     pub max_connections: usize,
+    /// Request extensions added to every request before routing: the domain services of
+    /// the server binary (`Arc<tenko_auth::AuthService>`, `Arc<tenko_ipam::IpamService>`,
+    /// `tenko_jobs::JobEngine`). Area handlers read them with `Extension<T>`.
+    pub extensions: axum::http::Extensions,
 }
 
 impl ServerConfig {
@@ -95,6 +99,7 @@ impl ServerConfig {
             handshake_timeout: Duration::from_secs(10),
             header_read_timeout: Duration::from_secs(30),
             max_connections: 20_000,
+            extensions: axum::http::Extensions::new(),
         }
     }
 
@@ -290,13 +295,14 @@ fn warning(code: &str, detail: &str, params: &[(&str, String)]) -> StatusWarning
 ///
 /// [`UiError`] when the UI directory has no `index.html`.
 pub fn app(state: AppState, http: &HttpConfig, ui_source: &UiSource) -> Result<Router, UiError> {
-    build_app(state, http, ui_source).map(|(router, _)| router)
+    build_app(state, http, ui_source, axum::http::Extensions::new()).map(|(router, _)| router)
 }
 
 fn build_app(
     state: AppState,
     http: &HttpConfig,
     ui_source: &UiSource,
+    extensions: axum::http::Extensions,
 ) -> Result<(Router, Arc<Layers>), UiError> {
     let layers = Arc::new(Layers::new(state.clone(), http));
     let (api, _) = crate::api(state);
@@ -306,7 +312,16 @@ fn build_app(
         .route_layer(from_fn_with_state(Arc::clone(&layers), middleware::api));
     let router = api
         .fallback(move |request: Request| fallback(ui.clone(), request))
-        .layer(from_fn_with_state(Arc::clone(&layers), middleware::outer));
+        .layer(from_fn_with_state(Arc::clone(&layers), middleware::outer))
+        .layer(axum::middleware::from_fn(
+            move |mut request: Request, next: axum::middleware::Next| {
+                let extensions = extensions.clone();
+                async move {
+                    request.extensions_mut().extend(extensions);
+                    next.run(request).await
+                }
+            },
+        ));
     Ok((router, layers))
 }
 
@@ -359,6 +374,35 @@ impl RunningServer {
         let _ = self.stop.send(true);
     }
 
+    /// Runs until the server stops on its own or `shutdown` resolves, then shuts it down
+    /// gracefully and waits for it.
+    ///
+    /// # Errors
+    ///
+    /// [`ServeError::Runtime`] when the server thread died, or the error the server
+    /// stopped with.
+    pub async fn run_until(
+        self,
+        shutdown: impl Future<Output = ()> + Send,
+    ) -> Result<(), ServeError> {
+        let Self {
+            addrs: _,
+            stop,
+            done,
+        } = self;
+        let mut done = done;
+        tokio::select! {
+            result = &mut done => {
+                return result.unwrap_or_else(|_| Err(ServeError::Runtime("the server thread ended".to_owned())));
+            }
+            () = shutdown => {}
+        }
+        tracing::info!("API shutting down");
+        let _ = stop.send(true);
+        done.await
+            .unwrap_or_else(|_| Err(ServeError::Runtime("the server thread ended".to_owned())))
+    }
+
     /// Waits until the server has stopped.
     ///
     /// # Errors
@@ -382,8 +426,13 @@ impl RunningServer {
 /// cannot be bound, or a runtime that cannot be built.
 pub async fn start(config: ServerConfig, state: AppState) -> Result<RunningServer, ServeError> {
     config.validate()?;
-    let (router, layers) =
-        build_app(state.clone(), &config.http, &config.ui).map_err(ServeError::Ui)?;
+    let (router, layers) = build_app(
+        state.clone(),
+        &config.http,
+        &config.ui,
+        config.extensions.clone(),
+    )
+    .map_err(ServeError::Ui)?;
     let (ready_tx, ready_rx) = oneshot::channel::<Result<Vec<SocketAddr>, ServeError>>();
     let (done_tx, done_rx) = oneshot::channel();
     let (stop_tx, stop_rx) = watch::channel(false);
@@ -447,22 +496,7 @@ pub async fn serve(
 ) -> Result<(), ServeError> {
     let server = start(config, state).await?;
     tracing::info!(addrs = ?server.local_addrs(), "API listening");
-    let RunningServer {
-        addrs: _,
-        stop,
-        done,
-    } = server;
-    let mut done = done;
-    tokio::select! {
-        result = &mut done => {
-            return result.unwrap_or_else(|_| Err(ServeError::Runtime("the server thread ended".to_owned())));
-        }
-        () = shutdown => {}
-    }
-    tracing::info!("API shutting down");
-    let _ = stop.send(true);
-    done.await
-        .unwrap_or_else(|_| Err(ServeError::Runtime("the server thread ended".to_owned())))
+    server.run_until(shutdown).await
 }
 
 /// Resolves on Ctrl-C, and on Unix also on `SIGTERM`.
