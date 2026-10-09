@@ -21,6 +21,7 @@
 //! included.
 
 pub mod audit;
+pub mod ca_root;
 pub mod export;
 pub mod health;
 pub mod hibp;

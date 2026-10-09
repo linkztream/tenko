@@ -111,6 +111,9 @@ pub enum Command {
         action: client::audit::AuditCommand,
     },
 
+    /// Download the root certificate of the internal CA, to install on admin clients.
+    CaRoot(client::ca_root::CaRootArgs),
+
     /// Ask a node whether it is ready (container health checks); no sign-in needed.
     Health(client::health::HealthArgs),
 
@@ -175,6 +178,7 @@ impl Command {
             Command::Login(_) => "login",
             Command::Logout(_) => "logout",
             Command::Prefix { action } => action.name(),
+            Command::CaRoot(_) => "ca-root",
             Command::Health(_) => "health",
             Command::Import(_) => "import",
             Command::Export(_) => "export",
@@ -247,6 +251,10 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
             logging::init_client();
             let json = action.client().json;
             client::block_on(name, json, out, err, client::prefix::run(action))
+        }
+        Command::CaRoot(args) => {
+            logging::init_client();
+            client::block_on(name, args.client.json, out, err, client::ca_root::run(args))
         }
         Command::Health(args) => {
             logging::init_client();
@@ -499,9 +507,10 @@ mod tests {
 
     #[test]
     fn command_names_match_the_command_line() {
-        let cases: [(&[&str], &str); 15] = [
+        let cases: [(&[&str], &str); 16] = [
             (&["kek", "rotate"], "kek rotate"),
             (&["health"], "health"),
+            (&["ca-root"], "ca-root"),
             (&["openapi"], "openapi"),
             (&["serve", "--data-dir", "d"], "serve"),
             (&["config", "check"], "config check"),

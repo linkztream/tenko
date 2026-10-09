@@ -208,6 +208,7 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     // events
     ("GET", "/events", "events"),
     // system
+    ("GET", "/system/ca-root", "get_ca_root"),
     ("GET", "/health", "health"),
     ("GET", "/health/ready", "ready"),
     ("GET", "/system/status", "system_status"),

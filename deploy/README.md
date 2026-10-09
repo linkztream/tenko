@@ -78,7 +78,10 @@ median of the data directory, logs it, and warns when it is above 10 ms.
 
 `[tls] mode` has four values. `internal_ca` (the default) makes Tenko its own CA and issue
 the server certificate for the host name; install `<data_dir>/tls/ca-root.pem` on admin
-clients, or pass it to the command line with `--ca-file`. `imported` serves your
+clients, or pass it to the command line with `--ca-file`. The root is also served at
+`GET /api/v1/system/ca-root`; `tenko ca-root --url <url> --fingerprint <sha256> -o ca-root.pem`
+downloads it before the client trusts the server, and accepts it only when its SHA-256
+matches the fingerprint the server prints at start (console and log). `imported` serves your
 certificate chain and key (`cert_path`, `key_path`, PEM) and reloads them when the files
 change. `reverse_proxy` ends TLS in HAProxy, nginx or Caddy in front of Tenko: Tenko
 accepts plain HTTP, or the PROXY protocol, only from `trusted_proxies`, takes the client

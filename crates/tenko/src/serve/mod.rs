@@ -45,6 +45,7 @@ use tenko_api::{
     ServerConfig,
     dto::system::NodeStatus,
     middleware::HttpConfig,
+    routes::system::CaRootSource,
     sse::EventRoutes,
     state::{AppState, StateOptions},
     ui::UiSource,
@@ -601,6 +602,8 @@ struct Services {
     engine: JobEngine,
     vault: Arc<StoreVault>,
     setup_token: Option<tenko_auth::secret::SetupToken>,
+    /// The SHA-256 fingerprint of the internal CA root (mode a).
+    ca_root_sha256: Option<String>,
     https: bool,
     elapsed: Duration,
     lab_plain_http: bool,
@@ -827,6 +830,12 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
             server.extensions.insert(Arc::clone(&auth));
             server.extensions.insert(Arc::clone(&ipam));
             server.extensions.insert(engine.clone());
+            if let Some((pem, _)) = &tls.ca_root {
+                server.extensions.insert(Arc::new(CaRootSource::new(
+                    tls.service.clone(),
+                    pem.as_str(),
+                )));
+            }
             imports.register(&mut server);
             let running = tenko_api::start(server, state).await.map_err(|error| {
                 let code = match &error {
@@ -863,6 +872,7 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
         engine,
         vault,
         setup_token,
+        ca_root_sha256: tls.ca_root.as_ref().map(|(_, sha256)| sha256.clone()),
         https,
         elapsed: steps.started.elapsed(),
         lab_plain_http,
@@ -1005,7 +1015,7 @@ fn read_certificates(path: &std::path::Path) -> Result<Vec<Vec<u8>>, StartError>
 }
 
 /// The DER bodies of the `CERTIFICATE` blocks of a PEM file.
-fn pem_certificates(pem: &[u8]) -> Vec<Vec<u8>> {
+pub(crate) fn pem_certificates(pem: &[u8]) -> Vec<Vec<u8>> {
     let text = String::from_utf8_lossy(pem);
     let mut out = Vec::new();
     let mut body: Option<String> = None;
@@ -1052,11 +1062,16 @@ fn announce(resolved: &Resolved, services: &Services, ready: &Ready) {
             "WARNING: plain HTTP from every source (Lab profile); do not use this in production"
         );
     }
-    if let TlsSpec::InternalCa { .. } = resolved.tls {
+    if let Some(sha256) = &services.ca_root_sha256 {
         let _ = writeln!(
             out,
             "internal CA root (install it on admin clients): {}",
             resolved.layout().ca_root().display()
+        );
+        let _ = writeln!(out, "  SHA-256 fingerprint: {sha256}");
+        let _ = writeln!(
+            out,
+            "  download: {url}api/v1/system/ca-root, or `tenko ca-root --url {url} --fingerprint {sha256}`"
         );
     }
     if let Some(token) = &services.setup_token {

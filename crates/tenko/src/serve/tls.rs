@@ -39,6 +39,9 @@ pub(super) struct TlsSetup {
     pub tasks: Vec<JoinHandle<()>>,
     /// Background tasks that are aborted at shutdown (the file and expiry watcher).
     pub watchers: Vec<JoinHandle<()>>,
+    /// Mode a: the internal CA root (PEM) and its SHA-256 fingerprint, for
+    /// `GET /system/ca-root` and the console.
+    pub ca_root: Option<(String, String)>,
 }
 
 /// Brings up the TLS layer.
@@ -62,6 +65,7 @@ pub(super) async fn start(
         summary: String::new(),
         tasks: Vec::new(),
         watchers: Vec::new(),
+        ca_root: None,
     };
     match &resolved.tls {
         TlsSpec::InternalCa { .. } => internal_ca(base, resolved, store, vault, stop).await,
@@ -161,7 +165,9 @@ async fn internal_ca(
         .await
         .map_err(|error| StartError::coded("tls", &error))?;
     let root = resolved.layout().ca_root();
-    write_root(&root, &ca.root_pem())?;
+    let root_pem = ca.root_pem();
+    let fingerprint = ca.root_info().sha256.clone();
+    write_root(&root, &root_pem)?;
     let identity = identity(resolved, store.as_ref()).await?;
     let material = ca
         .server_material(store.as_ref(), vault.as_ref(), &ctx, &identity)
@@ -170,7 +176,7 @@ async fn internal_ca(
     let not_after = material.info().not_after;
     base.service.install(material);
     let summary = format!(
-        "internal CA, certificate for {} until {not_after}; CA root at {}",
+        "internal CA, certificate for {} until {not_after}; CA root at {} (SHA-256 {fingerprint})",
         identity.host_name,
         root.display()
     );
@@ -192,6 +198,7 @@ async fn internal_ca(
         summary,
         tasks: vec![renewal],
         watchers: vec![watcher],
+        ca_root: Some((root_pem, fingerprint)),
         ..base
     })
 }
