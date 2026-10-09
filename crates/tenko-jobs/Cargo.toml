@@ -7,5 +7,18 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[dependencies]
+async-trait = { workspace = true }
+bytes = { workspace = true }
+ipnet = { workspace = true }
+serde = { workspace = true }
+tenko-core = { workspace = true }
+tenko-store = { workspace = true }
+thiserror = { workspace = true }
+utoipa = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
 [lints]
 workspace = true

@@ -1,55 +1,41 @@
-//! The `tenko` command-line client.
+//! Client side of the `tenko` binary: `tenko roles list` and the stubs of the commands that
+//! will talk to the public API.
 //!
-//! Phase 0 only reports its version and the node roles; management commands that talk to
-//! the controller API land in a later phase.
+//! The stubs accept any trailing arguments without validating them, print a notice to
+//! standard error and exit with status [`NOT_IMPLEMENTED_EXIT_CODE`].
 
-use std::fmt::Write as _;
+use std::{fmt::Write as _, io::Write};
 
-use clap::{Parser, Subcommand};
+use anyhow::Context as _;
+use clap::Args;
 use tenko_core::Role;
 
-/// Name of this crate as declared in its manifest.
-pub const CRATE_NAME: &str = "tenko-cli";
+/// Exit status of a client command that is not implemented yet.
+pub const NOT_IMPLEMENTED_EXIT_CODE: u8 = 2;
 
-/// Returns the version of this crate as declared in its manifest.
-pub const fn version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
+/// Trailing arguments of a client command that is not implemented yet.
+///
+/// Everything after the command name is collected unchanged, including words that look like
+/// flags, so that the final command line can already be written down and parsed.
+#[derive(Debug, Clone, Default, Args)]
+pub struct StubArgs {
+    /// Arguments of the command; ignored for now.
+    #[arg(
+        value_name = "ARGS",
+        trailing_var_arg = true,
+        allow_hyphen_values = true
+    )]
+    pub args: Vec<String>,
 }
 
-/// Tenko DDI command-line client.
-#[derive(Debug, Parser)]
-#[command(name = "tenko", version, arg_required_else_help = true)]
-pub struct Cli {
-    /// The command to run.
-    #[command(subcommand)]
-    pub command: Command,
-}
-
-/// Top-level commands of the `tenko` client.
-#[derive(Debug, Subcommand)]
-pub enum Command {
-    /// Inspect node roles.
-    Roles {
-        /// The `roles` subcommand to run.
-        #[command(subcommand)]
-        action: RolesCommand,
-    },
-}
-
-/// Subcommands of `tenko roles`.
-#[derive(Debug, Subcommand)]
-pub enum RolesCommand {
-    /// List the roles a Tenko node can run.
-    List,
-}
-
-/// Runs a parsed command and returns the text to print on standard output.
-pub fn execute(cli: &Cli) -> String {
-    match &cli.command {
-        Command::Roles {
-            action: RolesCommand::List,
-        } => render_roles(),
-    }
+/// Reports that `command` is not implemented yet on `err` and returns the exit status to use.
+///
+/// # Errors
+///
+/// Returns an error if writing to `err` fails.
+pub fn not_implemented(command: &str, err: &mut impl Write) -> anyhow::Result<u8> {
+    writeln!(err, "tenko {command}: not implemented yet").context("writing notice")?;
+    Ok(NOT_IMPLEMENTED_EXIT_CODE)
 }
 
 /// Renders the output of `tenko roles list`: one line per role with its description.
@@ -70,32 +56,83 @@ pub fn render_roles() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::{CommandFactory, error::ErrorKind};
+    use crate::{AuditCommand, Cli, Command, execute};
+    use clap::Parser as _;
 
-    #[test]
-    fn metadata_matches_manifest() {
-        assert_eq!(CRATE_NAME, env!("CARGO_PKG_NAME"));
-        assert!(version().starts_with(|c: char| c.is_ascii_digit()));
+    fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
+        Cli::try_parse_from(std::iter::once("tenko").chain(args.iter().copied()))
     }
 
-    #[test]
-    fn cli_definition_is_valid() {
-        Cli::command().debug_assert();
-    }
-
-    #[test]
-    fn roles_list_prints_every_role() {
-        let cli = Cli::try_parse_from(["tenko", "roles", "list"]).expect("valid arguments");
-        let output = execute(&cli);
-        assert_eq!(output.lines().count(), Role::ALL.len());
-        for role in Role::ALL {
-            assert!(output.contains(role.as_str()), "missing role {role}");
+    fn stub_args(command: &Command) -> &StubArgs {
+        match command {
+            Command::Login(args)
+            | Command::Import(args)
+            | Command::Export(args)
+            | Command::Prefix(args)
+            | Command::Audit {
+                action: AuditCommand::Verify(args),
+            } => args,
+            other => panic!("not a client stub: {other:?}"),
         }
     }
 
     #[test]
-    fn version_flag_is_supported() {
-        let err = Cli::try_parse_from(["tenko", "--version"]).expect_err("--version exits early");
-        assert_eq!(err.kind(), ErrorKind::DisplayVersion);
+    fn roles_render_one_line_per_role() {
+        let output = render_roles();
+        assert_eq!(output.lines().count(), Role::ALL.len());
+        for role in Role::ALL {
+            assert!(output.contains(role.as_str()), "missing role {role}");
+            assert!(
+                output.contains(role.description()),
+                "missing text of {role}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_stub_parses_and_exits_with_status_2() {
+        let cases: [(&[&str], &str); 5] = [
+            (&["login"], "login"),
+            (&["import"], "import"),
+            (&["export"], "export"),
+            (&["prefix"], "prefix"),
+            (&["audit", "verify"], "audit verify"),
+        ];
+        for (argv, name) in cases {
+            let cli = parse(argv).expect("valid arguments");
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let status = execute(&cli, &mut out, &mut err).expect("stub does not fail");
+            assert_eq!(status, 2, "exit status of {name}");
+            assert_eq!(status, NOT_IMPLEMENTED_EXIT_CODE);
+            assert!(out.is_empty(), "stdout of {name} must stay empty");
+            let err = String::from_utf8(err).expect("UTF-8 output");
+            assert_eq!(err, format!("tenko {name}: not implemented yet\n"));
+        }
+    }
+
+    #[test]
+    fn import_accepts_trailing_arguments() {
+        let cli = parse(&["import", "file.xlsx", "--dry-run"]).expect("valid arguments");
+        assert_eq!(stub_args(&cli.command).args, ["file.xlsx", "--dry-run"]);
+    }
+
+    #[test]
+    fn trailing_arguments_may_start_with_a_flag() {
+        let cli = parse(&["export", "--format", "csv", "-o", "out.csv"]).expect("valid arguments");
+        assert_eq!(
+            stub_args(&cli.command).args,
+            ["--format", "csv", "-o", "out.csv"]
+        );
+    }
+
+    #[test]
+    fn audit_verify_accepts_trailing_arguments() {
+        let cli = parse(&["audit", "verify", "--chain", "audit.cbor"]).expect("valid arguments");
+        assert_eq!(stub_args(&cli.command).args, ["--chain", "audit.cbor"]);
+    }
+
+    #[test]
+    fn audit_requires_a_subcommand() {
+        assert!(parse(&["audit"]).is_err());
     }
 }

@@ -26,6 +26,9 @@ jobs:
     name: Rust (ubuntu-latest)
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    env:
+      # Rust-only builds use a placeholder UI page; release builds refuse it.
+      TENKO_UI_STUB: "1"
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -38,11 +41,21 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
+      - name: OpenAPI drift
+        # The committed document must equal the generated one (E3). Inert until WP1.7
+        # commits docs/api/openapi.json.
+        if: hashFiles('docs/api/openapi.json') != ''
+        run: |
+          cargo run -p tenko --locked --quiet -- openapi > "$RUNNER_TEMP/openapi.json"
+          diff -u docs/api/openapi.json "$RUNNER_TEMP/openapi.json"
 
   rust-windows:
     name: Rust (windows-latest, nightly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
+    env:
+      # Rust-only builds use a placeholder UI page; release builds refuse it.
+      TENKO_UI_STUB: "1"
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -101,3 +114,27 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
+      - name: Keep the bundle for the embedded build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+          retention-days: 1
+
+  rust-embedded-ui:
+    name: Rust with the built UI
+    # The UI is built before Rust (ADR 0008); this build embeds the real bundle, without
+    # TENKO_UI_STUB.
+    needs: ui
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+      - name: Build
+        run: cargo build -p tenko --locked

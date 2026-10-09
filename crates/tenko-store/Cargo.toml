@@ -1,11 +1,29 @@
 [package]
 name = "tenko-store"
 version = "0.0.1"
-description = "Raft-replicated store, embedded KV engine, snapshots and local cache"
+description = "Replicated store contract, in-memory store and conformance suite; Raft over redb lands in WP1.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+
+[features]
+# The conformance suite (`tenko_store::testing`) for any `Store` implementation.
+testing = ["dep:arc-swap"]
+
+[dependencies]
+arc-swap = { workspace = true, optional = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+tenko-core = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+# Enables the conformance suite for this package's own integration tests.
+tenko-store = { path = ".", features = ["testing"] }
 
 [lints]
 workspace = true

@@ -7,7 +7,9 @@ exclude = ["bench", "fuzz"]
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.85"
+# The oldest toolchain that builds every declared dependency (redb 4.3 needs 1.90, uuid 1.27
+# needs 1.89, utoipa 6 and time 0.3.55 need 1.88).
+rust-version = "1.90"
 # Placeholder until the project licence is decided (open question in docs/ROADMAP.md).
 license = "LicenseRef-Proprietary"
 
@@ -20,27 +22,69 @@ pedantic = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
 
+# Only the lead builder edits this file (docs/plans/phase-1-execution.md, section 3). Every
+# Slice 1 dependency is declared here up front; a crate opts in with `name.workspace = true`.
+# Declarations that no crate uses do not enter Cargo.lock, so `cargo deny` and `cargo audit`
+# still see the real graph.
 [workspace.dependencies]
 # Internal crates.
+tenko-api = { path = "crates/tenko-api" }
+tenko-auth = { path = "crates/tenko-auth" }
+tenko-cluster = { path = "crates/tenko-cluster" }
+tenko-connect = { path = "crates/tenko-connect" }
 tenko-core = { path = "crates/tenko-core" }
+tenko-ipam = { path = "crates/tenko-ipam" }
+tenko-jobs = { path = "crates/tenko-jobs" }
+tenko-migrate = { path = "crates/tenko-migrate" }
+tenko-store = { path = "crates/tenko-store" }
+tenko-vault = { path = "crates/tenko-vault" }
 
-# External crates. Only dependencies that a crate actually uses are listed here, so that
-# `cargo deny` and `cargo audit` see the real graph.
-anyhow = "1"
-clap = { version = "4", features = ["derive"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Store and encoding.
+arc-swap = "1.9.2"
+bytes = { version = "1.12.1", features = ["serde"] }
+ciborium = "0.2.2"
+openraft = { version = "=0.9.25", features = ["serde", "storage-v2", "generic-snapshot-data"] }
+redb = "=4.3.0"
+sha2 = "0.11.0"
 
-# Planned dependencies, added by the first crate that needs them:
-#   axum, tower, tower-http       HTTP API (tenko-api)
-#   utoipa                        OpenAPI schema for public API types
-#   uuid (v7, serde)              identifiers (tenko-core)
-#   time (serde, formatting)      timestamps (tenko-core)
-#   bytes                         wire buffers (tenko-dns, tenko-dhcp)
-#   ipnet, macaddr                address and prefix types (tenko-core, tenko-ipam)
-#   include_dir                   embedding ui/dist (tenko-api)
-#   Raft implementation and embedded KV engine: decided by spikes, see docs/adr/
+# Domain types.
+ipnet = { version = "2.12.2", features = ["serde"] }
+macaddr = { version = "1.0.1", features = ["serde_std"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+time = { version = "0.3.55", features = ["serde", "formatting", "parsing"] }
+uuid = { version = "1.27.0", features = ["v7", "serde"] }
+
+# Import and export (WP1.5).
+calamine = "0.36.1"
+csv = "1.4.0"
+encoding_rs = "0.8.42"
+
+# Async runtime and plumbing.
+async-trait = "0.1.92"
+futures = "0.3.34"
+tokio = { version = "1.53.2", features = ["full"] }
+
+# HTTP API and OpenAPI.
+axum = "0.8.9"
+tower = "0.5.3"
+tower-http = "0.7.1"
+utoipa = { version = "6.0.0", features = ["uuid", "time"] }
+utoipa-axum = "0.3.0"
+
+# Cryptography. rustls uses the aws-lc-rs provider; OpenSSL is banned in deny.toml.
+argon2 = "0.6.0"
+aws-lc-rs = "1.18.1"
+rustls = "0.23.45"
+zeroize = "1.9.1"
+
+# Errors, logging and the command line.
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+thiserror = "2.0.21"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+# Tests only.
+proptest = "1.11.0"
+tempfile = "3.27.0"

@@ -1,15 +1,15 @@
-# Hardened systemd unit for tenko-server.
+# Hardened systemd unit for tenko.
 #
 # Install:
-#   1. Place the binary at /usr/local/bin/tenko-server.
+#   1. Place the binary at /usr/local/bin/tenko.
 #   2. Create the system user first:
 #        useradd --system --home-dir /var/lib/tenko --shell /usr/sbin/nologin tenko
 #   3. Put the configuration in /etc/tenko/tenko.toml.
-#   4. Install this file as /etc/systemd/system/tenko-server.service, then run:
-#        systemctl daemon-reload && systemctl enable --now tenko-server
+#   4. Install this file as /etc/systemd/system/tenko.service, then run:
+#        systemctl daemon-reload && systemctl enable --now tenko
 
 [Unit]
-Description=Tenko DDI server (DNS, DHCP and IPAM)
+Description=Tenko DDI (DNS, DHCP and IPAM)
 After=network-online.target
 Wants=network-online.target
 
@@ -17,7 +17,7 @@ Wants=network-online.target
 # Type=notify will replace Type=simple once the server implements sd_notify
 # readiness.
 Type=simple
-ExecStart=/usr/local/bin/tenko-server --roles controller,dns,dhcp --config /etc/tenko/tenko.toml
+ExecStart=/usr/local/bin/tenko serve --roles controller,dns,dhcp --data-dir /var/lib/tenko --config /etc/tenko/tenko.toml
 Restart=on-failure
 RestartSec=2s
 

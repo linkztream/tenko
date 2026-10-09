@@ -12,5 +12,6 @@ doc-valid-idents = [
   "UniFi",
   "PowerShell",
   "WebAuthn",
+  "UUIDv7",
   "..",
 ]

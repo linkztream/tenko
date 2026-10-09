@@ -1,15 +1,23 @@
 [package]
-name = "tenko-server"
+name = "tenko"
 version = "0.0.1"
-description = "The Tenko DDI server binary: controller, dns, dhcp and probe roles in one executable"
+description = "The Tenko DDI binary: the server roles and the command-line client in one executable"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "tenko"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
+tenko-api = { workspace = true }
 tenko-core = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

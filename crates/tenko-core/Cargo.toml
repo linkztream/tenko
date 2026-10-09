@@ -1,18 +1,32 @@
 [package]
 name = "tenko-core"
 version = "0.0.1"
-description = "Shared data model: IPAM tree, zones, leases, policies and the migration IR"
+description = "Shared contracts: identifiers, principals, the IPAM model, observations, audit records, errors and encodings"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# Test helpers for other crates (an allow-all authorizer). Never enabled in release builds.
+testing = []
+
 [dependencies]
+bytes = { workspace = true }
+ciborium = { workspace = true }
+ipnet = { workspace = true }
+macaddr = { workspace = true }
 serde = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
+time = { workspace = true }
+utoipa = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
+proptest = { workspace = true }
 serde_json = { workspace = true }
+time = { workspace = true, features = ["macros"] }
 
 [lints]
 workspace = true

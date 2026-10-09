@@ -45,8 +45,10 @@ cd ui && npm ci && npm run build
 Run the server with a subset of roles:
 
 ```sh
-cargo run -p tenko-server -- --roles controller,dns
+cargo run -p tenko -- serve --roles controller,dns --data-dir <dir>
 ```
+
+The same `tenko` binary is the command-line client: `tenko login`, `import`, `export`, `prefix` and `audit verify` talk to the public API of a running controller (stubs for now).
 
 ## Licence
 

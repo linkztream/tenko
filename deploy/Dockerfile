@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1
 #
-# Container image for tenko-server (DNS, DHCP and IPAM roles in one binary).
+# Container image for tenko (DNS, DHCP and IPAM roles in one binary).
 #
 # Build from the repository root, not from this directory:
 #
-#   docker build -f deploy/Dockerfile -t tenko-server .
+#   docker build -f deploy/Dockerfile -t tenko .
 #
 # ---------------------------------------------------------------------------
 # NETWORKING AND PRIVILEGES
@@ -29,7 +29,7 @@ RUN npm ci
 COPY ui/ ./
 RUN npm run build
 
-# Stage 2: server binary.
+# Stage 2: the tenko binary.
 FROM rust:1-slim-bookworm AS builder
 WORKDIR /src
 COPY . .
@@ -40,13 +40,13 @@ COPY --from=ui /src/ui/dist ui/dist
 # so the binary is copied out to /out inside the same RUN.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p tenko-server \
+    cargo build --release --locked -p tenko \
     && mkdir -p /out/state \
-    && cp target/release/tenko-server /out/tenko-server
+    && cp target/release/tenko /out/tenko
 
 # Stage 3: runtime image.
 FROM gcr.io/distroless/cc-debian12:nonroot
-COPY --from=builder /out/tenko-server /usr/local/bin/tenko-server
+COPY --from=builder /out/tenko /usr/local/bin/tenko
 # Create the state directory owned by the distroless "nonroot" user (65532) so
 # that a new volume mounted here is writable.
 COPY --from=builder --chown=65532:65532 /out/state /var/lib/tenko
@@ -57,5 +57,5 @@ VOLUME ["/var/lib/tenko"]
 # 547/udp         DHCPv6 server
 # 8443/tcp        HTTPS API and web UI (the API port is provisional)
 EXPOSE 53/udp 53/tcp 67/udp 547/udp 8443/tcp
-ENTRYPOINT ["/usr/local/bin/tenko-server"]
-CMD ["--roles", "controller,dns,dhcp", "--config", "/etc/tenko/tenko.toml"]
+ENTRYPOINT ["/usr/local/bin/tenko", "serve"]
+CMD ["--roles", "controller,dns,dhcp", "--data-dir", "/var/lib/tenko", "--config", "/etc/tenko/tenko.toml"]

@@ -6,17 +6,17 @@ behavior; none of these commands exist today.
 ## Planned commands
 
 ```
-tenko-server service install --roles dns,dhcp --config "C:\ProgramData\Tenko\tenko.toml"
-tenko-server service uninstall
-tenko-server service start
-tenko-server service stop
+tenko service install --roles dns,dhcp --data-dir "C:\ProgramData\Tenko" --config "C:\ProgramData\Tenko\tenko.toml"
+tenko service uninstall
+tenko service start
+tenko service stop
 ```
 
 `service install` (planned) registers a Windows service with:
 
-- name `tenko-server`, display name `Tenko DDI Server`
+- name `tenko`, display name `Tenko DDI`
 - start type automatic
-- the virtual service account `NT SERVICE\tenko-server`
+- the virtual service account `NT SERVICE\tenko`
 
 ## Planned layout
 

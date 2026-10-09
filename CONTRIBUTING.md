@@ -73,8 +73,7 @@ Read before changing anything substantial:
 | `tenko-connect-windows` | Windows DNS/DHCP Server connector (stub)                             |
 | `tenko-migrate`         | Plan/apply/verify migration pipeline over connectors                 |
 | `tenko-api`             | axum HTTP API, OpenAPI, SSE                                          |
-| `tenko-cli`             | The `tenko` command-line client                                      |
-| `tenko-server`          | The `tenko-server` binary; selects roles with `--roles`              |
+| `tenko`                 | The single binary: `tenko serve --roles …` and the API client commands |
 
 Other top-level directories: `ui/` (SolidJS web UI), `fuzz/` (fuzz targets), `bench/`
 (spikes and benchmarks, excluded from the workspace), `deploy/` (container, systemd and
@@ -89,6 +88,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 cargo deny check
 cargo audit
-cargo run -p tenko-server -- --roles controller,dns
+cargo run -p tenko -- serve --roles controller,dns --data-dir <dir>
 cd ui && npm ci && npm run build
 ```
+
+Rust-only builds use a placeholder UI page: set `TENKO_UI_STUB=1` when `ui/dist` has not been built (CI does this for its Rust jobs). Release builds refuse the placeholder.

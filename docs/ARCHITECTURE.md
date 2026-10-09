@@ -67,7 +67,7 @@ Design principles:
 
 ## Single binary and roles
 
-`tenko` is one statically linked binary that runs any combination of roles on a node (ADR 0004, OPS-01). The `tenko-server` crate orchestrates the roles inside the process and integrates with the Windows Service Control Manager or systemd.
+`tenko` is one statically linked binary that runs any combination of roles on a node (ADR 0004, OPS-01). The `tenko` crate orchestrates the roles inside the process and integrates with the Windows Service Control Manager or systemd.
 
 | Role | Responsibility |
 |---|---|

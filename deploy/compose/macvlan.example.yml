@@ -1,6 +1,6 @@
 # Example only: copy and adapt before use.
 #
-# Runs tenko-server with the dns and dhcp roles on a macvlan network, so the
+# Runs tenko with the dns and dhcp roles on a macvlan network, so the
 # container is a first-class host on the client segment and can receive DHCP
 # broadcasts.
 #
@@ -25,8 +25,8 @@ services:
     build:
       context: ../..
       dockerfile: deploy/Dockerfile
-    image: tenko-server:local
-    command: ["--roles", "dns,dhcp", "--config", "/etc/tenko/tenko.toml"]
+    image: tenko:local
+    command: ["--roles", "dns,dhcp", "--data-dir", "/var/lib/tenko", "--config", "/etc/tenko/tenko.toml"]
     restart: unless-stopped
     cap_add:
       - NET_BIND_SERVICE
