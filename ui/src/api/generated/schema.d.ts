@@ -2521,6 +2521,11 @@ export interface components {
             /** @description The chosen option. */
             value: string;
         };
+        /**
+         * @description Which soft-deleted objects a list returns (IPAM-09).
+         * @enum {string}
+         */
+        Deleted: "exclude" | "include" | "only";
         /** @description SHA-256 digest as 64 lowercase hexadecimal characters */
         Digest: string;
         /** @description DHCPv6 DUID as lowercase hexadecimal */
@@ -4717,6 +4722,11 @@ export interface components {
             /** @description Replaces the tags. */
             tags?: components["schemas"]["Tag"][] | null;
         };
+        /**
+         * @description Sort direction of lists that only sort by their natural key.
+         * @enum {string}
+         */
+        SortOrder: "asc" | "desc";
         /** @description When and by whom something happened. */
         Stamp: {
             /** @description The time (the proposer's request time). */
@@ -6622,7 +6632,7 @@ export interface operations {
                 /** @description Records before this time (RFC 3339). */
                 to?: components["schemas"]["Timestamp"];
                 /** @description `desc` (newest first, the default) or `asc`. */
-                order?: unknown;
+                order?: components["schemas"]["SortOrder"];
             };
             header?: never;
             path?: never;
@@ -10240,7 +10250,7 @@ export interface operations {
                  */
                 sort?: string;
                 /** @description `exclude` (default), `include` or `only` soft-deleted prefixes */
-                deleted?: unknown;
+                deleted?: components["schemas"]["Deleted"];
             };
             header?: never;
             path?: never;
@@ -11169,7 +11179,7 @@ export interface operations {
                  */
                 sort?: string;
                 /** @description `exclude` (default), `include` or `only` soft-deleted ranges */
-                deleted?: unknown;
+                deleted?: components["schemas"]["Deleted"];
             };
             header?: never;
             path: {
