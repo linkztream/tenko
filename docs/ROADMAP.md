@@ -94,6 +94,8 @@ Why the gate is expected to pass (details in ARCHITECTURE.md):
 
 Serve the SPA from the binary together with SSE, and measure cold start and bundle size.
 
+**Result (2026-10-09, Windows):** all targets met. Cold start 17 ms (target below 200 ms), idle working set 10.8 MiB (target below 30 MB), about 27,900 SSE clients per GiB (target at least 10,000). The embedding mechanism, caching rules and SSE pattern are decided in ADR 0008; results in `bench/spike-c-embed/results/2026-10-09-windows.md`. Linux and multi-host runs are pending.
+
 ### Done when
 
 - All three spikes have measurement data with reproducible scripts in `bench/`.

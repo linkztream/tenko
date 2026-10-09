@@ -428,7 +428,7 @@ The platform is API first (ADR 0003, API-01 to API-05):
 - Server-Sent Events carry live updates to the UI (API-05).
 - The UI uses only the public API (API-02). Phase 5 adds webhooks, a Terraform provider and an Ansible collection (API-06, API-07).
 
-The UI is a SolidJS and TypeScript SPA built with Vite and embedded in the binary through `include_dir`. **Spike C** (Phase 0) measures the embedded SPA together with SSE, in terms of cold start and bundle size.
+The UI is a SolidJS and TypeScript SPA built with Vite and embedded in the binary as a `build.rs`-generated `include_bytes!` table with pre-compressed variants (ADR 0008). **Spike C** (Phase 0) measured the embedded SPA together with SSE: 17 ms cold start, 10.8 MiB idle working set and about 37 KiB of private memory per SSE client; details in `bench/spike-c-embed/results/`.
 
 UI behavior for changes (API-08, API-09):
 
@@ -454,6 +454,7 @@ These choices are candidates, to be confirmed in the Phase 0 spikes. Final choic
 | LDAP | `ldap3` | AD reads for migration |
 | TLS, QUIC, HTTP | `rustls` with `aws-lc-rs`; `quinn` (DoQ); `hyper` and `h3` (DoH) | |
 | Web framework | `axum`, `utoipa`, `tower` | |
+| UI embedding and static serving | `build.rs` with `include_bytes!`, `brotli`, `flate2` | Decided in ADR 0008 after Spike C |
 | Authentication | `webauthn-rs`, `argon2`, a TOTP library | |
 | Scanning | `pnet`, `rasn-snmp` | |
 | Windows service | `windows-service` | |
@@ -497,7 +498,7 @@ DDI/
     ddi-api/                 # axum, OpenAPI, SSE
     ddi-cli/                 # `ddi` CLI, shares the client with the UI
     ddi-server/              # the binary, role orchestration, Windows SCM / systemd
-  ui/                        # SolidJS + TypeScript + Vite, embedded via include_dir
+  ui/                        # SolidJS + TypeScript + Vite, embedded via build.rs (ADR 0008)
   fuzz/                      # cargo-fuzz targets per parser
   bench/                     # Phase 0 spikes, dnsperf/perfdhcp scenarios
   deploy/                    # Dockerfile, compose with macvlan, LXC notes, systemd unit, MSI

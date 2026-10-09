@@ -1,6 +1,6 @@
 # ADR 0003: Embedded single-page UI
 
-- Status: Accepted
+- Status: Accepted (embedding mechanism refined by ADR 0008)
 - Date: 2026-10-09
 
 ## Context

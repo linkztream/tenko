@@ -55,8 +55,9 @@ The date is the date the ADR was written or last changed status.
 |---|---|---|---|
 | [0001](0001-implementation-language.md) | Implementation language | Accepted | 2026-10-09 |
 | [0002](0002-storage-and-replication.md) | Storage and replication | Proposed (pending Spike A) | 2026-10-09 |
-| [0003](0003-embedded-spa-ui.md) | Embedded single-page UI | Accepted | 2026-10-09 |
+| [0003](0003-embedded-spa-ui.md) | Embedded single-page UI | Accepted (mechanism refined by ADR 0008) | 2026-10-09 |
 | [0004](0004-single-binary-roles.md) | Single binary with roles | Accepted | 2026-10-09 |
 | [0005](0005-ipam-intent-hub.md) | IPAM as the intent hub | Accepted | 2026-10-09 |
 | [0006](0006-connector-architecture.md) | Connector architecture | Accepted | 2026-10-09 |
 | [0007](0007-delivery-order.md) | Delivery order | Accepted | 2026-10-09 |
+| [0008](0008-ui-embedding-and-sse.md) | UI embedding, static serving and SSE | Accepted | 2026-10-09 |
