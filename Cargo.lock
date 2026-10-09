@@ -2717,6 +2717,7 @@ name = "tenko"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap",
  "futures",
  "ipnet",
@@ -2725,6 +2726,7 @@ dependencies = [
  "sd-notify",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tenko-api",
  "tenko-auth",
