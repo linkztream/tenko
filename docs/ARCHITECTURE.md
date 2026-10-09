@@ -112,7 +112,7 @@ Expected behavior under failure:
 | Failure | Effect |
 |---|---|
 | One controller of three is lost | The cluster keeps its quorum. Configuration changes continue and `dns` and `dhcp` nodes are unaffected (OPS-03). |
-| Quorum is lost | Configuration changes are refused. `dns` and `dhcp` nodes keep answering and keep allocating and renewing leases from their local state (OPS-02). |
+| Quorum is lost | Configuration changes are refused. `dns` and `dhcp` nodes keep answering and keep allocating and renewing leases from their local state (OPS-02). The isolated controller shows the state, keeps serving reads from its local copy, and queues changes as proposals for re-planning when quorum returns (OPS-26); multi-site ownership for sites that must keep writing while cut off comes in Phase 5 (OPS-27). |
 | A DHCP failover partner is lost | The surviving partner continues under the failover protocol's partner-down state (DHCP-12). |
 | A probe is lost | No new observations arrive from its segment. Serving is unaffected. |
 

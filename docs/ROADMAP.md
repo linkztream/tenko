@@ -110,6 +110,7 @@ Replaces the existing IPAM spreadsheet.
 - **Connectors**: the plugin SDK and host runner first (ADR 0012: process plugins over gRPC, manifest, supervision, secret injection, conformance test), then the bundled reference plugins: UniFi (read topology and SSIDs, write VLANs, port profiles and per-client VLAN with guardrails), Proxmox inventory, Home Assistant inventory (CONN-01 to CONN-09).
 - **VLAN objects, topology map and move job** with preview and rollback (IPAM-03, IPAM-19, IPAM-20).
 - **Releases and upgrades**: a data-directory format version with migrations and `tenko upgrade check`, release builds with checksums per tag, a compatibility test against the previous release, and in-app update notices with release notes and single-node installation from the UI (OPS-23, OPS-24).
+- **Partition behaviour**: isolated controllers refuse writes visibly, serve reads with a staleness indicator, queue changes as proposals and catch up without merging (OPS-26).
 
 In Phase 1 the move job performs the IPAM intent change, the UniFi L2 move and the observation. The reservation and DNS steps are manual tasks until Tenko's own engines exist (Phase 2 to 3), at which point the same job becomes fully automatic.
 
@@ -210,6 +211,7 @@ Verification is by query replay (MIG-05): live queries are sampled from dnstap o
 
 ### Deliverables
 
+- **Multi-site ownership**: site-local Raft groups for the objects a site owns, so a cut-off site keeps changing its own prefixes, scopes and zones (OPS-27).
 - **Recursive resolver**: Tenko's own recursive resolver with DNSSEC validation, QNAME minimization, aggressive NSEC and RFC 5011 trust anchor maintenance (DNS-03, DNS-13, DNS-34). Until then, recursion is served by the forwarder, cache and RPZ combination from Phase 2.
 - **Identity**: OIDC and SAML, LDAP group mapping, SPNEGO and SCIM; PKCS#11 and KMS support for the KEK (IAM-11 to IAM-14, IAM-17).
 - **Scaling hooks**: anycast health hooks (BGP withdrawal) and autoscaling hooks for the Kubernetes, Nomad and Proxmox APIs (OPS-17, OPS-18).
