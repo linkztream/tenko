@@ -80,7 +80,7 @@ pub mod users;
         (name = "events", description = "Server-sent events"),
         (name = "system", description = "Health, status, the OpenAPI document and metrics"),
     ),
-    components(schemas(ProblemDetails)),
+    components(schemas(ProblemDetails, crate::dto::SortOrder, tenko_ipam::query::Deleted)),
     modifiers(&SecurityAddon)
 )]
 struct ApiDoc;
