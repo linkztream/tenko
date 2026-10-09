@@ -187,6 +187,7 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("DELETE", "/imports/{id}", "delete_import"),
     ("PUT", "/imports/{id}/mapping", "set_import_mapping"),
     ("GET", "/imports/{id}/preview", "preview_import"),
+    ("GET", "/imports/{id}/rows", "list_import_rows"),
     ("POST", "/imports/{id}/apply", "apply_import"),
     // export
     ("GET", "/exports/prefixes.csv", "export_prefixes_csv"),

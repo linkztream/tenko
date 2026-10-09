@@ -84,6 +84,10 @@ pub struct Session {
     /// The latest apply job.
     #[serde(default)]
     pub job: Option<JobId>,
+    /// Counts mapping changes; a stored preview and the cursors of its rows are valid for
+    /// one revision.
+    #[serde(default)]
+    pub mapping_revision: u64,
     /// What the latest apply froze.
     #[serde(default)]
     pub frozen: Option<Frozen>,
@@ -192,6 +196,54 @@ impl Stash {
         Ok(stored_as)
     }
 
+    /// Encrypts and writes a named part of an import (such as the rows of its latest
+    /// preview), replacing an earlier one atomically; returns its stored name. The name
+    /// must not contain `-`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an internal error when encryption or the write fails.
+    pub fn write_part(&self, id: ImportId, part: &str, bytes: &[u8]) -> IpamResult<String> {
+        let mut nonce = [0u8; NONCE_LEN];
+        aws_lc_rs::rand::fill(&mut nonce).map_err(|_| crypto_error("encrypted"))?;
+        let mut buffer = bytes.to_vec();
+        self.key
+            .seal_in_place_append_tag(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(Self::part_aad(id, part)),
+                &mut buffer,
+            )
+            .map_err(|_| crypto_error("encrypted"))?;
+        let stored_as = format!("import-{}-{part}.bin", id.0);
+        let temporary = self.dir.join(format!("{stored_as}.tmp"));
+        let mut file = fs::File::create(&temporary).map_err(|e| io_error("write a file", &e))?;
+        file.write_all(&nonce)
+            .and_then(|()| file.write_all(&buffer))
+            .and_then(|()| file.sync_all())
+            .map_err(|e| io_error("write a file", &e))?;
+        drop(file);
+        fs::rename(&temporary, self.dir.join(&stored_as))
+            .map_err(|e| io_error("replace a file", &e))?;
+        Ok(stored_as)
+    }
+
+    /// Reads and decrypts a named part written by [`write_part`](Self::write_part).
+    ///
+    /// # Errors
+    ///
+    /// Returns `import.upload.lost` (410) when the part is missing or was written under
+    /// another key.
+    pub fn read_part(&self, id: ImportId, part: &str, stored_as: &str) -> IpamResult<Vec<u8>> {
+        self.open(&Self::part_aad(id, part), stored_as)
+    }
+
+    fn part_aad(id: ImportId, part: &str) -> Vec<u8> {
+        let mut aad = id.0.as_bytes().to_vec();
+        aad.extend_from_slice(b"part:");
+        aad.extend_from_slice(part.as_bytes());
+        aad
+    }
+
     /// Reads and decrypts a staged file.
     ///
     /// # Errors
@@ -199,6 +251,11 @@ impl Stash {
     /// Returns `import.upload.lost` (410) when the file is missing or was written under
     /// another key (a restart).
     pub fn read(&self, id: ImportId, index: usize, stored_as: &str) -> IpamResult<Vec<u8>> {
+        self.open(&Self::aad(id, index), stored_as)
+    }
+
+    /// Reads and decrypts a stored file bound to `aad`.
+    fn open(&self, aad: &[u8], stored_as: &str) -> IpamResult<Vec<u8>> {
         let lost = || {
             IpamError::new(
                 codes::UPLOAD_LOST,
@@ -218,7 +275,7 @@ impl Stash {
             .key
             .open_in_place(
                 Nonce::assume_unique_for_key(nonce),
-                Aad::from(Self::aad(id, index)),
+                Aad::from(aad),
                 &mut buffer,
             )
             .map_err(|_| lost())?

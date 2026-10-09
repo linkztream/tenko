@@ -119,6 +119,9 @@ pub const STATE_CONFLICT: &str = "import.state.conflict";
 pub const CREDENTIALS_VAULT_REQUIRED: &str = "import.credentials.vault_required";
 /// The plan has warnings that need an acknowledgement, or errors.
 pub const PLAN_BLOCKED: &str = "import.plan.blocked";
+/// No preview was computed for the current mapping, or the mapping changed since the
+/// cursor was made (409): preview again.
+pub const PREVIEW_STALE: &str = "import.preview.stale";
 /// The import service is not configured on this server.
 pub const UNAVAILABLE: &str = "import.unavailable";
 /// A chunk of the apply job failed.

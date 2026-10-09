@@ -196,6 +196,40 @@ struct Evaluation {
     plan: Result<IpamPlan, IpamError>,
 }
 
+/// The staging part that holds the rows of the latest preview.
+const ROWS_PART: &str = "rows";
+
+/// Where the rows of the latest preview of an import are kept.
+#[derive(Debug, Clone)]
+struct StoredPreview {
+    /// The mapping revision the preview was computed for.
+    mapping_revision: u64,
+    /// The store revision it was computed from.
+    base_revision: u64,
+    /// Rows in it.
+    total_rows: usize,
+    /// The staged file holding them.
+    stored_as: String,
+}
+
+/// A page of the rows of a stored preview.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewRows {
+    /// The rows of the page.
+    pub items: Vec<PreviewRow>,
+    /// Rows in the whole preview.
+    pub total_rows: usize,
+    /// The store revision the preview was computed from.
+    pub base_revision: u64,
+    /// The mapping revision the preview was computed for (what a cursor carries).
+    pub mapping_revision: u64,
+    /// The position of the first row of the page.
+    pub offset: usize,
+}
+
+/// The decoded rows of the preview paged last: import, mapping revision and rows.
+type CachedRows = (ImportId, u64, Arc<Vec<PreviewRow>>);
+
 /// Parsed uploads kept in memory.
 const PARSED_CACHE: usize = 4;
 /// Prepared models of running jobs kept in memory.
@@ -210,6 +244,8 @@ pub struct ImportService {
     stash: Stash,
     parsed: Mutex<VecDeque<(ImportId, Arc<Vec<SourceFile>>)>>,
     prepared: Mutex<VecDeque<(ImportId, Digest, Arc<Prepared>)>>,
+    previews: Mutex<BTreeMap<ImportId, StoredPreview>>,
+    last_rows: Mutex<Option<CachedRows>>,
 }
 
 impl std::fmt::Debug for ImportService {
@@ -271,6 +307,8 @@ impl ImportService {
                 stash,
                 parsed: Mutex::new(VecDeque::new()),
                 prepared: Mutex::new(VecDeque::new()),
+                previews: Mutex::new(BTreeMap::new()),
+                last_rows: Mutex::new(None),
             }
         });
         Ok(service)
@@ -386,6 +424,13 @@ impl ImportService {
         }
         lock(&self.parsed).retain(|(id, _)| *id != session.id);
         lock(&self.prepared).retain(|(id, _, _)| *id != session.id);
+        if let Some(stored) = lock(&self.previews).remove(&session.id) {
+            self.stash.remove(&stored.stored_as);
+        }
+        let mut last = lock(&self.last_rows);
+        if last.as_ref().is_some_and(|(id, _, _)| *id == session.id) {
+            *last = None;
+        }
         Ok(())
     }
 
@@ -523,6 +568,7 @@ impl ImportService {
             files: staged,
             mapping: None,
             job: None,
+            mapping_revision: 0,
             frozen: None,
         };
         if let Err(error) = self
@@ -593,6 +639,7 @@ impl ImportService {
                 .titled("Mapping does not fit the upload")
         })?;
         session.mapping = Some(mapping);
+        session.mapping_revision += 1;
         self.write_session(cx, &session, Some(revision), "import.mapping", &[])
             .await?;
         lock(&self.prepared).retain(|(i, _, _)| *i != id);
@@ -769,9 +816,103 @@ impl ImportService {
             .evaluate(cx, &files, &mapping, &BTreeSet::new())
             .await?;
         let limit = rows.unwrap_or(self.config.preview_rows);
-        Ok(self
+        let (preview, all_rows) = self
             .build_preview(cx, id, &mapping, &evaluation, limit, gate)
-            .await)
+            .await;
+        self.store_rows(&session, preview.base_revision, all_rows)?;
+        Ok(preview)
+    }
+
+    /// Keeps every row of a preview in the staging area (encrypted like the upload), for
+    /// paging with [`preview_rows`](Self::preview_rows) without computing the preview again.
+    fn store_rows(
+        &self,
+        session: &Session,
+        base_revision: u64,
+        rows: Vec<PreviewRow>,
+    ) -> IpamResult<()> {
+        let bytes = tenko_core::codec::to_cbor(&rows)
+            .map_err(|e| IpamError::new("sys.internal", 500, e.to_string()))?;
+        let stored_as = self.stash.write_part(session.id, ROWS_PART, &bytes)?;
+        let stored = StoredPreview {
+            mapping_revision: session.mapping_revision,
+            base_revision,
+            total_rows: rows.len(),
+            stored_as,
+        };
+        lock(&self.previews).insert(session.id, stored);
+        *lock(&self.last_rows) = Some((session.id, session.mapping_revision, Arc::new(rows)));
+        Ok(())
+    }
+
+    /// A page of the rows of the stored preview (`GET /imports/{id}/rows`), from `offset`,
+    /// at most `limit` rows. `mapping_revision` is the revision a cursor was made for.
+    ///
+    /// # Errors
+    ///
+    /// `import.preview.stale` (409) when no preview was computed for the current mapping,
+    /// or the mapping changed since the cursor was made; and the errors of
+    /// [`get`](Self::get).
+    pub async fn preview_rows(
+        &self,
+        cx: &RequestCtx,
+        id: ImportId,
+        mapping_revision: Option<u64>,
+        offset: usize,
+        limit: usize,
+    ) -> IpamResult<PreviewRows> {
+        let (session, _) = self.session(cx, id).await?;
+        let stale = |detail: &str| {
+            IpamError::new(codes::PREVIEW_STALE, 409, detail.to_owned())
+                .titled("Preview out of date")
+                .param("mapping_revision", session.mapping_revision)
+        };
+        if mapping_revision.is_some_and(|revision| revision != session.mapping_revision) {
+            return Err(stale(
+                "the mapping changed since this page was listed; preview the import again",
+            ));
+        }
+        let stored = lock(&self.previews).get(&id).map(|stored| {
+            (
+                stored.mapping_revision,
+                stored.base_revision,
+                stored.total_rows,
+                stored.stored_as.clone(),
+            )
+        });
+        let Some((revision, base_revision, total_rows, stored_as)) = stored else {
+            return Err(stale(
+                "no preview was computed for the current mapping; preview the import first",
+            ));
+        };
+        if revision != session.mapping_revision {
+            return Err(stale(
+                "the mapping changed since the preview; preview the import again",
+            ));
+        }
+        let cached = lock(&self.last_rows)
+            .as_ref()
+            .filter(|(i, r, _)| *i == id && *r == revision)
+            .map(|(_, _, rows)| Arc::clone(rows));
+        let rows = if let Some(rows) = cached {
+            rows
+        } else {
+            let bytes = self.stash.read_part(id, ROWS_PART, &stored_as)?;
+            let rows = Arc::new(
+                tenko_core::codec::from_cbor::<Vec<PreviewRow>>(&bytes)
+                    .map_err(|e| IpamError::new("sys.internal", 500, e.to_string()))?,
+            );
+            *lock(&self.last_rows) = Some((id, revision, Arc::clone(&rows)));
+            rows
+        };
+        let items = rows.iter().skip(offset).take(limit).cloned().collect();
+        Ok(PreviewRows {
+            items,
+            total_rows,
+            base_revision,
+            mapping_revision: revision,
+            offset,
+        })
     }
 
     #[allow(clippy::too_many_lines)] // One pass from the evaluation to the answer.
@@ -783,7 +924,7 @@ impl ImportService {
         evaluation: &Evaluation,
         limit: usize,
         gate: &CredentialGate,
-    ) -> ImportPreview {
+    ) -> (ImportPreview, Vec<PreviewRow>) {
         let translation = &evaluation.translation;
         let reconciled = &evaluation.reconciled;
         let actions: BTreeMap<&ItemKey, ItemAction> = reconciled
@@ -845,10 +986,9 @@ impl ImportService {
                 translate::RowStatus::Skipped => row_counts.skipped += 1,
             }
         }
-        let rows = translation
+        let all_rows: Vec<PreviewRow> = translation
             .rows
             .iter()
-            .take(limit)
             .map(|row| PreviewRow {
                 location: row.location.clone(),
                 status: row.status,
@@ -913,7 +1053,8 @@ impl ImportService {
             self.config.max_chunk_commands,
         )
         .len();
-        ImportPreview {
+        let rows: Vec<PreviewRow> = all_rows.iter().take(limit).cloned().collect();
+        let preview = ImportPreview {
             id,
             base_revision: evaluation.view.revision().0,
             summary: PreviewSummary {
@@ -936,13 +1077,15 @@ impl ImportService {
                 unchanged,
                 statement,
                 allowed: block.is_none(),
-                reason: block.map(|(_, _, detail)| detail),
+                reason: block.as_ref().map(|(reason, _, _)| (*reason).to_owned()),
+                detail: block.map(|(_, _, detail)| detail),
             },
             warnings,
             plan_error,
             can_apply: blockers.is_empty(),
             blockers,
-        }
+        };
+        (preview, all_rows)
     }
 
     /// Refuses an apply that cannot go ahead: credential columns without the vault or

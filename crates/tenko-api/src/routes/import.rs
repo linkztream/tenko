@@ -90,7 +90,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use tenko_core::{Action, CodedError, ImportId, ObjectKind, ObjectRef};
 use tenko_ipam::import::{
     ApplyAccepted, ApplyRequest, ImportPreview, ImportService, ImportView, Mapping, Upload,
-    codes as import_codes, credential_gate,
+    codes as import_codes, credential_gate, dto::PreviewRow,
 };
 use utoipa::ToSchema;
 use utoipa_axum::{
@@ -103,7 +103,7 @@ use super::common::{IpamJson, IpamPath};
 use crate::{
     API_BASE,
     extract::Ctx,
-    list::Filters,
+    list::{CursorScope, Filters, MAX_LIMIT, decode_cursor, encode_cursor},
     problem::{ApiError, ProblemDetails, codes as api_codes},
     state::AppState,
 };
@@ -117,6 +117,32 @@ const APPLY_BODY_LIMIT: usize = 256 * 1024;
 
 /// The most rows `GET /imports/{id}/preview?rows=N` lists.
 const MAX_PREVIEW_ROWS: usize = 1_000;
+
+/// The page size of `GET /imports/{id}/rows` when `limit` is absent.
+const DEFAULT_ROWS_PAGE: usize = 200;
+
+/// A page of the rows of the latest preview of an import.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+pub struct ImportRowsPage {
+    /// The rows of the page, in source order.
+    pub items: Vec<PreviewRow>,
+    /// The cursor of the next page; `null` after the last row.
+    pub next_cursor: Option<String>,
+    /// Rows in the whole preview.
+    pub total_rows: u64,
+    /// The store revision the preview was computed from.
+    pub base_revision: u64,
+}
+
+/// The position a rows cursor carries: the mapping revision of the preview and the next
+/// row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+struct RowsCursor {
+    /// The mapping revision.
+    r: u64,
+    /// The position of the next row.
+    o: usize,
+}
 
 /// The multipart form of `POST /imports`.
 #[derive(ToSchema)]
@@ -134,6 +160,7 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(get_import, delete_import))
         .routes(routes!(set_import_mapping))
         .routes(routes!(preview_import))
+        .routes(routes!(list_import_rows))
         .routes(routes!(apply_import))
 }
 
@@ -341,6 +368,85 @@ async fn preview_import(
     app.authorize(&cx.principal, Action::Read, &ObjectRef::from(id))?;
     let gate = credential_gate(app.authorizer.as_deref(), &cx.principal);
     Ok(Json(imports.preview(&cx, id, rows, &gate).await?))
+}
+
+/// Lists the rows of the latest preview page by page, beyond the 1,000 rows a preview
+/// shows: the rows are kept with the upload when the preview is computed, so paging does not
+/// compute it again. A preview must exist for the current mapping; after the mapping
+/// changes, run the preview again (409 `import.preview.stale`, also for a cursor of the
+/// earlier mapping). `limit` is 1 to 1,000 (200 when absent); `cursor` is the
+/// `next_cursor` of the previous page.
+#[utoipa::path(
+    get,
+    path = "/imports/{id}/rows",
+    tag = "import",
+    operation_id = "list_import_rows",
+    summary = "List the rows of the latest preview of an import",
+    params(
+        ("id" = String, Path, description = "Import identifier"),
+        ("limit" = Option<u32>, Query, description = "Page size, 1 to 1,000 (default 200)"),
+        ("cursor" = Option<String>, Query, description = "Opaque cursor from the previous page's `next_cursor`")
+    ),
+    responses(
+        (status = 200, description = "A page of preview rows", body = ImportRowsPage),
+        (status = 400, description = "The identifier is not a UUID, a parameter is unknown or out of range, or the cursor is malformed (`sys.invalid_request`, `sys.invalid_query`, `sys.invalid_cursor`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Not allowed (`auth.forbidden`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such import (`import.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "No preview for the current mapping, or the mapping changed since the cursor was made (`import.preview.stale`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 410, description = "The upload expired or was lost in a restart (`import.expired`, `import.upload.lost`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Import not configured (`import.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+async fn list_import_rows(
+    State(app): State<AppState>,
+    Ctx(cx): Ctx,
+    Imports(imports): Imports,
+    IpamPath(id): IpamPath<ImportId>,
+    filters: Filters,
+) -> Result<Json<ImportRowsPage>, ApiError> {
+    reject_unknown_query(&filters, &["limit", "cursor"])?;
+    let limit = match filters.parse::<usize>("limit")? {
+        None => DEFAULT_ROWS_PAGE,
+        Some(0) => return Err(ApiError::invalid_query("limit", "must be at least 1")),
+        Some(limit) if limit > MAX_LIMIT => {
+            return Err(ApiError::invalid_query(
+                "limit",
+                format!("must be at most {MAX_LIMIT}"),
+            ));
+        }
+        Some(limit) => limit,
+    };
+    let scope = CursorScope::new("import.rows").with(&id.to_string());
+    let position: Option<RowsCursor> = filters
+        .get("cursor")?
+        .map(|cursor| decode_cursor(scope, cursor))
+        .transpose()?;
+    app.authorize(&cx.principal, Action::Read, &ObjectRef::from(id))?;
+    let page = imports
+        .preview_rows(
+            &cx,
+            id,
+            position.map(|p| p.r),
+            position.map_or(0, |p| p.o),
+            limit,
+        )
+        .await?;
+    let next = page.offset + page.items.len();
+    let next_cursor = (!page.items.is_empty() && next < page.total_rows).then(|| {
+        encode_cursor(
+            scope,
+            &RowsCursor {
+                r: page.mapping_revision,
+                o: next,
+            },
+        )
+    });
+    Ok(Json(ImportRowsPage {
+        items: page.items,
+        next_cursor,
+        total_rows: u64::try_from(page.total_rows).unwrap_or(u64::MAX),
+        base_revision: page.base_revision,
+    }))
 }
 
 /// Applies the import as a job of one step per chunk. The job rolls back what it wrote when
@@ -1873,6 +1979,12 @@ mod tests {
             .expect("statement");
         assert!(statement.contains("operator secret"), "{statement}");
         assert_eq!(preview["credentials"]["allowed"], false);
+        assert_eq!(preview["credentials"]["reason"], "vault_unavailable");
+        assert!(
+            preview["credentials"]["detail"]
+                .as_str()
+                .is_some_and(|detail| detail.contains("vault"))
+        );
         assert_eq!(preview["can_apply"], false);
         assert!(
             preview["blockers"]
@@ -1881,6 +1993,130 @@ mod tests {
                 .contains(&json!("import.credentials.vault_required"))
         );
         assert!(preview["rows"].as_array().expect("rows").len() > 2);
+    }
+
+    // ----- GET /imports/{id}/rows -------------------------------------------------------
+
+    /// The rows of all pages of `path`, following `next_cursor` to the end.
+    async fn all_rows(api: &Api, path: &str, limit: usize) -> (Vec<Value>, usize) {
+        let mut rows = Vec::new();
+        let mut pages = 0;
+        let mut url = format!("{path}?limit={limit}");
+        loop {
+            let page = api.get(&url).await.assert_json(200);
+            pages += 1;
+            let items = page["items"].as_array().expect("items");
+            assert!(items.len() <= limit);
+            rows.extend(items.iter().cloned());
+            match page["next_cursor"].as_str() {
+                Some(cursor) => url = format!("{path}?limit={limit}&cursor={cursor}"),
+                None => break,
+            }
+            assert!(pages < 1_000, "paging does not end");
+        }
+        (rows, pages)
+    }
+
+    #[tokio::test]
+    async fn rows_page_through_the_whole_preview_to_the_end() {
+        let api = Api::new();
+        let uploaded = api.upload_fixture("ip-plan.xlsx").await;
+        let id = uploaded["id"].as_str().expect("id");
+        let preview = api
+            .get(&format!("/imports/{id}/preview?rows=1000"))
+            .await
+            .assert_json(200);
+        let total = preview["total_rows"].as_u64().expect("total");
+        let path = format!("/imports/{id}/rows");
+        let (rows, pages) = all_rows(&api, &path, 100).await;
+        assert_eq!(rows.len() as u64, total);
+        assert_eq!(pages as u64, total.div_ceil(100));
+        assert_eq!(&rows, preview["rows"].as_array().expect("rows"));
+        let first = api.get(&path).await.assert_json(200);
+        assert_eq!(first["items"].as_array().expect("items").len(), 200);
+        assert_eq!(first["total_rows"], total);
+        assert_eq!(first["base_revision"], preview["base_revision"]);
+        let last = api
+            .get(&format!("{path}?limit=1000"))
+            .await
+            .assert_json(200);
+        assert_eq!(last["next_cursor"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn rows_need_a_preview_of_the_current_mapping() {
+        let api = Api::new();
+        let uploaded = api.upload_fixture("ip-plan.xlsx").await;
+        let id = uploaded["id"].as_str().expect("id");
+        let path = format!("/imports/{id}/rows");
+        api.get(&path)
+            .await
+            .assert_problem(409, "import.preview.stale");
+        api.get(&format!("/imports/{id}/preview"))
+            .await
+            .assert_json(200);
+        let page = api.get(&format!("{path}?limit=5")).await.assert_json(200);
+        let cursor = page["next_cursor"].as_str().expect("cursor").to_owned();
+
+        // A mapping change makes the stored preview and its cursors stale.
+        api.skip_credentials(&uploaded).await;
+        api.get(&format!("{path}?limit=5&cursor={cursor}"))
+            .await
+            .assert_problem(409, "import.preview.stale");
+        api.get(&path)
+            .await
+            .assert_problem(409, "import.preview.stale");
+        api.get(&format!("/imports/{id}/preview"))
+            .await
+            .assert_json(200);
+        api.get(&format!("{path}?limit=5&cursor={cursor}"))
+            .await
+            .assert_problem(409, "import.preview.stale");
+        let fresh = api.get(&format!("{path}?limit=5")).await.assert_json(200);
+        assert_eq!(fresh["items"].as_array().expect("items").len(), 5);
+    }
+
+    #[tokio::test]
+    async fn rows_check_their_parameters() {
+        let api = Api::new();
+        let uploaded = api.upload_fixture("ip-plan.xlsx").await;
+        let id = uploaded["id"].as_str().expect("id");
+        api.get(&format!("/imports/{id}/preview"))
+            .await
+            .assert_json(200);
+        let path = format!("/imports/{id}/rows");
+        api.get(&format!("{path}?limit=0"))
+            .await
+            .assert_problem(400, "sys.invalid_query");
+        api.get(&format!("{path}?limit=1001"))
+            .await
+            .assert_problem(400, "sys.invalid_query");
+        api.get(&format!("{path}?rows=5"))
+            .await
+            .assert_problem(400, "sys.invalid_query");
+        api.get(&format!("{path}?cursor=not-a-cursor"))
+            .await
+            .assert_problem(400, "sys.invalid_cursor");
+        let one = api.get(&format!("{path}?limit=1")).await.assert_json(200);
+        assert_eq!(one["items"].as_array().expect("items").len(), 1);
+        let most = api
+            .get(&format!("{path}?limit=1000"))
+            .await
+            .assert_json(200);
+        assert!(most["items"].as_array().expect("items").len() > 200);
+        // A cursor of another import is refused.
+        let other = api.upload_fixture("ip-plan.xlsx").await;
+        let other_id = other["id"].as_str().expect("id");
+        api.get(&format!("/imports/{other_id}/preview"))
+            .await
+            .assert_json(200);
+        let cursor = one["next_cursor"].as_str().expect("cursor");
+        api.get(&format!("/imports/{other_id}/rows?cursor={cursor}"))
+            .await
+            .assert_problem(400, "sys.invalid_cursor");
+        api.get(&format!("/imports/{}/rows", uuid::Uuid::now_v7()))
+            .await
+            .assert_problem(404, "import.not_found");
     }
 
     #[tokio::test]
