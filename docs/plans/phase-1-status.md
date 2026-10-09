@@ -42,7 +42,7 @@ The committed tree compiles and `Cargo.lock` matches the committed manifests sin
 
 ## Push state
 
-Every commit on `main` after `02a6d96` is local. The full locked verification of `a8b56cd` (check, fmt, clippy, 2,015 tests, deny, audit) was green on 2026-10-09 in the clean worktree. They are not pushed because CI runs `cargo … --locked` and the shared `Cargo.lock` carries the dependencies of the in-progress packages; pushing before their manifests are committed would turn CI red. Push happens now, with `docs/api/openapi.json` regenerated (`cargo run -p tenko -- openapi > docs/api/openapi.json`) and `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, `cargo deny check`, `cargo audit` and the attribution grep green.
+`main` was pushed to `origin` at `f4eac91` on the night of 2026-10-09 after the full locked verification (check, fmt, clippy, 2,046 Rust tests, deny, audit) and the embedded-UI build with 817 API and server tests in the clean worktree. Later pushes follow the same gate: the clean-worktree verification first, with `docs/api/openapi.json` regenerated (`cargo run -p tenko -- openapi > docs/api/openapi.json`) and `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, `cargo deny check`, `cargo audit` and the attribution grep green.
 
 ## Follow-ups recorded
 
