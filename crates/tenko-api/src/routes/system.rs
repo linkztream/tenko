@@ -69,15 +69,22 @@ const CA_ROOT_FILE: &str = "attachment; filename=\"tenko-ca-root.pem\"";
 pub struct CaRootSource {
     tls: TlsService,
     root_pem: Arc<str>,
+    /// SHA-256 of the root certificate, hex, as the server prints it at readiness.
+    fingerprint: Arc<str>,
 }
 
 impl CaRootSource {
     /// A source for the root `root_pem` (one PEM certificate) of the CA that issues the
-    /// certificate of `tls`.
-    pub fn new(tls: TlsService, root_pem: impl Into<Arc<str>>) -> Self {
+    /// certificate of `tls`, with the root's SHA-256 `fingerprint` in hex.
+    pub fn new(
+        tls: TlsService,
+        root_pem: impl Into<Arc<str>>,
+        fingerprint: impl Into<Arc<str>>,
+    ) -> Self {
         Self {
             tls,
             root_pem: root_pem.into(),
+            fingerprint: fingerprint.into(),
         }
     }
 
@@ -85,6 +92,12 @@ impl CaRootSource {
     /// modes.
     pub fn current(&self) -> Option<Arc<str>> {
         matches!(self.tls.status().mode, TlsMode::InternalCa).then(|| Arc::clone(&self.root_pem))
+    }
+
+    /// The SHA-256 fingerprint of the root (hex) while the listener is in TLS mode a,
+    /// `None` in the other modes.
+    pub fn fingerprint(&self) -> Option<Arc<str>> {
+        matches!(self.tls.status().mode, TlsMode::InternalCa).then(|| Arc::clone(&self.fingerprint))
     }
 }
 
@@ -389,6 +402,16 @@ mod tests {
         TlsService::new(mode, TlsPolicy::default()).expect("tls service")
     }
 
+    const FINGERPRINT: &str = "4f0c2b7e9a1d6c3b8e5f7a2d9c1b4e6f8a3d5c7e9b1f2a4c6e8d0b3f5a7c9e1";
+
+    #[test]
+    fn the_fingerprint_follows_the_tls_mode() {
+        let internal = CaRootSource::new(tls(TlsMode::InternalCa), ROOT, FINGERPRINT);
+        assert_eq!(internal.fingerprint().as_deref(), Some(FINGERPRINT));
+        let proxied = CaRootSource::new(tls(reverse_proxy()), ROOT, FINGERPRINT);
+        assert!(proxied.fingerprint().is_none());
+    }
+
     fn reverse_proxy() -> TlsMode {
         TlsMode::ReverseProxy {
             trusted_proxies: TrustedProxies::default(),
@@ -420,7 +443,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_root_is_served_in_internal_ca_mode() {
-        let source = CaRootSource::new(tls(TlsMode::InternalCa), ROOT);
+        let source = CaRootSource::new(tls(TlsMode::InternalCa), ROOT, FINGERPRINT);
         let (status, headers, body) = get(Some(source)).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body, ROOT);
@@ -431,7 +454,7 @@ mod tests {
 
     #[tokio::test]
     async fn other_modes_answer_no_internal_ca() {
-        let source = CaRootSource::new(tls(reverse_proxy()), ROOT);
+        let source = CaRootSource::new(tls(reverse_proxy()), ROOT, FINGERPRINT);
         let (status, headers, body) = get(Some(source)).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(headers[header::CONTENT_TYPE], "application/problem+json");
@@ -451,7 +474,7 @@ mod tests {
     #[test]
     fn the_source_follows_a_mode_switch() {
         let service = tls(TlsMode::InternalCa);
-        let source = CaRootSource::new(service.clone(), ROOT);
+        let source = CaRootSource::new(service.clone(), ROOT, FINGERPRINT);
         assert_eq!(source.current().as_deref(), Some(ROOT));
         service.set_mode(reverse_proxy()).expect("switch");
         assert_eq!(source.current(), None);

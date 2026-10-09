@@ -11,13 +11,18 @@
 //! | Endpoint | Success | Errors |
 //! |---|---|---|
 //! | `GET /setup` | 200 `SetupState`: `open`, and the profiles to choose from while open | 503 |
-//! | `POST /setup` | 200 `SessionInfo` with `Set-Cookie`: the first administrator is logged in | 400 `auth.setup.invalid_host_name`, `auth.invalid_request`, 401 `auth.setup.token_invalid`, 409 `auth.setup.closed`, 422 `auth.password.policy`, 429 `auth.throttled`, 503 |
+//! | `POST /setup` | 200 `SetupResponse` (the session plus `ca_fingerprint` in internal CA mode) with `Set-Cookie`: the first administrator is logged in | 400 `auth.setup.invalid_host_name`, `auth.invalid_request`, 401 `auth.setup.token_invalid`, 409 `auth.setup.closed`, 422 `auth.password.policy`, 429 `auth.throttled`, 503 |
 
-use axum::{Json, http::StatusCode, response::Response};
+use std::sync::Arc;
+
+use axum::{Extension, Json, http::StatusCode, response::Response};
+use serde::Serialize;
 use tenko_auth::service::{SessionInfo, SetupRequest, SetupState};
+use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use super::auth::{ApiJson, PublicCtx, RouteError, Svc, Unavailable, secret_json};
+use super::system::CaRootSource;
 use crate::{problem::ProblemDetails, state::AppState};
 
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
@@ -41,6 +46,19 @@ async fn get_setup(Svc(service): Svc) -> Result<Json<SetupState>, RouteError> {
     Ok(Json(service.setup_state().await?))
 }
 
+/// The answer of `POST /setup`: the administrator's new session, plus the SHA-256 fingerprint
+/// of the internal CA root when the installation runs the internal CA, so that the wizard can
+/// offer the root for installation and the fingerprint to compare it with.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SetupResponse {
+    /// The session, with the members of `SessionInfo`.
+    #[serde(flatten)]
+    pub session: SessionInfo,
+    /// SHA-256 fingerprint (hex) of the internal CA root; absent in the other TLS modes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ca_fingerprint: Option<String>,
+}
+
 /// Completes first-run setup: stores the settings of the chosen profile, creates the first
 /// administrator and the installation record, closes setup and logs the administrator in.
 #[utoipa::path(
@@ -51,7 +69,7 @@ async fn get_setup(Svc(service): Svc) -> Result<Json<SetupState>, RouteError> {
     summary = "Complete first-run setup and start a session",
     request_body = SetupRequest,
     responses(
-        (status = 200, description = "Setup is complete; the administrator is logged in", body = SessionInfo,
+        (status = 200, description = "Setup is complete; the administrator is logged in", body = SetupResponse,
             headers(("Set-Cookie" = String, description = "The session cookie `tenko_session`"))),
         (status = 400, description = "The body is malformed (`sys.invalid_request`), or the host name, user name or language is invalid (`auth.setup.invalid_host_name`, `auth.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "The setup token is wrong (`auth.setup.token_invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
@@ -64,12 +82,20 @@ async fn get_setup(Svc(service): Svc) -> Result<Json<SetupState>, RouteError> {
 async fn complete_setup(
     Svc(service): Svc,
     PublicCtx { ctx, user_agent }: PublicCtx,
+    ca_root: Option<Extension<Arc<CaRootSource>>>,
     ApiJson(request): ApiJson<SetupRequest>,
 ) -> Result<Response, RouteError> {
     let session = service
         .complete_setup(&ctx, user_agent.as_deref(), &request)
         .await?;
-    secret_json(StatusCode::OK, Some(&session.set_cookie), &session.info)
+    let ca_fingerprint = ca_root
+        .and_then(|Extension(source)| source.fingerprint())
+        .map(|fingerprint| fingerprint.to_string());
+    let answer = SetupResponse {
+        session: session.info.clone(),
+        ca_fingerprint,
+    };
+    secret_json(StatusCode::OK, Some(&session.set_cookie), &answer)
 }
 
 #[cfg(test)]

@@ -830,10 +830,11 @@ async fn start(resolved: &Resolved, running: &mut Running) -> Result<Services, S
             server.extensions.insert(Arc::clone(&auth));
             server.extensions.insert(Arc::clone(&ipam));
             server.extensions.insert(engine.clone());
-            if let Some((pem, _)) = &tls.ca_root {
+            if let Some((pem, fingerprint)) = &tls.ca_root {
                 server.extensions.insert(Arc::new(CaRootSource::new(
                     tls.service.clone(),
                     pem.as_str(),
+                    fingerprint.as_str(),
                 )));
             }
             imports.register(&mut server);
