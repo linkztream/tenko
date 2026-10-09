@@ -80,6 +80,8 @@ aws-lc-rs = { version = "1.18.1", features = ["prebuilt-nasm"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 # Unicode NFKC normalization of passwords before hashing (NIST SP 800-63B).
 unicode-normalization = "0.1"
+# Custom password preset (IAM-03): operator-supplied pattern.
+regex = { version = "1", default-features = false, features = ["std", "unicode-perl", "unicode-case"] }
 rustls = "0.23.45"
 zeroize = "1.9.1"
 
