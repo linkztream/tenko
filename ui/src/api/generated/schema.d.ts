@@ -505,6 +505,128 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/connectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List connector instances */
+        get: operations["list_connectors"];
+        put?: never;
+        /** Create a connector instance */
+        post: operations["create_connector"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connectors/plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List connector plugins */
+        get: operations["list_connector_plugins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connectors/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a connector instance */
+        get: operations["get_connector"];
+        put?: never;
+        post?: never;
+        /** Delete a connector instance */
+        delete: operations["delete_connector"];
+        options?: never;
+        head?: never;
+        /** Change a connector instance */
+        patch: operations["update_connector"];
+        trace?: never;
+    };
+    "/api/v1/connectors/{id}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check a connector instance now */
+        post: operations["check_connector"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connectors/{id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable a connector instance */
+        post: operations["disable_connector"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connectors/{id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable a connector instance */
+        post: operations["enable_connector"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connectors/{id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a connector instance now */
+        post: operations["run_connector"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/custom-fields": {
         parameters: {
             query?: never;
@@ -2363,6 +2485,11 @@ export interface components {
             /** @description Warnings of the plan. */
             warnings: components["schemas"]["PlanWarning"][];
         };
+        /**
+         * @description An interface a plugin implements.
+         * @enum {string}
+         */
+        Capability: "inventory" | "webhook" | "network_controller" | "actuator" | "migration";
         /** @description The certificate the listener serves. */
         CertificateStatus: {
             /**
@@ -2458,6 +2585,81 @@ export interface components {
          * @enum {string}
          */
         ConflictPolicy: "update" | "skip" | "fail";
+        /** @description The health of an instance: its process and its remote system. */
+        ConnectorHealth: {
+            /** @description The plugin process on this node. */
+            process: components["schemas"]["SupervisorStatus"];
+            remote?: components["schemas"]["HealthReport"] | null;
+            remote_error?: components["schemas"]["CodedError"] | null;
+        };
+        /** Format: uuid */
+        ConnectorId: string;
+        /** @description A configured connector instance: one plugin, its settings and its secret references. */
+        ConnectorInstance: {
+            /**
+             * Format: int32
+             * @description Timeout of one call in seconds; the manifest's default or 30 when absent.
+             */
+            call_timeout_secs?: number | null;
+            /** @description Creation. */
+            created: components["schemas"]["Stamp"];
+            /** @description Whether the plugin runs and its schedule is active. */
+            enabled: boolean;
+            /** @description Identifier. */
+            id: components["schemas"]["ConnectorId"];
+            /** @description The display name, unique (ignoring case). */
+            name: string;
+            /** @description The plugin name. */
+            plugin: string;
+            /**
+             * Format: int32
+             * @description Seconds between scheduled reads; the manifest's default or 300 when absent.
+             */
+            poll_interval_secs?: number | null;
+            /** @description Vault references by secret purpose; only purposes the manifest declares. */
+            secrets?: {
+                [key: string]: components["schemas"]["SecretRef"];
+            };
+            /** @description The settings, valid against the plugin's settings schema, with defaults filled in. */
+            settings: Record<string, never>;
+            /** @description Last change. */
+            updated: components["schemas"]["Stamp"];
+            /** @description Whether writes through this connector are allowed (TGL-20); off by default. */
+            writes_enabled?: boolean;
+        };
+        /** @description The body of a change request: absent members stay as they are. */
+        ConnectorPatch: {
+            /**
+             * Format: int32
+             * @description A new call timeout; `0` returns to the default.
+             */
+            call_timeout_secs?: number | null;
+            /** @description A new display name. */
+            name?: string | null;
+            /**
+             * Format: int32
+             * @description A new poll interval; `0` returns to the default.
+             */
+            poll_interval_secs?: number | null;
+            /** @description New secret references (the whole map). */
+            secrets?: {
+                [key: string]: components["schemas"]["SecretRef"];
+            } | null;
+            /** @description New settings (the whole object; validated against the schema). */
+            settings?: Record<string, never> | null;
+            /** @description Whether writes are allowed. */
+            writes_enabled?: boolean | null;
+        };
+        /** @description An instance as the API shows it. */
+        ConnectorView: components["schemas"]["ConnectorInstance"] & {
+            /** @description The plugin's capabilities, when the plugin is known. */
+            capabilities?: components["schemas"]["Capability"][];
+            /** @description Health of the process and the remote system. */
+            health: components["schemas"]["ConnectorHealth"];
+            last_run?: components["schemas"]["LastRun"] | null;
+            /** @description The store revision of the instance (for `If-Match` style preconditions). */
+            revision: components["schemas"]["Revision"];
+        };
         /**
          * @description Which context-specific word a password contained.
          * @enum {string}
@@ -2684,6 +2886,19 @@ export interface components {
             /** @description The chosen option. */
             value: string;
         };
+        /** @description Defaults a manifest suggests for new instances; the host enforces its own bounds. */
+        Defaults: {
+            /**
+             * Format: int32
+             * @description Timeout of one call in seconds (1 to 600; the host default is 30).
+             */
+            call_timeout_secs?: number | null;
+            /**
+             * Format: int32
+             * @description Seconds between inventory polls (60 to 86,400; the host default is 300).
+             */
+            poll_interval_secs?: number | null;
+        };
         /**
          * @description Which soft-deleted objects a list returns (IPAM-09).
          * @enum {string}
@@ -2693,6 +2908,23 @@ export interface components {
         Digest: string;
         /** @description DHCPv6 DUID as lowercase hexadecimal */
         Duid: string;
+        /**
+         * @description How to start an installed plugin: an executable, or a script with its interpreter.
+         *     Paths are relative to the plugin directory.
+         */
+        Entry: {
+            /** @description Arguments after the executable or script. */
+            args?: string[];
+            /** @description The executable, relative to the plugin directory. */
+            executable?: string | null;
+            /**
+             * @description The interpreter of a script, found on `PATH` (`python3`, `node`) or as an absolute
+             *     path.
+             */
+            interpreter?: string | null;
+            /** @description The script, relative to the plugin directory. */
+            script?: string | null;
+        };
         /**
          * @description The `data` of a topic event.
          *
@@ -2793,6 +3025,22 @@ export interface components {
             status: string;
             /** @description Version of the server. */
             version: string;
+        };
+        /** @description Result of [`Connector::check`]. */
+        HealthReport: {
+            /** @description When the check ran. */
+            checked_at: components["schemas"]["Timestamp"];
+            /** @description English detail for the operator. */
+            detail?: string | null;
+            /** @description Overall health. */
+            health: components["schemas"]["Health"];
+            /**
+             * Format: int64
+             * @description Round-trip time of the check in milliseconds.
+             */
+            latency_ms?: number | null;
+            /** @description Version the remote system reports. */
+            remote_version?: string | null;
         };
         /** @description Lowercase hexadecimal bytes */
         HexBytes: string;
@@ -3473,6 +3721,40 @@ export interface components {
             /** @description Translatable title. */
             title: components["schemas"]["MessageKey"];
         };
+        /** @description The last run of an instance. */
+        LastRun: {
+            /**
+             * Format: int32
+             * @description Failed runs in a row, this one included.
+             */
+            consecutive_failures?: number;
+            /** @description The cursor of the last successful inventory read, for an incremental next poll. */
+            cursor?: string | null;
+            error?: components["schemas"]["CodedError"] | null;
+            /** @description When it ended. */
+            finished_at: components["schemas"]["Timestamp"];
+            job?: components["schemas"]["JobId"] | null;
+            last_full_at?: components["schemas"]["Timestamp"] | null;
+            last_success_at?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: int32
+             * @description Observations handed on.
+             */
+            observations: number;
+            /** @description How it ended. */
+            outcome: components["schemas"]["RunOutcome"];
+            /**
+             * Format: int32
+             * @description Pages read.
+             */
+            pages: number;
+            /** @description When it started. */
+            started_at: components["schemas"]["Timestamp"];
+            /** @description What started it. */
+            trigger: components["schemas"]["RunTrigger"];
+            /** @description Values the host dropped or replaced (at most 20). */
+            warnings?: string[];
+        };
         /** @description A list without paging. */
         ListBody_CustomFieldDef: {
             /** @description Every item. */
@@ -3587,6 +3869,64 @@ export interface components {
         };
         /** @description MAC address, lowercase and colon-separated (00:00:5e:00:53:01) */
         MacAddr: string;
+        /** @description A plugin manifest. */
+        Manifest: {
+            /** @description The interfaces the plugin implements. */
+            capabilities: components["schemas"]["Capability"][];
+            /** @description Defaults the host applies to new instances. */
+            defaults?: components["schemas"]["Defaults"];
+            /** @description One or two English sentences for the operator. */
+            description: string;
+            entry?: components["schemas"]["Entry"] | null;
+            /** @description Where to read more. */
+            homepage?: string | null;
+            /** @description SPDX licence expression of the plugin. */
+            license?: string | null;
+            /**
+             * Format: int32
+             * @description The manifest format; `1`.
+             */
+            manifest_version: number;
+            /**
+             * @description The plugin name: lowercase ASCII letters, digits and `-`, starting with a letter, at
+             *     most 63 characters. Unique among the plugins of an installation.
+             */
+            name: string;
+            /**
+             * @description The network targets the plugin contacts, shown to the operator before an instance
+             *     is created.
+             */
+            network?: components["schemas"]["NetworkTarget"][];
+            /**
+             * @description The platforms the plugin runs on: `any` (scripts) or `<os>-<arch>` as Rust names
+             *     them, for example `linux-x86_64`, `linux-aarch64`, `windows-x86_64`.
+             */
+            platforms: string[];
+            /** @description The protocol major versions the plugin speaks. */
+            protocol: number[];
+            /** @description The secrets the plugin may receive. The host injects nothing else. */
+            secrets?: components["schemas"]["SecretDecl"][];
+            /**
+             * @description The JSON Schema of the settings of an instance (see the module documentation for
+             *     the supported subset). Absent means no settings.
+             */
+            settings?: Record<string, never>;
+            /**
+             * @description The plugin version (semantic versioning, `MAJOR.MINOR.PATCH` with an optional
+             *     pre-release and build suffix).
+             */
+            version: string;
+        };
+        /** @description One problem of a manifest or of instance settings. */
+        ManifestProblem: {
+            /** @description What is wrong, in English. */
+            message: string;
+            /**
+             * @description JSON pointer of the offending member, for example `/secrets/0/purpose`; empty for
+             *     the document as a whole.
+             */
+            path: string;
+        };
         /** @description A task for a person, with translatable text. */
         ManualTask: {
             /** @description Message arguments (host name, address, VLAN). */
@@ -3809,6 +4149,50 @@ export interface components {
          * @enum {string}
          */
         MoveTimeoutSource: "request" | "lease" | "default";
+        /**
+         * @description A network target a plugin contacts: the host named by a settings member, or a fixed
+         *     host.
+         */
+        NetworkTarget: {
+            /** @description What the target is, for the operator. */
+            description: string;
+            /** @description A fixed host name or IP address. */
+            host?: string | null;
+            /** @description The ports, when known. */
+            ports?: number[];
+            /**
+             * @description A JSON pointer to the settings member that holds the address (a URI, host name or
+             *     IP address), for example `/url`.
+             */
+            setting?: string | null;
+        };
+        /** @description The body of a create request. */
+        NewConnector: {
+            /**
+             * Format: int32
+             * @description Timeout of one call in seconds (1 to 600).
+             */
+            call_timeout_secs?: number | null;
+            /** @description Whether the instance starts enabled. */
+            enabled?: boolean;
+            /** @description The display name. */
+            name: string;
+            /** @description The plugin name. */
+            plugin: string;
+            /**
+             * Format: int32
+             * @description Seconds between scheduled reads (60 to 86,400).
+             */
+            poll_interval_secs?: number | null;
+            /** @description Vault references by secret purpose. */
+            secrets?: {
+                [key: string]: components["schemas"]["SecretRef"];
+            };
+            /** @description The settings; validated against the plugin's settings schema. */
+            settings?: Record<string, never>;
+            /** @description Whether writes are allowed (TGL-20). */
+            writes_enabled?: boolean;
+        };
         /** @description The body of `POST /prefixes/{id}/ranges`; the prefix comes from the path. */
         NewRange: {
             /** @description Custom field values. */
@@ -4010,6 +4394,30 @@ export interface components {
                 /** @description Position in the chain, gap-free from 1. */
                 seq: components["schemas"]["AuditSeq"];
             }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_ConnectorView: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["ConnectorInstance"] & {
+                /** @description The plugin's capabilities, when the plugin is known. */
+                capabilities?: components["schemas"]["Capability"][];
+                /** @description Health of the process and the remote system. */
+                health: components["schemas"]["ConnectorHealth"];
+                last_run?: components["schemas"]["LastRun"] | null;
+                /** @description The store revision of the instance (for `If-Match` style preconditions). */
+                revision: components["schemas"]["Revision"];
+            })[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
             /** @description Store revision the page was read at. */
@@ -4693,6 +5101,31 @@ export interface components {
             /** @description The object. */
             object: components["schemas"]["ObjectRef"];
         };
+        /** @description A plugin and whether it can run here. */
+        PluginInfo: {
+            manifest?: components["schemas"]["Manifest"] | null;
+            /** @description The plugin name (the directory name of an installed plugin). */
+            name: string;
+            /** @description What is wrong with it. */
+            problems?: components["schemas"]["ManifestProblem"][];
+            /** @description Where it comes from. */
+            source: components["schemas"]["PluginSource"];
+            /**
+             * @description Whether instances of it can run on this host: a valid manifest, this platform, a
+             *     common protocol version.
+             */
+            usable: boolean;
+        };
+        /** @description The plugins of this node. */
+        PluginList: {
+            /** @description Bundled plugins first, then installed ones by name. */
+            items: components["schemas"]["PluginInfo"][];
+        };
+        /**
+         * @description Where a plugin comes from.
+         * @enum {string}
+         */
+        PluginSource: "bundled" | "installed";
         /** @description One way a password breaks the policy. Each has a stable code under `auth.password.`. */
         PolicyViolation: {
             /** @enum {string} */
@@ -4909,6 +5342,54 @@ export interface components {
              * @example about:blank
              */
             type: string;
+        };
+        /** @description The state of a supervised plugin process. */
+        ProcessState: {
+            /** @enum {string} */
+            state: "stopped";
+        } | {
+            /**
+             * Format: int32
+             * @description The start attempt since the last healthy run, from 1.
+             */
+            attempt: number;
+            /** @enum {string} */
+            state: "starting";
+        } | {
+            /**
+             * Format: int32
+             * @description The process id.
+             */
+            pid?: number | null;
+            /**
+             * Format: int32
+             * @description The protocol version in use.
+             */
+            protocol: number;
+            /** @description Since when. */
+            since: components["schemas"]["Timestamp"];
+            /** @enum {string} */
+            state: "running";
+            /** @description The plugin version. */
+            version: string;
+        } | {
+            /**
+             * Format: int32
+             * @description The start attempt that follows.
+             */
+            attempt: number;
+            /** @enum {string} */
+            state: "backoff";
+            /** @description When the next start happens. */
+            until: components["schemas"]["Timestamp"];
+        } | {
+            /** @enum {string} */
+            state: "circuit_open";
+            /** @description When the trial start happens. */
+            until: components["schemas"]["Timestamp"];
+        } | {
+            /** @enum {string} */
+            state: "failed";
         };
         /**
          * @description A security profile (API-10).
@@ -5167,6 +5648,21 @@ export interface components {
             /** @description A human-readable name. */
             name: string;
         };
+        /** @description The answer to a run request: the job that runs the connector. */
+        RunAccepted: {
+            /** @description The job (`GET /jobs/{id}` shows its progress). */
+            job: components["schemas"]["JobId"];
+        };
+        /**
+         * @description How a run ended.
+         * @enum {string}
+         */
+        RunOutcome: "succeeded" | "failed";
+        /**
+         * @description What started a run.
+         * @enum {string}
+         */
+        RunTrigger: "schedule" | "manual";
         /** @description One search hit. */
         SearchHit: {
             /** @description The object itself. */
@@ -5181,6 +5677,28 @@ export interface components {
          * @enum {string}
          */
         SecondFactorMethod: "totp" | "recovery" | "webauthn";
+        /** @description A secret a plugin may receive. */
+        SecretDecl: {
+            /** @description What the secret is, for the operator. */
+            description: string;
+            /**
+             * @description The purpose: lowercase ASCII letters, digits and `_`, starting with a letter, at most
+             *     64 characters, for example `password` or `api_key`. Unique in the manifest.
+             */
+            purpose: string;
+            /** @description Whether an instance needs it. */
+            required?: boolean;
+        };
+        /** Format: uuid */
+        SecretId: string;
+        /**
+         * @description A reference to a vault secret, resolved at call time (ADR 0006). Connectors and other
+         *     consumers store references, never secret values.
+         */
+        SecretRef: {
+            /** @description The secret. */
+            secret: components["schemas"]["SecretId"];
+        };
         /** Format: password */
         SecretString: string;
         /** @description The authentication part of the security settings: the profile and TGL-01 to TGL-07. */
@@ -5686,6 +6204,22 @@ export interface components {
             /** @description The object kind. */
             kind: components["schemas"]["ObjectKind"];
         };
+        /** @description What the supervisor publishes. */
+        SupervisorStatus: components["schemas"]["ProcessState"] & {
+            /** @description When the status last changed. */
+            changed_at: components["schemas"]["Timestamp"];
+            /**
+             * Format: int32
+             * @description Failures since the last healthy run.
+             */
+            consecutive_failures: number;
+            last_error?: components["schemas"]["CodedError"] | null;
+            /**
+             * Format: int32
+             * @description How many times the plugin was started after its first start.
+             */
+            restarts: number;
+        };
         /**
          * @description Components that act as [`Principal::System`].
          * @enum {string}
@@ -5870,7 +6404,7 @@ export interface components {
          *     parameter subscribes to all of them.
          * @enum {string}
          */
-        Topic: "ipam" | "jobs" | "audit" | "import" | "system" | "admin";
+        Topic: "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "connectors";
         /**
          * @description The HMAC hash of a TOTP configuration (RFC 6238 section 1.2).
          * @enum {string}
@@ -8785,6 +9319,660 @@ export interface operations {
                 };
             };
             /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_connectors: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of connector instances by name; empty without permission to read connectors */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ConnectorView"];
+                };
+            };
+            /** @description A parameter is unknown or malformed (`sys.invalid_query`) or the cursor is bad (`sys.invalid_cursor`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_connector: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewConnector"];
+            };
+        };
+        responses: {
+            /** @description The new instance, with `ETag` */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorView"];
+                };
+            };
+            /** @description The body is not valid JSON (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to create connectors, or to reveal a referenced secret (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Another instance has the name (`connect.instance.name_taken`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unknown or unusable plugin (`connect.plugin.unknown`, `connect.plugin.unusable`), invalid settings (`connect.settings.invalid`, with field errors), secret references (`connect.secret.undeclared`, `connect.secret.missing`, `connect.secret.not_found`, `connect.secret.not_operator`) or values (`connect.instance.name`, `connect.instance.poll_interval`, `connect.instance.call_timeout`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_connector_plugins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The plugins; empty without permission to read connectors */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginList"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_connector: {
+        parameters: {
+            query?: {
+                /** @description Read at least at this store revision (read-your-writes) */
+                at_least?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Connector identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The instance, with `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorView"];
+                };
+            };
+            /** @description The identifier or a parameter is malformed (`sys.invalid_request`, `sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to read the instance */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such instance (`connect.instance.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_connector: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Connector identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to delete the instance */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such instance (`connect.instance.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The instance changed at the same time (`connect.instance.conflict`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_connector: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Apply only to this revision (the `ETag` of a read) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Connector identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectorPatch"];
+            };
+        };
+        responses: {
+            /** @description The changed instance, with `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorView"];
+                };
+            };
+            /** @description The identifier, `If-Match` or the body is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to change the instance, or to reveal a referenced secret (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such instance (`connect.instance.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The name is taken (`connect.instance.name_taken`) or the instance changed since `If-Match` (`connect.instance.conflict`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Invalid settings, secret references or values, as for create */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    check_connector: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Connector identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The health of the remote system */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthReport"];
+                };
+            };
+            /** @description The identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to run the instance */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such instance (`connect.instance.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The instance is disabled (`connect.instance.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The plugin is not running (`connect.plugin.unavailable`, `connect.plugin.unusable`) or the vault or audit log is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The plugin did not answer in time (`connect.timeout`) */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    disable_connector: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Connector identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The instance, with `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorView"];
+                };
+            };
+            /** @description The identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to change the instance */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such instance (`connect.instance.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The instance changed at the same time (`connect.instance.conflict`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    enable_connector: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Connector identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The instance, with `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorView"];
+                };
+            };
+            /** @description The identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to change the instance */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such instance (`connect.instance.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The instance changed at the same time (`connect.instance.conflict`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    run_connector: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Connector identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run was submitted as a job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunAccepted"];
+                };
+            };
+            /** @description The identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to run the instance */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such instance (`connect.instance.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The instance is disabled (`connect.instance.disabled`) or its plugin reads nothing (`connect.instance.nothing_to_run`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The job engine is not available (`connect.jobs_unavailable`) */
             503: {
                 headers: {
                     [name: string]: unknown;

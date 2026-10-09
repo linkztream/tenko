@@ -2765,6 +2765,816 @@
         ]
       }
     },
+    "/api/v1/connectors": {
+      "get": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "List connector instances",
+        "operationId": "list_connectors",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1,000 (default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page's `next_cursor`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least this store revision (read-your-writes after a write).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of connector instances by name; empty without permission to read connectors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ConnectorView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter is unknown or malformed (`sys.invalid_query`) or the cursor is bad (`sys.invalid_cursor`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Create a connector instance",
+        "operationId": "create_connector",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewConnector"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The new instance, with `ETag`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to create connectors, or to reveal a referenced secret (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another instance has the name (`connect.instance.name_taken`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown or unusable plugin (`connect.plugin.unknown`, `connect.plugin.unusable`), invalid settings (`connect.settings.invalid`, with field errors), secret references (`connect.secret.undeclared`, `connect.secret.missing`, `connect.secret.not_found`, `connect.secret.not_operator`) or values (`connect.instance.name`, `connect.instance.poll_interval`, `connect.instance.call_timeout`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/plugins": {
+      "get": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "List connector plugins",
+        "operationId": "list_connector_plugins",
+        "responses": {
+          "200": {
+            "description": "The plugins; empty without permission to read connectors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/{id}": {
+      "get": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Get a connector instance",
+        "operationId": "get_connector",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connector identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least at this store revision (read-your-writes)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The instance, with `ETag`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier or a parameter is malformed (`sys.invalid_request`, `sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to read the instance",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such instance (`connect.instance.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Delete a connector instance",
+        "operationId": "delete_connector",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connector identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "400": {
+            "description": "The identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to delete the instance",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such instance (`connect.instance.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The instance changed at the same time (`connect.instance.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Change a connector instance",
+        "operationId": "update_connector",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connector identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "Apply only to this revision (the `ETag` of a read)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectorPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The changed instance, with `ETag`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier, `If-Match` or the body is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to change the instance, or to reveal a referenced secret (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such instance (`connect.instance.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The name is taken (`connect.instance.name_taken`) or the instance changed since `If-Match` (`connect.instance.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid settings, secret references or values, as for create",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/{id}/check": {
+      "post": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Check a connector instance now",
+        "operationId": "check_connector",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connector identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The health of the remote system",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to run the instance",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such instance (`connect.instance.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The instance is disabled (`connect.instance.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The plugin is not running (`connect.plugin.unavailable`, `connect.plugin.unusable`) or the vault or audit log is not available",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The plugin did not answer in time (`connect.timeout`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/{id}/disable": {
+      "post": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Disable a connector instance",
+        "operationId": "disable_connector",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connector identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The instance, with `ETag`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to change the instance",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such instance (`connect.instance.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The instance changed at the same time (`connect.instance.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/{id}/enable": {
+      "post": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Enable a connector instance",
+        "operationId": "enable_connector",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connector identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The instance, with `ETag`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to change the instance",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such instance (`connect.instance.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The instance changed at the same time (`connect.instance.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/{id}/run": {
+      "post": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Run a connector instance now",
+        "operationId": "run_connector",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connector identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The run was submitted as a job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to run the instance",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such instance (`connect.instance.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The instance is disabled (`connect.instance.disabled`) or its plugin reads nothing (`connect.instance.nothing_to_run`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The job engine is not available (`connect.jobs_unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/custom-fields": {
       "get": {
         "tags": [
@@ -15537,6 +16347,17 @@
           }
         }
       },
+      "Capability": {
+        "type": "string",
+        "description": "An interface a plugin implements.",
+        "enum": [
+          "inventory",
+          "webhook",
+          "network_controller",
+          "actuator",
+          "migration"
+        ]
+      },
       "CertificateStatus": {
         "type": "object",
         "description": "The certificate the listener serves.",
@@ -15758,6 +16579,223 @@
           "skip",
           "fail"
         ]
+      },
+      "ConnectorHealth": {
+        "type": "object",
+        "description": "The health of an instance: its process and its remote system.",
+        "required": [
+          "process"
+        ],
+        "properties": {
+          "process": {
+            "$ref": "#/components/schemas/SupervisorStatus",
+            "description": "The plugin process on this node."
+          },
+          "remote": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HealthReport",
+                "description": "The last remote check."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "remote_error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CodedError",
+                "description": "Why the last remote check could not run."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ConnectorId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "ConnectorInstance": {
+        "type": "object",
+        "description": "A configured connector instance: one plugin, its settings and its secret references.",
+        "required": [
+          "id",
+          "plugin",
+          "name",
+          "enabled",
+          "settings",
+          "created",
+          "updated"
+        ],
+        "properties": {
+          "call_timeout_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Timeout of one call in seconds; the manifest's default or 30 when absent.",
+            "minimum": 0
+          },
+          "created": {
+            "$ref": "#/components/schemas/Stamp",
+            "description": "Creation."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the plugin runs and its schedule is active."
+          },
+          "id": {
+            "$ref": "#/components/schemas/ConnectorId",
+            "description": "Identifier."
+          },
+          "name": {
+            "type": "string",
+            "description": "The display name, unique (ignoring case)."
+          },
+          "plugin": {
+            "type": "string",
+            "description": "The plugin name."
+          },
+          "poll_interval_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Seconds between scheduled reads; the manifest's default or 300 when absent.",
+            "minimum": 0
+          },
+          "secrets": {
+            "type": "object",
+            "description": "Vault references by secret purpose; only purposes the manifest declares.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SecretRef"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "settings": {
+            "type": "object",
+            "description": "The settings, valid against the plugin's settings schema, with defaults filled in."
+          },
+          "updated": {
+            "$ref": "#/components/schemas/Stamp",
+            "description": "Last change."
+          },
+          "writes_enabled": {
+            "type": "boolean",
+            "description": "Whether writes through this connector are allowed (TGL-20); off by default."
+          }
+        }
+      },
+      "ConnectorPatch": {
+        "type": "object",
+        "description": "The body of a change request: absent members stay as they are.",
+        "properties": {
+          "call_timeout_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "A new call timeout; `0` returns to the default.",
+            "minimum": 0
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new display name."
+          },
+          "poll_interval_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "A new poll interval; `0` returns to the default.",
+            "minimum": 0
+          },
+          "secrets": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "New secret references (the whole map).",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SecretRef"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "settings": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "New settings (the whole object; validated against the schema)."
+          },
+          "writes_enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether writes are allowed."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ConnectorView": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ConnectorInstance",
+            "description": "The instance."
+          },
+          {
+            "type": "object",
+            "required": [
+              "revision",
+              "health"
+            ],
+            "properties": {
+              "capabilities": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Capability"
+                },
+                "description": "The plugin's capabilities, when the plugin is known."
+              },
+              "health": {
+                "$ref": "#/components/schemas/ConnectorHealth",
+                "description": "Health of the process and the remote system."
+              },
+              "last_run": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/LastRun",
+                    "description": "The last run."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "revision": {
+                "$ref": "#/components/schemas/Revision",
+                "description": "The store revision of the instance (for `If-Match` style preconditions)."
+              }
+            }
+          }
+        ],
+        "description": "An instance as the API shows it."
       },
       "ContextKind": {
         "type": "string",
@@ -16393,6 +17431,31 @@
         ],
         "description": "A custom field value."
       },
+      "Defaults": {
+        "type": "object",
+        "description": "Defaults a manifest suggests for new instances; the host enforces its own bounds.",
+        "properties": {
+          "call_timeout_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Timeout of one call in seconds (1 to 600; the host default is 30).",
+            "minimum": 0
+          },
+          "poll_interval_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Seconds between inventory polls (60 to 86,400; the host default is 300).",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "Deleted": {
         "type": "string",
         "description": "Which soft-deleted objects a list returns (IPAM-09).",
@@ -16409,6 +17472,41 @@
       "Duid": {
         "type": "string",
         "description": "DHCPv6 DUID as lowercase hexadecimal"
+      },
+      "Entry": {
+        "type": "object",
+        "description": "How to start an installed plugin: an executable, or a script with its interpreter.\nPaths are relative to the plugin directory.",
+        "properties": {
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Arguments after the executable or script."
+          },
+          "executable": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The executable, relative to the plugin directory."
+          },
+          "interpreter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The interpreter of a script, found on `PATH` (`python3`, `node`) or as an absolute\npath."
+          },
+          "script": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The script, relative to the plugin directory."
+          }
+        },
+        "additionalProperties": false
       },
       "EventData": {
         "type": "object",
@@ -16678,6 +17776,47 @@
           "version": {
             "type": "string",
             "description": "Version of the server."
+          }
+        }
+      },
+      "HealthReport": {
+        "type": "object",
+        "description": "Result of [`Connector::check`].",
+        "required": [
+          "health",
+          "checked_at"
+        ],
+        "properties": {
+          "checked_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the check ran."
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "English detail for the operator."
+          },
+          "health": {
+            "$ref": "#/components/schemas/Health",
+            "description": "Overall health."
+          },
+          "latency_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Round-trip time of the check in milliseconds.",
+            "minimum": 0
+          },
+          "remote_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Version the remote system reports."
           }
         }
       },
@@ -18958,6 +20097,112 @@
           }
         }
       },
+      "LastRun": {
+        "type": "object",
+        "description": "The last run of an instance.",
+        "required": [
+          "trigger",
+          "started_at",
+          "finished_at",
+          "outcome",
+          "observations",
+          "pages"
+        ],
+        "properties": {
+          "consecutive_failures": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Failed runs in a row, this one included.",
+            "minimum": 0
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The cursor of the last successful inventory read, for an incremental next poll."
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CodedError",
+                "description": "Why it failed."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finished_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it ended."
+          },
+          "job": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobId",
+                "description": "The job of a manual run."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_full_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the inventory was last read in full."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_success_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When a run last succeeded."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observations": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Observations handed on.",
+            "minimum": 0
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/RunOutcome",
+            "description": "How it ended."
+          },
+          "pages": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Pages read.",
+            "minimum": 0
+          },
+          "started_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it started."
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/RunTrigger",
+            "description": "What started it."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Values the host dropped or replaced (at most 20)."
+          }
+        }
+      },
       "ListBody_CustomFieldDef": {
         "type": "object",
         "description": "A list without paging.",
@@ -19247,6 +20492,128 @@
       "MacAddr": {
         "type": "string",
         "description": "MAC address, lowercase and colon-separated (00:00:5e:00:53:01)"
+      },
+      "Manifest": {
+        "type": "object",
+        "description": "A plugin manifest.",
+        "required": [
+          "manifest_version",
+          "name",
+          "version",
+          "description",
+          "protocol",
+          "capabilities",
+          "platforms"
+        ],
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Capability"
+            },
+            "description": "The interfaces the plugin implements."
+          },
+          "defaults": {
+            "$ref": "#/components/schemas/Defaults",
+            "description": "Defaults the host applies to new instances."
+          },
+          "description": {
+            "type": "string",
+            "description": "One or two English sentences for the operator."
+          },
+          "entry": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Entry",
+                "description": "How to start the plugin. Required for installed plugins; bundled plugins are started\nby the host as `tenko plugin run <name>`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "homepage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where to read more."
+          },
+          "license": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "SPDX licence expression of the plugin."
+          },
+          "manifest_version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The manifest format; `1`.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "The plugin name: lowercase ASCII letters, digits and `-`, starting with a letter, at\nmost 63 characters. Unique among the plugins of an installation."
+          },
+          "network": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkTarget"
+            },
+            "description": "The network targets the plugin contacts, shown to the operator before an instance\nis created."
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The platforms the plugin runs on: `any` (scripts) or `<os>-<arch>` as Rust names\nthem, for example `linux-x86_64`, `linux-aarch64`, `windows-x86_64`."
+          },
+          "protocol": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The protocol major versions the plugin speaks."
+          },
+          "secrets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SecretDecl"
+            },
+            "description": "The secrets the plugin may receive. The host injects nothing else."
+          },
+          "settings": {
+            "type": "object",
+            "description": "The JSON Schema of the settings of an instance (see the module documentation for\nthe supported subset). Absent means no settings."
+          },
+          "version": {
+            "type": "string",
+            "description": "The plugin version (semantic versioning, `MAJOR.MINOR.PATCH` with an optional\npre-release and build suffix)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ManifestProblem": {
+        "type": "object",
+        "description": "One problem of a manifest or of instance settings.",
+        "required": [
+          "path",
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "What is wrong, in English."
+          },
+          "path": {
+            "type": "string",
+            "description": "JSON pointer of the offending member, for example `/secrets/0/purpose`; empty for\nthe document as a whole."
+          }
+        }
       },
       "ManualTask": {
         "type": "object",
@@ -19816,6 +21183,102 @@
           "lease",
           "default"
         ]
+      },
+      "NetworkTarget": {
+        "type": "object",
+        "description": "A network target a plugin contacts: the host named by a settings member, or a fixed\nhost.",
+        "required": [
+          "description"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "What the target is, for the operator."
+          },
+          "host": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A fixed host name or IP address."
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The ports, when known."
+          },
+          "setting": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A JSON pointer to the settings member that holds the address (a URI, host name or\nIP address), for example `/url`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "NewConnector": {
+        "type": "object",
+        "description": "The body of a create request.",
+        "required": [
+          "plugin",
+          "name"
+        ],
+        "properties": {
+          "call_timeout_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Timeout of one call in seconds (1 to 600).",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the instance starts enabled."
+          },
+          "name": {
+            "type": "string",
+            "description": "The display name."
+          },
+          "plugin": {
+            "type": "string",
+            "description": "The plugin name."
+          },
+          "poll_interval_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Seconds between scheduled reads (60 to 86,400).",
+            "minimum": 0
+          },
+          "secrets": {
+            "type": "object",
+            "description": "Vault references by secret purpose.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SecretRef"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "settings": {
+            "type": "object",
+            "description": "The settings; validated against the plugin's settings schema."
+          },
+          "writes_enabled": {
+            "type": "boolean",
+            "description": "Whether writes are allowed (TGL-20)."
+          }
+        },
+        "additionalProperties": false
       },
       "NewRange": {
         "type": "object",
@@ -20436,6 +21899,75 @@
                   "description": "Position in the chain, gap-free from 1."
                 }
               }
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
+      "Page_ConnectorView": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ConnectorInstance",
+                  "description": "The instance."
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "revision",
+                    "health"
+                  ],
+                  "properties": {
+                    "capabilities": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Capability"
+                      },
+                      "description": "The plugin's capabilities, when the plugin is known."
+                    },
+                    "health": {
+                      "$ref": "#/components/schemas/ConnectorHealth",
+                      "description": "Health of the process and the remote system."
+                    },
+                    "last_run": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/LastRun",
+                          "description": "The last run."
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "revision": {
+                      "$ref": "#/components/schemas/Revision",
+                      "description": "The store revision of the instance (for `If-Match` style preconditions)."
+                    }
+                  }
+                }
+              ],
+              "description": "An instance as the API shows it."
             },
             "description": "The items of this page, at most `limit` of them."
           },
@@ -22224,6 +23756,71 @@
           }
         }
       },
+      "PluginInfo": {
+        "type": "object",
+        "description": "A plugin and whether it can run here.",
+        "required": [
+          "name",
+          "source",
+          "usable"
+        ],
+        "properties": {
+          "manifest": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Manifest",
+                "description": "The manifest, when it could be read."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "The plugin name (the directory name of an installed plugin)."
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManifestProblem"
+            },
+            "description": "What is wrong with it."
+          },
+          "source": {
+            "$ref": "#/components/schemas/PluginSource",
+            "description": "Where it comes from."
+          },
+          "usable": {
+            "type": "boolean",
+            "description": "Whether instances of it can run on this host: a valid manifest, this platform, a\ncommon protocol version."
+          }
+        }
+      },
+      "PluginList": {
+        "type": "object",
+        "description": "The plugins of this node.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginInfo"
+            },
+            "description": "Bundled plugins first, then installed ones by name."
+          }
+        }
+      },
+      "PluginSource": {
+        "type": "string",
+        "description": "Where a plugin comes from.",
+        "enum": [
+          "bundled",
+          "installed"
+        ]
+      },
       "PolicyViolation": {
         "oneOf": [
           {
@@ -23008,6 +24605,151 @@
           }
         }
       },
+      "ProcessState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Not running and not about to start (stopped by the host, or never started).",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "stopped"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Starting: spawn, handshake, connect.",
+            "required": [
+              "attempt",
+              "state"
+            ],
+            "properties": {
+              "attempt": {
+                "type": "integer",
+                "format": "int32",
+                "description": "The start attempt since the last healthy run, from 1.",
+                "minimum": 0
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "starting"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Running and answering.",
+            "required": [
+              "since",
+              "protocol",
+              "version",
+              "state"
+            ],
+            "properties": {
+              "pid": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "description": "The process id.",
+                "minimum": 0
+              },
+              "protocol": {
+                "type": "integer",
+                "format": "int32",
+                "description": "The protocol version in use.",
+                "minimum": 0
+              },
+              "since": {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "Since when."
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              },
+              "version": {
+                "type": "string",
+                "description": "The plugin version."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Waiting before the next start after a failure.",
+            "required": [
+              "until",
+              "attempt",
+              "state"
+            ],
+            "properties": {
+              "attempt": {
+                "type": "integer",
+                "format": "int32",
+                "description": "The start attempt that follows.",
+                "minimum": 0
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "backoff"
+                ]
+              },
+              "until": {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the next start happens."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Too many failures: no start before `until`, then one trial start.",
+            "required": [
+              "until",
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "circuit_open"
+                ]
+              },
+              "until": {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the trial start happens."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The plugin cannot start until something changes (a protocol mismatch, an invalid\nor different manifest); `last_error` says why.",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "The state of a supervised plugin process."
+      },
       "Profile": {
         "type": "string",
         "description": "A security profile (API-10).",
@@ -23634,6 +25376,35 @@
           }
         }
       },
+      "RunAccepted": {
+        "type": "object",
+        "description": "The answer to a run request: the job that runs the connector.",
+        "required": [
+          "job"
+        ],
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobId",
+            "description": "The job (`GET /jobs/{id}` shows its progress)."
+          }
+        }
+      },
+      "RunOutcome": {
+        "type": "string",
+        "description": "How a run ended.",
+        "enum": [
+          "succeeded",
+          "failed"
+        ]
+      },
+      "RunTrigger": {
+        "type": "string",
+        "description": "What started a run.",
+        "enum": [
+          "schedule",
+          "manual"
+        ]
+      },
       "SearchHit": {
         "type": "object",
         "description": "One search hit.",
@@ -23665,6 +25436,46 @@
           "recovery",
           "webauthn"
         ]
+      },
+      "SecretDecl": {
+        "type": "object",
+        "description": "A secret a plugin may receive.",
+        "required": [
+          "purpose",
+          "description"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "What the secret is, for the operator."
+          },
+          "purpose": {
+            "type": "string",
+            "description": "The purpose: lowercase ASCII letters, digits and `_`, starting with a letter, at most\n64 characters, for example `password` or `api_key`. Unique in the manifest."
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Whether an instance needs it."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SecretId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "SecretRef": {
+        "type": "object",
+        "description": "A reference to a vault secret, resolved at call time (ADR 0006). Connectors and other\nconsumers store references, never secret values.",
+        "required": [
+          "secret"
+        ],
+        "properties": {
+          "secret": {
+            "$ref": "#/components/schemas/SecretId",
+            "description": "The secret."
+          }
+        }
       },
       "SecretString": {
         "type": "string",
@@ -25151,6 +26962,52 @@
           }
         }
       },
+      "SupervisorStatus": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ProcessState",
+            "description": "The process state."
+          },
+          {
+            "type": "object",
+            "required": [
+              "restarts",
+              "consecutive_failures",
+              "changed_at"
+            ],
+            "properties": {
+              "changed_at": {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the status last changed."
+              },
+              "consecutive_failures": {
+                "type": "integer",
+                "format": "int32",
+                "description": "Failures since the last healthy run.",
+                "minimum": 0
+              },
+              "last_error": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/CodedError",
+                    "description": "The last failure."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "restarts": {
+                "type": "integer",
+                "format": "int32",
+                "description": "How many times the plugin was started after its first start.",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "What the supervisor publishes."
+      },
       "SystemComponent": {
         "type": "string",
         "description": "Components that act as [`Principal::System`].",
@@ -25651,7 +27508,8 @@
           "audit",
           "import",
           "system",
-          "admin"
+          "admin",
+          "connectors"
         ]
       },
       "TotpAlgorithm": {
@@ -28235,6 +30093,10 @@
     {
       "name": "system",
       "description": "Health, status, the OpenAPI document and metrics"
+    },
+    {
+      "name": "connectors",
+      "description": "Connector plugins and connector instances"
     }
   ]
 }
