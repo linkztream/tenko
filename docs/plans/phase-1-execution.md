@@ -575,3 +575,4 @@ Results go to `bench/phase1-*/results/` with scripts, machine and versions, as i
 | Q6 | Accepted as ADR 0011 (store write model) |
 | Q7 | The owner places the real spreadsheet outside the repository (`C:\Users\plm\Documents\tenko-samples\`); the lead reads its structure there and writes anonymized fixtures into `tenko-ipam/tests/fixtures/`. The original is never committed |
 | Binary | One binary `tenko` with `serve` and client subcommands (ADR 0004); WP1.0 creates the skeleton and removes `tenko-server` and `tenko-cli` |
+| Q8 | Upgrades and releases (asked on 2026-10-09): the owner approved the upgrade package (OPS-23) and asked for in-app updates with an "update available" notice and release notes (OPS-24). The lead proposed the profile defaults of TGL-23 (install from the UI in Home, Standard with step-up, and Lab; file upload only in Hardened) and the single-node scope for the first version; open for the owner to override |
