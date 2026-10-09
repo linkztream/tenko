@@ -508,6 +508,7 @@ Slice 3: platform hardening
 | WP3.6 Deployment | `deploy/**`, `tenko-server` platform modules | Windows service (OPS-10), systemd hardening (OPS-13), Docker macvlan (OPS-14), upgrades (OPS-08) | E10 | M |
 | WP3.7 Language packs | `ui/src/i18n/`, i18n route | Runtime XLIFF 2.0 packs (API-21) | Fallback to English | M |
 | WP3.8 Phase exit | `tenko-server/tests/**`, `bench/phase1-*` | E1 to E12 with results | ROADMAP "Done when" | M |
+| WP3.9 Partition behaviour | `tenko-store` quorum state, `tenko-api` isolated mode, `tenko-ipam` proposal queue, UI banner and staleness indicator | WP3.1 | OPS-26: isolated state surfaced by the store, writes refused with `cluster.no_quorum`, reads served with a staleness indicator, changes queued as proposals and re-planned on reconnection with conflicts shown, observations buffered on `dns`, `dhcp` and `probe` nodes and merged as per-source facts; ADR 0013 (partitions and multi-site ownership) | A three-controller cluster split 2 against 1: the minority refuses writes and serves reads, the data plane on its side keeps answering, a queued proposal on the minority applies after the split heals or is shown with its conflict, and no object differs between the nodes afterwards | M, R18 |
 
 ## 8. Phase 1 measurements
 
@@ -561,6 +562,7 @@ Results go to `bench/phase1-*/results/` with scripts, machine and versions, as i
 | R14 | API-03 "shares the client library" cannot be literal across Rust and TypeScript | Both derive from one OpenAPI document |
 | R16 | Plugin executables run with Tenko's identity on the host (ADR 0012) | Install from trusted sources only; manifest permissions enforced by the host; package signing and sandboxed Wasm with the hub (CONN-21) |
 | R17 | Self-update of a network service is a supply-chain path (OPS-24) | Pinned release source, checksums now and signatures with API-19, step-up authentication and audit for installs, installation from the UI off in Hardened, dry-run migration and automatic switch-back on failed health |
+| R18 | A cut-off site that must keep changing its own data cannot do so under one Raft group (OPS-26) | Make the isolated state visible and queue changes as proposals in Slice 3; site-local ownership groups in Phase 5 (OPS-27) for sites that need local writes |
 | R15 | KEK directory trust: a plain-file KEK generation stays readable when a sealed provider (DPAPI, systemd-creds) is active, so anyone who can write the KEK directory could drop in a higher-numbered plain generation and make it active | Directory permissions (0700, service account only) from Slice 1; in Slice 3 refuse plain generations once a sealed one exists unless explicitly allowed, and alarm on a provider downgrade |
 
 ### 9.3 Decisions taken on 2026-10-09
