@@ -138,6 +138,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "expand",
+            "in": "query",
+            "description": "`host`: each address bound to an interface also carries `interface_detail` (`id`, `name`, `mac`, `duid`) and `host` (`id`, `name`, `mode`, `lock`), read from the same view as the page. Both are absent for an unbound address, when the interface or host is deleted, and when the principal may not read interfaces and hosts. Does not change the cursor.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -146,7 +155,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page_Address"
+                  "$ref": "#/components/schemas/Page_AddressRow"
                 }
               }
             }
@@ -6523,6 +6532,151 @@
         }
       }
     },
+    "/api/v1/moves": {
+      "post": {
+        "tags": [
+          "moves"
+        ],
+        "summary": "Preview or start a move to another network",
+        "operationId": "create_move",
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "description": "Compute the preview without starting anything (API-09).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "For a dry run: read at least at this store revision.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Repeating a POST with the same key returns the first result (API-04).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The preview of a dry run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MovePreview"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The jobs of the move, one per moved address, in one job group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveSubmitted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`ipam.move.invalid_request`, `sys.invalid_request`, `sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "An object or the target does not exist (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A warning needs an acknowledgement (`ipam.plan.unacknowledged`), the target is full (`ipam.address.full`) or an object is deleted (`ipam.object_deleted`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "An object cannot move (`ipam.move.unmanaged`, `ipam.move.nothing_to_move`, `ipam.move.already_in_target`, `ipam.move.family_mismatch`, `ipam.move.unsupported_object`, `ipam.move.target_not_network`), or the idempotency key was used for another move (`ipam.idempotency_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "A host is locked (`ipam.host.locked`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM or the job engine is not configured (`ipam.unavailable`, `ipam.move.no_engine`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/openapi.json": {
       "get": {
         "tags": [
@@ -7428,7 +7582,7 @@
           "prefixes"
         ],
         "summary": "List the addresses of a prefix, optionally with the free ones",
-        "description": "Each item is `{ \"type\": \"address\", \"data\": <address> }` or\n`{ \"type\": \"free\", \"data\": { first, last, size } }`; `size` is a decimal string. The gaps\ncover the assignable addresses of a network (IPv4 without network and broadcast address)\nand are counted in the page size like addresses. The cursor stays valid across the\nboundary between an address and a gap.",
+        "description": "Each item is `{ \"type\": \"address\", \"data\": <address> }` or\n`{ \"type\": \"free\", \"data\": { first, last, size } }`; `size` is a decimal string. With\n`expand=host` the address data of a bound address also carries `interface_detail` and\n`host` (see `GET /addresses`). The gaps\ncover the assignable addresses of a network (IPv4 without network and broadcast address)\nand are counted in the page size like addresses. The cursor stays valid across the\nboundary between an address and a gap.",
         "operationId": "list_prefix_addresses",
         "parameters": [
           {
@@ -7478,6 +7632,15 @@
             "required": false,
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "name": "expand",
+            "in": "query",
+            "description": "`host`: each address bound to an interface also carries `interface_detail` (`id`, `name`, `mac`, `duid`) and `host` (`id`, `name`, `mode`, `lock`), read from the same view as the page. Both are absent for an unbound address, when the interface or host is deleted, and when the principal may not read interfaces and hosts. Does not change the cursor.",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -14333,6 +14496,42 @@
         },
         "additionalProperties": false
       },
+      "AddressRow": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Address",
+            "description": "The address."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "host": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/HostSummary",
+                    "description": "The host of that interface (`expand=host`)."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "interface_detail": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/InterfaceSummary",
+                    "description": "The interface the address is bound to (`expand=host`). The address's own\n`interface` member keeps the identifier."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "description": "An address in a list: the address object, and with `expand=host` the interface it is\nbound to and that interface's host, so an address grid needs no read per row. Both\nmembers are absent when the address is not bound, when its interface or host is\ndeleted, and without the expansion."
+      },
       "AlarmLevel": {
         "type": "string",
         "description": "Alarm level of a prefix.",
@@ -16665,6 +16864,34 @@
         },
         "additionalProperties": false
       },
+      "HostSummary": {
+        "type": "object",
+        "description": "What an address row shows of a host.",
+        "required": [
+          "id",
+          "name",
+          "mode",
+          "lock"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/HostId",
+            "description": "Identifier."
+          },
+          "lock": {
+            "type": "boolean",
+            "description": "Locked against automation."
+          },
+          "mode": {
+            "$ref": "#/components/schemas/AssignmentMode",
+            "description": "What IPAM may do with the host's addresses."
+          },
+          "name": {
+            "$ref": "#/components/schemas/HostName",
+            "description": "Name."
+          }
+        }
+      },
       "IdempotencyKey": {
         "type": "string",
         "description": "A client-chosen idempotency key (`Idempotency-Key` header, API-04): 1 to 255 visible\nASCII characters.\n\nThe store scopes keys per principal subject (see `Principal::subject`), so two users\ncannot collide on the same key."
@@ -17134,6 +17361,46 @@
           }
         },
         "additionalProperties": false
+      },
+      "InterfaceSummary": {
+        "type": "object",
+        "description": "What an address row shows of an interface.",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "duid": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Duid",
+                "description": "DUID."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/InterfaceId",
+            "description": "Identifier."
+          },
+          "mac": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MacAddr",
+                "description": "MAC address."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "Name, such as `eth0`."
+          }
+        }
       },
       "IpamCommand": {
         "oneOf": [
@@ -18962,6 +19229,438 @@
           "everyone"
         ]
       },
+      "MoveDns": {
+        "type": "object",
+        "description": "The DNS change of an item.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name."
+          },
+          "new": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What it will point to."
+          },
+          "old": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the name points to now."
+          }
+        }
+      },
+      "MoveItem": {
+        "type": "object",
+        "description": "One address that moves.",
+        "required": [
+          "object",
+          "requested",
+          "old_ip",
+          "new_ip",
+          "new_address",
+          "same_host_part",
+          "steps"
+        ],
+        "properties": {
+          "dns": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MoveDns",
+                "description": "The DNS change."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "host": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HostId",
+                "description": "The host of the address."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "host_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The host's name."
+          },
+          "interface": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/InterfaceId",
+                "description": "The interface of the address."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mac": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MacAddr",
+                "description": "The interface's MAC address."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mode": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AssignmentMode",
+                "description": "The host's assignment mode."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "new_address": {
+            "$ref": "#/components/schemas/AddressId",
+            "description": "The identifier the new address will have."
+          },
+          "new_ip": {
+            "type": "string",
+            "description": "The address after the move.",
+            "example": "198.51.100.10"
+          },
+          "object": {
+            "$ref": "#/components/schemas/ObjectRef",
+            "description": "The address that moves."
+          },
+          "old_ip": {
+            "type": "string",
+            "description": "The address now.",
+            "example": "192.0.2.10"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why not (`ipam.move.host_part_*`)."
+          },
+          "requested": {
+            "$ref": "#/components/schemas/ObjectRef",
+            "description": "What the request named (the address itself or its host)."
+          },
+          "same_host_part": {
+            "type": "boolean",
+            "description": "Whether the host part stays."
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MoveStepPreview"
+            },
+            "description": "The steps of the item's job, in order."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanWarning"
+            },
+            "description": "Warnings of this item."
+          }
+        }
+      },
+      "MoveJob": {
+        "type": "object",
+        "description": "The job of one item.",
+        "required": [
+          "object",
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "$ref": "#/components/schemas/JobId",
+            "description": "Its job."
+          },
+          "object": {
+            "$ref": "#/components/schemas/ObjectRef",
+            "description": "The address that moves."
+          }
+        }
+      },
+      "MovePreview": {
+        "type": "object",
+        "description": "The preview of a move (the dry run).",
+        "required": [
+          "target",
+          "timeout_secs",
+          "timeout_source",
+          "parallelism",
+          "base_revision",
+          "items"
+        ],
+        "properties": {
+          "base_revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The store revision the preview was computed at.",
+            "minimum": 0
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MoveItem"
+            },
+            "description": "One item per moved address."
+          },
+          "parallelism": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many jobs run at once.",
+            "minimum": 0
+          },
+          "target": {
+            "$ref": "#/components/schemas/MoveTarget",
+            "description": "The target."
+          },
+          "timeout_secs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The observation timeout in seconds.",
+            "minimum": 0
+          },
+          "timeout_source": {
+            "$ref": "#/components/schemas/MoveTimeoutSource",
+            "description": "How the timeout was chosen."
+          },
+          "unacknowledged": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Warning codes that need an acknowledgement before a submit."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanWarning"
+            },
+            "description": "Every warning of the move (also listed per item where it belongs)."
+          }
+        }
+      },
+      "MoveRequest": {
+        "type": "object",
+        "description": "A move request.",
+        "required": [
+          "objects",
+          "target"
+        ],
+        "properties": {
+          "acknowledge": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Warning codes the caller acknowledges."
+          },
+          "objects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectRef"
+            },
+            "description": "Hosts or addresses to move."
+          },
+          "parallelism": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "How many of the move's jobs run at once; the configured parallelism when absent.",
+            "minimum": 0
+          },
+          "target": {
+            "$ref": "#/components/schemas/PrefixId",
+            "description": "The target network prefix."
+          },
+          "timeout_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Observation timeout in seconds, 300 to 604,800; half the target's DHCP lease (else\n3,600) when absent.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "MoveStepPreview": {
+        "type": "object",
+        "description": "One step of an item, as previewed.",
+        "required": [
+          "kind",
+          "step_kind",
+          "automatic",
+          "text",
+          "params"
+        ],
+        "properties": {
+          "automatic": {
+            "type": "boolean",
+            "description": "Whether Tenko does it; otherwise a person ticks it off."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`ipam.intent`, `dhcp.manual`, `dns.manual`, `device.manual`, `l2.move`, `observe`\nor `cleanup`."
+          },
+          "params": {
+            "type": "object",
+            "description": "References and values for the text and for automation (prefix, VLAN, address,\nMAC).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "step_kind": {
+            "type": "string",
+            "description": "The engine's step kind (`ipam.move.intent`, ...)."
+          },
+          "text": {
+            "type": "string",
+            "description": "English description."
+          }
+        }
+      },
+      "MoveSubmitted": {
+        "type": "object",
+        "description": "The answer of a submitted move.",
+        "required": [
+          "group",
+          "jobs",
+          "items",
+          "timeout_secs",
+          "parallelism"
+        ],
+        "properties": {
+          "group": {
+            "type": "string",
+            "description": "The job group of the move."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MoveItem"
+            },
+            "description": "The items as computed at submit, to compare with the preview."
+          },
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MoveJob"
+            },
+            "description": "One job per item, in item order."
+          },
+          "parallelism": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many jobs run at once.",
+            "minimum": 0
+          },
+          "replayed": {
+            "type": "boolean",
+            "description": "Whether an earlier answer was returned for a repeated idempotency key."
+          },
+          "timeout_secs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The observation timeout in seconds.",
+            "minimum": 0
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanWarning"
+            },
+            "description": "Warnings of the move."
+          }
+        }
+      },
+      "MoveTarget": {
+        "type": "object",
+        "description": "The target of a move.",
+        "required": [
+          "prefix",
+          "cidr",
+          "vrf"
+        ],
+        "properties": {
+          "cidr": {
+            "type": "string",
+            "description": "Its network.",
+            "example": "198.51.100.0/24"
+          },
+          "lease_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The longest DHCP lease of its pools, in seconds.",
+            "minimum": 0
+          },
+          "prefix": {
+            "$ref": "#/components/schemas/PrefixId",
+            "description": "The prefix."
+          },
+          "vid": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The VLAN id.",
+            "minimum": 0
+          },
+          "vlan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VlanId",
+                "description": "Its VLAN."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vrf": {
+            "$ref": "#/components/schemas/VrfId",
+            "description": "Its VRF."
+          }
+        }
+      },
+      "MoveTimeoutSource": {
+        "type": "string",
+        "description": "How the observation timeout of a move was chosen.",
+        "enum": [
+          "request",
+          "lease",
+          "default"
+        ]
+      },
       "NewRange": {
         "type": "object",
         "description": "The body of `POST /prefixes/{id}/ranges`; the prefix comes from the path.",
@@ -19009,6 +19708,15 @@
             "type": "string",
             "description": "Last address, inclusive.",
             "example": "192.0.2.199"
+          },
+          "lease_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "DHCP lease time in seconds, 60 to 31,536,000 (`dhcp_pool` ranges only); half of it is\nthe default timeout of moves into the prefix.",
+            "minimum": 0
           },
           "role": {
             "$ref": "#/components/schemas/RangeRole",
@@ -19448,7 +20156,7 @@
         ],
         "description": "One acceptable observation.\n\nAdjacently tagged because variants carry IP addresses."
       },
-      "Page_Address": {
+      "Page_AddressRow": {
         "type": "object",
         "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
         "required": [
@@ -19459,65 +20167,40 @@
           "items": {
             "type": "array",
             "items": {
-              "type": "object",
-              "description": "An IP address object.",
-              "required": [
-                "id",
-                "vrf",
-                "ip",
-                "prefix",
-                "status",
-                "meta"
-              ],
-              "properties": {
-                "dns_name": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/Fqdn",
-                      "description": "Intended DNS name (A, AAAA and PTR from Phase 2)."
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Address",
+                  "description": "The address."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "host": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/HostSummary",
+                          "description": "The host of that interface (`expand=host`)."
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
-                    {
-                      "type": "null"
+                    "interface_detail": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/InterfaceSummary",
+                          "description": "The interface the address is bound to (`expand=host`). The address's own\n`interface` member keeps the identifier."
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
-                  ]
-                },
-                "id": {
-                  "$ref": "#/components/schemas/AddressId",
-                  "description": "Identifier."
-                },
-                "interface": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/InterfaceId",
-                      "description": "The interface the address is assigned to."
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "ip": {
-                  "type": "string",
-                  "description": "The address.",
-                  "example": "192.0.2.10"
-                },
-                "meta": {
-                  "$ref": "#/components/schemas/Meta",
-                  "description": "Metadata."
-                },
-                "prefix": {
-                  "$ref": "#/components/schemas/PrefixId",
-                  "description": "The most specific prefix containing the address."
-                },
-                "status": {
-                  "$ref": "#/components/schemas/Status",
-                  "description": "Lifecycle status."
-                },
-                "vrf": {
-                  "$ref": "#/components/schemas/VrfId",
-                  "description": "The VRF."
+                  }
                 }
-              }
+              ],
+              "description": "An address in a list: the address object, and with `expand=host` the interface it is\nbound to and that interface's host, so an address grid needs no read per row. Both\nmembers are absent when the address is not bound, when its interface or host is\ndeleted, and without the expansion."
             },
             "description": "The items of this page, at most `limit` of them."
           },
@@ -20238,15 +20921,15 @@
               "oneOf": [
                 {
                   "type": "object",
-                  "description": "An address object.",
+                  "description": "An address object, with its interface and host when the list expands them.",
                   "required": [
                     "data",
                     "type"
                   ],
                   "properties": {
                     "data": {
-                      "$ref": "#/components/schemas/Address",
-                      "description": "An address object."
+                      "$ref": "#/components/schemas/AddressRow",
+                      "description": "An address object, with its interface and host when the list expands them."
                     },
                     "type": {
                       "type": "string",
@@ -21616,15 +22299,15 @@
         "oneOf": [
           {
             "type": "object",
-            "description": "An address object.",
+            "description": "An address object, with its interface and host when the list expands them.",
             "required": [
               "data",
               "type"
             ],
             "properties": {
               "data": {
-                "$ref": "#/components/schemas/Address",
-                "description": "An address object."
+                "$ref": "#/components/schemas/AddressRow",
+                "description": "An address object, with its interface and host when the list expands them."
               },
               "type": {
                 "type": "string",
@@ -22367,6 +23050,15 @@
             "description": "Last address, inclusive.",
             "example": "192.0.2.199"
           },
+          "lease_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "DHCP lease time in seconds, 60 to 31,536,000 (`dhcp_pool` ranges only); half of it\nis the default timeout of moves into the prefix (IPAM-19).",
+            "minimum": 0
+          },
           "prefix": {
             "$ref": "#/components/schemas/PrefixId",
             "description": "The network prefix."
@@ -22434,6 +23126,15 @@
               "null"
             ],
             "description": "New last address."
+          },
+          "lease_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "New DHCP lease time in seconds (`dhcp_pool` ranges only); `null` clears it.",
+            "minimum": 0
           },
           "role": {
             "oneOf": [
@@ -27341,6 +28042,10 @@
     {
       "name": "jobs",
       "description": "Jobs and manual steps"
+    },
+    {
+      "name": "moves",
+      "description": "Moving hosts and addresses to another network"
     },
     {
       "name": "audit",

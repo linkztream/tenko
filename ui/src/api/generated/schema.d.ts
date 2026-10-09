@@ -1034,6 +1034,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/moves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview or start a move to another network */
+        post: operations["create_move"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/openapi.json": {
         parameters: {
             query?: never;
@@ -1167,7 +1184,9 @@ export interface paths {
         /**
          * List the addresses of a prefix, optionally with the free ones
          * @description Each item is `{ "type": "address", "data": <address> }` or
-         *     `{ "type": "free", "data": { first, last, size } }`; `size` is a decimal string. The gaps
+         *     `{ "type": "free", "data": { first, last, size } }`; `size` is a decimal string. With
+         *     `expand=host` the address data of a bound address also carries `interface_detail` and
+         *     `host` (see `GET /addresses`). The gaps
          *     cover the assignable addresses of a network (IPv4 without network and broadcast address)
          *     and are counted in the page size like addresses. The cursor stays valid across the
          *     boundary between an address and a gap.
@@ -2030,6 +2049,16 @@ export interface components {
             tags?: components["schemas"]["Tag"][] | null;
         };
         /**
+         * @description An address in a list: the address object, and with `expand=host` the interface it is
+         *     bound to and that interface's host, so an address grid needs no read per row. Both
+         *     members are absent when the address is not bound, when its interface or host is
+         *     deleted, and without the expansion.
+         */
+        AddressRow: components["schemas"]["Address"] & {
+            host?: components["schemas"]["HostSummary"] | null;
+            interface_detail?: components["schemas"]["InterfaceSummary"] | null;
+        };
+        /**
          * @description Alarm level of a prefix.
          * @enum {string}
          */
@@ -2828,6 +2857,17 @@ export interface components {
             /** @description Replaces the tags. */
             tags?: components["schemas"]["Tag"][] | null;
         };
+        /** @description What an address row shows of a host. */
+        HostSummary: {
+            /** @description Identifier. */
+            id: components["schemas"]["HostId"];
+            /** @description Locked against automation. */
+            lock: boolean;
+            /** @description What IPAM may do with the host's addresses. */
+            mode: components["schemas"]["AssignmentMode"];
+            /** @description Name. */
+            name: components["schemas"]["HostName"];
+        };
         /**
          * @description A client-chosen idempotency key (`Idempotency-Key` header, API-04): 1 to 255 visible
          *     ASCII characters.
@@ -2977,6 +3017,15 @@ export interface components {
             name?: string | null;
             /** @description Replaces the tags. */
             tags?: components["schemas"]["Tag"][] | null;
+        };
+        /** @description What an address row shows of an interface. */
+        InterfaceSummary: {
+            duid?: components["schemas"]["Duid"] | null;
+            /** @description Identifier. */
+            id: components["schemas"]["InterfaceId"];
+            mac?: components["schemas"]["MacAddr"] | null;
+            /** @description Name, such as `eth0`. */
+            name: string;
         };
         /**
          * @description One change, as part of a plan.
@@ -3551,6 +3600,176 @@ export interface components {
          * @enum {string}
          */
         MfaRequirement: "optional" | "administrators" | "everyone";
+        /** @description The DNS change of an item. */
+        MoveDns: {
+            /** @description The name. */
+            name: string;
+            /** @description What it will point to. */
+            new?: string | null;
+            /** @description What the name points to now. */
+            old?: string | null;
+        };
+        /** @description One address that moves. */
+        MoveItem: {
+            dns?: components["schemas"]["MoveDns"] | null;
+            host?: components["schemas"]["HostId"] | null;
+            /** @description The host's name. */
+            host_name?: string | null;
+            interface?: components["schemas"]["InterfaceId"] | null;
+            mac?: components["schemas"]["MacAddr"] | null;
+            mode?: components["schemas"]["AssignmentMode"] | null;
+            /** @description The identifier the new address will have. */
+            new_address: components["schemas"]["AddressId"];
+            /**
+             * @description The address after the move.
+             * @example 198.51.100.10
+             */
+            new_ip: string;
+            /** @description The address that moves. */
+            object: components["schemas"]["ObjectRef"];
+            /**
+             * @description The address now.
+             * @example 192.0.2.10
+             */
+            old_ip: string;
+            /** @description Why not (`ipam.move.host_part_*`). */
+            reason?: string | null;
+            /** @description What the request named (the address itself or its host). */
+            requested: components["schemas"]["ObjectRef"];
+            /** @description Whether the host part stays. */
+            same_host_part: boolean;
+            /** @description The steps of the item's job, in order. */
+            steps: components["schemas"]["MoveStepPreview"][];
+            /** @description Warnings of this item. */
+            warnings?: components["schemas"]["PlanWarning"][];
+        };
+        /** @description The job of one item. */
+        MoveJob: {
+            /** @description Its job. */
+            job_id: components["schemas"]["JobId"];
+            /** @description The address that moves. */
+            object: components["schemas"]["ObjectRef"];
+        };
+        /** @description The preview of a move (the dry run). */
+        MovePreview: {
+            /**
+             * Format: int64
+             * @description The store revision the preview was computed at.
+             */
+            base_revision: number;
+            /** @description One item per moved address. */
+            items: components["schemas"]["MoveItem"][];
+            /**
+             * Format: int32
+             * @description How many jobs run at once.
+             */
+            parallelism: number;
+            /** @description The target. */
+            target: components["schemas"]["MoveTarget"];
+            /**
+             * Format: int32
+             * @description The observation timeout in seconds.
+             */
+            timeout_secs: number;
+            /** @description How the timeout was chosen. */
+            timeout_source: components["schemas"]["MoveTimeoutSource"];
+            /** @description Warning codes that need an acknowledgement before a submit. */
+            unacknowledged?: string[];
+            /** @description Every warning of the move (also listed per item where it belongs). */
+            warnings?: components["schemas"]["PlanWarning"][];
+        };
+        /** @description A move request. */
+        MoveRequest: {
+            /** @description Warning codes the caller acknowledges. */
+            acknowledge?: string[];
+            /** @description Hosts or addresses to move. */
+            objects: components["schemas"]["ObjectRef"][];
+            /**
+             * Format: int32
+             * @description How many of the move's jobs run at once; the configured parallelism when absent.
+             */
+            parallelism?: number | null;
+            /** @description The target network prefix. */
+            target: components["schemas"]["PrefixId"];
+            /**
+             * Format: int32
+             * @description Observation timeout in seconds, 300 to 604,800; half the target's DHCP lease (else
+             *     3,600) when absent.
+             */
+            timeout_secs?: number | null;
+        };
+        /** @description One step of an item, as previewed. */
+        MoveStepPreview: {
+            /** @description Whether Tenko does it; otherwise a person ticks it off. */
+            automatic: boolean;
+            /**
+             * @description `ipam.intent`, `dhcp.manual`, `dns.manual`, `device.manual`, `l2.move`, `observe`
+             *     or `cleanup`.
+             */
+            kind: string;
+            /**
+             * @description References and values for the text and for automation (prefix, VLAN, address,
+             *     MAC).
+             */
+            params: {
+                [key: string]: string;
+            };
+            /** @description The engine's step kind (`ipam.move.intent`, ...). */
+            step_kind: string;
+            /** @description English description. */
+            text: string;
+        };
+        /** @description The answer of a submitted move. */
+        MoveSubmitted: {
+            /** @description The job group of the move. */
+            group: string;
+            /** @description The items as computed at submit, to compare with the preview. */
+            items: components["schemas"]["MoveItem"][];
+            /** @description One job per item, in item order. */
+            jobs: components["schemas"]["MoveJob"][];
+            /**
+             * Format: int32
+             * @description How many jobs run at once.
+             */
+            parallelism: number;
+            /** @description Whether an earlier answer was returned for a repeated idempotency key. */
+            replayed?: boolean;
+            /**
+             * Format: int32
+             * @description The observation timeout in seconds.
+             */
+            timeout_secs: number;
+            /** @description Warnings of the move. */
+            warnings?: components["schemas"]["PlanWarning"][];
+        };
+        /** @description The target of a move. */
+        MoveTarget: {
+            /**
+             * @description Its network.
+             * @example 198.51.100.0/24
+             */
+            cidr: string;
+            /**
+             * Format: int32
+             * @description The longest DHCP lease of its pools, in seconds.
+             */
+            lease_secs?: number | null;
+            /** @description The prefix. */
+            prefix: components["schemas"]["PrefixId"];
+            /**
+             * Format: int32
+             * @description The VLAN id.
+             */
+            vid?: number | null;
+            vlan?: components["schemas"]["VlanId"] | null;
+            /** @description Its VRF. */
+            vrf: components["schemas"]["VrfId"];
+        };
+        /**
+         * @description How the observation timeout of a move was chosen.
+         * @enum {string}
+         */
+        MoveTimeoutSource: "request" | "lease" | "default";
         /** @description The body of `POST /prefixes/{id}/ranges`; the prefix comes from the path. */
         NewRange: {
             /** @description Custom field values. */
@@ -3570,6 +3789,12 @@ export interface components {
              * @example 192.0.2.199
              */
             last: string;
+            /**
+             * Format: int32
+             * @description DHCP lease time in seconds, 60 to 31,536,000 (`dhcp_pool` ranges only); half of it is
+             *     the default timeout of moves into the prefix.
+             */
+            lease_secs?: number | null;
             /** @description What the range is for. */
             role: components["schemas"]["RangeRole"];
             status?: components["schemas"]["Status"] | null;
@@ -3708,27 +3933,12 @@ export interface components {
          *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
          *     bound to the query that produced it.
          */
-        Page_Address: {
+        Page_AddressRow: {
             /** @description The items of this page, at most `limit` of them. */
-            items: {
-                dns_name?: components["schemas"]["Fqdn"] | null;
-                /** @description Identifier. */
-                id: components["schemas"]["AddressId"];
-                interface?: components["schemas"]["InterfaceId"] | null;
-                /**
-                 * @description The address.
-                 * @example 192.0.2.10
-                 */
-                ip: string;
-                /** @description Metadata. */
-                meta: components["schemas"]["Meta"];
-                /** @description The most specific prefix containing the address. */
-                prefix: components["schemas"]["PrefixId"];
-                /** @description Lifecycle status. */
-                status: components["schemas"]["Status"];
-                /** @description The VRF. */
-                vrf: components["schemas"]["VrfId"];
-            }[];
+            items: (components["schemas"]["Address"] & {
+                host?: components["schemas"]["HostSummary"] | null;
+                interface_detail?: components["schemas"]["InterfaceSummary"] | null;
+            })[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
             /** @description Store revision the page was read at. */
@@ -4001,8 +4211,8 @@ export interface components {
         Page_PrefixAddressItem: {
             /** @description The items of this page, at most `limit` of them. */
             items: ({
-                /** @description An address object. */
-                data: components["schemas"]["Address"];
+                /** @description An address object, with its interface and host when the list expands them. */
+                data: components["schemas"]["AddressRow"];
                 /** @enum {string} */
                 type: "address";
             } | {
@@ -4506,8 +4716,8 @@ export interface components {
         };
         /** @description One row of a prefix's address list: an address object or a free gap. */
         PrefixAddressItem: {
-            /** @description An address object. */
-            data: components["schemas"]["Address"];
+            /** @description An address object, with its interface and host when the list expands them. */
+            data: components["schemas"]["AddressRow"];
             /** @enum {string} */
             type: "address";
         } | {
@@ -4751,6 +4961,12 @@ export interface components {
              * @example 192.0.2.199
              */
             last: string;
+            /**
+             * Format: int32
+             * @description DHCP lease time in seconds, 60 to 31,536,000 (`dhcp_pool` ranges only); half of it
+             *     is the default timeout of moves into the prefix (IPAM-19).
+             */
+            lease_secs?: number | null;
             /** @description The network prefix. */
             prefix: components["schemas"]["PrefixId"];
             /** @description What the range is for. */
@@ -4771,6 +4987,11 @@ export interface components {
             first?: string | null;
             /** @description New last address. */
             last?: string | null;
+            /**
+             * Format: int32
+             * @description New DHCP lease time in seconds (`dhcp_pool` ranges only); `null` clears it.
+             */
+            lease_secs?: number | null;
             role?: components["schemas"]["RangeRole"] | null;
             status?: components["schemas"]["Status"] | null;
             /** @description Replaces the tags. */
@@ -6531,6 +6752,8 @@ export interface operations {
                 sort?: string;
                 /** @description Deleted addresses: `exclude` (the default), `include` or `only` (the restore view). */
                 deleted?: string;
+                /** @description `host`: each address bound to an interface also carries `interface_detail` (`id`, `name`, `mac`, `duid`) and `host` (`id`, `name`, `mode`, `lock`), read from the same view as the page. Both are absent for an unbound address, when the interface or host is deleted, and when the principal may not read interfaces and hosts. Does not change the cursor. */
+                expand?: string;
             };
             header?: never;
             path?: never;
@@ -6544,7 +6767,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Page_Address"];
+                    "application/json": components["schemas"]["Page_AddressRow"];
                 };
             };
             /** @description Invalid parameter (`sys.invalid_query`, `sys.invalid_cursor`) */
@@ -11202,6 +11425,110 @@ export interface operations {
             };
         };
     };
+    create_move: {
+        parameters: {
+            query?: {
+                /** @description Compute the preview without starting anything (API-09). */
+                dry_run?: boolean;
+                /** @description For a dry run: read at least at this store revision. */
+                at_least?: number;
+            };
+            header?: {
+                /** @description Repeating a POST with the same key returns the first result (API-04). */
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MoveRequest"];
+            };
+        };
+        responses: {
+            /** @description The preview of a dry run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MovePreview"];
+                };
+            };
+            /** @description The jobs of the move, one per moved address, in one job group */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MoveSubmitted"];
+                };
+            };
+            /** @description Invalid request (`ipam.move.invalid_request`, `sys.invalid_request`, `sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An object or the target does not exist (`ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A warning needs an acknowledgement (`ipam.plan.unacknowledged`), the target is full (`ipam.address.full`) or an object is deleted (`ipam.object_deleted`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An object cannot move (`ipam.move.unmanaged`, `ipam.move.nothing_to_move`, `ipam.move.already_in_target`, `ipam.move.family_mismatch`, `ipam.move.unsupported_object`, `ipam.move.target_not_network`), or the idempotency key was used for another move (`ipam.idempotency_mismatch`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A host is locked (`ipam.host.locked`) */
+            423: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM or the job engine is not configured (`ipam.unavailable`, `ipam.move.no_engine`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     openapi_document: {
         parameters: {
             query?: never;
@@ -11816,6 +12143,8 @@ export interface operations {
                 at_least?: number;
                 /** @description Also return the free gaps between the addresses (default false) */
                 include_free?: boolean;
+                /** @description `host`: each address bound to an interface also carries `interface_detail` (`id`, `name`, `mac`, `duid`) and `host` (`id`, `name`, `mode`, `lock`), read from the same view as the page. Both are absent for an unbound address, when the interface or host is deleted, and when the principal may not read interfaces and hosts. Does not change the cursor. */
+                expand?: string;
             };
             header?: never;
             path: {
