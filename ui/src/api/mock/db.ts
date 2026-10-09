@@ -7,7 +7,6 @@ import type {
   AccountLock,
   AuthStrength,
   CredentialInfo,
-  JobState,
   NodeFacts,
   NodeRole,
   RoleName,
@@ -26,10 +25,8 @@ import {
   MOCK_USER_IDS,
   NODE_ROLES_ALL,
   OTHER_SESSIONS,
-  SEED_JOBS,
   SEED_TOKEN,
   SEED_USERS,
-  TICKER_JOBS,
   nodeFacts,
   type SeedCredential,
   type SeedUser,
@@ -187,19 +184,7 @@ export interface MockDb {
   ceremonies: Map<string, MockCeremony>;
   enrolments: Map<string, MockEnrolment>;
   throttle: Map<string, ThrottleEntry>;
-  jobs: MockJob[];
   journal: MockEvent[];
-}
-
-/** A job as the mock keeps it; routes turn it into the document's JobSummary. */
-export interface MockJob {
-  id: string;
-  kind: string;
-  state: JobState;
-  title: string;
-  /** 0 to 1. */
-  progress: number | null;
-  created_at: string;
 }
 
 /** The state. One object for the life of the module: `resetMockDb` replaces its members. */
@@ -406,38 +391,6 @@ export function settingsView(): SecuritySettingsView {
 }
 
 // ---------------------------------------------------------------------------------
-// Jobs
-
-let tickerCounter = 0;
-
-/**
- * One step of the job ticker: the running job advances, or finishes and the next one
- * starts. Records a `jobs` event and returns it.
- */
-export function advanceMockJobs(): MockEvent {
-  const now = Date.now();
-  let job = db.jobs.find((j) => j.state === "running");
-  if (!job) {
-    const seed = TICKER_JOBS[tickerCounter % TICKER_JOBS.length] ?? { kind: "import.apply", title: "Apply import" };
-    tickerCounter += 1;
-    job = { id: randomId(), kind: seed.kind, state: "running", title: seed.title, progress: 0.05, created_at: iso(now) };
-    db.jobs.unshift(job);
-  } else {
-    const progress = Math.round(((job.progress ?? 0) + 0.07) * 100) / 100;
-    if (progress >= 1) {
-      job.state = "succeeded";
-      job.progress = 1;
-    } else {
-      job.progress = progress;
-    }
-  }
-  // Keep the list short: the oldest finished jobs fall off.
-  const finished = db.jobs.filter((j) => j.state === "succeeded");
-  for (const old of finished.slice(5)) db.jobs.splice(db.jobs.indexOf(old), 1);
-  return recordEvent("jobs", { objects: [{ kind: "job", id: job.id }] });
-}
-
-// ---------------------------------------------------------------------------------
 // Creating the state
 
 function seedCredential(seed: SeedCredential, now: number): CredentialInfo {
@@ -523,14 +476,6 @@ function createDb(scenario: MockScenario): MockDb {
     ceremonies: new Map(),
     enrolments: new Map(),
     throttle: new Map(),
-    jobs: SEED_JOBS.map((j) => ({
-      id: j.id,
-      kind: j.kind,
-      state: j.state,
-      title: j.title,
-      progress: j.progress,
-      created_at: iso(now - j.created_minutes_ago * MINUTE),
-    })),
     journal: [],
   };
 

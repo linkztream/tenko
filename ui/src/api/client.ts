@@ -3,7 +3,8 @@
 // document does not compile. Conventions (docs/plans/phase-1-execution.md, section 4):
 //
 // - POST carries an `Idempotency-Key` (API-04). Pass the same `idempotencyKey` when
-//   retrying one logical operation; otherwise every call gets a fresh one.
+//   retrying one logical operation; otherwise every call gets a fresh one. `null` sends
+//   none: the server buffers keyed requests under a smaller size limit than an upload.
 // - PATCH and DELETE carry `If-Match: "<revision>"` when `ifMatch` is given; use the
 //   revision from the object you edit, or ANY_REVISION where no revision applies.
 // - Errors are thrown as ApiError with the problem's stable code (see problem.ts).
@@ -104,7 +105,8 @@ export type WriteOptions<P extends string, B> = CommonOptions &
   PathOption<P> & {
     body?: B | FormData | undefined;
     ifMatch?: Revision | undefined;
-    idempotencyKey?: string | undefined;
+    /** The key of one logical operation; null sends none (large uploads, see the import). */
+    idempotencyKey?: string | null | undefined;
   };
 
 type Optional<P extends string, T> = [PathParamNames<P>] extends [never] ? [options?: T] : [options: T];
@@ -172,7 +174,7 @@ export interface RawOptions extends CommonOptions {
   path?: Record<string, string | number> | undefined;
   body?: unknown;
   ifMatch?: Revision | undefined;
-  idempotencyKey?: string | undefined;
+  idempotencyKey?: string | null | undefined;
 }
 
 export async function rawRequest<T>(method: Method, template: string, options: RawOptions = {}): Promise<T> {
@@ -184,7 +186,9 @@ export async function rawRequest<T>(method: Method, template: string, options: R
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(options.body);
   }
-  if (method === "post") headers["Idempotency-Key"] = options.idempotencyKey ?? newIdempotencyKey();
+  if (method === "post" && options.idempotencyKey !== null) {
+    headers["Idempotency-Key"] = options.idempotencyKey ?? newIdempotencyKey();
+  }
   if ((method === "patch" || method === "delete" || method === "put") && options.ifMatch !== undefined) {
     headers["If-Match"] = options.ifMatch === ANY_REVISION ? ANY_REVISION : `"${options.ifMatch}"`;
   }

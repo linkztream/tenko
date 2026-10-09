@@ -1,0 +1,42 @@
+/* Cell renderers (cells.tsx). Token roles only. The base classes .mode, .flag, .tag, .meter,
+   .hostname and .seen live in app/styles/design.css; these rules add the status badge and the
+   variants the cells need. Selectors carry two classes where they must win over the base rule
+   whatever the order of the style sheets. */
+
+/* Lifecycle status (IPAM-05): the word is always shown; the outline is the second cue.
+   Every variant has a 1 px border so the badges line up in a column. */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  color: var(--ink);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+}
+.status-badge.active { color: var(--ink); }
+.status-badge.planned { border-style: dashed; border-color: var(--control-line); color: var(--ink-2); }
+.status-badge.reserved { border-style: solid; border-color: var(--control-line); color: var(--ink); }
+.status-badge.deprecated { color: var(--ink-3); text-decoration: line-through; }
+
+/* Alarm level flags (the base .flag is in design.css). */
+.flag.alarm-warning { color: var(--warn-ink); }
+.flag.alarm-critical { color: var(--danger-ink); }
+
+/* Tags: a row of chips, the overflow count, and the deleted marker. */
+.tags { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.tag.more { background: transparent; color: var(--ink-3); }
+.tag.deleted { border: 1px dashed var(--ink-3); background: transparent; color: var(--ink-3); }
+
+/* The hint that follows a mode word when it is spelled out. */
+.mode-hint { margin-left: var(--sp-4); }
+
+/* Utilization meter additions: the alert icon beside a warning or critical value, and a
+   narrower bar for tight places such as tree nodes. */
+.meter .alarm-icon { color: var(--warn-ink); }
+.meter.crit .alarm-icon { color: var(--danger-ink); }
+.meter.compact { gap: var(--sp-2); }
+.meter.compact .bar { width: 28px; }

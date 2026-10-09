@@ -4,7 +4,7 @@
 // 2001:db8::/32, MACs 00-00-5E-00-53-xx, names under example.test).
 //
 // Times are offsets from "now" (the moment the db is reset), so the data never looks stale.
-import type { JobState, NetworkFacts, NodeFacts, NodeRole, RoleName, SearchHit } from "../types";
+import type { NetworkFacts, NodeFacts, NodeRole, RoleName } from "../types";
 
 // ---------------------------------------------------------------------------------
 // Test values
@@ -299,97 +299,4 @@ export function nodeFacts(slowDisk: boolean): NodeFacts {
     networks: NODE_NETWORKS.map((n) => ({ ...n })),
     roles: [...NODE_ROLES_ALL],
   };
-}
-
-// ---------------------------------------------------------------------------------
-// Jobs and search
-
-export interface SeedJob {
-  id: string;
-  kind: string;
-  state: JobState;
-  title: string;
-  progress: number | null;
-  created_minutes_ago: number;
-}
-
-export const SEED_JOBS: readonly SeedJob[] = [
-  {
-    id: "0190d1c2-0000-7000-8000-00000000c001",
-    kind: "import.apply",
-    state: "running",
-    title: "Apply import hosts-2026-10.csv",
-    progress: 0.6,
-    created_minutes_ago: 7,
-  },
-  {
-    id: "0190d1c2-0000-7000-8000-00000000c002",
-    kind: "dns.zone_publish",
-    state: "waiting",
-    title: "Publish zone example.test",
-    progress: null,
-    created_minutes_ago: 3,
-  },
-  {
-    id: "0190d1c2-0000-7000-8000-00000000c003",
-    kind: "ipam.bulk_update",
-    state: "succeeded",
-    title: "Renumber 203.0.113.128/26",
-    progress: 1,
-    created_minutes_ago: 95,
-  },
-];
-
-/** Kinds and titles for the jobs the dev-mode ticker adds. */
-export const TICKER_JOBS: readonly { kind: string; title: string }[] = [
-  { kind: "import.apply", title: "Apply import cameras.csv" },
-  { kind: "dhcp.scope_sync", title: "Sync scope 192.0.2.0/24" },
-  { kind: "dns.zone_publish", title: "Publish zone lab.example.test" },
-  { kind: "ipam.bulk_update", title: "Retag 198.51.100.0/24" },
-];
-
-/** The searchable objects: kind, identifier and the label the server would show. */
-export interface SearchSeed {
-  kind: "address" | "prefix" | "host" | "interface";
-  id: string;
-  /** The address, prefix, host name or MAC. */
-  key: string;
-  label: string;
-}
-
-export const SEARCH_SEEDS: readonly SearchSeed[] = [
-  { kind: "prefix", id: "0190d1c2-0000-7000-8000-00000000d001", key: "192.0.2.0/24", label: "LAN, VLAN 10" },
-  { kind: "address", id: "0190d1c2-0000-7000-8000-00000000d002", key: "192.0.2.1", label: "gw.example.test" },
-  { kind: "address", id: "0190d1c2-0000-7000-8000-00000000d003", key: "192.0.2.11", label: "nas.example.test" },
-  { kind: "address", id: "0190d1c2-0000-7000-8000-00000000d004", key: "192.0.2.13", label: "tenko1.example.test" },
-  { kind: "address", id: "0190d1c2-0000-7000-8000-00000000d005", key: "192.0.2.20", label: "desk-01.example.test" },
-  { kind: "prefix", id: "0190d1c2-0000-7000-8000-00000000d006", key: "198.51.100.0/24", label: "IoT, VLAN 30" },
-  { kind: "prefix", id: "0190d1c2-0000-7000-8000-00000000d007", key: "203.0.113.0/25", label: "Lab, VLAN 20" },
-  { kind: "prefix", id: "0190d1c2-0000-7000-8000-00000000d008", key: "203.0.113.128/26", label: "DMZ, VLAN 40" },
-  { kind: "address", id: "0190d1c2-0000-7000-8000-00000000d009", key: "2001:db8::1", label: "router.example.test" },
-  { kind: "prefix", id: "0190d1c2-0000-7000-8000-00000000d00a", key: "2001:db8:10::/48", label: "IPv6 site prefix" },
-  { kind: "interface", id: "0190d1c2-0000-7000-8000-00000000d00b", key: "00:00:5e:00:53:2b", label: "cam-door.example.test eth0" },
-  { kind: "interface", id: "0190d1c2-0000-7000-8000-00000000d00c", key: "00:00:5e:00:53:10", label: "nas.example.test eth0" },
-  { kind: "host", id: "0190d1c2-0000-7000-8000-00000000d00d", key: "nas.example.test", label: "192.0.2.11" },
-  { kind: "host", id: "0190d1c2-0000-7000-8000-00000000d00e", key: "desk-01.example.test", label: "192.0.2.20" },
-  { kind: "host", id: "0190d1c2-0000-7000-8000-00000000d00f", key: "cam-door.example.test", label: "198.51.100.23" },
-];
-
-const NIL = "00000000-0000-0000-0000-000000000000";
-
-/** A SearchHit of the document's shape for a seed, with plausible object data. */
-export function searchHit(seed: SearchSeed): SearchHit {
-  const stamp = { at: "2026-10-01T08:00:00Z", by: { kind: "system", component: "import" } };
-  const meta = { created: stamp, updated: stamp, revision: 100 };
-  const object = { kind: seed.kind, id: seed.id };
-  switch (seed.kind) {
-    case "address":
-      return { label: seed.label, object, item: { kind: "address", data: { id: seed.id, ip: seed.key, meta, prefix: NIL, status: "active", vrf: NIL, dns_name: seed.label } } } as SearchHit;
-    case "prefix":
-      return { label: seed.label, object, item: { kind: "prefix", data: { id: seed.id, cidr: seed.key, meta, role: "network", status: "active", vrf: NIL } } } as SearchHit;
-    case "host":
-      return { label: seed.label, object, item: { kind: "host", data: { id: seed.id, name: seed.key, meta, mode: "reserved", tenant: NIL } } } as SearchHit;
-    case "interface":
-      return { label: seed.label, object, item: { kind: "interface", data: { id: seed.id, host: NIL, mac: seed.key, meta, name: "eth0" } } } as SearchHit;
-  }
 }

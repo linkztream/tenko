@@ -1,9 +1,10 @@
 // The 16-unit stroke icon set of the design (design/mockups/shell.js), as one inline
 // sprite. Paths are drawn in currentColor; stroke width and caps come from `svg.i` in
-// design.css. Icons added for the product: trash, download, print, globe.
+// design.css. Icons added for the product: trash, download, print, globe, audit.
 
 export const ICON_PATHS = {
   "alert": "<path d=\"M8 2.25 14.25 13H1.75L8 2.25Z\"/><path d=\"M8 6.5v3M8 11.25v.01\"/>",
+  "audit": "<rect x=\"3.25\" y=\"2.75\" width=\"9.5\" height=\"11\" rx=\"1.25\"/><path d=\"M6 2.75V1.75h4v1M5.75 6.25h4.5M5.75 8.75h4.5M5.75 11.25h2.5\"/>",
   "arrow-r": "<path d=\"M2.75 8h10.5M9.25 4l4 4-4 4\"/>",
   "bolt": "<path d=\"M9 1.75 3.5 9h4l-1 5.25L12.5 7h-4l.5-5.25Z\"/>",
   "cable": "<rect x=\"2.75\" y=\"3.25\" width=\"10.5\" height=\"7\" rx=\"1\"/><path d=\"M5.75 10.25v3h4.5v-3M5.5 6.5v1M8 6.5v1M10.5 6.5v1\"/>",

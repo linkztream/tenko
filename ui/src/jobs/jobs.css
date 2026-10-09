@@ -1,0 +1,98 @@
+/*
+ * Jobs: the list, the group panel with its checklist, and the job page. Token roles only. The
+ * job state glyphs (`.jstate`) are in app/styles/design.css; this adds the cancelled variant,
+ * the rows that wait for a person, and the layout of the three views.
+ */
+
+/* A cancelled job looks like a queued one (hollow ring) with its word struck through. */
+.jstate.cancelled { text-decoration: line-through; }
+
+/* ---------- The list ---------- */
+.jobs-page { overflow: auto; }
+.jobs-grid { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 320px; }
+.job-state-cell { display: inline-flex; align-items: center; gap: var(--sp-5); }
+.job-needs { font-size: var(--fs-12); }
+.job-cancel-flag { color: var(--ink-3); }
+.job-link { color: var(--ink); font-weight: var(--fw-medium); }
+.job-step-cell { display: inline; }
+/* A job that waits for a person: an edge on the first cell, next to the marker with words. */
+.grid tr.needs td:first-child { box-shadow: inset 3px 0 0 var(--discrepancy-mark); }
+
+/* A filter that comes from the URL, with its remove button. */
+.chip.applied { padding-right: var(--sp-2); gap: var(--sp-3); }
+.chip-x {
+  display: inline-grid; place-items: center;
+  width: 18px; height: 18px; padding: 0;
+  border: 0; border-radius: 50%;
+  background: transparent; color: inherit;
+}
+.chip-x:hover { background: var(--surface-3); color: var(--ink); }
+.field-error { display: inline-flex; align-items: flex-start; gap: 4px; }
+.field-error svg.i { margin-top: 2px; flex: none; }
+
+/* ---------- One group ---------- */
+.job-group {
+  display: grid; gap: var(--sp-5);
+  padding: var(--sp-5) var(--sp-6);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.job-group-head { display: grid; gap: var(--sp-3); }
+.job-group-head h2 { font-size: var(--fs-14); }
+.job-group-summary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-6); color: var(--ink-2); }
+.job-group-tasks { display: grid; gap: var(--sp-4); max-height: 50vh; overflow: auto; padding-right: var(--sp-2); }
+.job-group-tasks-head { display: flex; align-items: baseline; gap: var(--sp-4); }
+.job-group-tasks-head h3 { font-size: var(--fs-13); }
+.check-group { display: grid; gap: var(--sp-2); }
+.check-group h4 { font-size: var(--fs-12); font-weight: var(--fw-semibold); color: var(--ink-2); }
+.check-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--r-3); background: var(--surface); }
+.check-item {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center;
+  gap: var(--sp-5);
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--line);
+}
+.check-item:last-child { border-bottom: 0; }
+.check-text { min-width: 0; overflow-wrap: anywhere; line-height: var(--lh-text); }
+
+/* ---------- The job page ---------- */
+.job-crumbs { display: flex; align-items: center; gap: var(--sp-2); }
+.job-page .page-head h1 .sub { display: inline-flex; align-items: center; gap: var(--sp-5); }
+.job-facts {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: var(--sp-5) var(--sp-8);
+  margin: 0;
+}
+.job-facts dt { color: var(--ink-3); font-size: var(--fs-12); }
+.job-facts dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.job-targets { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); }
+
+.job-steps { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--r-3); background: var(--surface); }
+.job-step {
+  display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--line);
+}
+.job-step:last-child { border-bottom: 0; }
+.job-step[data-state="waiting_for_manual"] {
+  background: color-mix(in srgb, var(--accent-wash) 60%, var(--surface));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.job-step[data-state="failed"], .job-step[data-state="compensation_failed"] { box-shadow: inset 3px 0 0 var(--danger); }
+.step-no { color: var(--ink-3); text-align: right; line-height: var(--lh-ui); }
+.step-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-5); }
+.step-summary { font-weight: var(--fw-medium); overflow-wrap: anywhere; }
+.step-meta { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-5); margin: var(--sp-1) 0 0; font-size: var(--fs-12); }
+.step-task { display: grid; gap: var(--sp-3); margin-top: var(--sp-3); max-width: 640px; }
+.task-text { line-height: var(--lh-text); overflow-wrap: anywhere; }
+.step-deadline { color: var(--ink-2); font-size: var(--fs-12); }
+.step-error { display: flex; align-items: flex-start; gap: var(--sp-3); margin: var(--sp-3) 0 0; color: var(--danger-ink); line-height: var(--lh-text); overflow-wrap: anywhere; }
+.step-error svg.i { margin-top: 2px; flex: none; }
+.step-task .field { gap: var(--sp-2); }
+.step-task textarea.input { width: 100%; resize: vertical; }
+.note-meta { display: flex; justify-content: space-between; gap: var(--sp-5); }
+
+.job-log td.log-note { white-space: pre-wrap; max-width: 420px; overflow-wrap: anywhere; }
+.job-log td.log-step { max-width: 280px; }
+.job-log td { height: auto; min-height: var(--row-h); padding-top: var(--sp-2); padding-bottom: var(--sp-2); vertical-align: top; }
+.check-host { font-weight: var(--fw-semibold); }

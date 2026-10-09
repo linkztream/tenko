@@ -39,23 +39,39 @@ function withQuery(path: string, query?: Record<string, string | undefined>): st
 export type SettingsSection = "security" | "users";
 export type AccountSection = "security" | "sessions" | "tokens";
 
+/** Where an object of the move preview comes from: `host:<id>` or `address:<id>`. */
+export interface MoveObject {
+  kind: string;
+  id: string;
+}
+
 export const paths = {
   dashboard: () => "/",
-  // IPAM (views by WP1.10)
+  // IPAM (views by WP1.10). A `vrf` query names the VRF when an identifier exists in several.
   ipam: () => "/ipam",
-  prefix: (cidr: string) => `/ipam/prefixes/${prefixSegments(cidr)}`,
-  address: (ip: string) => `/ipam/addresses/${seg(ip)}`,
+  prefix: (cidr: string, vrf?: string) => withQuery(`/ipam/prefixes/${prefixSegments(cidr)}`, { vrf }),
+  addresses: (query?: Record<string, string | undefined>) => withQuery("/ipam/addresses", query),
+  address: (ip: string, vrf?: string) => withQuery(`/ipam/addresses/${seg(ip)}`, { vrf }),
+  hosts: (query?: Record<string, string | undefined>) => withQuery("/ipam/hosts", query),
   host: (fqdn: string) => `/ipam/hosts/${seg(fqdn)}`,
   mac: (mac: string) => `/ipam/macs/${seg(mac)}`,
+  vlans: () => "/ipam/vlans",
+  sites: () => "/ipam/sites",
+  tenancy: () => "/ipam/tenants",
+  tags: () => "/ipam/tags",
+  customFields: () => "/ipam/custom-fields",
+  move: (target: string, objects: readonly MoveObject[]) =>
+    withQuery("/ipam/move", { target, objects: objects.map((o) => `${o.kind}:${o.id}`).join(",") }),
   imports: () => "/ipam/import",
   // DNS and DHCP (later phases)
   dns: () => "/dns",
   zone: (name: string) => `/dns/zones/${seg(name)}`,
   dhcp: () => "/dhcp",
   topology: () => "/topology",
-  jobs: () => "/jobs",
+  jobs: (query?: Record<string, string | undefined>) => withQuery("/jobs", query),
   job: (id: string) => `/jobs/${seg(id)}`,
-  audit: () => "/audit",
+  audit: (query?: Record<string, string | undefined>) => withQuery("/audit", query),
+  auditRecord: (seq: number) => `/audit/${seq}`,
   // Settings and the account (WP1.9)
   settings: (section?: SettingsSection) => (section ? `/settings/${section}` : "/settings"),
   user: (id: string) => `/settings/users/${seg(id)}`,

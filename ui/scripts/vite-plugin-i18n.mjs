@@ -1,8 +1,14 @@
 // @ts-check
 // Vite plugin that compiles the XLIFF language packs of ui/i18n into virtual modules.
 //
-//   virtual:tenko-i18n/meta   sourceLocale, locales and lazy loaders (contract: src/i18n/virtual.d.ts)
-//   virtual:tenko-i18n/<code> default export: the message table of one language
+//   virtual:tenko-i18n/meta          sourceLocale, locales, lazy loaders and message packs
+//                                    (contract: src/i18n/virtual.d.ts)
+//   virtual:tenko-i18n/<code>        default export: the core message table of one language
+//   virtual:tenko-i18n/<code>/<pack> default export: one message pack of one language
+//
+// Message packs (option `packs`: pack name to key prefixes) keep the messages of lazily
+// loaded areas out of the core table, so the first page load does not carry them. A view
+// that uses them loads its packs with its route chunk (see `withPacks` in src/i18n).
 //
 // A build fails when a language pack is invalid or when src/i18n/generated/keys.ts is stale
 // (run `npm run i18n`). The dev server and vitest rewrite keys.ts instead, and the dev server
@@ -18,6 +24,7 @@ import {
   renderKeysTs,
   renderLocaleModule,
   renderMetaModule,
+  packOf,
 } from "./i18n/compile.mjs";
 
 /** @typedef {import("./i18n/compile.mjs").Catalog} Catalog */
@@ -34,12 +41,15 @@ function samePath(a, b) {
 }
 
 /**
- * @param {{ dir?: string, keysOut?: string }} [options] `dir` is the directory of the XLIFF
- *   files (default `ui/i18n`), `keysOut` the generated key types (default
- *   `ui/src/i18n/generated/keys.ts`).
+ * @param {{ dir?: string, keysOut?: string, packs?: Readonly<Record<string, readonly string[]>> }} [options]
+ *   `dir` is the directory of the XLIFF files (default `ui/i18n`), `keysOut` the generated
+ *   key types (default `ui/src/i18n/generated/keys.ts`), `packs` the message packs (pack
+ *   name to key prefixes; none by default, then the core table holds every key).
  * @returns {import("vite").Plugin}
  */
 export function i18n(options = {}) {
+  const packs = options.packs ?? {};
+  const packNames = Object.keys(packs);
   const uiDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const dir = path.resolve(options.dir ?? path.join(uiDir, "i18n"));
   const keysOut = path.resolve(options.keysOut ?? path.join(uiDir, "src", "i18n", "generated", "keys.ts"));
@@ -122,10 +132,15 @@ export function i18n(options = {}) {
 
     load(id) {
       if (!id.startsWith(RESOLVED_PREFIX)) return undefined;
-      const code = id.slice(RESOLVED_PREFIX.length);
+      const [code = "", pack] = id.slice(RESOLVED_PREFIX.length).split("/");
       const current = currentCatalog(this);
-      if (code === "meta") return renderMetaModule(current, { importPrefix: VIRTUAL_PREFIX });
-      if (current.messages.has(code)) return renderLocaleModule(current, code);
+      if (code === "meta") return renderMetaModule(current, { importPrefix: VIRTUAL_PREFIX, packs: packNames });
+      if (pack !== undefined && !packNames.includes(pack)) return this.error(`unknown message pack ${JSON.stringify(pack)}`);
+      if (current.messages.has(code)) {
+        return renderLocaleModule(current, code, {
+          include: (key) => packOf(key, packs) === pack,
+        });
+      }
       const known = current.locales.map((l) => l.code).join(", ");
       return this.error(`unknown language ${JSON.stringify(code)} (available: ${known})`);
     },
@@ -155,7 +170,10 @@ export function i18n(options = {}) {
 
         const names = new Set(["meta"]);
         for (const c of [previous, next]) {
-          for (const locale of c?.locales ?? []) names.add(locale.code);
+          for (const locale of c?.locales ?? []) {
+            names.add(locale.code);
+            for (const pack of packNames) names.add(`${locale.code}/${pack}`);
+          }
         }
         for (const environment of Object.values(server.environments)) {
           for (const name of names) {

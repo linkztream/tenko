@@ -1,0 +1,13 @@
+/* The start page (decision 13). Token roles only. */
+.dash-body { max-width: 1400px; }
+.dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--sp-5); }
+.dash-card { display: grid; gap: var(--sp-4); align-content: start; padding: var(--sp-5) var(--sp-6); }
+.dash-card > h2, .dash-card > h3, .dash-use > h2 { font-size: var(--fs-14); display: flex; align-items: baseline; gap: var(--sp-4); }
+.dash-card > h2 .aside, .dash-card > h3 .aside { margin-left: auto; font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); }
+.dash-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
+.dash-list li { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; min-width: 0; }
+.dash-use { display: grid; gap: var(--sp-4); }
+.dash-vrfs { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: var(--sp-5); }
+.dash-card > .meter .bar { width: 100%; max-width: 360px; height: 6px; }
+.dash-nets td { height: 26px; }
+.dash-nets td.r .meter { justify-content: flex-end; }

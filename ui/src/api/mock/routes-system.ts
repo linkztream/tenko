@@ -1,14 +1,15 @@
-// First-run setup, health, system status, jobs and search.
-import type { HttpHandler } from "msw";
-import type { JobState, JobSummary, NodeRole, SetupResult, SetupState, SystemStatus, TlsMode } from "../types";
+// First-run setup, health and system status. Jobs live in routes-jobs.ts; search is served
+// with the IPAM routes.
+import { http, type HttpHandler } from "msw";
+import type { NodeRole, SetupResult, SetupState, SystemStatus, TlsMode } from "../types";
 import { NODE_ROLES, PROFILES } from "../types";
 import { passwordStrength, requireSession, sessionInfo, startSession } from "./auth";
-import { commit, db, type MockJob, type MockUser } from "./db";
-import { MOCK_CA_FINGERPRINT, MOCK_USER_IDS, MOCK_VERSION, SEARCH_SEEDS, searchHit } from "./fixtures";
+import { commit, db, type MockUser } from "./db";
+import { MOCK_CA_FINGERPRINT, MOCK_VERSION } from "./fixtures";
 import { checkPassword } from "./policy";
 import { banner, profileSettings } from "./profiles";
-import { fail, ok } from "./reply";
-import { paginate, route } from "./route";
+import { Problem, fail, ok } from "./reply";
+import { route } from "./route";
 import { iso, randomId, uuidHandle } from "./util";
 import {
   failPolicy,
@@ -178,80 +179,27 @@ const systemStatus = route("get", "/api/v1/system/status", () => {
 });
 
 // ---------------------------------------------------------------------------------
-// Jobs and search
+// CA root (WP1.8b; not in the document yet, so a plain msw handler)
 
-const JOB_STATES: readonly JobState[] = [
-  "queued",
-  "running",
-  "waiting",
-  "rolling_back",
-  "succeeded",
-  "failed",
-  "rolled_back",
-  "cancelled",
-];
+/** A placeholder PEM block: the text "test certificate of the mock" in base64, no real certificate. */
+export const MOCK_CA_ROOT_PEM = [
+  "-----BEGIN CERTIFICATE-----",
+  "dGVzdCBjZXJ0aWZpY2F0ZSBvZiB0aGUgbW9jaw==",
+  "-----END CERTIFICATE-----",
+  "",
+].join("\n");
 
-const STEPS = 10;
-
-/** The document's JobSummary for a mock job. */
-function jobSummary(j: MockJob): JobSummary {
-  const done = j.state === "succeeded" ? STEPS : Math.round((j.progress ?? 0) * STEPS);
-  return {
-    id: j.id,
-    kind: j.kind,
-    state: j.state,
-    title: j.title,
-    created: { at: j.created_at, by: { kind: "user", id: MOCK_USER_IDS.alex, session: MOCK_USER_IDS.alex, strength: "passkey" } },
-    cancel_requested: false,
-    revision: db.revision,
-    step_count: STEPS,
-    steps_done: done,
-    current_step: j.state === "running" || j.state === "waiting" ? Math.min(done, STEPS - 1) : null,
-    targets: [],
-  } as JobSummary;
-}
-
-const listJobs = route("get", "/api/v1/jobs", (ctx) => {
-  requireSession();
-  const filter = ctx.query("state");
-  let states: JobState[] | null = null;
-  if (filter !== null && filter.trim() !== "") {
-    states = filter
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s !== "")
-      .map((s) => {
-        if (!(JOB_STATES as readonly string[]).includes(s)) {
-          return fail("sys.invalid_query", { params: { name: "state", value: s } });
-        }
-        return s as JobState;
-      });
+const caRoot = http.get("/api/v1/system/ca-root", () => {
+  if (db.setupOpen || db.installation.tls.mode !== "internal_ca") {
+    return new Problem("tls.no_internal_ca", {
+      status: 404,
+      detail: "this installation does not run the internal CA",
+    }).reply.toResponse();
   }
-  const jobs = db.jobs
-    .filter((j) => states === null || states.includes(j.state))
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .map(jobSummary);
-  return ok(paginate(jobs, ctx.url, db.revision));
+  return new Response(MOCK_CA_ROOT_PEM, {
+    status: 200,
+    headers: { "content-type": "application/x-pem-file", "content-disposition": "attachment; filename=\"tenko-ca-root.pem\"" },
+  });
 });
 
-/** Case-insensitive; MAC fragments match with any separator (00-00-5e, 00:00:5e, 00005e). */
-function matches(text: string, q: string): boolean {
-  const t = text.toLowerCase();
-  if (t.includes(q)) return true;
-  const bare = (s: string) => s.replace(/[-:.]/g, "");
-  return /^[0-9a-f:.-]+$/.test(q) && bare(q).length >= 4 && bare(t).includes(bare(q));
-}
-
-const search = route("get", "/api/v1/search", (ctx) => {
-  requireSession();
-  const q = (ctx.query("q") ?? "").trim().toLowerCase();
-  const hits =
-    q === ""
-      ? []
-      : SEARCH_SEEDS.filter((h) => matches(h.key, q) || matches(h.label, q)).map(searchHit);
-  const limit = Number(ctx.query("limit") ?? "50");
-  // The document lists search hits without paging: { items, revision }.
-  return ok({ items: hits.slice(0, Number.isFinite(limit) && limit > 0 ? limit : 50), revision: db.revision });
-});
-
-export const systemRoutes: HttpHandler[] = [getSetup, completeSetup, health, ready, systemStatus, listJobs, search];
+export const systemRoutes: HttpHandler[] = [getSetup, completeSetup, health, ready, systemStatus, caRoot];

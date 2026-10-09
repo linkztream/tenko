@@ -1,0 +1,14 @@
+/* The host views. Token roles only. */
+.host-body { max-width: 1200px; }
+.host-grid { position: relative; display: flex; flex-direction: column; height: 220px; border: 1px solid var(--line); border-radius: var(--r-3); overflow: hidden; }
+.host-grid .addr-link + .addr-link { margin-left: var(--sp-4); }
+.page-section > h2 .aside-btn { margin-left: auto; }
+.mode-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.mode-list li { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: var(--sp-4); align-items: baseline; padding: 4px var(--sp-4); border-radius: var(--r-2); color: var(--ink-2); }
+.mode-list li.current { background: var(--accent-wash); color: var(--ink); }
+.connect { display: grid; gap: var(--sp-4); }
+.connect .port { width: 100px; }
+.mode-choice { border: 0; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.radio-row { display: grid; grid-template-columns: auto 100px minmax(0, 1fr); gap: var(--sp-4); align-items: baseline; }
+.form-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-5); }
+.form-cols.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }

@@ -1,6 +1,7 @@
 import { A, useParams } from "@solidjs/router";
 import { For, Match, Show, Switch } from "solid-js";
 import { decodeSegment, paths, type AccountSection } from "../../app/paths";
+import { CaRootLink } from "../../components/CaRootLink";
 import { PageHead } from "../../components/PageHead";
 import { t, type MessageKey } from "../../i18n";
 import { session } from "../session";
@@ -47,6 +48,9 @@ export default function Account() {
           </Match>
           <Match when={true}>
             <Methods />
+            <div class="page-body">
+              <CaRootLink withHelp />
+            </div>
           </Match>
         </Switch>
       </Show>

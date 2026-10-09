@@ -107,6 +107,12 @@
       <unit id="common.recommended">
         <segment><source>Recommended</source></segment>
       </unit>
+      <unit id="common.ca_root.download">
+        <segment><source>Download the CA root certificate</source></segment>
+      </unit>
+      <unit id="common.ca_root.help">
+        <segment><source>Install it on the computers you administer from, so their browsers trust this installation.</source></segment>
+      </unit>
     </group>
     <group id="profile">
       <unit id="profile.home.name">
@@ -746,23 +752,11 @@
       <unit id="shell.dashboard.no_roles">
         <segment><source>No roles reported</source></segment>
       </unit>
-      <unit id="shell.dashboard.revision">
-        <segment><source>Store revision</source></segment>
-      </unit>
-      <unit id="shell.dashboard.revision_hint">
-        <segment><source>Every change advances it by one.</source></segment>
-      </unit>
       <unit id="shell.dashboard.jobs">
         <segment><source>Active jobs</source></segment>
       </unit>
-      <unit id="shell.dashboard.jobs_hint">
-        <segment><source>Running or waiting for observation</source></segment>
-      </unit>
       <unit id="shell.dashboard.uptime">
         <segment><source>Running for</source></segment>
-      </unit>
-      <unit id="shell.dashboard.note">
-        <segment><source>Health charts for the cluster and each node arrive with the DNS and DHCP roles.</source></segment>
       </unit>
       <unit id="shell.banner.mfa_required">
         <segment><source>Your security profile requires a second factor. Add a passkey or an authenticator app.</source></segment>
@@ -772,6 +766,41 @@
       </unit>
       <unit id="shell.banner.fix">
         <segment><source>Open security and sign-in</source></segment>
+      </unit>
+      <unit id="shell.nav.audit">
+        <notes><note category="description">Rail entry of the audit log.</note></notes>
+        <segment><source>Audit</source></segment>
+      </unit>
+      <unit id="shell.status.alarms">
+        <notes><note category="description">Status bar item: prefixes above their utilization threshold.</note></notes>
+        <segment><source>{count, plural, one {# alarm} other {# alarms}}</source></segment>
+      </unit>
+      <unit id="shell.status.alarms_title">
+        <segment><source>Prefixes above their utilization threshold. Open the dashboard.</source></segment>
+      </unit>
+      <unit id="shell.status.critical">
+        <segment><source>{count, plural, one {# critical} other {# critical}}</source></segment>
+      </unit>
+      <unit id="shell.command.import">
+        <segment><source>Import a spreadsheet</source></segment>
+      </unit>
+      <unit id="shell.command.hosts">
+        <segment><source>Hosts</source></segment>
+      </unit>
+      <unit id="shell.command.addresses">
+        <segment><source>Addresses</source></segment>
+      </unit>
+      <unit id="shell.command.vlans">
+        <segment><source>VLANs</source></segment>
+      </unit>
+      <unit id="shell.command.audit_verify">
+        <segment><source>Verify the audit chain</source></segment>
+      </unit>
+      <unit id="shell.search.kind.interface">
+        <segment><source>Interface</source></segment>
+      </unit>
+      <unit id="shell.search.kind.range">
+        <segment><source>Range</source></segment>
       </unit>
     </group>
     <group id="errors">
@@ -933,6 +962,198 @@
       </unit>
       <unit id="errors.users.not_found">
         <segment><source>The user no longer exists.</source></segment>
+      </unit>
+      <unit id="errors.ipam.not_found">
+        <segment><source>The {kind} does not exist (any more).</source></segment>
+      </unit>
+      <unit id="errors.ipam.revision_mismatch">
+        <segment><source>Someone changed this {kind} after you opened it. Reload and try again.</source></segment>
+      </unit>
+      <unit id="errors.ipam.object_deleted">
+        <segment><source>The {kind} is deleted. Restore it first.</source></segment>
+      </unit>
+      <unit id="errors.ipam.not_deleted">
+        <segment><source>The {kind} is not deleted.</source></segment>
+      </unit>
+      <unit id="errors.ipam.id_taken">
+        <segment><source>The identifier is already used.</source></segment>
+      </unit>
+      <unit id="errors.ipam.name_taken">
+        <segment><source>The name {name} is already used.</source></segment>
+      </unit>
+      <unit id="errors.ipam.validation">
+        <segment><source>Some fields are not valid.</source></segment>
+      </unit>
+      <unit id="errors.ipam.immutable">
+        <segment><source>The field {field} cannot change after creation.</source></segment>
+      </unit>
+      <unit id="errors.ipam.reference_missing">
+        <segment><source>The referenced {kind} is missing or deleted.</source></segment>
+      </unit>
+      <unit id="errors.ipam.in_use">
+        <segment><source>The {kind} is still in use ({count, number} references). Delete with its dependants or remove them first.</source></segment>
+      </unit>
+      <unit id="errors.ipam.prefix.overlap">
+        <segment><source>{cidr} overlaps {existing} in this VRF.</source></segment>
+      </unit>
+      <unit id="errors.ipam.prefix.host_bits">
+        <segment><source>{cidr} has host bits set; the network is {network}.</source></segment>
+      </unit>
+      <unit id="errors.ipam.prefix.has_children">
+        <segment><source>{cidr} has child prefixes, so it must stay a supernet.</source></segment>
+      </unit>
+      <unit id="errors.ipam.prefix.has_ranges">
+        <segment><source>{cidr} has ranges, so it must stay a network.</source></segment>
+      </unit>
+      <unit id="errors.ipam.prefix.resize_orphans">
+        <segment><source>The new size would leave prefixes, addresses or ranges outside the prefix.</source></segment>
+      </unit>
+      <unit id="errors.ipam.prefix.overlaps_range">
+        <segment><source>The new prefix would cut through the range {range}.</source></segment>
+      </unit>
+      <unit id="errors.ipam.prefix.full">
+        <segment><source>No free /{length} is left in {cidr}.</source></segment>
+      </unit>
+      <unit id="errors.ipam.range.overlap">
+        <segment><source>The range overlaps {existing}.</source></segment>
+      </unit>
+      <unit id="errors.ipam.range.outside_prefix">
+        <segment><source>The range lies outside {cidr}.</source></segment>
+      </unit>
+      <unit id="errors.ipam.range.not_in_network">
+        <segment><source>Ranges belong to networks, and {cidr} is a supernet.</source></segment>
+      </unit>
+      <unit id="errors.ipam.range.covers_reservation">
+        <segment><source>The DHCP pool would cover {ip}, the reserved address of {host}.</source></segment>
+      </unit>
+      <unit id="errors.ipam.address.duplicate">
+        <segment><source>{ip} already exists in this VRF.</source></segment>
+      </unit>
+      <unit id="errors.ipam.address.no_prefix">
+        <segment><source>No prefix in this VRF contains {ip}.</source></segment>
+      </unit>
+      <unit id="errors.ipam.address.network_or_broadcast">
+        <segment><source>{ip} is the network or broadcast address of {cidr}.</source></segment>
+      </unit>
+      <unit id="errors.ipam.address.in_dhcp_pool">
+        <segment><source>{ip} lies in the DHCP pool {range}.</source></segment>
+      </unit>
+      <unit id="errors.ipam.address.full">
+        <segment><source>No free address is left in {cidr}.</source></segment>
+      </unit>
+      <unit id="errors.ipam.vlan.duplicate">
+        <segment><source>VLAN {vid} already exists at this site.</source></segment>
+      </unit>
+      <unit id="errors.ipam.site.cycle">
+        <segment><source>A site cannot be inside itself.</source></segment>
+      </unit>
+      <unit id="errors.ipam.status.transition">
+        <segment><source>The status cannot change from {from} to {to}.</source></segment>
+      </unit>
+      <unit id="errors.ipam.host.locked">
+        <segment><source>{host} is locked against automation.</source></segment>
+      </unit>
+      <unit id="errors.ipam.host.lock_manual_only">
+        <segment><source>Only people lock and unlock hosts.</source></segment>
+      </unit>
+      <unit id="errors.ipam.plan.unacknowledged">
+        <segment><source>Acknowledge the warnings {codes} first.</source></segment>
+      </unit>
+      <unit id="errors.ipam.plan.stale">
+        <segment><source>The data changed since the preview. Preview again.</source></segment>
+      </unit>
+      <unit id="errors.ipam.contended">
+        <segment><source>Other changes kept getting in the way. Try again.</source></segment>
+      </unit>
+      <unit id="errors.ipam.idempotency_mismatch">
+        <segment><source>This request was already sent with other content.</source></segment>
+      </unit>
+      <unit id="errors.ipam.bulk.too_large">
+        <segment><source>Too many changes at once ({count, number}, at most {limit, number}).</source></segment>
+      </unit>
+      <unit id="errors.ipam.bulk.wrong_collection">
+        <segment><source>Change {index} belongs to another collection.</source></segment>
+      </unit>
+      <unit id="errors.ipam.invalid_cursor">
+        <segment><source>The list position is not valid any more. Reload the list.</source></segment>
+      </unit>
+      <unit id="errors.ipam.invalid_filter">
+        <segment><source>The filter {name} is not valid.</source></segment>
+      </unit>
+      <unit id="errors.ipam.job.failed">
+        <segment><source>The change failed while it was applied.</source></segment>
+      </unit>
+      <unit id="errors.ipam.unavailable">
+        <segment><source>IPAM is not available on this server.</source></segment>
+      </unit>
+      <unit id="errors.ipam.prefix.nibble_boundary">
+        <segment><source>The IPv6 prefix is not on a nibble boundary (a length divisible by 4), which makes reverse DNS and planning harder.</source></segment>
+      </unit>
+      <unit id="errors.ipam.host.reservation_identifier">
+        <segment><source>The host is reserved but has no MAC address (IPv4) or DUID (IPv6), so no DHCP reservation can be made.</source></segment>
+      </unit>
+      <unit id="errors.ipam.address.in_supernet">
+        <segment><source>The address lies directly in a supernet, not in a network.</source></segment>
+      </unit>
+      <unit id="errors.ipam.parent_status">
+        <segment><source>An active object lies inside a planned or deprecated parent.</source></segment>
+      </unit>
+      <unit id="errors.ipam.interface.duplicate_mac">
+        <segment><source>Another interface has the same MAC address.</source></segment>
+      </unit>
+      <unit id="errors.ipam.address.in_range">
+        <segment><source>The address lies in a reserved or infrastructure range.</source></segment>
+      </unit>
+      <unit id="errors.ipam.move.unmanaged">
+        <segment><source>Unmanaged hosts are never moved.</source></segment>
+      </unit>
+      <unit id="errors.ipam.move.host_part_taken">
+        <segment><source>The same host part is taken in the target network, so the next free address was chosen.</source></segment>
+      </unit>
+      <unit id="errors.import.not_found">
+        <segment><source>No such import.</source></segment>
+      </unit>
+      <unit id="errors.import.expired">
+        <segment><source>The upload has expired. Upload the files again.</source></segment>
+      </unit>
+      <unit id="errors.import.upload.empty">
+        <segment><source>The upload has no file.</source></segment>
+      </unit>
+      <unit id="errors.import.upload.too_large">
+        <segment><source>The upload is larger than the limit.</source></segment>
+      </unit>
+      <unit id="errors.import.upload.unsupported">
+        <segment><source>The file is not CSV or a workbook.</source></segment>
+      </unit>
+      <unit id="errors.import.upload.unreadable">
+        <segment><source>The file cannot be read.</source></segment>
+      </unit>
+      <unit id="errors.import.upload.malformed">
+        <segment><source>The upload is malformed.</source></segment>
+      </unit>
+      <unit id="errors.import.mapping.invalid">
+        <segment><source>The mapping does not fit the upload.</source></segment>
+      </unit>
+      <unit id="errors.import.state.conflict">
+        <segment><source>The import is being applied, or was applied with another mapping.</source></segment>
+      </unit>
+      <unit id="errors.import.credentials.vault_required">
+        <segment><source>Credentials need the vault and a sign-in strong enough for operator secrets.</source></segment>
+      </unit>
+      <unit id="errors.import.plan.blocked">
+        <segment><source>The plan has errors or warnings that need an acknowledgement.</source></segment>
+      </unit>
+      <unit id="errors.import.unavailable">
+        <segment><source>Import is not available on this server.</source></segment>
+      </unit>
+      <unit id="errors.import.apply.failed">
+        <segment><source>A part of the import failed while it was applied.</source></segment>
+      </unit>
+      <unit id="errors.import.upload.lost">
+        <segment><source>The staged upload is gone after a restart.</source></segment>
+      </unit>
+      <unit id="errors.import.conflict.kept">
+        <segment><source>Existing objects differ and the conflict policy keeps them; choose Update or remove the rows.</source></segment>
       </unit>
     </group>
     <group id="account">
@@ -1146,9 +1367,6 @@
       <unit id="account.totp.setup_title">
         <segment><source>Set up your authenticator app</source></segment>
       </unit>
-      <unit id="account.totp.no_qr">
-        <segment><source>Enter the key in your app, or open the link on the device that has the app. Then enter the code the app shows.</source></segment>
-      </unit>
       <unit id="account.totp.key">
         <segment><source>Secret key</source></segment>
       </unit>
@@ -1358,6 +1576,12 @@
       </unit>
       <unit id="account.tokens.stored">
         <segment><source>I have stored the token</source></segment>
+      </unit>
+      <unit id="account.totp.scan_or_key">
+        <segment><source>Scan the code with your authenticator app, enter the key by hand, or open the link on the device that has the app. Then enter the code the app shows.</source></segment>
+      </unit>
+      <unit id="account.totp.qr_label">
+        <segment><source>QR code of the key for your authenticator app</source></segment>
       </unit>
     </group>
     <group id="settings">
@@ -2860,6 +3084,9 @@
       <unit id="setup.gate.passkey_required">
         <segment><source>Hardened requires a passkey for administrators.</source></segment>
       </unit>
+      <unit id="setup.result.ca.compare">
+        <segment><source>The server prints the same SHA-256 fingerprint on its console when it is ready. Compare them before you install the downloaded file.</source></segment>
+      </unit>
     </group>
     <group id="toggles">
       <unit id="toggles.password_policy.name">
@@ -2963,6 +3190,3203 @@
       </unit>
       <unit id="recovery.saved">
         <segment><source>I have saved the recovery codes</source></segment>
+      </unit>
+    </group>
+    <group id="grid">
+      <unit id="grid.select_all">
+        <notes><note category="description">Check box in the header of a data grid.</note></notes>
+        <segment><source>Select all rows in view</source></segment>
+      </unit>
+      <unit id="grid.select_row">
+        <notes><note category="description">Check box of one grid row. The argument row is the row's name, such as an address.</note></notes>
+        <segment><source>Select {row}</source></segment>
+      </unit>
+      <unit id="grid.actions">
+        <notes><note category="description">Hidden header of the column with the row menus.</note></notes>
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="grid.row_actions">
+        <notes><note category="description">Button that opens the menu of one grid row.</note></notes>
+        <segment><source>Actions for {row}</source></segment>
+      </unit>
+      <unit id="grid.loading">
+        <segment><source>Loading…</source></segment>
+      </unit>
+      <unit id="grid.loading_more">
+        <segment><source>Loading more rows…</source></segment>
+      </unit>
+      <unit id="grid.rows">
+        <notes><note category="description">Follows the row count in the grid footer, for example 1.2K rows.</note></notes>
+        <segment><source>{count, plural, one {row} other {rows}}</source></segment>
+      </unit>
+      <unit id="grid.more">
+        <segment><source>More rows load as you scroll.</source></segment>
+      </unit>
+      <unit id="grid.selected">
+        <segment><source>{count, plural, one {# selected} other {# selected}}</source></segment>
+      </unit>
+      <unit id="grid.empty.title">
+        <segment><source>Nothing to show</source></segment>
+      </unit>
+      <unit id="grid.empty.filtered">
+        <segment><source>No rows match the filter.</source></segment>
+      </unit>
+      <unit id="grid.filter.invalid">
+        <notes><note category="description">Shown when a field:value term in the filter has a value the field does not allow.</note></notes>
+        <segment><source>{value} is not a value of {field}</source></segment>
+      </unit>
+      <unit id="grid.deleted.label">
+        <segment><source>Deleted objects</source></segment>
+      </unit>
+      <unit id="grid.deleted.exclude">
+        <segment><source>Current</source></segment>
+      </unit>
+      <unit id="grid.deleted.include">
+        <segment><source>With deleted</source></segment>
+      </unit>
+      <unit id="grid.deleted.only">
+        <segment><source>Deleted only</source></segment>
+      </unit>
+      <unit id="grid.density.label">
+        <segment><source>Row density</source></segment>
+      </unit>
+      <unit id="grid.density.dense">
+        <segment><source>Dense</source></segment>
+      </unit>
+      <unit id="grid.density.compact">
+        <segment><source>Compact</source></segment>
+      </unit>
+      <unit id="grid.density.comfortable">
+        <segment><source>Comfortable</source></segment>
+      </unit>
+      <unit id="grid.columns.button">
+        <segment><source>Choose columns</source></segment>
+      </unit>
+      <unit id="grid.columns.title">
+        <segment><source>Columns</source></segment>
+      </unit>
+      <unit id="grid.columns.move_up">
+        <segment><source>Move {column} left</source></segment>
+      </unit>
+      <unit id="grid.columns.move_down">
+        <segment><source>Move {column} right</source></segment>
+      </unit>
+      <unit id="grid.columns.reset">
+        <segment><source>Reset columns</source></segment>
+      </unit>
+      <unit id="grid.actionbar.label">
+        <segment><source>Selection actions</source></segment>
+      </unit>
+      <unit id="grid.actionbar.selected">
+        <notes><note category="description">Follows the number of selected rows in the action bar.</note></notes>
+        <segment><source>{count, plural, one {selected} other {selected}}</source></segment>
+      </unit>
+      <unit id="grid.selection.clear">
+        <segment><source>Clear selection (Esc)</source></segment>
+      </unit>
+      <unit id="grid.saving">
+        <segment><source>Saving…</source></segment>
+      </unit>
+    </group>
+    <group id="ipam">
+      <unit id="ipam.plan.heading">
+        <segment><source>What changes</source></segment>
+      </unit>
+      <unit id="ipam.plan.changes">
+        <segment><source>Planned changes</source></segment>
+      </unit>
+      <unit id="ipam.plan.nothing">
+        <segment><source>Nothing changes.</source></segment>
+      </unit>
+      <unit id="ipam.plan.previewing">
+        <segment><source>Preparing the preview…</source></segment>
+      </unit>
+      <unit id="ipam.plan.summary_line">
+        <notes><note category="description">One line of the plan summary, for example Prefixes: 1 created.</note></notes>
+        <segment><source>{kind}: {action}</source></segment>
+      </unit>
+      <unit id="ipam.plan.col.action">
+        <segment><source>Change</source></segment>
+      </unit>
+      <unit id="ipam.plan.col.object">
+        <segment><source>Object</source></segment>
+      </unit>
+      <unit id="ipam.plan.col.fields">
+        <segment><source>Details</source></segment>
+      </unit>
+      <unit id="ipam.plan.change.create">
+        <segment><source>Create</source></segment>
+      </unit>
+      <unit id="ipam.plan.change.update">
+        <segment><source>Update</source></segment>
+      </unit>
+      <unit id="ipam.plan.change.delete">
+        <segment><source>Delete</source></segment>
+      </unit>
+      <unit id="ipam.plan.change.restore">
+        <segment><source>Restore</source></segment>
+      </unit>
+      <unit id="ipam.plan.change.lock">
+        <segment><source>Lock</source></segment>
+      </unit>
+      <unit id="ipam.plan.change.unlock">
+        <segment><source>Unlock</source></segment>
+      </unit>
+      <unit id="ipam.plan.change.remove">
+        <segment><source>Remove</source></segment>
+      </unit>
+      <unit id="ipam.plan.derived">
+        <notes><note category="description">Tag on a change that follows from another change of the same plan.</note></notes>
+        <segment><source>follows</source></segment>
+      </unit>
+      <unit id="ipam.plan.ack">
+        <segment><source>I have read this and want to go ahead</source></segment>
+      </unit>
+      <unit id="ipam.plan.ack_needed">
+        <segment><source>Acknowledge the marked warnings to continue.</source></segment>
+      </unit>
+      <unit id="ipam.plan.stale">
+        <segment><source>The data changed since the preview. This is a new preview.</source></segment>
+      </unit>
+      <unit id="ipam.plan.open_job">
+        <segment><source>Open job</source></segment>
+      </unit>
+      <unit id="ipam.status.planned">
+        <notes><note category="description">Lifecycle status of an IPAM object: not in use yet.</note></notes>
+        <segment><source>Planned</source></segment>
+      </unit>
+      <unit id="ipam.status.active">
+        <notes><note category="description">Lifecycle status of an IPAM object: in use.</note></notes>
+        <segment><source>Active</source></segment>
+      </unit>
+      <unit id="ipam.status.reserved">
+        <notes><note category="description">Lifecycle status of an IPAM object: held back for a purpose.</note></notes>
+        <segment><source>Reserved</source></segment>
+      </unit>
+      <unit id="ipam.status.deprecated">
+        <notes><note category="description">Lifecycle status of an IPAM object: still there but being phased out.</note></notes>
+        <segment><source>Deprecated</source></segment>
+      </unit>
+      <unit id="ipam.mode.static">
+        <notes><note category="description">Assignment mode of a host. Shown in lowercase next to a glyph in grids.</note></notes>
+        <segment><source>static</source></segment>
+      </unit>
+      <unit id="ipam.mode.reserved">
+        <notes><note category="description">Assignment mode of a host: a DHCP reservation. Shown in lowercase next to a glyph in grids.</note></notes>
+        <segment><source>reserved</source></segment>
+      </unit>
+      <unit id="ipam.mode.dynamic">
+        <notes><note category="description">Assignment mode of a host: the address comes from a DHCP pool. Shown in lowercase next to a glyph in grids.</note></notes>
+        <segment><source>dynamic</source></segment>
+      </unit>
+      <unit id="ipam.mode.unmanaged">
+        <notes><note category="description">Assignment mode of a host: Tenko leaves it alone. Shown in lowercase next to a glyph in grids.</note></notes>
+        <segment><source>unmanaged</source></segment>
+      </unit>
+      <unit id="ipam.mode_hint.reserved">
+        <notes><note category="description">Tooltip of the assignment mode reserved.</note></notes>
+        <segment><source>An address change moves the DHCP reservation and updates DNS.</source></segment>
+      </unit>
+      <unit id="ipam.mode_hint.static">
+        <notes><note category="description">Tooltip of the assignment mode static.</note></notes>
+        <segment><source>Only DNS follows. The device itself is configured by hand.</source></segment>
+      </unit>
+      <unit id="ipam.mode_hint.dynamic">
+        <notes><note category="description">Tooltip of the assignment mode dynamic.</note></notes>
+        <segment><source>Tenko only observes this host.</source></segment>
+      </unit>
+      <unit id="ipam.mode_hint.unmanaged">
+        <notes><note category="description">Tooltip of the assignment mode unmanaged.</note></notes>
+        <segment><source>Tenko never touches this host.</source></segment>
+      </unit>
+      <unit id="ipam.prefix_role.supernet">
+        <notes><note category="description">Role of a prefix that only contains other prefixes.</note></notes>
+        <segment><source>Supernet</source></segment>
+      </unit>
+      <unit id="ipam.prefix_role.network">
+        <notes><note category="description">Role of a prefix that holds addresses.</note></notes>
+        <segment><source>Network</source></segment>
+      </unit>
+      <unit id="ipam.range_role.dhcp_pool">
+        <notes><note category="description">Role of an address range.</note></notes>
+        <segment><source>DHCP pool</source></segment>
+      </unit>
+      <unit id="ipam.range_role.reserved">
+        <notes><note category="description">Role of an address range: held back, not handed out.</note></notes>
+        <segment><source>Reserved</source></segment>
+      </unit>
+      <unit id="ipam.range_role.infrastructure">
+        <notes><note category="description">Role of an address range: routers, switches and similar.</note></notes>
+        <segment><source>Infrastructure</source></segment>
+      </unit>
+      <unit id="ipam.alarm.normal">
+        <notes><note category="description">Utilization alarm level.</note></notes>
+        <segment><source>Normal</source></segment>
+      </unit>
+      <unit id="ipam.alarm.warning">
+        <notes><note category="description">Utilization alarm level: the prefix is filling up.</note></notes>
+        <segment><source>Warning</source></segment>
+      </unit>
+      <unit id="ipam.alarm.critical">
+        <notes><note category="description">Utilization alarm level: the prefix is almost full.</note></notes>
+        <segment><source>Critical</source></segment>
+      </unit>
+      <unit id="ipam.kind.tenant">
+        <notes><note category="description">Lowercase noun for an IPAM object type, used in running text and counts.</note></notes>
+        <segment><source>{count, plural, one {tenant} other {tenants}}</source></segment>
+      </unit>
+      <unit id="ipam.kind.vrf">
+        <notes><note category="description">Lowercase noun for an IPAM object type, used in running text and counts.</note></notes>
+        <segment><source>{count, plural, one {VRF} other {VRFs}}</source></segment>
+      </unit>
+      <unit id="ipam.kind.site">
+        <notes><note category="description">Lowercase noun for an IPAM object type, used in running text and counts.</note></notes>
+        <segment><source>{count, plural, one {site} other {sites}}</source></segment>
+      </unit>
+      <unit id="ipam.kind.vlan">
+        <notes><note category="description">Lowercase noun for an IPAM object type, used in running text and counts.</note></notes>
+        <segment><source>{count, plural, one {VLAN} other {VLANs}}</source></segment>
+      </unit>
+      <unit id="ipam.kind.prefix">
+        <notes><note category="description">Lowercase noun for an IPAM object type, used in running text and counts.</note></notes>
+        <segment><source>{count, plural, one {prefix} other {prefixes}}</source></segment>
+      </unit>
+      <unit id="ipam.kind.range">
+        <notes><note category="description">Lowercase noun for an IPAM object type, used in running text and counts.</note></notes>
+        <segment><source>{count, plural, one {range} other {ranges}}</source></segment>
+      </unit>
+      <unit id="ipam.kind.address">
+        <notes><note category="description">Lowercase noun for an IPAM object type, used in running text and counts.</note></notes>
+        <segment><source>{count, plural, one {address} other {addresses}}</source></segment>
+      </unit>
+      <unit id="ipam.kind.host">
+        <notes><note category="description">Lowercase noun for an IPAM object type, used in running text and counts.</note></notes>
+        <segment><source>{count, plural, one {host} other {hosts}}</source></segment>
+      </unit>
+      <unit id="ipam.kind.interface">
+        <notes><note category="description">Lowercase noun for an IPAM object type, used in running text and counts.</note></notes>
+        <segment><source>{count, plural, one {interface} other {interfaces}}</source></segment>
+      </unit>
+      <unit id="ipam.kind.custom_field">
+        <notes><note category="description">Lowercase noun for an IPAM object type, used in running text and counts.</note></notes>
+        <segment><source>{count, plural, one {custom field} other {custom fields}}</source></segment>
+      </unit>
+      <unit id="ipam.kind_title.tenant">
+        <notes><note category="description">Singular name of an IPAM object type for headings.</note></notes>
+        <segment><source>Tenant</source></segment>
+      </unit>
+      <unit id="ipam.kind_title.vrf">
+        <notes><note category="description">Singular name of an IPAM object type for headings.</note></notes>
+        <segment><source>VRF</source></segment>
+      </unit>
+      <unit id="ipam.kind_title.site">
+        <notes><note category="description">Singular name of an IPAM object type for headings.</note></notes>
+        <segment><source>Site</source></segment>
+      </unit>
+      <unit id="ipam.kind_title.vlan">
+        <notes><note category="description">Singular name of an IPAM object type for headings.</note></notes>
+        <segment><source>VLAN</source></segment>
+      </unit>
+      <unit id="ipam.kind_title.prefix">
+        <notes><note category="description">Singular name of an IPAM object type for headings.</note></notes>
+        <segment><source>Prefix</source></segment>
+      </unit>
+      <unit id="ipam.kind_title.range">
+        <notes><note category="description">Singular name of an IPAM object type for headings.</note></notes>
+        <segment><source>Range</source></segment>
+      </unit>
+      <unit id="ipam.kind_title.address">
+        <notes><note category="description">Singular name of an IPAM object type for headings.</note></notes>
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="ipam.kind_title.host">
+        <notes><note category="description">Singular name of an IPAM object type for headings.</note></notes>
+        <segment><source>Host</source></segment>
+      </unit>
+      <unit id="ipam.kind_title.interface">
+        <notes><note category="description">Singular name of an IPAM object type for headings.</note></notes>
+        <segment><source>Interface</source></segment>
+      </unit>
+      <unit id="ipam.kind_title.custom_field">
+        <notes><note category="description">Singular name of an IPAM object type for headings.</note></notes>
+        <segment><source>Custom field</source></segment>
+      </unit>
+      <unit id="ipam.action.create">
+        <notes><note category="description">Summary of a change set: how many objects were created.</note></notes>
+        <segment><source>{count, plural, one {# created} other {# created}}</source></segment>
+      </unit>
+      <unit id="ipam.action.update">
+        <notes><note category="description">Summary of a change set: how many objects were updated.</note></notes>
+        <segment><source>{count, plural, one {# updated} other {# updated}}</source></segment>
+      </unit>
+      <unit id="ipam.action.delete">
+        <notes><note category="description">Summary of a change set: how many objects were deleted (they can be restored).</note></notes>
+        <segment><source>{count, plural, one {# deleted} other {# deleted}}</source></segment>
+      </unit>
+      <unit id="ipam.action.restore">
+        <notes><note category="description">Summary of a change set: how many deleted objects were restored.</note></notes>
+        <segment><source>{count, plural, one {# restored} other {# restored}}</source></segment>
+      </unit>
+      <unit id="ipam.action.lock">
+        <notes><note category="description">Summary of a change set: how many hosts were locked against automation.</note></notes>
+        <segment><source>{count, plural, one {# locked} other {# locked}}</source></segment>
+      </unit>
+      <unit id="ipam.action.unlock">
+        <notes><note category="description">Summary of a change set: how many hosts were unlocked.</note></notes>
+        <segment><source>{count, plural, one {# unlocked} other {# unlocked}}</source></segment>
+      </unit>
+      <unit id="ipam.action.remove">
+        <notes><note category="description">Summary of a change set: how many objects were removed for good (no restore).</note></notes>
+        <segment><source>{count, plural, one {# removed} other {# removed}}</source></segment>
+      </unit>
+      <unit id="ipam.custom_kind.text">
+        <notes><note category="description">Value type of a custom field.</note></notes>
+        <segment><source>Text</source></segment>
+      </unit>
+      <unit id="ipam.custom_kind.integer">
+        <notes><note category="description">Value type of a custom field.</note></notes>
+        <segment><source>Whole number</source></segment>
+      </unit>
+      <unit id="ipam.custom_kind.boolean">
+        <notes><note category="description">Value type of a custom field.</note></notes>
+        <segment><source>Yes or no</source></segment>
+      </unit>
+      <unit id="ipam.custom_kind.date">
+        <notes><note category="description">Value type of a custom field.</note></notes>
+        <segment><source>Date</source></segment>
+      </unit>
+      <unit id="ipam.custom_kind.url">
+        <notes><note category="description">Value type of a custom field.</note></notes>
+        <segment><source>URL</source></segment>
+      </unit>
+      <unit id="ipam.custom_kind.select">
+        <notes><note category="description">Value type of a custom field: one value out of a fixed list.</note></notes>
+        <segment><source>List of choices</source></segment>
+      </unit>
+      <unit id="ipam.flag.locked">
+        <notes><note category="description">Flag on a host: automation is stopped.</note></notes>
+        <segment><source>Locked</source></segment>
+      </unit>
+      <unit id="ipam.flag.locked_hint">
+        <notes><note category="description">Tooltip of the Locked flag.</note></notes>
+        <segment><source>Automation is stopped for this host.</source></segment>
+      </unit>
+      <unit id="ipam.flag.deleted">
+        <notes><note category="description">Tag on an object that is in the trash. The tooltip shows when it was deleted.</note></notes>
+        <segment><source>Deleted</source></segment>
+      </unit>
+      <unit id="ipam.meter.value">
+        <notes><note category="description">Utilization of a prefix. The argument is a number with at most one decimal, for example 44.1. Swedish puts a non-breaking space before the percent sign.</note></notes>
+        <segment><source>{value}%</source></segment>
+      </unit>
+      <unit id="ipam.meter.title">
+        <notes><note category="description">Tooltip of the utilization meter. Both arguments are compact counts such as 1.2K.</note></notes>
+        <segment><source>{used} of {capacity} addresses in use</source></segment>
+      </unit>
+      <unit id="ipam.nav.label">
+        <segment><source>IPAM sections</source></segment>
+      </unit>
+      <unit id="ipam.nav.networks">
+        <segment><source>Networks</source></segment>
+      </unit>
+      <unit id="ipam.nav.addresses">
+        <segment><source>Addresses</source></segment>
+      </unit>
+      <unit id="ipam.nav.hosts">
+        <segment><source>Hosts</source></segment>
+      </unit>
+      <unit id="ipam.nav.vlans">
+        <segment><source>VLANs</source></segment>
+      </unit>
+      <unit id="ipam.nav.sites">
+        <segment><source>Sites</source></segment>
+      </unit>
+      <unit id="ipam.nav.tenancy">
+        <segment><source>Tenants and VRFs</source></segment>
+      </unit>
+      <unit id="ipam.nav.tags">
+        <segment><source>Tags</source></segment>
+      </unit>
+      <unit id="ipam.nav.custom_fields">
+        <segment><source>Custom fields</source></segment>
+      </unit>
+      <unit id="ipam.nav.import">
+        <segment><source>Import</source></segment>
+      </unit>
+      <unit id="ipam.scope.label">
+        <segment><source>Tenant and VRF</source></segment>
+      </unit>
+      <unit id="ipam.scope.option">
+        <notes><note category="description">One entry of the tenant and VRF switcher.</note></notes>
+        <segment><source>{tenant} / {vrf}</source></segment>
+      </unit>
+      <unit id="ipam.tree.label">
+        <segment><source>Networks</source></segment>
+      </unit>
+      <unit id="ipam.tree.filter">
+        <segment><source>Filter networks</source></segment>
+      </unit>
+      <unit id="ipam.tree.add">
+        <segment><source>Add prefix</source></segment>
+      </unit>
+      <unit id="ipam.tree.empty">
+        <segment><source>No prefixes in this VRF yet.</source></segment>
+      </unit>
+      <unit id="ipam.tree.supernet">
+        <segment><source>supernet</source></segment>
+      </unit>
+      <unit id="ipam.tree.drop_hint">
+        <segment><source>Release to preview moving {count, plural, one {# object} other {# objects}} to {cidr}. Nothing changes until you confirm the preview.</source></segment>
+      </unit>
+      <unit id="ipam.tree.drop_refused">
+        <segment><source>Drop on a network, not on a supernet.</source></segment>
+      </unit>
+      <unit id="ipam.tree.key_tree">
+        <segment><source>tree</source></segment>
+      </unit>
+      <unit id="ipam.tree.key_grid">
+        <segment><source>grid</source></segment>
+      </unit>
+      <unit id="ipam.tree.drag_hint">
+        <segment><source>Drag hosts onto a network to move them</source></segment>
+      </unit>
+      <unit id="ipam.command.focus_tree">
+        <segment><source>Focus the network tree</source></segment>
+      </unit>
+      <unit id="ipam.overview.label">
+        <segment><source>VRF overview</source></segment>
+      </unit>
+      <unit id="ipam.prefix.not_found">
+        <segment><source>No prefix {cidr} in this VRF.</source></segment>
+      </unit>
+      <unit id="ipam.prefix.in_several">
+        <segment><source>{cidr} exists in several VRFs. Choose one:</source></segment>
+      </unit>
+      <unit id="ipam.prefix.crumbs">
+        <segment><source>Where this prefix lies</source></segment>
+      </unit>
+      <unit id="ipam.prefix.usage">
+        <segment><source>{used} of {capacity} addresses in use</source></segment>
+      </unit>
+      <unit id="ipam.prefix.alloc">
+        <segment><source>Allocation</source></segment>
+      </unit>
+      <unit id="ipam.prefix.alloc_lowest">
+        <segment><source>From the lowest address</source></segment>
+      </unit>
+      <unit id="ipam.prefix.alloc_highest">
+        <segment><source>From the highest address</source></segment>
+      </unit>
+      <unit id="ipam.prefix.alarm">
+        <segment><source>Alarm at</source></segment>
+      </unit>
+      <unit id="ipam.prefix.alarm_value">
+        <segment><source>warning {warn}%, critical {crit}%</source></segment>
+      </unit>
+      <unit id="ipam.prefix.tabs">
+        <segment><source>Prefix sections</source></segment>
+      </unit>
+      <unit id="ipam.prefix.tab.addresses">
+        <segment><source>Addresses</source></segment>
+      </unit>
+      <unit id="ipam.prefix.tab.ranges">
+        <segment><source>Ranges</source></segment>
+      </unit>
+      <unit id="ipam.prefix.tab.children">
+        <segment><source>Prefixes</source></segment>
+      </unit>
+      <unit id="ipam.prefix.tab.history">
+        <segment><source>History</source></segment>
+      </unit>
+      <unit id="ipam.prefix.children_grid">
+        <segment><source>Prefixes in {cidr}</source></segment>
+      </unit>
+      <unit id="ipam.prefix.ranges_grid">
+        <segment><source>Ranges of {cidr}</source></segment>
+      </unit>
+      <unit id="ipam.prefix.no_children">
+        <segment><source>No prefixes inside yet.</source></segment>
+      </unit>
+      <unit id="ipam.col.address">
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="ipam.col.dns_name">
+        <segment><source>DNS name</source></segment>
+      </unit>
+      <unit id="ipam.col.host">
+        <segment><source>Host</source></segment>
+      </unit>
+      <unit id="ipam.col.mode">
+        <segment><source>Mode</source></segment>
+      </unit>
+      <unit id="ipam.col.mac">
+        <segment><source>MAC</source></segment>
+      </unit>
+      <unit id="ipam.col.status">
+        <segment><source>Status</source></segment>
+      </unit>
+      <unit id="ipam.col.tags">
+        <segment><source>Tags</source></segment>
+      </unit>
+      <unit id="ipam.col.updated">
+        <segment><source>Changed</source></segment>
+      </unit>
+      <unit id="ipam.col.prefix">
+        <segment><source>Prefix</source></segment>
+      </unit>
+      <unit id="ipam.col.vlan">
+        <segment><source>VLAN</source></segment>
+      </unit>
+      <unit id="ipam.col.description">
+        <segment><source>Description</source></segment>
+      </unit>
+      <unit id="ipam.col.utilization">
+        <segment><source>Utilization</source></segment>
+      </unit>
+      <unit id="ipam.col.range">
+        <segment><source>Range</source></segment>
+      </unit>
+      <unit id="ipam.col.role">
+        <segment><source>Role</source></segment>
+      </unit>
+      <unit id="ipam.col.lease">
+        <segment><source>Lease</source></segment>
+      </unit>
+      <unit id="ipam.col.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="ipam.col.site">
+        <segment><source>Site</source></segment>
+      </unit>
+      <unit id="ipam.col.vid">
+        <segment><source>VLAN id</source></segment>
+      </unit>
+      <unit id="ipam.col.tenant">
+        <segment><source>Tenant</source></segment>
+      </unit>
+      <unit id="ipam.col.vrf">
+        <segment><source>VRF</source></segment>
+      </unit>
+      <unit id="ipam.col.created">
+        <segment><source>Created</source></segment>
+      </unit>
+      <unit id="ipam.do.open">
+        <segment><source>Open</source></segment>
+      </unit>
+      <unit id="ipam.do.edit">
+        <segment><source>Edit</source></segment>
+      </unit>
+      <unit id="ipam.do.delete">
+        <segment><source>Delete</source></segment>
+      </unit>
+      <unit id="ipam.do.restore">
+        <segment><source>Restore</source></segment>
+      </unit>
+      <unit id="ipam.do.move">
+        <segment><source>Move to network</source></segment>
+      </unit>
+      <unit id="ipam.do.history">
+        <segment><source>History</source></segment>
+      </unit>
+      <unit id="ipam.do.next_free_address">
+        <segment><source>Claim next free</source></segment>
+      </unit>
+      <unit id="ipam.do.next_free_prefix">
+        <segment><source>Next free prefix</source></segment>
+      </unit>
+      <unit id="ipam.do.export_csv">
+        <segment><source>Export CSV</source></segment>
+      </unit>
+      <unit id="ipam.addresses.filter_label">
+        <segment><source>Filter addresses</source></segment>
+      </unit>
+      <unit id="ipam.addresses.filter_placeholder">
+        <segment><source>Filter by address, name or description</source></segment>
+      </unit>
+      <unit id="ipam.addresses.show_free">
+        <segment><source>Show free</source></segment>
+      </unit>
+      <unit id="ipam.addresses.grid">
+        <segment><source>Addresses in {cidr}</source></segment>
+      </unit>
+      <unit id="ipam.addresses.free">
+        <notes><note category="description">Follows the size of a free gap, for example 4 free.</note></notes>
+        <segment><source>{count, plural, one {free} other {free}}</source></segment>
+      </unit>
+      <unit id="ipam.addresses.claim">
+        <segment><source>Claim {ip}</source></segment>
+      </unit>
+      <unit id="ipam.addresses.dns_hint">
+        <segment><source>Enter saves the DNS name as a job. Esc cancels.</source></segment>
+      </unit>
+      <unit id="ipam.addresses.empty">
+        <segment><source>No addresses in this prefix yet.</source></segment>
+      </unit>
+      <unit id="ipam.address.renamed">
+        <segment><source>{ip} is now {name}</source></segment>
+      </unit>
+      <unit id="ipam.address.claimed">
+        <segment><source>Claimed {ip}</source></segment>
+      </unit>
+      <unit id="ipam.address.claim_failed">
+        <segment><source>Could not claim {ip}</source></segment>
+      </unit>
+      <unit id="ipam.move.dragging">
+        <segment><source>Moving {count, plural, one {# object} other {# objects}}</source></segment>
+      </unit>
+      <unit id="ipam.range.add">
+        <segment><source>Add range</source></segment>
+      </unit>
+      <unit id="ipam.range.empty">
+        <segment><source>No ranges in this prefix.</source></segment>
+      </unit>
+      <unit id="ipam.move.choose_title">
+        <segment><source>{count, plural, one {Move # object to a network} other {Move # objects to a network}}</source></segment>
+      </unit>
+      <unit id="ipam.move.choose_body">
+        <segment><source>Choose the target network. The move preview opens next; nothing changes until you confirm it.</source></segment>
+      </unit>
+      <unit id="ipam.move.no_target">
+        <segment><source>No network matches.</source></segment>
+      </unit>
+      <unit id="ipam.overview.sub">
+        <segment><source>{tenant}, {count, plural, one {# prefix} other {# prefixes}}, {alarms, plural, =0 {no alarms} one {# alarm} other {# alarms}}</source></segment>
+      </unit>
+      <unit id="ipam.overview.grid">
+        <segment><source>Prefixes of {vrf}</source></segment>
+      </unit>
+      <unit id="ipam.overview.empty_hint">
+        <segment><source>Add a prefix with the plus button of the tree, or import a spreadsheet.</source></segment>
+      </unit>
+      <unit id="ipam.addresses.filter_terms">
+        <segment><source>Filter: text, status:active, tag:camera, within:192.0.2.0/24</source></segment>
+      </unit>
+      <unit id="ipam.addresses.none">
+        <segment><source>No addresses in this VRF yet.</source></segment>
+      </unit>
+      <unit id="ipam.address.not_found">
+        <segment><source>No address {ip} here.</source></segment>
+      </unit>
+      <unit id="ipam.address.in_several">
+        <segment><source>{ip} exists in several VRFs. Choose one:</source></segment>
+      </unit>
+      <unit id="ipam.address.facts">
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="ipam.address.unassigned">
+        <segment><source>Not assigned to a host</source></segment>
+      </unit>
+      <unit id="ipam.address.interface">
+        <segment><source>Interface</source></segment>
+      </unit>
+      <unit id="ipam.move.title">
+        <notes><note category="description">Title of the job of a move. The job list shows the host next to it.</note></notes>
+        <segment><source>Move</source></segment>
+      </unit>
+      <unit id="ipam.move.task.dhcp">
+        <notes><note category="description">Manual task of a move. The server sends the arguments new_ip and cidr with every task.</note></notes>
+        <segment><source>Create a DHCP reservation of {new_ip} in the scope of {cidr}; keep the old one until cleanup.</source></segment>
+      </unit>
+      <unit id="ipam.move.task.dns">
+        <segment><source>Point {name} to {new_ip} (address and reverse records); remove the old records at cleanup.</source></segment>
+      </unit>
+      <unit id="ipam.move.task.device">
+        <segment><source>Reconfigure the device to {new_ip} in {cidr}.</source></segment>
+      </unit>
+      <unit id="ipam.move.task.l2">
+        <segment><source>Move the device to the network {cidr}.</source></segment>
+      </unit>
+      <unit id="ipam.move.task.observe">
+        <notes><note category="description">The argument timeout_secs is a whole number of seconds sent as text.</note></notes>
+        <segment><source>Confirm that the device is seen at {new_ip} in {cidr}; the move rolls back after {timeout_secs} seconds.</source></segment>
+      </unit>
+      <unit id="ipam.move.task.generic">
+        <segment><source>Do this step by hand: move the device from {old_ip} to {new_ip} in {cidr}, then mark it done.</source></segment>
+      </unit>
+      <unit id="ipam.move.step.intent">
+        <segment><source>Add {new_ip} to IPAM as planned; keep {old_ip} until cleanup.</source></segment>
+      </unit>
+      <unit id="ipam.move.step.cleanup">
+        <segment><source>Remove {old_ip} and make {new_ip} active.</source></segment>
+      </unit>
+      <unit id="ipam.form.create_kind">
+        <notes><note category="description">Title and button of a form that creates an object. The kind is a lowercase noun such as prefix, range or address.</note></notes>
+        <segment><source>Create {kind}</source></segment>
+      </unit>
+      <unit id="ipam.form.edit_title">
+        <notes><note category="description">Title of the form that edits an object, for example Edit prefix 192.0.2.0/24.</note></notes>
+        <segment><source>Edit {kind} {label}</source></segment>
+      </unit>
+      <unit id="ipam.form.save_changes">
+        <notes><note category="description">Button that saves an edit.</note></notes>
+        <segment><source>Save changes</source></segment>
+      </unit>
+      <unit id="ipam.form.create_title">
+        <notes><note category="description">Title of the plan dialog of a create, for example Create prefix 2001:db8:0:40::/62.</note></notes>
+        <segment><source>Create {kind} {label}</source></segment>
+      </unit>
+      <unit id="ipam.form.save_title">
+        <notes><note category="description">Title of the plan dialog of an edit.</note></notes>
+        <segment><source>Save changes to {kind} {label}</source></segment>
+      </unit>
+      <unit id="ipam.form.created">
+        <notes><note category="description">Toast after an object was created, for example Created prefix 2001:db8:0:40::/62.</note></notes>
+        <segment><source>Created {kind} {label}</source></segment>
+      </unit>
+      <unit id="ipam.form.saved">
+        <notes><note category="description">Toast after an edit was saved, for example Saved 192.0.2.0/24.</note></notes>
+        <segment><source>Saved {label}</source></segment>
+      </unit>
+      <unit id="ipam.form.use_network">
+        <notes><note category="description">Button that replaces a network that has host bits set with the network it belongs to.</note></notes>
+        <segment><source>Use {network}</source></segment>
+      </unit>
+      <unit id="ipam.form.role_auto">
+        <notes><note category="description">Choice of the role of a new prefix: the server picks network or supernet.</note></notes>
+        <segment><source>Decide from what it contains</source></segment>
+      </unit>
+      <unit id="ipam.form.role_help">
+        <segment><source>A network holds addresses. A supernet holds other prefixes.</source></segment>
+      </unit>
+      <unit id="ipam.field.none">
+        <notes><note category="description">Choice in a list that means no value, for example no VLAN.</note></notes>
+        <segment><source>None</source></segment>
+      </unit>
+      <unit id="ipam.field.cidr">
+        <notes><note category="description">Label of the field for the address and length of a prefix.</note></notes>
+        <segment><source>Network</source></segment>
+      </unit>
+      <unit id="ipam.field.cidr_help">
+        <segment><source>In CIDR form, for example 192.0.2.0/24 or 2001:db8::/32.</source></segment>
+      </unit>
+      <unit id="ipam.field.cidr_required">
+        <segment><source>Enter the network.</source></segment>
+      </unit>
+      <unit id="ipam.field.cidr_invalid">
+        <segment><source>Enter a network in CIDR form, such as 192.0.2.0/24 or 2001:db8::/32.</source></segment>
+      </unit>
+      <unit id="ipam.field.alarm_warn">
+        <segment><source>Warning at (percent)</source></segment>
+      </unit>
+      <unit id="ipam.field.alarm_crit">
+        <segment><source>Critical at (percent)</source></segment>
+      </unit>
+      <unit id="ipam.field.alarm_help">
+        <segment><source>Leave both empty for no alarm.</source></segment>
+      </unit>
+      <unit id="ipam.field.alarm_both">
+        <segment><source>Set both thresholds, or leave both empty.</source></segment>
+      </unit>
+      <unit id="ipam.field.alarm_range">
+        <segment><source>Enter a whole number from 1 to 100.</source></segment>
+      </unit>
+      <unit id="ipam.field.alarm_order">
+        <segment><source>The critical threshold must be above the warning threshold.</source></segment>
+      </unit>
+      <unit id="ipam.field.first">
+        <segment><source>First address</source></segment>
+      </unit>
+      <unit id="ipam.field.last">
+        <segment><source>Last address</source></segment>
+      </unit>
+      <unit id="ipam.field.inside_prefix">
+        <segment><source>Inside {cidr}.</source></segment>
+      </unit>
+      <unit id="ipam.field.ip">
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="ipam.field.ip_required">
+        <segment><source>Enter an address.</source></segment>
+      </unit>
+      <unit id="ipam.field.ip_invalid">
+        <segment><source>This is not a valid IP address.</source></segment>
+      </unit>
+      <unit id="ipam.field.ip_renumber_help">
+        <segment><source>Changing the address moves it within its VRF. The prefix follows from the new address.</source></segment>
+      </unit>
+      <unit id="ipam.field.last_before_first">
+        <segment><source>The last address must not come before the first.</source></segment>
+      </unit>
+      <unit id="ipam.field.lease_help">
+        <segment><source>Optional. From 1 minute to 365 days.</source></segment>
+      </unit>
+      <unit id="ipam.field.lease_number">
+        <segment><source>Enter a number, for example 12.</source></segment>
+      </unit>
+      <unit id="ipam.field.lease_range">
+        <segment><source>The lease time must be between 1 minute and 365 days.</source></segment>
+      </unit>
+      <unit id="ipam.field.lease_unit">
+        <segment><source>Unit of the lease time</source></segment>
+      </unit>
+      <unit id="ipam.field.unit_minutes">
+        <notes><note category="description">Unit of a lease time, lowercase, in a list next to a number.</note></notes>
+        <segment><source>minutes</source></segment>
+      </unit>
+      <unit id="ipam.field.unit_hours">
+        <segment><source>hours</source></segment>
+      </unit>
+      <unit id="ipam.field.unit_days">
+        <segment><source>days</source></segment>
+      </unit>
+      <unit id="ipam.field.dns_help">
+        <segment><source>A full name, for example nas.example.com. Leave empty for none.</source></segment>
+      </unit>
+      <unit id="ipam.field.dns_invalid">
+        <segment><source>Enter a full DNS name, such as host.example.com.</source></segment>
+      </unit>
+      <unit id="ipam.field.custom">
+        <segment><source>Custom fields</source></segment>
+      </unit>
+      <unit id="ipam.field.integer_invalid">
+        <segment><source>Enter a whole number.</source></segment>
+      </unit>
+      <unit id="ipam.field.url_invalid">
+        <segment><source>Enter a full web address, such as https://example.com.</source></segment>
+      </unit>
+      <unit id="ipam.field.option_invalid">
+        <segment><source>Choose one of the options.</source></segment>
+      </unit>
+      <unit id="ipam.field.required">
+        <segment><source>This field is required.</source></segment>
+      </unit>
+      <unit id="ipam.field.choose">
+        <segment><source>Choose an option</source></segment>
+      </unit>
+      <unit id="ipam.field.tags_help">
+        <segment><source>Separate tags with commas.</source></segment>
+      </unit>
+      <unit id="ipam.field.tag_invalid">
+        <segment><source>A tag has 1 to {max} characters.</source></segment>
+      </unit>
+      <unit id="ipam.field.tag_remove">
+        <segment><source>Remove tag {tag}</source></segment>
+      </unit>
+      <unit id="ipam.delete.title">
+        <notes><note category="description">Title of the delete dialog and its confirm button, for example Delete prefix 192.0.2.0/24.</note></notes>
+        <segment><source>Delete {kind} {label}</source></segment>
+      </unit>
+      <unit id="ipam.delete.cascade">
+        <segment><source>Also delete what it contains</source></segment>
+      </unit>
+      <unit id="ipam.delete.done">
+        <segment><source>Deleted {kind} {label}</source></segment>
+      </unit>
+      <unit id="ipam.delete.undo">
+        <notes><note category="description">Button in the toast after a delete: restores the object.</note></notes>
+        <segment><source>Undo</source></segment>
+      </unit>
+      <unit id="ipam.delete.undo_failed">
+        <segment><source>Could not restore {kind} {label}</source></segment>
+      </unit>
+      <unit id="ipam.restore.title">
+        <notes><note category="description">Title of the restore dialog and its confirm button.</note></notes>
+        <segment><source>Restore {kind} {label}</source></segment>
+      </unit>
+      <unit id="ipam.restore.done">
+        <segment><source>Restored {kind} {label}</source></segment>
+      </unit>
+      <unit id="ipam.history.label">
+        <segment><source>History of {label}</source></segment>
+      </unit>
+      <unit id="ipam.history.title">
+        <segment><source>History of {label}</source></segment>
+      </unit>
+      <unit id="ipam.history.empty">
+        <segment><source>Nothing has happened to this object yet.</source></segment>
+      </unit>
+      <unit id="ipam.history.more">
+        <segment><source>Load more</source></segment>
+      </unit>
+      <unit id="ipam.next_free.address_title">
+        <segment><source>Next free address in {cidr}</source></segment>
+      </unit>
+      <unit id="ipam.next_free.prefix_title">
+        <segment><source>Next free prefix in {cidr}</source></segment>
+      </unit>
+      <unit id="ipam.next_free.find_address">
+        <notes><note category="description">Button of the first step: it previews which address the server would take.</note></notes>
+        <segment><source>Find next free address</source></segment>
+      </unit>
+      <unit id="ipam.next_free.find_prefix">
+        <segment><source>Find next free prefix</source></segment>
+      </unit>
+      <unit id="ipam.next_free.address">
+        <segment><source>Next free address: {ip}</source></segment>
+      </unit>
+      <unit id="ipam.next_free.prefix">
+        <segment><source>Next free prefix: {cidr}</source></segment>
+      </unit>
+      <unit id="ipam.next_free.create">
+        <segment><source>Create {cidr}</source></segment>
+      </unit>
+      <unit id="ipam.next_free.whole_network">
+        <segment><source>The whole network {cidr}</source></segment>
+      </unit>
+      <unit id="ipam.next_free.from">
+        <segment><source>Allocate from</source></segment>
+      </unit>
+      <unit id="ipam.next_free.length">
+        <segment><source>Prefix length</source></segment>
+      </unit>
+      <unit id="ipam.next_free.length_help">
+        <segment><source>Longer than the length of {cidr}, from {min} to {max}.</source></segment>
+      </unit>
+      <unit id="ipam.next_free.length_required">
+        <segment><source>Enter the length.</source></segment>
+      </unit>
+      <unit id="ipam.next_free.length_invalid">
+        <segment><source>Enter a whole number from {min} to {max}.</source></segment>
+      </unit>
+      <unit id="ipam.next_free.suggest">
+        <segment><source>Lengths on a nibble boundary:</source></segment>
+      </unit>
+      <unit id="ipam.col.tag">
+        <segment><source>Tag</source></segment>
+      </unit>
+      <unit id="ipam.col.vni">
+        <segment><source>VNI</source></segment>
+      </unit>
+      <unit id="ipam.tenancy.save">
+        <segment><source>Save</source></segment>
+      </unit>
+      <unit id="ipam.tenancy.saved">
+        <segment><source>{name} saved</source></segment>
+      </unit>
+      <unit id="ipam.tenancy.created">
+        <segment><source>{name} created</source></segment>
+      </unit>
+      <unit id="ipam.tenancy.name_required">
+        <segment><source>Enter a name.</source></segment>
+      </unit>
+      <unit id="ipam.tenancy.none">
+        <segment><source>None</source></segment>
+      </unit>
+      <unit id="ipam.tenancy.filter_placeholder">
+        <segment><source>Name or description</source></segment>
+      </unit>
+      <unit id="ipam.tenant.title">
+        <segment><source>Tenants</source></segment>
+      </unit>
+      <unit id="ipam.tenant.create">
+        <segment><source>New tenant</source></segment>
+      </unit>
+      <unit id="ipam.tenant.create_title">
+        <segment><source>New tenant</source></segment>
+      </unit>
+      <unit id="ipam.tenant.edit_title">
+        <segment><source>Edit tenant {name}</source></segment>
+      </unit>
+      <unit id="ipam.tenant.filter_label">
+        <segment><source>Filter tenants</source></segment>
+      </unit>
+      <unit id="ipam.tenant.empty">
+        <segment><source>No tenants yet.</source></segment>
+      </unit>
+      <unit id="ipam.vrf.title">
+        <segment><source>VRFs</source></segment>
+      </unit>
+      <unit id="ipam.vrf.create">
+        <segment><source>New VRF</source></segment>
+      </unit>
+      <unit id="ipam.vrf.create_title">
+        <segment><source>New VRF</source></segment>
+      </unit>
+      <unit id="ipam.vrf.edit_title">
+        <segment><source>Edit VRF {name}</source></segment>
+      </unit>
+      <unit id="ipam.vrf.filter_label">
+        <segment><source>Filter VRFs</source></segment>
+      </unit>
+      <unit id="ipam.vrf.empty">
+        <segment><source>No VRFs yet.</source></segment>
+      </unit>
+      <unit id="ipam.vrf.rd">
+        <segment><source>Route distinguisher</source></segment>
+      </unit>
+      <unit id="ipam.vrf.rd_help">
+        <segment><source>Optional, for example 64512:10. Only used when the VRF is announced to routers.</source></segment>
+      </unit>
+      <unit id="ipam.vrf.default_tenant">
+        <segment><source>Default tenant</source></segment>
+      </unit>
+      <unit id="ipam.site.create">
+        <segment><source>New site</source></segment>
+      </unit>
+      <unit id="ipam.site.create_title">
+        <segment><source>New site</source></segment>
+      </unit>
+      <unit id="ipam.site.edit_title">
+        <segment><source>Edit site {name}</source></segment>
+      </unit>
+      <unit id="ipam.site.parent">
+        <segment><source>Inside site</source></segment>
+      </unit>
+      <unit id="ipam.site.ad_site">
+        <segment><source>Active Directory site</source></segment>
+      </unit>
+      <unit id="ipam.site.ad_site_help">
+        <segment><source>The name of the matching site in Active Directory Sites and Services, if any.</source></segment>
+      </unit>
+      <unit id="ipam.site.filter_label">
+        <segment><source>Filter sites</source></segment>
+      </unit>
+      <unit id="ipam.site.filter_placeholder">
+        <segment><source>Name, description or AD site</source></segment>
+      </unit>
+      <unit id="ipam.site.empty">
+        <segment><source>No sites yet.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.create">
+        <segment><source>New VLAN</source></segment>
+      </unit>
+      <unit id="ipam.vlan.create_title">
+        <segment><source>New VLAN</source></segment>
+      </unit>
+      <unit id="ipam.vlan.edit_title">
+        <segment><source>Edit VLAN {vid}</source></segment>
+      </unit>
+      <unit id="ipam.vlan.vid_invalid">
+        <segment><source>Enter a VLAN id from 1 to 4094.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.vni_invalid">
+        <segment><source>Enter a VNI from 0 to 16777215.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.vni_help">
+        <segment><source>The VXLAN network identifier, when the VLAN is carried over VXLAN.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.filter_label">
+        <segment><source>Filter VLANs</source></segment>
+      </unit>
+      <unit id="ipam.vlan.filter_placeholder">
+        <segment><source>VLAN id, name or status:active</source></segment>
+      </unit>
+      <unit id="ipam.vlan.empty">
+        <segment><source>No VLANs yet.</source></segment>
+      </unit>
+      <unit id="ipam.tags.sub">
+        <segment><source>Tags on live objects, with the number of objects of each kind</source></segment>
+      </unit>
+      <unit id="ipam.tags.count">
+        <segment><source>Objects</source></segment>
+      </unit>
+      <unit id="ipam.tags.by_kind">
+        <segment><source>By kind</source></segment>
+      </unit>
+      <unit id="ipam.tags.show">
+        <segment><source>Show</source></segment>
+      </unit>
+      <unit id="ipam.tags.empty">
+        <segment><source>No object carries a tag yet.</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.key">
+        <segment><source>Key</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.key_help">
+        <segment><source>Lowercase letters, digits and underscores, starting with a letter. The key cannot change later.</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.key_invalid">
+        <segment><source>Use lowercase letters, digits and underscores, starting with a letter, at most 64 characters.</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.type">
+        <segment><source>Value type</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.options">
+        <segment><source>Choices</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.options_help">
+        <segment><source>One choice per line.</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.options_required">
+        <segment><source>Enter at least one choice.</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.applies_to">
+        <segment><source>Applies to</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.applies_required">
+        <segment><source>Choose at least one kind of object.</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.required">
+        <segment><source>Every object of these kinds must have a value</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.required_col">
+        <segment><source>Required</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.yes">
+        <segment><source>Yes</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.no">
+        <segment><source>No</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.create">
+        <segment><source>New custom field</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.create_title">
+        <segment><source>New custom field</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.edit_title">
+        <segment><source>Edit custom field {key}</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.delete_title">
+        <segment><source>Delete custom field {key}</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.deleted">
+        <segment><source>Custom field {key} deleted</source></segment>
+      </unit>
+      <unit id="ipam.cfdef.empty">
+        <segment><source>No custom fields defined yet.</source></segment>
+      </unit>
+    </group>
+    <group id="principal">
+      <unit id="principal.you">
+        <segment><source>{name} (you)</source></segment>
+      </unit>
+      <unit id="principal.user">
+        <notes><note category="description">A user whose name this account may not read; id is the first characters of the user id.</note></notes>
+        <segment><source>user {id}</source></segment>
+      </unit>
+      <unit id="principal.token">
+        <segment><source>API token {id}</source></segment>
+      </unit>
+      <unit id="principal.system">
+        <notes><note category="description">Work of Tenko itself; component is a part such as ipam or jobs.</note></notes>
+        <segment><source>Tenko ({component})</source></segment>
+      </unit>
+      <unit id="principal.node">
+        <segment><source>node {id}</source></segment>
+      </unit>
+    </group>
+    <group id="move">
+      <unit id="move.title">
+        <segment><source>Move preview</source></segment>
+      </unit>
+      <unit id="move.heading">
+        <notes><note category="description">Followed by the target network, for example Move 5 objects to 198.51.100.0/24.</note></notes>
+        <segment><source>{count, plural, one {Move # object to} other {Move # objects to}}</source></segment>
+      </unit>
+      <unit id="move.heading_vlan">
+        <segment><source>VLAN {vid}</source></segment>
+      </unit>
+      <unit id="move.preview_only">
+        <segment><source>Preview only. Nothing has changed yet.</source></segment>
+      </unit>
+      <unit id="move.phase1_title">
+        <segment><source>What happens:</source></segment>
+      </unit>
+      <unit id="move.phase1_body">
+        <segment><source>Tenko changes the IPAM intent of each device first. The DHCP reservation, the DNS records, the network change and the confirmation that the device is seen in the new network are tasks you tick off in this version; a device waits for its ticked tasks before its network change.</source></segment>
+      </unit>
+      <unit id="move.nothing">
+        <segment><source>Nothing to move: the link names no target network or no objects. Choose them in the IPAM view.</source></segment>
+      </unit>
+      <unit id="move.devices">
+        <segment><source>Devices</source></segment>
+      </unit>
+      <unit id="move.included">
+        <segment><source>{count, number} of {total, number} included</source></segment>
+      </unit>
+      <unit id="move.legend.auto">
+        <segment><source>Tenko does it</source></segment>
+      </unit>
+      <unit id="move.legend.manual">
+        <segment><source>You tick it off</source></segment>
+      </unit>
+      <unit id="move.keys.move">
+        <segment><source>move</source></segment>
+      </unit>
+      <unit id="move.keys.include">
+        <segment><source>include</source></segment>
+      </unit>
+      <unit id="move.keys.steps">
+        <segment><source>show steps</source></segment>
+      </unit>
+      <unit id="move.show_all_steps">
+        <segment><source>Show all steps</source></segment>
+      </unit>
+      <unit id="move.show_steps">
+        <segment><source>Show the steps for {name}</source></segment>
+      </unit>
+      <unit id="move.include">
+        <segment><source>Include {name}</source></segment>
+      </unit>
+      <unit id="move.col.include">
+        <segment><source>Include</source></segment>
+      </unit>
+      <unit id="move.col.device">
+        <segment><source>Device</source></segment>
+      </unit>
+      <unit id="move.col.ip">
+        <segment><source>Address change</source></segment>
+      </unit>
+      <unit id="move.col.dns">
+        <segment><source>DNS change (A, PTR), manual</source></segment>
+      </unit>
+      <unit id="move.col.l2">
+        <segment><source>Network change</source></segment>
+      </unit>
+      <unit id="move.col.manual">
+        <segment><source>Manual steps</source></segment>
+      </unit>
+      <unit id="move.other_host_part">
+        <segment><source>other host part</source></segment>
+      </unit>
+      <unit id="move.tasks">
+        <segment><source>{count, plural, =0 {none} one {# task} other {# tasks}}</source></segment>
+      </unit>
+      <unit id="move.reason.host_part_taken">
+        <segment><source>Not the same host part: it is taken in the target network, so the next free address {ip} was chosen.</source></segment>
+      </unit>
+      <unit id="move.reason.host_part_outside">
+        <segment><source>Not the same host part: it lies outside the target network, so the next free address {ip} was chosen.</source></segment>
+      </unit>
+      <unit id="move.reason.host_part_reserved">
+        <segment><source>Not the same host part: it lies in a reserved range or the DHCP pool of the target, so the next free address {ip} was chosen.</source></segment>
+      </unit>
+      <unit id="move.step.ipam_intent">
+        <segment><source>Change the address in IPAM from {old_ip} to {new_ip}.</source></segment>
+      </unit>
+      <unit id="move.step.dhcp_manual">
+        <segment><source>Reserve {ip} for {mac} in the DHCP scope of {cidr}.</source></segment>
+      </unit>
+      <unit id="move.step.dhcp_manual_no_mac">
+        <segment><source>Reserve {ip} for {host} in the DHCP scope of {cidr} (no MAC address is known).</source></segment>
+      </unit>
+      <unit id="move.step.device_manual">
+        <segment><source>Configure {host} by hand with {ip}/{length} and the gateway of the new network.</source></segment>
+      </unit>
+      <unit id="move.step.dns_manual">
+        <segment><source>Point {name} to {ip} (A and PTR records).</source></segment>
+      </unit>
+      <unit id="move.step.l2_move">
+        <segment><source>Move {host} to VLAN {vid} (switch port or wireless network).</source></segment>
+      </unit>
+      <unit id="move.step.l2_move_novlan">
+        <segment><source>Connect {host} to the network {cidr}.</source></segment>
+      </unit>
+      <unit id="move.step.observe">
+        <segment><source>Confirm that {host} is seen at {ip}.</source></segment>
+      </unit>
+      <unit id="move.step.cleanup">
+        <segment><source>Remove the old reservation, lease and DNS records of {ip}.</source></segment>
+      </unit>
+      <unit id="move.group.ipam_intent">
+        <segment><source>IPAM changes ({count, number})</source></segment>
+      </unit>
+      <unit id="move.group.dhcp_manual">
+        <segment><source>DHCP reservations ({count, number})</source></segment>
+      </unit>
+      <unit id="move.group.device_manual">
+        <segment><source>On the device ({count, number})</source></segment>
+      </unit>
+      <unit id="move.group.dns_manual">
+        <segment><source>DNS records ({count, number})</source></segment>
+      </unit>
+      <unit id="move.group.l2_move">
+        <segment><source>Network changes ({count, number})</source></segment>
+      </unit>
+      <unit id="move.group.observe">
+        <segment><source>Confirm the device is seen ({count, number})</source></segment>
+      </unit>
+      <unit id="move.group.cleanup">
+        <segment><source>Clean up ({count, number})</source></segment>
+      </unit>
+      <unit id="move.checklist">
+        <segment><source>Manual tasks</source></segment>
+      </unit>
+      <unit id="move.checklist_sum">
+        <segment><source>{count, plural, one {# task for the whole batch} other {# tasks for the whole batch}}</source></segment>
+      </unit>
+      <unit id="move.checklist_foot">
+        <segment><source>The jobs create these tasks when they start, as one checklist for the whole batch. A device waits for its ticked tasks before its network change; Tenko then waits until you confirm that the device is seen.</source></segment>
+      </unit>
+      <unit id="move.tickets">
+        <segment><source>Create tickets</source></segment>
+      </unit>
+      <unit id="move.tickets_hint">
+        <segment><source>Sends these tasks to a ticket system once a ticketing connector is installed.</source></segment>
+      </unit>
+      <unit id="move.confirm">
+        <segment><source>Confirm the moves</source></segment>
+      </unit>
+      <unit id="move.parallelism">
+        <segment><source>Parallelism</source></segment>
+      </unit>
+      <unit id="move.parallelism_help">
+        <segment><source>Moves running at the same time. Protects DHCP and the network controller from bursts.</source></segment>
+      </unit>
+      <unit id="move.timeout">
+        <segment><source>Observation timeout</source></segment>
+      </unit>
+      <unit id="move.timeout_auto">
+        <segment><source>Automatic: {timeout}</source></segment>
+      </unit>
+      <unit id="move.timeout.lease">
+        <segment><source>Lease {lease}, so the timeout is {timeout}: half the lease, when devices renew, never below 5 min.</source></segment>
+      </unit>
+      <unit id="move.timeout.request">
+        <segment><source>Timeout {timeout}, as chosen.</source></segment>
+      </unit>
+      <unit id="move.timeout.default">
+        <segment><source>No DHCP lease is known for the target network, so the timeout is {timeout}.</source></segment>
+      </unit>
+      <unit id="move.rollback_note">
+        <segment><source>A device that is not seen within the timeout is rolled back automatically.</source></segment>
+      </unit>
+      <unit id="move.start">
+        <segment><source>{count, plural, one {Start # move} other {Start # moves}}</source></segment>
+      </unit>
+      <unit id="move.started">
+        <segment><source>{count, plural, one {Started # move} other {Started # moves}}</source></segment>
+      </unit>
+      <unit id="move.open_jobs">
+        <segment><source>Open jobs</source></segment>
+      </unit>
+    </group>
+    <group id="jobs">
+      <unit id="jobs.title">
+        <notes><note category="description">Heading of the jobs list and accessible name of its grid.</note></notes>
+        <segment><source>Jobs</source></segment>
+      </unit>
+      <unit id="jobs.sub">
+        <segment><source>Background work. Nothing here blocks you.</source></segment>
+      </unit>
+      <unit id="jobs.crumbs">
+        <segment><source>Breadcrumb</source></segment>
+      </unit>
+      <unit id="jobs.filter.label">
+        <segment><source>Filter jobs</source></segment>
+      </unit>
+      <unit id="jobs.filter.placeholder">
+        <segment><source>Filter by title, kind or id</source></segment>
+      </unit>
+      <unit id="jobs.filter.kind">
+        <segment><source>Kind: {kind}</source></segment>
+      </unit>
+      <unit id="jobs.filter.target">
+        <segment><source>Target: {target}</source></segment>
+      </unit>
+      <unit id="jobs.filter.group">
+        <notes><note category="description">Chip shown when the list is limited to one job group. The argument group is a short id.</note></notes>
+        <segment><source>Group {group}</source></segment>
+      </unit>
+      <unit id="jobs.filter.remove">
+        <segment><source>Remove filter: {filter}</source></segment>
+      </unit>
+      <unit id="jobs.view.all">
+        <segment><source>All</source></segment>
+      </unit>
+      <unit id="jobs.view.active">
+        <notes><note category="description">Jobs that are queued, running, waiting or rolling back.</note></notes>
+        <segment><source>Active</source></segment>
+      </unit>
+      <unit id="jobs.view.failed">
+        <segment><source>Failed or rolled back</source></segment>
+      </unit>
+      <unit id="jobs.view.finished">
+        <notes><note category="description">Jobs in a final state: done, failed, rolled back or cancelled.</note></notes>
+        <segment><source>Finished</source></segment>
+      </unit>
+      <unit id="jobs.needs_you">
+        <notes><note category="description">Filter chip and row marker for jobs that wait for a person to do or confirm a task.</note></notes>
+        <segment><source>Needs you</source></segment>
+      </unit>
+      <unit id="jobs.flag.cancel_requested">
+        <segment><source>Cancel requested</source></segment>
+      </unit>
+      <unit id="jobs.empty.title">
+        <segment><source>No jobs yet</source></segment>
+      </unit>
+      <unit id="jobs.empty.body">
+        <segment><source>Moves, imports and other bulk changes run as jobs. They appear here as soon as one starts.</source></segment>
+      </unit>
+      <unit id="jobs.empty.filtered">
+        <segment><source>No jobs match the filter.</source></segment>
+      </unit>
+      <unit id="jobs.col.state">
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="jobs.col.job">
+        <segment><source>Job</source></segment>
+      </unit>
+      <unit id="jobs.col.kind">
+        <segment><source>Kind</source></segment>
+      </unit>
+      <unit id="jobs.col.progress">
+        <segment><source>Progress</source></segment>
+      </unit>
+      <unit id="jobs.col.step">
+        <segment><source>Current step</source></segment>
+      </unit>
+      <unit id="jobs.col.by">
+        <segment><source>Started by</source></segment>
+      </unit>
+      <unit id="jobs.col.created">
+        <segment><source>Created</source></segment>
+      </unit>
+      <unit id="jobs.col.finished">
+        <segment><source>Finished</source></segment>
+      </unit>
+      <unit id="jobs.targets">
+        <notes><note category="description">How many objects a job changes.</note></notes>
+        <segment><source>{count, plural, one {# object} other {# objects}}</source></segment>
+      </unit>
+      <unit id="jobs.progress">
+        <notes><note category="description">Progress of a job, for example 3 of 6 steps.</note></notes>
+        <segment><source>{done, number} of {total, plural, one {# step} other {# steps}}</source></segment>
+      </unit>
+      <unit id="jobs.step_position">
+        <notes><note category="description">Shown for the current step of a job while its description is not read yet.</note></notes>
+        <segment><source>Step {n, number} of {total, number}</source></segment>
+      </unit>
+      <unit id="jobs.state.queued">
+        <segment><source>Queued</source></segment>
+      </unit>
+      <unit id="jobs.state.running">
+        <segment><source>Running</source></segment>
+      </unit>
+      <unit id="jobs.state.waiting">
+        <segment><source>Waiting</source></segment>
+      </unit>
+      <unit id="jobs.state.rolling_back">
+        <segment><source>Rolling back</source></segment>
+      </unit>
+      <unit id="jobs.state.succeeded">
+        <segment><source>Done</source></segment>
+      </unit>
+      <unit id="jobs.state.failed">
+        <segment><source>Failed</source></segment>
+      </unit>
+      <unit id="jobs.state.rolled_back">
+        <segment><source>Rolled back</source></segment>
+      </unit>
+      <unit id="jobs.state.cancelled">
+        <segment><source>Cancelled</source></segment>
+      </unit>
+      <unit id="jobs.step_state.pending">
+        <segment><source>Not started</source></segment>
+      </unit>
+      <unit id="jobs.step_state.running">
+        <segment><source>Running</source></segment>
+      </unit>
+      <unit id="jobs.step_state.done">
+        <segment><source>Done</source></segment>
+      </unit>
+      <unit id="jobs.step_state.skipped">
+        <segment><source>Skipped</source></segment>
+      </unit>
+      <unit id="jobs.step_state.waiting_for_observation">
+        <segment><source>Waiting to see the device</source></segment>
+      </unit>
+      <unit id="jobs.step_state.waiting_for_manual">
+        <segment><source>Waiting for you</source></segment>
+      </unit>
+      <unit id="jobs.step_state.failed">
+        <segment><source>Failed</source></segment>
+      </unit>
+      <unit id="jobs.step_state.compensating">
+        <segment><source>Undoing</source></segment>
+      </unit>
+      <unit id="jobs.step_state.compensated">
+        <segment><source>Undone</source></segment>
+      </unit>
+      <unit id="jobs.step_state.compensation_failed">
+        <segment><source>Undo failed</source></segment>
+      </unit>
+      <unit id="jobs.title.move">
+        <segment><source>Move host to another network</source></segment>
+      </unit>
+      <unit id="jobs.title.import_apply">
+        <segment><source>Apply an import</source></segment>
+      </unit>
+      <unit id="jobs.title.ipam_apply">
+        <segment><source>Apply an IPAM change</source></segment>
+      </unit>
+      <unit id="jobs.step.ipam_intent">
+        <segment><source>Record the new address of {host}</source></segment>
+      </unit>
+      <unit id="jobs.step.dhcp_manual">
+        <segment><source>Reserve {ip} for {host} in DHCP</source></segment>
+      </unit>
+      <unit id="jobs.step.device_manual">
+        <segment><source>Set {ip} on {host}</source></segment>
+      </unit>
+      <unit id="jobs.step.dns_manual">
+        <segment><source>Point {name} to {new_ip} in DNS</source></segment>
+      </unit>
+      <unit id="jobs.step.l2_move">
+        <segment><source>Move {host} to VLAN {vlan}</source></segment>
+      </unit>
+      <unit id="jobs.step.observe">
+        <segment><source>Wait until {host} is seen on {ip}</source></segment>
+      </unit>
+      <unit id="jobs.step.cleanup">
+        <segment><source>Clean up the old address of {host}</source></segment>
+      </unit>
+      <unit id="jobs.step.import_parse">
+        <segment><source>Read the uploaded sheets</source></segment>
+      </unit>
+      <unit id="jobs.step.import_plan">
+        <segment><source>Plan the changes</source></segment>
+      </unit>
+      <unit id="jobs.step.import_apply_chunk">
+        <segment><source>Apply the planned changes</source></segment>
+      </unit>
+      <unit id="jobs.step.ipam_apply">
+        <segment><source>Apply the change</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_intent">
+        <segment><source>Record the new address</source></segment>
+      </unit>
+      <unit id="jobs.stepname.dhcp_manual">
+        <segment><source>Reserve in DHCP</source></segment>
+      </unit>
+      <unit id="jobs.stepname.device_manual">
+        <segment><source>Set the address on the device</source></segment>
+      </unit>
+      <unit id="jobs.stepname.dns_manual">
+        <segment><source>Update DNS</source></segment>
+      </unit>
+      <unit id="jobs.stepname.l2_move">
+        <segment><source>Move to the new VLAN</source></segment>
+      </unit>
+      <unit id="jobs.stepname.observe">
+        <segment><source>Confirm that the device is seen</source></segment>
+      </unit>
+      <unit id="jobs.stepname.cleanup">
+        <segment><source>Clean up the old address</source></segment>
+      </unit>
+      <unit id="jobs.task.dhcp_reserve">
+        <segment><source>Reserve {ip} for {host} (MAC {mac}) in the DHCP server of {prefix}.</source></segment>
+      </unit>
+      <unit id="jobs.task.dhcp_release">
+        <segment><source>Remove the DHCP reservation of {ip} for {host}.</source></segment>
+      </unit>
+      <unit id="jobs.task.dns_update">
+        <segment><source>Change the DNS record {name} from {old_ip} to {new_ip}.</source></segment>
+      </unit>
+      <unit id="jobs.task.dns_revert">
+        <segment><source>Change the DNS record {name} back to {old_ip}.</source></segment>
+      </unit>
+      <unit id="jobs.undo.step">
+        <notes><note category="description">The engine uses this text when a step that cannot be undone automatically has no undo text of its own.</note></notes>
+        <segment><source>Undo step {step} ({kind}) by hand, then mark this done.</source></segment>
+      </unit>
+      <unit id="jobs.problem.title">
+        <segment><source>What went wrong</source></segment>
+      </unit>
+      <unit id="jobs.error.cancelled">
+        <segment><source>The job was cancelled.</source></segment>
+      </unit>
+      <unit id="jobs.error.timeout">
+        <segment><source>The job did not finish within its timeout, so it was rolled back.</source></segment>
+      </unit>
+      <unit id="jobs.error.step_failed">
+        <segment><source>A step failed.</source></segment>
+      </unit>
+      <unit id="jobs.error.step_deadline_passed">
+        <segment><source>A step was still waiting when its deadline passed, so the job was rolled back.</source></segment>
+      </unit>
+      <unit id="jobs.error.step_timeout">
+        <segment><source>A step took longer than its timeout.</source></segment>
+      </unit>
+      <unit id="jobs.error.step_interrupted">
+        <segment><source>A step was interrupted, for example by a restart.</source></segment>
+      </unit>
+      <unit id="jobs.error.step_panicked">
+        <segment><source>A step stopped unexpectedly.</source></segment>
+      </unit>
+      <unit id="jobs.error.step_invalid_params">
+        <segment><source>A step has settings that are not valid.</source></segment>
+      </unit>
+      <unit id="jobs.error.step_not_compensable">
+        <segment><source>A step cannot be undone automatically. It needs an undo task by hand.</source></segment>
+      </unit>
+      <unit id="jobs.error.step_not_found">
+        <segment><source>This job has no such step.</source></segment>
+      </unit>
+      <unit id="jobs.error.unknown_step_kind">
+        <segment><source>A step of this job is not known to the node that runs it.</source></segment>
+      </unit>
+      <unit id="jobs.error.not_found">
+        <segment><source>This job does not exist. It may have been removed.</source></segment>
+      </unit>
+      <unit id="jobs.error.invalid_transition">
+        <segment><source>The job is in another state now, so this is no longer possible. Reload the page to see its state.</source></segment>
+      </unit>
+      <unit id="jobs.error.note_too_long">
+        <segment><source>The note is too long. It can have at most {max, number} bytes.</source></segment>
+      </unit>
+      <unit id="jobs.error.query_invalid">
+        <segment><source>The filter {param} does not accept the value {value}.</source></segment>
+      </unit>
+      <unit id="jobs.problem.detail">
+        <segment><source>Detail from the server: {detail}</source></segment>
+      </unit>
+      <unit id="jobs.fact.id">
+        <segment><source>Identifier</source></segment>
+      </unit>
+      <unit id="jobs.fact.created">
+        <segment><source>Created</source></segment>
+      </unit>
+      <unit id="jobs.fact.started">
+        <segment><source>Started</source></segment>
+      </unit>
+      <unit id="jobs.fact.finished">
+        <segment><source>Finished</source></segment>
+      </unit>
+      <unit id="jobs.fact.timeout">
+        <segment><source>Timeout</source></segment>
+      </unit>
+      <unit id="jobs.fact.timeout_hint">
+        <segment><source>When the timeout passes, the job rolls back.</source></segment>
+      </unit>
+      <unit id="jobs.fact.group">
+        <segment><source>Group</source></segment>
+      </unit>
+      <unit id="jobs.fact.group_limit">
+        <segment><source>At most {limit, number} run at a time</source></segment>
+      </unit>
+      <unit id="jobs.fact.group_link">
+        <segment><source>Show the jobs of this group</source></segment>
+      </unit>
+      <unit id="jobs.fact.targets">
+        <segment><source>Targets</source></segment>
+      </unit>
+      <unit id="jobs.fact.not_yet">
+        <segment><source>Not yet</source></segment>
+      </unit>
+      <unit id="jobs.fact.when_by">
+        <notes><note category="description">A time and the person or component behind it, for example 3 minutes ago by alex.</note></notes>
+        <segment><source>{when} by {who}</source></segment>
+      </unit>
+      <unit id="jobs.no_right">
+        <segment><source>You can read jobs but not change them. This needs the operator or administrator role.</source></segment>
+      </unit>
+      <unit id="jobs.cancel.button">
+        <segment><source>Cancel job</source></segment>
+      </unit>
+      <unit id="jobs.cancel.title">
+        <segment><source>Cancel this job?</source></segment>
+      </unit>
+      <unit id="jobs.cancel.body_queued">
+        <segment><source>The job has not started. It is cancelled and never runs.</source></segment>
+      </unit>
+      <unit id="jobs.cancel.body_active">
+        <segment><source>The steps that already ran are undone. Some undo tasks may need you.</source></segment>
+      </unit>
+      <unit id="jobs.cancel.confirm">
+        <segment><source>Cancel job</source></segment>
+      </unit>
+      <unit id="jobs.cancel.keep">
+        <segment><source>Keep job</source></segment>
+      </unit>
+      <unit id="jobs.cancel.done">
+        <segment><source>Job cancelled</source></segment>
+      </unit>
+      <unit id="jobs.cancel.requested">
+        <segment><source>Cancel requested. The job is rolling back.</source></segment>
+      </unit>
+      <unit id="jobs.cancel.note">
+        <segment><source>Cancel requested {when} by {who}. The job is undoing what it did.</source></segment>
+      </unit>
+      <unit id="jobs.steps.heading">
+        <segment><source>Steps</source></segment>
+      </unit>
+      <unit id="jobs.steps.label">
+        <segment><source>Steps of the job</source></segment>
+      </unit>
+      <unit id="jobs.stepmeta.started">
+        <segment><source>Started {when}</source></segment>
+      </unit>
+      <unit id="jobs.stepmeta.finished">
+        <segment><source>Finished {when}</source></segment>
+      </unit>
+      <unit id="jobs.stepmeta.attempts">
+        <segment><source>{count, plural, one {# attempt} other {# attempts}}</source></segment>
+      </unit>
+      <unit id="jobs.tag.undo">
+        <segment><source>Undo</source></segment>
+      </unit>
+      <unit id="jobs.observe.waiting">
+        <segment><source>Waiting until {what}.</source></segment>
+      </unit>
+      <unit id="jobs.observe.address_seen">
+        <segment><source>{ip} answers</source></segment>
+      </unit>
+      <unit id="jobs.observe.address_seen_mac">
+        <segment><source>{ip} answers from {mac}</source></segment>
+      </unit>
+      <unit id="jobs.observe.lease">
+        <segment><source>{mac} gets a DHCP lease</source></segment>
+      </unit>
+      <unit id="jobs.observe.other">
+        <segment><source>another observation matches</source></segment>
+      </unit>
+      <unit id="jobs.deadline.in">
+        <segment><source>in {time}</source></segment>
+      </unit>
+      <unit id="jobs.deadline.line">
+        <notes><note category="description">The argument when is a countdown such as in 10 h 59 min.</note></notes>
+        <segment><source>Deadline {when}. After that the job rolls back automatically.</source></segment>
+      </unit>
+      <unit id="jobs.deadline.passed">
+        <segment><source>The deadline has passed. The job rolls back automatically.</source></segment>
+      </unit>
+      <unit id="jobs.duration.d">
+        <notes><note category="description">Days in a countdown.</note></notes>
+        <segment><source>{value, number} d</source></segment>
+      </unit>
+      <unit id="jobs.duration.h">
+        <notes><note category="description">Hours in a countdown.</note></notes>
+        <segment><source>{value, number} h</source></segment>
+      </unit>
+      <unit id="jobs.duration.min">
+        <notes><note category="description">Minutes in a countdown.</note></notes>
+        <segment><source>{value, number} min</source></segment>
+      </unit>
+      <unit id="jobs.duration.s">
+        <notes><note category="description">Seconds in a countdown.</note></notes>
+        <segment><source>{value, number} s</source></segment>
+      </unit>
+      <unit id="jobs.note.label">
+        <segment><source>Note (optional)</source></segment>
+      </unit>
+      <unit id="jobs.note.help">
+        <segment><source>Kept in the job log and in the audit trail.</source></segment>
+      </unit>
+      <unit id="jobs.note.counter">
+        <segment><source>{used, number} of {max, number} bytes</source></segment>
+      </unit>
+      <unit id="jobs.note.over">
+        <segment><source>The note is {over, plural, one {# byte} other {# bytes}} too long. Shorten it, then mark the task done.</source></segment>
+      </unit>
+      <unit id="jobs.complete.button">
+        <segment><source>Mark done</source></segment>
+      </unit>
+      <unit id="jobs.complete.done">
+        <segment><source>Step {n, number} marked done</source></segment>
+      </unit>
+      <unit id="jobs.log.heading">
+        <segment><source>Activity</source></segment>
+      </unit>
+      <unit id="jobs.log.label">
+        <segment><source>Transition log of the job</source></segment>
+      </unit>
+      <unit id="jobs.log.col.time">
+        <segment><source>Time</source></segment>
+      </unit>
+      <unit id="jobs.log.col.event">
+        <segment><source>Event</source></segment>
+      </unit>
+      <unit id="jobs.log.col.by">
+        <segment><source>By</source></segment>
+      </unit>
+      <unit id="jobs.log.col.change">
+        <segment><source>State change</source></segment>
+      </unit>
+      <unit id="jobs.log.col.step">
+        <segment><source>Step</source></segment>
+      </unit>
+      <unit id="jobs.log.col.note">
+        <segment><source>Note</source></segment>
+      </unit>
+      <unit id="jobs.log.change">
+        <segment><source>{from} to {to}</source></segment>
+      </unit>
+      <unit id="jobs.event.submitted">
+        <segment><source>Submitted</source></segment>
+      </unit>
+      <unit id="jobs.event.claimed">
+        <segment><source>Claimed by a node</source></segment>
+      </unit>
+      <unit id="jobs.event.cancel_requested">
+        <segment><source>Cancel requested</source></segment>
+      </unit>
+      <unit id="jobs.event.step">
+        <segment><source>Step changed</source></segment>
+      </unit>
+      <unit id="jobs.action.start">
+        <segment><source>Started</source></segment>
+      </unit>
+      <unit id="jobs.action.wait">
+        <segment><source>Waiting</source></segment>
+      </unit>
+      <unit id="jobs.action.resume">
+        <segment><source>Resumed</source></segment>
+      </unit>
+      <unit id="jobs.action.complete">
+        <segment><source>Completed</source></segment>
+      </unit>
+      <unit id="jobs.action.roll_back">
+        <segment><source>Rollback started</source></segment>
+      </unit>
+      <unit id="jobs.action.cancel">
+        <segment><source>Cancelled</source></segment>
+      </unit>
+      <unit id="jobs.action.finish_rollback">
+        <segment><source>Rollback finished</source></segment>
+      </unit>
+      <unit id="jobs.action.finish_cancel">
+        <segment><source>Cancellation finished</source></segment>
+      </unit>
+      <unit id="jobs.action.fail">
+        <segment><source>Failed</source></segment>
+      </unit>
+      <unit id="jobs.group.heading">
+        <notes><note category="description">The argument group is a short id of the job group.</note></notes>
+        <segment><source>Group {group}</source></segment>
+      </unit>
+      <unit id="jobs.group.summary">
+        <segment><source>{count, plural, one {# job} other {# jobs}} in this group</source></segment>
+      </unit>
+      <unit id="jobs.group.limit">
+        <segment><source>At most {limit, number} run at a time.</source></segment>
+      </unit>
+      <unit id="jobs.checklist.heading">
+        <segment><source>Tasks for you</source></segment>
+      </unit>
+      <unit id="jobs.checklist.open">
+        <segment><source>{count, plural, one {# task open} other {# tasks open}}</source></segment>
+      </unit>
+      <unit id="jobs.checklist.hint">
+        <segment><source>Mark a task done when you have done it. Each job then goes on by itself.</source></segment>
+      </unit>
+      <unit id="jobs.checklist.empty">
+        <segment><source>Nothing in this group waits for you.</source></segment>
+      </unit>
+      <unit id="jobs.checklist.loading">
+        <segment><source>Reading the tasks of the group…</source></segment>
+      </unit>
+      <unit id="jobs.checklist.mark_done">
+        <segment><source>Mark done: {task}</source></segment>
+      </unit>
+      <unit id="jobs.checklist.group">
+        <notes><note category="description">Heading of the tasks of one kind in the group checklist.</note></notes>
+        <segment><source>{name} ({count, number})</source></segment>
+      </unit>
+      <unit id="jobs.kind.tenant">
+        <segment><source>tenant</source></segment>
+      </unit>
+      <unit id="jobs.kind.vrf">
+        <segment><source>VRF</source></segment>
+      </unit>
+      <unit id="jobs.kind.site">
+        <segment><source>site</source></segment>
+      </unit>
+      <unit id="jobs.kind.vlan">
+        <segment><source>VLAN</source></segment>
+      </unit>
+      <unit id="jobs.kind.prefix">
+        <segment><source>prefix</source></segment>
+      </unit>
+      <unit id="jobs.kind.range">
+        <segment><source>range</source></segment>
+      </unit>
+      <unit id="jobs.kind.address">
+        <segment><source>address</source></segment>
+      </unit>
+      <unit id="jobs.kind.host">
+        <segment><source>host</source></segment>
+      </unit>
+      <unit id="jobs.kind.interface">
+        <segment><source>interface</source></segment>
+      </unit>
+      <unit id="jobs.kind.custom_field">
+        <segment><source>custom field</source></segment>
+      </unit>
+      <unit id="jobs.kind.import">
+        <segment><source>import</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_move_intent">
+        <segment><source>Add the new address in IPAM</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_move_dhcp">
+        <segment><source>Reserve in DHCP</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_move_dns">
+        <segment><source>Update DNS</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_move_device">
+        <segment><source>Reconfigure the device</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_move_l2">
+        <segment><source>Move to the new network</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_move_observe">
+        <segment><source>Confirm that the device is seen</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_move_cleanup">
+        <segment><source>Clean up the old address</source></segment>
+      </unit>
+    </group>
+    <group id="audit">
+      <unit id="audit.title">
+        <segment><source>Audit log</source></segment>
+      </unit>
+      <unit id="audit.sub">
+        <segment><source>Every change and every sign-in attempt, in order. Records cannot be changed.</source></segment>
+      </unit>
+      <unit id="audit.grid.label">
+        <segment><source>Audit records</source></segment>
+      </unit>
+      <unit id="audit.row">
+        <notes><note category="description">Accessible name of a row; seq is the sequence number of the record.</note></notes>
+        <segment><source>Record {seq}</source></segment>
+      </unit>
+      <unit id="audit.chain.label">
+        <segment><source>Audit chain status</source></segment>
+      </unit>
+      <unit id="audit.chain.checking">
+        <segment><source>Checking the audit chain…</source></segment>
+      </unit>
+      <unit id="audit.chain.intact">
+        <notes><note category="description">Shown when the hash chain of the audit log verifies; seq is the number of the last verified record.</note></notes>
+        <segment><source>Chain intact: {count, plural, one {# record} other {# records}} verified up to record {seq}</source></segment>
+      </unit>
+      <unit id="audit.chain.empty">
+        <segment><source>The audit log has no records yet, so there is nothing to verify.</source></segment>
+      </unit>
+      <unit id="audit.chain.head">
+        <notes><note category="description">Label of the hash of the last verified record.</note></notes>
+        <segment><source>Head hash</source></segment>
+      </unit>
+      <unit id="audit.chain.checked">
+        <segment><source>Checked {time}</source></segment>
+      </unit>
+      <unit id="audit.chain.verify">
+        <segment><source>Verify again</source></segment>
+      </unit>
+      <unit id="audit.chain.verifying">
+        <segment><source>Verifying…</source></segment>
+      </unit>
+      <unit id="audit.chain.failed">
+        <segment><source>The chain could not be checked.</source></segment>
+      </unit>
+      <unit id="audit.chain.broken">
+        <notes><note category="description">Loud alert title when the hash chain of the audit log does not verify.</note></notes>
+        <segment><source>Chain broken at record {seq}</source></segment>
+      </unit>
+      <unit id="audit.chain.reason.sys.audit.gap">
+        <segment><source>The sequence has a gap: a record before this one is missing.</source></segment>
+      </unit>
+      <unit id="audit.chain.reason.sys.audit.broken_link">
+        <segment><source>This record does not link to the one before it, so records were removed, inserted or reordered.</source></segment>
+      </unit>
+      <unit id="audit.chain.reason.sys.audit.bad_hash">
+        <segment><source>This record no longer matches its own hash, so it was changed after it was written.</source></segment>
+      </unit>
+      <unit id="audit.chain.reason.other">
+        <segment><source>This record could not be read or checked.</source></segment>
+      </unit>
+      <unit id="audit.chain.detail">
+        <segment><source>Server message: {detail}</source></segment>
+      </unit>
+      <unit id="audit.chain.verified_before">
+        <segment><source>{count, plural, =0 {No record before it verified.} one {One record before it verified.} other {# records before it verified.}}</source></segment>
+      </unit>
+      <unit id="audit.chain.advice">
+        <segment><source>Compare the log with a backup or an exported copy, and treat this as a security incident until you know the cause.</source></segment>
+      </unit>
+      <unit id="audit.chain.open_record">
+        <segment><source>Open record {seq}</source></segment>
+      </unit>
+      <unit id="audit.filters.label">
+        <segment><source>Filter the audit log</source></segment>
+      </unit>
+      <unit id="audit.filter.from">
+        <segment><source>From</source></segment>
+      </unit>
+      <unit id="audit.filter.to">
+        <segment><source>To</source></segment>
+      </unit>
+      <unit id="audit.filter.principal">
+        <notes><note category="description">Who acted: a user, an API token, a part of Tenko or a node.</note></notes>
+        <segment><source>Principal</source></segment>
+      </unit>
+      <unit id="audit.filter.principal_placeholder">
+        <notes><note category="description">Placeholder; keep user:, token:, node: and system: as they are, they are part of the filter syntax.</note></notes>
+        <segment><source>user:ID or system:api</source></segment>
+      </unit>
+      <unit id="audit.filter.action">
+        <segment><source>Action</source></segment>
+      </unit>
+      <unit id="audit.filter.action_placeholder">
+        <notes><note category="description">Placeholder; the action names are fixed identifiers.</note></notes>
+        <segment><source>ipam. or auth.login.failure</source></segment>
+      </unit>
+      <unit id="audit.filter.object">
+        <segment><source>Object</source></segment>
+      </unit>
+      <unit id="audit.filter.object_placeholder">
+        <notes><note category="description">Placeholder; the kind names are fixed identifiers.</note></notes>
+        <segment><source>prefix or host:ID</source></segment>
+      </unit>
+      <unit id="audit.filter.outcome">
+        <segment><source>Outcome</source></segment>
+      </unit>
+      <unit id="audit.filter.outcome_all">
+        <segment><source>All outcomes</source></segment>
+      </unit>
+      <unit id="audit.filter.order">
+        <segment><source>Order</source></segment>
+      </unit>
+      <unit id="audit.filter.order_desc">
+        <segment><source>Newest first</source></segment>
+      </unit>
+      <unit id="audit.filter.order_asc">
+        <segment><source>Oldest first</source></segment>
+      </unit>
+      <unit id="audit.filter.clear">
+        <segment><source>Clear filters</source></segment>
+      </unit>
+      <unit id="audit.filter.principal_invalid">
+        <segment><source>Use user:ID, token:ID, node:NUMBER or system:NAME, or type the name of a user.</source></segment>
+      </unit>
+      <unit id="audit.filter.action_invalid">
+        <segment><source>Use a full action such as ipam.prefix.create, or end with a dot to match a whole group such as ipam.prefix.</source></segment>
+      </unit>
+      <unit id="audit.filter.object_invalid">
+        <segment><source>Use an object kind such as prefix, or kind:ID with the full object ID.</source></segment>
+      </unit>
+      <unit id="audit.filter.time_invalid">
+        <segment><source>This is not a date and time that can be used as a filter.</source></segment>
+      </unit>
+      <unit id="audit.filter.range_invalid">
+        <segment><source>The end is before the start, so no record can match.</source></segment>
+      </unit>
+      <unit id="audit.live.new">
+        <segment><source>{count, plural, one {# new record} other {# new records}}</source></segment>
+      </unit>
+      <unit id="audit.live.new_many">
+        <segment><source>{count} or more new records</source></segment>
+      </unit>
+      <unit id="audit.live.show">
+        <notes><note category="description">Button that adds the new records to the list.</note></notes>
+        <segment><source>Show</source></segment>
+      </unit>
+      <unit id="audit.live.show_latest">
+        <segment><source>Show newest first</source></segment>
+      </unit>
+      <unit id="audit.empty.none">
+        <segment><source>The audit log has no records yet.</source></segment>
+      </unit>
+      <unit id="audit.empty.filtered">
+        <segment><source>No record matches these filters.</source></segment>
+      </unit>
+      <unit id="audit.empty.filtered_hint">
+        <segment><source>Change the filters or clear them to see more.</source></segment>
+      </unit>
+      <unit id="audit.col.seq">
+        <notes><note category="description">Column header: the sequence number of the record.</note></notes>
+        <segment><source>Record</source></segment>
+      </unit>
+      <unit id="audit.col.time">
+        <segment><source>Time</source></segment>
+      </unit>
+      <unit id="audit.col.principal">
+        <segment><source>Principal</source></segment>
+      </unit>
+      <unit id="audit.col.action">
+        <segment><source>Action</source></segment>
+      </unit>
+      <unit id="audit.col.objects">
+        <segment><source>Objects</source></segment>
+      </unit>
+      <unit id="audit.col.outcome">
+        <segment><source>Outcome</source></segment>
+      </unit>
+      <unit id="audit.col.source">
+        <segment><source>Source address</source></segment>
+      </unit>
+      <unit id="audit.outcome.success">
+        <segment><source>Success</source></segment>
+      </unit>
+      <unit id="audit.outcome.denied">
+        <segment><source>Denied</source></segment>
+      </unit>
+      <unit id="audit.outcome.failed">
+        <segment><source>Failed</source></segment>
+      </unit>
+      <unit id="audit.kind.tenant">
+        <segment><source>Tenant</source></segment>
+      </unit>
+      <unit id="audit.kind.vrf">
+        <segment><source>VRF</source></segment>
+      </unit>
+      <unit id="audit.kind.site">
+        <segment><source>Site</source></segment>
+      </unit>
+      <unit id="audit.kind.vlan">
+        <segment><source>VLAN</source></segment>
+      </unit>
+      <unit id="audit.kind.prefix">
+        <segment><source>Prefix</source></segment>
+      </unit>
+      <unit id="audit.kind.range">
+        <segment><source>Range</source></segment>
+      </unit>
+      <unit id="audit.kind.address">
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="audit.kind.host">
+        <segment><source>Host</source></segment>
+      </unit>
+      <unit id="audit.kind.interface">
+        <segment><source>Interface</source></segment>
+      </unit>
+      <unit id="audit.kind.custom_field">
+        <segment><source>Custom field</source></segment>
+      </unit>
+      <unit id="audit.kind.user">
+        <segment><source>User</source></segment>
+      </unit>
+      <unit id="audit.kind.session">
+        <segment><source>Session</source></segment>
+      </unit>
+      <unit id="audit.kind.api_token">
+        <segment><source>API token</source></segment>
+      </unit>
+      <unit id="audit.kind.job">
+        <segment><source>Job</source></segment>
+      </unit>
+      <unit id="audit.kind.observation">
+        <segment><source>Observation</source></segment>
+      </unit>
+      <unit id="audit.kind.proposal">
+        <segment><source>Proposal</source></segment>
+      </unit>
+      <unit id="audit.kind.import">
+        <segment><source>Import</source></segment>
+      </unit>
+      <unit id="audit.kind.connector">
+        <segment><source>Connector</source></segment>
+      </unit>
+      <unit id="audit.kind.secret">
+        <segment><source>Secret</source></segment>
+      </unit>
+      <unit id="audit.kind.node">
+        <segment><source>Node</source></segment>
+      </unit>
+      <unit id="audit.kind.settings">
+        <segment><source>Settings</source></segment>
+      </unit>
+      <unit id="audit.kind.system">
+        <segment><source>System</source></segment>
+      </unit>
+      <unit id="audit.principal.kind.user">
+        <segment><source>User</source></segment>
+      </unit>
+      <unit id="audit.principal.kind.token">
+        <segment><source>API token</source></segment>
+      </unit>
+      <unit id="audit.principal.kind.system">
+        <segment><source>Component of Tenko</source></segment>
+      </unit>
+      <unit id="audit.principal.kind.node">
+        <segment><source>Cluster node</source></segment>
+      </unit>
+      <unit id="audit.strength.pin">
+        <segment><source>PIN code</source></segment>
+      </unit>
+      <unit id="audit.strength.password">
+        <segment><source>Password</source></segment>
+      </unit>
+      <unit id="audit.strength.password_totp">
+        <segment><source>Password and authenticator code</source></segment>
+      </unit>
+      <unit id="audit.strength.passkey">
+        <segment><source>Passkey</source></segment>
+      </unit>
+      <unit id="audit.strength.hardware_key">
+        <segment><source>Hardware security key</source></segment>
+      </unit>
+      <unit id="audit.record.crumbs">
+        <segment><source>Breadcrumb</source></segment>
+      </unit>
+      <unit id="audit.record.title">
+        <segment><source>Record {seq}</source></segment>
+      </unit>
+      <unit id="audit.record.previous">
+        <segment><source>Previous record</source></segment>
+      </unit>
+      <unit id="audit.record.next">
+        <segment><source>Next record</source></segment>
+      </unit>
+      <unit id="audit.record.loading">
+        <segment><source>Loading the record…</source></segment>
+      </unit>
+      <unit id="audit.record.not_found">
+        <segment><source>There is no audit record {seq}.</source></segment>
+      </unit>
+      <unit id="audit.record.back">
+        <segment><source>Back to the audit log</source></segment>
+      </unit>
+      <unit id="audit.record.open_newest">
+        <segment><source>Open the newest record, {seq}</source></segment>
+      </unit>
+      <unit id="audit.record.overview">
+        <segment><source>Overview</source></segment>
+      </unit>
+      <unit id="audit.record.revision">
+        <notes><note category="description">The store revision that committed the record.</note></notes>
+        <segment><source>Revision</source></segment>
+      </unit>
+      <unit id="audit.record.request">
+        <segment><source>Request ID</source></segment>
+      </unit>
+      <unit id="audit.record.principal_kind">
+        <segment><source>Principal kind</source></segment>
+      </unit>
+      <unit id="audit.record.principal_id">
+        <segment><source>Principal ID</source></segment>
+      </unit>
+      <unit id="audit.record.session">
+        <segment><source>Session</source></segment>
+      </unit>
+      <unit id="audit.record.strength">
+        <segment><source>Sign-in strength</source></segment>
+      </unit>
+      <unit id="audit.record.owner">
+        <segment><source>Token owner</source></segment>
+      </unit>
+      <unit id="audit.record.component">
+        <segment><source>Component</source></segment>
+      </unit>
+      <unit id="audit.record.on_behalf_of">
+        <segment><source>On behalf of</source></segment>
+      </unit>
+      <unit id="audit.record.principal_log">
+        <segment><source>All records by this principal</source></segment>
+      </unit>
+      <unit id="audit.record.objects">
+        <segment><source>Objects</source></segment>
+      </unit>
+      <unit id="audit.record.objects_none">
+        <segment><source>This action names no object.</source></segment>
+      </unit>
+      <unit id="audit.record.object_log">
+        <segment><source>All records for this object</source></segment>
+      </unit>
+      <unit id="audit.record.not_set">
+        <notes><note category="description">Read by screen readers in place of a dash.</note></notes>
+        <segment><source>not set</source></segment>
+      </unit>
+      <unit id="audit.changes.title">
+        <segment><source>Changes</source></segment>
+      </unit>
+      <unit id="audit.changes.table">
+        <segment><source>Field changes</source></segment>
+      </unit>
+      <unit id="audit.changes.none">
+        <segment><source>This record lists no field changes.</source></segment>
+      </unit>
+      <unit id="audit.changes.object">
+        <segment><source>Object</source></segment>
+      </unit>
+      <unit id="audit.changes.field">
+        <segment><source>Field</source></segment>
+      </unit>
+      <unit id="audit.changes.old">
+        <segment><source>Before</source></segment>
+      </unit>
+      <unit id="audit.changes.new">
+        <segment><source>After</source></segment>
+      </unit>
+      <unit id="audit.changes.no_value">
+        <notes><note category="description">Read by screen readers in place of a dash when a field had no value before or after.</note></notes>
+        <segment><source>no value</source></segment>
+      </unit>
+      <unit id="audit.changes.not_recorded">
+        <notes><note category="description">Shown for a field such as a secret whose old and new values are never written to the log.</note></notes>
+        <segment><source>Changed; the value is not recorded</source></segment>
+      </unit>
+      <unit id="audit.context.title">
+        <segment><source>Context</source></segment>
+      </unit>
+      <unit id="audit.context.none">
+        <segment><source>This record carries no context.</source></segment>
+      </unit>
+      <unit id="audit.context.key">
+        <segment><source>Key</source></segment>
+      </unit>
+      <unit id="audit.context.value">
+        <segment><source>Value</source></segment>
+      </unit>
+      <unit id="audit.hashes.title">
+        <segment><source>Chain</source></segment>
+      </unit>
+      <unit id="audit.hashes.note">
+        <segment><source>Each record carries the hash of the record before it. Changing or removing any record breaks the chain from that point on.</source></segment>
+      </unit>
+      <unit id="audit.hashes.prev">
+        <segment><source>Hash of the previous record</source></segment>
+      </unit>
+      <unit id="audit.hashes.hash">
+        <segment><source>Hash of this record</source></segment>
+      </unit>
+      <unit id="audit.hashes.first">
+        <segment><source>The first record has no record before it.</source></segment>
+      </unit>
+      <unit id="audit.filter.value_invalid">
+        <segment><source>This value cannot be used as a filter.</source></segment>
+      </unit>
+    </group>
+    <group id="import">
+      <unit id="import.title">
+        <segment><source>Import</source></segment>
+      </unit>
+      <unit id="import.sub">
+        <segment><source>Spreadsheets and CSV files into IPAM, with a preview before anything changes</source></segment>
+      </unit>
+      <unit id="import.steps">
+        <segment><source>Import steps</source></segment>
+      </unit>
+      <unit id="import.step.upload">
+        <segment><source>Upload</source></segment>
+      </unit>
+      <unit id="import.step.mapping">
+        <segment><source>Mapping</source></segment>
+      </unit>
+      <unit id="import.step.preview">
+        <segment><source>Preview</source></segment>
+      </unit>
+      <unit id="import.step.apply">
+        <segment><source>Apply</source></segment>
+      </unit>
+      <unit id="import.step.done">
+        <segment><source>Result</source></segment>
+      </unit>
+      <unit id="import.upload.title">
+        <segment><source>Choose the files</source></segment>
+      </unit>
+      <unit id="import.upload.body">
+        <segment><source>CSV (UTF-8 or Windows-1252, any delimiter) or a workbook (xlsx, xls, ods), up to 20 MB together. The upload is kept for 24 hours.</source></segment>
+      </unit>
+      <unit id="import.upload.drop">
+        <segment><source>Drop files here, or</source></segment>
+      </unit>
+      <unit id="import.upload.choose">
+        <segment><source>Choose files</source></segment>
+      </unit>
+      <unit id="import.upload.files">
+        <segment><source>Files to upload</source></segment>
+      </unit>
+      <unit id="import.upload.size">
+        <segment><source>{kb} KB</source></segment>
+      </unit>
+      <unit id="import.upload.remove">
+        <segment><source>Remove {name}</source></segment>
+      </unit>
+      <unit id="import.upload.unsupported">
+        <segment><source>Left out, not CSV or a workbook: {names}</source></segment>
+      </unit>
+      <unit id="import.upload.too_large">
+        <segment><source>The files are larger than 20 MB together.</source></segment>
+      </unit>
+      <unit id="import.upload.start">
+        <segment><source>{count, plural, =0 {Upload} one {Upload # file} other {Upload # files}}</source></segment>
+      </unit>
+      <unit id="import.mapping.files">
+        <segment><source>Uploaded</source></segment>
+      </unit>
+      <unit id="import.mapping.text">
+        <segment><source>{encoding}, delimiter {delimiter}</source></segment>
+      </unit>
+      <unit id="import.mapping.tab">
+        <segment><source>tab</source></segment>
+      </unit>
+      <unit id="import.mapping.preview">
+        <segment><source>Preview the import</source></segment>
+      </unit>
+      <unit id="import.discard">
+        <segment><source>Discard the upload</source></segment>
+      </unit>
+      <unit id="import.options.title">
+        <segment><source>Options</source></segment>
+      </unit>
+      <unit id="import.options.vrf">
+        <segment><source>VRF</source></segment>
+      </unit>
+      <unit id="import.options.vrf_default">
+        <segment><source>default</source></segment>
+      </unit>
+      <unit id="import.options.tenant">
+        <segment><source>Tenant</source></segment>
+      </unit>
+      <unit id="import.options.tenant_default">
+        <segment><source>default</source></segment>
+      </unit>
+      <unit id="import.options.conflict">
+        <segment><source>When an object exists with other values</source></segment>
+      </unit>
+      <unit id="import.options.credentials">
+        <segment><source>Credentials</source></segment>
+      </unit>
+      <unit id="import.options.credentials_import">
+        <segment><source>Store logins and passwords in the vault</source></segment>
+      </unit>
+      <unit id="import.options.credentials_help">
+        <segment><source>Credential columns are never imported as IPAM fields. Without this they are left out.</source></segment>
+      </unit>
+      <unit id="import.conflict.update">
+        <segment><source>Update it</source></segment>
+      </unit>
+      <unit id="import.conflict.skip">
+        <segment><source>Keep it as it is</source></segment>
+      </unit>
+      <unit id="import.conflict.fail">
+        <segment><source>Stop the import</source></segment>
+      </unit>
+      <unit id="import.sheet.summary">
+        <segment><source>{file}, {rows, plural, one {# row} other {# rows}} with data, {width, plural, one {# column} other {# columns}}</source></segment>
+      </unit>
+      <unit id="import.sheet.kind">
+        <segment><source>Read as</source></segment>
+      </unit>
+      <unit id="import.sheet.cidr">
+        <segment><source>Network</source></segment>
+      </unit>
+      <unit id="import.sheet.header_row">
+        <segment><source>Header row</source></segment>
+      </unit>
+      <unit id="import.sheet.no_header">
+        <segment><source>none</source></segment>
+      </unit>
+      <unit id="import.sheet.listed">
+        <segment><source>listed in Index</source></segment>
+      </unit>
+      <unit id="import.sheet.roles_from">
+        <segment><source>No header: the column roles come from {sheet}.</source></segment>
+      </unit>
+      <unit id="import.kind.network">
+        <segment><source>Address list of one network</source></segment>
+      </unit>
+      <unit id="import.kind.list">
+        <segment><source>Device list</source></segment>
+      </unit>
+      <unit id="import.kind.host">
+        <segment><source>One host</source></segment>
+      </unit>
+      <unit id="import.kind.index">
+        <segment><source>Index of networks</source></segment>
+      </unit>
+      <unit id="import.kind.skip">
+        <segment><source>Skip this sheet</source></segment>
+      </unit>
+      <unit id="import.mask.index">
+        <segment><source>The mask comes from the Index sheet.</source></segment>
+      </unit>
+      <unit id="import.mask.name">
+        <segment><source>The mask comes from the sheet name.</source></segment>
+      </unit>
+      <unit id="import.mask.row_count">
+        <segment><source>The mask comes from the number of rows.</source></segment>
+      </unit>
+      <unit id="import.mask.addresses">
+        <segment><source>The mask comes from the addresses in the sheet.</source></segment>
+      </unit>
+      <unit id="import.mask.user">
+        <segment><source>You chose the mask.</source></segment>
+      </unit>
+      <unit id="import.issue.network_cidr">
+        <segment><source>Give the network of this sheet, for example 192.0.2.0/24.</source></segment>
+      </unit>
+      <unit id="import.issue.header_row">
+        <segment><source>The header row lies outside the sheet.</source></segment>
+      </unit>
+      <unit id="import.issue.no_address">
+        <segment><source>Map at least one column to Address, Prefix, Host name or Interfaces.</source></segment>
+      </unit>
+      <unit id="import.columns.label">
+        <segment><source>Columns of {sheet}</source></segment>
+      </unit>
+      <unit id="import.columns.column">
+        <segment><source>Column</source></segment>
+      </unit>
+      <unit id="import.columns.header">
+        <segment><source>Header</source></segment>
+      </unit>
+      <unit id="import.columns.samples">
+        <segment><source>Samples</source></segment>
+      </unit>
+      <unit id="import.columns.shapes">
+        <segment><source>Values</source></segment>
+      </unit>
+      <unit id="import.columns.target">
+        <segment><source>Import as</source></segment>
+      </unit>
+      <unit id="import.columns.target_of">
+        <segment><source>Import column {column} of {sheet} as</source></segment>
+      </unit>
+      <unit id="import.columns.credential_option">
+        <segment><source>{target} (stored in the vault)</source></segment>
+      </unit>
+      <unit id="import.columns.suggested">
+        <segment><source>Suggested: {target}</source></segment>
+      </unit>
+      <unit id="import.columns.vault">
+        <segment><source>vault</source></segment>
+      </unit>
+      <unit id="import.columns.interface">
+        <segment><source>Interface of the addresses in column {column}</source></segment>
+      </unit>
+      <unit id="import.columns.interface_placeholder">
+        <segment><source>interface, for example nic1</source></segment>
+      </unit>
+      <unit id="import.shape.count">
+        <segment><source>{shape} {count, number}</source></segment>
+      </unit>
+      <unit id="import.shape.address">
+        <segment><source>address</source></segment>
+      </unit>
+      <unit id="import.shape.cidr">
+        <segment><source>network</source></segment>
+      </unit>
+      <unit id="import.shape.range">
+        <segment><source>range</source></segment>
+      </unit>
+      <unit id="import.shape.mac">
+        <segment><source>MAC</source></segment>
+      </unit>
+      <unit id="import.shape.duid">
+        <segment><source>DUID</source></segment>
+      </unit>
+      <unit id="import.shape.number">
+        <segment><source>number</source></segment>
+      </unit>
+      <unit id="import.shape.text">
+        <segment><source>text</source></segment>
+      </unit>
+      <unit id="import.shape.empty">
+        <segment><source>empty</source></segment>
+      </unit>
+      <unit id="import.target.ignore">
+        <segment><source>Do not import</source></segment>
+      </unit>
+      <unit id="import.target.address">
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="import.target.prefix">
+        <segment><source>Prefix</source></segment>
+      </unit>
+      <unit id="import.target.mask">
+        <segment><source>Mask</source></segment>
+      </unit>
+      <unit id="import.target.host">
+        <segment><source>Host name</source></segment>
+      </unit>
+      <unit id="import.target.dns_name">
+        <segment><source>DNS name</source></segment>
+      </unit>
+      <unit id="import.target.description">
+        <segment><source>Description</source></segment>
+      </unit>
+      <unit id="import.target.status">
+        <segment><source>Status</source></segment>
+      </unit>
+      <unit id="import.target.mode">
+        <segment><source>Assignment mode</source></segment>
+      </unit>
+      <unit id="import.target.lock">
+        <segment><source>Lock</source></segment>
+      </unit>
+      <unit id="import.target.mac">
+        <segment><source>MAC address</source></segment>
+      </unit>
+      <unit id="import.target.duid">
+        <segment><source>DUID</source></segment>
+      </unit>
+      <unit id="import.target.client_id">
+        <segment><source>DHCP client id</source></segment>
+      </unit>
+      <unit id="import.target.interface">
+        <segment><source>Interface name</source></segment>
+      </unit>
+      <unit id="import.target.interfaces">
+        <segment><source>Interfaces</source></segment>
+      </unit>
+      <unit id="import.target.vlan">
+        <segment><source>VLAN id</source></segment>
+      </unit>
+      <unit id="import.target.vlan_name">
+        <segment><source>VLAN name</source></segment>
+      </unit>
+      <unit id="import.target.site">
+        <segment><source>Site</source></segment>
+      </unit>
+      <unit id="import.target.vrf">
+        <segment><source>VRF</source></segment>
+      </unit>
+      <unit id="import.target.tenant">
+        <segment><source>Tenant</source></segment>
+      </unit>
+      <unit id="import.target.role">
+        <segment><source>Prefix role</source></segment>
+      </unit>
+      <unit id="import.target.alloc">
+        <segment><source>Allocation</source></segment>
+      </unit>
+      <unit id="import.target.alarm_warn">
+        <segment><source>Warning threshold</source></segment>
+      </unit>
+      <unit id="import.target.alarm_crit">
+        <segment><source>Critical threshold</source></segment>
+      </unit>
+      <unit id="import.target.tags">
+        <segment><source>Tags</source></segment>
+      </unit>
+      <unit id="import.target.login">
+        <segment><source>Login</source></segment>
+      </unit>
+      <unit id="import.target.password">
+        <segment><source>Password</source></segment>
+      </unit>
+      <unit id="import.preview.summary">
+        <segment><source>What the import does</source></segment>
+      </unit>
+      <unit id="import.preview.rows_total">
+        <segment><source>rows with data</source></segment>
+      </unit>
+      <unit id="import.preview.rows_imported">
+        <segment><source>imported</source></segment>
+      </unit>
+      <unit id="import.preview.rows_free">
+        <segment><source>free addresses (address only)</source></segment>
+      </unit>
+      <unit id="import.preview.rows_skipped">
+        <segment><source>left out (see the loss report)</source></segment>
+      </unit>
+      <unit id="import.preview.counts">
+        <segment><source>Objects by kind and change</source></segment>
+      </unit>
+      <unit id="import.preview.kind">
+        <segment><source>Kind</source></segment>
+      </unit>
+      <unit id="import.preview.credentials_kind">
+        <segment><source>Credentials</source></segment>
+      </unit>
+      <unit id="import.preview.blocked">
+        <segment><source>The import cannot be applied yet:</source></segment>
+      </unit>
+      <unit id="import.preview.warnings">
+        <segment><source>Warnings</source></segment>
+      </unit>
+      <unit id="import.preview.back">
+        <segment><source>Back to the mapping</source></segment>
+      </unit>
+      <unit id="import.preview.apply">
+        <segment><source>{count, plural, one {Apply the import (# row)} other {Apply the import (# rows)}}</source></segment>
+      </unit>
+      <unit id="import.action.create">
+        <segment><source>created</source></segment>
+      </unit>
+      <unit id="import.action.update">
+        <segment><source>updated</source></segment>
+      </unit>
+      <unit id="import.action.unchanged">
+        <segment><source>unchanged</source></segment>
+      </unit>
+      <unit id="import.action.kept">
+        <segment><source>kept (conflict)</source></segment>
+      </unit>
+      <unit id="import.credentials.title">
+        <segment><source>Credentials</source></segment>
+      </unit>
+      <unit id="import.credentials.statement">
+        <segment><source>{hosts, plural, one {# host has} other {# hosts have}} a login or password in the files. They become secrets in the vault, attached to their host, never IPAM fields: {created, number} new, {changed, number} replaced, {unchanged, number} unchanged.</source></segment>
+      </unit>
+      <unit id="import.credentials.not_allowed">
+        <segment><source>This account may not store secrets now. Leave the credentials out or sign in with a stronger method.</source></segment>
+      </unit>
+      <unit id="import.proposals.title">
+        <segment><source>Proposed prefixes</source></segment>
+      </unit>
+      <unit id="import.proposals.body">
+        <segment><source>Some addresses lie outside every known network. The import creates these prefixes for them unless you reject them; then their addresses are left out.</source></segment>
+      </unit>
+      <unit id="import.proposals.holds">
+        <segment><source>{count, plural, one {# address} other {# addresses}}, first in {sheet} row {row}</source></segment>
+      </unit>
+      <unit id="import.changes.title">
+        <segment><source>Planned changes</source></segment>
+      </unit>
+      <unit id="import.changes.first_rows">
+        <segment><source>Showing the changes of the first {shown, number} of {total, number} rows.</source></segment>
+      </unit>
+      <unit id="import.changes.group">
+        <segment><source>{kind}: {count, number} {action}</source></segment>
+      </unit>
+      <unit id="import.loss.title">
+        <segment><source>Loss report</source></segment>
+      </unit>
+      <unit id="import.loss.counts">
+        <segment><source>{error, number} errors, {warning, number} warnings, {info, number} notes</source></segment>
+      </unit>
+      <unit id="import.loss.none">
+        <segment><source>Nothing was lost: every value is imported.</source></segment>
+      </unit>
+      <unit id="import.loss.download">
+        <segment><source>Download as CSV</source></segment>
+      </unit>
+      <unit id="import.loss.whole">
+        <segment><source>The whole import</source></segment>
+      </unit>
+      <unit id="import.loss.severity">
+        <segment><source>Severity</source></segment>
+      </unit>
+      <unit id="import.loss.where">
+        <segment><source>Cell</source></segment>
+      </unit>
+      <unit id="import.loss.what">
+        <segment><source>What</source></segment>
+      </unit>
+      <unit id="import.loss.detail">
+        <segment><source>Detail</source></segment>
+      </unit>
+      <unit id="import.loss.address.unparsable">
+        <segment><source>Not an address: the row is not imported</source></segment>
+      </unit>
+      <unit id="import.loss.column.unmapped">
+        <segment><source>Values in a column without a target are left out</source></segment>
+      </unit>
+      <unit id="import.loss.credential.suspicious">
+        <segment><source>The login looks like a description; stored as a login anyway</source></segment>
+      </unit>
+      <unit id="import.loss.address.is_network">
+        <segment><source>The address is the network address; the host is imported without it</source></segment>
+      </unit>
+      <unit id="import.loss.address.is_broadcast">
+        <segment><source>The address is the broadcast address; the host is imported without it</source></segment>
+      </unit>
+      <unit id="import.loss.credential.numeric">
+        <segment><source>The password is a number; leading zeros may be lost</source></segment>
+      </unit>
+      <unit id="import.loss.prefix.unlisted">
+        <segment><source>The network is not in the Index sheet; the mask was inferred</source></segment>
+      </unit>
+      <unit id="import.loss.sheet.empty">
+        <segment><source>The sheet is empty</source></segment>
+      </unit>
+      <unit id="import.loss.sheet.skipped">
+        <segment><source>Nothing of the sheet is understood; it is left out</source></segment>
+      </unit>
+      <unit id="import.loss.name.normalized">
+        <segment><source>Not a valid host name; a normalized name is used and the label kept as description</source></segment>
+      </unit>
+      <unit id="import.loss.name.invalid">
+        <segment><source>No host name can be made of the label: the row is not imported</source></segment>
+      </unit>
+      <unit id="import.loss.name.missing">
+        <segment><source>A device without a name: the row is not imported</source></segment>
+      </unit>
+      <unit id="import.loss.prefix.proposed">
+        <segment><source>Outside every known network: a prefix is proposed</source></segment>
+      </unit>
+      <unit id="import.loss.address.no_prefix">
+        <segment><source>The proposed prefix was rejected: the address is left out</source></segment>
+      </unit>
+      <unit id="import.loss.prefix.host_bits">
+        <segment><source>The network had host bits; the network was used</source></segment>
+      </unit>
+      <unit id="import.loss.prefix.unparsable">
+        <segment><source>Not a valid network</source></segment>
+      </unit>
+      <unit id="import.loss.address.duplicate">
+        <segment><source>The address appears twice; the first one is kept</source></segment>
+      </unit>
+      <unit id="import.loss.address.range_too_large">
+        <segment><source>The range is too large to split into addresses</source></segment>
+      </unit>
+      <unit id="import.loss.value.invalid">
+        <segment><source>The value does not fit its target and is left out</source></segment>
+      </unit>
+      <unit id="import.loss.host.conflict">
+        <segment><source>Two rows give the host different values; the first one is kept</source></segment>
+      </unit>
+      <unit id="import.loss.credential.no_host">
+        <segment><source>Credentials without a host are left out</source></segment>
+      </unit>
+      <unit id="import.loss.credential.duplicate">
+        <segment><source>The host has credentials in two rows; the first ones are kept</source></segment>
+      </unit>
+      <unit id="import.loss.credential.skipped">
+        <segment><source>Credentials are left out, as chosen</source></segment>
+      </unit>
+      <unit id="import.loss.address.missing">
+        <segment><source>The row has data but no address: it is not imported</source></segment>
+      </unit>
+      <unit id="import.loss.custom.undefined">
+        <segment><source>The custom field is not defined; its values are left out</source></segment>
+      </unit>
+      <unit id="import.loss.conflict.kept">
+        <segment><source>The stored value differs and is kept</source></segment>
+      </unit>
+      <unit id="import.loss.host.locked">
+        <segment><source>The host is locked; the import leaves it unchanged</source></segment>
+      </unit>
+      <unit id="import.severity.info">
+        <segment><source>note</source></segment>
+      </unit>
+      <unit id="import.severity.warning">
+        <segment><source>warning</source></segment>
+      </unit>
+      <unit id="import.severity.error">
+        <segment><source>error</source></segment>
+      </unit>
+      <unit id="import.result.running">
+        <segment><source>The import is being applied</source></segment>
+      </unit>
+      <unit id="import.result.progress">
+        <segment><source>{done, number} of {total, number} steps done</source></segment>
+      </unit>
+      <unit id="import.result.done">
+        <segment><source>The import is applied</source></segment>
+      </unit>
+      <unit id="import.result.count">
+        <segment><source>{kind}: {count, number} {action}</source></segment>
+      </unit>
+      <unit id="import.result.created">
+        <segment><source>Created</source></segment>
+      </unit>
+      <unit id="import.result.more">
+        <segment><source>{count, plural, one {and # more} other {and # more}}</source></segment>
+      </unit>
+      <unit id="import.result.failed">
+        <segment><source>The import failed and was rolled back.</source></segment>
+      </unit>
+      <unit id="import.result.rolled_back">
+        <segment><source>Nothing of it remains in IPAM.</source></segment>
+      </unit>
+      <unit id="import.result.back">
+        <segment><source>Back to the preview</source></segment>
+      </unit>
+      <unit id="import.result.again">
+        <segment><source>Import more</source></segment>
+      </unit>
+      <unit id="import.export.title">
+        <segment><source>Export</source></segment>
+      </unit>
+      <unit id="import.export.body">
+        <segment><source>CSV files in the vocabulary of the import, so they import back unchanged. Credentials are never exported.</source></segment>
+      </unit>
+      <unit id="import.export.prefixes">
+        <segment><source>Prefixes</source></segment>
+      </unit>
+      <unit id="import.export.addresses">
+        <segment><source>Addresses</source></segment>
+      </unit>
+      <unit id="import.export.hosts">
+        <segment><source>Hosts</source></segment>
+      </unit>
+      <unit id="import.credentials.reason.forbidden">
+        <segment><source>This account may not store or reveal secrets. Leave the credentials out or ask an administrator.</source></segment>
+      </unit>
+      <unit id="import.credentials.reason.step_up_required">
+        <segment><source>Storing secrets needs a stronger sign-in than this session has. Sign in again with a stronger method, or leave the credentials out.</source></segment>
+      </unit>
+      <unit id="import.credentials.reason.unauthenticated">
+        <segment><source>Storing secrets needs a signed-in person.</source></segment>
+      </unit>
+      <unit id="import.credentials.reason.vault_unavailable">
+        <segment><source>The vault cannot store secrets now. Leave the credentials out or try again later.</source></segment>
+      </unit>
+    </group>
+    <group id="dashboard">
+      <unit id="dashboard.action.claim">
+        <segment><source>Claim next free address</source></segment>
+      </unit>
+      <unit id="dashboard.action.claim_where">
+        <segment><source>Claim the next free address in which network?</source></segment>
+      </unit>
+      <unit id="dashboard.action.prefix">
+        <segment><source>New prefix</source></segment>
+      </unit>
+      <unit id="dashboard.action.import">
+        <segment><source>Import</source></segment>
+      </unit>
+      <unit id="dashboard.tile.addresses">
+        <segment><source>Addresses in use</source></segment>
+      </unit>
+      <unit id="dashboard.tile.addresses_of">
+        <segment><source>of</source></segment>
+      </unit>
+      <unit id="dashboard.tile.alarms">
+        <segment><source>Utilization alarms</source></segment>
+      </unit>
+      <unit id="dashboard.tile.alarms_hint">
+        <segment><source>{critical, plural, =0 {none critical} one {# critical} other {# critical}}</source></segment>
+      </unit>
+      <unit id="dashboard.tile.waiting_for_you">
+        <segment><source>{count, plural, =0 {none waiting for you} one {# waiting for you} other {# waiting for you}}</source></segment>
+      </unit>
+      <unit id="dashboard.alarms.title">
+        <segment><source>Active alarms</source></segment>
+      </unit>
+      <unit id="dashboard.alarms.none">
+        <segment><source>Every network is below its thresholds.</source></segment>
+      </unit>
+      <unit id="dashboard.waiting.title">
+        <segment><source>Waiting for a person</source></segment>
+      </unit>
+      <unit id="dashboard.waiting.all">
+        <segment><source>All jobs</source></segment>
+      </unit>
+      <unit id="dashboard.waiting.none">
+        <segment><source>No job waits for a manual step.</source></segment>
+      </unit>
+      <unit id="dashboard.waiting.step">
+        <segment><source>step {step, number} of {total, number}</source></segment>
+      </unit>
+      <unit id="dashboard.audit.title">
+        <segment><source>Recent changes</source></segment>
+      </unit>
+      <unit id="dashboard.audit.all">
+        <segment><source>Audit log</source></segment>
+      </unit>
+      <unit id="dashboard.audit.none">
+        <segment><source>Nothing recorded yet.</source></segment>
+      </unit>
+      <unit id="dashboard.use.title">
+        <segment><source>Utilization by tenant and VRF</source></segment>
+      </unit>
+      <unit id="dashboard.use.vrf">
+        <segment><source>{tenant} / {vrf}</source></segment>
+      </unit>
+      <unit id="dashboard.use.of">
+        <segment><source>of</source></segment>
+      </unit>
+      <unit id="dashboard.use.networks">
+        <segment><source>Busiest networks</source></segment>
+      </unit>
+      <unit id="dashboard.use.empty">
+        <segment><source>No networks yet.</source></segment>
+      </unit>
+      <unit id="dashboard.use.more">
+        <segment><source>{count, plural, one {and # more network} other {and # more networks}}</source></segment>
+      </unit>
+      <unit id="dashboard.palette_hint">
+        <segment><source>finds any address, host, MAC or prefix, and every command.</source></segment>
+      </unit>
+    </group>
+    <group id="hosts">
+      <unit id="hosts.crumbs">
+        <segment><source>Where this host belongs</source></segment>
+      </unit>
+      <unit id="hosts.not_found">
+        <segment><source>No host named {name}.</source></segment>
+      </unit>
+      <unit id="hosts.in_several">
+        <segment><source>{name} exists in several tenants. Choose one:</source></segment>
+      </unit>
+      <unit id="hosts.empty">
+        <segment><source>No hosts yet. Create one or import a spreadsheet.</source></segment>
+      </unit>
+      <unit id="hosts.filter.label">
+        <segment><source>Filter hosts</source></segment>
+      </unit>
+      <unit id="hosts.filter.placeholder">
+        <segment><source>Filter: name, mode:reserved, tag:camera, site:Home</source></segment>
+      </unit>
+      <unit id="hosts.filter.locked">
+        <segment><source>Locked</source></segment>
+      </unit>
+      <unit id="hosts.do.create">
+        <segment><source>New host</source></segment>
+      </unit>
+      <unit id="hosts.do.set_mode">
+        <segment><source>Set mode</source></segment>
+      </unit>
+      <unit id="hosts.do.toggle_lock">
+        <segment><source>Lock or unlock</source></segment>
+      </unit>
+      <unit id="hosts.do.lock">
+        <segment><source>Lock</source></segment>
+      </unit>
+      <unit id="hosts.do.unlock">
+        <segment><source>Unlock</source></segment>
+      </unit>
+      <unit id="hosts.bulk.mode_title">
+        <segment><source>{count, plural, one {Set # host to {mode}} other {Set # hosts to {mode}}}</source></segment>
+      </unit>
+      <unit id="hosts.bulk.lock_title">
+        <segment><source>{count, plural, one {Lock # host} other {Lock # hosts}}</source></segment>
+      </unit>
+      <unit id="hosts.bulk.unlock_title">
+        <segment><source>{count, plural, one {Unlock # host} other {Unlock # hosts}}</source></segment>
+      </unit>
+      <unit id="hosts.locked">
+        <segment><source>{name} is locked</source></segment>
+      </unit>
+      <unit id="hosts.unlocked">
+        <segment><source>{name} is unlocked</source></segment>
+      </unit>
+      <unit id="hosts.lock_failed">
+        <segment><source>Could not change the lock of {name}</source></segment>
+      </unit>
+      <unit id="hosts.undo">
+        <segment><source>Undo</source></segment>
+      </unit>
+      <unit id="hosts.warn.identifier_title">
+        <segment><source>No reservation possible:</source></segment>
+      </unit>
+      <unit id="hosts.warn.mac">
+        <segment><source>this host is reserved, but the interface of its IPv4 address has no MAC address. Add the MAC address so the DHCP reservation can be made.</source></segment>
+      </unit>
+      <unit id="hosts.warn.duid">
+        <segment><source>this host is reserved, but the interface of its IPv6 address has no DUID. Add the DUID so the DHCPv6 reservation can be made.</source></segment>
+      </unit>
+      <unit id="hosts.warn.both">
+        <segment><source>this host is reserved, but it has neither a MAC address for IPv4 nor a DUID for IPv6.</source></segment>
+      </unit>
+      <unit id="hosts.mode.title">
+        <segment><source>Assignment mode</source></segment>
+      </unit>
+      <unit id="hosts.mode.current">
+        <segment><source>current</source></segment>
+      </unit>
+      <unit id="hosts.mode.locked_note">
+        <segment><source>The host is locked: no automation touches it, whatever its mode.</source></segment>
+      </unit>
+      <unit id="hosts.mode.change_title">
+        <segment><source>Set {name} to {mode}</source></segment>
+      </unit>
+      <unit id="hosts.mode.change">
+        <segment><source>Set to {mode}</source></segment>
+      </unit>
+      <unit id="hosts.mode.changed">
+        <segment><source>{name} is now {mode}</source></segment>
+      </unit>
+      <unit id="hosts.interfaces.title">
+        <segment><source>Interfaces</source></segment>
+      </unit>
+      <unit id="hosts.interfaces.add">
+        <segment><source>Add interface</source></segment>
+      </unit>
+      <unit id="hosts.interfaces.empty">
+        <segment><source>No interfaces yet.</source></segment>
+      </unit>
+      <unit id="hosts.col.interface">
+        <segment><source>Interface</source></segment>
+      </unit>
+      <unit id="hosts.col.duid">
+        <segment><source>DUID</source></segment>
+      </unit>
+      <unit id="hosts.col.client_id">
+        <segment><source>DHCP client id</source></segment>
+      </unit>
+      <unit id="hosts.col.addresses">
+        <segment><source>Addresses</source></segment>
+      </unit>
+      <unit id="hosts.addresses.title">
+        <segment><source>Addresses</source></segment>
+      </unit>
+      <unit id="hosts.addresses.none">
+        <segment><source>No address is assigned to this host.</source></segment>
+      </unit>
+      <unit id="hosts.connect.title">
+        <segment><source>Connect</source></segment>
+      </unit>
+      <unit id="hosts.connect.target">
+        <segment><source>Connect to</source></segment>
+      </unit>
+      <unit id="hosts.connect.user">
+        <segment><source>User</source></segment>
+      </unit>
+      <unit id="hosts.connect.rdp_port">
+        <segment><source>RDP port</source></segment>
+      </unit>
+      <unit id="hosts.connect.ssh_port">
+        <segment><source>SSH port</source></segment>
+      </unit>
+      <unit id="hosts.connect.rdp">
+        <segment><source>Remote desktop (.rdp)</source></segment>
+      </unit>
+      <unit id="hosts.connect.ssh">
+        <segment><source>SSH</source></segment>
+      </unit>
+      <unit id="hosts.connect.hint">
+        <segment><source>Your operating system opens the file or the link with its own client.</source></segment>
+      </unit>
+      <unit id="hosts.facts.title">
+        <segment><source>Details</source></segment>
+      </unit>
+      <unit id="hosts.observations.title">
+        <segment><source>Observations</source></segment>
+      </unit>
+      <unit id="hosts.observations.empty">
+        <segment><source>DHCP leases, DNS records and scan results appear here when the DHCP, DNS and scanner roles arrive.</source></segment>
+      </unit>
+      <unit id="hosts.jobs.title">
+        <segment><source>Jobs</source></segment>
+      </unit>
+      <unit id="hosts.jobs.all">
+        <segment><source>All jobs of this host</source></segment>
+      </unit>
+      <unit id="hosts.jobs.none">
+        <segment><source>No jobs have changed this host yet.</source></segment>
+      </unit>
+      <unit id="hosts.mac.several">
+        <segment><source>Several hosts have this MAC address:</source></segment>
+      </unit>
+      <unit id="hosts.mac.none">
+        <segment><source>No host has the MAC address</source></segment>
+      </unit>
+      <unit id="hosts.form.create_title">
+        <segment><source>New host</source></segment>
+      </unit>
+      <unit id="hosts.form.edit_title">
+        <segment><source>Edit {name}</source></segment>
+      </unit>
+      <unit id="hosts.form.name_invalid">
+        <segment><source>Use letters, digits and hyphens, with dots between the labels.</source></segment>
+      </unit>
+      <unit id="hosts.form.mac_invalid">
+        <segment><source>Not a MAC address. Write it as 00:00:5e:00:53:01 or 00-00-5E-00-53-01.</source></segment>
+      </unit>
+      <unit id="hosts.form.duid_invalid">
+        <segment><source>Not a DUID: hexadecimal bytes are expected.</source></segment>
+      </unit>
+      <unit id="hosts.form.hex_invalid">
+        <segment><source>Hexadecimal bytes are expected.</source></segment>
+      </unit>
+      <unit id="hosts.form.lock">
+        <segment><source>Locked: no automation touches this host</source></segment>
+      </unit>
+      <unit id="hosts.form.none">
+        <segment><source>None</source></segment>
+      </unit>
+      <unit id="hosts.form.default_tenant">
+        <segment><source>default</source></segment>
+      </unit>
+      <unit id="hosts.form.first_interface">
+        <segment><source>First interface</source></segment>
+      </unit>
+      <unit id="hosts.form.create">
+        <segment><source>Create host</source></segment>
+      </unit>
+      <unit id="hosts.form.save">
+        <segment><source>Save changes</source></segment>
+      </unit>
+      <unit id="hosts.form.created">
+        <segment><source>Created host {name}</source></segment>
+      </unit>
+      <unit id="hosts.form.saved">
+        <segment><source>Saved {name}</source></segment>
+      </unit>
+      <unit id="hosts.form.iface_create_title">
+        <segment><source>New interface of {host}</source></segment>
+      </unit>
+      <unit id="hosts.form.iface_edit_title">
+        <segment><source>Edit {name} of {host}</source></segment>
+      </unit>
+      <unit id="hosts.form.iface_name_required">
+        <segment><source>The interface needs a name, such as eth0.</source></segment>
+      </unit>
+      <unit id="hosts.form.iface_create">
+        <segment><source>Add interface</source></segment>
+      </unit>
+      <unit id="hosts.form.iface_saved">
+        <segment><source>Saved {name} of {host}</source></segment>
       </unit>
     </group>
   </file>

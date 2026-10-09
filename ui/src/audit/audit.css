@@ -1,0 +1,65 @@
+/* The audit log and its records. Token roles only. */
+
+.audit-page { overflow: auto; }
+
+/* Chain status on top of the log. */
+.audit-chain { padding: var(--sp-4) var(--sp-5); }
+.audit-chain .note { align-items: center; }
+.audit-chain .note.bad { align-items: flex-start; }
+.audit-chain .note > svg.i { align-self: flex-start; margin-top: 2px; }
+.audit-chain .note .btn { flex: none; }
+.chain-body { display: grid; gap: var(--sp-2); min-width: 0; }
+.chain-body p { margin: 0; }
+.chain-body strong { font-size: var(--fs-13); }
+.chain-meta { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); font-size: var(--fs-12); }
+.chain-detail { overflow-wrap: anywhere; }
+
+/* Filter bar: labeled fields instead of one query field. */
+.audit-filters { align-items: flex-start; gap: var(--sp-4) var(--sp-5); }
+.afield { display: grid; gap: var(--sp-1); align-content: start; min-width: 0; }
+.afield > label, .afield > .label { font-size: var(--fs-12); color: var(--ink-2); font-weight: var(--fw-medium); }
+.afield .input, .afield .select { width: 100%; }
+.afield .input.mono { font-size: 12.5px; }
+.afield .help { max-width: 26ch; line-height: var(--lh-ui); }
+.afield:has(input[type="datetime-local"]) { width: 188px; }
+.afield:has(input[data-testid="audit-filter-principal"]) { width: 232px; }
+.afield:has(input[data-testid="audit-filter-action"]) { width: 212px; }
+.afield:has(input[data-testid="audit-filter-object"]) { width: 190px; }
+.afield:has(select) { width: 150px; }
+.audit-filters .right { align-self: flex-end; }
+
+/* The grid fills the rest of the page but never shrinks below a few rows. */
+.audit-grid { position: relative; display: flex; flex-direction: column; flex: 1 0 320px; min-height: 0; min-width: 0; }
+.audit-grid .grid td.num { font-variant-numeric: tabular-nums; }
+.audit-grid .grid tbody tr[data-id] { cursor: pointer; }
+.audit-new { display: inline-flex; align-items: center; gap: var(--sp-3); color: var(--accent); font-weight: var(--fw-medium); }
+.audit-new:empty { display: none; }
+.grid-foot .btn.sm { height: 22px; }
+
+/* Outcome: glyph and word; the exceptions get a hue. */
+.outcome { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-12); font-weight: var(--fw-medium); white-space: nowrap; }
+.outcome.success { color: var(--ink-2); }
+.outcome.denied { color: var(--warn-ink); }
+.outcome.failed { color: var(--danger-ink); }
+.outcome-code { margin-left: var(--sp-2); color: var(--ink-3); font-size: var(--fs-11); font-weight: var(--fw-regular); }
+
+/* Objects of a record. */
+.objects { display: inline-flex; align-items: baseline; gap: var(--sp-5); }
+.object { display: inline-flex; align-items: baseline; gap: 6px; }
+.object-kind { color: var(--ink-3); font-size: var(--fs-12); }
+
+/* The record page. */
+.crumbs-nav { display: flex; align-items: center; gap: var(--sp-2); }
+.crumbs-nav [aria-current="page"] { color: var(--ink-2); }
+.step-links { display: flex; gap: var(--sp-3); }
+.step-links .btn { text-decoration: none; }
+.step-links .flip { transform: scaleX(-1); }
+.audit-facts { grid-template-columns: 180px minmax(0, 1fr); }
+.audit-facts dd { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-5); }
+.record-objects { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-4); }
+.record-object { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-5); }
+.record-object .object-kind { min-width: 96px; }
+table.changes td, table.changes th { vertical-align: top; }
+table.changes td { padding-top: var(--sp-3); padding-bottom: var(--sp-3); height: auto; white-space: normal; overflow-wrap: anywhere; }
+table.changes tr:hover td { background: transparent; }
+.hash { font-family: var(--font-data); font-variant-ligatures: none; overflow-wrap: anywhere; user-select: all; }

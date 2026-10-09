@@ -1,0 +1,15 @@
+/* The plan preview (PlanPreview.tsx) and its dialog. */
+.dialog.plan-dialog { width: min(760px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; top: 10vh; }
+.plan-dialog-body { display: grid; gap: var(--sp-5); }
+.plan { display: grid; gap: var(--sp-4); }
+.plan-summary { margin: 0; padding-left: var(--sp-6); color: var(--ink-2); }
+.plan-warnings { display: grid; gap: var(--sp-3); }
+.plan-warnings .ackrow { margin-top: var(--sp-3); }
+.plan-changes { max-height: 40vh; }
+.plan-changes td { vertical-align: top; padding-top: 5px; padding-bottom: 5px; height: auto; }
+.plan-fields div { line-height: 1.5; }
+.plan-fields del { color: var(--ink-3); text-decoration: line-through; }
+.plan-fields ins { text-decoration: none; color: var(--ink); }
+.plan-action { font-weight: var(--fw-medium); }
+.plan-action.delete, .plan-action.remove { color: var(--danger-ink); }
+.plan-action.create { color: var(--ok-ink); }

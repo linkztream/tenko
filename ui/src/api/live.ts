@@ -40,9 +40,14 @@ export function createLiveQuery<T>(options: LiveQueryOptions<T>): LiveQuery<T> {
     return result.value;
   });
 
+  // `refetch(false)` skips Solid's guard that drops a second load in the same microtask
+  // (a source that changes twice in one tick would keep the first answer); the newest load
+  // aborts the older one and only its answer is applied.
+  const reload = () => void refetch(false);
+
   const schedule = () => {
     clearTimeout(timer);
-    timer = setTimeout(() => void refetch(), options.debounceMs ?? 150);
+    timer = setTimeout(reload, options.debounceMs ?? 150);
   };
 
   const offs = options.topics.flatMap((topic) => [
@@ -51,7 +56,7 @@ export function createLiveQuery<T>(options: LiveQueryOptions<T>): LiveQuery<T> {
       if (options.relevant && !options.relevant(event)) return;
       schedule();
     }),
-    stream.onReset(topic, () => void refetch()),
+    stream.onReset(topic, reload),
   ]);
 
   onCleanup(() => {
@@ -60,5 +65,5 @@ export function createLiveQuery<T>(options: LiveQueryOptions<T>): LiveQuery<T> {
     for (const off of offs) off();
   });
 
-  return { value, refetch: () => void refetch(), revision: () => revision };
+  return { value, refetch: reload, revision: () => revision };
 }

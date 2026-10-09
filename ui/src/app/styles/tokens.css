@@ -196,6 +196,11 @@
   --warn-wash: #FFF4DE;
   --ok-wash: #E6F4EA;
 
+  /* QR codes stay dark on light in both themes: not every authenticator app reads an
+     inverted code. Not redefined for dark. */
+  --qr-light: #FFFFFF;
+  --qr-dark: #161921;
+
   /* Charts (validated with the dataviz palette checks on #FFFFFF). */
   --chart-surface: #FFFFFF;
   --chart-grid: #E8EAEF;

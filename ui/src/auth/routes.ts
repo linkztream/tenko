@@ -1,5 +1,6 @@
 import { lazy } from "solid-js";
 import type { AppRoute } from "../app/router";
+import { withPacks } from "../i18n";
 
 export const routes: AppRoute[] = [
   {
@@ -9,5 +10,5 @@ export const routes: AppRoute[] = [
     access: "public",
     title: "auth.signin.title",
   },
-  { path: "/account/:section?", component: lazy(() => import("./account/Account")), title: "account.title" },
+  { path: "/account/:section?", component: lazy(withPacks(["account"], () => import("./account/Account"))), title: "account.title" },
 ];

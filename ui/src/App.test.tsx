@@ -42,15 +42,23 @@ describe("access", () => {
 
 describe("shell", () => {
   it("shows the rail in the approved order with labels, and the placeholder for unbuilt areas", async () => {
-    const app = await renderApp("/ipam/prefixes/192.0.2.0/24", "signed-in");
+    const app = await renderApp("/dns/zones/example.test", "signed-in");
     const rail = await screen.findByRole("navigation", { name: "Main" });
     const labels = within(rail)
       .getAllByRole("link")
       .map((a) => a.textContent?.trim());
-    expect(labels).toEqual(["Dashboard", "IPAM", "DNS", "DHCP", "Topology", "Jobs", "Settings"]);
+    expect(labels).toEqual(["Dashboard", "IPAM", "DNS", "DHCP", "Topology", "Jobs", "Audit", "Settings"]);
+    expect(within(rail).getByRole("link", { name: /DNS/ }).classList.contains("active")).toBe(true);
+    expect(await screen.findByText("DNS arrives in a later build")).toBeTruthy();
+    expect(app.location()).toBe("/dns/zones/example.test");
+  });
+
+  it("opens a prefix from a deep link in the IPAM view", async () => {
+    await renderApp("/ipam/prefixes/192.0.2.0/24", "signed-in");
+    const rail = await screen.findByRole("navigation", { name: "Main" });
     expect(within(rail).getByRole("link", { name: /IPAM/ }).classList.contains("active")).toBe(true);
-    expect(await screen.findByText("IPAM arrives in a later build")).toBeTruthy();
-    expect(app.location()).toBe("/ipam/prefixes/192.0.2.0/24");
+    const pane = await screen.findByTestId("prefix-pane", {}, { timeout: 5000 });
+    expect(pane.dataset.key).toBe("192.0.2.0/24");
   });
 
   it("opens the command palette with Ctrl+K and runs a navigation command", async () => {

@@ -838,11 +838,14 @@ function messagesOf(catalog, code) {
  * select is its literal text; every other message is its ICU syntax tree. Keys are sorted.
  * @param {Catalog} catalog
  * @param {string} code
+ * @param {{ include?: (key: string) => boolean }} [options] `include` limits the table to
+ *   the keys it accepts (the core table or one message pack, see renderMetaModule).
  * @returns {string}
  */
-export function renderLocaleModule(catalog, code) {
+export function renderLocaleModule(catalog, code, options = {}) {
   const messages = messagesOf(catalog, code);
-  const lines = [...messages.keys()].sort(compareText).map((key) => {
+  const include = options.include ?? (() => true);
+  const lines = [...messages.keys()].filter(include).sort(compareText).map((key) => {
     const message = /** @type {Message} */ (messages.get(key));
     const plain = message.ast.every((el) => el.type === TYPE.literal);
     const value = plain
@@ -862,23 +865,51 @@ function propertyName(code) {
 
 /**
  * The `meta` module: source language, language list and lazy loaders of the other languages.
+ * With `packs`, the module also exports `packs`: per message pack, a loader per language of
+ * the pack's table (`<importPrefix><code>/<pack>`). A pack holds the keys of one area that
+ * only its lazily loaded views use, so the core table of the first page load stays small.
  * @param {Catalog} catalog
- * @param {{ importPrefix?: string }} [options] `importPrefix` defaults to `virtual:tenko-i18n/`.
+ * @param {{ importPrefix?: string, packs?: readonly string[] }} [options] `importPrefix`
+ *   defaults to `virtual:tenko-i18n/`.
  * @returns {string}
  */
-export function renderMetaModule(catalog, { importPrefix = "virtual:tenko-i18n/" } = {}) {
+export function renderMetaModule(catalog, { importPrefix = "virtual:tenko-i18n/", packs } = {}) {
   const locales = catalog.locales.map((l) =>
     JSON.stringify({ code: l.code, name: l.name, author: l.author, version: l.version }),
   );
   const loaders = catalog.locales
     .filter((l) => l.code !== catalog.sourceLocale)
     .map((l) => `  ${propertyName(l.code)}: () => import(${JSON.stringify(importPrefix + l.code)}),`);
-  return [
+  const lines = [
     `export const sourceLocale = ${JSON.stringify(catalog.sourceLocale)};`,
     `export const locales = [${locales.map((l) => `\n  ${l},`).join("")}${locales.length > 0 ? "\n" : ""}];`,
     `export const loaders = {${loaders.length > 0 ? `\n${loaders.join("\n")}\n` : ""}};`,
-    "",
-  ].join("\n");
+  ];
+  if (packs !== undefined) {
+    const entries = [...packs].sort(compareText).map((pack) => {
+      const perLocale = catalog.locales.map(
+        (l) => `    ${propertyName(l.code)}: () => import(${JSON.stringify(`${importPrefix}${l.code}/${pack}`)}),`,
+      );
+      return `  ${propertyName(pack)}: {\n${perLocale.join("\n")}\n  },`;
+    });
+    lines.push(`export const packs = {${entries.length > 0 ? `\n${entries.join("\n")}\n` : ""}};`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+/**
+ * The message pack a key belongs to: the first pack with a prefix the key starts with, or
+ * undefined for a key of the core table.
+ * @param {string} key
+ * @param {Readonly<Record<string, readonly string[]>>} packs pack name to key prefixes
+ * @returns {string | undefined}
+ */
+export function packOf(key, packs) {
+  for (const [name, prefixes] of Object.entries(packs)) {
+    if (prefixes.some((prefix) => key.startsWith(prefix))) return name;
+  }
+  return undefined;
 }
 
 /**

@@ -160,6 +160,124 @@ export type JobState = S["JobState"];
 export type JobSummary = S["JobSummary"];
 export type SearchHit = S["SearchHit"];
 export type ObjectRef = S["ObjectRef"];
+export type ObjectKind = S["ObjectKind"];
+export type Principal = S["Principal"];
+export type Stamp = S["Stamp"];
+
+// ---------------------------------------------------------------------------------
+// IPAM (IPAM-01 to IPAM-23)
+
+export type Status = S["Status"];
+export const STATUSES: readonly Status[] = ["planned", "active", "reserved", "deprecated"];
+export type Deleted = S["Deleted"];
+export type SortOrder = S["SortOrder"];
+export type Meta = S["Meta"];
+export type Tag = S["Tag"];
+export type TagCount = S["TagCount"];
+export type CustomValue = S["CustomValue"];
+export type CustomKind = S["CustomKind"];
+export type CustomFieldDef = S["CustomFieldDef"];
+export type CustomFieldInput = S["CustomFieldInput"];
+export type CustomFieldPatch = S["CustomFieldPatch"];
+export type Tenant = S["Tenant"];
+export type TenantInput = S["TenantInput"];
+export type TenantPatch = S["TenantPatch"];
+export type Vrf = S["Vrf"];
+export type VrfInput = S["VrfInput"];
+export type VrfPatch = S["VrfPatch"];
+export type Site = S["Site"];
+export type SiteInput = S["SiteInput"];
+export type SitePatch = S["SitePatch"];
+export type Vlan = S["Vlan"];
+export type VlanInput = S["VlanInput"];
+export type VlanPatch = S["VlanPatch"];
+export type Prefix = S["Prefix"];
+export type PrefixInput = S["PrefixInput"];
+export type PrefixPatch = S["PrefixPatch"];
+export type PrefixRole = S["PrefixRole"];
+export type AllocPolicy = S["AllocPolicy"];
+export type UtilizationView = S["UtilizationView"];
+export type UtilizationAlarm = S["UtilizationAlarm"];
+export type AlarmLevel = S["AlarmLevel"];
+export type RoleUsage = S["RoleUsage"];
+export type TreeNode = S["TreeNode"];
+export type TreeResponse = S["TreeResponse"];
+export type PrefixAddressItem = S["PrefixAddressItem"];
+export type Range = S["Range"];
+export type RangeRole = S["RangeRole"];
+export const RANGE_ROLES: readonly RangeRole[] = ["dhcp_pool", "reserved", "infrastructure"];
+export type NewRange = S["NewRange"];
+export type RangePatch = S["RangePatch"];
+export type Address = S["Address"];
+/** An address of a list; with `expand=host` it also carries its interface and host. */
+export type AddressRow = S["AddressRow"];
+export type HostSummary = S["HostSummary"];
+export type InterfaceSummary = S["InterfaceSummary"];
+export type AddressInput = S["AddressInput"];
+export type AddressPatch = S["AddressPatch"];
+export type AssignmentMode = S["AssignmentMode"];
+export const ASSIGNMENT_MODES: readonly AssignmentMode[] = ["reserved", "static", "dynamic", "unmanaged"];
+export type Host = S["Host"];
+export type HostInput = S["HostInput"];
+export type HostPatch = S["HostPatch"];
+export type Interface = S["Interface"];
+export type InterfaceInput = S["InterfaceInput"];
+export type InterfacePatch = S["InterfacePatch"];
+export type NextFreeAddress = S["NextFreeAddress"];
+export type NextFreePrefix = S["NextFreePrefix"];
+export type IpamObject = S["IpamObject"];
+export type IpamCommand = S["IpamCommand"];
+export type BulkRequest = S["BulkRequest"];
+export type BulkResponse = S["BulkResponse"];
+export type PlanView = S["PlanView"];
+export type PlanSummary = S["PlanSummary"];
+export type PlanWarning = S["PlanWarning"];
+export type PlannedChange = S["PlannedChange"];
+export type ChangeAction = S["ChangeAction"];
+export type FieldChange = S["FieldChange"];
+export type SummaryCount = S["SummaryCount"];
+export type HistoryEntry = S["HistoryEntry"];
+
+/** The answer of every IPAM write (`WriteResponse_<Kind>` in the document). */
+export interface WriteResponse<T> {
+  dry_run: boolean;
+  item?: T | null;
+  job_id?: string | null;
+  plan?: PlanView | null;
+  replayed: boolean;
+  revision?: number | null;
+  warnings: PlanWarning[];
+}
+
+// ---------------------------------------------------------------------------------
+// Jobs (IPAM-17) and audit (IAM-18)
+
+export type Job = S["Job"];
+export type JobDetail = S["JobDetail"];
+export type JobPreview = S["JobPreview"];
+export type StepRecord = S["StepRecord"];
+export type StepState = S["StepState"];
+export type StepStateKind = S["StepStateKind"];
+export type StepPreview = S["StepPreview"];
+export type ManualTask = S["ManualTask"];
+export type Transition = S["Transition"];
+export type CodedError = S["CodedError"];
+export type CompleteStepRequest = S["CompleteStepRequest"];
+export const JOB_STATES: readonly JobState[] = [
+  "queued",
+  "running",
+  "waiting",
+  "rolling_back",
+  "succeeded",
+  "failed",
+  "rolled_back",
+  "cancelled",
+];
+export type AuditRecord = S["AuditRecord"];
+export type AuditDraft = S["AuditDraft"];
+export type AuditOutcome = S["AuditOutcome"];
+export type AuditVerifyReport = S["AuditVerifyReport"];
+export type EventData = S["EventData"];
 
 export interface Page<T> {
   items: T[];

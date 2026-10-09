@@ -79,6 +79,16 @@ describe("requests", () => {
     expect(header(calls[2], "Idempotency-Key")).not.toBe("retry-1");
   });
 
+  it("sends no Idempotency-Key when the caller passes null (large uploads)", async () => {
+    const calls = stubFetch(() => new Response(null, { status: 204 }));
+    const form = new FormData();
+    form.append("files", new Blob(["address\n192.0.2.10\n"]), "plan.csv");
+    await api.post("/api/v1/imports", { body: form, idempotencyKey: null });
+    expect(header(calls[0], "Idempotency-Key")).toBeUndefined();
+    expect(calls[0]?.init.body).toBe(form);
+    expect(header(calls[0], "Content-Type")).toBeUndefined();
+  });
+
   it("sends If-Match with the quoted revision on PATCH and DELETE, and no Idempotency-Key", async () => {
     const calls = stubFetch(() => new Response(null, { status: 204 }));
     await api.patch("/api/v1/users/{id}", { path: { id: "u1" }, body: { display_name: "Sam" }, ifMatch: 4712 });

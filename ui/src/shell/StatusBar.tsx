@@ -1,5 +1,5 @@
 import { A } from "@solidjs/router";
-import { Show } from "solid-js";
+import { lazy, Show } from "solid-js";
 import { events, type ConnectionState } from "../api/events";
 import { paths } from "../app/paths";
 import { formatRelative, t, type MessageKey } from "../i18n";
@@ -13,7 +13,10 @@ const STATE: Record<ConnectionState, { key: MessageKey; dot: string }> = {
   idle: { key: "shell.status.idle", dot: "dot idle" },
 };
 
-/** The status bar (decision 14): live connection, last event, jobs, selection, version. */
+// The utilization alarms come from the IPAM area; loaded after the shell is up.
+const AlarmStatus = lazy(() => import("../ipam/AlarmStatus"));
+
+/** The status bar (decision 14): live connection, last event, jobs, alarms, selection, version. */
 export function StatusBar(props: { jobs: JobCounts | null; version: string | undefined }) {
   const state = () => STATE[events.state()];
   const lastEvent = () => {
@@ -36,6 +39,7 @@ export function StatusBar(props: { jobs: JobCounts | null; version: string | und
           </A>
         )}
       </Show>
+      <AlarmStatus />
       <Show when={selection()}>
         {(sel) => <span>{t("shell.status.selection", { selected: sel().selected, total: sel().total })}</span>}
       </Show>

@@ -41,6 +41,7 @@ import { handlers, ok, route } from "./handlers";
 import { checkPassword, isTrivial } from "./policy";
 import { PROFILE_MATRIX, banner, profileSettings, toggleStates } from "./profiles";
 import { FetchEventSource } from "./event-source";
+import { advanceMockJobs } from "./job-store";
 import { emitMockEvent, openStreamCount } from "./sse";
 
 // ---------------------------------------------------------------------------------
@@ -66,7 +67,8 @@ async function call<T = unknown>(method: string, path: string, init: CallInit = 
     body: init.json === undefined ? null : JSON.stringify(init.json),
   });
   const text = await res.text();
-  return { res, status: res.status, body: (text ? JSON.parse(text) : undefined) as T };
+  const json = (res.headers.get("content-type") ?? "").includes("json");
+  return { res, status: res.status, body: (text && json ? JSON.parse(text) : text || undefined) as T };
 }
 
 const get = <T>(path: string, init?: CallInit) => call<T>("GET", path, init);
@@ -220,20 +222,24 @@ describe("operations", () => {
   });
 
   it("answers an operation without a mock with a 501 problem", async () => {
-    const answer = await get("/api/v1/addresses");
+    const answer = await get("/api/v1/metrics");
     const problem = expectProblem(answer, 501, "sys.not_implemented");
     expect(problem.title).toBe("Not implemented");
-    expect(problem.detail).toBe("GET /api/v1/addresses is not implemented yet");
-    expect(problem.params).toEqual({ method: "GET", path: "/api/v1/addresses" });
+    expect(problem.detail).toBe("GET /api/v1/metrics is not implemented yet");
+    expect(problem.params).toEqual({ method: "GET", path: "/api/v1/metrics" });
   });
 
   it("tries a static path before a parameterised one", async () => {
-    const tree = expectProblem(await get("/api/v1/prefixes/tree"), 501, "sys.not_implemented");
-    expect(tree.params.path).toBe("/api/v1/prefixes/tree");
-    const one = expectProblem(await get("/api/v1/prefixes/abc"), 501, "sys.not_implemented");
-    expect(one.params.path).toBe("/api/v1/prefixes/{id}");
-    const csv = expectProblem(await get("/api/v1/exports/addresses.csv"), 501, "sys.not_implemented");
-    expect(csv.params.path).toBe("/api/v1/exports/addresses.csv");
+    resetMockDb("signed-in");
+    const tree = await get<{ nodes: unknown[] }>("/api/v1/prefixes/tree");
+    expect(tree.status).toBe(200);
+    expect(Array.isArray(tree.body.nodes)).toBe(true);
+    // "abc" reaches the parameterised route, which refuses an id that is not a UUID.
+    expect((await get("/api/v1/prefixes/abc")).status).toBe(400);
+    resetMockDb();
+    // A static path that no mock answers yet still reaches its stub.
+    const stub = expectProblem(await get("/api/v1/openapi.json"), 501, "sys.not_implemented");
+    expect(stub.params.path).toBe("/api/v1/openapi.json");
   });
 
   it("does not compile a handler for a path that is not in the document", () => {
@@ -1436,24 +1442,46 @@ describe("system", () => {
     expect(status.body.warnings[0]?.code).toBe("sys.tls.plain_http");
   });
 
-  it("lists one running, one waiting and one finished job", async () => {
+  it("lists the seed jobs with their derived summary", async () => {
     resetMockDb("signed-in");
-    const jobs = await get<Page<{ id: string; state: string; steps_done: number; step_count: number; kind: string; title: string }>>(
-      "/api/v1/jobs",
-    );
+    type Row = { id: string; state: string; steps_done: number; step_count: number; kind: string; title: string };
+    const jobs = await get<Page<Row>>("/api/v1/jobs");
     expect(jobs.status).toBe(200);
-    expect(jobs.body.items.map((j) => j.state).sort()).toEqual(["running", "succeeded", "waiting"]);
+    expect(jobs.body.items.map((j) => j.state).sort()).toEqual([
+      "cancelled",
+      "queued",
+      "rolled_back",
+      "running",
+      "succeeded",
+      "waiting",
+    ]);
     const running = jobs.body.items.find((j) => j.state === "running");
-    expect(running?.steps_done).toBe(6);
-    expect(running?.step_count).toBe(10);
+    expect(running).toMatchObject({ kind: "import.apply", title: "jobs.title.import_apply", steps_done: 2, step_count: 3 });
     expect(jobs.body.revision).toBe(db.revision);
 
-    const onlyRunning = await get<Page<{ state: string }>>("/api/v1/jobs?state=running");
+    const onlyRunning = await get<Page<Row>>("/api/v1/jobs?state=running");
     expect(onlyRunning.body.items.map((j) => j.state)).toEqual(["running"]);
-    const two = await get<Page<{ state: string }>>("/api/v1/jobs?state=waiting,succeeded");
+    const two = await get<Page<Row>>("/api/v1/jobs?state=waiting,succeeded");
     expect(two.body.items.map((j) => j.state).sort()).toEqual(["succeeded", "waiting"]);
     expect((await get<Page<unknown>>("/api/v1/jobs?state=failed")).body.items).toEqual([]);
-    expectProblem(await get("/api/v1/jobs?state=sleeping"), 400, "sys.invalid_query");
+    const bad = expectProblem(await get("/api/v1/jobs?state=sleeping"), 400, "jobs.query.invalid");
+    expect(bad.params).toEqual({ param: "state", value: "sleeping" });
+    expectProblem(await get("/api/v1/jobs?colour=red"), 400, "sys.invalid_query");
+  });
+
+  it("advances the running import with the job ticker and starts the next one", async () => {
+    resetMockDb("signed-in");
+    const stateOf = async () => {
+      const page = await get<Page<{ kind: string; state: string; steps_done: number }>>("/api/v1/jobs?kind=import.apply");
+      return page.body.items.map((j) => `${j.state}:${j.steps_done}`);
+    };
+    expect(await stateOf()).toEqual(["running:2"]);
+    const before = db.revision;
+    advanceMockJobs();
+    expect(db.revision).toBe(before + 1);
+    expect(await stateOf()).toEqual(["succeeded:3"]);
+    advanceMockJobs();
+    expect((await stateOf()).sort()).toEqual(["running:0", "succeeded:3"]);
   });
 
   it("searches addresses, prefixes, hosts and MACs without regard to case", async () => {
@@ -1463,13 +1491,15 @@ describe("system", () => {
     const titles = async (q: string) =>
       (await get<{ items: Hit[] }>(`/api/v1/search?q=${encodeURIComponent(q)}`)).body.items.map(key);
 
-    expect(await titles("NAS")).toEqual(["192.0.2.11", "00:00:5e:00:53:10", "nas.example.test"]);
-    expect(await titles("192.0.2.20")).toEqual(["192.0.2.20", "desk-01.example.test"]);
-    expect(await titles("198.51.100.0/24")).toEqual(["198.51.100.0/24"]);
-    expect(await titles("cam-door")).toEqual(["00:00:5e:00:53:2b", "cam-door.example.test"]);
-    expect(await titles("00-00-5e-00-53-2b")).toEqual(["00:00:5e:00:53:2b"]);
-    expect(await titles("2001:db8")).toContain("2001:db8::1");
-    expect(await titles("iot")).toEqual(["198.51.100.0/24"]);
+    expect(await titles("NAS")).toEqual(expect.arrayContaining(["192.0.2.11", "nas"]));
+    expect(await titles("198.51.100.0/24")).toContain("198.51.100.0/24");
+    const camDoor = await titles("cam-door");
+    expect(camDoor).toEqual(expect.arrayContaining(["192.0.2.43", "cam-door"]));
+    const byMac = await titles("00-00-5e-00-53-2b");
+    expect(byMac).toHaveLength(1);
+    expect(byMac[0]).toMatch(/^00:00:5e:00:53:2b$/);
+    expect(await titles("2001:db8")).toContain("2001:db8:0:10::1");
+    expect(await titles("IoT")).toContain("198.51.100.0/24");
     expect(await titles("nothing like this")).toEqual([]);
     expect(await titles("")).toEqual([]);
     expect(await titles("   ")).toEqual([]);

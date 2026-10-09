@@ -13,7 +13,6 @@ import type { HttpHandler } from "msw";
 import type { Topic } from "../events";
 import { requireSession } from "./auth";
 import {
-  advanceMockJobs,
   db,
   onMockReset,
   recordAlarm,
@@ -22,6 +21,7 @@ import {
   type MockEvent,
   type MockEventData,
 } from "./db";
+import { advanceMockJobs } from "./job-store";
 import { fail } from "./reply";
 import { route } from "./route";
 

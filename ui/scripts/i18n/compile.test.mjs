@@ -12,6 +12,7 @@ import {
   renderKeysTs,
   renderLocaleModule,
   renderMetaModule,
+  packOf,
 } from "./compile.mjs";
 
 /** @typedef {import("./compile.mjs").Catalog} Catalog */
@@ -930,5 +931,34 @@ describe("the language packs of ui/i18n", () => {
     const swedish = [...(catalog.messages.get("sv")?.keys() ?? [])].sort();
     expect(english.length).toBeGreaterThan(0);
     expect(swedish).toEqual(english);
+  });
+});
+
+describe("message packs", () => {
+  it("assigns a key to the first pack with a matching prefix, else to the core", () => {
+    const packs = { ipam: ["ipam.", "hosts."], jobs: ["jobs."] };
+    expect(packOf("ipam.tree.title", packs)).toBe("ipam");
+    expect(packOf("hosts.mode.static", packs)).toBe("ipam");
+    expect(packOf("jobs.state.running", packs)).toBe("jobs");
+    expect(packOf("shell.nav.ipam", packs)).toBeUndefined();
+  });
+
+  it("renders the core table and a pack table from the include filter", async () => {
+    const catalog = load(validPair());
+    const core = await evaluateModule(renderLocaleModule(catalog, "en", { include: (k) => k !== "app.save" }));
+    expect(Object.keys(core["default"])).toEqual(["app.greeting", "app.items"]);
+    const pack = await evaluateModule(renderLocaleModule(catalog, "sv", { include: (k) => k === "app.save" }));
+    expect(pack["default"]).toEqual({ "app.save": "Spara" });
+  });
+
+  it("exports a loader per pack and language when packs are given", async () => {
+    const catalog = load(validPair());
+    const text = renderMetaModule(catalog, { packs: ["jobs", "ipam"] });
+    expect(text).toContain(
+      'export const packs = {\n  ipam: {\n    en: () => import("virtual:tenko-i18n/en/ipam"),\n' +
+        '    sv: () => import("virtual:tenko-i18n/sv/ipam"),\n  },\n  jobs: {',
+    );
+    expect(renderMetaModule(catalog, { packs: [] })).toContain("export const packs = {};\n");
+    expect(renderMetaModule(catalog)).not.toContain("packs");
   });
 });

@@ -1,0 +1,10 @@
+/* VLAN chip swatch shapes: the second cue next to the color (design decision 11).
+   The swatch itself is `.vlan::before` in app/styles/design.css (8 x 8 px, filled with
+   --vlan); these rules only change its shape. Selectors carry two classes so they win over
+   the base rule whatever the order of the style sheets. */
+.vlan.vlan-shape-square::before { border-radius: 2px; }
+.vlan.vlan-shape-circle::before { border-radius: 50%; }
+.vlan.vlan-shape-diamond::before { border-radius: 1px; transform: rotate(45deg) scale(.85); }
+.vlan.vlan-shape-triangle::before { border-radius: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.vlan.vlan-shape-ring::before { box-sizing: border-box; border: 2px solid var(--vlan, var(--ink-4)); border-radius: 50%; background: transparent; }
+.vlan.vlan-shape-bar::before { width: 4px; height: 10px; border-radius: 1px; }

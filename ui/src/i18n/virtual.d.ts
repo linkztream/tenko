@@ -20,6 +20,14 @@ declare module "virtual:tenko-i18n/meta" {
   export const loaders: Readonly<
     Record<string, () => Promise<{ default: Readonly<Record<string, string | readonly unknown[]>> }>>
   >;
+  /**
+   * Message packs: per pack, a loader per language (the source language included) of the
+   * keys that only lazily loaded areas use. Empty under test, where the core table holds
+   * every key.
+   */
+  export const packs: Readonly<
+    Record<string, Readonly<Record<string, () => Promise<{ default: Readonly<Record<string, string | readonly unknown[]>> }>>>>
+  >;
 }
 
 declare module "virtual:tenko-i18n/en" {

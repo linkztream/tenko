@@ -9,6 +9,7 @@ import { RecoveryCodes } from "../../components/RecoveryCodes";
 import { toast } from "../../components/toast";
 import { t } from "../../i18n";
 import { fingerprintRows, fingerprintText } from "../format";
+import { CaRootLink } from "../../components/CaRootLink";
 import { FOCUS } from "../gates";
 import { useWizard } from "../controller";
 
@@ -154,6 +155,8 @@ export function Result() {
                 {t("setup.result.ca.copy")}
               </button>
             </div>
+            <CaRootLink mode="internal_ca" withHelp />
+            <p class="wz-help">{t("setup.result.ca.compare")}</p>
           </div>
         )}
       </Show>

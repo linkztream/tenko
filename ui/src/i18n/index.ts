@@ -12,7 +12,7 @@
 import { IntlMessageFormat } from "intl-messageformat";
 import { createSignal, type JSX } from "solid-js";
 import en from "virtual:tenko-i18n/en";
-import { loaders, locales, sourceLocale } from "virtual:tenko-i18n/meta";
+import { loaders, locales, packs, sourceLocale } from "virtual:tenko-i18n/meta";
 import type { MessageArgs, MessageKey } from "./generated/keys";
 
 export type { MessageArgs, MessageKey } from "./generated/keys";
@@ -23,8 +23,19 @@ export type ArgsOf<K extends MessageKey> = K extends keyof MessageArgs ? [args: 
 
 const STORED_KEY = "tenko-lang";
 
-const tables = new Map<string, MessageTable>([[sourceLocale, en]]);
+type MutableTable = Record<string, string | readonly unknown[]>;
+
+/** The source table: the core messages plus every message pack loaded so far. */
+const source: MutableTable = { ...en };
+const tables = new Map<string, MutableTable>([[sourceLocale, source]]);
 const [locale, setLocaleSignal] = createSignal<string>(sourceLocale);
+/** Message packs loaded so far (see loadPacks). */
+const loadedPacks = new Set<string>();
+/**
+ * Counts pack arrivals, so a text read before its pack arrived (a route title, say) is
+ * read again once it is there.
+ */
+const [packRevision, setPackRevision] = createSignal(0);
 
 /** The current UI language (BCP 47). */
 export { locale };
@@ -101,10 +112,53 @@ export async function setLocale(code: string): Promise<void> {
     const load = loaders[target];
     if (!load) return;
     const mod = await load();
-    tables.set(target, mod.default);
+    const table: MutableTable = { ...mod.default };
+    // The packs in use (or on their way), in the new language too.
+    await Promise.all(pending.values());
+    await Promise.all([...loadedPacks].map((name) => mergePack(table, name, target)));
+    tables.set(target, table);
   }
   setLocaleSignal(target);
   if (typeof document !== "undefined") document.documentElement.lang = target;
+}
+
+async function mergePack(table: MutableTable, name: string, code: string): Promise<void> {
+  const load = packs[name]?.[code];
+  if (!load) return;
+  Object.assign(table, (await load()).default);
+}
+
+const pending = new Map<string, Promise<void>>();
+
+/**
+ * Loads message packs (the messages of lazily loaded areas, see scripts/vite-plugin-i18n.mjs)
+ * in the source language and in every language loaded so far. Unknown names are ignored, so
+ * a build without packs (tests) needs no special case.
+ */
+export function loadPacks(names: readonly string[]): Promise<void> {
+  return Promise.all(
+    names.map((name) => {
+      if (loadedPacks.has(name) || !packs[name]) return Promise.resolve();
+      let p = pending.get(name);
+      if (!p) {
+        p = Promise.all([...tables].map(([code, table]) => mergePack(table, name, code))).then(() => {
+          loadedPacks.add(name);
+          pending.delete(name);
+          setPackRevision((n) => n + 1);
+        });
+        pending.set(name, p);
+      }
+      return p;
+    }),
+  ).then(() => undefined);
+}
+
+/**
+ * Wraps the loader of a lazy route so its message packs arrive with its code:
+ * `lazy(withPacks(["ipam"], () => import("./IpamView")))`.
+ */
+export function withPacks<T>(names: readonly string[], load: () => Promise<T>): () => Promise<T> {
+  return () => Promise.all([loadPacks(names), load()]).then(([, mod]) => mod);
 }
 
 const formatters = new Map<string, IntlMessageFormat>();
@@ -112,7 +166,7 @@ const formatters = new Map<string, IntlMessageFormat>();
 function lookup(code: string, key: string): { loc: string; msg: string | readonly unknown[] } | undefined {
   const own = tables.get(code)?.[key];
   if (own !== undefined) return { loc: code, msg: own };
-  const fallback = en[key];
+  const fallback = source[key];
   return fallback === undefined ? undefined : { loc: sourceLocale, msg: fallback };
 }
 
@@ -129,6 +183,7 @@ function compiled(loc: string, key: string, ast: readonly unknown[]): IntlMessag
 
 function render(key: string, values: Record<string, unknown> | undefined): string | unknown[] {
   const code = locale();
+  packRevision();
   const found = lookup(code, key);
   if (!found) return key;
   if (typeof found.msg === "string") return found.msg;
@@ -156,7 +211,8 @@ export function tx(key: MessageKey, values: Record<string, JSX.Element | string 
 
 /** Whether a key exists (for keys built at run time, such as error codes). */
 export function hasMessage(key: string): key is MessageKey {
-  return en[key] !== undefined;
+  packRevision();
+  return source[key] !== undefined;
 }
 
 /** A message for a key built at run time; `undefined` when the key does not exist. */

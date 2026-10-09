@@ -59,3 +59,9 @@
 
 /* Dialogs that show a secret once are a little wider than a confirmation. */
 .dialog.wide { width: min(560px, calc(100vw - 32px)); }
+
+/* The QR code of the TOTP enrolment: dark on light in both themes. */
+.acct-qr { margin: var(--sp-3) 0 var(--sp-4); }
+.qr { display: block; border-radius: var(--r-2); }
+.qr .qr-light { fill: var(--qr-light); }
+.qr .qr-dark { fill: var(--qr-dark); }

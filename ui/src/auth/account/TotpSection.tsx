@@ -5,6 +5,7 @@ import type { FactorEnrolled, TotpEnrolment } from "../../api/types";
 import { ConfirmDialog } from "../../components/Dialog";
 import { Icon } from "../../components/Icon";
 import { Notice } from "../../components/Notice";
+import { QrCode } from "../../components/QrCode";
 import { toast } from "../../components/toast";
 import { formatNumber, t } from "../../i18n";
 import type { MethodsData } from "./data";
@@ -156,7 +157,10 @@ export function TotpSection(props: {
         {(enrol) => (
           <div class="acct-panel" role="group" aria-labelledby="acct-totp-setup">
             <h3 id="acct-totp-setup">{t("account.totp.setup_title")}</h3>
-            <p>{t("account.totp.no_qr")}</p>
+            <p>{t("account.totp.scan_or_key")}</p>
+            <div class="acct-qr">
+              <QrCode text={enrol().otpauth_uri} label={t("account.totp.qr_label")} />
+            </div>
 
             <div class="field">
               <span class="label" id="acct-totp-key-label">

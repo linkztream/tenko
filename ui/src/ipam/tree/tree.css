@@ -1,0 +1,20 @@
+/* The prefix tree (PrefixTree.tsx) inside the tree pane of the IPAM view. */
+.tree-scroll { position: relative; flex: 1; overflow: auto; min-height: 0; }
+.tree-scroll .tree:focus { outline: none; }
+.tree-scroll .tree:focus-visible .tnode.active { outline: 2px solid var(--focus); outline-offset: -2px; }
+.tree-msg { padding: var(--sp-5); }
+.tnode { cursor: pointer; }
+.tnode .tw { cursor: pointer; }
+.tnode.dim { opacity: 0.45; cursor: not-allowed; }
+.tnode.supernet .lbl .mono, .tnode.supernet .addr { color: var(--ink-2); }
+.tnode .meter .bar { width: 36px; }
+.tnode .vlan { font-size: var(--fs-11); }
+.tnode .status-badge { font-size: var(--fs-11); }
+.tree-scroll .drop-tip {
+  position: sticky; bottom: var(--sp-4); margin: var(--sp-4);
+  padding: 6px 10px; border-radius: var(--r-2);
+  background: var(--surface-inverse); color: var(--ink-inverse);
+  font-size: var(--fs-12); line-height: 1.4; box-shadow: var(--shadow-float);
+}
+.tnode.selected { background: var(--accent-wash); }
+.tnode.selected .lbl .addr { color: var(--accent); font-weight: var(--fw-semibold); }

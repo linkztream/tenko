@@ -1,0 +1,40 @@
+/* The import wizard (Wizard.tsx and steps/). Token roles only. */
+.import-page { overflow: auto; }
+.import-steps { display: flex; gap: var(--sp-6); list-style: none; margin: 0; padding: var(--sp-4) var(--sp-6); background: var(--surface); border-bottom: 1px solid var(--line); }
+.import-steps li { display: inline-flex; align-items: center; gap: var(--sp-3); color: var(--ink-3); font-weight: var(--fw-medium); }
+.import-steps li .n { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--line-strong); font-size: var(--fs-11); }
+.import-steps li.current { color: var(--ink); }
+.import-steps li.current .n { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.import-steps li.done .n { border-color: var(--ok-ink); color: var(--ok-ink); }
+.import-body { display: grid; gap: var(--sp-5); padding: var(--sp-6); max-width: 1200px; }
+.import-card { display: grid; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); border: 1px solid var(--line); border-radius: var(--r-3); background: var(--surface); }
+.import-card > h2, .import-card > h3 { font-size: var(--fs-14); display: flex; align-items: baseline; gap: var(--sp-4); }
+.import-card > h2 .aside { margin-left: auto; font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); }
+.import-card > h3 .muted { font-weight: var(--fw-regular); font-size: var(--fs-12); }
+.dropzone { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-8); border: 1.5px dashed var(--control-line); border-radius: var(--r-3); color: var(--ink-2); justify-content: center; }
+.dropzone.over { border-color: var(--accent); background: var(--accent-wash); }
+.import-files { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.import-files li { display: flex; align-items: center; gap: var(--sp-4); }
+.import-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-5); }
+.sheet-head { display: flex; flex-wrap: wrap; gap: var(--sp-5); align-items: flex-end; }
+.sheet-head .input.num { width: 90px; }
+.sheet-notes { display: flex; gap: var(--sp-4); align-items: center; font-size: var(--fs-12); }
+.import-columns td { height: auto; padding-top: 4px; padding-bottom: 4px; vertical-align: top; }
+.import-columns .samples { color: var(--ink-2); max-width: 340px; white-space: normal; }
+.target-cell { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.target-cell .iface { width: 140px; }
+.import-actions { display: flex; align-items: center; gap: var(--sp-4); justify-content: flex-end; }
+.import-actions.sticky { position: sticky; bottom: 0; padding: var(--sp-4) 0; background: var(--bg); border-top: 1px solid var(--line); }
+.import-facts { display: flex; flex-wrap: wrap; gap: var(--sp-8); color: var(--ink-2); }
+.import-facts .big { font-size: var(--fs-18); font-weight: var(--fw-semibold); color: var(--ink); }
+.import-counts { max-width: 640px; }
+.import-group > summary { cursor: pointer; padding: var(--sp-2) 0; }
+.import-group ul { max-height: 240px; overflow: auto; }
+.plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.sev { display: inline-flex; align-items: center; gap: 4px; font-weight: var(--fw-medium); }
+.sev.error { color: var(--danger-ink); }
+.sev.warning { color: var(--warn-ink); }
+.sev.info { color: var(--ink-3); }
+.import-links { columns: 3 220px; list-style: none; margin: 0; padding: 0; }
+.import-result .progress .bar { width: 320px; height: 6px; }
+table.plain caption { text-align: left; font-weight: var(--fw-semibold); padding: var(--sp-3) var(--cell-px); }

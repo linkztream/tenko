@@ -4,7 +4,7 @@ import type { IconName } from "../components/Icon";
 import type { MessageKey } from "../i18n";
 
 export interface Area {
-  id: "dashboard" | "ipam" | "dns" | "dhcp" | "topology" | "jobs" | "settings";
+  id: "dashboard" | "ipam" | "dns" | "dhcp" | "topology" | "jobs" | "audit" | "settings";
   path: string;
   icon: IconName;
   label: MessageKey;
@@ -19,5 +19,6 @@ export const AREAS: readonly Area[] = [
   { id: "dhcp", path: "/dhcp", icon: "dhcp", label: "shell.nav.dhcp", chord: "H" },
   { id: "topology", path: "/topology", icon: "topology", label: "shell.nav.topology", chord: "T" },
   { id: "jobs", path: "/jobs", icon: "jobs", label: "shell.nav.jobs", chord: "J" },
+  { id: "audit", path: "/audit", icon: "audit", label: "shell.nav.audit", chord: "A" },
   { id: "settings", path: "/settings", icon: "settings", label: "shell.nav.settings", chord: "S" },
 ];

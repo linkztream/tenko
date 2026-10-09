@@ -1,0 +1,65 @@
+/* The IPAM view: prefix tree | prefix pane (design: shell-and-ipam mockup). Token roles only. */
+.ipam-page { overflow: hidden; }
+.ipam { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: var(--tree-w, 320px) minmax(0, 1fr); }
+.tree-pane { display: flex; flex-direction: column; min-height: 0; background: var(--surface); border-right: 1px solid var(--line); }
+.tree-head { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4) var(--sp-3) var(--sp-5); border-bottom: 1px solid var(--line); }
+.tree-head .query { max-width: none; min-width: 0; flex: 1; height: 28px; }
+.tree-head .scope-switch { flex: 1; min-width: 0; }
+.tree-foot { padding: var(--sp-4) var(--sp-5); border-top: 1px solid var(--line); color: var(--ink-3); font-size: var(--fs-12); display: flex; gap: var(--sp-3); align-items: center; }
+.tree-foot .grow { margin-left: auto; text-align: right; }
+
+.ipam-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.prefix-pane, .vrf-overview { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.prefix-pane .page-head h1 .tag { margin-left: var(--sp-3); }
+.prefix-tabpanel { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.prefix-tabpanel > .history { overflow: auto; }
+.tab-tools { display: flex; gap: var(--sp-3); padding: var(--sp-3) var(--sp-5); background: var(--surface); border-bottom: 1px solid var(--line); }
+.indent { display: inline-block; padding-left: calc(var(--depth, 0) * 14px); }
+
+/* Prefix summary strip */
+.summary { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-4) var(--sp-5); background: var(--surface); border-bottom: 1px solid var(--line); flex-wrap: wrap; row-gap: var(--sp-3); }
+.summary .use { display: grid; gap: 5px; min-width: 300px; }
+.summary .use .top { display: flex; align-items: baseline; gap: var(--sp-4); }
+.summary .use .pct { font-size: var(--fs-18); font-weight: var(--fw-semibold); }
+.summary .use .of { color: var(--ink-3); font-size: var(--fs-12); }
+.summary .use .meter .bar { width: 300px; height: 6px; }
+.summary .legend { display: flex; gap: var(--sp-5); font-size: var(--fs-11); color: var(--ink-3); }
+.facts { display: grid; grid-template-columns: repeat(4, auto); gap: 2px var(--sp-8); font-size: var(--fs-12); margin: 0; }
+.facts dt { color: var(--ink-3); }
+.facts dd { margin: 0; color: var(--ink); }
+
+/* Rows of the address grid */
+.grid tr.deleted td { color: var(--ink-3); }
+.free-cell { display: inline-flex; align-items: center; gap: var(--sp-3); }
+
+/* Move target picker */
+.dialog.move-dialog { width: min(560px, calc(100vw - 32px)); }
+.move-targets { list-style: none; margin: var(--sp-3) 0 0; padding: 0; max-height: 46vh; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-2); }
+.move-targets li { display: grid; grid-template-columns: 180px 1fr auto; gap: var(--sp-4); align-items: center; padding: 6px var(--sp-4); cursor: pointer; }
+.move-targets li[aria-selected="true"] { background: var(--accent-wash); }
+
+@media (max-width: 1400px) { .ipam { --tree-w: 264px; } }
+@media (max-width: 1180px) { .ipam { --tree-w: 228px; } .summary .facts { display: none; } }
+
+/* Pages that are one grid with a filter bar (addresses, hosts, VLANs, ...). */
+.list-page { overflow: hidden; }
+.list-body { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+
+/* Detail pages (address, host): sections in one column, up to a readable width. */
+.detail-body { max-width: 1100px; }
+.detail-body .kv { grid-template-columns: 160px minmax(0, 1fr); }
+
+/* Tenancy pages: tenants and VRFs side by side, each a filtered grid. */
+.tenancy-page { overflow: hidden; }
+.tenancy-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-6); flex: 1; min-height: 0; }
+.tenancy-split > section { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.split-title { margin: 0 0 var(--sp-3); font-size: var(--fs-14); font-weight: var(--fw-semibold); color: var(--ink); }
+.collection { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.collection.half { min-width: 0; }
+@media (max-width: 1100px) { .tenancy-split { grid-template-columns: minmax(0, 1fr); overflow: auto; } }
+
+/* Tags and custom field definitions */
+.tag-kind { display: inline-flex; align-items: baseline; gap: var(--sp-2); margin-right: var(--sp-5); color: var(--ink-2); }
+.kinds-choice { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.kinds-choice > legend { grid-column: 1 / -1; }
+.kinds-choice > .help { grid-column: 1 / -1; }

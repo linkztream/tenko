@@ -1,0 +1,57 @@
+/* The IPAM forms (PrefixForm, RangeForm, AddressForm, the next free dialogs) and the shared
+   pieces under them: tags input, custom fields, history and delete dialogs. Token roles only. */
+.dialog.form-dialog { width: min(640px, calc(100vw - 32px)); max-height: 84vh; overflow: auto; top: 8vh; }
+.form-frame { display: grid; gap: var(--sp-5); min-width: 0; }
+.form-fields { display: grid; gap: var(--sp-5); min-width: 0; }
+.form-fields .input, .form-fields .select { width: 100%; }
+.form-fields .field { min-width: 0; }
+.field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-5); align-items: start; }
+.field-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 560px) {
+  .field-row, .field-row.three { grid-template-columns: minmax(0, 1fr); }
+}
+.field > label.required::after { content: "*"; content: "*" / ""; margin-left: 2px; color: var(--danger-ink); }
+.field-note { display: inline-flex; align-items: flex-start; gap: var(--sp-2); }
+.field-note svg.i { margin-top: 2px; flex: none; }
+.field-actions { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+.field-with-unit { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 9em); gap: var(--sp-3); }
+fieldset.field-group { margin: 0; padding: 0; border: 0; display: grid; gap: var(--sp-4); min-width: 0; }
+fieldset.field-group > legend { padding: 0; font-size: var(--fs-12); font-weight: var(--fw-medium); color: var(--ink-2); margin-bottom: var(--sp-3); }
+.check-field { display: flex; align-items: center; gap: var(--sp-4); }
+.check-field label { font-size: var(--fs-13); color: var(--ink); font-weight: var(--fw-regular); }
+
+/* Tags input */
+.tags-input { display: grid; gap: var(--sp-3); }
+.tags-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.tags-chips:empty { display: none; }
+.tags-chips .tag { height: 22px; padding-right: 2px; }
+.tag-remove { display: inline-grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: var(--r-1); background: transparent; color: var(--ink-3); cursor: pointer; }
+.tag-remove:hover { background: var(--surface-2); color: var(--ink); }
+.tag-remove:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+
+/* Custom values, read only */
+.custom-values { margin-top: var(--sp-4); }
+
+/* Next free dialogs */
+.next-free-result { display: flex; align-items: baseline; gap: var(--sp-4); margin: 0; font-size: var(--fs-14); }
+.next-free-result .mono { font-size: var(--fs-16); font-weight: var(--fw-semibold); color: var(--ink); }
+.length-picks { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+
+/* Delete and restore dialogs */
+.delete-cascade { display: flex; align-items: center; gap: var(--sp-4); font-weight: var(--fw-medium); cursor: pointer; }
+
+/* History */
+.history { display: grid; gap: var(--sp-4); padding: var(--sp-5); align-content: start; min-width: 0; }
+.history-head { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+.history-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; border: 1px solid var(--line); border-radius: var(--r-3); background: var(--surface); }
+.history-entry { display: grid; gap: var(--sp-2); padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--line); min-width: 0; }
+.history-entry:last-child { border-bottom: 0; }
+.history-line { display: flex; align-items: baseline; gap: var(--sp-4); flex-wrap: wrap; }
+.history-action { font-weight: var(--fw-medium); }
+.history-action.delete, .history-action.remove { color: var(--danger-ink); }
+.history-action.create, .history-action.restore { color: var(--ok-ink); }
+.history-changes { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; font-size: var(--fs-12); }
+.history-changes del { color: var(--ink-3); text-decoration: line-through; }
+.history-changes ins { text-decoration: none; color: var(--ink); }
+.history-more { justify-self: start; }
+.dialog.history-dialog { width: min(760px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; top: 10vh; }
