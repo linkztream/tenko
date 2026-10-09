@@ -121,6 +121,7 @@ export function Result() {
               <button
                 type="button"
                 id={FOCUS.passkey}
+                data-testid="setup-passkey-add"
                 class="btn"
                 aria-disabled={w.after.passkey.status === "waiting"}
                 onClick={() => void w.addPasskey()}
@@ -140,7 +141,7 @@ export function Result() {
             <div class="wz-fp">
               <div class="grow">
                 <div class="wz-help ink">{t("setup.result.ca.help")}</div>
-                <div class="hex" role="group" aria-labelledby="wz-ca-title">
+                <div class="hex" role="group" aria-labelledby="wz-ca-title" data-testid="setup-ca-fingerprint">
                   <For each={fingerprintRows(fp())}>
                     {(row) => (
                       <div>

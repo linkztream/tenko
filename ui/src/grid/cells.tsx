@@ -15,7 +15,7 @@ import "./cells.css";
  */
 export function StatusBadge(props: { status: Status }) {
   return (
-    <span class={`status-badge ${props.status}`} data-status={props.status}>
+    <span class={`status-badge ${props.status}`} data-status={props.status} data-testid="status-badge">
       {statusWord(props.status)}
     </span>
   );

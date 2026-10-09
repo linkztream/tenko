@@ -46,6 +46,8 @@ export function ProfileStep() {
                   class="wz-rd"
                   type="radio"
                   name="wz-profile"
+                  data-testid="setup-profile"
+                  data-key={p}
                   value={p}
                   checked={w.state.profile === p}
                   onChange={() => w.setProfile(p)}
@@ -86,6 +88,7 @@ export function ProfileStep() {
             <label class="ack">
               <input
                 id={FOCUS.labAck}
+                data-testid="field-lab-ack"
                 class="cb"
                 type="checkbox"
                 checked={w.state.labAck}

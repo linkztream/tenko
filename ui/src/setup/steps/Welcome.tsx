@@ -72,6 +72,7 @@ export function Welcome() {
           <label for={FOCUS.token}>{t("setup.welcome.token.label")}</label>
           <input
             id={FOCUS.token}
+            data-testid="field-setup-token"
             class="input mono"
             value={w.state.token}
             onInput={(e) => w.setState("token", e.currentTarget.value)}

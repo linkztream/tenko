@@ -73,7 +73,14 @@ export function AccountMenu(props: {
 
   return (
     <Portal>
-      <div ref={menu} class="acct" role="dialog" aria-label={t("shell.account.title")} onKeyDown={onKey}>
+      <div
+        ref={menu}
+        class="acct"
+        role="dialog"
+        aria-label={t("shell.account.title")}
+        onKeyDown={onKey}
+        data-testid="dialog-account"
+      >
         <div class="who">
           <strong>{s()?.user.display_name}</strong>
           <span>{t("shell.account.who", { role: role(), method: strength() })}</span>
@@ -113,6 +120,7 @@ export function AccountMenu(props: {
           </label>
           <select
             id="acct-language"
+            data-testid="field-language"
             class="select"
             value={s()?.user.language ?? ""}
             onChange={(e) => void changeLanguage(e.currentTarget.value)}
@@ -122,7 +130,7 @@ export function AccountMenu(props: {
           </select>
         </div>
         <div class="row items">
-          <A class="item" href={paths.account()} onClick={() => props.onClose()}>
+          <A class="item" href={paths.account()} onClick={() => props.onClose()} data-testid="account-security">
             <Icon name="key" />
             {t("shell.account.security")}
           </A>
@@ -131,7 +139,7 @@ export function AccountMenu(props: {
             {t("shell.keys.title")}
             <Kbd keys={["?"]} />
           </button>
-          <button type="button" class="item" onClick={() => props.onSignOut()}>
+          <button type="button" class="item" onClick={() => props.onSignOut()} data-testid="account-sign-out">
             <Icon name="user" />
             {t("shell.account.sign_out")}
           </button>

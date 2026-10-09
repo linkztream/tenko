@@ -79,6 +79,7 @@ export function DataDir() {
                       <label class="wz-override">
                         <input
                           id={FOCUS.diskOverride}
+                          data-testid="field-disk-override"
                           class="cb"
                           type="checkbox"
                           checked={w.state.acceptSlowDisk}

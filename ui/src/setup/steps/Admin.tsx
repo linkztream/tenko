@@ -79,6 +79,7 @@ export function Admin() {
           <label for={FOCUS.userName}>{t("setup.admin.user.label")}</label>
           <input
             id={FOCUS.userName}
+            data-testid="field-user-name"
             class="input"
             classList={{ bad: userBad() }}
             value={w.state.userName}
@@ -97,6 +98,7 @@ export function Admin() {
           <label for={FOCUS.displayName}>{t("setup.admin.name.label")}</label>
           <input
             id={FOCUS.displayName}
+            data-testid="field-display-name"
             class="input"
             value={w.state.displayName}
             onInput={(e) => w.setState("displayName", e.currentTarget.value)}
@@ -113,6 +115,7 @@ export function Admin() {
           <div class="wz-pwrow">
             <input
               id={FOCUS.password}
+              data-testid="field-password"
               class="input mono"
               type={w.state.showPassword ? "text" : "password"}
               value={w.state.password}

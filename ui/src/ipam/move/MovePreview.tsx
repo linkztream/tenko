@@ -269,7 +269,13 @@ export default function MovePreview() {
               <Kbd keys={["↑", "↓"]} /> {t("move.keys.move")} <Kbd keys={["Space"]} /> {t("move.keys.include")}{" "}
               <Kbd keys={["Enter"]} /> {t("move.keys.steps")}
             </span>
-            <button type="button" class="btn sm ghost" aria-pressed={allOpen()} onClick={() => setAllOpen(!allOpen())}>
+            <button
+              type="button"
+              class="btn sm ghost"
+              data-testid="move-show-steps"
+              aria-pressed={allOpen()}
+              onClick={() => setAllOpen(!allOpen())}
+            >
               {t("move.show_all_steps")}
             </button>
           </div>
@@ -303,11 +309,12 @@ export default function MovePreview() {
                       onChange={() => toggleInclude(item.requested)}
                     />
                   </td>
-                  <td>
+                  <td data-col="device">
                     <span class="devcell">
                       <button
                         type="button"
                         class="twisty"
+                        data-testid="move-steps-toggle"
                         tabIndex={-1}
                         aria-expanded={isOpen(item)}
                         aria-label={t("move.show_steps", { name: deviceName(item) })}
@@ -318,10 +325,10 @@ export default function MovePreview() {
                       <span class="nm">{deviceName(item)}</span>
                     </span>
                   </td>
-                  <td>
+                  <td data-col="mode">
                     <Show when={item.mode}>{(m) => <ModeBadge mode={m()} />}</Show>
                   </td>
-                  <td>
+                  <td data-col="ip">
                     <span class="chg">
                       <Addr value={item.old_ip} />
                       <Icon name="arrow-r" size="xs" />
@@ -333,7 +340,7 @@ export default function MovePreview() {
                       </Show>
                     </span>
                   </td>
-                  <td>
+                  <td data-col="dns">
                     <Show when={item.dns} fallback={<span class="muted">–</span>}>
                       {(dns) => (
                         <span class="dnschg">
@@ -345,8 +352,8 @@ export default function MovePreview() {
                       )}
                     </Show>
                   </td>
-                  <td>{l2Step(item) && preview() ? stepText(l2Step(item)!, item, preview()!) : ""}</td>
-                  <td>
+                  <td data-col="l2">{l2Step(item) && preview() ? stepText(l2Step(item)!, item, preview()!) : ""}</td>
+                  <td data-col="manual">
                     <span class="mt">{t("move.tasks", { count: manualCount(item) })}</span>
                   </td>
                 </tr>
@@ -377,7 +384,12 @@ export default function MovePreview() {
                       <ol class="steps" data-testid="move-steps">
                         <For each={item.steps}>
                           {(s) => (
-                            <li classList={{ auto: s.automatic, manual: !s.automatic }} data-kind={s.kind}>
+                            <li
+                              classList={{ auto: s.automatic, manual: !s.automatic }}
+                              data-kind={s.kind}
+                              data-testid="move-step"
+                              data-key={s.kind}
+                            >
                               <span class="who">{s.automatic ? t("move.legend.auto") : t("move.legend.manual")}</span>
                               {preview() ? stepText(s, item, preview()!) : ""}
                             </li>
@@ -410,12 +422,12 @@ export default function MovePreview() {
             </summary>
             <For each={checklist()}>
               {(group) => (
-                <section class="tgroup" data-kind={group.kind}>
+                <section class="tgroup" data-kind={group.kind} data-testid="move-checklist-group" data-key={group.kind}>
                   <h3>{groupTitle(group.kind, group.tasks.length)}</h3>
                   <ul>
                     <For each={group.tasks}>
                       {(task) => (
-                        <li>
+                        <li data-testid="move-task">
                           <span class="nm">{deviceName(task.item)}</span> {task.text}
                         </li>
                       )}
@@ -471,7 +483,7 @@ export default function MovePreview() {
           </div>
           <div class="cf-act">
             <span class="cf-rb">{t("move.rollback_note")}</span>
-            <button type="button" class="btn" onClick={() => navigate(-1)}>
+            <button type="button" class="btn" data-testid="move-cancel" onClick={() => navigate(-1)}>
               {t("common.action.cancel")}
             </button>
             <button type="button" class="btn primary" data-testid="move-start" disabled={!canStart()} onClick={() => void start()}>

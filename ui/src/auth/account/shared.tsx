@@ -65,14 +65,14 @@ export function CodesDialog(props: { codes: readonly string[]; fileBase: string;
     if (saved()) props.onClose();
   };
   return (
-    <Dialog label={t("account.codes.title")} onClose={close} class="dialog wide">
+    <Dialog label={t("account.codes.title")} onClose={close} class="dialog wide" testid="dialog-recovery-codes">
       <h2 class="dialog-title">{t("account.codes.title")}</h2>
       <div class="dialog-body">
         <p>{t("account.codes.lede")}</p>
         <RecoveryCodes codes={props.codes} fileBase={props.fileBase} saved={saved()} onSavedChange={setSaved} />
       </div>
       <div class="dialog-actions">
-        <button type="button" class="btn primary" disabled={!saved()} onClick={close}>
+        <button type="button" class="btn primary" disabled={!saved()} onClick={close} data-testid="recovery-close">
           {t("common.action.close")}
         </button>
       </div>

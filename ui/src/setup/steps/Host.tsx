@@ -56,6 +56,7 @@ export function Host() {
           <label for={FOCUS.hostName}>{t("setup.host.label")}</label>
           <input
             id={FOCUS.hostName}
+            data-testid="field-host-name"
             class="input mono"
             classList={{ bad: problem() !== null }}
             value={w.state.hostName}
@@ -87,6 +88,8 @@ export function Host() {
                     class="wz-rd"
                     type="radio"
                     name="wz-tls"
+                    data-testid="setup-tls"
+                    data-key={mode}
                     value={mode}
                     checked={w.state.tlsMode === mode}
                     disabled={disabled()}

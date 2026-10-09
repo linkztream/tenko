@@ -1,0 +1,5 @@
+# End-to-end test output: screenshots, traces, the Playwright report and the copy of the
+# server binary the tests run.
+e2e/.artifacts/
+playwright-report/
+test-results/

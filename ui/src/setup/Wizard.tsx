@@ -164,7 +164,7 @@ export default function Wizard() {
 
   return (
     <WizardProvider value={w}>
-      <div class="wz-page">
+      <div class="wz-page" data-testid="page-setup">
         <div class="wz-top">
           <Show when={w.state.profile === "lab"}>
             <div class="banner danger" role="alert">
@@ -193,6 +193,7 @@ export default function Wizard() {
               <select
                 id="wz-language"
                 class="select"
+                data-testid="field-language"
                 value={locale()}
                 onChange={(e) => void pickLanguage(e.currentTarget.value)}
               >
@@ -220,6 +221,8 @@ export default function Wizard() {
                     <button
                       type="button"
                       class="wz-step"
+                      data-testid="setup-step"
+                      data-key={id}
                       classList={{ done: w.isDone(i()) }}
                       aria-current={w.state.step === i() ? "step" : undefined}
                       aria-label={stepLabel(i())}
@@ -244,7 +247,12 @@ export default function Wizard() {
             </ol>
           </nav>
 
-          <main class="card wz-card" aria-labelledby="wz-title">
+          <main
+            class="card wz-card"
+            aria-labelledby="wz-title"
+            data-testid="setup-card"
+            data-key={w.finished() ? "result" : STEP_IDS[w.state.step]}
+          >
             <div class="wz-body">
               <div class="wz-stepno">{t("setup.stepno", { step: w.state.step + 1, total: STEP_COUNT })}</div>
               <h1 id="wz-title" tabindex="-1">
@@ -302,7 +310,13 @@ export default function Wizard() {
 
             <footer class="wz-foot">
               <Show when={!w.finished() && w.state.step > 0}>
-                <button type="button" class="btn ghost" onClick={() => w.back()} aria-keyshortcuts="Alt+ArrowLeft">
+                <button
+                  type="button"
+                  class="btn ghost"
+                  onClick={() => w.back()}
+                  aria-keyshortcuts="Alt+ArrowLeft"
+                  data-testid="setup-back"
+                >
                   {t("common.action.back")}{" "}
                   <span aria-hidden="true">
                     <Kbd keys={["Alt", "←"]} />
@@ -315,6 +329,7 @@ export default function Wizard() {
                   {(g) => (
                     <span
                       class="wz-blocker"
+                      data-testid="setup-blocker"
                       classList={{ pending: g().soft === true }}
                       ref={(el) => {
                         blocker = el;
@@ -332,6 +347,7 @@ export default function Wizard() {
                   <button
                     type="button"
                     id="wz-open"
+                    data-testid="setup-open"
                     class="btn primary"
                     aria-disabled={current() ? "true" : "false"}
                     aria-keyshortcuts="Enter"
@@ -347,6 +363,7 @@ export default function Wizard() {
                 <button
                   type="button"
                   id="wz-next"
+                  data-testid="setup-next"
                   class="btn primary"
                   aria-disabled={current() || w.state.submitting ? "true" : "false"}
                   aria-keyshortcuts="Enter"

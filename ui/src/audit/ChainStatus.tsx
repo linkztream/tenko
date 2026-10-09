@@ -90,7 +90,7 @@ function Intact(props: { chain: Chain; checked: Checked }) {
           <Show when={report().head.seq > 0}>
             <span>
               {t("audit.chain.head")}{" "}
-              <span class="mono" title={report().head.hash}>
+              <span class="mono" title={report().head.hash} data-testid="audit-chain-head" data-key={String(report().head.seq)}>
                 {shortHash(report().head.hash)}
               </span>
             </span>

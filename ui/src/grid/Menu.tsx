@@ -105,6 +105,8 @@ export function Menu(props: {
               tabIndex={i() === active() ? 0 : -1}
               aria-disabled={item.disabled ? "true" : undefined}
               data-item={item.id}
+              data-testid="menu-item"
+              data-key={item.id}
               onMouseEnter={() => setActive(i())}
               onClick={() => run(item)}
             >

@@ -262,7 +262,10 @@ export default function HostView() {
             <div class="page-body detail-body host-body">
               <Show when={missing().mac || missing().duid}>
                 <Notice kind="warn" role="status" title={t("hosts.warn.identifier_title")}>
-                  <span data-testid="host-identifier-warning">
+                  <span
+                    data-testid="host-identifier-warning"
+                    data-key={missing().mac && missing().duid ? "mac+duid" : missing().mac ? "mac" : "duid"}
+                  >
                     {missing().mac && missing().duid
                       ? t("hosts.warn.both")
                       : missing().mac
@@ -378,9 +381,9 @@ export default function HostView() {
                   <dt>{t("ipam.col.site")}</dt>
                   <dd>{siteName(h().site) ?? "–"}</dd>
                   <dt>{t("ipam.col.description")}</dt>
-                  <dd>{h().meta.description ?? "–"}</dd>
+                  <dd data-testid="host-description">{h().meta.description ?? "–"}</dd>
                   <dt>{t("ipam.col.tags")}</dt>
-                  <dd>
+                  <dd data-testid="host-tags">
                     <Tags tags={h().meta.tags} max={10} />
                   </dd>
                   <dt>{t("ipam.col.updated")}</dt>

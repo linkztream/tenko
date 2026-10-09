@@ -8,10 +8,12 @@ export function Notice(props: {
   title?: JSX.Element;
   children?: JSX.Element;
   role?: "alert" | "status";
+  /** The `data-testid` of the note (ui/README.md). */
+  testid?: string;
 }) {
   const icon = (): IconName => (props.kind === "ok" ? "check" : props.kind === "info" || !props.kind ? "info" : "alert");
   return (
-    <div class={`note ${props.kind ?? "info"}`} role={props.role}>
+    <div class={`note ${props.kind ?? "info"}`} role={props.role} data-testid={props.testid}>
       <Icon name={icon()} size="sm" />
       <div class="grow">
         <Show when={props.title}>

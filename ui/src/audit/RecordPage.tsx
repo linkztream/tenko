@@ -160,7 +160,7 @@ function Content(props: { record: AuditRecord }) {
           <ul class="record-objects" data-testid="audit-objects">
             <For each={objects()}>
               {(view) => (
-                <li class="record-object" data-kind={view.ref.kind}>
+                <li class="record-object" data-kind={view.ref.kind} data-testid="audit-object" data-id={view.ref.id} data-key={view.text}>
                   <span class="object-kind">{kindWord(view.ref.kind)}</span>
                   <Show
                     when={view.href}
@@ -203,7 +203,7 @@ function Content(props: { record: AuditRecord }) {
               <tbody>
                 <For each={changes()}>
                   {(change) => (
-                    <tr>
+                    <tr data-testid="audit-change" data-key={change.field}>
                       <Show when={hasObjectColumn()}>
                         <td>
                           <Show when={change.object} fallback={<Dash />}>

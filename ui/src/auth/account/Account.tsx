@@ -27,12 +27,17 @@ export default function Account() {
   };
 
   return (
-    <div class="page">
+    <div class="page" data-testid="page-account">
       <PageHead title={t("account.title")} sub={session()?.user.display_name} />
       <nav class="subnav" aria-label={t("account.nav.label")}>
         <For each={LINKS}>
           {(link) => (
-            <A href={paths.account(link.section)} classList={{ active: section() === link.section }}>
+            <A
+              href={paths.account(link.section)}
+              classList={{ active: section() === link.section }}
+              data-testid="account-nav"
+              data-key={link.section}
+            >
               {t(link.label)}
             </A>
           )}

@@ -125,6 +125,47 @@ jobs:
           path: ui/dist
           retention-days: 1
 
+  e2e:
+    name: End-to-end (Playwright)
+    # The server with the embedded UI, driven by a browser (WP1.11).
+    needs: ui
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+      - name: Build the server with the real UI
+        run: cargo build -p tenko --locked
+      - name: Install dependencies
+        working-directory: ui
+        run: npm ci
+      - name: Install Chromium
+        working-directory: ui
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests
+        working-directory: ui
+        env:
+          TENKO_BIN: ${{ github.workspace }}/target/debug/tenko
+        run: npm run e2e
+      - name: Keep the Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: ui/e2e/.artifacts/
+          retention-days: 14
+
   rust-embedded-ui:
     name: Rust with the built UI
     # The UI is built before Rust (ADR 0008); this build embeds the real bundle, without

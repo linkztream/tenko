@@ -13,7 +13,7 @@ export function JobStateChip(props: { state: JobState; done?: number | undefined
       ? { "--p": `${progressPercent(props.done ?? 0, props.total)}%` }
       : undefined;
   return (
-    <span class={`jstate ${jobStateClass(props.state)}`} style={style()} data-state={props.state}>
+    <span class={`jstate ${jobStateClass(props.state)}`} style={style()} data-state={props.state} data-testid="job-state">
       {jobStateWord(props.state)}
     </span>
   );
@@ -22,7 +22,7 @@ export function JobStateChip(props: { state: JobState; done?: number | undefined
 /** The state of one step of a job. */
 export function StepStateChip(props: { state: StepStateKind }) {
   return (
-    <span class={`jstate ${stepStateClass(props.state)}`} data-state={props.state}>
+    <span class={`jstate ${stepStateClass(props.state)}`} data-state={props.state} data-testid="job-step-state">
       {stepStateWord(props.state)}
     </span>
   );

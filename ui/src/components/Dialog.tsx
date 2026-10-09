@@ -13,6 +13,8 @@ export interface DialogProps {
   onClose: () => void;
   /** Class of the panel inside the scrim: `palette`, `sheet` or `dialog`. */
   class?: string;
+  /** The `data-testid` of the panel (`dialog-<name>`, see ui/README.md). */
+  testid?: string;
   /** Element to focus first; otherwise the first focusable element. */
   initialFocus?: () => HTMLElement | undefined;
   children: JSX.Element;
@@ -67,6 +69,7 @@ export function Dialog(props: DialogProps) {
           role="dialog"
           aria-modal="true"
           aria-label={props.label}
+          data-testid={props.testid}
           tabIndex={-1}
           onKeyDown={onKeyDown}
         >
@@ -80,6 +83,8 @@ export function Dialog(props: DialogProps) {
 /** A confirmation dialog whose confirm button names the action ("Revoke 3 sessions"). */
 export function ConfirmDialog(props: {
   title: string;
+  /** The `data-testid` of the panel; `dialog-confirm` by default. */
+  testid?: string;
   body?: JSX.Element;
   confirmLabel: string;
   cancelLabel: string;
@@ -90,11 +95,17 @@ export function ConfirmDialog(props: {
 }) {
   let confirm!: HTMLButtonElement;
   return (
-    <Dialog label={props.title} onClose={props.onClose} class="dialog" initialFocus={() => confirm}>
+    <Dialog
+      label={props.title}
+      onClose={props.onClose}
+      class="dialog"
+      initialFocus={() => confirm}
+      testid={props.testid ?? "dialog-confirm"}
+    >
       <h2 class="dialog-title">{props.title}</h2>
       <div class="dialog-body">{props.body}</div>
       <div class="dialog-actions">
-        <button type="button" class="btn ghost" onClick={() => props.onClose()}>
+        <button type="button" class="btn ghost" onClick={() => props.onClose()} data-testid="confirm-cancel">
           {props.cancelLabel}
         </button>
         <button
@@ -103,6 +114,7 @@ export function ConfirmDialog(props: {
           class={props.danger ? "btn danger" : "btn primary"}
           disabled={props.busy}
           onClick={() => props.onConfirm()}
+          data-testid="confirm-ok"
         >
           {props.confirmLabel}
         </button>

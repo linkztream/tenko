@@ -19,6 +19,7 @@ Run everything from `ui/` (Node 22 or later).
 | `npm run size` | Bundle report of `dist/` after a build: raw, gzip and brotli per file and the first-load total. |
 | `npm run i18n` | Compiles the XLIFF files into `src/i18n/generated/keys.ts`. |
 | `npm run api:types` | Regenerates `src/api/generated/schema.d.ts` from `docs/api/openapi.json`. Never edit the generated file by hand. |
+| `npm run e2e` | End-to-end tests (Playwright, Chromium) against the real `tenko serve`; see "End-to-end tests". `npm run e2e:report` opens the last HTML report. |
 
 Before a change is handed over: `npm run typecheck`, `npm run lint`, `npm run test` and
 `npm run build` all pass, and the first page load stays under 75 KB gzip (`npm run size`).
@@ -178,12 +179,16 @@ names are kebab case and stable; text and layout may change without breaking the
 | Plan dialog | `plan-summary`, `plan-blocking`, `plan-ack`, `plan-confirm` | |
 | Repeated item | one generic id, e.g. `move-item`, `tree-node` | `data-id`, `data-key` or `data-index` |
 | Status bar items | `status-<name>`, e.g. `status-alarms` | |
+| Repeated item by position | the generic id, e.g. `toast-action` | `data-index` |
+| Confirmation dialog | `dialog-confirm`, `confirm-ok`, `confirm-cancel` | |
+| State and kind of an item | | `data-state` (job, step and chain chips), `data-status` (`status-badge`), `data-kind` and `data-action` (`plan-change`, `history-entry`), `data-code` (`plan-ack`), `data-job` (`job-group-task`) |
 
 Page roots in this version:
 
 | Route | Test id |
 |---|---|
 | `/` | `page-dashboard` |
+| `/setup`, `/signin`, `/account/:section?` | `page-setup`, `page-signin`, `page-account` |
 | `/ipam`, `/ipam/prefixes/:network/:length` | `page-ipam` |
 | `/ipam/addresses`, `/ipam/addresses/:ip` | `page-ipam-addresses`, `page-ipam-address` |
 | `/ipam/hosts`, `/ipam/hosts/:fqdn`, `/ipam/macs/:mac` | `page-hosts`, `page-host`, `page-mac` |
@@ -196,6 +201,29 @@ Page roots in this version:
 
 A new view follows the same pattern: a page root id, `grid-<id>` for each grid, the generic
 row and cell hooks from `DataGrid`, and `<area>-<action>` for its actions.
+
+## End-to-end tests
+
+`ui/e2e/` holds the browser tests of the embedded UI against the real server (WP1.11): first-run
+wizard, sign-in with TOTP and passkeys, IPAM, import, move, audit and language. Every test
+starts its own `tenko serve` with a temporary data directory and a free port
+(`e2e/support/server.ts`), so tests are independent and run in parallel.
+
+- Build first: `npm run build`, then `cargo build -p tenko` without `TENKO_UI_STUB`. The binary
+  is found through `TENKO_BIN`, `CARGO_TARGET_DIR/debug/tenko` or `../target/debug/tenko`; the
+  global setup copies it to `e2e/.artifacts/bin/` and refuses a placeholder-UI build.
+- The default instance is the Lab profile with plain HTTP on `http://localhost` (a secure
+  context, so passkeys work with the relying party `localhost`); `test.use({ transport:
+  "internal_ca" })` runs a test over HTTPS with the internal CA.
+- Fixtures (`e2e/support/fixtures.ts`): `server`, `api` (the API over the page's cookies),
+  `signedIn` (setup through the API, the browser signed in). TOTP codes come from
+  `e2e/support/totp.ts` (RFC 6238), passkeys from Chromium's virtual authenticator
+  (`e2e/support/webauthn.ts`).
+- Locate elements by `data-testid` and the `data-key`, `data-id` and `data-col` attributes of this
+  convention only (helpers in `e2e/support/ui.ts`), never by text, role name or CSS class.
+- `TENKO_E2E_UI_DIR=<dir>` serves the UI from a directory (`vite build --outDir <dir>`) instead
+  of the embedded one, which saves the Rust build while writing tests.
+- Output (report, traces, screenshots) goes to `e2e/.artifacts/`, which git ignores.
 
 ## Third-party code
 

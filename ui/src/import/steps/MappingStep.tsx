@@ -129,7 +129,7 @@ export function MappingStep(props: {
           const sm = () => sheetMapping(sheet.sheet);
           const sheetIssues = () => issues().filter((i) => i.sheet === sheet.sheet);
           return (
-            <section class="import-card sheet-map" data-testid="import-sheet" data-sheet={sheet.sheet} aria-label={sheet.sheet}>
+            <section class="import-card sheet-map" data-testid="import-sheet" data-key={sheet.sheet} data-sheet={sheet.sheet} aria-label={sheet.sheet}>
               <h3>
                 <span class="mono">{sheet.sheet}</span>
                 <span class="muted">
@@ -170,6 +170,7 @@ export function MappingStep(props: {
                   <input
                     id={`header-${sheet.sheet}`}
                     class="input num"
+                    data-testid="import-sheet-header-row"
                     type="number"
                     min="1"
                     max={sheet.rows}
@@ -216,7 +217,7 @@ export function MappingStep(props: {
                           const target = () => targetOf(props.mapping, sheet.sheet, col.column);
                           const credential = () => props.view.targets.find((i) => i.target === target())?.credential ?? false;
                           return (
-                            <tr data-testid="import-column" data-column={col.column} data-target={target()}>
+                            <tr data-testid="import-column" data-key={col.column} data-column={col.column} data-target={target()}>
                               <td class="mono">{col.column}</td>
                               <td>{col.header ?? <span class="muted">–</span>}</td>
                               <td class="samples mono">{col.samples.join(" · ")}</td>
@@ -257,6 +258,7 @@ export function MappingStep(props: {
                                   <Show when={target() === "address" && addressColumns(sheet.sheet) > 1}>
                                     <input
                                       class="input mono iface"
+                                      data-testid="import-column-interface"
                                       aria-label={t("import.columns.interface", { column: col.column })}
                                       placeholder={t("import.columns.interface_placeholder")}
                                       value={sm()?.columns?.find((c) => c.column === col.column)?.interface ?? ""}

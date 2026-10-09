@@ -99,7 +99,7 @@ export function PasskeySection(props: {
             <ul class="list">
               <For each={keys()}>
                 {(c) => (
-                  <li class="factor">
+                  <li class="factor" data-testid="account-passkey" data-id={c.id} data-key={c.label}>
                     <div class="info">
                       <h3>
                         {c.label}
@@ -122,6 +122,7 @@ export function PasskeySection(props: {
                         type="button"
                         class="btn sm"
                         aria-label={t("account.passkey.remove_named", { name: c.label })}
+                        data-testid="account-passkey-remove"
                         onClick={() => {
                           setRemoveError(null);
                           setRemoving(c);
@@ -149,6 +150,7 @@ export function PasskeySection(props: {
           <label for="acct-pk-label">{t("account.passkey.label")}</label>
           <input
             id="acct-pk-label"
+            data-testid="field-passkey-label"
             class="input"
             maxlength={64}
             autocomplete="off"
@@ -161,11 +163,17 @@ export function PasskeySection(props: {
           </span>
         </div>
         <div class="form-row">
-          <button type="submit" class="btn" disabled={!available || waiting() !== null}>
+          <button type="submit" class="btn" disabled={!available || waiting() !== null} data-testid="account-passkey-add">
             <Icon name="key" size="sm" />
             {t("account.passkey.add")}
           </button>
-          <button type="button" class="btn" disabled={!available || waiting() !== null} onClick={() => void add(true)}>
+          <button
+            type="button"
+            class="btn"
+            disabled={!available || waiting() !== null}
+            onClick={() => void add(true)}
+            data-testid="account-passkey-add-key"
+          >
             <Icon name="key" size="sm" />
             {t("account.passkey.add_key")}
           </button>

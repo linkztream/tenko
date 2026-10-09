@@ -50,7 +50,7 @@ export function Toasts() {
     <div class="toasts" role="status" aria-live="polite">
       <For each={toasts()}>
         {(item) => (
-          <div class={`toast ${item.kind ?? "info"}`}>
+          <div class={`toast ${item.kind ?? "info"}`} data-testid="toast" data-key={item.kind ?? "info"}>
             <span class={`toast-icon ${item.kind ?? "info"}`}>
               <Icon name={ICON[item.kind ?? "info"]} />
             </span>
@@ -66,10 +66,12 @@ export function Toasts() {
             <Show when={item.actions?.length}>
               <div class="acts">
                 <For each={item.actions}>
-                  {(a) => (
+                  {(a, i) => (
                     <button
                       type="button"
                       class={a.primary ? "btn sm primary" : "btn sm"}
+                      data-testid="toast-action"
+                      data-index={i()}
                       onClick={() => {
                         a.run();
                         dismissToast(item.id);

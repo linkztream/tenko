@@ -132,7 +132,7 @@ export function GroupPanel(props: {
           <span>{t("jobs.group.summary", { count: props.jobs.length })}</span>
           <For each={counts()}>
             {([state, count]) => (
-              <span class={`jstate ${jobStateClass(state)}`} data-state={state}>
+              <span class={`jstate ${jobStateClass(state)}`} data-state={state} data-testid="job-group-state" data-key={state}>
                 {formatNumber(count)} {jobStateWord(state)}
               </span>
             )}
@@ -159,7 +159,7 @@ export function GroupPanel(props: {
         >
           <For each={groups()}>
             {(group) => (
-              <section class="check-group" data-kind={group.kind}>
+              <section class="check-group" data-kind={group.kind} data-testid="job-group-kind" data-key={group.kind}>
                 <h4>{t("jobs.checklist.group", { name: stepName(group.kind), count: group.tasks.length })}</h4>
                 <ul class="check-list">
                   <For each={group.tasks}>
@@ -188,7 +188,7 @@ export function GroupPanel(props: {
                             )}
                           </Show>
                         </div>
-                        <A class="mono check-job" href={paths.job(task.jobId)}>
+                        <A class="mono check-job" href={paths.job(task.jobId)} data-testid="job-group-task-link">
                           {shortId(task.jobId)}
                         </A>
                         <button

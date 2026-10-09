@@ -50,7 +50,7 @@ export function RecoveryCodes(props: {
   return (
     <div class="recovery">
       <div classList={{ "print-area": printing() }}>
-        <ol class="codes" aria-label={t("recovery.list_label")}>
+        <ol class="codes" aria-label={t("recovery.list_label")} data-testid="recovery-codes">
           <For each={props.codes}>{(code) => <li>{code}</li>}</For>
         </ol>
       </div>
@@ -73,6 +73,7 @@ export function RecoveryCodes(props: {
           type="checkbox"
           class="cb"
           checked={props.saved}
+          data-testid="recovery-saved"
           onChange={(e) => props.onSavedChange(e.currentTarget.checked)}
         />
         {t("recovery.saved")}

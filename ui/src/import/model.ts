@@ -9,6 +9,7 @@
 // Editing the mapping on the preview page (proposals) saves it and previews again; the
 // preview is only applied when the server says it can be (`can_apply`) and every warning
 // that needs an acknowledgement has one.
+import { MAX_PREVIEW_ROWS, PREVIEW_ROWS } from "./api";
 import type {
   ColumnMapping,
   ImportOptions,
@@ -43,6 +44,8 @@ export type WizardEvent =
   | { type: "edit"; mapping: Mapping }
   | { type: "saved"; view: ImportView }
   | { type: "previewed"; preview: ImportPreview }
+  /** The same preview with more of its rows listed. */
+  | { type: "rows"; preview: ImportPreview }
   | { type: "acknowledge"; code: string; on: boolean }
   | { type: "applying"; jobId: string }
   | { type: "finished"; succeeded: boolean }
@@ -109,6 +112,12 @@ export function reduce(state: WizardState, event: WizardEvent): WizardState {
         // Acknowledgements of warnings the new preview no longer has are dropped.
         acknowledged: state.acknowledged.filter((c) => event.preview.warnings.some((w) => w.code === c)),
       };
+    case "rows":
+      if (state.step !== "preview" || !state.preview) return state;
+      // The store changed since: the whole preview is new.
+      if (event.preview.base_revision !== state.preview.base_revision) return reduce(state, { type: "previewed", preview: event.preview });
+      if (event.preview.rows.length <= state.preview.rows.length) return state;
+      return { ...state, preview: { ...state.preview, rows: event.preview.rows, total_rows: event.preview.total_rows } };
     case "acknowledge": {
       const set = new Set(state.acknowledged);
       if (event.on) set.add(event.code);
@@ -144,6 +153,20 @@ export function unacknowledged(state: WizardState): string[] {
   if (!preview) return [];
   const given = new Set([...state.acknowledged, ...(state.mapping?.options?.acknowledge ?? [])]);
   return [...new Set(preview.warnings.filter((w) => w.requires_ack && !w.acknowledged && !given.has(w.code)).map((w) => w.code))];
+}
+
+/** How many source rows the next page of the row list asks for; 0 when all are listed. */
+export function nextRows(state: WizardState): number {
+  const preview = state.preview;
+  if (!preview) return 0;
+  const listed = preview.rows.length;
+  const reachable = Math.min(preview.total_rows, MAX_PREVIEW_ROWS);
+  return listed < reachable ? Math.min(reachable, listed + PREVIEW_ROWS) : 0;
+}
+
+/** Every source row the server can list is listed (all, or the first MAX_PREVIEW_ROWS). */
+export function allRowsListed(state: WizardState): boolean {
+  return nextRows(state) === 0;
 }
 
 /** The plan blocker that the acknowledgements sent with apply can clear. */

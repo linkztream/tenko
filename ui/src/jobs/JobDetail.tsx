@@ -74,7 +74,7 @@ function CancelDialog(props: { detail: JobDetailData; onClose: () => void; onDon
       title={t("jobs.cancel.title")}
       body={
         <>
-          <p>{queued() ? t("jobs.cancel.body_queued") : t("jobs.cancel.body_active")}</p>
+          <p data-testid="job-cancel-text">{queued() ? t("jobs.cancel.body_queued") : t("jobs.cancel.body_active")}</p>
           <Show when={error()}>
             {(err) => (
               <p class="help bad field-error" role="alert" data-testid="job-cancel-error">
@@ -189,7 +189,7 @@ function JobBody(props: { detail: JobDetailData; onChanged: () => void }) {
           <Show when={spec().group}>
             {(group) => (
               <Fact label={t("jobs.fact.group")} testid="job-group-fact">
-                <A href={paths.jobs({ group: group() })} title={group()}>
+                <A href={paths.jobs({ group: group() })} title={group()} data-testid="job-group-link">
                   {t("jobs.fact.group_link")}
                 </A>{" "}
                 <span class="mono muted">{groupLabel(group())}</span>

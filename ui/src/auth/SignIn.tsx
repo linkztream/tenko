@@ -169,7 +169,7 @@ export default function SignIn() {
   const icon = () => (theme() === "system" ? "system" : theme() === "light" ? "sun" : "moon");
 
   return (
-    <div class="focus-page">
+    <div class="focus-page" data-testid="page-signin">
       <div class="focus-top">
         <button type="button" class="icon-btn" onClick={() => cycleTheme()} aria-label={themeLabel()} title={themeLabel()}>
           <Icon name={icon()} />
@@ -203,7 +203,7 @@ export default function SignIn() {
             </div>
 
             <Show when={error()}>
-              <div class="note bad" role="alert">
+              <div class="note bad" role="alert" data-testid="signin-error">
                 <Icon name="alert" size="sm" />
                 <span class="grow">{error()}</span>
               </div>
@@ -212,7 +212,13 @@ export default function SignIn() {
             <Switch>
               <Match when={stage() === "passkey"}>
                 <div class="fields">
-                  <button type="button" class="btn primary wide" disabled={busy()} onClick={() => void passkey()}>
+                  <button
+                    type="button"
+                    class="btn primary wide"
+                    disabled={busy()}
+                    onClick={() => void passkey()}
+                    data-testid="signin-passkey"
+                  >
                     <Icon name="key" />
                     {t("auth.signin.passkey")}
                   </button>
@@ -225,19 +231,20 @@ export default function SignIn() {
                     <p class="help">{secure() ? t("auth.signin.passkey_unsupported") : t("auth.signin.passkey_insecure")}</p>
                   </Show>
                   <div class="or">{t("auth.signin.or")}</div>
-                  <button type="button" class="btn wide" onClick={() => go("password")}>
+                  <button type="button" class="btn wide" onClick={() => go("password")} data-testid="signin-use-password">
                     {t("auth.signin.use_password")}
                   </button>
                 </div>
               </Match>
 
               <Match when={stage() === "password"}>
-                <form class="fields" onSubmit={(e) => void submitPassword(e)} novalidate>
+                <form class="fields" onSubmit={(e) => void submitPassword(e)} novalidate data-testid="signin-password-form">
                   <div class="field">
                     <label for="signin-user">{t("auth.signin.user_name")}</label>
                     <input
                       ref={userInput}
                       id="signin-user"
+                      data-testid="field-user-name"
                       class="input"
                       autocomplete="username"
                       autocapitalize="off"
@@ -251,6 +258,7 @@ export default function SignIn() {
                     <input
                       ref={passwordInput}
                       id="signin-password"
+                      data-testid="field-password"
                       class="input"
                       type="password"
                       autocomplete="current-password"
@@ -267,7 +275,7 @@ export default function SignIn() {
                       </span>
                     </div>
                   </Show>
-                  <button type="submit" class="btn primary wide" disabled={busy() || retryIn() > 0}>
+                  <button type="submit" class="btn primary wide" disabled={busy() || retryIn() > 0} data-testid="form-submit">
                     {t("auth.signin.submit")}
                   </button>
                   <div class="links">
@@ -279,7 +287,7 @@ export default function SignIn() {
               </Match>
 
               <Match when={stage() === "second"}>
-                <form class="fields" onSubmit={(e) => void submitCode(e)} novalidate>
+                <form class="fields" onSubmit={(e) => void submitCode(e)} novalidate data-testid="signin-code-form">
                   <div class="field">
                     <label for="signin-code">
                       {method() === "totp" ? t("auth.signin.totp_code") : t("auth.signin.recovery_code")}
@@ -287,6 +295,7 @@ export default function SignIn() {
                     <input
                       ref={codeInput}
                       id="signin-code"
+                      data-testid="field-code"
                       class="input mono"
                       autocomplete="one-time-code"
                       inputmode={method() === "totp" ? "numeric" : "text"}
@@ -304,7 +313,7 @@ export default function SignIn() {
                       </span>
                     </div>
                   </Show>
-                  <button type="submit" class="btn primary wide" disabled={busy() || retryIn() > 0}>
+                  <button type="submit" class="btn primary wide" disabled={busy() || retryIn() > 0} data-testid="form-submit">
                     {t("auth.signin.verify")}
                   </button>
                   <div class="links">
@@ -314,6 +323,8 @@ export default function SignIn() {
                           <button
                             type="button"
                             class="linkbtn"
+                            data-testid="signin-method"
+                            data-key={m}
                             onClick={() => {
                               if (m === "webauthn") void passkey();
                               else {
@@ -387,7 +398,12 @@ export default function SignIn() {
         <label class="lang">
           <Icon name="globe" size="sm" />
           <span class="sr-only">{t("shell.account.language")}</span>
-          <select class="select" value={locale()} onChange={(e) => void pickLanguage(e.currentTarget.value)}>
+          <select
+            class="select"
+            value={locale()}
+            onChange={(e) => void pickLanguage(e.currentTarget.value)}
+            data-testid="field-language"
+          >
             <For each={availableLocales()}>{(l) => <option value={l.code}>{l.name}</option>}</For>
           </select>
         </label>

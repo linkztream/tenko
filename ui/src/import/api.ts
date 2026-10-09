@@ -42,8 +42,13 @@ export type ShapeCounts = S["ShapeCounts"];
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 /** Extensions the server reads. */
 export const ACCEPTED = [".csv", ".txt", ".xlsx", ".xls", ".ods"] as const;
-/** Rows of the preview's row table. */
+/** Source rows of the preview's row list per page. */
 export const PREVIEW_ROWS = 200;
+/**
+ * The most rows one preview lists (the server's limit). The preview has no cursor: a page
+ * more asks for the preview again with more rows, up to this limit.
+ */
+export const MAX_PREVIEW_ROWS = 1000;
 
 export function uploadImport(files: readonly File[], signal?: AbortSignal): Promise<ImportView> {
   const form = new FormData();
@@ -59,8 +64,13 @@ export function saveMapping(id: string, mapping: Mapping): Promise<ImportView> {
   return api.put("/api/v1/imports/{id}/mapping", { path: { id }, body: mapping });
 }
 
-export function previewImport(id: string, signal?: AbortSignal): Promise<ImportPreview> {
-  return api.get("/api/v1/imports/{id}/preview", { path: { id }, query: { rows: PREVIEW_ROWS }, signal });
+/** The preview with the first `rows` source rows listed (the counts always cover everything). */
+export function previewImport(id: string, rows: number = PREVIEW_ROWS, signal?: AbortSignal): Promise<ImportPreview> {
+  return api.get("/api/v1/imports/{id}/preview", {
+    path: { id },
+    query: { rows: Math.max(1, Math.min(MAX_PREVIEW_ROWS, rows)) },
+    signal,
+  });
 }
 
 export async function applyImport(id: string, acknowledge: readonly string[], idempotencyKey: string): Promise<string> {

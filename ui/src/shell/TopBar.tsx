@@ -112,6 +112,7 @@ export function TopBar(props: {
         <button
           type="button"
           class="avatar"
+          data-testid="account-menu"
           aria-haspopup="dialog"
           aria-expanded={props.accountOpen}
           aria-label={t("shell.account.open", { name: session()?.user.display_name ?? "" })}

@@ -115,7 +115,11 @@ export function TotpSection(props: {
           <h2>
             {t("account.totp.name")}
             <Show when={props.data.totp() !== undefined}>
-              <span classList={{ tag: true, ok: props.data.totp() === true }}>
+              <span
+                classList={{ tag: true, ok: props.data.totp() === true }}
+                data-testid="account-totp-status"
+                data-key={props.data.totp() ? "on" : "off"}
+              >
                 <Icon name={props.data.totp() ? "check" : "x"} size="xs" />
                 {props.data.totp() ? t("account.totp.status_on") : t("account.totp.status_off")}
               </span>
@@ -130,6 +134,7 @@ export function TotpSection(props: {
               <Show when={enrolment() === null}>
                 <button
                   ref={startButton}
+                  data-testid="account-totp-setup"
                   type="button"
                   class="btn"
                   disabled={busy()}
@@ -140,7 +145,7 @@ export function TotpSection(props: {
               </Show>
             }
           >
-            <button type="button" class="btn sm" onClick={() => setRemoving(true)}>
+            <button type="button" class="btn sm" onClick={() => setRemoving(true)} data-testid="account-totp-remove">
               {t("common.action.remove")}
             </button>
           </Show>
@@ -167,7 +172,7 @@ export function TotpSection(props: {
                 {t("account.totp.key")}
               </span>
               <div class="form-row" role="group" aria-labelledby="acct-totp-key-label">
-                <code class="secret acct-secret">
+                <code class="secret acct-secret" data-testid="account-totp-secret">
                   {groupSecret(enrol().secret)}
                 </code>
                 <button type="button" class="btn sm" onClick={() => void copyText(enrol().secret)}>
@@ -201,6 +206,7 @@ export function TotpSection(props: {
                 <input
                   ref={codeInput}
                   id="acct-totp-code"
+                  data-testid="field-totp-code"
                   class="input mono acct-code"
                   inputmode="numeric"
                   autocomplete="one-time-code"
@@ -212,13 +218,13 @@ export function TotpSection(props: {
                 />
               </div>
               <Show when={error()}>
-                <div class="note bad" role="alert" id="acct-totp-error">
+                <div class="note bad" role="alert" id="acct-totp-error" data-testid="account-totp-error">
                   <Icon name="alert" size="sm" />
                   <span class="grow">{error()}</span>
                 </div>
               </Show>
               <div class="form-row">
-                <button type="submit" class="btn primary" disabled={busy()}>
+                <button type="submit" class="btn primary" disabled={busy()} data-testid="account-totp-verify">
                   {t("account.totp.verify")}
                 </button>
                 <button type="button" class="btn ghost" onClick={cancel}>

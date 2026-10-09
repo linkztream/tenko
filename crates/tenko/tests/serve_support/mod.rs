@@ -43,6 +43,8 @@ use std::{
 
 use tempfile::TempDir;
 
+pub mod api;
+
 /// The version the binary reports, which is the version of this package.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

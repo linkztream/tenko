@@ -58,6 +58,8 @@ export function Roles() {
               <label class="wz-choice multi">
                 <input
                   id={role === "controller" ? FOCUS.roleController : role === "probe" ? FOCUS.roleProbe : undefined}
+                  data-testid="setup-role"
+                  data-key={role}
                   class="cb"
                   type="checkbox"
                   checked={w.state.roles[role]}
