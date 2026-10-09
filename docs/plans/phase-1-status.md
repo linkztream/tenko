@@ -54,7 +54,7 @@ The committed tree compiles and `Cargo.lock` matches the committed manifests sin
 
 ## Push state
 
-`main` was pushed to `origin` at `f4eac91` on the night of 2026-10-09 after the full locked verification (check, fmt, clippy, 2,046 Rust tests, deny, audit) and the embedded-UI build with 817 API and server tests in the clean worktree. Later pushes follow the same gate: the clean-worktree verification first, with `docs/api/openapi.json` regenerated (`cargo run -p tenko -- openapi > docs/api/openapi.json`) and `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, `cargo deny check`, `cargo audit` and the attribution grep green.
+`main` was pushed to `origin` at `f4eac91` on the night of 2026-10-09 after the full locked verification (check, fmt, clippy, 2,046 Rust tests, deny, audit) and the embedded-UI build with 817 API and server tests in the clean worktree. Later pushes follow the same gate: the clean-worktree verification first, with `docs/api/openapi.json` regenerated (`cargo run -p tenko -- openapi > docs/api/openapi.json`) and `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, `cargo deny check`, `cargo audit` and the attribution grep green. A second push at `b5c7953` followed on the night of 2026-10-09 after the gate with the browser suite (23 Playwright scenarios, 826 API and server tests, 1,495 UI tests).
 
 ## Follow-ups recorded
 
