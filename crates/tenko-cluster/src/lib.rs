@@ -1,7 +1,10 @@
 //! Node-to-node transport: gRPC over mutual TLS, node enrolment, and the internal
 //! certificate authority.
 //!
-//! Placeholder crate: the implementation lands in a later phase (see `docs/ROADMAP.md`).
+//! Slice 1 holds the internal certificate authority and the TLS model of the API listener
+//! ([`ca`], WP1.3); gRPC, mTLS and enrolment follow in Slice 2 (WP2.2).
+
+pub mod ca;
 
 /// Name of this crate as declared in its manifest.
 pub const CRATE_NAME: &str = "tenko-cluster";

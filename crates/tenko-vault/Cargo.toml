@@ -7,5 +7,31 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# `MemVault` and `MemKek` helpers for other packages' tests.
+testing = []
+
+[dependencies]
+async-trait = { workspace = true }
+aws-lc-rs = { workspace = true }
+bytes = { workspace = true }
+serde = { workspace = true }
+tenko-core = { workspace = true }
+tenko-store = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+zeroize = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+# Safe wrapper over `CryptProtectData` / `CryptUnprotectData` (the FFI lives in the crate).
+# Pinned to the reviewed release: it is a small single-maintainer crate.
+windows-dpapi = "=0.2.0"
+
+[dev-dependencies]
+futures = { workspace = true }
+serde_json = { workspace = true }
+tenko-vault = { path = ".", features = ["testing"] }
+tokio = { workspace = true }
+
 [lints]
 workspace = true

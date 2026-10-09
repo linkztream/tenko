@@ -7,5 +7,29 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[dependencies]
+arc-swap = { workspace = true }
+async-trait = { workspace = true }
+aws-lc-rs = { workspace = true }
+ipnet = { workspace = true }
+# X.509 generation for the internal CA, on the same aws-lc-rs backend as rustls.
+rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "pem", "x509-parser", "zeroize"] }
+rustls = { workspace = true }
+serde = { workspace = true }
+tenko-core = { workspace = true }
+tenko-store = { workspace = true }
+tenko-vault = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+# Reads validity, names and extensions of certificates; verifies CSR signatures.
+x509-parser = { version = "0.18.1", features = ["verify-aws"] }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tenko-vault = { workspace = true, features = ["testing"] }
+
 [lints]
 workspace = true
