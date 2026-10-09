@@ -25,7 +25,7 @@
 | WP1.10 UI IPAM, import, audit | FINAL, committed locally | `fa95cae` | 1,485 tests in 67 files; first load 63.9 KB gzip with message packs per route; grid, IPAM, hosts, move preview, jobs, audit, dashboard, import wizard and export, CA root link, TOTP QR code (`uqr`, MIT); `data-testid` convention and layout in `ui/README.md` |
 | WP1.11 Acceptance and E2E | FINAL, committed locally | `b21d9a5` | 137 server tests (8 new acceptance files), 23 Playwright scenarios passing plus 2 `test.fixme` waiting for WP1.4d and WP1.10b, no flakes over three repeats; E1 and E3 verified automatically, E2 for PIN, TOTP and a virtual-authenticator passkey (hardware key, imported certificate and HAProxy stay manual), the manual-step parts of E8; `e2e` CI job added |
 | WP1.4d Default tenant and VRF at setup | In progress | `tenko-ipam`, `routes/setup.rs`, `serve/mod.rs` | Found by the E2E tests: a fresh installation had no tenant or VRF until the first write; `IpamService::ensure_defaults` at setup and at start |
-| WP1.10b UI fixes from E2E | In progress | `ui/src/hosts/HostForm.tsx`, `ui/src/import/**` | Host form clears custom values through `customPatch`; the import preview renders per-sheet outcomes and pages through every row |
+| WP1.10b UI fixes from E2E | FINAL, committed locally | `5997eed` | Host form sends only changed custom values (`null` clears); import preview shows the outcome per sheet, pages every listable row in a grid, loads all rows before apply; 1,495 UI tests; first load 64.1 KB gzip |
 | Design spike | Done, committed locally | `4880d8c` | All 16 owner decisions applied; mockups served from `design/` |
 
 ## Slice 2 work packages
