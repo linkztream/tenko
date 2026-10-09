@@ -18,8 +18,11 @@
 //!
 //! Without the variable the tests only verify that the committed files still equal what the
 //! generator produces and that the files read back, through `calamine`, to exactly the data.
-//! The writers are byte deterministic (fixed document dates, fixed zip entry timestamps, no
-//! author or generator metadata), so the committed bytes are compared as well. The CSV files
+//! The writers are byte deterministic across time and platforms: fixed document dates, no
+//! author or generator metadata, and every zip entry written with a fixed time, a fixed
+//! deflate level, fixed permissions and the Unix host (the workbook from `rust_xlsxwriter` is
+//! rewritten that way, because the `zip` crate otherwise records DOS on Windows and Unix
+//! elsewhere). So the committed bytes are compared as well. The CSV files
 //! use LF line ends, which the repository's line ending normalization keeps as they are (the
 //! CSV reader takes CRLF as well; its own tests cover that).
 //!
@@ -41,7 +44,7 @@ use calamine::{Data, Range, Reader, Sheets, open_workbook_auto_from_rs};
 use ipnet::IpNet;
 use rust_xlsxwriter::{DocProperties, ExcelDateTime, Workbook};
 use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
+use zip::{CompressionMethod, DateTime, System, ZipArchive, ZipWriter};
 
 /// Result type of the helpers and tests of this file.
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
@@ -396,7 +399,44 @@ fn write_xlsx(sheets: &[FixtureSheet]) -> TestResult<Vec<u8>> {
             }
         }
     }
-    Ok(book.save_to_buffer()?)
+    canonical_zip(&book.save_to_buffer()?)
+}
+
+/// The fixed modification time of every zip entry.
+fn entry_time() -> TestResult<DateTime> {
+    Ok(DateTime::from_date_and_time(2026, 10, 9, 0, 0, 0)?)
+}
+
+/// The options of every zip entry: a fixed time, a fixed deflate level, and the Unix host
+/// with fixed permissions. Without an explicit host the `zip` crate records DOS on Windows
+/// and Unix elsewhere, so the same package would differ by platform.
+fn entry_options(method: CompressionMethod) -> TestResult<SimpleFileOptions> {
+    let level = (method == CompressionMethod::Deflated).then_some(6);
+    Ok(SimpleFileOptions::default()
+        .compression_method(method)
+        .compression_level(level)
+        .last_modified_time(entry_time()?)
+        .system(System::Unix)
+        .unix_permissions(0o644))
+}
+
+/// Rewrites a zip package with [`entry_options`], keeping the entries, their order, their
+/// content and their compression method, so the bytes depend neither on the clock nor on the
+/// platform (the workbook writer leaves the host system to the `zip` crate's default).
+fn canonical_zip(bytes: &[u8]) -> TestResult<Vec<u8>> {
+    let mut archive = ZipArchive::new(Cursor::new(bytes))?;
+    let mut package = ZipWriter::new(Cursor::new(Vec::new()));
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index)?;
+        let name = file.name().to_owned();
+        let options = entry_options(file.compression())?;
+        let mut content = Vec::new();
+        file.read_to_end(&mut content)?;
+        drop(file);
+        package.start_file(name, options)?;
+        package.write_all(&content)?;
+    }
+    Ok(package.finish()?.into_inner())
 }
 
 /// Escapes text for use in XML character data and attribute values.
@@ -509,12 +549,8 @@ fn ods_content(sheets: &[FixtureSheet]) -> TestResult<String> {
 /// Writes the workbook as an `.ods` file image: a zip package whose first entry is the
 /// stored `mimetype`, followed by the manifest, the metadata and the content.
 fn write_ods(sheets: &[FixtureSheet]) -> TestResult<Vec<u8>> {
-    let stamp = DateTime::from_date_and_time(2026, 10, 9, 0, 0, 0)?;
-    let stored = SimpleFileOptions::default()
-        .compression_method(CompressionMethod::Stored)
-        .last_modified_time(stamp)
-        .unix_permissions(0o644);
-    let deflated = stored.compression_method(CompressionMethod::Deflated);
+    let stored = entry_options(CompressionMethod::Stored)?;
+    let deflated = entry_options(CompressionMethod::Deflated)?;
 
     let mut package = ZipWriter::new(Cursor::new(Vec::new()));
     package.start_file("mimetype", stored)?;
@@ -880,16 +916,56 @@ fn texts_are_plain_enough_for_every_format() {
 #[test]
 fn writers_are_byte_deterministic() -> TestResult {
     let sheets = workbook();
+    let xlsx = write_xlsx(&sheets)?;
+    let ods = write_ods(&sheets)?;
+    let csv: Vec<Vec<u8>> = sheets.iter().map(write_csv).collect::<TestResult<_>>()?;
+    // Across a change of the wall-clock second: nothing in the output may follow the clock.
+    std::thread::sleep(std::time::Duration::from_millis(1_100));
+    assert!(write_xlsx(&sheets)? == xlsx, "xlsx differs between runs");
+    assert!(write_ods(&sheets)? == ods, "ods differs between runs");
+    for (sheet, first) in sheets.iter().zip(&csv) {
+        assert_eq!(&write_csv(sheet)?, first);
+    }
+    // Nothing that depends on the platform: every entry records the Unix host, the fixed
+    // time and fixed permissions, and no XML part carries a carriage return.
+    for (label, package) in [("xlsx", &xlsx), ("ods", &ods)] {
+        assert_platform_neutral(label, package)?;
+    }
+    Ok(())
+}
+
+/// Checks the platform-dependent fields of a zip package: the host system byte of "version
+/// made by" in every central directory header, entry times, permissions, and line ends.
+fn assert_platform_neutral(label: &str, package: &[u8]) -> TestResult {
+    const CENTRAL_HEADER: [u8; 4] = [0x50, 0x4B, 0x01, 0x02];
+    let hosts: Vec<u8> = package
+        .windows(6)
+        .filter(|window| window[..4] == CENTRAL_HEADER)
+        .map(|window| window[5])
+        .collect();
+    assert!(!hosts.is_empty(), "{label}: no central directory headers");
     assert!(
-        write_xlsx(&sheets)? == write_xlsx(&sheets)?,
-        "xlsx differs between runs"
+        hosts.iter().all(|host| *host == u8::from(System::Unix)),
+        "{label}: an entry records a host other than Unix: {hosts:?}"
     );
-    assert!(
-        write_ods(&sheets)? == write_ods(&sheets)?,
-        "ods differs between runs"
-    );
-    for sheet in &sheets {
-        assert_eq!(write_csv(sheet)?, write_csv(sheet)?);
+    let mut archive = ZipArchive::new(Cursor::new(package))?;
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index)?;
+        let name = file.name().to_owned();
+        assert_eq!(file.last_modified(), Some(entry_time()?), "{label}: {name}");
+        assert_eq!(
+            file.unix_mode().map(|mode| mode & 0o777),
+            Some(0o644),
+            "{label}: {name}"
+        );
+        assert!(!name.contains('\\'), "{label}: {name} has a backslash");
+        let mut content = Vec::new();
+        file.read_to_end(&mut content)?;
+        // Every part is XML or the plain `mimetype`: none may carry a carriage return.
+        assert!(
+            !content.contains(&b'\r'),
+            "{label}: {name} has a carriage return"
+        );
     }
     Ok(())
 }
