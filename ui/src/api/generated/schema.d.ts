@@ -2305,6 +2305,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/topology": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the topology graph */
+        get: operations["get_topology"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/topology/nodes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one topology node with its ports and neighbours */
+        get: operations["get_topology_node"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -2428,6 +2462,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/vlans/provision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview or start creating a VLAN with its network on the network controller */
+        post: operations["provision_vlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/vlans/{id}": {
         parameters: {
             query?: never;
@@ -2456,6 +2507,23 @@ export interface paths {
         };
         /** Get the change history of one VLAN */
         get: operations["get_vlan_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/vlans/{id}/prefixes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the prefixes of a VLAN */
+        get: operations["list_vlan_prefixes"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3257,6 +3325,71 @@ export interface components {
          * @enum {string}
          */
         ContextKind: "user_name" | "display_name" | "host_name" | "product";
+        /** @description A connector instance that can act as a network controller. */
+        ControllerInfo: {
+            /** @description Whether the instance is enabled. */
+            enabled: boolean;
+            /** @description The connector instance. */
+            id: components["schemas"]["ConnectorId"];
+            /** @description Its display name. */
+            name: string;
+            /** @description The plugin, such as `unifi`. */
+            plugin: string;
+            /** @description Whether writes through the instance are allowed (TGL-20). */
+            writes_enabled: boolean;
+        };
+        /**
+         * @description How the network gets onto the switches and access points.
+         * @enum {string}
+         */
+        ControllerMode: "automatic" | "unchanged" | "manual";
+        /** @description A network on the controller. */
+        ControllerNetwork: {
+            /** @description The controller's reference (for UniFi the network `_id`, not the VLAN). */
+            id: string;
+            /** @description Whether Tenko or the controller is managed through this network (never written). */
+            management?: boolean;
+            /** @description Name. */
+            name: string;
+            /** @description The gateway subnet. */
+            subnet?: string | null;
+            /**
+             * Format: int32
+             * @description The VLAN id; absent for the untagged default network.
+             */
+            vlan?: number | null;
+        };
+        /** @description The network step of a provision. */
+        ControllerPreview: {
+            /** @description The network controllers to choose from. */
+            candidates?: components["schemas"]["ControllerInfo"][];
+            connector?: components["schemas"]["ControllerInfo"] | null;
+            /** @description The read-back diff: what the write changes on the controller. */
+            diff?: components["schemas"]["DiffEntry"][];
+            /** @description How the network gets there. */
+            mode: components["schemas"]["ControllerMode"];
+            /** @description The network asked for. */
+            network: components["schemas"]["NetworkSpec"];
+            read_at?: components["schemas"]["Timestamp"] | null;
+            /**
+             * @description Why the step is manual (`ipam.vlan.no_controller`, `ipam.vlan.manual_requested`,
+             *     `ipam.vlan.controller_ambiguous`, `ipam.vlan.controller_read_only`).
+             */
+            reason?: string | null;
+            /** @description The controller's warnings, in English. */
+            warnings?: string[];
+        };
+        /** @description How a network controller contributed. */
+        ControllerStatus: {
+            /** @description The connector instance. */
+            connector: components["schemas"]["ConnectorId"];
+            /** @description Managed devices it reported. */
+            devices: number;
+            error?: components["schemas"]["CodedError"] | null;
+            /** @description Its name. */
+            name: string;
+            observed_at?: components["schemas"]["Timestamp"] | null;
+        };
         /** @description Answer of `POST /nodes/enrolments`: the token, shown once. */
         CreatedEnrolment: {
             /** @description The SHA-256 fingerprint of the internal CA root, for `--ca-fingerprint`. */
@@ -3530,10 +3663,24 @@ export interface components {
          * @enum {string}
          */
         Deleted: "exclude" | "include" | "only";
+        /** @description One line of a read-back diff: what the controller has and what the change would set. */
+        DiffEntry: {
+            /** @description The planned value; absent when the item goes away. */
+            after?: string | null;
+            /** @description The current value; absent when the item does not exist. */
+            before?: string | null;
+            /** @description What changes, for example `networks/iot/vlan`. */
+            path: string;
+        };
         /** @description SHA-256 digest as 64 lowercase hexadecimal characters */
         Digest: string;
         /** @description DHCPv6 DUID as lowercase hexadecimal */
         Duid: string;
+        /**
+         * @description What an edge is.
+         * @enum {string}
+         */
+        EdgeKind: "wired" | "wireless" | "lldp" | "uplink" | "vm_host";
         /** @description One end of a link. */
         Endpoint: {
             /** @description The device, as the source names it. */
@@ -4133,6 +4280,21 @@ export interface components {
             job_id: components["schemas"]["JobId"];
             /** @description The version being installed. */
             version: components["schemas"]["ReleaseVersion"];
+        };
+        /** @description An address of intent on a node. */
+        IntentAddress: {
+            /** @description The network. */
+            cidr: string;
+            /** @description The address. */
+            ip: string;
+            /** @description Its network. */
+            prefix: components["schemas"]["PrefixId"];
+            /**
+             * Format: int32
+             * @description The VLAN id.
+             */
+            vid?: number | null;
+            vlan?: components["schemas"]["VlanId"] | null;
         };
         /**
          * @description The intent objects that match a subject: interfaces by MAC address, addresses by IP
@@ -5196,6 +5358,50 @@ export interface components {
          * @enum {string}
          */
         MoveTimeoutSource: "request" | "lease" | "default";
+        /** @description A neighbour of a node across one edge. */
+        Neighbour: {
+            /** @description The edge. */
+            edge: string;
+            /** @description The kind of the edge. */
+            edge_kind: components["schemas"]["EdgeKind"];
+            /** @description Its kind. */
+            kind: components["schemas"]["NodeKind"];
+            /** @description Its label. */
+            label: string;
+            /** @description The neighbour. */
+            node: string;
+            /** @description The port on this node's side. */
+            port?: string | null;
+            /** @description The port on the neighbour's side. */
+            remote_port?: string | null;
+            /** @description The wireless network of the edge. */
+            ssid?: string | null;
+            /**
+             * Format: int32
+             * @description The VLAN of the edge.
+             */
+            vlan?: number | null;
+        };
+        /** @description A network of a controller with the VLAN it carries. */
+        NetworkInView: components["schemas"]["ControllerNetwork"] & {
+            /** @description The controller. */
+            connector: components["schemas"]["ConnectorId"];
+        };
+        /**
+         * @description The network Tenko asks a controller to have for a VLAN: the controller's DHCP off, or
+         *     relaying to the given servers (Tenko serves DHCP).
+         */
+        NetworkSpec: {
+            /** @description DHCP relay targets; empty means the controller's DHCP is off. */
+            dhcp_relay?: string[];
+            /** @description The network name on the controller. */
+            name: string;
+            /**
+             * Format: int32
+             * @description The VLAN id.
+             */
+            vid: number;
+        };
         /**
          * @description A network target a plugin contacts: the host named by a settings member, or a fixed
          *     host.
@@ -5309,6 +5515,37 @@ export interface components {
             /** @description Tags. */
             tags?: components["schemas"]["Tag"][];
         };
+        /** @description A VLAN the job creates. */
+        NewVlan: {
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Name. */
+            name: string;
+            site?: components["schemas"]["SiteId"] | null;
+            /** @description Tags. */
+            tags?: components["schemas"]["Tag"][];
+            /**
+             * Format: int32
+             * @description VLAN id, 1 to 4094, unique per site.
+             */
+            vid: number;
+            /**
+             * Format: int32
+             * @description VXLAN network identifier.
+             */
+            vni?: number | null;
+        };
+        /** @description A network prefix the job creates for the VLAN. */
+        NewVlanPrefix: {
+            /**
+             * @description The network.
+             * @example 198.51.100.0/24
+             */
+            cidr: string;
+            /** @description Free text. */
+            description?: string | null;
+            vrf?: components["schemas"]["VrfId"] | null;
+        };
         /**
          * @description The optional body of `POST /prefixes/{id}/next-free-address`: how the new address is
          *     chosen and what it carries. Every member is optional; an empty body means all defaults.
@@ -5375,6 +5612,22 @@ export interface components {
          * @description Raft node identifier, assigned at enrolment.
          */
         NodeId: number;
+        /** @description The intent behind a node. */
+        NodeIntent: {
+            /** @description Its live addresses. */
+            addresses: components["schemas"]["IntentAddress"][];
+            /** @description The host. */
+            host: components["schemas"]["HostId"];
+            /** @description Its assignment mode. */
+            mode: components["schemas"]["AssignmentMode"];
+            /** @description Its name. */
+            name: string;
+        };
+        /**
+         * @description What a node is.
+         * @enum {string}
+         */
+        NodeKind: "router" | "switch" | "access_point" | "hypervisor" | "vm" | "container" | "host" | "device";
         /** @description Identity and roles of the node. */
         NodeStatus: {
             id?: components["schemas"]["NodeId"] | null;
@@ -6878,6 +7131,17 @@ export interface components {
          * @enum {string}
          */
         PrefixRole: "supernet" | "network";
+        /** @description The prefix of a provision. */
+        PrefixTarget: {
+            /**
+             * @description The network.
+             * @example 198.51.100.0/24
+             */
+            cidr: string;
+            /** @description The identifier the prefix will have. */
+            id: components["schemas"]["PrefixId"];
+            vrf?: components["schemas"]["VrfId"] | null;
+        };
         /** @description One source row of the preview. */
         PreviewRow: {
             /** @description What it creates, updates or leaves unchanged. */
@@ -8409,6 +8673,152 @@ export interface components {
          * @enum {string}
          */
         Topic: "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "connectors" | "discovery" | "secrets" | "cluster";
+        /** @description An edge of the graph. */
+        TopologyEdge: {
+            /** @description One end: the switch, access point or hypervisor for client edges. */
+            a: string;
+            /** @description The port at `a`. */
+            a_port?: string | null;
+            /** @description The other end. */
+            b: string;
+            /** @description The port at `b`. */
+            b_port?: string | null;
+            /** @description Stable identifier, from the kind, the ends and their ports. */
+            id: string;
+            /** @description What it is. */
+            kind: components["schemas"]["EdgeKind"];
+            /** @description Source keys of the facts behind the edge. */
+            sources: string[];
+            /** @description The wireless network of a wireless edge. */
+            ssid?: string | null;
+            /**
+             * Format: int32
+             * @description The VLAN of a client edge.
+             */
+            vlan?: number | null;
+        };
+        /** @description The graph: nodes, edges and a summary, computed from one store revision. */
+        TopologyGraph: {
+            /** @description Edges, by identifier. */
+            edges: components["schemas"]["TopologyEdge"][];
+            /** @description Nodes, by identifier. */
+            nodes: components["schemas"]["TopologyNode"][];
+            /**
+             * Format: int64
+             * @description The store revision the graph was computed from.
+             */
+            revision: number;
+            /** @description Counts and context. */
+            summary: components["schemas"]["TopologySummary"];
+        };
+        /** @description A node of the graph: one device as every source sees it, with the intent joined in. */
+        TopologyNode: {
+            host?: components["schemas"]["HostId"] | null;
+            /**
+             * @description Stable identifier: `h-` and the host for a device of intent, `c-` for a device of a
+             *     network controller, `i-` for an inventory host, `m-` and the MAC address, `n-` for a
+             *     device named by a probe, `a-` for an address.
+             */
+            id: string;
+            /** @description IP addresses. */
+            ips?: string[];
+            /** @description What it is. */
+            kind: components["schemas"]["NodeKind"];
+            /**
+             * @description The best name: the host of intent, the controller's name, the inventory name, a
+             *     probe's name, the vendor with the MAC address, the MAC or IP address.
+             */
+            label: string;
+            last_seen?: components["schemas"]["Timestamp"] | null;
+            /** @description MAC addresses. */
+            macs?: components["schemas"]["MacAddr"][];
+            /** @description The model a controller reports. */
+            model?: string | null;
+            /** @description The operating system an inventory or probe reports. */
+            os?: string | null;
+            /** @description The most specific networks of intent that hold its addresses. */
+            prefixes?: components["schemas"]["PrefixId"][];
+            site?: components["schemas"]["SiteId"] | null;
+            /** @description Source keys of the facts behind the node (`intent` for a host of intent). */
+            sources: string[];
+            /** @description Wireless networks an access point broadcasts or a client uses. */
+            ssids?: string[];
+            /**
+             * @description The subject to look the node up across sources (`GET /observations/{subject}`): its
+             *     first MAC address, else its first IP address.
+             */
+            subject?: string | null;
+            /** @description The vendor of the first MAC address. */
+            vendor?: string | null;
+            /**
+             * @description VLAN ids the node is in: client attachments, the VLANs of its networks, the
+             *     untagged VLANs of its ports.
+             */
+            vlans?: number[];
+        };
+        /** @description One node with its ports, neighbours and intent (`GET /topology/nodes/{id}`). */
+        TopologyNodeView: {
+            intent?: components["schemas"]["NodeIntent"] | null;
+            /** @description Every neighbour, also those across edges without a port on this side. */
+            neighbours: components["schemas"]["Neighbour"][];
+            /** @description The node. */
+            node: components["schemas"]["TopologyNode"];
+            /** @description Its ports with what hangs on each; with `port`, only that port. */
+            ports: components["schemas"]["TopologyPort"][];
+            /**
+             * Format: int64
+             * @description The store revision of the graph.
+             */
+            revision: number;
+        };
+        /** @description A port of a node and what hangs on it. */
+        TopologyPort: {
+            /** @description The controller's name of the port. */
+            name?: string | null;
+            /**
+             * Format: int32
+             * @description The untagged VLAN the controller reports.
+             */
+            native_vlan?: number | null;
+            /** @description Everything seen behind the port. */
+            neighbours: components["schemas"]["Neighbour"][];
+            /** @description The port as the sources name it. */
+            port: string;
+            /** @description Link state, when a controller reports it. */
+            up?: boolean | null;
+            /** @description Whether the controller marks it as an uplink. */
+            uplink?: boolean;
+        };
+        /** @description Counts and context of a graph. */
+        TopologySummary: {
+            /** @description Edges in the answer per kind. */
+            by_edge_kind: {
+                [key: string]: number;
+            };
+            /** @description Nodes in the answer per kind. */
+            by_kind: {
+                [key: string]: number;
+            };
+            computed_at?: components["schemas"]["Timestamp"] | null;
+            /** @description The network controllers and how their last read went. */
+            controllers: components["schemas"]["ControllerStatus"][];
+            /** @description Edges in the answer. */
+            edges: number;
+            /** @description The networks the controllers report, with their VLANs. */
+            networks: components["schemas"]["NetworkInView"][];
+            /** @description Nodes in the answer. */
+            nodes: number;
+            /** @description The sites of the nodes in the answer. */
+            sites: components["schemas"]["SiteId"][];
+            /** @description Edges of the whole graph before filtering. */
+            total_edges: number;
+            /** @description Nodes of the whole graph before filtering. */
+            total_nodes: number;
+            /** @description Whether the answer was cut at the node limit. */
+            truncated?: boolean;
+            /** @description The VLANs of the nodes in the answer, by VLAN id. */
+            vlans: components["schemas"]["VlanInView"][];
+        };
         /**
          * @description The HMAC hash of a TOTP configuration (RFC 6238 section 1.2).
          * @enum {string}
@@ -8902,6 +9312,19 @@ export interface components {
         };
         /** Format: uuid */
         VlanId: string;
+        /** @description One VLAN in view, for the legend. */
+        VlanInView: {
+            /** @description Its name. */
+            name?: string | null;
+            /** @description Nodes in it. */
+            nodes: number;
+            /**
+             * Format: int32
+             * @description The VLAN id.
+             */
+            vid: number;
+            vlan?: components["schemas"]["VlanId"] | null;
+        };
         /** @description A new VLAN. */
         VlanInput: {
             /** @description Custom field values (IPAM-08). */
@@ -8953,6 +9376,88 @@ export interface components {
              * @description New VNI; `null` clears it.
              */
             vni?: number | null;
+        };
+        /** @description The preview of a provision (the dry run, API-09). */
+        VlanProvisionPreview: {
+            /**
+             * Format: int64
+             * @description The store revision the preview was computed at.
+             */
+            base_revision: number;
+            /** @description The network step. */
+            controller: components["schemas"]["ControllerPreview"];
+            plan?: components["schemas"]["PlanView"] | null;
+            prefix?: components["schemas"]["PrefixTarget"] | null;
+            /** @description The steps of the job, in order. */
+            steps: components["schemas"]["VlanStepPreview"][];
+            /** @description Warning codes that need an acknowledgement before a submit. */
+            unacknowledged?: string[];
+            /** @description The VLAN. */
+            vlan: components["schemas"]["VlanTarget"];
+            /** @description Every warning: of the IPAM plan and of the network step. */
+            warnings?: components["schemas"]["PlanWarning"][];
+        };
+        /** @description A request to create a VLAN with its network (IPAM-03). */
+        VlanProvisionRequest: {
+            /** @description Warning codes the caller acknowledges. */
+            acknowledge?: string[];
+            connector?: components["schemas"]["ConnectorId"] | null;
+            create?: components["schemas"]["NewVlan"] | null;
+            /**
+             * @description DHCP relay targets of the network (Tenko serves DHCP); the controller's DHCP is off
+             *     when empty.
+             */
+            dhcp_relay?: string[];
+            /** @description Leave the controller alone: a person creates the network. */
+            manual?: boolean;
+            /** @description The network name on the controller; the VLAN name when absent. */
+            network_name?: string | null;
+            prefix?: components["schemas"]["NewVlanPrefix"] | null;
+            vlan?: components["schemas"]["VlanId"] | null;
+        };
+        /** @description The answer of a submitted provision. */
+        VlanProvisionSubmitted: {
+            /** @description The job. */
+            job_id: components["schemas"]["JobId"];
+            prefix?: components["schemas"]["PrefixId"] | null;
+            /** @description The preview as computed at submit, to compare with the dry run. */
+            preview: components["schemas"]["VlanProvisionPreview"];
+            /** @description Whether an earlier answer was returned for a repeated idempotency key. */
+            replayed?: boolean;
+            /** @description The VLAN. */
+            vlan: components["schemas"]["VlanId"];
+        };
+        /** @description One step of the job, as previewed. */
+        VlanStepPreview: {
+            /** @description Whether Tenko does it; otherwise a person ticks it off. */
+            automatic: boolean;
+            /** @description `ipam.intent`, `l2.network`, `l2.manual` or `activate`. */
+            kind: string;
+            /** @description Values for the text (VLAN id, name, network, connector). */
+            params: {
+                [key: string]: string;
+            };
+            /** @description The engine's step kind (`ipam.vlan.intent`, ...). */
+            step_kind: string;
+            /** @description English description. */
+            text: string;
+        };
+        /** @description The VLAN of a provision. */
+        VlanTarget: {
+            /** @description Whether it exists already. */
+            existing: boolean;
+            /** @description The VLAN (the identifier it will have when the job creates it). */
+            id: components["schemas"]["VlanId"];
+            /** @description Its name. */
+            name: string;
+            site?: components["schemas"]["SiteId"] | null;
+            /** @description Its status now, or `planned` for a new one. */
+            status: components["schemas"]["Status"];
+            /**
+             * Format: int32
+             * @description The VLAN id.
+             */
+            vid: number;
         };
         /**
          * @description A VRF: an independent address space inside a tenant (IPAM-01). Prefixes overlap only
@@ -20758,6 +21263,146 @@ export interface operations {
             };
         };
     };
+    get_topology: {
+        parameters: {
+            query?: {
+                /** @description Nodes of this site (identifier). */
+                site?: string;
+                /** @description Nodes in this VLAN: a VLAN id (1 to 4094) or a VLAN identifier. */
+                vlan?: string;
+                /** @description Nodes with an address in this prefix (identifier). */
+                prefix?: string;
+                /** @description Nodes with an address inside this network, such as `192.0.2.0/24`. */
+                within?: string;
+                /**
+                 * @description Nodes of these kinds: `router`, `switch`, `access_point`, `hypervisor`, `vm`,
+                 *     `container`, `host`, `device`; repeat the parameter or separate with commas.
+                 */
+                kind?: string[];
+                /** @description Case-insensitive text over the label, MAC and IP addresses, vendor, model and SSIDs. */
+                q?: string;
+                /** @description The most nodes to return, 1 to 20,000; 5,000 when absent. */
+                limit?: number;
+                /** @description Read at least at this store revision. */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Nodes, edges and a summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopologyGraph"];
+                };
+            };
+            /** @description Invalid parameter (`sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not read observations */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The named VLAN or prefix does not exist (`ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM or the topology is not configured (`ipam.unavailable`, `ipam.topology.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_topology_node: {
+        parameters: {
+            query?: {
+                /** @description Only this port: what is connected to it. */
+                port?: string;
+                /** @description Read at least at this store revision. */
+                at_least?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The node identifier, such as `m-00005e005301`. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The node, its ports with what hangs on each, its neighbours and its intent */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopologyNodeView"];
+                };
+            };
+            /** @description Invalid parameter (`sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not read observations */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No node has this identifier (`ipam.topology.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM or the topology is not configured (`ipam.unavailable`, `ipam.topology.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     list_users: {
         parameters: {
             query?: never;
@@ -21575,6 +22220,113 @@ export interface operations {
             };
         };
     };
+    provision_vlan: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Compute the preview without starting anything (API-09); the controller is read and
+                 *     diffed, nothing is written.
+                 */
+                dry_run?: boolean;
+                /** @description For a dry run: read at least at this store revision. */
+                at_least?: number;
+            };
+            header?: {
+                /** @description Repeating a POST with the same key returns the first result (API-04). */
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VlanProvisionRequest"];
+            };
+        };
+        responses: {
+            /** @description The preview of a dry run: the IPAM plan, the controller's read-back diff and the steps of the job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VlanProvisionPreview"];
+                };
+            };
+            /** @description The job of the provision */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VlanProvisionSubmitted"];
+                };
+            };
+            /** @description Invalid request (`ipam.vlan.invalid_request`, `ipam.validation`, `sys.invalid_request`, `sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed, or writes through the connector are off (`connect.writes_disabled`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The VLAN does not exist (`ipam.not_found`) or the connector is not a network controller (`ipam.vlan.controller_unknown`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A warning needs an acknowledgement (`ipam.plan.unacknowledged`), the VLAN id exists at the site (`ipam.vlan.duplicate`), the network overlaps (`ipam.prefix.overlap`), the connector is disabled (`ipam.vlan.controller_disabled`) or a guardrail refuses (`connect.guardrail.protected_vlan`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The idempotency key was used for another provision (`ipam.idempotency_mismatch`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The network controller did not answer (`connect.unreachable` and other `connect.*` codes) */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM, the job engine or the network controllers are not configured (`ipam.unavailable`, `ipam.move.no_engine`, `ipam.vlan.controllers_unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     get_vlan: {
         parameters: {
             query?: {
@@ -21870,6 +22622,70 @@ export interface operations {
                 };
             };
             /** @description No such object (`ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_vlan_prefixes: {
+        parameters: {
+            query?: {
+                /** @description Soft-deleted prefixes: `exclude` (the default) or `include`. */
+                deleted?: string;
+                /** @description Read at least at this store revision. */
+                at_least?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The VLAN. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The prefixes linked to the VLAN, by VRF and network */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_Prefix"];
+                };
+            };
+            /** @description Invalid parameter (`sys.invalid_query`, `sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The VLAN does not exist (`ipam.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;

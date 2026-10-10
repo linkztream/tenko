@@ -104,6 +104,11 @@ const SUMMARY_ARGS: Readonly<Record<string, readonly string[]>> = {
   "ipam.move.task.l2": ["cidr"],
   "ipam.move.task.observe": ["new_ip", "cidr", "timeout_secs"],
   "ipam.move.task.generic": ["old_ip", "new_ip", "cidr"],
+  // The steps of a VLAN provision job (WP2.7): automatic steps by summary, the manual one by task.
+  "ipam.vlan.step.intent": ["vid", "name"],
+  "ipam.vlan.step.controller": ["vid", "name"],
+  "ipam.vlan.step.activate": ["vid"],
+  "ipam.vlan.task.network": ["vid", "name"],
   // The kinds earlier versions of the mock used.
   "jobs.step.ipam_intent": ["host"],
   "jobs.step.dhcp_manual": ["host", "ip"],

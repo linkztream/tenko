@@ -15732,6 +15732,240 @@
         }
       }
     },
+    "/api/v1/topology": {
+      "get": {
+        "tags": [
+          "topology"
+        ],
+        "summary": "Get the topology graph",
+        "operationId": "get_topology",
+        "parameters": [
+          {
+            "name": "site",
+            "in": "query",
+            "description": "Nodes of this site (identifier).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "vlan",
+            "in": "query",
+            "description": "Nodes in this VLAN: a VLAN id (1 to 4094) or a VLAN identifier.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "prefix",
+            "in": "query",
+            "description": "Nodes with an address in this prefix (identifier).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "within",
+            "in": "query",
+            "description": "Nodes with an address inside this network, such as `192.0.2.0/24`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Nodes of these kinds: `router`, `switch`, `access_point`, `hypervisor`, `vm`,\n`container`, `host`, `device`; repeat the parameter or separate with commas.",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Case-insensitive text over the label, MAC and IP addresses, vendor, model and SSIDs.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "The most nodes to return, 1 to 20,000; 5,000 when absent.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least at this store revision.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Nodes, edges and a summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopologyGraph"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameter (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not read observations",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The named VLAN or prefix does not exist (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM or the topology is not configured (`ipam.unavailable`, `ipam.topology.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/topology/nodes/{id}": {
+      "get": {
+        "tags": [
+          "topology"
+        ],
+        "summary": "Get one topology node with its ports and neighbours",
+        "operationId": "get_topology_node",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The node identifier, such as `m-00005e005301`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "port",
+            "in": "query",
+            "description": "Only this port: what is connected to it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least at this store revision.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The node, its ports with what hangs on each, its neighbours and its intent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopologyNodeView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameter (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not read observations",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No node has this identifier (`ipam.topology.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM or the topology is not configured (`ipam.unavailable`, `ipam.topology.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/users": {
       "get": {
         "tags": [
@@ -16884,6 +17118,151 @@
         }
       }
     },
+    "/api/v1/vlans/provision": {
+      "post": {
+        "tags": [
+          "tenancy"
+        ],
+        "summary": "Preview or start creating a VLAN with its network on the network controller",
+        "operationId": "provision_vlan",
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "description": "Compute the preview without starting anything (API-09); the controller is read and\ndiffed, nothing is written.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "For a dry run: read at least at this store revision.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Repeating a POST with the same key returns the first result (API-04).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VlanProvisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The preview of a dry run: the IPAM plan, the controller's read-back diff and the steps of the job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VlanProvisionPreview"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The job of the provision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VlanProvisionSubmitted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`ipam.vlan.invalid_request`, `ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed, or writes through the connector are off (`connect.writes_disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The VLAN does not exist (`ipam.not_found`) or the connector is not a network controller (`ipam.vlan.controller_unknown`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A warning needs an acknowledgement (`ipam.plan.unacknowledged`), the VLAN id exists at the site (`ipam.vlan.duplicate`), the network overlaps (`ipam.prefix.overlap`), the connector is disabled (`ipam.vlan.controller_disabled`) or a guardrail refuses (`connect.guardrail.protected_vlan`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The idempotency key was used for another provision (`ipam.idempotency_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The network controller did not answer (`connect.unreachable` and other `connect.*` codes)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM, the job engine or the network controllers are not configured (`ipam.unavailable`, `ipam.move.no_engine`, `ipam.vlan.controllers_unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/vlans/{id}": {
       "get": {
         "tags": [
@@ -17299,6 +17678,98 @@
           },
           "404": {
             "description": "No such object (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/vlans/{id}/prefixes": {
+      "get": {
+        "tags": [
+          "tenancy"
+        ],
+        "summary": "List the prefixes of a VLAN",
+        "operationId": "list_vlan_prefixes",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The VLAN.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "deleted",
+            "in": "query",
+            "description": "Soft-deleted prefixes: `exclude` (the default) or `include`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least at this store revision.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The prefixes linked to the VLAN, by VRF and network",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_Prefix"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameter (`sys.invalid_query`, `sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The VLAN does not exist (`ipam.not_found`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20260,6 +20731,200 @@
           "product"
         ]
       },
+      "ControllerInfo": {
+        "type": "object",
+        "description": "A connector instance that can act as a network controller.",
+        "required": [
+          "id",
+          "name",
+          "plugin",
+          "enabled",
+          "writes_enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the instance is enabled."
+          },
+          "id": {
+            "$ref": "#/components/schemas/ConnectorId",
+            "description": "The connector instance."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its display name."
+          },
+          "plugin": {
+            "type": "string",
+            "description": "The plugin, such as `unifi`."
+          },
+          "writes_enabled": {
+            "type": "boolean",
+            "description": "Whether writes through the instance are allowed (TGL-20)."
+          }
+        }
+      },
+      "ControllerMode": {
+        "type": "string",
+        "description": "How the network gets onto the switches and access points.",
+        "enum": [
+          "automatic",
+          "unchanged",
+          "manual"
+        ]
+      },
+      "ControllerNetwork": {
+        "type": "object",
+        "description": "A network on the controller.",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The controller's reference (for UniFi the network `_id`, not the VLAN)."
+          },
+          "management": {
+            "type": "boolean",
+            "description": "Whether Tenko or the controller is managed through this network (never written)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          },
+          "subnet": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The gateway subnet."
+          },
+          "vlan": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The VLAN id; absent for the untagged default network.",
+            "minimum": 0
+          }
+        }
+      },
+      "ControllerPreview": {
+        "type": "object",
+        "description": "The network step of a provision.",
+        "required": [
+          "mode",
+          "network"
+        ],
+        "properties": {
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ControllerInfo"
+            },
+            "description": "The network controllers to choose from."
+          },
+          "connector": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ControllerInfo",
+                "description": "The controller."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "diff": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiffEntry"
+            },
+            "description": "The read-back diff: what the write changes on the controller."
+          },
+          "mode": {
+            "$ref": "#/components/schemas/ControllerMode",
+            "description": "How the network gets there."
+          },
+          "network": {
+            "$ref": "#/components/schemas/NetworkSpec",
+            "description": "The network asked for."
+          },
+          "read_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the controller was read."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the step is manual (`ipam.vlan.no_controller`, `ipam.vlan.manual_requested`,\n`ipam.vlan.controller_ambiguous`, `ipam.vlan.controller_read_only`)."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The controller's warnings, in English."
+          }
+        }
+      },
+      "ControllerStatus": {
+        "type": "object",
+        "description": "How a network controller contributed.",
+        "required": [
+          "connector",
+          "name",
+          "devices"
+        ],
+        "properties": {
+          "connector": {
+            "$ref": "#/components/schemas/ConnectorId",
+            "description": "The connector instance."
+          },
+          "devices": {
+            "type": "integer",
+            "description": "Managed devices it reported.",
+            "minimum": 0
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CodedError",
+                "description": "Why the last read failed."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "observed_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When its devices were read; absent when they never were."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "CreatedEnrolment": {
         "type": "object",
         "description": "Answer of `POST /nodes/enrolments`: the token, shown once.",
@@ -21022,6 +21687,33 @@
           "only"
         ]
       },
+      "DiffEntry": {
+        "type": "object",
+        "description": "One line of a read-back diff: what the controller has and what the change would set.",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "after": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The planned value; absent when the item goes away."
+          },
+          "before": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The current value; absent when the item does not exist."
+          },
+          "path": {
+            "type": "string",
+            "description": "What changes, for example `networks/iot/vlan`."
+          }
+        }
+      },
       "Digest": {
         "type": "string",
         "description": "SHA-256 digest as 64 lowercase hexadecimal characters"
@@ -21029,6 +21721,17 @@
       "Duid": {
         "type": "string",
         "description": "DHCPv6 DUID as lowercase hexadecimal"
+      },
+      "EdgeKind": {
+        "type": "string",
+        "description": "What an edge is.",
+        "enum": [
+          "wired",
+          "wireless",
+          "lldp",
+          "uplink",
+          "vm_host"
+        ]
       },
       "Endpoint": {
         "type": "object",
@@ -22677,6 +23380,49 @@
           "version": {
             "$ref": "#/components/schemas/ReleaseVersion",
             "description": "The version being installed."
+          }
+        }
+      },
+      "IntentAddress": {
+        "type": "object",
+        "description": "An address of intent on a node.",
+        "required": [
+          "ip",
+          "prefix",
+          "cidr"
+        ],
+        "properties": {
+          "cidr": {
+            "type": "string",
+            "description": "The network."
+          },
+          "ip": {
+            "type": "string",
+            "description": "The address."
+          },
+          "prefix": {
+            "$ref": "#/components/schemas/PrefixId",
+            "description": "Its network."
+          },
+          "vid": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The VLAN id.",
+            "minimum": 0
+          },
+          "vlan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VlanId",
+                "description": "The VLAN of the network."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -25850,6 +26596,117 @@
           "default"
         ]
       },
+      "Neighbour": {
+        "type": "object",
+        "description": "A neighbour of a node across one edge.",
+        "required": [
+          "node",
+          "label",
+          "kind",
+          "edge",
+          "edge_kind"
+        ],
+        "properties": {
+          "edge": {
+            "type": "string",
+            "description": "The edge."
+          },
+          "edge_kind": {
+            "$ref": "#/components/schemas/EdgeKind",
+            "description": "The kind of the edge."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NodeKind",
+            "description": "Its kind."
+          },
+          "label": {
+            "type": "string",
+            "description": "Its label."
+          },
+          "node": {
+            "type": "string",
+            "description": "The neighbour."
+          },
+          "port": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The port on this node's side."
+          },
+          "remote_port": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The port on the neighbour's side."
+          },
+          "ssid": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The wireless network of the edge."
+          },
+          "vlan": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The VLAN of the edge.",
+            "minimum": 0
+          }
+        }
+      },
+      "NetworkInView": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ControllerNetwork",
+            "description": "The network."
+          },
+          {
+            "type": "object",
+            "required": [
+              "connector"
+            ],
+            "properties": {
+              "connector": {
+                "$ref": "#/components/schemas/ConnectorId",
+                "description": "The controller."
+              }
+            }
+          }
+        ],
+        "description": "A network of a controller with the VLAN it carries."
+      },
+      "NetworkSpec": {
+        "type": "object",
+        "description": "The network Tenko asks a controller to have for a VLAN: the controller's DHCP off, or\nrelaying to the given servers (Tenko serves DHCP).",
+        "required": [
+          "vid",
+          "name"
+        ],
+        "properties": {
+          "dhcp_relay": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "DHCP relay targets; empty means the controller's DHCP is off."
+          },
+          "name": {
+            "type": "string",
+            "description": "The network name on the controller."
+          },
+          "vid": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The VLAN id.",
+            "minimum": 0
+          }
+        }
+      },
       "NetworkTarget": {
         "type": "object",
         "description": "A network target a plugin contacts: the host named by a settings member, or a fixed\nhost.",
@@ -26112,6 +26969,95 @@
         },
         "additionalProperties": false
       },
+      "NewVlan": {
+        "type": "object",
+        "description": "A VLAN the job creates.",
+        "required": [
+          "vid",
+          "name"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Free text."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          },
+          "site": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SiteId",
+                "description": "Site; global when absent."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Tag"
+            },
+            "description": "Tags.",
+            "uniqueItems": true
+          },
+          "vid": {
+            "type": "integer",
+            "format": "int32",
+            "description": "VLAN id, 1 to 4094, unique per site.",
+            "minimum": 0
+          },
+          "vni": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "VXLAN network identifier.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "NewVlanPrefix": {
+        "type": "object",
+        "description": "A network prefix the job creates for the VLAN.",
+        "required": [
+          "cidr"
+        ],
+        "properties": {
+          "cidr": {
+            "type": "string",
+            "description": "The network.",
+            "example": "198.51.100.0/24"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Free text."
+          },
+          "vrf": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VrfId",
+                "description": "VRF; the default VRF when absent."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "NextFreeAddress": {
         "type": "object",
         "description": "The optional body of `POST /prefixes/{id}/next-free-address`: how the new address is\nchosen and what it carries. Every member is optional; an empty body means all defaults.",
@@ -26344,6 +27290,51 @@
         "format": "int64",
         "description": "Raft node identifier, assigned at enrolment.",
         "minimum": 0
+      },
+      "NodeIntent": {
+        "type": "object",
+        "description": "The intent behind a node.",
+        "required": [
+          "host",
+          "name",
+          "mode",
+          "addresses"
+        ],
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IntentAddress"
+            },
+            "description": "Its live addresses."
+          },
+          "host": {
+            "$ref": "#/components/schemas/HostId",
+            "description": "The host."
+          },
+          "mode": {
+            "$ref": "#/components/schemas/AssignmentMode",
+            "description": "Its assignment mode."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          }
+        }
+      },
+      "NodeKind": {
+        "type": "string",
+        "description": "What a node is.",
+        "enum": [
+          "router",
+          "switch",
+          "access_point",
+          "hypervisor",
+          "vm",
+          "container",
+          "host",
+          "device"
+        ]
       },
       "NodeStatus": {
         "type": "object",
@@ -30589,6 +31580,36 @@
           "network"
         ]
       },
+      "PrefixTarget": {
+        "type": "object",
+        "description": "The prefix of a provision.",
+        "required": [
+          "id",
+          "cidr"
+        ],
+        "properties": {
+          "cidr": {
+            "type": "string",
+            "description": "The network.",
+            "example": "198.51.100.0/24"
+          },
+          "id": {
+            "$ref": "#/components/schemas/PrefixId",
+            "description": "The identifier the prefix will have."
+          },
+          "vrf": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VrfId",
+                "description": "The VRF; the default VRF when absent."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "PreviewRow": {
         "type": "object",
         "description": "One source row of the preview.",
@@ -34708,6 +35729,435 @@
           "cluster"
         ]
       },
+      "TopologyEdge": {
+        "type": "object",
+        "description": "An edge of the graph.",
+        "required": [
+          "id",
+          "kind",
+          "a",
+          "b",
+          "sources"
+        ],
+        "properties": {
+          "a": {
+            "type": "string",
+            "description": "One end: the switch, access point or hypervisor for client edges."
+          },
+          "a_port": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The port at `a`."
+          },
+          "b": {
+            "type": "string",
+            "description": "The other end."
+          },
+          "b_port": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The port at `b`."
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable identifier, from the kind, the ends and their ports."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/EdgeKind",
+            "description": "What it is."
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Source keys of the facts behind the edge."
+          },
+          "ssid": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The wireless network of a wireless edge."
+          },
+          "vlan": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The VLAN of a client edge.",
+            "minimum": 0
+          }
+        }
+      },
+      "TopologyGraph": {
+        "type": "object",
+        "description": "The graph: nodes, edges and a summary, computed from one store revision.",
+        "required": [
+          "nodes",
+          "edges",
+          "summary",
+          "revision"
+        ],
+        "properties": {
+          "edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TopologyEdge"
+            },
+            "description": "Edges, by identifier."
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TopologyNode"
+            },
+            "description": "Nodes, by identifier."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The store revision the graph was computed from.",
+            "minimum": 0
+          },
+          "summary": {
+            "$ref": "#/components/schemas/TopologySummary",
+            "description": "Counts and context."
+          }
+        }
+      },
+      "TopologyNode": {
+        "type": "object",
+        "description": "A node of the graph: one device as every source sees it, with the intent joined in.",
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "sources"
+        ],
+        "properties": {
+          "host": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HostId",
+                "description": "The host of intent."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable identifier: `h-` and the host for a device of intent, `c-` for a device of a\nnetwork controller, `i-` for an inventory host, `m-` and the MAC address, `n-` for a\ndevice named by a probe, `a-` for an address."
+          },
+          "ips": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IP addresses."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NodeKind",
+            "description": "What it is."
+          },
+          "label": {
+            "type": "string",
+            "description": "The best name: the host of intent, the controller's name, the inventory name, a\nprobe's name, the vendor with the MAC address, the MAC or IP address."
+          },
+          "last_seen": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "The latest sighting of any of its facts."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "macs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MacAddr"
+            },
+            "description": "MAC addresses."
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The model a controller reports."
+          },
+          "os": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The operating system an inventory or probe reports."
+          },
+          "prefixes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrefixId"
+            },
+            "description": "The most specific networks of intent that hold its addresses."
+          },
+          "site": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SiteId",
+                "description": "The site: the host's, else its network's, else its VLAN's."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Source keys of the facts behind the node (`intent` for a host of intent)."
+          },
+          "ssids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Wireless networks an access point broadcasts or a client uses."
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The subject to look the node up across sources (`GET /observations/{subject}`): its\nfirst MAC address, else its first IP address."
+          },
+          "vendor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The vendor of the first MAC address."
+          },
+          "vlans": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "VLAN ids the node is in: client attachments, the VLANs of its networks, the\nuntagged VLANs of its ports."
+          }
+        }
+      },
+      "TopologyNodeView": {
+        "type": "object",
+        "description": "One node with its ports, neighbours and intent (`GET /topology/nodes/{id}`).",
+        "required": [
+          "node",
+          "ports",
+          "neighbours",
+          "revision"
+        ],
+        "properties": {
+          "intent": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NodeIntent",
+                "description": "The host of intent, when the node is one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "neighbours": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Neighbour"
+            },
+            "description": "Every neighbour, also those across edges without a port on this side."
+          },
+          "node": {
+            "$ref": "#/components/schemas/TopologyNode",
+            "description": "The node."
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TopologyPort"
+            },
+            "description": "Its ports with what hangs on each; with `port`, only that port."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The store revision of the graph.",
+            "minimum": 0
+          }
+        }
+      },
+      "TopologyPort": {
+        "type": "object",
+        "description": "A port of a node and what hangs on it.",
+        "required": [
+          "port",
+          "neighbours"
+        ],
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The controller's name of the port."
+          },
+          "native_vlan": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The untagged VLAN the controller reports.",
+            "minimum": 0
+          },
+          "neighbours": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Neighbour"
+            },
+            "description": "Everything seen behind the port."
+          },
+          "port": {
+            "type": "string",
+            "description": "The port as the sources name it."
+          },
+          "up": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Link state, when a controller reports it."
+          },
+          "uplink": {
+            "type": "boolean",
+            "description": "Whether the controller marks it as an uplink."
+          }
+        }
+      },
+      "TopologySummary": {
+        "type": "object",
+        "description": "Counts and context of a graph.",
+        "required": [
+          "nodes",
+          "edges",
+          "total_nodes",
+          "total_edges",
+          "by_kind",
+          "by_edge_kind",
+          "vlans",
+          "sites",
+          "controllers",
+          "networks"
+        ],
+        "properties": {
+          "by_edge_kind": {
+            "type": "object",
+            "description": "Edges in the answer per kind.",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "by_kind": {
+            "type": "object",
+            "description": "Nodes in the answer per kind.",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "computed_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the graph was computed."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "controllers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ControllerStatus"
+            },
+            "description": "The network controllers and how their last read went."
+          },
+          "edges": {
+            "type": "integer",
+            "description": "Edges in the answer.",
+            "minimum": 0
+          },
+          "networks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInView"
+            },
+            "description": "The networks the controllers report, with their VLANs."
+          },
+          "nodes": {
+            "type": "integer",
+            "description": "Nodes in the answer.",
+            "minimum": 0
+          },
+          "sites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SiteId"
+            },
+            "description": "The sites of the nodes in the answer."
+          },
+          "total_edges": {
+            "type": "integer",
+            "description": "Edges of the whole graph before filtering.",
+            "minimum": 0
+          },
+          "total_nodes": {
+            "type": "integer",
+            "description": "Nodes of the whole graph before filtering.",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Whether the answer was cut at the node limit."
+          },
+          "vlans": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VlanInView"
+            },
+            "description": "The VLANs of the nodes in the answer, by VLAN id."
+          }
+        }
+      },
       "TotpAlgorithm": {
         "type": "string",
         "description": "The HMAC hash of a TOTP configuration (RFC 6238 section 1.2).",
@@ -35957,6 +37407,45 @@
         "type": "string",
         "format": "uuid"
       },
+      "VlanInView": {
+        "type": "object",
+        "description": "One VLAN in view, for the legend.",
+        "required": [
+          "vid",
+          "nodes"
+        ],
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its name."
+          },
+          "nodes": {
+            "type": "integer",
+            "description": "Nodes in it.",
+            "minimum": 0
+          },
+          "vid": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The VLAN id.",
+            "minimum": 0
+          },
+          "vlan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VlanId",
+                "description": "The VLAN object of intent, when one exists (at the node's site or global)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "VlanInput": {
         "type": "object",
         "description": "A new VLAN.",
@@ -36126,6 +37615,274 @@
           }
         },
         "additionalProperties": false
+      },
+      "VlanProvisionPreview": {
+        "type": "object",
+        "description": "The preview of a provision (the dry run, API-09).",
+        "required": [
+          "vlan",
+          "controller",
+          "steps",
+          "base_revision"
+        ],
+        "properties": {
+          "base_revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The store revision the preview was computed at.",
+            "minimum": 0
+          },
+          "controller": {
+            "$ref": "#/components/schemas/ControllerPreview",
+            "description": "The network step."
+          },
+          "plan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlanView",
+                "description": "The IPAM changes of the first step; absent when IPAM does not change."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prefix": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PrefixTarget",
+                "description": "The prefix the job creates."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VlanStepPreview"
+            },
+            "description": "The steps of the job, in order."
+          },
+          "unacknowledged": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Warning codes that need an acknowledgement before a submit."
+          },
+          "vlan": {
+            "$ref": "#/components/schemas/VlanTarget",
+            "description": "The VLAN."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanWarning"
+            },
+            "description": "Every warning: of the IPAM plan and of the network step."
+          }
+        }
+      },
+      "VlanProvisionRequest": {
+        "type": "object",
+        "description": "A request to create a VLAN with its network (IPAM-03).",
+        "properties": {
+          "acknowledge": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Warning codes the caller acknowledges."
+          },
+          "connector": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ConnectorId",
+                "description": "The network-controller connector; the only one when absent."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "create": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NewVlan",
+                "description": "The VLAN to create."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dhcp_relay": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "DHCP relay targets of the network (Tenko serves DHCP); the controller's DHCP is off\nwhen empty."
+          },
+          "manual": {
+            "type": "boolean",
+            "description": "Leave the controller alone: a person creates the network."
+          },
+          "network_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The network name on the controller; the VLAN name when absent."
+          },
+          "prefix": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NewVlanPrefix",
+                "description": "A network prefix to create for the VLAN."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vlan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VlanId",
+                "description": "An existing VLAN to put onto the network; absent when `create` describes a new one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "VlanProvisionSubmitted": {
+        "type": "object",
+        "description": "The answer of a submitted provision.",
+        "required": [
+          "job_id",
+          "vlan",
+          "preview"
+        ],
+        "properties": {
+          "job_id": {
+            "$ref": "#/components/schemas/JobId",
+            "description": "The job."
+          },
+          "prefix": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PrefixId",
+                "description": "The prefix the job creates."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preview": {
+            "$ref": "#/components/schemas/VlanProvisionPreview",
+            "description": "The preview as computed at submit, to compare with the dry run."
+          },
+          "replayed": {
+            "type": "boolean",
+            "description": "Whether an earlier answer was returned for a repeated idempotency key."
+          },
+          "vlan": {
+            "$ref": "#/components/schemas/VlanId",
+            "description": "The VLAN."
+          }
+        }
+      },
+      "VlanStepPreview": {
+        "type": "object",
+        "description": "One step of the job, as previewed.",
+        "required": [
+          "kind",
+          "step_kind",
+          "automatic",
+          "text",
+          "params"
+        ],
+        "properties": {
+          "automatic": {
+            "type": "boolean",
+            "description": "Whether Tenko does it; otherwise a person ticks it off."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`ipam.intent`, `l2.network`, `l2.manual` or `activate`."
+          },
+          "params": {
+            "type": "object",
+            "description": "Values for the text (VLAN id, name, network, connector).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "step_kind": {
+            "type": "string",
+            "description": "The engine's step kind (`ipam.vlan.intent`, ...)."
+          },
+          "text": {
+            "type": "string",
+            "description": "English description."
+          }
+        }
+      },
+      "VlanTarget": {
+        "type": "object",
+        "description": "The VLAN of a provision.",
+        "required": [
+          "id",
+          "vid",
+          "name",
+          "existing",
+          "status"
+        ],
+        "properties": {
+          "existing": {
+            "type": "boolean",
+            "description": "Whether it exists already."
+          },
+          "id": {
+            "$ref": "#/components/schemas/VlanId",
+            "description": "The VLAN (the identifier it will have when the job creates it)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "site": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SiteId",
+                "description": "Its site."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status",
+            "description": "Its status now, or `planned` for a new one."
+          },
+          "vid": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The VLAN id.",
+            "minimum": 0
+          }
+        }
       },
       "Vrf": {
         "type": "object",
@@ -37592,6 +39349,10 @@
     {
       "name": "secrets",
       "description": "Operator secrets, their reveal, host credentials and the remote access hand-off"
+    },
+    {
+      "name": "topology",
+      "description": "The topology map: nodes, edges, ports and neighbours"
     }
   ]
 }

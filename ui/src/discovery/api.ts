@@ -30,7 +30,7 @@ export type FactType = S["FactSubject"]["type"];
 export const PROPOSAL_KINDS: readonly ProposalKind[] = ["discovered_host", "address_mismatch", "conflict", "outside_prefixes", "orphaned_intent"];
 export const PROPOSAL_STATES: readonly ProposalState[] = ["open", "accepted", "rejected", "expired", "superseded"];
 export const SEVERITIES: readonly ProposalSeverity[] = ["critical", "warning", "info"];
-export const FACT_TYPES: readonly FactType[] = ["host", "address", "attachment", "services", "os", "link"];
+export const FACT_TYPES: readonly FactType[] = ["host", "address", "attachment", "services", "os", "link", "name", "vendor"];
 export const ADOPTION_MODES: readonly AdoptionMode[] = ["manual", "adopt_hosts", "adopt_all"];
 
 /** The most bytes a rejection reason may have (docs/reconciliation.md, section 5.2). */

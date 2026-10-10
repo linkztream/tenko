@@ -198,8 +198,8 @@ export function observedText(observed: Observed): string {
       const ports = observed.data.open_tcp.length
         ? t("discovery.fact.ports", { ip: observed.data.ip, ports: observed.data.open_tcp.join(", ") })
         : t("discovery.fact.no_ports", { ip: observed.data.ip });
-      // Ports that answered a TLS handshake, from servers that report them (WP2.3).
-      const tls = (observed.data as { tls_tcp?: unknown }).tls_tcp;
+      // Ports that answered a TLS handshake, from servers that report them.
+      const tls = observed.data.tls_tcp;
       return Array.isArray(tls) && tls.length > 0 ? `${ports} · ${t("discovery.fact.tls", { ports: tls.join(", ") })}` : ports;
     }
     case "os":
@@ -215,22 +215,29 @@ export function observedText(observed: Observed): string {
       const end = (e: { device: string; port?: string | null }) => (e.port ? `${e.device} ${e.port}` : e.device);
       return t("discovery.fact.link", { a: end(observed.data.a), b: end(observed.data.b), kind: observed.data.kind });
     }
+    case "name":
+      // What a probe found for an address; it is no sighting of the address.
+      return observed.data.ip && observed.data.name ? t("discovery.fact.name", { ip: observed.data.ip, name: observed.data.name }) : otherObservedText(observed);
+    case "vendor":
+      return observed.data.mac && observed.data.vendor ? t("discovery.fact.vendor", { mac: observed.data.mac, vendor: observed.data.vendor }) : otherObservedText(observed);
     default:
-      return otherObservedText(observed as unknown as { type: string; data?: Record<string, unknown> });
+      // A kind of fact that a newer server adds.
+      return otherObservedText(observed);
   }
 }
 
+/** The `data` of an observation as members by name; nothing for a `data` that is not an object. */
+function dataOf(o: { data?: unknown }): Record<string, unknown> {
+  return typeof o.data === "object" && o.data !== null ? (o.data as Record<string, unknown>) : {};
+}
+
 /**
- * What an observation of a kind this build does not know reports: the names a newer server
- * adds (`name` with an address and a name, `vendor` with a MAC address and a vendor) in
- * words, anything else as its members.
+ * What an observation of a kind this build does not know reports: its members, as
+ * `name value` in one line. Also the way out for a `name` or a `vendor` without its text.
  */
-function otherObservedText(o: { type: string; data?: Record<string, unknown> }): string {
-  const d = o.data ?? {};
+function otherObservedText(o: { type: string; data?: unknown }): string {
   const text = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
-  if (o.type === "name" && d.ip && d.name) return t("discovery.fact.name", { ip: text(d.ip), name: text(d.name) });
-  if (o.type === "vendor" && d.mac && d.vendor) return t("discovery.fact.vendor", { mac: text(d.mac), vendor: text(d.vendor) });
-  return Object.entries(d)
+  return Object.entries(dataOf(o))
     .map(([k, v]) => `${k} ${Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : text(v)}`)
     .join(" · ");
 }
@@ -250,21 +257,19 @@ export function lookupSubject(fact: ObservedFact): string | null {
       return o.data.mac;
     case "link":
       return null;
+    case "name":
+      // The address the name was found for.
+      return o.data.ip;
+    case "vendor":
+      // The MAC address whose vendor it is.
+      return o.data.mac;
     default: {
-      const d = (o as unknown as { data?: Record<string, unknown> }).data ?? {};
+      // A kind of fact that a newer server adds: whatever it names, MAC address first.
+      const d = dataOf(o);
       const subject = d.mac ?? d.ip ?? d.name;
       return typeof subject === "string" ? subject : null;
     }
   }
-}
-
-/** Members a newer server adds to the summary of a subject (WP2.3): vendors and TLS ports. */
-export function summaryExtras(summary: object): { vendors: string[]; tls: number[] } {
-  const s = summary as { vendors?: unknown; tls_tcp?: unknown };
-  return {
-    vendors: Array.isArray(s.vendors) ? s.vendors.filter((v): v is string => typeof v === "string") : [],
-    tls: Array.isArray(s.tls_tcp) ? s.tls_tcp.filter((v): v is number => typeof v === "number") : [],
-  };
 }
 
 // ---------------------------------------------------------------------------------

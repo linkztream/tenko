@@ -203,7 +203,37 @@ function buildSeed(now: number, revision: number): ReconcileState {
     { type: "attachment", data: { mac: "00:00:5e:00:53:c3", device: "ap-hall", ssid: "guest", vlan: 50 } },
     { first: 4 * DAY_MS, last: 30 * MINUTE, sightings: 6 },
   );
-  const facts = [mediaPc, mediaServices, mediaOs, hallClient, iotAddress, thermostatSeen, thermostatAttached, outside, printerTaken, oldTest, guestPhone];
+  // What probes find besides sightings: a name for an address (reverse DNS) and the vendor of a
+  // MAC address (its OUI, read where ARP shows the MAC address). Neither is a sighting.
+  const speakerName = fact(
+    probe("reverse_dns"),
+    { type: "name", data: { ip: "192.0.2.44" } },
+    "name:192.0.2.44",
+    { type: "name", data: { ip: "192.0.2.44", name: "speaker-den.example.test" } },
+    { first: 6 * DAY_MS, last: 25 * MINUTE, sightings: 8, expires: 3 * HOUR_MS },
+  );
+  const outsideVendor = fact(
+    probe("arp"),
+    { type: "vendor", data: { mac: "00:00:5e:00:53:d5" } },
+    "vendor:00:00:5e:00:53:d5",
+    { type: "vendor", data: { mac: "00:00:5e:00:53:d5", vendor: "ICANN, IANA Department" } },
+    { first: 4 * HOUR_MS, last: 18 * MINUTE, sightings: 2 },
+  );
+  const facts = [
+    mediaPc,
+    mediaServices,
+    mediaOs,
+    hallClient,
+    iotAddress,
+    thermostatSeen,
+    thermostatAttached,
+    outside,
+    printerTaken,
+    oldTest,
+    guestPhone,
+    speakerName,
+    outsideVendor,
+  ];
 
   const evidence = (f: ObservedFact, pair: { mac?: string | null; ip?: string | null; name?: string | null }): S["ProposalEvidence"] => ({
     source: f.source,

@@ -816,6 +816,7 @@ export type MessageKey =
   | "errors.cluster.node.name"
   | "errors.cluster.node.name_taken"
   | "errors.cluster.node.not_found"
+  | "errors.connect.guardrail.protected_vlan"
   | "errors.connect.instance.call_timeout"
   | "errors.connect.instance.conflict"
   | "errors.connect.instance.disabled"
@@ -835,6 +836,9 @@ export type MessageKey =
   | "errors.connect.secret.undeclared"
   | "errors.connect.settings.invalid"
   | "errors.connect.timeout"
+  | "errors.connect.unreachable"
+  | "errors.connect.verify_mismatch"
+  | "errors.connect.writes_disabled"
   | "errors.generic.client"
   | "errors.generic.field"
   | "errors.generic.not_implemented"
@@ -908,9 +912,16 @@ export type MessageKey =
   | "errors.ipam.revision_mismatch"
   | "errors.ipam.site.cycle"
   | "errors.ipam.status.transition"
+  | "errors.ipam.topology.not_found"
+  | "errors.ipam.topology.unavailable"
   | "errors.ipam.unavailable"
   | "errors.ipam.validation"
+  | "errors.ipam.vlan.controller_changed"
+  | "errors.ipam.vlan.controller_disabled"
+  | "errors.ipam.vlan.controller_unknown"
+  | "errors.ipam.vlan.controllers_unavailable"
   | "errors.ipam.vlan.duplicate"
+  | "errors.ipam.vlan.invalid_request"
   | "errors.modules.conflict"
   | "errors.modules.pinned"
   | "errors.modules.store"
@@ -1674,6 +1685,85 @@ export type MessageKey =
   | "ipam.vlan.empty"
   | "ipam.vlan.filter_label"
   | "ipam.vlan.filter_placeholder"
+  | "ipam.vlan.job.title"
+  | "ipam.vlan.prefixes.empty"
+  | "ipam.vlan.prefixes.intro"
+  | "ipam.vlan.prefixes.list_label"
+  | "ipam.vlan.prefixes.loading"
+  | "ipam.vlan.prefixes.row_action"
+  | "ipam.vlan.prefixes.title"
+  | "ipam.vlan.provision.action"
+  | "ipam.vlan.provision.connector"
+  | "ipam.vlan.provision.connector_any"
+  | "ipam.vlan.provision.connector_help"
+  | "ipam.vlan.provision.controller_auto"
+  | "ipam.vlan.provision.controller_auto_help"
+  | "ipam.vlan.provision.controller_label"
+  | "ipam.vlan.provision.controller_manual"
+  | "ipam.vlan.provision.controller_manual_help"
+  | "ipam.vlan.provision.controller_none"
+  | "ipam.vlan.provision.dhcp_off"
+  | "ipam.vlan.provision.dhcp_relay"
+  | "ipam.vlan.provision.dhcp_relay_help"
+  | "ipam.vlan.provision.diff.absent"
+  | "ipam.vlan.provision.diff.now"
+  | "ipam.vlan.provision.diff.planned"
+  | "ipam.vlan.provision.diff.removed"
+  | "ipam.vlan.provision.diff.setting"
+  | "ipam.vlan.provision.diff_heading"
+  | "ipam.vlan.provision.diff_none"
+  | "ipam.vlan.provision.hint.by_hand"
+  | "ipam.vlan.provision.intro_existing"
+  | "ipam.vlan.provision.intro_new"
+  | "ipam.vlan.provision.mode.automatic"
+  | "ipam.vlan.provision.mode.manual"
+  | "ipam.vlan.provision.mode.unchanged"
+  | "ipam.vlan.provision.mode_hint.automatic"
+  | "ipam.vlan.provision.mode_hint.manual"
+  | "ipam.vlan.provision.mode_hint.unchanged"
+  | "ipam.vlan.provision.network_legend"
+  | "ipam.vlan.provision.network_name"
+  | "ipam.vlan.provision.network_name_help"
+  | "ipam.vlan.provision.network_name_long"
+  | "ipam.vlan.provision.network_name_placeholder"
+  | "ipam.vlan.provision.notes_heading"
+  | "ipam.vlan.provision.preview"
+  | "ipam.vlan.provision.preview_intro"
+  | "ipam.vlan.provision.read_at"
+  | "ipam.vlan.provision.read_only"
+  | "ipam.vlan.provision.reason.controller_ambiguous"
+  | "ipam.vlan.provision.reason.controller_read_only"
+  | "ipam.vlan.provision.reason.manual_requested"
+  | "ipam.vlan.provision.reason.no_controller"
+  | "ipam.vlan.provision.reason.unknown"
+  | "ipam.vlan.provision.relay_invalid"
+  | "ipam.vlan.provision.relay_too_many"
+  | "ipam.vlan.provision.row_action"
+  | "ipam.vlan.provision.start"
+  | "ipam.vlan.provision.started"
+  | "ipam.vlan.provision.step.activate"
+  | "ipam.vlan.provision.step.intent_both"
+  | "ipam.vlan.provision.step.intent_prefix"
+  | "ipam.vlan.provision.step.intent_vlan"
+  | "ipam.vlan.provision.step.manual"
+  | "ipam.vlan.provision.step.network"
+  | "ipam.vlan.provision.step.network_check"
+  | "ipam.vlan.provision.steps_heading"
+  | "ipam.vlan.provision.title_existing"
+  | "ipam.vlan.provision.title_new"
+  | "ipam.vlan.provision.vlan_existing"
+  | "ipam.vlan.provision.vlan_new"
+  | "ipam.vlan.provision.vrf_default"
+  | "ipam.vlan.provision.warning.controller_ambiguous"
+  | "ipam.vlan.provision.warning.controller_read_only"
+  | "ipam.vlan.provision.warning.network_changes"
+  | "ipam.vlan.provision.will_exist"
+  | "ipam.vlan.provision.with_prefix"
+  | "ipam.vlan.provision.with_prefix_help"
+  | "ipam.vlan.step.activate"
+  | "ipam.vlan.step.controller"
+  | "ipam.vlan.step.intent"
+  | "ipam.vlan.task.network"
   | "ipam.vlan.vid_invalid"
   | "ipam.vlan.vni_help"
   | "ipam.vlan.vni_invalid"
@@ -1856,6 +1946,10 @@ export type MessageKey =
   | "jobs.stepname.ipam_move_intent"
   | "jobs.stepname.ipam_move_l2"
   | "jobs.stepname.ipam_move_observe"
+  | "jobs.stepname.ipam_vlan_activate"
+  | "jobs.stepname.ipam_vlan_controller"
+  | "jobs.stepname.ipam_vlan_intent"
+  | "jobs.stepname.ipam_vlan_manual"
   | "jobs.stepname.l2_move"
   | "jobs.stepname.observe"
   | "jobs.stepname.sys_update_check"
@@ -2913,6 +3007,105 @@ export type MessageKey =
   | "toggles.updates.install.upload_only"
   | "toggles.updates.name"
   | "toggles.updates.value"
+  | "topology.controller.error_generic"
+  | "topology.controller.label"
+  | "topology.controller.ok"
+  | "topology.edge.lldp"
+  | "topology.edge.uplink"
+  | "topology.edge.vm_host"
+  | "topology.edge.wired"
+  | "topology.edge.wireless"
+  | "topology.empty.body"
+  | "topology.empty.filtered"
+  | "topology.empty.filtered_hint"
+  | "topology.empty.link"
+  | "topology.empty.title"
+  | "topology.filter.clear"
+  | "topology.filter.label"
+  | "topology.filter.placeholder"
+  | "topology.filter.site"
+  | "topology.filter.site_all"
+  | "topology.filter.unknown_site"
+  | "topology.filter.unknown_vlan"
+  | "topology.filter.vlan"
+  | "topology.filter.vlan_all"
+  | "topology.group.aria"
+  | "topology.group.close_all"
+  | "topology.group.label"
+  | "topology.kind.access_point"
+  | "topology.kind.container"
+  | "topology.kind.device"
+  | "topology.kind.host"
+  | "topology.kind.hypervisor"
+  | "topology.kind.router"
+  | "topology.kind.switch"
+  | "topology.kind.vm"
+  | "topology.legend.edges"
+  | "topology.legend.kinds"
+  | "topology.legend.label"
+  | "topology.legend.too_many"
+  | "topology.legend.vlans"
+  | "topology.legend.vlans_none"
+  | "topology.loading"
+  | "topology.map.label"
+  | "topology.neighbour.local"
+  | "topology.neighbour.remote"
+  | "topology.neighbour.ssid"
+  | "topology.node.aria"
+  | "topology.panel.back"
+  | "topology.panel.details"
+  | "topology.panel.host_link"
+  | "topology.panel.intent"
+  | "topology.panel.intent_addresses"
+  | "topology.panel.intent_no_addresses"
+  | "topology.panel.intent_none"
+  | "topology.panel.ips"
+  | "topology.panel.label"
+  | "topology.panel.last_seen"
+  | "topology.panel.macs"
+  | "topology.panel.model"
+  | "topology.panel.neighbours"
+  | "topology.panel.neighbours_none"
+  | "topology.panel.observation_link"
+  | "topology.panel.os"
+  | "topology.panel.paths"
+  | "topology.panel.ports"
+  | "topology.panel.ports_none"
+  | "topology.panel.sources"
+  | "topology.panel.ssids"
+  | "topology.panel.vendor"
+  | "topology.panel.vlans"
+  | "topology.path.clear"
+  | "topology.path.from"
+  | "topology.path.is_router"
+  | "topology.path.no_route"
+  | "topology.path.none"
+  | "topology.path.router"
+  | "topology.path.show"
+  | "topology.path.start"
+  | "topology.path.start_here"
+  | "topology.port.connected"
+  | "topology.port.count"
+  | "topology.port.down"
+  | "topology.port.hide"
+  | "topology.port.hide_aria"
+  | "topology.port.nothing"
+  | "topology.port.open"
+  | "topology.port.open_aria"
+  | "topology.port.unknown"
+  | "topology.port.up"
+  | "topology.port.uplink"
+  | "topology.port.vlan"
+  | "topology.source.intent"
+  | "topology.source.inventory"
+  | "topology.source.network_controller"
+  | "topology.source.probe"
+  | "topology.summary"
+  | "topology.truncated"
+  | "topology.zoom.fit"
+  | "topology.zoom.in"
+  | "topology.zoom.label"
+  | "topology.zoom.out"
   | "updates.attempt.failed"
   | "updates.attempt.rolled_back"
   | "updates.blocked.air_gapped"
@@ -3351,6 +3544,25 @@ export interface MessageArgs {
   "ipam.tenant.edit_title": { name: string | number };
   "ipam.tree.drop_hint": { cidr: string | number; count: number };
   "ipam.vlan.edit_title": { vid: string | number };
+  "ipam.vlan.prefixes.title": { name: string | number; vid: string | number };
+  "ipam.vlan.provision.network_name_long": { max: number };
+  "ipam.vlan.provision.relay_invalid": { address: string | number };
+  "ipam.vlan.provision.relay_too_many": { max: number };
+  "ipam.vlan.provision.started": { vid: string | number };
+  "ipam.vlan.provision.step.activate": { vid: string | number };
+  "ipam.vlan.provision.step.intent_both": { cidr: string | number; name: string | number; vid: string | number };
+  "ipam.vlan.provision.step.intent_prefix": { cidr: string | number; name: string | number; vid: string | number };
+  "ipam.vlan.provision.step.intent_vlan": { name: string | number; vid: string | number };
+  "ipam.vlan.provision.step.manual": { name: string | number; vid: string | number };
+  "ipam.vlan.provision.step.network": { connector: string | number; name: string | number; vid: string | number };
+  "ipam.vlan.provision.step.network_check": { connector: string | number; name: string | number; vid: string | number };
+  "ipam.vlan.provision.title_existing": { vid: string | number };
+  "ipam.vlan.provision.warning.controller_read_only": { connector: string | number };
+  "ipam.vlan.provision.warning.network_changes": { vid: string | number };
+  "ipam.vlan.step.activate": { vid: string | number };
+  "ipam.vlan.step.controller": { name: string | number; vid: string | number };
+  "ipam.vlan.step.intent": { name: string | number; vid: string | number };
+  "ipam.vlan.task.network": { name: string | number; vid: string | number };
   "ipam.vrf.edit_title": { name: string | number };
   "jobs.cancel.note": { when: string | number; who: string | number };
   "jobs.checklist.group": { count: number; name: string | number };
@@ -3591,6 +3803,23 @@ export interface MessageArgs {
   "toggles.session.value": { absolute: string | number; idle: string | number };
   "toggles.token_max_days.days": { days: number };
   "toggles.updates.value": { check: string | number; install: string | number };
+  "topology.controller.error_generic": { code: string | number };
+  "topology.controller.ok": { count: number };
+  "topology.filter.unknown_site": { id: string | number };
+  "topology.filter.unknown_vlan": { id: string | number };
+  "topology.group.aria": { count: number };
+  "topology.group.label": { count: number };
+  "topology.legend.too_many": { count: number };
+  "topology.neighbour.local": { port: string | number };
+  "topology.neighbour.remote": { port: string | number };
+  "topology.neighbour.ssid": { ssid: string | number };
+  "topology.node.aria": { kind: string | number; label: string | number };
+  "topology.path.start": { label: string | number };
+  "topology.port.connected": { port: string | number };
+  "topology.port.count": { count: number };
+  "topology.port.hide_aria": { port: string | number };
+  "topology.port.open_aria": { port: string | number };
+  "topology.summary": { edges: number; nodes: number; total_edges: number; total_nodes: number };
   "updates.attempt.failed": { to: string | number };
   "updates.attempt.rolled_back": { from: string | number; to: string | number };
   "updates.blocked.other": { reason: string | number };
@@ -4445,6 +4674,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.cluster.node.name",
   "errors.cluster.node.name_taken",
   "errors.cluster.node.not_found",
+  "errors.connect.guardrail.protected_vlan",
   "errors.connect.instance.call_timeout",
   "errors.connect.instance.conflict",
   "errors.connect.instance.disabled",
@@ -4464,6 +4694,9 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.connect.secret.undeclared",
   "errors.connect.settings.invalid",
   "errors.connect.timeout",
+  "errors.connect.unreachable",
+  "errors.connect.verify_mismatch",
+  "errors.connect.writes_disabled",
   "errors.generic.client",
   "errors.generic.field",
   "errors.generic.not_implemented",
@@ -4537,9 +4770,16 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.ipam.revision_mismatch",
   "errors.ipam.site.cycle",
   "errors.ipam.status.transition",
+  "errors.ipam.topology.not_found",
+  "errors.ipam.topology.unavailable",
   "errors.ipam.unavailable",
   "errors.ipam.validation",
+  "errors.ipam.vlan.controller_changed",
+  "errors.ipam.vlan.controller_disabled",
+  "errors.ipam.vlan.controller_unknown",
+  "errors.ipam.vlan.controllers_unavailable",
   "errors.ipam.vlan.duplicate",
+  "errors.ipam.vlan.invalid_request",
   "errors.modules.conflict",
   "errors.modules.pinned",
   "errors.modules.store",
@@ -5303,6 +5543,85 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.vlan.empty",
   "ipam.vlan.filter_label",
   "ipam.vlan.filter_placeholder",
+  "ipam.vlan.job.title",
+  "ipam.vlan.prefixes.empty",
+  "ipam.vlan.prefixes.intro",
+  "ipam.vlan.prefixes.list_label",
+  "ipam.vlan.prefixes.loading",
+  "ipam.vlan.prefixes.row_action",
+  "ipam.vlan.prefixes.title",
+  "ipam.vlan.provision.action",
+  "ipam.vlan.provision.connector",
+  "ipam.vlan.provision.connector_any",
+  "ipam.vlan.provision.connector_help",
+  "ipam.vlan.provision.controller_auto",
+  "ipam.vlan.provision.controller_auto_help",
+  "ipam.vlan.provision.controller_label",
+  "ipam.vlan.provision.controller_manual",
+  "ipam.vlan.provision.controller_manual_help",
+  "ipam.vlan.provision.controller_none",
+  "ipam.vlan.provision.dhcp_off",
+  "ipam.vlan.provision.dhcp_relay",
+  "ipam.vlan.provision.dhcp_relay_help",
+  "ipam.vlan.provision.diff.absent",
+  "ipam.vlan.provision.diff.now",
+  "ipam.vlan.provision.diff.planned",
+  "ipam.vlan.provision.diff.removed",
+  "ipam.vlan.provision.diff.setting",
+  "ipam.vlan.provision.diff_heading",
+  "ipam.vlan.provision.diff_none",
+  "ipam.vlan.provision.hint.by_hand",
+  "ipam.vlan.provision.intro_existing",
+  "ipam.vlan.provision.intro_new",
+  "ipam.vlan.provision.mode.automatic",
+  "ipam.vlan.provision.mode.manual",
+  "ipam.vlan.provision.mode.unchanged",
+  "ipam.vlan.provision.mode_hint.automatic",
+  "ipam.vlan.provision.mode_hint.manual",
+  "ipam.vlan.provision.mode_hint.unchanged",
+  "ipam.vlan.provision.network_legend",
+  "ipam.vlan.provision.network_name",
+  "ipam.vlan.provision.network_name_help",
+  "ipam.vlan.provision.network_name_long",
+  "ipam.vlan.provision.network_name_placeholder",
+  "ipam.vlan.provision.notes_heading",
+  "ipam.vlan.provision.preview",
+  "ipam.vlan.provision.preview_intro",
+  "ipam.vlan.provision.read_at",
+  "ipam.vlan.provision.read_only",
+  "ipam.vlan.provision.reason.controller_ambiguous",
+  "ipam.vlan.provision.reason.controller_read_only",
+  "ipam.vlan.provision.reason.manual_requested",
+  "ipam.vlan.provision.reason.no_controller",
+  "ipam.vlan.provision.reason.unknown",
+  "ipam.vlan.provision.relay_invalid",
+  "ipam.vlan.provision.relay_too_many",
+  "ipam.vlan.provision.row_action",
+  "ipam.vlan.provision.start",
+  "ipam.vlan.provision.started",
+  "ipam.vlan.provision.step.activate",
+  "ipam.vlan.provision.step.intent_both",
+  "ipam.vlan.provision.step.intent_prefix",
+  "ipam.vlan.provision.step.intent_vlan",
+  "ipam.vlan.provision.step.manual",
+  "ipam.vlan.provision.step.network",
+  "ipam.vlan.provision.step.network_check",
+  "ipam.vlan.provision.steps_heading",
+  "ipam.vlan.provision.title_existing",
+  "ipam.vlan.provision.title_new",
+  "ipam.vlan.provision.vlan_existing",
+  "ipam.vlan.provision.vlan_new",
+  "ipam.vlan.provision.vrf_default",
+  "ipam.vlan.provision.warning.controller_ambiguous",
+  "ipam.vlan.provision.warning.controller_read_only",
+  "ipam.vlan.provision.warning.network_changes",
+  "ipam.vlan.provision.will_exist",
+  "ipam.vlan.provision.with_prefix",
+  "ipam.vlan.provision.with_prefix_help",
+  "ipam.vlan.step.activate",
+  "ipam.vlan.step.controller",
+  "ipam.vlan.step.intent",
+  "ipam.vlan.task.network",
   "ipam.vlan.vid_invalid",
   "ipam.vlan.vni_help",
   "ipam.vlan.vni_invalid",
@@ -5485,6 +5804,10 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.stepname.ipam_move_intent",
   "jobs.stepname.ipam_move_l2",
   "jobs.stepname.ipam_move_observe",
+  "jobs.stepname.ipam_vlan_activate",
+  "jobs.stepname.ipam_vlan_controller",
+  "jobs.stepname.ipam_vlan_intent",
+  "jobs.stepname.ipam_vlan_manual",
   "jobs.stepname.l2_move",
   "jobs.stepname.observe",
   "jobs.stepname.sys_update_check",
@@ -6542,6 +6865,105 @@ export const messageKeys: readonly MessageKey[] = [
   "toggles.updates.install.upload_only",
   "toggles.updates.name",
   "toggles.updates.value",
+  "topology.controller.error_generic",
+  "topology.controller.label",
+  "topology.controller.ok",
+  "topology.edge.lldp",
+  "topology.edge.uplink",
+  "topology.edge.vm_host",
+  "topology.edge.wired",
+  "topology.edge.wireless",
+  "topology.empty.body",
+  "topology.empty.filtered",
+  "topology.empty.filtered_hint",
+  "topology.empty.link",
+  "topology.empty.title",
+  "topology.filter.clear",
+  "topology.filter.label",
+  "topology.filter.placeholder",
+  "topology.filter.site",
+  "topology.filter.site_all",
+  "topology.filter.unknown_site",
+  "topology.filter.unknown_vlan",
+  "topology.filter.vlan",
+  "topology.filter.vlan_all",
+  "topology.group.aria",
+  "topology.group.close_all",
+  "topology.group.label",
+  "topology.kind.access_point",
+  "topology.kind.container",
+  "topology.kind.device",
+  "topology.kind.host",
+  "topology.kind.hypervisor",
+  "topology.kind.router",
+  "topology.kind.switch",
+  "topology.kind.vm",
+  "topology.legend.edges",
+  "topology.legend.kinds",
+  "topology.legend.label",
+  "topology.legend.too_many",
+  "topology.legend.vlans",
+  "topology.legend.vlans_none",
+  "topology.loading",
+  "topology.map.label",
+  "topology.neighbour.local",
+  "topology.neighbour.remote",
+  "topology.neighbour.ssid",
+  "topology.node.aria",
+  "topology.panel.back",
+  "topology.panel.details",
+  "topology.panel.host_link",
+  "topology.panel.intent",
+  "topology.panel.intent_addresses",
+  "topology.panel.intent_no_addresses",
+  "topology.panel.intent_none",
+  "topology.panel.ips",
+  "topology.panel.label",
+  "topology.panel.last_seen",
+  "topology.panel.macs",
+  "topology.panel.model",
+  "topology.panel.neighbours",
+  "topology.panel.neighbours_none",
+  "topology.panel.observation_link",
+  "topology.panel.os",
+  "topology.panel.paths",
+  "topology.panel.ports",
+  "topology.panel.ports_none",
+  "topology.panel.sources",
+  "topology.panel.ssids",
+  "topology.panel.vendor",
+  "topology.panel.vlans",
+  "topology.path.clear",
+  "topology.path.from",
+  "topology.path.is_router",
+  "topology.path.no_route",
+  "topology.path.none",
+  "topology.path.router",
+  "topology.path.show",
+  "topology.path.start",
+  "topology.path.start_here",
+  "topology.port.connected",
+  "topology.port.count",
+  "topology.port.down",
+  "topology.port.hide",
+  "topology.port.hide_aria",
+  "topology.port.nothing",
+  "topology.port.open",
+  "topology.port.open_aria",
+  "topology.port.unknown",
+  "topology.port.up",
+  "topology.port.uplink",
+  "topology.port.vlan",
+  "topology.source.intent",
+  "topology.source.inventory",
+  "topology.source.network_controller",
+  "topology.source.probe",
+  "topology.summary",
+  "topology.truncated",
+  "topology.zoom.fit",
+  "topology.zoom.in",
+  "topology.zoom.label",
+  "topology.zoom.out",
   "updates.attempt.failed",
   "updates.attempt.rolled_back",
   "updates.blocked.air_gapped",

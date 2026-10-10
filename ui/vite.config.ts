@@ -23,7 +23,18 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   // jobs pack, which is listed first because a key belongs to the first pack that matches. Only
   // the three prefixes the job uses: ipam.move.dragging and the rest are texts of the IPAM views.
   // The titles of connector and cluster jobs come from the server as keys too (WP2.9).
-  jobs: ["jobs.", "ipam.move.task.", "ipam.move.step.", "ipam.move.title", "connect.job.", "cluster.job."],
+  // The title, manual task and step texts of the VLAN provision job come as keys too (WP2.7).
+  jobs: [
+    "jobs.",
+    "ipam.move.task.",
+    "ipam.move.step.",
+    "ipam.move.title",
+    "connect.job.",
+    "cluster.job.",
+    "ipam.vlan.job.",
+    "ipam.vlan.task.",
+    "ipam.vlan.step.",
+  ],
   // The adoption policy of a prefix is part of the prefix pane, with its error texts.
   ipam: ["ipam.", "hosts.", "move.", "errors.ipam.adoption."],
   audit: ["audit."],
@@ -46,6 +57,8 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   connectors: ["connectors.", "errors.connect."],
   // Cluster nodes and enrolment tokens, with the error texts of the node endpoints (WP2.9).
   nodes: ["nodes.", "errors.cluster."],
+  // The topology map (WP2.7).
+  topology: ["topology."],
 };
 
 export default defineConfig(({ command, mode }) => {

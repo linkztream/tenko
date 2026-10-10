@@ -134,6 +134,10 @@ describe("titles, step summaries and tasks", () => {
       "jobs.step.l2_move",
       "jobs.step.observe",
       "jobs.step.cleanup",
+      "ipam.vlan.step.intent",
+      "ipam.vlan.step.controller",
+      "ipam.vlan.step.activate",
+      "ipam.vlan.task.network",
     ];
     for (const key of keys) {
       const names = summaryArgs(key);
@@ -143,6 +147,16 @@ describe("titles, step summaries and tasks", () => {
       expect(text, key).not.toBe(key);
       for (const name of names) expect(text, `${key} ${name}`).toContain(`<${name}>`);
     }
+  });
+
+  it("writes the texts of a VLAN provision job with the arguments the server always sends", () => {
+    // The server sends vid and name with every step; cidr and connector only when they exist.
+    const args = { vid: "30", name: "IoT" };
+    expect(taskText({ instruction: "ipam.vlan.task.network", args })).toBe(
+      "Create the network IoT on VLAN 30 on the switches and access points, then mark this step done.",
+    );
+    expect(stepName("ipam.vlan.controller")).toBe("Create on the network controller");
+    expect(stepName("ipam.vlan.manual")).toBe("Create the network by hand");
   });
 
   it("writes the texts of a move with the arguments the server always sends", () => {

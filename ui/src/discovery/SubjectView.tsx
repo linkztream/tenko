@@ -16,7 +16,7 @@ import { getSubject, listProposals, type Proposal, type SubjectView as Picture }
 import { KindBadge, StateBadge } from "./columns";
 import { DiscoveryNav } from "./DiscoveryNav";
 import { FactTable } from "./FactTable";
-import { isProposalEvent, ruleText, sourceKeyText, subjectKind, summaryExtras, type SourceNames } from "./model";
+import { isProposalEvent, ruleText, sourceKeyText, subjectKind, type SourceNames } from "./model";
 import { ObjectLink, useSourceNames } from "./refs";
 import "./discovery.css";
 
@@ -109,6 +109,9 @@ function Values(props: { values: readonly (string | number)[]; mono?: boolean; t
 
 function PictureCards(props: { picture: Picture; proposals: Proposal[]; names: SourceNames }) {
   const s = () => props.picture.summary;
+  // A summary without these members (an older server) has none.
+  const tls = () => s().tls_tcp ?? [];
+  const vendors = () => s().vendors ?? [];
   const intent = () => props.picture.intent;
   const intentRefs = () => [
     ...intent().hosts.map((id) => ({ kind: "host" as const, id })),
@@ -156,16 +159,16 @@ function PictureCards(props: { picture: Picture; proposals: Proposal[]; names: S
             <dd>
               <Values values={s().open_tcp} mono testid="subject-ports" />
             </dd>
-            <Show when={summaryExtras(s()).tls.length > 0}>
+            <Show when={tls().length > 0}>
               <dt>{t("discovery.subject.tls")}</dt>
               <dd>
-                <Values values={summaryExtras(s()).tls} mono testid="subject-tls" />
+                <Values values={tls()} mono testid="subject-tls" />
               </dd>
             </Show>
-            <Show when={summaryExtras(s()).vendors.length > 0}>
+            <Show when={vendors().length > 0}>
               <dt>{t("discovery.subject.vendors")}</dt>
               <dd>
-                <Values values={summaryExtras(s()).vendors} testid="subject-vendors" />
+                <Values values={vendors()} testid="subject-vendors" />
               </dd>
             </Show>
             <Show when={s().platforms.length > 0}>
@@ -260,7 +263,7 @@ function ProposalsCard(props: { proposals: Proposal[] }) {
             {(p) => (
               <li data-testid="subject-proposal" data-id={p.id}>
                 <KindBadge kind={p.kind} />
-                <A href={paths.proposal(p.id)}>{ruleText(p)}</A>
+                <A href={paths.proposal(p.id)} data-testid="subject-proposal-link">{ruleText(p)}</A>
                 <StateBadge state={p.state} />
               </li>
             )}

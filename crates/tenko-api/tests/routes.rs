@@ -252,6 +252,12 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     // observations
     ("GET", "/observations", "list_observations"),
     ("GET", "/observations/{subject}", "get_observation"),
+    // topology (WP2.7)
+    ("GET", "/topology", "get_topology"),
+    ("GET", "/topology/nodes/{id}", "get_topology_node"),
+    // VLAN provisioning (WP2.7)
+    ("POST", "/vlans/provision", "provision_vlan"),
+    ("GET", "/vlans/{id}/prefixes", "list_vlan_prefixes"),
     // proposals
     ("GET", "/proposals", "list_proposals"),
     ("POST", "/proposals/reconcile", "reconcile_proposals"),
@@ -470,7 +476,7 @@ fn operations_have_a_declared_tag_and_a_summary() {
         .flatten()
         .map(|tag| tag.name.as_str())
         .collect();
-    assert_eq!(tags.len(), 21, "one tag per area");
+    assert_eq!(tags.len(), 22, "one tag per area");
     for (path, item) in &document.paths.paths {
         for (method, operation) in operations(item) {
             let operation_tags = operation.tags.as_deref().unwrap_or_default();

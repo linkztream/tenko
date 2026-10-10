@@ -94,7 +94,7 @@ function compareBy<T>(keys: { field: string; desc: boolean }[], value: (item: T,
 // ---------------------------------------------------------------------------------
 // Facts
 
-const FACT_TYPES = ["host", "address", "attachment", "services", "os", "link"] as const;
+const FACT_TYPES = ["host", "address", "attachment", "services", "os", "link", "name", "vendor"] as const;
 
 function isCurrent(fact: ObservedFact, now = Date.now()): boolean {
   return !fact.expires_at || Date.parse(fact.expires_at) > now;
@@ -109,6 +109,7 @@ function macsOf(fact: ObservedFact): string[] {
     case "address":
       return o.data.mac ? [o.data.mac] : [];
     case "attachment":
+    case "vendor":
       return [o.data.mac];
     default:
       return [];
@@ -124,14 +125,26 @@ function ipsOf(fact: ObservedFact): string[] {
     case "address":
     case "services":
     case "os":
+    case "name":
       return [o.data.ip];
     default:
       return [];
   }
 }
 
+/** The name a fact gives its subject: an inventory host's name, or the name a probe found for an address. */
 function nameOf(fact: ObservedFact): string | null {
-  return fact.observed.type === "host" ? (fact.observed.data.name ?? null) : null;
+  const o = fact.observed;
+  return o.type === "host" ? (o.data.name ?? null) : o.type === "name" ? o.data.name : null;
+}
+
+/**
+ * Whether a fact is a sighting of what it names. A name or a vendor says what a thing is called
+ * or who made it, not that it is in use, so intent's last sightings leave such facts out
+ * (docs/reconciliation.md section 2.6, docs/scanning.md section 3.3).
+ */
+function isSighting(fact: ObservedFact): boolean {
+  return fact.observed.type !== "name" && fact.observed.type !== "vendor";
 }
 
 /** The text `q` searches: subject key, name, OS, platform, parent, tags and attachment device. */
@@ -141,6 +154,8 @@ function searchText(fact: ObservedFact): string {
   if (o.type === "host") parts.push(o.data.name ?? "", o.data.os ?? "", o.data.platform ?? "", o.data.parent ?? "", ...(o.data.tags ?? []));
   if (o.type === "attachment") parts.push(o.data.device);
   if (o.type === "os") parts.push(o.data.guess);
+  if (o.type === "name") parts.push(o.data.name);
+  if (o.type === "vendor") parts.push(o.data.vendor);
   return parts.join(" ").toLowerCase();
 }
 
@@ -254,7 +269,7 @@ const observation = route("get", "/api/v1/observations/{subject}", (ctx) => {
     if (!host.meta.deleted && names.includes(host.name.toLowerCase())) hostIds.add(host.id);
   }
   const latest = (match: (f: ObservedFact) => boolean): S["IntentSighting"] | null => {
-    const f = current.filter(match).sort((a, b) => (a.last_seen < b.last_seen ? 1 : -1))[0];
+    const f = current.filter((x) => isSighting(x) && match(x)).sort((a, b) => (a.last_seen < b.last_seen ? 1 : -1))[0];
     return f ? { at: f.last_seen, observation: f.observation, source: f.source_key } : null;
   };
   const sightings: S["ObjectSighting"][] = [
@@ -283,6 +298,8 @@ const observation = route("get", "/api/v1/observations/{subject}", (ctx) => {
       platforms: sorted(basis.flatMap((f) => (f.observed.type === "host" && f.observed.data.platform ? [f.observed.data.platform] : []))),
       parents: sorted(basis.flatMap((f) => (f.observed.type === "host" && f.observed.data.parent ? [f.observed.data.parent] : []))),
       open_tcp: [...new Set(basis.flatMap((f) => (f.observed.type === "services" ? f.observed.data.open_tcp : [])))].sort((a, b) => a - b),
+      tls_tcp: [...new Set(basis.flatMap((f) => (f.observed.type === "services" ? (f.observed.data.tls_tcp ?? []) : [])))].sort((a, b) => a - b),
+      vendors: sorted(basis.flatMap((f) => (f.observed.type === "vendor" ? [f.observed.data.vendor] : []))),
       attachments,
       tags: sorted(basis.flatMap((f) => (f.observed.type === "host" ? (f.observed.data.tags ?? []) : []))),
     },

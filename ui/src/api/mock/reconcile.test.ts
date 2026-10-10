@@ -6,7 +6,7 @@ import { apiOperations } from "../generated/operations";
 import { audit } from "./audit-store";
 import { resetMockDb } from "./db";
 import { HOST_IDS, IPAM_IDS, ipamState } from "./ipam/api";
-import { RECONCILE_IDS } from "./reconcile-store";
+import { RECONCILE_IDS, reconcileState } from "./reconcile-store";
 
 type S = components["schemas"];
 type Page<T> = { items: T[]; next_cursor?: string | null; revision: number };
@@ -216,6 +216,152 @@ describe("observations", () => {
     expect(byIp.body.facts.map((f) => f.subject.type).sort()).toEqual(["host", "os", "services"]);
     expect((await get<Problem>(`${V}/observations/unknown-device`)).status).toBe(404);
     expect((await get<Problem>(`${V}/observations/${"x".repeat(254)}`)).status).toBe(400);
+  });
+});
+
+describe("the names and vendors that probes find", () => {
+  const MAC = "00:00:5e:00:53:d5";
+  const probeKey = (method: string) => `probe:${RECONCILE_IDS.probeNode}:${method}`;
+
+  it("lists them as facts of their own type and filters by that type", async () => {
+    const names = (await get<Page<S["ObservedFact"]>>(`${V}/observations?type=name`)).body.items;
+    expect(names).toHaveLength(1);
+    expect(names[0]).toMatchObject({
+      source_key: probeKey("reverse_dns"),
+      subject: { type: "name", data: { ip: "192.0.2.44" } },
+      subject_key: "name:192.0.2.44",
+      observed: { type: "name", data: { ip: "192.0.2.44", name: "speaker-den.example.test" } },
+    });
+    expect(names[0]?.expires_at && Date.parse(names[0].expires_at)).toBeGreaterThan(Date.now());
+
+    const vendors = (await get<Page<S["ObservedFact"]>>(`${V}/observations?type=vendor`)).body.items;
+    expect(vendors).toHaveLength(1);
+    expect(vendors[0]).toMatchObject({
+      source_key: probeKey("arp"),
+      subject: { type: "vendor", data: { mac: MAC } },
+      subject_key: `vendor:${MAC}`,
+      observed: { type: "vendor", data: { mac: MAC, vendor: "ICANN, IANA Department" } },
+    });
+
+    // The type is still checked, and the two new ones are among the known.
+    const refused = await get<Problem>(`${V}/observations?type=nickname`);
+    expect(refused.status).toBe(400);
+    expect(refused.body.code).toBe("sys.invalid_query");
+    expect((await get<Page<S["ObservedFact"]>>(`${V}/observations?type=link`)).body.items).toEqual([]);
+  });
+
+  it("names an address with a name and a MAC address with a vendor", async () => {
+    const byIp = (await get<Page<S["ObservedFact"]>>(`${V}/observations?ip=192.0.2.44`)).body.items;
+    expect(byIp.map((f) => f.subject_key)).toEqual(["name:192.0.2.44"]);
+    const within = (await get<Page<S["ObservedFact"]>>(`${V}/observations?within=192.0.2.0/24&type=name`)).body.items;
+    expect(within.map((f) => f.subject_key)).toEqual(["name:192.0.2.44"]);
+    const byMac = (await get<Page<S["ObservedFact"]>>(`${V}/observations?mac=00-00-5E-00-53-D5`)).body.items;
+    expect(byMac.map((f) => f.subject.type).sort()).toEqual(["address", "vendor"]);
+    // A vendor names no address, so a network does not hold it.
+    const outside = (await get<Page<S["ObservedFact"]>>(`${V}/observations?within=203.0.113.0/24`)).body.items;
+    expect(outside.map((f) => f.subject.type)).toEqual(["address"]);
+  });
+
+  it("searches their text with q", async () => {
+    const byName = (await get<Page<S["ObservedFact"]>>(`${V}/observations?q=EXAMPLE.test`)).body.items;
+    expect(byName.map((f) => f.subject_key)).toEqual(["name:192.0.2.44"]);
+    const byVendor = (await get<Page<S["ObservedFact"]>>(`${V}/observations?q=icann`)).body.items;
+    expect(byVendor.map((f) => f.subject_key)).toEqual([`vendor:${MAC}`]);
+  });
+
+  it("fills the vendors of the summary from the vendor facts that name the MAC address", async () => {
+    const view = await get<S["SubjectView"]>(`${V}/observations/00-00-5E-00-53-D5`);
+    expect(view.status).toBe(200);
+    expect(view.body.subject).toBe(`mac:${MAC}`);
+    expect(view.body.facts.map((f) => f.subject.type).sort()).toEqual(["address", "vendor"]);
+    expect(view.body.summary).toMatchObject({ current: true, macs: [MAC], ips: ["203.0.113.230"], names: [], vendors: ["ICANN, IANA Department"], tls_tcp: [] });
+    expect(view.body.summary.sources).toEqual([probeKey("arp")]);
+
+    // The vendor fact names the MAC address only: the address does not list the vendor.
+    const byIp = await get<S["SubjectView"]>(`${V}/observations/203.0.113.230`);
+    expect(byIp.body.facts.map((f) => f.subject.type)).toEqual(["address"]);
+    expect(byIp.body.summary).toMatchObject({ macs: [MAC], vendors: [] });
+  });
+
+  it("adds the name to the names of the summary, whether the subject is the address or the name", async () => {
+    const byIp = await get<S["SubjectView"]>(`${V}/observations/192.0.2.44`);
+    expect(byIp.body.facts.map((f) => f.subject.type)).toEqual(["name"]);
+    expect(byIp.body.summary).toMatchObject({ ips: ["192.0.2.44"], macs: [], names: ["speaker-den.example.test"], vendors: [] });
+
+    const byName = await get<S["SubjectView"]>(`${V}/observations/Speaker-Den.Example.Test`);
+    expect(byName.body.subject).toBe("name:speaker-den.example.test");
+    expect(byName.body.facts.map((f) => f.subject_key)).toEqual(["name:192.0.2.44"]);
+    expect(byName.body.summary).toMatchObject({ ips: ["192.0.2.44"], names: ["speaker-den.example.test"] });
+    // The address of intent matches through the name's address, but a name is no sighting of it.
+    expect(byName.body.intent.addresses).toHaveLength(1);
+    expect(byName.body.sightings).toEqual([]);
+    expect(byIp.body.intent.addresses).toEqual(byName.body.intent.addresses);
+  });
+
+  it("sorts and de-duplicates the vendors, and uses the current facts only", async () => {
+    const facts = reconcileState().facts;
+    const vendor = facts.find((f) => f.observed.type === "vendor");
+    if (!vendor) throw new Error("the seed has no vendor fact");
+    const report = (n: number, method: S["ProbeMethod"], text: string, expires_at?: string): S["ObservedFact"] => ({
+      ...vendor,
+      source: { type: "probe", node: RECONCILE_IDS.probeNode, method },
+      source_key: probeKey(method),
+      observation: `0190d1c2-0000-7000-8000-00000e0000b${n}`,
+      observed: { type: "vendor", data: { mac: MAC, vendor: text } },
+      ...(expires_at ? { expires_at } : {}),
+    });
+    facts.push(
+      report(1, "nd", "ICANN, IANA Department"),
+      report(2, "snmp", "Cisco Systems, Inc"),
+      report(3, "mdns", "Ancient Devices", new Date(Date.now() - 60_000).toISOString()),
+    );
+    const view = await get<S["SubjectView"]>(`${V}/observations/${MAC}`);
+    expect(view.body.summary.vendors).toEqual(["Cisco Systems, Inc", "ICANN, IANA Department"]);
+    expect(view.body.summary.sources).toEqual([probeKey("arp"), probeKey("nd"), probeKey("snmp")]);
+    // Expired facts are still listed, after the current ones.
+    expect(view.body.facts).toHaveLength(5);
+    expect(view.body.facts.at(-1)?.observed).toMatchObject({ data: { vendor: "Ancient Devices" } });
+  });
+
+  it("does not count a vendor as a sighting of intent", async () => {
+    // The thermostat interface is last seen by its attachment; a newer vendor fact does not change that.
+    const facts = reconcileState().facts;
+    const seen = (await get<S["SubjectView"]>(`${V}/observations/00-00-5E-00-53-29`)).body;
+    expect(seen.sightings).toHaveLength(1);
+    const attachment = seen.facts.find((f) => f.subject.type === "attachment");
+    const template = facts[0] as S["ObservedFact"];
+    const now = new Date().toISOString();
+    facts.push({
+      ...template,
+      source: { type: "probe", node: RECONCILE_IDS.probeNode, method: "arp" },
+      source_key: probeKey("arp"),
+      subject: { type: "vendor", data: { mac: "00:00:5e:00:53:29" } },
+      subject_key: "vendor:00:00:5e:00:53:29",
+      observation: "0190d1c2-0000-7000-8000-00000e0000aa",
+      observed: { type: "vendor", data: { mac: "00:00:5e:00:53:29", vendor: "ICANN, IANA Department" } },
+      first_seen: now,
+      last_seen: now,
+      expires_at: null,
+    });
+    const after = (await get<S["SubjectView"]>(`${V}/observations/00-00-5E-00-53-29`)).body;
+    expect(after.summary.vendors).toEqual(["ICANN, IANA Department"]);
+    expect(after.facts[0]?.subject.type).toBe("vendor");
+    expect(after.sightings).toHaveLength(1);
+    expect(after.sightings[0]?.sighting.observation).toBe(attachment?.observation);
+    expect(after.sightings[0]?.sighting.source).toBe(attachment?.source_key);
+  });
+
+  it("collects the TLS ports of the services facts, sorted and without duplicates", async () => {
+    const quiet = await get<S["SubjectView"]>(`${V}/observations/192.0.2.150`);
+    expect(quiet.body.summary.tls_tcp).toEqual([]);
+
+    const facts = reconcileState().facts;
+    const index = facts.findIndex((f) => f.observed.type === "services");
+    const services = facts[index];
+    if (!services || services.observed.type !== "services") throw new Error("the seed has no services fact");
+    facts[index] = { ...services, observed: { type: "services", data: { ...services.observed.data, open_tcp: [8096, 22, 443], tls_tcp: [8096, 443, 8096] } } };
+    const view = await get<S["SubjectView"]>(`${V}/observations/192.0.2.150`);
+    expect(view.body.summary).toMatchObject({ open_tcp: [22, 443, 8096], tls_tcp: [443, 8096] });
   });
 });
 

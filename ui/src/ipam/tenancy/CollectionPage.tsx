@@ -41,6 +41,8 @@ export interface CollectionPageProps<T extends CollectionRow> {
   empty: JSX.Element;
   /** Receives the source, for a view that refreshes after its own create form. */
   sourceRef?: (source: ListSource<T>) => void;
+  /** Row actions of the view, after the built-in ones (edit, history, restore, delete). */
+  actions?: RowAction<T>[];
   /** Where the grid lives inside the page (default: fills the page). */
   class?: string;
 }
@@ -89,6 +91,8 @@ export function CollectionPage<T extends CollectionRow>(props: CollectionPagePro
     { id: "history", label: () => t("ipam.do.history"), run: (r) => setDialog({ kind: "history", row: r }) },
     { id: "restore", label: () => t("ipam.do.restore"), disabled: (r) => !r.meta.deleted, run: (r) => setDialog({ kind: "restore", row: r }) },
     { id: "delete", label: () => t("ipam.do.delete"), danger: true, disabled: (r) => !!r.meta.deleted, run: (r) => setDialog({ kind: "delete", row: r }) },
+    // The view's own actions come after the built-in ones; the list is fixed for the life of the page.
+    ...untrack(() => props.actions ?? []),
   ];
   const close = (changed: boolean) => {
     setDialog(null);

@@ -226,6 +226,7 @@ export default function ObservationsView() {
               <button
                 type="button"
                 class="chip-x"
+                data-testid="filter-chip-remove"
                 aria-label={t("discovery.filter.remove", { filter: f.value })}
                 onClick={() => setSearch({ [f.name]: undefined })}
               >

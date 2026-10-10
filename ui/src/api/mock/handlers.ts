@@ -13,7 +13,9 @@ import { reconcileRoutes } from "./routes-reconcile";
 import { revealPolicyRoutes } from "./routes-reveal-policy";
 import { secretsRoutes } from "./routes-secrets";
 import { systemRoutes } from "./routes-system";
+import { topologyRoutes } from "./routes-topology";
 import { updatesRoutes } from "./routes-updates";
+import { vlanRoutes } from "./routes-vlans";
 import { eventRoutes } from "./sse";
 import { stubs } from "./stubs";
 import { nodeRoutes } from "./routes-nodes";
@@ -45,6 +47,9 @@ export const happyPaths: HttpHandler[] = [
   // Cluster nodes and enrolment tokens (WP2.2 routes, WP2.9 mock).
   ...nodeRoutes,
   ...connectorRoutes,
+  // The topology map, the VLAN provision and the prefixes of a VLAN (WP2.7).
+  ...topologyRoutes,
+  ...vlanRoutes,
 ];
 
 export const handlers: HttpHandler[] = [...happyPaths, ...stubs];

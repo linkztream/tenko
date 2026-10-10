@@ -15,6 +15,7 @@ Tenko DDI is a DNS, DHCP and IPAM stack written in Rust with an embedded web UI.
 | [reconciliation.md](reconciliation.md) | Intent versus observation: observations per source, the reconciler's proposals, decisions and adoption policies |
 | [cluster.md](cluster.md) | Nodes and the node transport: enrolment tokens, certificates and renewal, revocation, the gRPC protocol and its version negotiation, heartbeats, the disk buffer for probe observations, ports and settings |
 | [scanning.md](scanning.md) | The probe's discovery methods: what each one does, needs and reports, rate limits, blackout windows and the kill switch, `tenko node scan`, IDS and EDR allow-listing, the `[scan]` section |
+| [topology.md](topology.md) | The topology map: its sources, how observations and intent are joined into devices, edges, the API with its filters and the node view, caching, the map in the UI and the choice of drawing library, and the VLAN provision job |
 | [upgrades.md](upgrades.md) | Data-directory format and migrations, `tenko upgrade check`, releases, manual upgrade and rollback, updates from the UI, the version layout, modules |
 | [CONFORMANCE.md](CONFORMANCE.md) | RFC and specification matrix with target phase and status |
 | [ROADMAP.md](ROADMAP.md) | Phases 0 to 5 with deliverables, spikes, "Done when" criteria, verification and open questions |

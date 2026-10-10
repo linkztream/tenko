@@ -26,7 +26,6 @@ import {
   subjectKind,
   subjectLabel,
   subjectValue,
-  summaryExtras,
   type SourceNames,
 } from "./model";
 
@@ -494,10 +493,22 @@ describe("facts", () => {
       );
     });
 
-    it("tells the kinds that a newer server adds: a name and a vendor", () => {
-      expect(observedText({ type: "name", data: { ip: "192.0.2.1", name: "gw" } } as unknown as Observed)).toBe("192.0.2.1 is called gw");
-      expect(observedText({ type: "vendor", data: { mac: "00:00:5e:00:53:01", vendor: "Example Networks" } } as unknown as Observed)).toBe(
-        "00:00:5e:00:53:01 is made by Example Networks",
+    it("tells the name a probe found for an address", () => {
+      expect(observedText({ type: "name", data: { ip: "192.0.2.44", name: "speaker-den.example.test" } })).toBe("192.0.2.44 is called speaker-den.example.test");
+      expect(observedText({ type: "name", data: { ip: "2001:db8::7", name: "gw" } })).toBe("2001:db8::7 is called gw");
+    });
+
+    it("tells the vendor of a MAC address", () => {
+      expect(observedText({ type: "vendor", data: { mac: "00:00:5e:00:53:d5", vendor: "ICANN, IANA Department" } })).toBe(
+        "00:00:5e:00:53:d5 is made by ICANN, IANA Department",
+      );
+    });
+
+    it("tells the name and the vendor in Swedish", async () => {
+      await setLocale("sv");
+      expect(observedText({ type: "name", data: { ip: "192.0.2.44", name: "speaker-den.example.test" } })).toBe("192.0.2.44 heter speaker-den.example.test");
+      expect(observedText({ type: "vendor", data: { mac: "00:00:5e:00:53:d5", vendor: "ICANN, IANA Department" } })).toBe(
+        "00:00:5e:00:53:d5 är tillverkad av ICANN, IANA Department",
       );
     });
 
@@ -540,36 +551,22 @@ describe("facts", () => {
       expect(lookup({ type: "link", data: { a: { device: "a" }, b: { device: "b" }, kind: "lldp" } } as Observed)).toBeNull();
     });
 
+    it("is the address of a name, which a probe found for that address", () => {
+      expect(lookup({ type: "name", data: { ip: "192.0.2.44", name: "speaker-den.example.test" } })).toBe("192.0.2.44");
+    });
+
+    it("is the MAC address of a vendor, not a name or an address", () => {
+      expect(lookup({ type: "vendor", data: { mac: "00:00:5e:00:53:d5", vendor: "ICANN, IANA Department" } })).toBe("00:00:5e:00:53:d5");
+    });
+
     it("is the MAC address, else the address, else the name of a kind it does not know", () => {
-      const other = (data: object) => lookup({ type: "name", data } as unknown as Observed);
+      const other = (data: object) => lookup({ type: "thermal_image", data } as unknown as Observed);
       expect(other({ mac: "00:00:5e:00:53:01", ip: "192.0.2.1", name: "gw" })).toBe("00:00:5e:00:53:01");
       expect(other({ ip: "192.0.2.1", name: "gw" })).toBe("192.0.2.1");
       expect(other({ name: "gw" })).toBe("gw");
       expect(other({})).toBeNull();
       expect(other({ mac: 5 })).toBeNull();
-      expect(lookup({ type: "name" } as unknown as Observed)).toBeNull();
-    });
-  });
-
-  describe("what a newer server adds to the summary of a subject (summaryExtras)", () => {
-    it("reads the vendors and the TLS ports", () => {
-      expect(summaryExtras({ vendors: ["Example Networks", "Example Devices"], tls_tcp: [443, 8443] })).toEqual({
-        vendors: ["Example Networks", "Example Devices"],
-        tls: [443, 8443],
-      });
-    });
-
-    it("is empty for a summary without them", () => {
-      expect(summaryExtras({})).toEqual({ vendors: [], tls: [] });
-      expect(summaryExtras({ macs: ["00:00:5e:00:53:01"], open_tcp: [22] })).toEqual({ vendors: [], tls: [] });
-    });
-
-    it("keeps only the members of the right type, and ignores a member of another shape", () => {
-      expect(summaryExtras({ vendors: ["Example Networks", 5, null], tls_tcp: [443, "8443", null, 8443] })).toEqual({
-        vendors: ["Example Networks"],
-        tls: [443, 8443],
-      });
-      expect(summaryExtras({ vendors: "Example Networks", tls_tcp: 443 })).toEqual({ vendors: [], tls: [] });
+      expect(lookup({ type: "thermal_image" } as unknown as Observed)).toBeNull();
     });
   });
 });

@@ -53,6 +53,8 @@
 //! | [`alarm`] | alarm levels and events (IPAM-10) |
 //! | [`jobs`] | the inline job of a change, [`JobSink`], [`DirectJobs`] |
 //! | [`moves`] | moving hosts and addresses to another network (IPAM-19) |
+//! | [`vlan`] | the VLAN provision job and the port to network controllers (IPAM-03) |
+//! | [`topology`] | the computed topology graph (IPAM-20) |
 //! | [`history`] | history entries (IPAM-09) |
 //! | [`query`] | reads for the API: lists, filters, pagination, search |
 //! | [`custom`] | custom field validation (IPAM-08) |
@@ -81,7 +83,9 @@ pub mod query;
 pub mod reconcile;
 pub mod service;
 pub mod tables;
+pub mod topology;
 pub mod tree;
+pub mod vlan;
 
 #[cfg(test)]
 pub(crate) mod testutil;

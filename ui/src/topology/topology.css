@@ -1,0 +1,113 @@
+/*
+ * Topology: the map with its filter bar, legend and docked device panel. Token roles only
+ * (tokens.css). Nothing is told by color alone: kinds have shapes and words, edge kinds have
+ * line styles, VLANs show their id, a selected device is drawn heavier as well as in the accent.
+ */
+
+/* ---------- The page ---------- */
+.topology-page { overflow: hidden; display: flex; flex-direction: column; }
+.topology-split { position: relative; display: flex; flex: 1; min-height: 320px; }
+.topology-main { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.topology-split.with-panel .topology-main { margin-right: min(var(--panel-w), 100%); }
+@media (max-width: 960px) {
+  .topology-split.with-panel .topology-main { margin-right: 0; }
+}
+.topology-state { padding: var(--sp-8); display: grid; justify-items: start; gap: var(--sp-4); }
+.topology-main .empty h2 { font-size: var(--fs-16); color: var(--ink); }
+
+/* ---------- Status line ---------- */
+.topology-status {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-7);
+  padding: var(--sp-3) var(--sp-6);
+  background: var(--surface); border-bottom: 1px solid var(--line);
+  color: var(--ink-2); font-size: var(--fs-12);
+}
+.topology-summary { margin: 0; font-variant-numeric: tabular-nums; }
+.topology-controllers { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-6); }
+.topology-controller { display: inline-flex; align-items: center; gap: var(--sp-3); }
+.topology-controller[data-state="error"] { color: var(--danger-ink); }
+.topology-controller[data-state="ok"] svg.i { color: var(--ok-ink); }
+.topology-controller-error { font-weight: var(--fw-medium); }
+
+/* ---------- The drawing ---------- */
+.topology-canvas { position: relative; flex: 1; min-height: 240px; overflow: hidden; background: var(--surface); }
+.topology-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; user-select: none; }
+.topology-svg:active { cursor: grabbing; }
+
+/* Edges. Solid wired, dashed wireless, dotted LLDP, thick uplink, thin virtual placement. */
+.topology-edge { fill: none; stroke: var(--ink-3); stroke-width: 1.5; }
+.topology-edge.has-vlan { stroke: var(--vlan, var(--ink-3)); }
+.topology-edge.edge-wired { stroke-dasharray: none; }
+.topology-edge.edge-wireless { stroke-dasharray: 7 5; }
+.topology-edge.edge-lldp { stroke-dasharray: 1.5 5; stroke-linecap: round; stroke-width: 2.25; }
+.topology-edge.edge-uplink { stroke: var(--ink-2); stroke-width: 4; }
+.topology-edge.edge-vm_host { stroke-width: 1; }
+.topology-edge[data-path="true"] { stroke: var(--accent); stroke-width: 4; }
+.topology-drawing.has-path .topology-edge:not([data-path]) { opacity: 0.25; }
+
+/* Devices and groups. The fill is opaque, so an edge behind a device never shows through. */
+.topology-node { cursor: pointer; }
+.topology-node:focus { outline: none; }
+.topology-node:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.topology-node .shape { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1.75; stroke-linejoin: round; fill-rule: evenodd; }
+.topology-node.kind-router .shape { stroke: var(--ink); stroke-width: 2.5; }
+.topology-node:hover .shape { fill: var(--surface-3); }
+.topology-node.on-path .shape { stroke: var(--accent); stroke-width: 3; }
+.topology-node.start .shape { stroke: var(--accent-strong); stroke-width: 3.5; stroke-dasharray: 5 3; }
+.topology-node.selected .shape { fill: var(--accent-wash); stroke: var(--accent); stroke-width: 3.5; }
+.topology-node .label {
+  fill: var(--ink); font-size: var(--fs-11); font-weight: var(--fw-medium);
+  paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round;
+}
+.topology-node.selected .label { fill: var(--accent); }
+.topology-group .shape { fill: var(--surface-2); stroke-dasharray: 5 3; }
+.topology-group .count { fill: var(--ink); font-size: var(--fs-11); font-weight: var(--fw-medium); font-variant-numeric: tabular-nums; }
+.topology-drawing.has-path .topology-node:not(.on-path) { opacity: 0.5; }
+
+/* Zoom buttons. */
+.topology-zoom {
+  position: absolute; right: var(--sp-5); bottom: var(--sp-5);
+  display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-1);
+  border: 1px solid var(--line-strong); border-radius: var(--r-3); background: var(--surface);
+}
+
+/* ---------- Legend ---------- */
+.topology-legend {
+  display: flex; flex-wrap: wrap; gap: var(--sp-4) var(--sp-8);
+  padding: var(--sp-4) var(--sp-6);
+  border-top: 1px solid var(--line); background: var(--surface);
+  font-size: var(--fs-12); color: var(--ink-2);
+}
+.legend-block { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-5); min-width: 0; }
+.legend-block h2 { font-size: var(--fs-11); font-weight: var(--fw-medium); color: var(--ink-3); }
+.legend-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); }
+.legend-list li { display: inline-flex; align-items: center; gap: var(--sp-3); }
+.legend-sample { width: 40px; height: 8px; flex: none; }
+.legend-sample.shape-sample { width: 26px; height: 18px; }
+.legend-shape { fill: var(--surface); stroke: var(--ink-2); stroke-width: 2; stroke-linejoin: round; fill-rule: evenodd; }
+
+/* ---------- The device panel ---------- */
+.topology-panel .panel-head h2 { font-size: var(--fs-14); line-height: var(--lh-text); overflow-wrap: anywhere; }
+.topology-panel .grow { flex: 1; min-width: 0; }
+.topology-badges { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.topology-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.topology-links { margin-top: var(--sp-4); }
+.topology-reason { margin-top: var(--sp-3); font-size: var(--fs-12); }
+.topology-panel .value-list { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
+
+.port-list, .neighbour-list, .intent-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
+.topology-port { border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--sp-3) var(--sp-4); display: grid; gap: var(--sp-3); }
+.port-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
+.port-head .btn { margin-left: auto; }
+.port-name { font-weight: var(--fw-medium); }
+.port-state[data-state="down"] { color: var(--warn-ink); }
+.neighbour {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px var(--sp-4);
+  width: 100%; padding: var(--sp-3) var(--sp-4); text-align: left;
+  border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface); color: var(--ink);
+}
+.neighbour:hover { background: var(--surface-3); }
+.neighbour-name { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); min-width: 0; overflow-wrap: anywhere; }
+.neighbour-link { grid-column: 1; font-size: var(--fs-12); }
+.neighbour .vlan { grid-column: 2; grid-row: 1 / span 2; }
+.intent-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }

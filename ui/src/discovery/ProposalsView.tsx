@@ -247,6 +247,7 @@ export default function ProposalsView() {
                 <button
                   type="button"
                   class="chip-x"
+                  data-testid="filter-chip-remove"
                   aria-label={t("discovery.filter.remove_prefix")}
                   onClick={() => setSearch({ prefix: undefined })}
                 >

@@ -233,6 +233,149 @@ describe("the picture of a device", () => {
   });
 });
 
+describe("what probes find besides sightings", () => {
+  it("shows the vendor of a MAC address with the facts that name it", async () => {
+    await openSubject("00:00:5e:00:53:d5");
+    expect(text("subject-vendors")).toBe("ICANN, IANA Department");
+    expect(text("subject-macs")).toBe("00:00:5e:00:53:d5");
+    expect(text("subject-ips")).toBe("203.0.113.230");
+    expect(screen.queryByTestId("subject-tls")).toBeNull();
+    expect(factKeys().sort()).toEqual([`${PROBE}:arp|address:${VRF}/203.0.113.230`, `${PROBE}:arp|vendor:00:00:5e:00:53:d5`].sort());
+    expect(card("subject-facts").textContent).toContain("2 facts");
+
+    const vendor = facts().find((f) => f.dataset.key?.includes("|vendor:")) as HTMLElement;
+    const cells = within(vendor).getAllByRole("cell");
+    await waitFor(() => expect(cells[0]?.textContent).toBe("Probe 1, ARP"));
+    expect(cells[1]?.textContent).toBe("Vendor");
+    expect(cells[2]?.textContent).toBe("00:00:5e:00:53:d5 is made by ICANN, IANA Department");
+    expect(cells[6]?.textContent).toBe("Current");
+    // A vendor is not a sighting: the MAC address matches no interface of IPAM, so there is no sighting to list.
+    expect(within(card("subject-intent")).queryByTestId("subject-sightings")).toBeNull();
+  });
+
+  it("does not take the vendor of a MAC address for a fact about the address it was seen with", async () => {
+    // The vendor fact names the MAC address only, so the address does not list it.
+    await openSubject("203.0.113.230");
+    expect(text("subject-macs")).toBe("00:00:5e:00:53:d5");
+    expect(screen.queryByTestId("subject-vendors")).toBeNull();
+    expect(factKeys()).toEqual([`${PROBE}:arp|address:${VRF}/203.0.113.230`]);
+  });
+
+  it("shows the name a probe found for an address, which is no sighting of that address", async () => {
+    await openSubject("192.0.2.44");
+    expect(screen.getByTestId("page-discovery-subject").textContent).toContain("IP address · seen now");
+    expect(text("subject-names")).toBe("speaker-den.example.test");
+    expect(text("subject-ips")).toBe("192.0.2.44");
+    expect(screen.queryByTestId("subject-vendors")).toBeNull();
+    expect(factKeys()).toEqual([`${PROBE}:reverse_dns|name:192.0.2.44`]);
+
+    const [fact] = facts();
+    const cells = within(fact as HTMLElement).getAllByRole("cell");
+    await waitFor(() => expect(cells[0]?.textContent).toBe("Probe 1, reverse DNS"));
+    expect(cells[1]?.textContent).toBe("Name");
+    expect(cells[2]?.textContent).toBe("192.0.2.44 is called speaker-den.example.test");
+
+    // IPAM has the address; the name does not count as a sighting of it.
+    const intent = card("subject-intent");
+    expect((await within(intent).findByRole("link", { name: "192.0.2.44" })).getAttribute("href")).toContain("192.0.2.44");
+    expect(within(intent).queryByTestId("subject-sightings")).toBeNull();
+  });
+
+  it("finds the address of a name by that name, without regard to case", async () => {
+    await openSubject("Speaker-Den.Example.Test");
+    expect(screen.getByTestId("page-discovery-subject").textContent).toContain("Name · seen now");
+    expect(text("subject-names")).toBe("speaker-den.example.test");
+    expect(text("subject-ips")).toBe("192.0.2.44");
+    expect(factKeys()).toEqual([`${PROBE}:reverse_dns|name:192.0.2.44`]);
+  });
+
+  it("lists the open ports that answered a TLS handshake", async () => {
+    const state = reconcileState();
+    const index = state.facts.findIndex((f) => f.observed.type === "services");
+    const services = state.facts[index];
+    if (!services || services.observed.type !== "services") throw new Error("the seed has no services fact");
+    state.facts[index] = { ...services, observed: { type: "services", data: { ...services.observed.data, open_tcp: [22, 443, 8096], tls_tcp: [443] } } };
+
+    await openSubject("192.0.2.150");
+    expect([...card("subject-ports").querySelectorAll("span")].map((s) => s.textContent)).toEqual(["22", "443", "8096"]);
+    expect([...card("subject-tls").querySelectorAll("span")].map((s) => s.textContent)).toEqual(["443"]);
+    const fact = facts().find((f) => f.dataset.key?.includes("|services:")) as HTMLElement;
+    expect(within(fact).getAllByRole("cell")[2]?.textContent).toBe("192.0.2.150: TCP 22, 443, 8096 · TLS on 443");
+  });
+
+  it("has no vendor and no TLS port to show when the summary has none", async () => {
+    await openSubject("192.0.2.150");
+    expect(screen.getByTestId("subject-ports")).toBeTruthy();
+    expect(screen.queryByTestId("subject-tls")).toBeNull();
+    expect(screen.queryByTestId("subject-vendors")).toBeNull();
+    expect(card("subject-summary").textContent).not.toContain("Vendors");
+    expect(card("subject-summary").textContent).not.toContain("TLS");
+  });
+
+  it("shows the vendors and the TLS ports that a server reports", async () => {
+    server.use(
+      http.get("/api/v1/observations/:subject", () =>
+        HttpResponse.json({
+          subject: "mac:00:00:5e:00:53:01",
+          facts: [],
+          summary: {
+            current: true,
+            sources: [],
+            macs: ["00:00:5e:00:53:01"],
+            ips: [],
+            names: [],
+            os: [],
+            platforms: [],
+            parents: [],
+            open_tcp: [443, 8443],
+            tls_tcp: [443, 8443],
+            vendors: ["Example Devices", "Example Networks"],
+            attachments: [],
+            tags: [],
+          },
+          intent: { hosts: [], interfaces: [], addresses: [], vrfs: [] },
+          sightings: [],
+          revision: 1,
+        }),
+      ),
+    );
+    await openSubject("00:00:5e:00:53:01");
+    expect([...card("subject-vendors").querySelectorAll("span")].map((s) => s.textContent)).toEqual(["Example Devices", "Example Networks"]);
+    expect([...card("subject-tls").querySelectorAll("span")].map((s) => s.textContent)).toEqual(["443", "8443"]);
+  });
+
+  it("copes with a summary from a server that does not report them", async () => {
+    server.use(
+      http.get("/api/v1/observations/:subject", () =>
+        HttpResponse.json({
+          subject: "mac:00:00:5e:00:53:01",
+          facts: [],
+          summary: {
+            current: true,
+            sources: [],
+            macs: ["00:00:5e:00:53:01"],
+            ips: [],
+            names: [],
+            os: [],
+            platforms: [],
+            parents: [],
+            open_tcp: [443],
+            attachments: [],
+            tags: [],
+          },
+          intent: { hosts: [], interfaces: [], addresses: [], vrfs: [] },
+          sightings: [],
+          revision: 1,
+        }),
+      ),
+    );
+    await openSubject("00:00:5e:00:53:01");
+    expect(text("subject-ports")).toBe("443");
+    expect(screen.queryByTestId("subject-tls")).toBeNull();
+    expect(screen.queryByTestId("subject-vendors")).toBeNull();
+  });
+});
+
 describe("a subject that no source reported", () => {
   it("says so and offers the way back to the observations", async () => {
     renderSubject("00:00:5e:00:53:ee");
@@ -328,6 +471,18 @@ describe("accessibility", () => {
   it("has no violations for a device that IPAM does not know", async () => {
     const view = await openSubject("192.0.2.150");
     await waitFor(() => expect(text("subject-sources")).toContain("Lab inventory (inventory)"));
+    expect(await axeViolations(view.container)).toEqual([]);
+  });
+
+  it("has no violations for a MAC address with a vendor", async () => {
+    const view = await openSubject("00:00:5e:00:53:d5");
+    await waitFor(() => expect(text("subject-sources")).toContain("Probe 1, ARP"));
+    expect(await axeViolations(view.container)).toEqual([]);
+  });
+
+  it("has no violations for an address with a name", async () => {
+    const view = await openSubject("192.0.2.44");
+    await within(card("subject-intent")).findByRole("link", { name: "192.0.2.44" });
     expect(await axeViolations(view.container)).toEqual([]);
   });
 

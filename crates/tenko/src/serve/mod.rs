@@ -912,6 +912,9 @@ async fn start(
         })
         .await?;
 
+    // The network controllers of the VLAN provision job and the topology (WP2.7): filled
+    // once the connector service runs; the job steps read it when they run.
+    let vlan_controllers = tenko_ipam::vlan::Controllers::new();
     let (ipam, mut engine, imports) = steps
         .run("ipam", async {
             let mut engine = JobEngine::new(
@@ -936,6 +939,7 @@ async fn start(
                 ));
             }
             tenko_ipam::jobs::register_steps(&mut engine);
+            tenko_ipam::vlan::register_steps(&mut engine, &vlan_controllers);
             let ipam = IpamService::new(
                 Arc::clone(&store_dyn),
                 Arc::new(engine.clone()),
@@ -1105,6 +1109,9 @@ async fn start(
         )
         .await?;
     running.tasks.push(connectors.task());
+    vlan_controllers.set(tenko_api::routes::vlans::host::HostControllers::new(
+        Arc::clone(connectors.host()),
+    ));
     let mut cluster = steps
         .run(
             "cluster",
@@ -1171,6 +1178,14 @@ async fn start(
             server.extensions.insert(Arc::clone(&auth));
             if let Some(ipam) = &ipam {
                 server.extensions.insert(Arc::clone(ipam));
+                server.extensions.insert(Arc::clone(&vlan_controllers));
+                server
+                    .extensions
+                    .insert(tenko_ipam::topology::TopologyService::new(
+                        Arc::clone(ipam),
+                        Arc::clone(&vlan_controllers),
+                        tenko_ipam::topology::TopologyConfig::default(),
+                    ));
             }
             server.extensions.insert(engine.clone());
             let module_switch: Arc<dyn tenko_api::routes::system::modules::ModuleService> =

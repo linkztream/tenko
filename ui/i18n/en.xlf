@@ -1044,6 +1044,27 @@
       <unit id="errors.ipam.vlan.duplicate">
         <segment><source>VLAN {vid} already exists at this site.</source></segment>
       </unit>
+      <unit id="errors.ipam.vlan.invalid_request">
+        <segment><source>Name either an existing VLAN or a new one, and check the network name and the DHCP relays.</source></segment>
+      </unit>
+      <unit id="errors.ipam.vlan.controller_unknown">
+        <segment><source>The chosen connector is not a network controller of this server.</source></segment>
+      </unit>
+      <unit id="errors.ipam.vlan.controller_disabled">
+        <segment><source>The chosen network controller is disabled.</source></segment>
+      </unit>
+      <unit id="errors.ipam.vlan.controllers_unavailable">
+        <segment><source>The network controllers are not available on this server.</source></segment>
+      </unit>
+      <unit id="errors.ipam.vlan.controller_changed">
+        <segment><source>The network controller changed after the job was started. Preview the VLAN again.</source></segment>
+      </unit>
+      <unit id="errors.ipam.topology.not_found">
+        <segment><source>This device is no longer in the topology.</source></segment>
+      </unit>
+      <unit id="errors.ipam.topology.unavailable">
+        <segment><source>The topology is not available on this server.</source></segment>
+      </unit>
       <unit id="errors.ipam.site.cycle">
         <segment><source>A site cannot be inside itself.</source></segment>
       </unit>
@@ -3912,6 +3933,23 @@
       <unit id="ipam.move.step.cleanup">
         <segment><source>Remove {old_ip} and make {new_ip} active.</source></segment>
       </unit>
+      <unit id="ipam.vlan.job.title">
+        <notes><note category="description">Title of the job that creates a VLAN with its network on the switches and access points.</note></notes>
+        <segment><source>Create VLAN</source></segment>
+      </unit>
+      <unit id="ipam.vlan.task.network">
+        <notes><note category="description">Manual task of the VLAN job when no network controller writes the network. The server always sends vid and name.</note></notes>
+        <segment><source>Create the network {name} on VLAN {vid} on the switches and access points, then mark this step done.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.step.intent">
+        <segment><source>Create VLAN {vid} ({name}) in IPAM as planned.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.step.controller">
+        <segment><source>Create the network {name} on VLAN {vid} on the network controller: dry run, write, read back and compare.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.step.activate">
+        <segment><source>Make VLAN {vid} and its network active.</source></segment>
+      </unit>
       <unit id="ipam.form.create_kind">
         <notes><note category="description">Title and button of a form that creates an object. The kind is a lowercase noun such as prefix, range or address.</note></notes>
         <segment><source>Create {kind}</source></segment>
@@ -4266,6 +4304,230 @@
       </unit>
       <unit id="ipam.vlan.empty">
         <segment><source>No VLANs yet.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.action">
+        <segment><source>Create with network</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.row_action">
+        <segment><source>Put onto the network</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.title_new">
+        <segment><source>Create VLAN with network</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.title_existing">
+        <segment><source>Put VLAN {vid} onto the network</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.intro_new">
+        <segment><source>Creates the VLAN in IPAM and, if you wish, its network on the switches and access points. You see a preview first; nothing changes until you start the job.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.intro_existing">
+        <segment><source>Puts this VLAN onto the switches and access points. IPAM changes only if you also create a network below. You see a preview first.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.with_prefix">
+        <segment><source>Also create a network in IPAM</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.with_prefix_help">
+        <segment><source>A prefix linked to the VLAN. It is created as planned and becomes active when the job succeeds.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.vrf_default">
+        <segment><source>Default VRF</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.network_legend">
+        <segment><source>Network on the switches and access points</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.controller_auto">
+        <segment><source>Through the network controller</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.controller_auto_help">
+        <segment><source>Tenko plans the network, writes it and reads it back to check it.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.controller_manual">
+        <segment><source>By hand</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.controller_manual_help">
+        <segment><source>Tenko creates the VLAN in IPAM only. A person creates the network and marks the step done in the job.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.connector">
+        <segment><source>Network controller</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.connector_any">
+        <segment><source>Not chosen</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.connector_help">
+        <segment><source>Several network controllers are configured. Choose the one that writes this network.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.network_name">
+        <segment><source>Network name on the controller</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.network_name_help">
+        <segment><source>Leave empty to use the VLAN name.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.network_name_placeholder">
+        <segment><source>The VLAN name</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.network_name_long">
+        <segment><source>Use at most {max, number} characters.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.dhcp_relay">
+        <segment><source>DHCP relay addresses</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.dhcp_relay_help">
+        <segment><source>Addresses of the Tenko DHCP servers, separated by commas or spaces. Leave empty to keep the DHCP service of the controller off for this network.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.relay_invalid">
+        <segment><source>{address} is not a valid IPv4 or IPv6 address.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.relay_too_many">
+        <segment><source>Enter at most {max, number} relay addresses.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.preview">
+        <segment><source>Preview</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.preview_intro">
+        <segment><source>Nothing has been written yet. Check what Tenko will do, then start the job.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.will_exist">
+        <segment><source>What will exist</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.vlan_new">
+        <segment><source>New VLAN</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.vlan_existing">
+        <segment><source>Existing VLAN</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.controller_label">
+        <segment><source>Controller</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.controller_none">
+        <segment><source>No network controller</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.dhcp_off">
+        <segment><source>None, the DHCP service of the controller stays off</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.read_only">
+        <segment><source>Read only</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.reason.no_controller">
+        <notes><note category="description">Reason of a manual network step in the VLAN provision preview.</note></notes>
+        <segment><source>No network controller is configured, so a person creates the network.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.reason.manual_requested">
+        <segment><source>You chose to create the network by hand.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.reason.controller_ambiguous">
+        <segment><source>Several network controllers are configured and none is chosen, so a person creates the network.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.reason.controller_read_only">
+        <segment><source>Writes through the network controller are switched off, so a person creates the network.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.reason.unknown">
+        <segment><source>A person creates the network.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.mode.automatic">
+        <segment><source>Automatic</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.mode.unchanged">
+        <segment><source>Unchanged</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.mode.manual">
+        <segment><source>By hand</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.mode_hint.automatic">
+        <segment><source>Tenko writes the network to the controller and reads it back to compare.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.mode_hint.unchanged">
+        <segment><source>The controller already has the network as asked. The job only checks it.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.mode_hint.manual">
+        <segment><source>A person creates the network. The job waits and shows the instructions.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.diff_heading">
+        <segment><source>Changes on the controller</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.diff.setting">
+        <segment><source>Setting</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.diff.now">
+        <segment><source>Now</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.diff.planned">
+        <segment><source>Planned</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.diff.absent">
+        <segment><source>absent</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.diff.removed">
+        <segment><source>removed</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.diff_none">
+        <segment><source>The controller already has the network as asked. Nothing is written.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.read_at">
+        <segment><source>Read from the controller</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.notes_heading">
+        <segment><source>Notes from the controller</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.steps_heading">
+        <segment><source>Steps of the job</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.step.intent_vlan">
+        <notes><note category="description">Step of the VLAN provision preview. The server sends vid, name and, with a network, cidr.</note></notes>
+        <segment><source>Create VLAN {vid} ({name}) in IPAM as planned.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.step.intent_both">
+        <segment><source>Create VLAN {vid} ({name}) and the network {cidr} in IPAM as planned.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.step.intent_prefix">
+        <segment><source>Create the network {cidr} for VLAN {vid} ({name}) in IPAM as planned.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.step.network">
+        <segment><source>Create the network {name} on VLAN {vid} through {connector}: dry run, write, read back and compare.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.step.network_check">
+        <segment><source>Check that {connector} has the network {name} on VLAN {vid}.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.step.manual">
+        <segment><source>Create the network {name} on VLAN {vid} on the switches and access points, then mark the step done.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.step.activate">
+        <segment><source>Make VLAN {vid} and its network active.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.warning.controller_ambiguous">
+        <segment><source>Several network controllers are configured and none is chosen. The network step is left to a person unless you go back and choose one.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.warning.controller_read_only">
+        <segment><source>Writes through {connector} are switched off. The network step is left to a person, who makes the changes shown above.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.warning.network_changes">
+        <segment><source>The controller already has a network on VLAN {vid}. The write changes it as shown above.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.start">
+        <segment><source>Start</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.started">
+        <segment><source>Started the network job for VLAN {vid}</source></segment>
+      </unit>
+      <unit id="ipam.vlan.provision.hint.by_hand">
+        <segment><source>Choose By hand to create the VLAN in IPAM only. The controller is left alone.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.prefixes.row_action">
+        <segment><source>Prefixes</source></segment>
+      </unit>
+      <unit id="ipam.vlan.prefixes.title">
+        <segment><source>Prefixes of VLAN {vid} ({name})</source></segment>
+      </unit>
+      <unit id="ipam.vlan.prefixes.intro">
+        <segment><source>A prefix is linked to a VLAN by editing the prefix.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.prefixes.empty">
+        <segment><source>No prefix is linked to this VLAN.</source></segment>
+      </unit>
+      <unit id="ipam.vlan.prefixes.loading">
+        <segment><source>Loading the prefixes…</source></segment>
+      </unit>
+      <unit id="ipam.vlan.prefixes.list_label">
+        <segment><source>Prefixes linked to the VLAN</source></segment>
       </unit>
       <unit id="ipam.tags.sub">
         <segment><source>Tags on live objects, with the number of objects of each kind</source></segment>
@@ -5120,6 +5382,18 @@
       </unit>
       <unit id="jobs.stepname.ipam_move_cleanup">
         <segment><source>Clean up the old address</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_vlan_intent">
+        <segment><source>Create in IPAM</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_vlan_controller">
+        <segment><source>Create on the network controller</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_vlan_manual">
+        <segment><source>Create the network by hand</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_vlan_activate">
+        <segment><source>Activate</source></segment>
       </unit>
     </group>
     <group id="audit">
@@ -8988,6 +9262,18 @@
       <unit id="errors.connect.timeout">
         <segment><source>The plugin did not answer in time.</source></segment>
       </unit>
+      <unit id="errors.connect.unreachable">
+        <segment><source>The remote system cannot be reached.</source></segment>
+      </unit>
+      <unit id="errors.connect.writes_disabled">
+        <segment><source>Writes through this connector are switched off.</source></segment>
+      </unit>
+      <unit id="errors.connect.verify_mismatch">
+        <segment><source>The read-back of the network controller does not match the plan.</source></segment>
+      </unit>
+      <unit id="errors.connect.guardrail.protected_vlan">
+        <segment><source>This VLAN is protected: Tenko or the controller is managed through it.</source></segment>
+      </unit>
       <unit id="errors.connect.settings.invalid">
         <segment><source>Some settings are not valid; see the fields.</source></segment>
       </unit>
@@ -9387,6 +9673,305 @@
       </unit>
       <unit id="dashboard.tile.nodes_link">
         <segment><source>Open the nodes</source></segment>
+      </unit>
+    </group>
+    <group id="topology">
+      <unit id="topology.filter.label">
+        <segment><source>Filter the map</source></segment>
+      </unit>
+      <unit id="topology.filter.placeholder">
+        <segment><source>Search name, address, vendor, model or wireless network</source></segment>
+      </unit>
+      <unit id="topology.filter.site">
+        <segment><source>Site</source></segment>
+      </unit>
+      <unit id="topology.filter.site_all">
+        <segment><source>All sites</source></segment>
+      </unit>
+      <unit id="topology.filter.vlan">
+        <segment><source>VLAN</source></segment>
+      </unit>
+      <unit id="topology.filter.vlan_all">
+        <segment><source>All VLANs</source></segment>
+      </unit>
+      <unit id="topology.filter.clear">
+        <segment><source>Clear filters</source></segment>
+      </unit>
+      <unit id="topology.filter.unknown_site">
+        <segment><source>Site {id}</source></segment>
+      </unit>
+      <unit id="topology.filter.unknown_vlan">
+        <segment><source>VLAN {id}</source></segment>
+      </unit>
+      <unit id="topology.kind.router">
+        <segment><source>Router</source></segment>
+      </unit>
+      <unit id="topology.kind.switch">
+        <segment><source>Switch</source></segment>
+      </unit>
+      <unit id="topology.kind.access_point">
+        <segment><source>Access point</source></segment>
+      </unit>
+      <unit id="topology.kind.hypervisor">
+        <segment><source>Hypervisor</source></segment>
+      </unit>
+      <unit id="topology.kind.vm">
+        <segment><source>Virtual machine</source></segment>
+      </unit>
+      <unit id="topology.kind.container">
+        <segment><source>Container</source></segment>
+      </unit>
+      <unit id="topology.kind.host">
+        <segment><source>Host</source></segment>
+      </unit>
+      <unit id="topology.kind.device">
+        <segment><source>Other device</source></segment>
+      </unit>
+      <unit id="topology.edge.wired">
+        <segment><source>Wired</source></segment>
+      </unit>
+      <unit id="topology.edge.wireless">
+        <segment><source>Wireless</source></segment>
+      </unit>
+      <unit id="topology.edge.lldp">
+        <segment><source>LLDP link</source></segment>
+      </unit>
+      <unit id="topology.edge.uplink">
+        <segment><source>Uplink</source></segment>
+      </unit>
+      <unit id="topology.edge.vm_host">
+        <segment><source>Hosted on hypervisor</source></segment>
+      </unit>
+      <unit id="topology.source.intent">
+        <segment><source>Intent</source></segment>
+      </unit>
+      <unit id="topology.source.network_controller">
+        <segment><source>Network controller</source></segment>
+      </unit>
+      <unit id="topology.source.probe">
+        <segment><source>Probe</source></segment>
+      </unit>
+      <unit id="topology.source.inventory">
+        <segment><source>Inventory</source></segment>
+      </unit>
+      <unit id="topology.map.label">
+        <segment><source>Network map</source></segment>
+      </unit>
+      <unit id="topology.node.aria">
+        <segment><source>{label}, {kind}</source></segment>
+      </unit>
+      <unit id="topology.group.label">
+        <segment><source>{count, plural, one {# device} other {# devices}}</source></segment>
+      </unit>
+      <unit id="topology.group.aria">
+        <segment><source>{count, plural, one {# hidden device, open the group} other {# hidden devices, open the group}}</source></segment>
+      </unit>
+      <unit id="topology.group.close_all">
+        <segment><source>Close all groups</source></segment>
+      </unit>
+      <unit id="topology.zoom.label">
+        <segment><source>Map controls</source></segment>
+      </unit>
+      <unit id="topology.zoom.in">
+        <segment><source>Zoom in</source></segment>
+      </unit>
+      <unit id="topology.zoom.out">
+        <segment><source>Zoom out</source></segment>
+      </unit>
+      <unit id="topology.zoom.fit">
+        <segment><source>Fit the map to the view</source></segment>
+      </unit>
+      <unit id="topology.summary">
+        <segment><source>Showing {nodes, number} of {total_nodes, plural, one {# device} other {# devices}} and {edges, number} of {total_edges, plural, one {# link} other {# links}}</source></segment>
+      </unit>
+      <unit id="topology.truncated">
+        <segment><source>The answer was cut at the limit. Network devices come first; narrow the filter to see the rest.</source></segment>
+      </unit>
+      <unit id="topology.loading">
+        <segment><source>Loading the map…</source></segment>
+      </unit>
+      <unit id="topology.controller.label">
+        <segment><source>Network controllers</source></segment>
+      </unit>
+      <unit id="topology.controller.ok">
+        <segment><source>{count, plural, one {# device} other {# devices}} read</source></segment>
+      </unit>
+      <unit id="topology.controller.error_generic">
+        <segment><source>The last read failed ({code})</source></segment>
+      </unit>
+      <unit id="topology.empty.title">
+        <segment><source>Nothing to draw yet</source></segment>
+      </unit>
+      <unit id="topology.empty.body">
+        <segment><source>The map is built from what the network controller connector, the SNMP probe and the inventory connectors observe. Connect one of them and the devices appear here.</source></segment>
+      </unit>
+      <unit id="topology.empty.link">
+        <segment><source>Open the connectors</source></segment>
+      </unit>
+      <unit id="topology.empty.filtered">
+        <segment><source>No device matches the filter</source></segment>
+      </unit>
+      <unit id="topology.empty.filtered_hint">
+        <segment><source>Change or clear the filter to see more of the network.</source></segment>
+      </unit>
+      <unit id="topology.legend.label">
+        <segment><source>Legend</source></segment>
+      </unit>
+      <unit id="topology.legend.vlans">
+        <segment><source>VLANs</source></segment>
+      </unit>
+      <unit id="topology.legend.edges">
+        <segment><source>Links</source></segment>
+      </unit>
+      <unit id="topology.legend.kinds">
+        <segment><source>Devices</source></segment>
+      </unit>
+      <unit id="topology.legend.vlans_none">
+        <segment><source>No VLAN information in view</source></segment>
+      </unit>
+      <unit id="topology.legend.too_many">
+        <segment><source>{count, number} VLANs are in view. Choose a VLAN in the filter to see it in color.</source></segment>
+      </unit>
+      <unit id="topology.panel.label">
+        <segment><source>Device details</source></segment>
+      </unit>
+      <unit id="topology.panel.back">
+        <segment><source>Back to the map</source></segment>
+      </unit>
+      <unit id="topology.panel.paths">
+        <segment><source>Paths</source></segment>
+      </unit>
+      <unit id="topology.panel.details">
+        <segment><source>Details</source></segment>
+      </unit>
+      <unit id="topology.panel.ips">
+        <segment><source>IP addresses</source></segment>
+      </unit>
+      <unit id="topology.panel.macs">
+        <segment><source>MAC addresses</source></segment>
+      </unit>
+      <unit id="topology.panel.vendor">
+        <segment><source>Vendor</source></segment>
+      </unit>
+      <unit id="topology.panel.model">
+        <segment><source>Model</source></segment>
+      </unit>
+      <unit id="topology.panel.os">
+        <segment><source>Operating system</source></segment>
+      </unit>
+      <unit id="topology.panel.vlans">
+        <segment><source>VLANs</source></segment>
+      </unit>
+      <unit id="topology.panel.ssids">
+        <segment><source>Wireless networks</source></segment>
+      </unit>
+      <unit id="topology.panel.sources">
+        <segment><source>Sources</source></segment>
+      </unit>
+      <unit id="topology.panel.last_seen">
+        <segment><source>Last seen</source></segment>
+      </unit>
+      <unit id="topology.panel.host_link">
+        <segment><source>Host page</source></segment>
+      </unit>
+      <unit id="topology.panel.observation_link">
+        <segment><source>Observations</source></segment>
+      </unit>
+      <unit id="topology.panel.intent">
+        <segment><source>Intent</source></segment>
+      </unit>
+      <unit id="topology.panel.intent_none">
+        <segment><source>This device is not a host in IPAM.</source></segment>
+      </unit>
+      <unit id="topology.panel.intent_no_addresses">
+        <segment><source>The host has no live address.</source></segment>
+      </unit>
+      <unit id="topology.panel.intent_addresses">
+        <segment><source>Addresses of the host</source></segment>
+      </unit>
+      <unit id="topology.panel.ports">
+        <segment><source>Ports</source></segment>
+      </unit>
+      <unit id="topology.panel.ports_none">
+        <segment><source>No ports are known for this device.</source></segment>
+      </unit>
+      <unit id="topology.panel.neighbours">
+        <segment><source>Neighbours</source></segment>
+      </unit>
+      <unit id="topology.panel.neighbours_none">
+        <segment><source>This device has no neighbours in the graph.</source></segment>
+      </unit>
+      <unit id="topology.port.uplink">
+        <segment><source>Uplink</source></segment>
+      </unit>
+      <unit id="topology.port.vlan">
+        <segment><source>Untagged VLAN</source></segment>
+      </unit>
+      <unit id="topology.port.up">
+        <segment><source>Link up</source></segment>
+      </unit>
+      <unit id="topology.port.down">
+        <segment><source>Link down</source></segment>
+      </unit>
+      <unit id="topology.port.unknown">
+        <segment><source>Link state unknown</source></segment>
+      </unit>
+      <unit id="topology.port.count">
+        <segment><source>{count, plural, =0 {nothing connected} one {# connected} other {# connected}}</source></segment>
+      </unit>
+      <unit id="topology.port.open">
+        <segment><source>Show what is connected</source></segment>
+      </unit>
+      <unit id="topology.port.hide">
+        <segment><source>Hide</source></segment>
+      </unit>
+      <unit id="topology.port.open_aria">
+        <segment><source>Show what is connected to port {port}</source></segment>
+      </unit>
+      <unit id="topology.port.hide_aria">
+        <segment><source>Hide what is connected to port {port}</source></segment>
+      </unit>
+      <unit id="topology.port.connected">
+        <segment><source>Connected to port {port}</source></segment>
+      </unit>
+      <unit id="topology.port.nothing">
+        <segment><source>Nothing is connected to this port.</source></segment>
+      </unit>
+      <unit id="topology.neighbour.local">
+        <segment><source>port {port}</source></segment>
+      </unit>
+      <unit id="topology.neighbour.remote">
+        <segment><source>remote port {port}</source></segment>
+      </unit>
+      <unit id="topology.neighbour.ssid">
+        <segment><source>network {ssid}</source></segment>
+      </unit>
+      <unit id="topology.path.router">
+        <segment><source>Path to the nearest router</source></segment>
+      </unit>
+      <unit id="topology.path.from">
+        <segment><source>Start a path here</source></segment>
+      </unit>
+      <unit id="topology.path.show">
+        <segment><source>Show the path from the start</source></segment>
+      </unit>
+      <unit id="topology.path.clear">
+        <segment><source>Clear the path</source></segment>
+      </unit>
+      <unit id="topology.path.none">
+        <segment><source>No router is reachable from this device in the current view.</source></segment>
+      </unit>
+      <unit id="topology.path.is_router">
+        <segment><source>This device is a router.</source></segment>
+      </unit>
+      <unit id="topology.path.no_route">
+        <segment><source>No path joins the start and this device in the current view.</source></segment>
+      </unit>
+      <unit id="topology.path.start">
+        <segment><source>Path start: {label}</source></segment>
+      </unit>
+      <unit id="topology.path.start_here">
+        <segment><source>This device is the start of the path.</source></segment>
       </unit>
     </group>
   </file>

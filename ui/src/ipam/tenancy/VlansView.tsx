@@ -8,12 +8,14 @@ import { STATUSES } from "../../api/types";
 import { Icon } from "../../components/Icon";
 import { StatusBadge, Tags, TimeAgo } from "../../grid/cells";
 import type { ListSource } from "../../grid/source";
-import type { Column } from "../../grid/types";
+import type { Column, RowAction } from "../../grid/types";
 import { t } from "../../i18n";
 import { TagsInput } from "../fields/CustomFieldsEditor";
 import { IpamNav } from "../IpamNav";
 import { writeQuery } from "../plan/describe";
 import { createVlanStyles } from "../vlan/palette";
+import { PrefixesDialog } from "../vlan/PrefixesDialog";
+import { ProvisionDialog } from "../vlan/ProvisionDialog";
 import { VlanChip } from "../vlan/VlanChip";
 import { statusWord } from "../words";
 import { CollectionPage } from "./CollectionPage";
@@ -109,6 +111,13 @@ export default function VlansView() {
   const styles = createVlanStyles(() => source()?.rows().map((v) => v.vid) ?? []);
   const siteName = (id?: string | null) => (id ? sites()?.find((s) => s.id === id)?.name : undefined);
   const [creating, setCreating] = createSignal(false);
+  // The VLAN provision dialog: for a new VLAN ({}) or an existing one to put onto the network.
+  const [provisioning, setProvisioning] = createSignal<{ vlan?: Vlan } | null>(null);
+  const [listing, setListing] = createSignal<Vlan | null>(null);
+  const rowActions: RowAction<Vlan>[] = [
+    { id: "provision", label: () => t("ipam.vlan.provision.row_action"), disabled: (v) => !!v.meta.deleted, run: (v) => setProvisioning({ vlan: v }) },
+    { id: "prefixes", label: () => t("ipam.vlan.prefixes.row_action"), run: (v) => setListing(v) },
+  ];
 
   const columns = createMemo<Column<Vlan>[]>(() => [
     {
@@ -137,6 +146,10 @@ export default function VlansView() {
           <h1 tabIndex={-1}>{t("ipam.nav.vlans")}</h1>
         </div>
         <div class="actions">
+          <button type="button" class="btn" data-testid="vlan-provision" onClick={() => setProvisioning({})}>
+            <Icon name="plus" />
+            {t("ipam.vlan.provision.action")}
+          </button>
           <button type="button" class="btn primary" data-testid="vlan-create" onClick={() => setCreating(true)}>
             <Icon name="plus" />
             {t("ipam.vlan.create")}
@@ -156,6 +169,7 @@ export default function VlansView() {
         columns={columns()}
         rowLabel={(v) => `${v.vid} ${v.name}`}
         sourceRef={(s) => setSource(() => s)}
+        actions={rowActions}
         edit={(v, close) => <VlanForm vlan={v} sites={sites() ?? []} onDone={() => close(true)} onClose={() => close(false)} />}
         empty={
           <div class="empty">
@@ -163,6 +177,21 @@ export default function VlansView() {
           </div>
         }
       />
+      <Show when={provisioning()} keyed>
+        {(p) => (
+          <ProvisionDialog
+            vlan={p.vlan}
+            onClose={() => setProvisioning(null)}
+            onDone={() => {
+              setProvisioning(null);
+              source()?.reload();
+            }}
+          />
+        )}
+      </Show>
+      <Show when={listing()} keyed>
+        {(v) => <PrefixesDialog vlan={v} onClose={() => setListing(null)} />}
+      </Show>
       <Show when={creating()}>
         <VlanForm
           sites={sites() ?? []}

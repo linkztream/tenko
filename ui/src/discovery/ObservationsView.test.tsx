@@ -29,9 +29,25 @@ const OUTSIDE = `${PROBE}:arp|address:0190d1c2-0000-7000-8000-000000020001/203.0
 const PRINTER_TAKEN = `${PROBE}:arp|address:0190d1c2-0000-7000-8000-000000020001/192.0.2.30`;
 const GUEST_PHONE = `${CONTROLLER}|attachment:00:00:5e:00:53:c3`;
 const OLD_TEST = `${INVENTORY}|host:vm-200`;
+/** What a probe found for an address (reverse DNS), and the vendor of a MAC address (ARP). */
+const SPEAKER_NAME = `${PROBE}:reverse_dns|name:192.0.2.44`;
+const OUTSIDE_VENDOR = `${PROBE}:arp|vendor:00:00:5e:00:53:d5`;
 
-/** The ten facts that are current in the seed. */
-const CURRENT = [MEDIA_PC, MEDIA_SERVICES, MEDIA_OS, HALL_CLIENT, IOT_ADDRESS, THERMOSTAT_SEEN, THERMOSTAT_ATTACHED, OUTSIDE, PRINTER_TAKEN, GUEST_PHONE];
+/** The twelve facts that are current in the seed. */
+const CURRENT = [
+  MEDIA_PC,
+  MEDIA_SERVICES,
+  MEDIA_OS,
+  HALL_CLIENT,
+  IOT_ADDRESS,
+  THERMOSTAT_SEEN,
+  THERMOSTAT_ATTACHED,
+  OUTSIDE,
+  PRINTER_TAKEN,
+  GUEST_PHONE,
+  SPEAKER_NAME,
+  OUTSIDE_VENDOR,
+];
 
 let stopBridge: (() => void) | undefined;
 
@@ -105,12 +121,17 @@ describe("the observations", () => {
     expect(observed(THERMOSTAT_SEEN)).toBe("192.0.2.49 from 00:00:5e:00:53:29");
     // An address without a MAC address is just the address.
     expect(observed(IOT_ADDRESS)).toBe("198.51.100.77");
+    // A name a probe found for an address, and the vendor of a MAC address.
+    expect(observed(SPEAKER_NAME)).toBe("192.0.2.44 is called speaker-den.example.test");
+    expect(observed(OUTSIDE_VENDOR)).toBe("00:00:5e:00:53:d5 is made by ICANN, IANA Department");
 
     expect(cell(rowOf(MEDIA_PC), "type")).toBe("Host");
     expect(cell(rowOf(MEDIA_SERVICES), "type")).toBe("Open ports");
     expect(cell(rowOf(MEDIA_OS), "type")).toBe("Operating system");
     expect(cell(rowOf(HALL_CLIENT), "type")).toBe("Attachment");
     expect(cell(rowOf(IOT_ADDRESS), "type")).toBe("Address");
+    expect(cell(rowOf(SPEAKER_NAME), "type")).toBe("Name");
+    expect(cell(rowOf(OUTSIDE_VENDOR), "type")).toBe("Vendor");
     expect(cell(rowOf(MEDIA_PC), "sightings")).toBe("9");
     expect(cell(rowOf(THERMOSTAT_ATTACHED), "sightings")).toBe("40");
   });
@@ -124,6 +145,8 @@ describe("the observations", () => {
     expect(cell(rowOf(MEDIA_OS), "source")).toBe("Probe 1, OS fingerprint");
     expect(cell(rowOf(THERMOSTAT_SEEN), "source")).toBe("Probe 1, ARP");
     expect(cell(rowOf(IOT_ADDRESS), "source")).toBe("Probe 1, ping");
+    expect(cell(rowOf(SPEAKER_NAME), "source")).toBe("Probe 1, reverse DNS");
+    expect(cell(rowOf(OUTSIDE_VENDOR), "source")).toBe("Probe 1, ARP");
   });
 
   it("filters by the type of the fact with chips that keep the URL up to date", async () => {
@@ -147,6 +170,19 @@ describe("the observations", () => {
     fireEvent.click(chip("os"));
     await waitFor(() => expect(rowIds()).toEqual([MEDIA_OS]));
 
+    // A name and a vendor are facts of their own, not sightings of an address.
+    fireEvent.click(chip("name"));
+    await waitFor(() => expect(rowIds()).toEqual([SPEAKER_NAME]));
+    expect(chip("name").getAttribute("aria-pressed")).toBe("true");
+    expect(chip("os").getAttribute("aria-pressed")).toBe("false");
+    expect(view.location()).toBe("/discovery/observations?type=name");
+    fireEvent.click(chip("vendor"));
+    await waitFor(() => expect(rowIds()).toEqual([OUTSIDE_VENDOR]));
+    expect(chip("name").getAttribute("aria-pressed")).toBe("false");
+    expect(view.location()).toBe("/discovery/observations?type=vendor");
+    fireEvent.click(chip("os"));
+    await waitFor(() => expect(rowIds()).toEqual([MEDIA_OS]));
+
     // No link is reported: the list says so, and says why only when nothing is narrowed.
     fireEvent.click(chip("link"));
     await waitFor(() => expect(screen.getByTestId("observations-empty")).toBeTruthy());
@@ -163,6 +199,30 @@ describe("the observations", () => {
     await openObservations("/discovery/observations?type=services", 1);
     expect(rowIds()).toEqual([MEDIA_SERVICES]);
     expect(screen.getByTestId("filter-type-services").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("offers a chip for every type of fact, the name and the vendor among them", async () => {
+    await openObservations();
+    expect(screen.getAllByTestId(/^filter-type-/).map((chip) => [chip.dataset.testid, chip.textContent])).toEqual([
+      ["filter-type-host", "Host"],
+      ["filter-type-address", "Address"],
+      ["filter-type-attachment", "Attachment"],
+      ["filter-type-services", "Open ports"],
+      ["filter-type-os", "Operating system"],
+      ["filter-type-link", "Link"],
+      ["filter-type-name", "Name"],
+      ["filter-type-vendor", "Vendor"],
+    ]);
+  });
+
+  it("takes the name and the vendor as the type from the URL", async () => {
+    const view = await openObservations("/discovery/observations?type=name", 1);
+    expect(rowIds()).toEqual([SPEAKER_NAME]);
+    expect(screen.getByTestId("filter-type-name").getAttribute("aria-pressed")).toBe("true");
+    view.history.set({ value: "/discovery/observations?type=vendor" });
+    await waitFor(() => expect(rowIds()).toEqual([OUTSIDE_VENDOR]));
+    expect(screen.getByTestId("filter-type-vendor").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("filter-type-name").getAttribute("aria-pressed")).toBe("false");
   });
 
   it("shows the expired facts, or all of them, on request", async () => {
@@ -199,6 +259,11 @@ describe("the observations", () => {
     await waitFor(() => expect(rowIds()).toEqual([THERMOSTAT_ATTACHED]));
     type("linux");
     await waitFor(() => expect(rowIds()).toEqual([MEDIA_OS]));
+    // The text of a name and of a vendor is searched too.
+    type("example.test");
+    await waitFor(() => expect(rowIds()).toEqual([SPEAKER_NAME]));
+    type("icann");
+    await waitFor(() => expect(rowIds()).toEqual([OUTSIDE_VENDOR]));
     type("no such text");
     await waitFor(() => expect(rows()).toHaveLength(0));
     expect(screen.getByTestId("observations-empty").textContent).toContain("No observation matches");
@@ -244,8 +309,8 @@ describe("the filters of the URL", () => {
   });
 
   it("names a source key in words", async () => {
-    await openObservations(`/discovery/observations?source=${encodeURIComponent(`${PROBE}:arp`)}`, 3);
-    expect(sortedIds()).toEqual([THERMOSTAT_SEEN, OUTSIDE, PRINTER_TAKEN].sort());
+    await openObservations(`/discovery/observations?source=${encodeURIComponent(`${PROBE}:arp`)}`, 4);
+    expect(sortedIds()).toEqual([THERMOSTAT_SEEN, OUTSIDE, PRINTER_TAKEN, OUTSIDE_VENDOR].sort());
     expect(screen.getByTestId("filter-source").textContent).toContain("Probe 1, ARP");
   });
 
@@ -257,6 +322,12 @@ describe("the filters of the URL", () => {
     view.history.set({ value: "/discovery/observations?ip=192.0.2.150" });
     await waitFor(() => expect(sortedIds()).toEqual([MEDIA_PC, MEDIA_SERVICES, MEDIA_OS].sort()));
     expect(screen.getByTestId("filter-ip").textContent).toContain("192.0.2.150");
+
+    // A name names its address, and a vendor its MAC address.
+    view.history.set({ value: "/discovery/observations?ip=192.0.2.44" });
+    await waitFor(() => expect(rowIds()).toEqual([SPEAKER_NAME]));
+    view.history.set({ value: "/discovery/observations?mac=00:00:5e:00:53:d5" });
+    await waitFor(() => expect(sortedIds()).toEqual([OUTSIDE, OUTSIDE_VENDOR].sort()));
 
     view.history.set({ value: "/discovery/observations?within=203.0.113.0/24" });
     await waitFor(() => expect(rowIds()).toEqual([OUTSIDE]));
@@ -284,6 +355,20 @@ describe("opening a subject", () => {
     await listed(CURRENT.length);
     fireEvent.click(rowOf(HALL_CLIENT).querySelector("[data-col='sightings']") as HTMLElement);
     await waitFor(() => expect(view.location()).toBe("/discovery/observations/00:00:5e:00:53:d2"));
+  });
+
+  it("opens the address of a name and the MAC address of a vendor", async () => {
+    const view = await openObservations();
+    fireEvent.click(rowOf(SPEAKER_NAME).querySelector("[data-col='type']") as HTMLElement);
+    await waitFor(() => expect(view.location()).toBe("/discovery/observations/192.0.2.44"));
+    expect((await screen.findByTestId("page-discovery-subject")).dataset.key).toBe("192.0.2.44");
+    expect((await screen.findByTestId("subject-names")).textContent).toBe("speaker-den.example.test");
+
+    view.history.set({ value: "/discovery/observations" });
+    await listed(CURRENT.length);
+    fireEvent.click(rowOf(OUTSIDE_VENDOR).querySelector("[data-col='type']") as HTMLElement);
+    await waitFor(() => expect(view.location()).toBe("/discovery/observations/00:00:5e:00:53:d5"));
+    expect((await screen.findByTestId("subject-vendors")).textContent).toBe("ICANN, IANA Department");
   });
 
   it("opens the picture of the service of an address by that address", async () => {

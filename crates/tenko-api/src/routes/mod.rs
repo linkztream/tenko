@@ -28,6 +28,8 @@
 //! | [`nodes`] | cluster nodes: enrolment tokens, enrolment, registry, revocation | WP2.2 |
 //! | [`secrets`] | operator secrets, reveal, host credentials | WP2.1 |
 //! | [`remote`] | RDP file and SSH URI of a host (API-11) | WP2.1 |
+//! | [`vlans`] | VLAN provisioning through network controllers, the prefixes of a VLAN | WP2.7 |
+//! | [`topology`] | the topology map (IPAM-20) | WP2.7 |
 //! | [`audit`] | audit log and chain verification | WP1.7 |
 //! | [`events`] | server-sent events | WP1.7 |
 //! | [`system`] | health, status, OpenAPI document, metrics | WP1.7 |
@@ -69,7 +71,9 @@ pub mod settings;
 pub mod setup;
 pub mod system;
 pub mod tenancy;
+pub mod topology;
 pub mod users;
+pub mod vlans;
 
 /// The skeleton of the OpenAPI document: info, one tag per area and the security schemes.
 #[derive(OpenApi)]
@@ -100,6 +104,7 @@ pub mod users;
         (name = "proposals", description = "Proposals of the reconciler, their decisions and adoption policies"),
         (name = "nodes", description = "Cluster nodes: enrolment tokens, enrolment, the node registry and revocation"),
         (name = "secrets", description = "Operator secrets, their reveal, host credentials and the remote access hand-off"),
+        (name = "topology", description = "The topology map: nodes, edges, ports and neighbours"),
     ),
     components(schemas(ProblemDetails, crate::dto::SortOrder, tenko_ipam::query::Deleted)),
     modifiers(&SecurityAddon)
@@ -177,7 +182,9 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
             .merge(observations::routes())
             .merge(proposals::routes())
             .merge(secrets::host_routes())
-            .merge(remote::routes());
+            .merge(remote::routes())
+            .merge(vlans::routes())
+            .merge(topology::routes());
     }
     router
 }
