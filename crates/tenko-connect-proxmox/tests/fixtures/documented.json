@@ -1,0 +1,129 @@
+{
+  "description": "A two-node Proxmox VE 9 cluster in the shapes of the API documentation, with documentation addresses (RFC 5737, RFC 3849) and MAC addresses (RFC 7042). Guests: 101 QEMU running with guest agent addresses on a VLAN vnet and a tagged bridge; 102 QEMU running whose agent is not running, with cloud-init addresses; 103 QEMU stopped; 104 QEMU template; 105 LXC running with a static address and live interfaces; 106 LXC running with DHCP and live interfaces; 107 LXC stopped on the second node; 108 QEMU running whose agent the token may not read.",
+  "routes": {
+    "/api2/json/version": {
+      "data": { "version": "9.1.6", "release": "9.1", "repoid": "0000000000000000" }
+    },
+    "/api2/json/access/permissions": {
+      "data": {
+        "/": {
+          "Datastore.Audit": 1, "Mapping.Audit": 1, "Pool.Audit": 1, "SDN.Audit": 1,
+          "Sys.Audit": 1, "VM.Audit": 1, "VM.GuestAgent.Audit": 1
+        }
+      }
+    },
+    "/api2/json/cluster/resources": {
+      "data": [
+        { "id": "node/pve-a", "type": "node", "node": "pve-a", "status": "online", "level": "", "cgroup-mode": 2, "maxcpu": 8, "maxmem": 34359738368, "uptime": 86400 },
+        { "id": "node/pve-b", "type": "node", "node": "pve-b", "status": "online", "level": "", "cgroup-mode": 2, "maxcpu": 4, "maxmem": 17179869184, "uptime": 86400 },
+        { "id": "qemu/101", "type": "qemu", "node": "pve-a", "vmid": 101, "name": "vm-01", "status": "running", "template": 0, "pool": "pool-a", "tags": "tag-a;tag-b", "maxmem": 4294967296, "uptime": 3600 },
+        { "id": "qemu/102", "type": "qemu", "node": "pve-a", "vmid": 102, "name": "vm-02", "status": "running", "template": 0, "maxmem": 2147483648, "uptime": 3600 },
+        { "id": "qemu/103", "type": "qemu", "node": "pve-a", "vmid": 103, "name": "vm-03", "status": "stopped", "template": 0, "maxmem": 2147483648, "uptime": 0 },
+        { "id": "qemu/104", "type": "qemu", "node": "pve-a", "vmid": 104, "name": "vm-04", "status": "stopped", "template": 1, "maxmem": 2147483648, "uptime": 0 },
+        { "id": "lxc/105", "type": "lxc", "node": "pve-a", "vmid": 105, "name": "ct-01", "status": "running", "template": 0, "pool": "pool-a", "maxmem": 536870912, "uptime": 3600 },
+        { "id": "lxc/106", "type": "lxc", "node": "pve-a", "vmid": 106, "name": "ct-02", "status": "running", "template": 0, "tags": "tag-c", "maxmem": 536870912, "uptime": 3600 },
+        { "id": "lxc/107", "type": "lxc", "node": "pve-b", "vmid": 107, "name": "ct-03", "status": "stopped", "template": 0, "maxmem": 536870912, "uptime": 0 },
+        { "id": "qemu/108", "type": "qemu", "node": "pve-b", "vmid": 108, "name": "vm-05", "status": "running", "template": 0, "maxmem": 2147483648, "uptime": 3600 },
+        { "id": "storage/pve-a/store-a", "type": "storage", "node": "pve-a", "storage": "store-a", "status": "available", "plugintype": "dir", "content": "images,rootdir", "shared": 0 },
+        { "id": "sdn/pve-a/zone-a", "type": "sdn", "node": "pve-a", "sdn": "zone-a", "status": "ok" },
+        { "id": "pool/pool-a", "type": "pool", "pool": "pool-a" }
+      ]
+    },
+    "/api2/json/cluster/status": {
+      "data": [
+        { "id": "cluster", "type": "cluster", "name": "lab", "nodes": 2, "quorate": 1, "version": 4 },
+        { "id": "node/pve-a", "type": "node", "name": "pve-a", "ip": "192.0.2.2", "online": 1, "local": 1, "nodeid": 1, "level": "" },
+        { "id": "node/pve-b", "type": "node", "name": "pve-b", "ip": "192.0.2.3", "online": 1, "local": 0, "nodeid": 2, "level": "" }
+      ]
+    },
+    "/api2/json/nodes/pve-a/network": {
+      "data": [
+        { "iface": "eth0", "type": "eth", "active": 1, "exists": 1, "method": "manual", "method6": "manual", "families": ["inet"], "priority": 3 },
+        { "iface": "vmbr0", "type": "bridge", "active": 1, "autostart": 1, "method": "static", "method6": "static", "families": ["inet", "inet6"], "address": "192.0.2.2", "netmask": "24", "gateway": "192.0.2.1", "cidr": "192.0.2.2/24", "address6": "2001:db8::2", "netmask6": "64", "cidr6": "2001:db8::2/64", "bridge_ports": "eth0", "bridge_vlan_aware": 1, "priority": 4 },
+        { "iface": "vmbr9", "type": "bridge", "active": 0, "autostart": 0, "method": "static", "families": ["inet"], "address": "203.0.113.9", "cidr": "203.0.113.9/24", "priority": 5 }
+      ]
+    },
+    "/api2/json/nodes/pve-b/network": {
+      "data": [
+        { "iface": "vmbr0", "type": "bridge", "active": 1, "autostart": 1, "method": "static", "families": ["inet"], "address": "192.0.2.3", "netmask": "24", "cidr": "192.0.2.3/24", "bridge_ports": "eth0", "priority": 4 }
+      ]
+    },
+    "/api2/json/cluster/sdn/vnets": {
+      "data": [ { "vnet": "vnet1", "zone": "zone-a", "tag": 20, "type": "vnet" } ]
+    },
+    "/api2/json/cluster/sdn/zones": {
+      "data": [ { "zone": "zone-a", "type": "vlan" } ]
+    },
+    "/api2/json/nodes/pve-a/qemu/101/config": {
+      "data": {
+        "name": "vm-01", "ostype": "l26", "agent": "1",
+        "net0": "virtio=00:00:5E:00:53:01,bridge=vnet1,firewall=1",
+        "net1": "virtio=00:00:5E:00:53:02,bridge=vmbr0,tag=30"
+      }
+    },
+    "/api2/json/nodes/pve-a/qemu/101/agent/network-get-interfaces": {
+      "data": {
+        "result": [
+          { "name": "lo", "hardware-address": "00:00:00:00:00:00", "ip-addresses": [ { "ip-address": "127.0.0.1", "ip-address-type": "ipv4", "prefix": 8 }, { "ip-address": "::1", "ip-address-type": "ipv6", "prefix": 128 } ] },
+          { "name": "eth0", "hardware-address": "00:00:5e:00:53:01", "ip-addresses": [ { "ip-address": "198.51.100.10", "ip-address-type": "ipv4", "prefix": 24 }, { "ip-address": "fe80::1", "ip-address-type": "ipv6", "prefix": 64 } ] },
+          { "name": "eth1", "hardware-address": "00:00:5e:00:53:02", "ip-addresses": [ { "ip-address": "203.0.113.10", "ip-address-type": "ipv4", "prefix": 24 }, { "ip-address": "2001:db8:30::10", "ip-address-type": "ipv6", "prefix": 64 } ] },
+          { "name": "docker0", "hardware-address": "00:00:5e:00:53:f0", "ip-addresses": [ { "ip-address": "192.0.2.250", "ip-address-type": "ipv4", "prefix": 24 } ] }
+        ]
+      }
+    },
+    "/api2/json/nodes/pve-a/qemu/102/config": {
+      "data": {
+        "name": "vm-02", "ostype": "win11", "agent": "enabled=1,fstrim_cloned_disks=1",
+        "net0": "e1000=00:00:5E:00:53:03,bridge=vmbr0",
+        "ipconfig0": "ip=192.0.2.12/24,gw=192.0.2.1,ip6=2001:db8::12/64"
+      }
+    },
+    "/api2/json/nodes/pve-a/qemu/102/agent/network-get-interfaces": {
+      "status": 500,
+      "body": { "data": null, "message": "QEMU guest agent is not running" }
+    },
+    "/api2/json/nodes/pve-a/qemu/103/config": {
+      "data": { "name": "vm-03", "ostype": "l26", "net0": "virtio=00:00:5E:00:53:04,bridge=vmbr0" }
+    },
+    "/api2/json/nodes/pve-a/qemu/104/config": {
+      "data": { "name": "vm-04", "ostype": "l26", "template": 1, "net0": "virtio=00:00:5E:00:53:05,bridge=vmbr0" }
+    },
+    "/api2/json/nodes/pve-a/lxc/105/config": {
+      "data": {
+        "hostname": "ct-01", "ostype": "debian",
+        "net0": "name=eth0,bridge=vmbr0,firewall=1,hwaddr=00:00:5E:00:53:11,ip=192.0.2.15/24,gw=192.0.2.1,type=veth"
+      }
+    },
+    "/api2/json/nodes/pve-a/lxc/105/interfaces": {
+      "data": [
+        { "name": "lo", "hwaddr": "00:00:00:00:00:00", "inet": "127.0.0.1/8", "inet6": "::1/128" },
+        { "name": "eth0", "hwaddr": "00:00:5e:00:53:11", "inet": "192.0.2.15/24", "inet6": "2001:db8::15/64" }
+      ]
+    },
+    "/api2/json/nodes/pve-a/lxc/106/config": {
+      "data": {
+        "hostname": "ct-02", "ostype": "alpine",
+        "net0": "name=eth0,bridge=vmbr0,hwaddr=00:00:5E:00:53:12,ip=dhcp,ip6=auto,tag=40,type=veth"
+      }
+    },
+    "/api2/json/nodes/pve-a/lxc/106/interfaces": {
+      "data": [
+        { "name": "lo", "hwaddr": "00:00:00:00:00:00", "inet": "127.0.0.1/8" },
+        { "name": "eth0", "hwaddr": "00:00:5e:00:53:12", "inet": "198.51.100.16/24" }
+      ]
+    },
+    "/api2/json/nodes/pve-b/lxc/107/config": {
+      "data": {
+        "hostname": "ct-03", "ostype": "ubuntu",
+        "net0": "name=eth0,bridge=vmbr0,hwaddr=00:00:5E:00:53:13,ip=192.0.2.17/24,type=veth"
+      }
+    },
+    "/api2/json/nodes/pve-b/qemu/108/config": {
+      "data": { "name": "vm-05", "ostype": "l26", "agent": "1", "net0": "virtio=00:00:5E:00:53:06,bridge=vmbr0" }
+    },
+    "/api2/json/nodes/pve-b/qemu/108/agent/network-get-interfaces": {
+      "status": 403,
+      "body": { "data": null, "message": "Permission check failed" }
+    }
+  }
+}

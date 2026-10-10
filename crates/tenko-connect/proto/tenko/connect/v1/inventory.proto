@@ -36,6 +36,17 @@ message PollResponse {
   optional string cursor = 4;
   // Another page is ready: the host polls again at once with `cursor`.
   bool more = 5;
+  // Vendors of MAC addresses of this page, as the source reports them (a manufacturer).
+  // The host records each as a vendor fact of the MAC address.
+  repeated VendorFact vendors = 6;
+}
+
+// The vendor (manufacturer) the source reports for a MAC address.
+message VendorFact {
+  // The MAC address in the form 00:00:5e:00:53:01 (any case; `-` separators accepted).
+  string mac = 1;
+  // The vendor name as the source shows it.
+  string vendor = 2;
 }
 
 // A host as the source reports it.

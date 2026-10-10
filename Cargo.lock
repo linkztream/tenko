@@ -2883,6 +2883,8 @@ dependencies = [
  "tenko-auth",
  "tenko-cluster",
  "tenko-connect",
+ "tenko-connect-hass",
+ "tenko-connect-proxmox",
  "tenko-core",
  "tenko-ipam",
  "tenko-jobs",
@@ -3016,7 +3018,10 @@ dependencies = [
  "prost",
  "prost-types",
  "protox",
+ "rcgen",
  "regex",
+ "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",
@@ -3026,6 +3031,7 @@ dependencies = [
  "tenko-vault",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-rustls",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
@@ -3039,10 +3045,33 @@ dependencies = [
 [[package]]
 name = "tenko-connect-hass"
 version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "aws-lc-rs",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tenko-connect",
+ "tenko-core",
+ "thiserror 2.0.21",
+ "tokio",
+ "zeroize",
+]
 
 [[package]]
 name = "tenko-connect-proxmox"
 version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "futures",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tenko-connect",
+ "tenko-core",
+ "tokio",
+ "zeroize",
+]
 
 [[package]]
 name = "tenko-connect-unifi"

@@ -131,6 +131,13 @@ pub enum L2Change {
         /// The client.
         mac: MacAddr,
     },
+    /// Remove a network: the undo of a network that `EnsureNetwork` created.
+    RemoveNetwork {
+        /// The network.
+        network: NetworkRef,
+        /// The VLAN it carries.
+        vlan: u16,
+    },
 }
 
 /// The controller's own DHCP for a network: Tenko serves DHCP, so it is off or relays.
@@ -143,6 +150,9 @@ pub enum ControllerDhcp {
     Disabled,
     /// Relay to these servers.
     RelayTo(Vec<IpAddr>),
+    /// The controller serves DHCP itself (reported, and restored by undo steps; Tenko never
+    /// asks for it).
+    Server,
 }
 
 /// The plan of one change: what was read, what would change, and the fingerprint
@@ -262,6 +272,9 @@ pub struct DevicePort {
     /// Link state.
     #[serde(default)]
     pub up: bool,
+    /// Whether Tenko or the controller is reached through this port (always protected).
+    #[serde(default)]
+    pub management: bool,
 }
 
 /// A link between two devices.
@@ -297,6 +310,15 @@ pub struct ClientAttachment {
     /// The VLAN.
     #[serde(default)]
     pub vlan: Option<u16>,
+    /// The name on the controller.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The vendor of the MAC address.
+    #[serde(default)]
+    pub vendor: Option<String>,
+    /// Whether the client is the controller or Tenko's host (always protected).
+    #[serde(default)]
+    pub management: bool,
 }
 
 /// A network on the controller.
@@ -424,6 +446,13 @@ impl Guardrails {
                 if uplink {
                     return refuse("connect.guardrail.uplink");
                 }
+                let management_port = topology
+                    .device(device)
+                    .and_then(|d| d.ports.iter().find(|p| p.index == *port))
+                    .is_some_and(|p| p.management);
+                if management_port {
+                    return refuse("connect.guardrail.management_port");
+                }
                 if self.protected.iter().any(|path| {
                     matches!(path, ProtectedPath::Port { device: d, port: p } if d == device && p == port)
                 }) {
@@ -431,6 +460,13 @@ impl Guardrails {
                 }
             }
             L2Change::SetClientVlan { mac, network } => {
+                if topology
+                    .clients
+                    .iter()
+                    .any(|c| c.mac == *mac && c.management)
+                {
+                    return refuse("connect.guardrail.management_client");
+                }
                 if self.is_protected_client(*mac) {
                     return refuse("connect.guardrail.protected_client");
                 }
@@ -439,11 +475,34 @@ impl Guardrails {
                 }
             }
             L2Change::ClearClientVlan { mac } => {
+                if topology
+                    .clients
+                    .iter()
+                    .any(|c| c.mac == *mac && c.management)
+                {
+                    return refuse("connect.guardrail.management_client");
+                }
                 if self.is_protected_client(*mac) {
                     return refuse("connect.guardrail.protected_client");
                 }
             }
             L2Change::EnsureNetwork { vlan, .. } => {
+                let management_vlan = topology
+                    .networks
+                    .iter()
+                    .any(|n| n.management && n.vlan == Some(*vlan));
+                let protected_vlan = self
+                    .protected
+                    .iter()
+                    .any(|path| matches!(path, ProtectedPath::Vlan { vid } if vid == vlan));
+                if management_vlan || protected_vlan {
+                    return refuse("connect.guardrail.protected_vlan");
+                }
+            }
+            L2Change::RemoveNetwork { network, vlan } => {
+                if self.is_protected_network(network, topology) {
+                    return refuse("connect.guardrail.protected_network");
+                }
                 let management_vlan = topology
                     .networks
                     .iter()
@@ -502,6 +561,7 @@ mod tests {
                         native_vlan: Some(1),
                         uplink: true,
                         up: true,
+                        management: false,
                     },
                     DevicePort {
                         index: 5,
@@ -510,11 +570,32 @@ mod tests {
                         native_vlan: Some(20),
                         uplink: false,
                         up: true,
+                        management: false,
+                    },
+                    DevicePort {
+                        index: 8,
+                        name: None,
+                        profile: None,
+                        native_vlan: Some(10),
+                        uplink: false,
+                        up: true,
+                        management: true,
                     },
                 ],
             }],
             links: vec![],
-            clients: vec![],
+            clients: vec![ClientAttachment {
+                mac: "00:00:5e:00:53:0a".parse().expect("mac"),
+                ip: Some("192.0.2.3".parse().expect("ip")),
+                device: DeviceRef("switch-a".to_owned()),
+                port: Some(8),
+                ssid: None,
+                network: Some(NetworkRef("mgmt".to_owned())),
+                vlan: Some(10),
+                name: Some("controller.example.test".to_owned()),
+                vendor: None,
+                management: true,
+            }],
             networks: vec![ControllerNetwork {
                 id: NetworkRef("mgmt".to_owned()),
                 name: "Management".to_owned(),
@@ -596,6 +677,78 @@ mod tests {
             refused(guardrails.check(&management_vlan, &topology)),
             "connect.guardrail.protected_vlan"
         );
+    }
+
+    #[test]
+    fn the_management_port_and_the_management_client_are_refused() {
+        let guardrails = Guardrails {
+            protected: vec![],
+            max_parallel: 10,
+        };
+        let topology = topology();
+        let port = L2Change::SetPortProfile {
+            device: DeviceRef("switch-a".to_owned()),
+            port: 8,
+            profile: ProfileRef("iot".to_owned()),
+        };
+        assert_eq!(
+            refused(guardrails.check(&port, &topology)),
+            "connect.guardrail.management_port"
+        );
+        let controller: MacAddr = "00:00:5e:00:53:0a".parse().expect("mac");
+        let set = L2Change::SetClientVlan {
+            mac: controller,
+            network: NetworkRef("iot".to_owned()),
+        };
+        assert_eq!(
+            refused(guardrails.check(&set, &topology)),
+            "connect.guardrail.management_client"
+        );
+        let clear = L2Change::ClearClientVlan { mac: controller };
+        assert_eq!(
+            refused(guardrails.check(&clear, &topology)),
+            "connect.guardrail.management_client"
+        );
+        let other = L2Change::SetClientVlan {
+            mac: "00:00:5e:00:53:0b".parse().expect("mac"),
+            network: NetworkRef("iot".to_owned()),
+        };
+        assert!(guardrails.check(&other, &topology).is_ok());
+    }
+
+    #[test]
+    fn removing_a_management_network_or_a_protected_vlan_is_refused() {
+        let guardrails = Guardrails {
+            protected: vec![
+                ProtectedPath::Vlan { vid: 40 },
+                ProtectedPath::Network {
+                    network: NetworkRef("lab".to_owned()),
+                },
+            ],
+            max_parallel: 10,
+        };
+        let topology = topology();
+        let remove = |network: &str, vlan| L2Change::RemoveNetwork {
+            network: NetworkRef(network.to_owned()),
+            vlan,
+        };
+        assert_eq!(
+            refused(guardrails.check(&remove("mgmt", 10), &topology)),
+            "connect.guardrail.protected_network"
+        );
+        assert_eq!(
+            refused(guardrails.check(&remove("lab", 50), &topology)),
+            "connect.guardrail.protected_network"
+        );
+        assert_eq!(
+            refused(guardrails.check(&remove("other", 10), &topology)),
+            "connect.guardrail.protected_vlan"
+        );
+        assert_eq!(
+            refused(guardrails.check(&remove("guests", 40), &topology)),
+            "connect.guardrail.protected_vlan"
+        );
+        assert!(guardrails.check(&remove("iot", 30), &topology).is_ok());
     }
 
     #[test]

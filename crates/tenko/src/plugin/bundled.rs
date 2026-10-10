@@ -2,8 +2,9 @@
 //! `tenko plugin run <name>`, exactly like a third-party plugin: its own process, the stdio
 //! handshake, gRPC on a private endpoint.
 //!
-//! The reference plugins (UniFi, Proxmox, Home Assistant) join this table in their own work
-//! packages; each entry is a manifest and an entry point.
+//! Each entry is a manifest and an entry point: the sample plugin, and the reference plugins
+//! for Proxmox VE (`proxmox`) and Home Assistant (`hass`). The UniFi plugin joins the table
+//! in its own work package.
 
 use std::path::PathBuf;
 
@@ -24,11 +25,23 @@ pub struct Entry {
 }
 
 /// The bundled plugins.
-pub const BUNDLED: &[Entry] = &[Entry {
-    name: sample::NAME,
-    manifest: sample::manifest,
-    run: run_sample,
-}];
+pub const BUNDLED: &[Entry] = &[
+    Entry {
+        name: sample::NAME,
+        manifest: sample::manifest,
+        run: run_sample,
+    },
+    Entry {
+        name: tenko_connect_proxmox::NAME,
+        manifest: tenko_connect_proxmox::manifest,
+        run: tenko_connect_proxmox::run_status,
+    },
+    Entry {
+        name: tenko_connect_hass::NAME,
+        manifest: tenko_connect_hass::manifest,
+        run: tenko_connect_hass::run_status,
+    },
+];
 
 fn run_sample() -> u8 {
     sample::run_status(sample::Mode::Normal)
@@ -66,6 +79,8 @@ mod tests {
             assert!(manifest.entry.is_none(), "bundled plugins have no entry");
         }
         assert!(find("sample").is_some());
+        assert!(find("proxmox").is_some());
+        assert!(find("hass").is_some());
         assert!(find("unknown").is_none());
         let entries = registry_entries(std::path::Path::new("tenko"));
         assert_eq!(entries[0].launch.args, ["plugin", "run", "sample"]);

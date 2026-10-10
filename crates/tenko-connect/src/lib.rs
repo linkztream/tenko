@@ -51,7 +51,7 @@ pub mod transport;
 pub use actuator::{Actuator, ActuatorIntent, ActuatorPlan, ActuatorReceipt, DiffLine, WriteMode};
 pub use context::{CallContext, Secrets};
 pub use error::ConnectorError;
-pub use inventory::{Cursor, InventoryBatch, InventorySource, WebhookRequest};
+pub use inventory::{Cursor, InventoryBatch, InventorySource, VendorFact, WebhookRequest};
 pub use manifest::{Capability, Manifest};
 pub use migration::{MigrationArea, MigrationScope, MigrationSource};
 pub use network::{

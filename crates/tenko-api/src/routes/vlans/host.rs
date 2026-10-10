@@ -178,10 +178,11 @@ pub fn topology_of(connector: ConnectorId, snapshot: &TopologySnapshot) -> Contr
     }
 }
 
-/// The relay targets of a controller's DHCP setting (empty when it is off).
+/// The relay targets of a controller's DHCP setting (empty when it is off or the controller
+/// serves DHCP itself).
 pub fn relays_of(dhcp: &ControllerDhcp) -> Vec<IpAddr> {
     match dhcp {
-        ControllerDhcp::Disabled => Vec::new(),
+        ControllerDhcp::Disabled | ControllerDhcp::Server => Vec::new(),
         ControllerDhcp::RelayTo(targets) => targets.clone(),
     }
 }
@@ -370,6 +371,7 @@ mod tests {
                     profile: None,
                     native_vlan: Some(10),
                     uplink: true,
+                    management: false,
                     up: true,
                 }],
             }],

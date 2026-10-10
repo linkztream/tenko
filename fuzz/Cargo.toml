@@ -13,6 +13,9 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+serde_json = "1"
+tenko-connect-hass = { path = "../crates/tenko-connect-hass" }
+tenko-connect-proxmox = { path = "../crates/tenko-connect-proxmox" }
 tenko-core = { path = "../crates/tenko-core" }
 tenko-scan = { path = "../crates/tenko-scan" }
 
@@ -33,6 +36,27 @@ bench = false
 [[bin]]
 name = "scan_neighbour_tables"
 path = "fuzz_targets/scan_neighbour_tables.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "connect_hass_ws_frame"
+path = "fuzz_targets/connect_hass_ws_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "connect_proxmox_inventory"
+path = "fuzz_targets/connect_proxmox_inventory.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "connect_hass_inventory"
+path = "fuzz_targets/connect_hass_inventory.rs"
 test = false
 doc = false
 bench = false

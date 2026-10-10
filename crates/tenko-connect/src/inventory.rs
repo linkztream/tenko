@@ -2,7 +2,7 @@
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use tenko_core::{Timestamp, observe::ObservedHost};
+use tenko_core::{MacAddr, Timestamp, observe::ObservedHost};
 
 use crate::{CallContext, ConnectorError};
 
@@ -62,6 +62,10 @@ pub struct InventoryBatch {
     /// Another page is ready: poll again at once with `cursor`.
     #[serde(default)]
     pub more: bool,
+    /// Vendors of MAC addresses, as the source reports them (a manufacturer); the host
+    /// records each as a vendor fact of the MAC address.
+    #[serde(default)]
+    pub vendors: Vec<VendorFact>,
 }
 
 impl InventoryBatch {
@@ -73,8 +77,19 @@ impl InventoryBatch {
             complete: true,
             cursor: None,
             more: false,
+            vendors: Vec::new(),
         }
     }
+}
+
+/// The vendor (manufacturer) a source reports for a MAC address, such as the manufacturer
+/// in the device registry of a home automation hub.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct VendorFact {
+    /// The MAC address.
+    pub mac: MacAddr,
+    /// The vendor name as the source shows it.
+    pub vendor: String,
 }
 
 /// An opaque position in a source's change feed.

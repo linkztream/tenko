@@ -144,10 +144,16 @@ test("the plugin list agrees with the CLI, and the form generated from the setti
   await mkdir(join(installed, "broken-sample"), { recursive: true });
   await writeFile(join(installed, "broken-sample", "plugin.json"), JSON.stringify({ manifest_version: 1, name: "broken-sample" }));
   const plugins = (await api.get<Schemas["PluginList"]>("/connectors/plugins")).items;
-  expect(plugins.map((p) => p.name)).toEqual(["sample", "broken-sample"]);
-  const manifest = plugins[0]!.manifest!;
+  // The bundled plugins come first (the sample and the reference plugins; more join in later
+  // work packages), then the installed ones.
+  const names = plugins.map((p) => p.name);
+  expect(names[0]).toBe("sample");
+  expect(names).toEqual(expect.arrayContaining(["sample", "proxmox", "hass", "broken-sample"]));
+  const sample = plugins.find((p) => p.name === "sample")!;
+  expect(sample.source).toBe("bundled");
+  const manifest = sample.manifest!;
   const schema = manifest.settings as unknown as SampleSchema;
-  const broken = plugins[1]!;
+  const broken = plugins.find((p) => p.name === "broken-sample")!;
   expect(broken).toMatchObject({ source: "installed", usable: false });
   expect(broken.problems?.length).toBeGreaterThan(0);
   const refused = await api.post("/connectors", { plugin: "broken-sample", name: "Never created", settings: {} }).then(
@@ -157,12 +163,12 @@ test("the plugin list agrees with the CLI, and the form generated from the setti
   expect(refused).toBeInstanceOf(ApiError);
   expect([(refused as ApiError).status, (refused as ApiError).code]).toEqual([422, "connect.plugin.unusable"]);
 
-  // The page lists both plugins, the broken one marked unusable with its problems, and no instance yet.
+  // The page lists every plugin, the broken one marked unusable with its problems, and no instance yet.
   await page.goto("/connectors");
   await expect(page.getByTestId("page-connectors")).toBeVisible();
   await expect(page.getByTestId("connectors-empty")).toBeVisible();
   const section = page.getByTestId("connectors-plugins");
-  await expect(section.getByTestId("plugin")).toHaveCount(2);
+  await expect(section.getByTestId("plugin")).toHaveCount(plugins.length);
   const unusable = withKey(section, "plugin", "broken-sample");
   await expect(unusable).toHaveAttribute("data-usable", "false");
   await expect(unusable.getByTestId("plugin-unusable")).toBeVisible();
@@ -205,7 +211,7 @@ test("the plugin list agrees with the CLI, and the form generated from the setti
   await expect(form.getByTestId("field-plugin")).toHaveValue("sample");
   // Only a plugin that can run is offered.
   const offered = await form.getByTestId("field-plugin").evaluate((select: HTMLSelectElement) => [...select.options].map((o) => o.value));
-  expect(offered).toEqual(["sample"]);
+  expect(offered).toEqual(plugins.filter((p) => p.usable).map((p) => p.name));
   const settings = form.getByTestId("connector-settings");
   await expect(settings.getByTestId("settings-form")).toBeVisible();
   for (const name of ["site", "hosts", "page_size", "endpoint"]) {

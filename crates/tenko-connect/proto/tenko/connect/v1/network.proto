@@ -83,6 +83,9 @@ message DevicePort {
   bool uplink = 5;
   // Link state.
   bool up = 6;
+  // Whether Tenko or the controller is reached through this port (the controller's own access
+  // port). The host never touches it.
+  bool management = 7;
 }
 
 // One end of a link.
@@ -119,18 +122,30 @@ message ClientAttachment {
   // The network reference.
   optional string network = 6;
   optional uint32 vlan = 7;
+  // The client's name on the controller (its alias, else the name it announced).
+  optional string name = 8;
+  // The vendor the controller reports for the client's MAC address (its OUI).
+  optional string vendor = 9;
+  // Whether this client is the controller itself or the host Tenko runs on. The host never
+  // changes its VLAN.
+  bool management = 10;
 }
 
 // The DHCP service of the controller for a network: Tenko serves DHCP, so it is off or
-// relays to Tenko.
+// relays to Tenko; a controller that serves DHCP itself reports `server`.
 message ControllerDhcp {
   oneof mode {
     DhcpDisabled disabled = 1;
     DhcpRelay relay = 2;
+    DhcpServer server = 3;
   }
 }
 
 message DhcpDisabled {}
+
+// The controller serves DHCP itself. Tenko never asks for it; it appears in topologies and in
+// undo steps that restore a network as it was.
+message DhcpServer {}
 
 message DhcpRelay {
   // Relay targets as IPv4 or IPv6 text.
@@ -180,6 +195,7 @@ message L2Change {
     SetPortProfile set_port_profile = 2;
     SetClientVlan set_client_vlan = 3;
     ClearClientVlan clear_client_vlan = 4;
+    RemoveNetwork remove_network = 5;
   }
 }
 
@@ -207,6 +223,15 @@ message SetClientVlan {
 // Remove a per-client VLAN override.
 message ClearClientVlan {
   string mac = 1;
+}
+
+// Remove a network: the undo of a network that EnsureNetwork created. The host refuses it
+// for management networks and protected VLANs like EnsureNetwork.
+message RemoveNetwork {
+  // The network reference (for UniFi the network `_id`).
+  string network = 1;
+  // The VLAN id it carries.
+  uint32 vlan = 2;
 }
 
 // What a change would do, made against the state the fingerprint identifies.

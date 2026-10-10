@@ -25,7 +25,7 @@ use crate::{
     ControllerDhcp, ControllerNetwork, Cursor, DeviceKind, DevicePort, DeviceRef, DiffLine, Health,
     HealthReport, InventoryBatch, L2Change, L2Plan, L2Receipt, MigrationArea, MigrationScope,
     NetworkDevice, NetworkRef, PortProfile, ProfileRef, Secrets, TopologyLink, TopologySnapshot,
-    WirelessNetwork, WriteMode, proto::v1,
+    VendorFact, WirelessNetwork, WriteMode, proto::v1,
 };
 
 /// A message member that does not convert.
@@ -364,7 +364,43 @@ pub fn batch_to_proto(batch: &InventoryBatch) -> v1::PollResponse {
         complete: batch.complete,
         cursor: batch.cursor.as_ref().map(|cursor| cursor.0.clone()),
         more: batch.more,
+        vendors: batch
+            .vendors
+            .iter()
+            .map(|fact| v1::VendorFact {
+                mac: fact.mac.to_string(),
+                vendor: fact.vendor.clone(),
+            })
+            .collect(),
     }
+}
+
+/// The vendor facts of a message, leniently: an entry whose MAC address does not parse, or
+/// whose vendor is blank or oversized, is skipped with a warning; for a MAC address named
+/// twice the later entry wins.
+fn vendors_from_proto(vendors: Vec<v1::VendorFact>, warnings: &mut Vec<String>) -> Vec<VendorFact> {
+    let mut out: Vec<VendorFact> = Vec::new();
+    for (i, fact) in vendors.into_iter().enumerate() {
+        let at = format!("vendors[{i}]");
+        let mac = match mac(&format!("{at}.mac"), &fact.mac) {
+            Ok(mac) => mac,
+            Err(error) => {
+                warnings.push(format!("{error}; the vendor is skipped"));
+                continue;
+            }
+        };
+        let vendor = match text(&format!("{at}.vendor"), fact.vendor) {
+            Ok(vendor) if !vendor.trim().is_empty() => vendor.trim().to_owned(),
+            Ok(_) => continue,
+            Err(error) => {
+                warnings.push(format!("{error}; the vendor is skipped"));
+                continue;
+            }
+        };
+        out.retain(|known| known.mac != mac);
+        out.push(VendorFact { mac, vendor });
+    }
+    out
 }
 
 /// An inventory batch from a message, leniently (see [`host_from_proto`]). A missing or
@@ -387,6 +423,7 @@ pub fn batch_from_proto(
         .enumerate()
         .filter_map(|(index, host)| host_from_proto(index, host, &mut warnings))
         .collect();
+    let vendors = vendors_from_proto(response.vendors, &mut warnings);
     let batch = InventoryBatch {
         observed_at,
         hosts,
@@ -396,6 +433,7 @@ pub fn batch_from_proto(
             .filter(|cursor| !cursor.is_empty())
             .map(Cursor),
         more: response.more,
+        vendors,
     };
     (batch, warnings)
 }
@@ -459,6 +497,7 @@ pub fn dhcp_to_proto(dhcp: &ControllerDhcp) -> v1::ControllerDhcp {
             ControllerDhcp::RelayTo(servers) => v1::controller_dhcp::Mode::Relay(v1::DhcpRelay {
                 servers: servers.iter().map(ToString::to_string).collect(),
             }),
+            ControllerDhcp::Server => v1::controller_dhcp::Mode::Server(v1::DhcpServer {}),
         }),
     }
 }
@@ -475,6 +514,7 @@ fn dhcp_from_proto(path: &str, dhcp: Option<v1::ControllerDhcp>) -> Result<Contr
                 .map(|(i, server)| ip(&format!("{path}.relay.servers[{i}]"), server))
                 .collect::<Result<_>>()?,
         )),
+        Some(v1::controller_dhcp::Mode::Server(_)) => Ok(ControllerDhcp::Server),
     }
 }
 
@@ -506,6 +546,10 @@ pub fn change_to_proto(change: &L2Change) -> v1::L2Change {
             L2Change::ClearClientVlan { mac } => Change::ClearClientVlan(v1::ClearClientVlan {
                 mac: mac.to_string(),
             }),
+            L2Change::RemoveNetwork { network, vlan } => Change::RemoveNetwork(v1::RemoveNetwork {
+                network: network.0.clone(),
+                vlan: u32::from(*vlan),
+            }),
         }),
     }
 }
@@ -535,6 +579,10 @@ pub fn change_from_proto(path: &str, change: Option<v1::L2Change>) -> Result<L2C
         }),
         Some(Change::ClearClientVlan(clear)) => Ok(L2Change::ClearClientVlan {
             mac: mac(&format!("{path}.mac"), &clear.mac)?,
+        }),
+        Some(Change::RemoveNetwork(remove)) => Ok(L2Change::RemoveNetwork {
+            network: NetworkRef(nonempty(&format!("{path}.network"), remove.network)?),
+            vlan: vlan(&format!("{path}.vlan"), remove.vlan)?,
         }),
     }
 }
@@ -685,6 +733,7 @@ pub fn topology_to_proto(topology: &TopologySnapshot) -> v1::Topology {
                         native_vlan: port.native_vlan.map(u32::from),
                         uplink: port.uplink,
                         up: port.up,
+                        management: port.management,
                     })
                     .collect(),
             })
@@ -709,6 +758,9 @@ pub fn topology_to_proto(topology: &TopologySnapshot) -> v1::Topology {
                 ssid: client.ssid.clone(),
                 network: client.network.as_ref().map(|network| network.0.clone()),
                 vlan: client.vlan.map(u32::from),
+                name: client.name.clone(),
+                vendor: client.vendor.clone(),
+                management: client.management,
             })
             .collect(),
         networks: topology
@@ -779,6 +831,7 @@ pub fn topology_from_proto(topology: Option<v1::Topology>) -> Result<TopologySna
                     .transpose()?,
                 uplink: entry.uplink,
                 up: entry.up,
+                management: entry.management,
             });
         }
         devices.push(NetworkDevice {
@@ -833,6 +886,9 @@ pub fn topology_from_proto(topology: Option<v1::Topology>) -> Result<TopologySna
                     .vlan
                     .map(|value| vlan(&format!("{at}.vlan"), value))
                     .transpose()?,
+                name: opt_text(&format!("{at}.name"), client.name)?,
+                vendor: opt_text(&format!("{at}.vendor"), client.vendor)?,
+                management: client.management,
             })
         })
         .collect::<Result<_>>()?;
@@ -1409,6 +1465,7 @@ mod tests {
             complete: true,
             cursor: Some(String::new()),
             more: false,
+            vendors: Vec::new(),
         };
         let (batch, warnings) = batch_from_proto(response, Timestamp::now());
         assert_eq!(batch.hosts.len(), 1);
@@ -1429,6 +1486,39 @@ mod tests {
         assert_eq!(none, Vec::<String>::new());
     }
 
+    #[test]
+    fn vendor_facts_are_lenient_and_round_trip() {
+        let fact = |mac: &str, vendor: &str| v1::VendorFact {
+            mac: mac.to_owned(),
+            vendor: vendor.to_owned(),
+        };
+        let response = v1::PollResponse {
+            complete: true,
+            vendors: vec![
+                fact("00-00-5E-00-53-20", "Example Devices"),
+                fact("not-a-mac", "Example Devices"),
+                fact("00:00:5e:00:53:21", "   "),
+                fact("00:00:5e:00:53:22", &"x".repeat(MAX_TEXT + 1)),
+                fact("00:00:5e:00:53:20", " Example Devices Inc. "),
+            ],
+            ..v1::PollResponse::default()
+        };
+        let (batch, warnings) = batch_from_proto(response, Timestamp::now());
+        assert_eq!(
+            batch.vendors,
+            vec![VendorFact {
+                mac: "00:00:5e:00:53:20".parse().expect("mac"),
+                vendor: "Example Devices Inc.".to_owned(),
+            }]
+        );
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(warnings.iter().any(|w| w.contains("vendors[1].mac")));
+        assert!(warnings.iter().any(|w| w.contains("vendors[3].vendor")));
+        let (round, none) = batch_from_proto(batch_to_proto(&batch), Timestamp::now());
+        assert_eq!(round.vendors, batch.vendors);
+        assert_eq!(none, Vec::<String>::new());
+    }
+
     fn topology() -> TopologySnapshot {
         TopologySnapshot {
             observed_at: at("2026-10-09T12:00:00Z"),
@@ -1439,14 +1529,26 @@ mod tests {
                 mac: Some("00:00:5e:00:53:a0".parse().expect("mac")),
                 ip: Some("192.0.2.2".parse().expect("ip")),
                 kind: DeviceKind::Switch,
-                ports: vec![DevicePort {
-                    index: 1,
-                    name: Some("uplink".to_owned()),
-                    profile: Some(ProfileRef("all".to_owned())),
-                    native_vlan: Some(1),
-                    uplink: true,
-                    up: true,
-                }],
+                ports: vec![
+                    DevicePort {
+                        index: 1,
+                        name: Some("uplink".to_owned()),
+                        profile: Some(ProfileRef("all".to_owned())),
+                        native_vlan: Some(1),
+                        uplink: true,
+                        up: true,
+                        management: false,
+                    },
+                    DevicePort {
+                        index: 2,
+                        name: Some("controller".to_owned()),
+                        profile: None,
+                        native_vlan: Some(10),
+                        uplink: false,
+                        up: true,
+                        management: true,
+                    },
+                ],
             }],
             links: vec![TopologyLink {
                 a: Endpoint {
@@ -1467,6 +1569,9 @@ mod tests {
                 ssid: None,
                 network: Some(NetworkRef("lan".to_owned())),
                 vlan: Some(20),
+                name: Some("printer.example.test".to_owned()),
+                vendor: Some("Example Devices".to_owned()),
+                management: true,
             }],
             networks: vec![ControllerNetwork {
                 id: NetworkRef("lan".to_owned()),
@@ -1552,6 +1657,47 @@ mod tests {
         assert_eq!(
             change_from_proto("c", Some(change_to_proto(&ensure))).expect("change"),
             ensure
+        );
+    }
+
+    #[test]
+    fn network_removal_and_a_dhcp_server_round_trip() {
+        let remove = L2Change::RemoveNetwork {
+            network: NetworkRef("net-30".to_owned()),
+            vlan: 30,
+        };
+        assert_eq!(
+            change_from_proto("c", Some(change_to_proto(&remove))).expect("change"),
+            remove
+        );
+        let restore = L2Change::EnsureNetwork {
+            vlan: 30,
+            name: "IoT".to_owned(),
+            dhcp: ControllerDhcp::Server,
+        };
+        assert_eq!(
+            change_from_proto("c", Some(change_to_proto(&restore))).expect("change"),
+            restore
+        );
+        let mut message = change_to_proto(&remove);
+        if let Some(v1::l2_change::Change::RemoveNetwork(inner)) = message.change.as_mut() {
+            inner.vlan = 4095;
+        }
+        assert_eq!(
+            change_from_proto("c", Some(message))
+                .expect_err("vlan")
+                .path,
+            "c.vlan"
+        );
+        let mut message = change_to_proto(&remove);
+        if let Some(v1::l2_change::Change::RemoveNetwork(inner)) = message.change.as_mut() {
+            inner.network = String::new();
+        }
+        assert_eq!(
+            change_from_proto("c", Some(message))
+                .expect_err("network")
+                .path,
+            "c.network"
         );
     }
 

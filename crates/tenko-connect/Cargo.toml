@@ -9,8 +9,11 @@ publish = false
 build = "build.rs"
 
 [features]
+default = ["http-client"]
 # `MockInventorySource` and other test doubles for crates that use connectors.
 testing = []
+# `sdk::http`: the web-API client of plugins (TLS modes, error mapping, bounded reads).
+http-client = ["dep:reqwest", "dep:rustls"]
 
 [dependencies]
 async-trait = { workspace = true }
@@ -22,6 +25,8 @@ ipnet = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 regex = { workspace = true }
+reqwest = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tenko-core = { workspace = true }
@@ -43,7 +48,11 @@ protox = { workspace = true }
 tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
+# A test certificate authority and a TLS server for the `sdk::http` tests (both already in the
+# graph through tenko-api and tenko-cluster, with the same features).
+rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "crypto", "pem"] }
 tempfile = { workspace = true }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "logging", "tls12"] }
 tenko-jobs = { workspace = true, features = ["testing"] }
 tenko-store = { workspace = true, features = ["testing"] }
 tenko-vault = { workspace = true, features = ["testing"] }

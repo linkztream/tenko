@@ -462,8 +462,14 @@ mod tests {
             "{out}"
         );
         assert!(lines[1].ends_with("usable"), "{out}");
+        for (line, name) in lines[2..4].iter().zip(["proxmox", "hass"]) {
+            assert!(
+                line.starts_with(name) && line.contains("bundled") && line.ends_with("usable"),
+                "{out}"
+            );
+        }
         assert!(
-            lines[2].starts_with("broken") && lines[2].contains("not usable"),
+            lines[4].starts_with("broken") && lines[4].contains("not usable"),
             "{out}"
         );
 

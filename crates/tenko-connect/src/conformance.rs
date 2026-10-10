@@ -488,8 +488,12 @@ async fn capability_check(
                         host.external_id
                     ));
                 }
+                let vendors = match polled.batch.vendors.len() {
+                    0 => String::new(),
+                    count => format!(", {count} vendor facts"),
+                };
                 Ok(format!(
-                    "{} hosts in {} page(s)",
+                    "{} hosts in {} page(s){vendors}",
                     polled.batch.hosts.len(),
                     polled.pages
                 ))

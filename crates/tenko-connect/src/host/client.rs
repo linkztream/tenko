@@ -219,6 +219,7 @@ impl PluginClient {
             pages += 1;
             warnings.extend(page_warnings);
             batch.hosts.extend(page.hosts);
+            batch.vendors.extend(page.vendors);
             batch.complete = page.complete;
             batch.cursor = page.cursor;
             batch.more = page.more;

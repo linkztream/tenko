@@ -67,9 +67,9 @@ Read before changing anything substantial:
 | `tenko-dhcp`            | DHCPv4/v6, failover, relay handling, DDNS                            |
 | `tenko-jobs`            | Job engine: steps, state, timeouts, rollback                         |
 | `tenko-connect`         | Connector plugin SDK: protocol, host runner, helper library, manifest, conformance test |
-| `tenko-connect-proxmox` | Proxmox VE connector (stub)                                          |
+| `tenko-connect-proxmox` | Proxmox VE connector (inventory, bundled plugin)                    |
 | `tenko-connect-unifi`   | UniFi connector (stub)                                               |
-| `tenko-connect-hass`    | Home Assistant connector (stub)                                      |
+| `tenko-connect-hass`    | Home Assistant connector (inventory, bundled plugin)                |
 | `tenko-connect-windows` | Windows DNS/DHCP Server connector (stub)                             |
 | `tenko-migrate`         | Plan/apply/verify migration pipeline over connectors                 |
 | `tenko-api`             | axum HTTP API, OpenAPI, SSE                                          |

@@ -302,6 +302,7 @@ impl InventorySource for Sample {
             complete: true,
             cursor: more.then(|| Cursor(format!("page:{}", page + 1))),
             more,
+            vendors: Vec::new(),
         })
     }
 }

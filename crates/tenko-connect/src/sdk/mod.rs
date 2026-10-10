@@ -44,6 +44,8 @@
 //! [`ConnectorError`]s to gRPC statuses, and exits when the host asks (`Plugin.Shutdown`) or
 //! when standard input closes. Log to standard error; the host forwards each line.
 
+#[cfg(feature = "http-client")]
+pub mod http;
 mod services;
 
 use std::{io, pin::Pin, process::ExitCode, sync::Arc, time::Duration};

@@ -75,6 +75,7 @@ impl InventorySource for MockInventorySource {
                 complete: false,
                 cursor,
                 more: false,
+                vendors: Vec::new(),
             })
         })
     }
@@ -102,6 +103,7 @@ mod tests {
                 complete: true,
                 cursor: Some(Cursor("1".to_owned())),
                 more: false,
+                vendors: Vec::new(),
             }),
             Err(ConnectorError::Unreachable),
         ]);

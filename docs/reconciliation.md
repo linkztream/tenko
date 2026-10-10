@@ -53,8 +53,8 @@ A fact is stored once per source and subject, under the key (source key, subject
 | `attachment` | `attachment:<mac>` | Network controllers, SNMP probes | The client's switch or access point, port, SSID and VLAN |
 | `services` | `services:<ip>` | Probes | Open TCP ports, and the ones that answered a TLS handshake (SCAN-08) |
 | `os` | `os:<ip>` | Probes | An OS guess and its confidence (SCAN-08) |
-| `name` | `name:<ip>` | Probes | A name found for an address (reverse DNS, mDNS, LLMNR, or the `sysName` of a polled device). It is not a sighting of the address |
-| `vendor` | `vendor:<mac>` | Probes | The vendor of a MAC address: the organization its OUI is registered to |
+| `name` | `name:<ip>` | Probes, network controllers | A name found for an address (reverse DNS, mDNS, LLMNR, the `sysName` of a polled device, or the name of a client on a network controller). It is not a sighting of the address |
+| `vendor` | `vendor:<mac>` | Probes, network controllers, inventory connectors | The vendor of a MAC address: the organization its OUI is registered to, the vendor a network controller reports for a client, or the manufacturer an inventory source reports for a device |
 | `link` | `link:<device>\|<port>\|<device>\|<port>\|<kind>` | Network controllers, SNMP probes | A link between two devices (IPAM-20); the same fact whichever end the source names first |
 
 A fact carries the source and the subject (as structure and as canonical text), `observed` (the latest report with every attribute the source gave), `observation` (the observation that first reported the fact or last changed its attributes), `first_seen` and `last_seen` (the source's own times), `received_at` (when Tenko last wrote the fact), `expires_at`, `sightings` with `counted_at` (the number of counted sightings and the source time of the last one), and the store `revision`. A fact is **current** while `expires_at` is empty or in the future. Expired facts stay readable until retention removes them (section 2.4); the reconciler's rules use current facts only.
@@ -97,7 +97,7 @@ The table `ipam.obs.last_seen` records when an address or an interface of intent
 
 The connector host (`tenko-connect`) normalizes what a plugin reports before it reaches the observation layer, with these rules:
 
-- An inventory batch becomes one `host` observation per host, with sorted and de-duplicated MAC and IP addresses and de-duplicated tags. A network controller topology becomes one `attachment` observation per client and one `link` observation per link, always as a complete batch.
+- An inventory batch becomes one `host` observation per host, with sorted and de-duplicated MAC and IP addresses and de-duplicated tags, and one `vendor` observation per MAC address the batch reports a vendor for (the last report of a MAC address wins). A network controller topology becomes one `attachment` observation per client, one `vendor` observation per client with a vendor, one `name` observation per client with a name and an address, and one `link` observation per link, always as a complete batch.
 - The batch keeps the source's time, unless that lies more than five minutes ahead of the host's clock. Then the host's receive time is used and a warning is recorded.
 - Every observation expires three poll intervals after it was received, but not sooner than 15 minutes.
 - Every batch names its source, so a complete batch with no observations still tells which facts are gone.
@@ -333,7 +333,7 @@ The policy that decides is the one in force for the proposal's prefix, the most 
 All constraints must hold.
 
 - **`only_dhcp_pools`:** the proposal must have address commands, and each of their addresses must lie in a range with the role DHCP pool in its network.
-- **`vendors`:** an entry that is an OUI (`00:00:5e`, `00-00-5E` or `00005e`) matches the first three octets of the device's MAC address. Any other entry is text, compared without case with a vendor name that a source reports. No source reports a vendor name yet, so today only OUI entries can match, and a policy with only text entries adopts nothing (section 8).
+- **`vendors`:** an entry that is an OUI (`00:00:5e`, `00-00-5E` or `00005e`) matches the first three octets of the device's MAC address. Any other entry is text, compared without case with a vendor name that a source reports. Probes, network controllers and the Home Assistant connector report vendor facts, but the constraint does not read them yet, so today only OUI entries can match, and a policy with only text entries adopts nothing (section 8).
 - **`min_sightings`:** the most counted sightings among the evidence. A sighting counts at most once per refresh interval, so three sightings take at least 30 minutes.
 
 ### 6.3 Inheritance

@@ -7,7 +7,9 @@
 //! Rules: the source time of a batch is kept unless it lies more than five minutes in the
 //! future (then the host's receive time is used, with a warning); every observation expires
 //! after three poll intervals, at least 15 minutes, unless a newer poll refreshes it; a
-//! host's MAC and IP addresses are sorted and deduplicated, its tags deduplicated in order.
+//! host's MAC and IP addresses are sorted and deduplicated, its tags deduplicated in order;
+//! the vendor facts of an inventory become one vendor observation per MAC address, the last
+//! report of a MAC address winning.
 
 use std::time::Duration;
 
@@ -125,7 +127,7 @@ pub fn inventory(
     let mut warnings = Vec::new();
     let observed_at = source_time(batch.observed_at, now, &mut warnings);
     let expires_at = now.checked_add(ttl(interval));
-    let observations = batch
+    let mut observations: Vec<Observation> = batch
         .hosts
         .iter()
         .map(|host| {
@@ -151,6 +153,24 @@ pub fn inventory(
             }
         })
         .collect();
+    let mut vendors: Vec<&crate::VendorFact> = Vec::with_capacity(batch.vendors.len());
+    for fact in batch.vendors.iter().rev() {
+        if !vendors.iter().any(|known| known.mac == fact.mac) {
+            vendors.push(fact);
+        }
+    }
+    vendors.sort_by_key(|fact| fact.mac);
+    observations.extend(vendors.into_iter().map(|fact| Observation {
+        id: ObservationId::generate(),
+        source: ObservationSource::Inventory { connector },
+        subject: Observed::Vendor {
+            mac: fact.mac,
+            vendor: fact.vendor.clone(),
+        },
+        observed_at,
+        received_at: now,
+        expires_at,
+    }));
     (
         ObservationBatch {
             connector,
@@ -163,8 +183,9 @@ pub fn inventory(
     )
 }
 
-/// The observations of a network controller's topology: where each client is attached,
-/// and the links between devices.
+/// The observations of a network controller's topology: where each client is attached, the
+/// vendor of each client the controller reports one for, the name of each client with a name
+/// and an address, and the links between devices.
 pub fn topology(
     connector: ConnectorId,
     topology: &TopologySnapshot,
@@ -182,19 +203,40 @@ pub fn topology(
         received_at: now,
         expires_at,
     };
-    let mut observations: Vec<Observation> = topology
-        .clients
-        .iter()
-        .map(|client| {
-            observation(Observed::Attachment {
+    let mut observations: Vec<Observation> = Vec::with_capacity(topology.clients.len());
+    for client in &topology.clients {
+        observations.push(observation(Observed::Attachment {
+            mac: client.mac,
+            device: client.device.0.clone(),
+            port: client.port.map(|port| port.to_string()),
+            ssid: client.ssid.clone(),
+            vlan: client.vlan,
+        }));
+        if let Some(vendor) = client
+            .vendor
+            .as_deref()
+            .map(str::trim)
+            .filter(|vendor| !vendor.is_empty())
+        {
+            observations.push(observation(Observed::Vendor {
                 mac: client.mac,
-                device: client.device.0.clone(),
-                port: client.port.map(|port| port.to_string()),
-                ssid: client.ssid.clone(),
-                vlan: client.vlan,
-            })
-        })
-        .collect();
+                vendor: vendor.to_owned(),
+            }));
+        }
+        if let (Some(ip), Some(name)) = (
+            client.ip,
+            client
+                .name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty()),
+        ) {
+            observations.push(observation(Observed::Name {
+                ip,
+                name: name.to_owned(),
+            }));
+        }
+    }
     observations.extend(topology.links.iter().map(|link| {
         observation(Observed::Link {
             a: link.a.clone(),
@@ -247,6 +289,107 @@ mod tests {
         };
         assert_eq!(host.tags, ["lab"]);
         assert_eq!(host.macs.len(), 1);
+    }
+
+    #[test]
+    fn vendor_facts_become_one_vendor_observation_per_mac() {
+        let connector = ConnectorId::generate();
+        let now: Timestamp = "2026-10-09T12:00:00Z".parse().expect("time");
+        let mac = |last: u8| tenko_core::MacAddr::new([0x00, 0x00, 0x5e, 0x00, 0x53, last]);
+        let fact = |last: u8, vendor: &str| crate::VendorFact {
+            mac: mac(last),
+            vendor: vendor.to_owned(),
+        };
+        let mut batch = InventoryBatch::complete(now, vec![sample_host(0, "lab", false)]);
+        batch.vendors = vec![
+            fact(0x22, "Example Devices"),
+            fact(0x21, "Old Name"),
+            fact(0x21, "Example Lighting"),
+        ];
+        let (normalized, warnings) = inventory(connector, &batch, now, Duration::from_secs(300));
+        assert_eq!(warnings, Vec::<String>::new());
+        let vendors: Vec<(tenko_core::MacAddr, &str)> = normalized
+            .observations
+            .iter()
+            .filter_map(|observation| match &observation.subject {
+                Observed::Vendor { mac, vendor } => Some((*mac, vendor.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            vendors,
+            [
+                (mac(0x21), "Example Lighting"),
+                (mac(0x22), "Example Devices")
+            ]
+        );
+        assert_eq!(normalized.observations.len(), 3);
+        assert!(
+            normalized
+                .observations
+                .iter()
+                .all(|o| o.source == ObservationSource::Inventory { connector })
+        );
+    }
+
+    #[test]
+    fn controller_clients_with_a_name_and_a_vendor_give_name_and_vendor_facts() {
+        let connector = ConnectorId::generate();
+        let now: Timestamp = "2026-10-09T12:00:00Z".parse().expect("time");
+        let client = |last: u8, name: Option<&str>, vendor: Option<&str>| crate::ClientAttachment {
+            mac: tenko_core::MacAddr::new([0x00, 0x00, 0x5e, 0x00, 0x53, last]),
+            ip: Some(std::net::IpAddr::from([192, 0, 2, last])),
+            device: crate::DeviceRef("ap-a".to_owned()),
+            port: None,
+            ssid: Some("lab.example.net".to_owned()),
+            network: None,
+            vlan: Some(20),
+            name: name.map(str::to_owned),
+            vendor: vendor.map(str::to_owned),
+            management: false,
+        };
+        let topology = TopologySnapshot {
+            observed_at: now,
+            devices: vec![],
+            links: vec![],
+            clients: vec![
+                client(
+                    0x31,
+                    Some(" printer.example.test "),
+                    Some("Example Devices"),
+                ),
+                client(0x32, None, None),
+                client(0x33, Some("  "), Some("")),
+            ],
+            networks: vec![],
+            profiles: vec![],
+            wlans: vec![],
+        };
+        let (normalized, warnings) =
+            super::topology(connector, &topology, now, Duration::from_secs(300));
+        assert_eq!(warnings, Vec::<String>::new());
+        let kinds: Vec<&str> = normalized
+            .observations
+            .iter()
+            .map(|o| match &o.subject {
+                Observed::Attachment { .. } => "attachment",
+                Observed::Vendor { .. } => "vendor",
+                Observed::Name { .. } => "name",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            ["attachment", "vendor", "name", "attachment", "attachment"]
+        );
+        assert!(normalized.observations.iter().any(|o| matches!(
+            &o.subject,
+            Observed::Name { ip, name } if *ip == std::net::IpAddr::from([192, 0, 2, 0x31]) && name == "printer.example.test"
+        )));
+        assert!(normalized.observations.iter().any(|o| matches!(
+            &o.subject,
+            Observed::Vendor { vendor, .. } if vendor == "Example Devices"
+        )));
     }
 
     #[tokio::test]
