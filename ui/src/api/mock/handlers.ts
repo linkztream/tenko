@@ -8,6 +8,7 @@ import { auditRoutes } from "./routes-audit";
 import { authRoutes } from "./routes-auth";
 import { importRoutes } from "./routes-import";
 import { jobRoutes } from "./routes-jobs";
+import { reconcileRoutes } from "./routes-reconcile";
 import { moveRoutes } from "./routes-move";
 import { systemRoutes } from "./routes-system";
 import { updatesRoutes } from "./routes-updates";
@@ -32,6 +33,7 @@ export const happyPaths: HttpHandler[] = [
   ...adminRoutes,
   ...systemRoutes,
   ...eventRoutes,
+  ...reconcileRoutes,
 ];
 
 export const handlers: HttpHandler[] = [...happyPaths, ...stubs];
