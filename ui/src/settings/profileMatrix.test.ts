@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { profileSettings } from "../api/mock/profiles";
+import { profileSettings, toggleStates } from "../api/mock/profiles";
 import type { MfaRequirement, PasswordPolicy, SecuritySettingsView } from "../api/types";
-import { admitsPin, pinCoupled } from "./profileMatrix";
+import { admitsPin, PROFILE_DEFAULTS, pinCoupled, planProfileChange, valueOf, weakerSettings } from "./profileMatrix";
+import { TOGGLES } from "./toggles";
 
 const custom = (min_length: number, extra: { max_length?: number; pattern?: string } = {}): PasswordPolicy => ({
   preset: "custom",
@@ -94,5 +95,45 @@ describe("pinCoupled", () => {
   it("passes everything while the vault holds no secret", () => {
     expect(pinCoupled(view("standard", false), { password_policy: PIN, mfa: "optional" })).toBe(false);
     expect(pinCoupled(view("home", false, { mfa: "everyone" }), { password_policy: PIN, mfa: "optional" })).toBe(false);
+  });
+});
+
+describe("the toggle table", () => {
+  it("lists the toggles by id, with TGL-21 before TGL-23", () => {
+    const ids = TOGGLES.map((def) => def.id);
+    expect(ids).toEqual([...ids].sort());
+    expect(ids.indexOf("TGL-21")).toBe(ids.indexOf("TGL-07") + 1);
+    expect(ids.indexOf("TGL-23")).toBe(ids.indexOf("TGL-21") + 1);
+    expect(TOGGLES.find((def) => def.id === "TGL-21")?.setting).toBe("audit_export");
+    // Every toggle of the table has a value in every profile.
+    for (const profile of ["home", "standard", "hardened", "lab"] as const) {
+      for (const def of TOGGLES) expect(valueOf(PROFILE_DEFAULTS[profile], def.setting), `${profile} ${def.id}`).not.toBeUndefined();
+    }
+  });
+
+  it("plans a switch of profile with the audit export, and never finds it weaker than Home", () => {
+    const standard = PROFILE_DEFAULTS.standard;
+    const states = toggleStates(standard);
+    const view = {
+      settings: standard,
+      toggles: TOGGLES.map((def) => {
+        const state = states.find((s) => s.id === def.id);
+        const value = state?.value ?? valueOf(standard, def.setting);
+        return { id: def.id, setting: def.setting, value, profile_default: value, deviates: false, weaker_than_home: false };
+      }),
+      banner: { lab: false, weaker_than_home: false, deviations: [] },
+      vault_has_operator_secrets: false,
+      revision: 1,
+    } as SecuritySettingsView;
+
+    const hardened = planProfileChange(view, "hardened").find((change) => change.def.id === "TGL-21");
+    expect(hardened).toMatchObject({ from: "optional", to: "required", weaker: false });
+    const lab = planProfileChange(view, "lab").find((change) => change.def.id === "TGL-21");
+    expect(lab).toMatchObject({ from: "optional", to: "local", weaker: false });
+    expect(planProfileChange(view, "standard").some((change) => change.def.id === "TGL-21")).toBe(false);
+
+    for (const profile of ["home", "standard", "hardened", "lab"] as const) {
+      expect(weakerSettings(profile).map((def) => def.id)).not.toContain("TGL-21");
+    }
   });
 });

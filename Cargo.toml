@@ -79,6 +79,9 @@ encoding_rs = "0.8.42"
 async-trait = "0.1.92"
 futures = "0.3.34"
 tokio = { version = "1.53.2", features = ["full"] }
+# `CancellationToken` of the leader-only services (Slice 3, WP3.0); already in the graph
+# through tonic and h2.
+tokio-util = { version = "0.7.20", default-features = false }
 
 # HTTP API and OpenAPI.
 axum = "0.8.9"

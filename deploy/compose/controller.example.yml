@@ -23,9 +23,9 @@
 # Start:
 #   docker compose -f controller.example.yml up --build -d
 #
-# First-run setup. While setup is open the server writes a one-time setup token to the
-# console and to the log. Read it with:
-#   docker compose -f controller.example.yml logs tenko | grep -E 'Setup token|setup_token'
+# First-run setup. While setup is open the server keeps a one-time setup token in
+# /var/lib/tenko/setup-token, never in the container log. Print it with:
+#   docker compose -f controller.example.yml exec tenko tenko setup token
 # Then open https://ddi.example.org:8443/ and enter the token, or run on a machine with the
 # tenko binary (it asks for the token and the password):
 #   docker compose -f controller.example.yml cp tenko:/var/lib/tenko/tls/ca-root.pem .

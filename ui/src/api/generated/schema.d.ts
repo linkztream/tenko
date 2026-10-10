@@ -2977,6 +2977,13 @@ export interface components {
             /** @description The client address. */
             source_ip?: string | null;
         };
+        /**
+         * @description How the audit trail leaves the installation (TGL-21, IAM-18). The audit log itself is
+         *     never off; the toggle decides whether export sinks are required. The variants are
+         *     ordered from the weakest to the strongest.
+         * @enum {string}
+         */
+        AuditExport: "local" | "optional" | "required";
         /** @description The outcome of an audited action. */
         AuditOutcome: {
             /** @enum {string} */
@@ -4846,6 +4853,7 @@ export interface components {
             idempotency?: components["schemas"]["IdempotencyKey"] | null;
             /** @description The kind of job. */
             kind: components["schemas"]["JobKind"];
+            node?: components["schemas"]["NodeId"] | null;
             /** @description The steps, run in order. */
             steps: components["schemas"]["StepSpec"][];
             /** @description The objects the job changes. */
@@ -7869,7 +7877,7 @@ export interface components {
          * @description A global role.
          * @enum {string}
          */
-        RoleName: "admin" | "operator" | "viewer";
+        RoleName: "admin" | "operator" | "viewer" | "auditor";
         /** @description The ranges of one role inside a network. */
         RoleUsage: {
             /** @description The role. */
@@ -8017,6 +8025,7 @@ export interface components {
         SecretString: string;
         /** @description The authentication part of the security settings: the profile and TGL-01 to TGL-07. */
         SecuritySettings: {
+            audit_export?: components["schemas"]["AuditExport"] | null;
             /** @description TGL-06: breached-password check. */
             breach_check: components["schemas"]["BreachMode"];
             /** @description TGL-07: lockout. */
@@ -8126,6 +8135,7 @@ export interface components {
          *     every toggle to its values first; explicit toggles then apply on top.
          */
         SettingsPatch: {
+            audit_export?: components["schemas"]["AuditExport"] | null;
             breach_check?: components["schemas"]["BreachMode"] | null;
             lockout?: components["schemas"]["LockoutMode"] | null;
             mfa?: components["schemas"]["MfaRequirement"] | null;
@@ -8615,7 +8625,7 @@ export interface components {
          * @description Components that act as [`Principal::System`].
          * @enum {string}
          */
-        SystemComponent: "setup" | "api" | "auth" | "vault" | "store" | "ipam" | "import" | "jobs" | "reconciler" | "connector" | "scan" | "cluster";
+        SystemComponent: "setup" | "api" | "auth" | "vault" | "store" | "ipam" | "import" | "jobs" | "reconciler" | "connector" | "scan" | "cluster" | "audit_export" | "backup" | "languages" | "leader";
         /** @description Body of `GET /system/status`. */
         SystemStatus: {
             cluster?: components["schemas"]["ClusterStatus"] | null;
@@ -8805,10 +8815,10 @@ export interface components {
         };
         /**
          * @description An event topic. `GET /events?topics=ipam,jobs` subscribes to a subset; no `topics`
-         *     parameter subscribes to all of them.
+         *     parameter subscribes to all of them except `metrics`, which a client names to receive it.
          * @enum {string}
          */
-        Topic: "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "connectors" | "discovery" | "secrets" | "cluster";
+        Topic: "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "connectors" | "discovery" | "secrets" | "cluster" | "metrics";
         /** @description An edge of the graph. */
         TopologyEdge: {
             /** @description One end: the switch, access point or hypervisor for client edges. */
@@ -13031,8 +13041,9 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Comma-separated topics: `ipam`, `jobs`, `audit`, `import`, `system`, `admin`; all
-                 *     when absent.
+                 * @description Comma-separated topics: `ipam`, `jobs`, `audit`, `import`, `system`, `admin`,
+                 *     `connectors`, `discovery`, `secrets`, `cluster`, `metrics`; all except `metrics` when
+                 *     absent.
                  */
                 topics?: string;
                 /**

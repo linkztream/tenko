@@ -1,6 +1,11 @@
 # Normalise line endings: LF in the repository and in the working tree.
 * text=auto eol=lf
 
+# TypeScript sources are always text with LF, also where an editor on Windows writes CRLF
+# into the working tree (the index already holds LF).
+*.ts text eol=lf
+*.tsx text eol=lf
+
 # Windows batch files require CRLF.
 *.bat text eol=crlf
 *.cmd text eol=crlf

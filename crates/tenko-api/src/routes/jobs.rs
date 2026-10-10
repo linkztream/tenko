@@ -646,6 +646,7 @@ mod tests {
             group: None,
             group_limit: None,
             idempotency: None,
+            node: None,
         }
     }
 

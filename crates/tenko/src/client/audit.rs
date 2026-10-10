@@ -1,5 +1,6 @@
 //! `tenko audit verify`: asks the controller to check the hash chain of the audit log
-//! (IAM-18) and reports the first break.
+//! (IAM-18) and reports the first break. `tenko audit export` is a stub until the audit
+//! export package (WP3.3) writes an export through the API.
 
 use clap::{Args, Subcommand};
 
@@ -11,6 +12,8 @@ use crate::exit;
 pub enum AuditCommand {
     /// Verify the hash chain of the audit log; exits with status 9 when it is broken.
     Verify(VerifyArgs),
+    /// Write the audit log from a sequence number as JSON lines with chain checkpoints.
+    Export(crate::Pending),
 }
 
 /// Arguments of `tenko audit verify`.

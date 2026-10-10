@@ -84,6 +84,7 @@ pub mod types;
 mod apply;
 mod coalescer;
 mod index;
+mod leadership;
 mod sm;
 mod snapshot;
 mod stored;
@@ -112,14 +113,15 @@ use tokio::{
 use self::{
     coalescer::{CoalescerStats, Queued},
     fsync::FsyncProbe,
+    leadership::LeadershipState,
     log::LogStore,
     network::{NetworkFactory, NoPeers, PeerTransport},
     sm::{SmOptions, StateMachine},
     types::{ProposedBatch, Raft, RaftNodeId, Snapshot, SnapshotFile, SnapshotMeta, Vote},
 };
 use crate::api::{
-    ChangeStream, CoalescerConfig, Committed, DerivedIndex, ReadConsistency, ReadView, Store,
-    StoreError, StoreRole, StoreStatus, WatchFilter, WriteBatch,
+    ChangeStream, CoalescerConfig, Committed, DerivedIndex, Leadership, ReadConsistency, ReadView,
+    Store, StoreError, StoreRole, StoreStatus, WatchFilter, WriteBatch,
 };
 
 /// When `sm.redb` makes its commits durable. The Raft log is fsynced before an entry
@@ -377,6 +379,8 @@ struct Inner {
     /// State file bytes and live data bytes when the store opened.
     at_open: (u64, u64),
     coalescer: Arc<CoalescerStats>,
+    /// Who leads, from the metrics (`Store::leadership`).
+    leadership: Arc<LeadershipState>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
     /// A temporary data directory removed when the store is dropped.
     temp_dir: Option<PathBuf>,
@@ -651,12 +655,18 @@ impl RaftStore {
             snapshot_bytes: AtomicU64::new(0),
             at_open,
             coalescer: coalescer_stats,
+            leadership: Arc::new(LeadershipState::new()),
             tasks: Mutex::new(vec![coalescer]),
             temp_dir,
         });
         inner.refresh_sizes();
         let maintenance = tokio::spawn(maintain(Arc::downgrade(&inner)));
-        lock(&inner.tasks).push(maintenance);
+        let leadership = tokio::spawn(leadership::follow(
+            inner.raft.metrics(),
+            Arc::clone(&inner.leadership),
+            Arc::clone(&inner.shutdown),
+        ));
+        lock(&inner.tasks).extend([maintenance, leadership]);
         Ok(Self { inner })
     }
 
@@ -921,6 +931,7 @@ impl RaftStore {
             task.abort();
         }
         inner.shutdown.store(true, Ordering::SeqCst);
+        inner.leadership.close();
         let _ = inner.raft.shutdown().await;
         let sm = inner.sm.clone();
         let checkpoint = tokio::task::spawn_blocking(move || sm.checkpoint())
@@ -1235,7 +1246,7 @@ impl Store for RaftStore {
 
     fn status(&self) -> StoreStatus {
         let inner = &self.inner;
-        let (role, leader, lag) = {
+        let (role, leader, lag, quorum, term, members) = {
             let metrics = inner.raft.metrics();
             let metrics = metrics.borrow();
             let role = match metrics.state {
@@ -1250,7 +1261,14 @@ impl Store for RaftStore {
                 .last_log_index
                 .map(|last| last.saturating_sub(applied))
                 .or(Some(0));
-            (role, metrics.current_leader.map(NodeId), lag)
+            (
+                role,
+                metrics.current_leader.map(NodeId),
+                lag,
+                inner.leadership.quorum(&metrics),
+                metrics.current_term,
+                leadership::members(&metrics),
+            )
         };
         let role = if inner.check_running().is_err() {
             StoreRole::Shutdown
@@ -1272,6 +1290,13 @@ impl Store for RaftStore {
             sm_file_bytes: Some(inner.sm_file_bytes.load(Ordering::Relaxed)),
             fsync_p50_micros: inner.fsync.map(|probe| probe.p50_micros()),
             indexes: inner.sm.index_statuses(),
+            quorum,
+            term,
+            members,
         }
+    }
+
+    fn leadership(&self) -> tokio::sync::watch::Receiver<Option<Leadership>> {
+        self.inner.leadership.subscribe()
     }
 }

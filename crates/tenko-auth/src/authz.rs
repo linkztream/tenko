@@ -1,18 +1,24 @@
 //! The [`Authorizer`] of Slice 1: global roles, the strength rules of TGL-02, TGL-03 and
 //! IAM-07 (the index follows `vault.operator_index`, so the first operator secret takes
 //! effect at once), and [`ScopeFilter::All`] or [`ScopeFilter::Nothing`] (object scopes are Slice 3).
+//! The index also keeps the active language set (`i18n.packs`, API-21), so the language
+//! check of users and setup reads no table.
 //!
 //! Authorization runs on every request and must not touch the store, so the roles and the
 //! settings it needs are kept in a derived index ([`AuthIndex`]) that the store builds at
 //! registration and keeps current in revision order (ADR 0011, decision 8): a role change
 //! or a disabled account takes effect with the commit that made it.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+};
 
 use arc_swap::ArcSwap;
 use tenko_core::{
     Action, Authorizer, Denied, DenyReason, ObjectKind, ObjectRef, Principal, Revision,
     ScopeFilter, UserId,
+    i18n::{BUILT_IN_LANGUAGES, PACKS},
 };
 use tenko_store::{
     ChangeSet, DerivedIndex, IndexImage, KeyRange, ReadView, ReadViewExt, StoreError, WatchFilter,
@@ -45,6 +51,8 @@ pub struct AuthImage {
     users: HashMap<UserId, UserAuthz>,
     settings: SecuritySettings,
     operator_secrets: bool,
+    /// Tags of the active uploaded language packs; the built-in languages are always active.
+    languages: BTreeSet<String>,
 }
 
 impl AuthImage {
@@ -61,6 +69,35 @@ impl AuthImage {
     /// Whether the vault holds an operator secret (the condition of IAM-07).
     pub fn operator_secrets(&self) -> bool {
         self.operator_secrets
+    }
+
+    /// Whether users may choose the language `tag`: a built-in language or an active pack.
+    pub fn is_language(&self, tag: &str) -> bool {
+        BUILT_IN_LANGUAGES.contains(&tag) || self.languages.contains(tag)
+    }
+
+    /// The languages users may choose: the built-in ones, then the active packs by tag.
+    pub fn languages(&self) -> Vec<String> {
+        BUILT_IN_LANGUAGES
+            .iter()
+            .map(|tag| (*tag).to_owned())
+            .chain(
+                self.languages
+                    .iter()
+                    .filter(|tag| !BUILT_IN_LANGUAGES.contains(&tag.as_str()))
+                    .cloned(),
+            )
+            .collect()
+    }
+
+    fn load_languages(&mut self, view: &dyn ReadView) -> Result<(), StoreError> {
+        self.languages = view
+            .scan_typed(&PACKS, KeyRange::all(), MAX_PACKS, false)?
+            .into_iter()
+            .filter(|(_, pack, _)| pack.is_active())
+            .map(|(tag, _, _)| tag)
+            .collect();
+        Ok(())
     }
 
     fn load_operator_secrets(&mut self, view: &dyn ReadView) -> Result<(), StoreError> {
@@ -128,6 +165,8 @@ impl AuthIndex {
 
 /// Largest number of users read when the index is built.
 const MAX_USERS: usize = 1_000_000;
+/// Largest number of language packs read when the index is built.
+const MAX_PACKS: usize = 10_000;
 
 impl DerivedIndex for AuthIndex {
     fn name(&self) -> &'static str {
@@ -139,6 +178,7 @@ impl DerivedIndex for AuthIndex {
             USERS.name().clone(),
             SETTINGS.name().clone(),
             OPERATOR_INDEX.name().clone(),
+            PACKS.name().clone(),
         ])
     }
 
@@ -159,6 +199,7 @@ impl DerivedIndex for AuthIndex {
         }
         image.load_settings(view)?;
         image.load_operator_secrets(view)?;
+        image.load_languages(view)?;
         Ok(Box::new(image))
     }
 
@@ -181,6 +222,8 @@ impl DerivedIndex for AuthIndex {
                 image.load_settings(view)
             } else if &change.table == OPERATOR_INDEX.name() {
                 image.load_operator_secrets(view)
+            } else if &change.table == PACKS.name() {
+                image.load_languages(view)
             } else {
                 Ok(())
             };
@@ -273,5 +316,58 @@ impl Authorizer for RbacAuthorizer {
         } else {
             ScopeFilter::Nothing
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tenko_core::{
+        Principal, SystemComponent, Timestamp,
+        i18n::{PackRecord, PackState},
+    };
+    use tenko_store::{MemStore, Store, WriteBatch};
+
+    use super::*;
+
+    async fn put_pack(store: &MemStore, tag: &str, state: PackState) {
+        let mut batch = WriteBatch::new(
+            Principal::system(SystemComponent::Languages),
+            Timestamp::UNIX_EPOCH,
+        );
+        batch
+            .put_typed(
+                &PACKS,
+                &tag.to_owned(),
+                &PackRecord {
+                    tag: tag.to_owned(),
+                    state,
+                    display_name: String::new(),
+                },
+            )
+            .expect("encode");
+        store.propose(batch).await.expect("commit");
+    }
+
+    #[tokio::test]
+    async fn the_language_set_follows_the_active_packs() {
+        let store = MemStore::default();
+        put_pack(&store, "fr", PackState::Active).await;
+        let index = Arc::new(AuthIndex::new());
+        store.register_index(index.clone()).expect("register");
+        let image = index.image();
+        assert!(image.is_language("en") && image.is_language("sv"));
+        assert!(image.is_language("fr"), "built from the table");
+        assert_eq!(image.languages(), ["en", "sv", "fr"]);
+
+        put_pack(&store, "de", PackState::Uploaded).await;
+        assert!(!index.image().is_language("de"), "uploaded is not active");
+        put_pack(&store, "de", PackState::Active).await;
+        assert!(index.image().is_language("de"), "applied in revision order");
+        put_pack(&store, "fr", PackState::Previewed).await;
+        assert!(!index.image().is_language("fr"));
+        // A pack that overrides a built-in language never removes it.
+        put_pack(&store, "sv", PackState::Uploaded).await;
+        assert_eq!(index.image().languages(), ["en", "sv", "de"]);
+        assert!(AuthImage::default().is_language("sv"));
     }
 }

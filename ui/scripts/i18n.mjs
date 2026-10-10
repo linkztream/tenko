@@ -1,5 +1,6 @@
 // @ts-check
-// Validates the XLIFF language packs of ui/i18n and generates src/i18n/generated/keys.ts.
+// Validates the XLIFF language packs of ui/i18n (the main files and the fragment files of the
+// <code>.d directories, see scripts/i18n/compile.mjs) and generates src/i18n/generated/keys.ts.
 //
 //   node scripts/i18n.mjs           validate, then write keys.ts when its content changed
 //   node scripts/i18n.mjs --check   validate and fail when keys.ts is stale; writes nothing
@@ -147,9 +148,12 @@ function main(args) {
     return `${locale.code} ${percent}%`;
   });
   const codes = catalog.locales.map((l) => l.code).join(", ");
+  // Fragment files (ui/i18n/<code>.d/*.xlf) of all languages; the main files are not counted.
+  const fragments = [...catalog.files.values()].reduce((sum, files) => sum + files.length - 1, 0);
+  const fragmentText = fragments > 0 ? `, ${fragments} fragment${fragments === 1 ? "" : "s"}` : "";
   console.log(
     `i18n: ${catalog.locales.length} language${catalog.locales.length === 1 ? "" : "s"} (${codes}), ` +
-      `${source.size} key${source.size === 1 ? "" : "s"}; ${completeness.join(", ")}`,
+      `${source.size} key${source.size === 1 ? "" : "s"}${fragmentText}; ${completeness.join(", ")}`,
   );
   return 0;
 }

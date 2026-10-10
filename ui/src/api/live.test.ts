@@ -1,7 +1,8 @@
 import { createRoot } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventStream } from "./events";
-import { createLiveQuery, type LiveQuery } from "./live";
+import { createResource } from "solid-js";
+import { createLiveQuery, latest, type LiveQuery } from "./live";
 
 class FakeSource {
   static last: FakeSource | undefined;
@@ -80,5 +81,65 @@ describe("createLiveQuery", () => {
     src.emit("admin", { topic: "admin", revision: 1000, objects: [{ kind: "user", id: "u1" }] }, "1000");
     await vi.advanceTimersByTimeAsync(500);
     expect(fetch).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("latest", () => {
+  it("is undefined before the first read, the value after it, and undefined again while the last read failed", async () => {
+    let call = 0;
+    const fetch = vi.fn(async () => {
+      call += 1;
+      if (call === 2) throw new Error("read failed");
+      return { value: call * 10, revision: call };
+    });
+    let q!: LiveQuery<number>;
+    const dispose = createRoot((d) => {
+      q = createLiveQuery({ topics: ["admin"], fetch, stream });
+      return d;
+    });
+    expect(q.latest()).toBeUndefined();
+    expect(latest(q)).toBeUndefined();
+
+    await settle();
+    expect(q.latest()).toBe(10);
+    expect(latest(q)).toBe(10);
+    expect(latest(q.value)).toBe(10);
+
+    // The second read fails: `value.latest` throws that error, the guard does not.
+    q.refetch();
+    await settle();
+    expect(q.value.error).toBeInstanceOf(Error);
+    expect(() => q.value.latest).toThrow("read failed");
+    expect(q.latest()).toBeUndefined();
+    expect(latest(q)).toBeUndefined();
+    expect(latest(q.value)).toBeUndefined();
+
+    // The next read succeeds again and the value is back.
+    q.refetch();
+    await settle();
+    expect(q.value.error).toBeUndefined();
+    expect(q.latest()).toBe(30);
+    expect(latest(q)).toBe(30);
+    dispose();
+  });
+
+  it("guards any resource, not only live queries", async () => {
+    const handle = createRoot((dispose) => {
+      let n = 0;
+      const [resource, { refetch }] = createResource<string>(async () => {
+        n += 1;
+        if (n === 2) throw new Error("nope");
+        return `read ${n}`;
+      });
+      return { resource, refetch, dispose };
+    });
+    expect(latest(handle.resource)).toBeUndefined();
+    await settle();
+    expect(latest(handle.resource)).toBe("read 1");
+    void handle.refetch();
+    await settle();
+    expect(() => handle.resource.latest).toThrow("nope");
+    expect(latest(handle.resource)).toBeUndefined();
+    handle.dispose();
   });
 });

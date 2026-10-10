@@ -24,6 +24,7 @@ mod tests {
             majors: vec![1],
             version: "0.0.1".to_owned(),
             roles: vec!["probe".to_owned()],
+            capabilities: Vec::new(),
         };
         let mut bytes = request.encode_to_vec();
         assert_eq!(
@@ -37,5 +38,38 @@ mod tests {
             v1::HelloRequest::decode(bytes.as_slice()).expect("decode"),
             request
         );
+    }
+
+    #[test]
+    fn the_fields_added_to_hello_round_trip_and_are_empty_from_an_old_peer() {
+        let request = v1::HelloRequest {
+            majors: vec![1],
+            version: "0.0.1".to_owned(),
+            roles: vec!["probe".to_owned()],
+            capabilities: vec!["config-sync".to_owned()],
+        };
+        let response = v1::HelloResponse {
+            major: 1,
+            majors: vec![1],
+            version: "0.0.1".to_owned(),
+            node_id: 1001,
+            heartbeat_secs: 10,
+            server_time: None,
+            capabilities: vec!["config-sync".to_owned()],
+            endpoints: vec!["10.0.0.1:8444".to_owned(), "10.0.0.2:8444".to_owned()],
+        };
+        assert_eq!(
+            v1::HelloRequest::decode(request.encode_to_vec().as_slice()).expect("decode"),
+            request
+        );
+        assert_eq!(
+            v1::HelloResponse::decode(response.encode_to_vec().as_slice()).expect("decode"),
+            response
+        );
+        // A peer that predates the new fields sends only field 1 (major = 1): the rest
+        // decodes as empty.
+        let old = v1::HelloResponse::decode([0x08, 0x01].as_slice()).expect("decode");
+        assert_eq!(old.major, 1);
+        assert!(old.capabilities.is_empty() && old.endpoints.is_empty());
     }
 }

@@ -802,7 +802,7 @@ async fn role_changes_are_audited_and_validated() {
         records[0].draft.details.changes[0].new.as_deref(),
         Some("operator")
     );
-    assert_eq!(env.service.roles().len(), 3);
+    assert_eq!(env.service.roles().len(), 4);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1418,6 +1418,16 @@ fn expected_toggles() -> Vec<(&'static str, &'static str, [Value; 4])> {
             ],
         ),
         (
+            "TGL-21",
+            "audit_export",
+            [
+                json!("local"),
+                json!("optional"),
+                json!("required"),
+                json!("local"),
+            ],
+        ),
+        (
             "TGL-23",
             "updates",
             [
@@ -1459,8 +1469,8 @@ async fn the_settings_view_reports_each_profile_as_the_matrix_says() {
         assert_eq!(
             ids,
             [
-                "TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-23",
-                "TGL-24"
+                "TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-21",
+                "TGL-23", "TGL-24"
             ]
         );
         for (toggle, (id, setting, values)) in view.toggles.iter().zip(&expected) {
@@ -2233,6 +2243,10 @@ impl Store for GatedStore {
 
     fn status(&self) -> StoreStatus {
         self.inner.status()
+    }
+
+    fn leadership(&self) -> tokio::sync::watch::Receiver<Option<tenko_store::Leadership>> {
+        self.inner.leadership()
     }
 }
 

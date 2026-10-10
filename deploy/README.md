@@ -60,8 +60,9 @@ tenko serve --config /etc/tenko/tenko.toml [--data-dir PATH] [--roles controller
 
 `tenko serve` stays in the foreground, logs to standard error (`log.format` = `text` or
 `json`; `log.file` adds a file) and prints the console notes to standard output. It starts
-ten steps in order, each logged with its duration: `kek`, `store`, `vault`, `tls`,
-`auth`, `ipam`, `jobs`, `connectors`, `cluster`, `api`. A step that fails stops the start with exit status 4 and a
+eleven steps in order, each logged with its duration: `kek`, `store`, `cluster` (the
+controller cluster; nothing to do on a single controller), `vault`, `tls`, `auth`, `ipam`,
+`jobs`, `connectors`, `nodes` (the node transport), `api`. A step that fails stops the start with exit status 4 and a
 message that names the step and its code. `GET /api/v1/health/ready` answers 200 when the
 node serves requests and 503 while it starts or shuts down; `GET /api/v1/health` is the
 liveness probe. `SIGINT` and `SIGTERM` shut the server down gracefully: open requests
@@ -91,16 +92,27 @@ included. `plain` is plain HTTP from everyone and exists for the Lab profile onl
 
 ### First-run setup
 
-A new installation has no administrator. While setup is open, `tenko serve` prints a
-one-time setup token on standard output (`Setup token: ...`) and writes it to the log as
-`setup_token=...`; it changes at every start until setup is complete, so treat the console,
-the journal and the container log as sensitive until then. Read it from the journal or the
-container log:
+A new installation has no administrator. While setup is open, every start of `tenko serve`
+writes a new one-time setup token to `<data_dir>/setup-token` before the server is ready, and
+keeps it out of the log: the log only says that first-run setup is open and names the command
+that prints the token. The file holds the token and a newline and is readable by the service
+account only (mode 0600 on Linux; on Windows it inherits the access control list of the data
+directory, which `tenko service install` restricts to the service account, Administrators and
+SYSTEM). The token changes at every start, and the file is removed when setup completes. Print
+the token on the node, as the account that runs the server:
 
 ```
-journalctl -u tenko | grep -E 'Setup token|setup_token'
-docker compose logs tenko | grep -E 'Setup token|setup_token'
+sudo -u tenko tenko setup token --data-dir /var/lib/tenko    # systemd; or --config /etc/tenko/tenko.toml
+docker exec tenko tenko setup token                          # container; docker compose exec tenko tenko setup token
+tenko setup token --data-dir C:\ProgramData\Tenko             # Windows, in an administrator shell
 ```
+
+`tenko setup token` finds the data directory like `tenko serve` does (`--data-dir`, else
+`TENKO_DATA_DIR`, else `data_dir` of the file named by `--config` or `TENKO_CONFIG`) and prints
+the token alone. Exit status 1 and a message on standard error mean that no server has
+written a token there yet or that setup is complete. Standard output of the server shows the
+token itself only when it is a terminal (`tenko serve` at a prompt, `docker run -it`); anywhere
+else the console block names the file, so the journal and the container log never carry it.
 
 Open the URL the server prints in a browser and enter the token, or complete setup without
 a browser. The command asks for the token and the password; `--setup-token` (or
@@ -202,7 +214,7 @@ exposes 8443/tcp only. A volume at `/var/lib/tenko` keeps the state; use SSD or 
 ```
 docker run -d --name tenko -p 8443:8443 -v tenko-data:/var/lib/tenko \
   --stop-timeout 30 tenko
-docker logs tenko 2>&1 | grep -E 'Setup token|setup_token'
+docker exec tenko tenko setup token
 ```
 
 There is no systemd-creds or TPM in a container, so without a key file the KEK is a plain

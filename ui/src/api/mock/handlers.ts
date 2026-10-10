@@ -3,14 +3,21 @@
 // its stub. Register more with `route()`, which only accepts paths of the document.
 import type { HttpHandler } from "msw";
 import { ipamRoutes } from "./ipam/routes";
+import { accessRoutes } from "./routes-access";
 import { adminRoutes } from "./routes-admin";
 import { auditRoutes } from "./routes-audit";
+import { auditExportRoutes } from "./routes-audit-export";
 import { authRoutes } from "./routes-auth";
+import { backupRoutes } from "./routes-backup";
+import { clusterRoutes } from "./routes-cluster";
+import { i18nRoutes } from "./routes-i18n";
 import { importRoutes } from "./routes-import";
 import { jobRoutes } from "./routes-jobs";
+import { kekRoutes } from "./routes-kek";
 import { moveRoutes } from "./routes-move";
 import { reconcileRoutes } from "./routes-reconcile";
 import { revealPolicyRoutes } from "./routes-reveal-policy";
+import { scansRoutes } from "./routes-scans";
 import { secretsRoutes } from "./routes-secrets";
 import { systemRoutes } from "./routes-system";
 import { topologyRoutes } from "./routes-topology";
@@ -50,6 +57,15 @@ export const happyPaths: HttpHandler[] = [
   // The topology map, the VLAN provision and the prefixes of a VLAN (WP2.7).
   ...topologyRoutes,
   ...vlanRoutes,
+  // The API areas of Slice 3: empty files that the UI packages fill as the Rust packages add
+  // their operations (WP3.0).
+  ...clusterRoutes,
+  ...scansRoutes,
+  ...accessRoutes,
+  ...auditExportRoutes,
+  ...kekRoutes,
+  ...backupRoutes,
+  ...i18nRoutes,
 ];
 
 export const handlers: HttpHandler[] = [...happyPaths, ...stubs];

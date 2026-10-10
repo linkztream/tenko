@@ -47,8 +47,8 @@ use bytes::Bytes;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tenko_core::{
-    AuditSeq, Coded, CounterKey, IdempotencyKey, NodeId, Principal, RequestCtx, RequestId,
-    Revision, TableName, Timestamp,
+    Anchors, AuditSeq, Coded, CounterKey, IdempotencyKey, NodeId, ObjectRef, Principal, RequestCtx,
+    RequestId, Revision, TableName, Timestamp,
     audit::{AuditDraft, Digest},
     codec::{CodecError, KeyCodec, KeyError, canonical_sha256, prefix_successor},
     secret::VaultEnvelope,
@@ -860,6 +860,107 @@ pub struct StoreStatus {
     pub sm_file_bytes: Option<u64>,
     /// Registered derived indexes.
     pub indexes: Vec<IndexStatus>,
+    /// Whether this member reaches a quorum (OPS-26). Status written before Slice 3 reads
+    /// as [`QuorumState::Single`].
+    #[serde(default)]
+    pub quorum: QuorumState,
+    /// The Raft term this member knows (`1` for `MemStore`).
+    #[serde(default)]
+    pub term: u64,
+    /// The members of the cluster with their replication state, filled on the leader only
+    /// (empty on a follower and for `MemStore`).
+    #[serde(default)]
+    pub members: Vec<MemberStatus>,
+}
+
+/// Whether a member of the store can reach a quorum (OPS-26, plan section 2.2). The
+/// partition layer refuses writes on a member that is not [`QuorumState::Single`] or
+/// [`QuorumState::Healthy`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum QuorumState {
+    /// The only voter: never isolated (`MemStore` and a single controller).
+    #[default]
+    Single,
+    /// A leader is known and in contact with a quorum.
+    Healthy,
+    /// No leader is known; an election is running.
+    Electing {
+        /// When the member lost its leader.
+        since: Timestamp,
+    },
+    /// No contact with a quorum for longer than `[cluster] isolation_after_ms`; reads serve
+    /// the local copy, writes are refused.
+    Isolated {
+        /// When the member became isolated.
+        since: Timestamp,
+        /// The last message from a leader (follower) or the last quorum acknowledgement
+        /// (leader), if any.
+        last_contact: Option<Timestamp>,
+        /// The last revision this member applied: the age of its local copy.
+        applied: Revision,
+    },
+}
+
+impl QuorumState {
+    /// Whether writes can commit through this member.
+    pub fn accepts_writes(&self) -> bool {
+        matches!(self, Self::Single | Self::Healthy)
+    }
+}
+
+/// Who leads the store, as one member sees it ([`Store::leadership`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Leadership {
+    /// The leader.
+    pub leader: NodeId,
+    /// The term of its leadership.
+    pub term: u64,
+    /// Whether this member is the leader and has applied every entry up to its first
+    /// commit in the term, so leader-only work never starts on a stale view.
+    pub is_self: bool,
+}
+
+/// The replication state of one member, as the leader sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemberStatus {
+    /// The member.
+    pub node: NodeId,
+    /// A voter (otherwise a learner catching up).
+    pub voter: bool,
+    /// The last log index known to match the leader's log.
+    pub matched: Option<u64>,
+    /// Entries the member is behind the leader's last log index.
+    pub lag_entries: Option<u64>,
+    /// Milliseconds since the leader last heard from the member.
+    pub last_contact_ms: Option<u64>,
+}
+
+/// The precondition that fences a leader-only write to the term of office it was planned
+/// in: the counter [`tenko_core::cluster::LEADER_EPOCH`] still has the value `epoch` that
+/// [`tenko_core::cluster::LeaderService::run`] received. Once another member has taken
+/// office the counter has moved on and the batch fails with
+/// [`StoreError::PreconditionFailed`], so a deposed leader cannot write.
+pub fn fence(epoch: u64) -> Precondition {
+    Precondition::Counter {
+        counter: tenko_core::cluster::LEADER_EPOCH,
+        expect: epoch,
+    }
+}
+
+/// Finds the [`Anchors`] of an object for scope checks (IAM-01, plan section 2.5): a prefix
+/// anchors to itself and its ancestors, an address or a range to its most specific prefix,
+/// a host to its site and the prefixes of its addresses, and so on. Implemented over the
+/// prefix tree by `tenko-ipam`; the authorizer of `tenko-auth` asks it before
+/// [`tenko_core::ScopeFilter::admits`]. It lives here, beside [`ReadView`], because both
+/// crates depend on this one and the anchors of most objects need a read.
+pub trait AnchorResolver: Send + Sync {
+    /// The anchors of `object` in `view`.
+    ///
+    /// # Errors
+    ///
+    /// A storage or decoding failure of the read.
+    fn anchors(&self, view: &dyn ReadView, object: &ObjectRef) -> Result<Anchors, StoreError>;
 }
 
 impl StoreStatus {
@@ -1028,6 +1129,13 @@ pub trait Store: Send + Sync + 'static {
 
     /// Role, leader, revision, lag and cached sizes.
     fn status(&self) -> StoreStatus;
+
+    /// Who leads, as this member sees it: `None` while no leader is known. The value
+    /// changes when the leader or the term changes and when this member's `is_self` turns
+    /// true after it has applied its first commit of the term. The leader supervisor of
+    /// `tenko serve` starts leader-only work on `is_self` and stops it when that ends.
+    /// `MemStore` is always the leader.
+    fn leadership(&self) -> tokio::sync::watch::Receiver<Option<Leadership>>;
 }
 
 impl fmt::Display for Change {
@@ -1156,6 +1264,28 @@ mod tests {
                 .apply(&changes)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn fence_expects_the_leader_epoch() {
+        let mut b = batch();
+        b.preconditions.push(fence(7));
+        assert_eq!(
+            b.preconditions,
+            vec![Precondition::Counter {
+                counter: tenko_core::cluster::LEADER_EPOCH,
+                expect: 7,
+            }]
+        );
+        assert!(QuorumState::Single.accepts_writes());
+        assert!(QuorumState::Healthy.accepts_writes());
+        assert!(
+            !QuorumState::Electing {
+                since: Timestamp::UNIX_EPOCH
+            }
+            .accepts_writes()
+        );
+        assert_eq!(QuorumState::default(), QuorumState::Single);
     }
 
     #[test]

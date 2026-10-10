@@ -20,6 +20,23 @@
 //   - A translation unit keeps the `<source>` text it was translated from next to its
 //     `<target>`, which makes stale translations detectable.
 //
+// Fragments
+//   Beside `<language>.xlf`, a directory `<language>.d/` may hold fragment files `<area>.xlf`
+//   (not searched recursively; the area matches FRAGMENT_NAME_PATTERN; files that do not end in
+//   `.xlf` are ignored). The units of the fragments, read in file-name order after the main
+//   file, are merged into the language as if they were written in the main file.
+//   - A fragment is a complete XLIFF 2.0 document: the same root rules as the main file of its
+//     language (namespace, version, srcLang, and trgLang for a translation) and exactly one
+//     `<file>`. It carries no `language-pack` metadata; that lives in the main file only.
+//   - A key is defined once per language. A later definition, in the same file, in a fragment
+//     or in another fragment, is reported and dropped; the first one (main file, then the
+//     fragments by name) stays the message.
+//   - Translations are checked against the merged key set of the source language: a translation
+//     may sit in the main file or in any fragment of its language, whatever file the source key
+//     is in. Diagnostics name the file the unit is in.
+//   - A `<language>.d/` directory without its `<language>.xlf` is an error.
+//   The generated modules do not depend on which file a message came from.
+//
 // Text rule for <source>, <target>, <note> and metadata values
 //   Line endings are normalized to LF first (as XML requires). The text of an element is its
 //   character data and CDATA sections. When that text contains no line break it is used
@@ -70,7 +87,7 @@ import { XMLParser, XMLValidator } from "fast-xml-parser";
  * @property {string} name Display name in the language itself.
  * @property {string} author
  * @property {string} version
- * @property {string} file Absolute path of the XLIFF file.
+ * @property {string} file Absolute path of the main XLIFF file (`<code>.xlf`).
  */
 
 /**
@@ -78,6 +95,8 @@ import { XMLParser, XMLValidator } from "fast-xml-parser";
  * @property {string} sourceLocale
  * @property {CatalogLocale[]} locales Source language first, then the others by code.
  * @property {Map<string, Map<string, Message>>} messages Messages per language code.
+ * @property {Map<string, string[]>} files Absolute paths of the files read per language code:
+ *   the main file, then its fragment files in file-name order.
  * @property {Diagnostic[]} errors
  * @property {Diagnostic[]} warnings
  */
@@ -87,6 +106,13 @@ export const METADATA_NS = "urn:oasis:names:tc:xliff:metadata:2.0";
 
 /** Message keys are lowercase dotted paths. */
 export const KEY_PATTERN = /^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$/;
+
+/** The name of a fragment file without `.xlf`: the area it holds. */
+export const FRAGMENT_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
+
+const XLIFF_EXT = ".xlf";
+/** The fragments of a language `sv` live in the directory `sv.d` beside `sv.xlf`. */
+const FRAGMENT_DIR_EXT = ".d";
 
 const META_CATEGORY = "language-pack";
 const META_TYPES = ["displayName", "author", "version", "sourceLanguage"];
@@ -110,6 +136,18 @@ function compareText(a, b) {
 /** @param {unknown} error */
 function errorText(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * A function that records a problem of one file.
+ * @param {Diagnostic[]} errors
+ * @param {string} file
+ * @returns {(key: string | undefined, message: string) => void}
+ */
+function reporterFor(errors, file) {
+  return (key, message) => {
+    errors.push(key === undefined ? { file, message } : { file, key, message });
+  };
 }
 
 // ---------------------------------------------------------------------------------------
@@ -465,12 +503,23 @@ function compileMessage(text, fail) {
 
 /**
  * @typedef {object} RawFile
- * @property {string} code File base name.
+ * @property {string} code Language code: the base name of the main file.
  * @property {string} file Absolute path.
  * @property {boolean} isSource
- * @property {{ name: string, author: string, version: string }} meta
+ * @property {{ name: string, author: string, version: string }} meta Empty for a fragment.
  * @property {RawUnit[]} units
  */
+
+/**
+ * The `language-pack` meta groups of a `<file>`.
+ * @param {XElement} fileEl
+ * @returns {XElement[]}
+ */
+function languagePackGroups(fileEl) {
+  return childElements(fileEl, METADATA_NS, "metadata")
+    .flatMap((metadata) => childElements(metadata, METADATA_NS, "metaGroup"))
+    .filter((group) => group.attrs["category"] === META_CATEGORY);
+}
 
 /**
  * Reads the language-pack metadata of the file.
@@ -480,13 +529,10 @@ function compileMessage(text, fail) {
 function readMetadata(fileEl, fail) {
   /** @type {Map<string, string>} */
   const values = new Map();
-  for (const metadata of childElements(fileEl, METADATA_NS, "metadata")) {
-    for (const group of childElements(metadata, METADATA_NS, "metaGroup")) {
-      if (group.attrs["category"] !== META_CATEGORY) continue;
-      for (const meta of childElements(group, METADATA_NS, "meta")) {
-        const type = meta.attrs["type"];
-        if (type !== undefined && !values.has(type)) values.set(type, elementText(meta, fail).trim());
-      }
+  for (const group of languagePackGroups(fileEl)) {
+    for (const meta of childElements(group, METADATA_NS, "meta")) {
+      const type = meta.attrs["type"];
+      if (type !== undefined && !values.has(type)) values.set(type, elementText(meta, fail).trim());
     }
   }
   for (const type of META_TYPES) {
@@ -590,18 +636,20 @@ function collectUnits(parent, group, out, report) {
 }
 
 /**
- * Reads and structurally validates one XLIFF file.
+ * Reads and structurally validates one XLIFF file: the main file of a language, or with
+ * `fragment` a fragment file of its `<code>.d` directory. The two share every root check; a
+ * fragment has no language-pack metadata, and its language is not checked again.
  * @param {string} file Absolute path.
- * @param {string} code File base name.
+ * @param {string} code Language code: the base name of the main file, also the language of its fragments.
  * @param {string} sourceLocale
  * @param {Diagnostic[]} errors
+ * @param {boolean} [fragment] True for a fragment file.
  * @returns {RawFile | null} null when the file cannot be used at all
  */
-function readXliffFile(file, code, sourceLocale, errors) {
-  /** @param {string | undefined} key @param {string} message */
-  const report = (key, message) => {
-    errors.push(key === undefined ? { file, message } : { file, key, message });
-  };
+function readXliffFile(file, code, sourceLocale, errors, fragment = false) {
+  const report = reporterFor(errors, file);
+  /** What `code` is in messages: a main file is named by it, a fragment sits in its directory. */
+  const named = fragment ? "the language" : "the file name";
   /** @param {string} message */
   const fail = (message) => report(undefined, message);
 
@@ -625,11 +673,14 @@ function readXliffFile(file, code, sourceLocale, errors) {
   }
 
   const isSource = code === sourceLocale;
-  try {
-    const canonical = Intl.getCanonicalLocales(code)[0];
-    if (canonical !== code) fail(`the file name is not a canonical BCP 47 tag, expected ${canonical}.xlf`);
-  } catch {
-    fail("the file name is not a BCP 47 language tag");
+  if (!fragment) {
+    // The language itself, checked once, with its main file.
+    try {
+      const canonical = Intl.getCanonicalLocales(code)[0];
+      if (canonical !== code) fail(`the file name is not a canonical BCP 47 tag, expected ${canonical}.xlf`);
+    } catch {
+      fail("the file name is not a BCP 47 language tag");
+    }
   }
 
   const version = root.attrs["version"];
@@ -640,14 +691,14 @@ function readXliffFile(file, code, sourceLocale, errors) {
   if (srcLang === undefined) {
     fail("missing srcLang attribute");
   } else if (isSource) {
-    if (srcLang !== code) fail(`srcLang ${JSON.stringify(srcLang)} must equal the file name ${JSON.stringify(code)}`);
+    if (srcLang !== code) fail(`srcLang ${JSON.stringify(srcLang)} must equal ${named} ${JSON.stringify(code)}`);
   } else if (srcLang !== sourceLocale) {
     fail(`srcLang ${JSON.stringify(srcLang)} must be the source language ${JSON.stringify(sourceLocale)}`);
   }
   if (!isSource) {
     const trgLang = root.attrs["trgLang"];
     if (trgLang === undefined) fail("missing trgLang attribute");
-    else if (trgLang !== code) fail(`trgLang ${JSON.stringify(trgLang)} must equal the file name ${JSON.stringify(code)}`);
+    else if (trgLang !== code) fail(`trgLang ${JSON.stringify(trgLang)} must equal ${named} ${JSON.stringify(code)}`);
   }
 
   const files = childElements(root, XLIFF_NS, "file");
@@ -657,9 +708,15 @@ function readXliffFile(file, code, sourceLocale, errors) {
   }
   const fileEl = files[0];
 
-  const metadata = readMetadata(fileEl, fail);
-  if (metadata.sourceLanguage && srcLang !== undefined && metadata.sourceLanguage !== srcLang) {
-    fail(`metadata sourceLanguage ${JSON.stringify(metadata.sourceLanguage)} differs from srcLang ${JSON.stringify(srcLang)}`);
+  /** @type {ReturnType<typeof readMetadata>} */
+  let metadata = { name: "", author: "", version: "", sourceLanguage: "" };
+  if (fragment) {
+    if (languagePackGroups(fileEl).length > 0) fail(`language-pack metadata belongs in ${code}.xlf only`);
+  } else {
+    metadata = readMetadata(fileEl, fail);
+    if (metadata.sourceLanguage && srcLang !== undefined && metadata.sourceLanguage !== srcLang) {
+      fail(`metadata sourceLanguage ${JSON.stringify(metadata.sourceLanguage)} differs from srcLang ${JSON.stringify(srcLang)}`);
+    }
   }
 
   /** @type {RawUnit[]} */
@@ -674,8 +731,93 @@ function readXliffFile(file, code, sourceLocale, errors) {
 // ---------------------------------------------------------------------------------------
 
 /**
- * Loads every `*.xlf` file of `dir` (not recursive), validates them and returns the catalog.
- * Problems are collected in `errors`, nothing is thrown for bad content.
+ * The names of the `*.xlf` files among directory entries, sorted.
+ * @param {readonly fs.Dirent[]} entries
+ * @returns {string[]}
+ */
+function xliffNames(entries) {
+  return entries
+    .filter((e) => e.isFile() && e.name.endsWith(XLIFF_EXT))
+    .map((e) => e.name)
+    .sort(compareText);
+}
+
+/**
+ * The names of the fragment directories (`<code>.d`) among directory entries, sorted.
+ * @param {readonly fs.Dirent[]} entries
+ * @returns {string[]}
+ */
+function fragmentDirNames(entries) {
+  return entries
+    .filter((e) => e.isDirectory() && e.name.endsWith(FRAGMENT_DIR_EXT))
+    .map((e) => e.name)
+    .sort(compareText);
+}
+
+/**
+ * Every XLIFF file of a language directory: the main files `<code>.xlf`, then the fragment files
+ * of each `<code>.d` directory, as absolute paths. Nothing is validated; this is the list of
+ * files to watch or to hand to a bundler. Empty when the directory cannot be read.
+ * @param {string} dir
+ * @returns {string[]}
+ */
+export function languageFiles(dir) {
+  const root = path.resolve(dir);
+  try {
+    const entries = fs.readdirSync(root, { withFileTypes: true });
+    const files = xliffNames(entries).map((name) => path.join(root, name));
+    for (const name of fragmentDirNames(entries)) {
+      const fragmentDir = path.join(root, name);
+      const inside = fs.readdirSync(fragmentDir, { withFileTypes: true });
+      files.push(...xliffNames(inside).map((file) => path.join(fragmentDir, file)));
+    }
+    return files;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The fragment files of a language: the `*.xlf` files directly in `<code>.d`, by file name. A
+ * name that is not a valid area name is reported and left out.
+ * @param {string} root The language directory.
+ * @param {string} code
+ * @param {Diagnostic[]} errors
+ * @returns {{ files: string[], complete: boolean }} `complete` is false when the directory or a
+ *   file could not be used, so the language may lack units.
+ */
+function listFragments(root, code, errors) {
+  const dir = path.join(root, `${code}${FRAGMENT_DIR_EXT}`);
+  /** @type {fs.Dirent[]} */
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    errors.push({ file: dir, message: `cannot read the fragment directory: ${errorText(error)}` });
+    return { files: [], complete: false };
+  }
+  /** @type {string[]} */
+  const files = [];
+  let complete = true;
+  for (const name of xliffNames(entries)) {
+    const file = path.join(dir, name);
+    if (FRAGMENT_NAME_PATTERN.test(name.slice(0, -XLIFF_EXT.length))) {
+      files.push(file);
+    } else {
+      errors.push({
+        file,
+        message: `invalid fragment file name: use an area name of lowercase letters, digits and hyphens, starting with a letter, followed by ${XLIFF_EXT}`,
+      });
+      complete = false;
+    }
+  }
+  return { files, complete };
+}
+
+/**
+ * Loads every `*.xlf` file of `dir` (not recursive) with the fragment files of the `<code>.d`
+ * directories beside them, validates them and returns the catalog. Problems are collected in
+ * `errors`, nothing is thrown for bad content.
  * @param {string} dir
  * @param {{ source?: string }} [options] `source` is the source language, `en` by default.
  * @returns {Catalog}
@@ -685,68 +827,112 @@ export function loadCatalog(dir, options = {}) {
   /** @type {Diagnostic[]} */
   const errors = [];
   /** @type {Catalog} */
-  const catalog = { sourceLocale, locales: [], messages: new Map(), errors, warnings: [] };
+  const catalog = { sourceLocale, locales: [], messages: new Map(), files: new Map(), errors, warnings: [] };
   const root = path.resolve(dir);
 
-  /** @type {string[]} */
-  let names;
+  /** @type {fs.Dirent[]} */
+  let entries;
   try {
-    names = fs
-      .readdirSync(root, { withFileTypes: true })
-      .filter((e) => e.isFile() && e.name.endsWith(".xlf"))
-      .map((e) => e.name)
-      .sort(compareText);
+    entries = fs.readdirSync(root, { withFileTypes: true });
   } catch (error) {
     errors.push({ file: root, message: `cannot read the language directory: ${errorText(error)}` });
     return catalog;
   }
-  if (!names.includes(`${sourceLocale}.xlf`)) {
-    errors.push({ file: path.join(root, `${sourceLocale}.xlf`), message: "source language file not found" });
+  const names = xliffNames(entries);
+  if (!names.includes(`${sourceLocale}${XLIFF_EXT}`)) {
+    errors.push({ file: path.join(root, `${sourceLocale}${XLIFF_EXT}`), message: "source language file not found" });
   }
+  const fragmentDirs = fragmentDirNames(entries);
+  for (const name of fragmentDirs) {
+    const main = `${name.slice(0, -FRAGMENT_DIR_EXT.length)}${XLIFF_EXT}`;
+    if (!names.includes(main)) {
+      errors.push({ file: path.join(root, name), message: `fragment directory without its main file ${main}` });
+    }
+  }
+
+  /**
+   * A file path relative to the language directory, with forward slashes.
+   * @param {string} file
+   */
+  const relative = (file) => path.relative(root, file).split(path.sep).join("/");
+  /**
+   * The way a message names another file: `i18n/en.d/cluster.xlf`.
+   * @param {string} file
+   */
+  const labelOf = (file) => `${path.basename(root)}/${relative(file)}`;
 
   // The source language first, then the translations by code.
   const codes = names
-    .map((n) => n.slice(0, -".xlf".length))
+    .map((n) => n.slice(0, -XLIFF_EXT.length))
     .sort((a, b) => (a === sourceLocale ? -1 : b === sourceLocale ? 1 : compareText(a, b)));
 
   /** @type {Map<string, Message> | undefined} */
   let sourceMessages;
-  /** @type {Set<string>} */
-  let sourceKeys = new Set();
+  /**
+   * Source key to the file of its definition, also for units that failed validation.
+   * @type {Map<string, string>}
+   */
+  let sourceSeen = new Map();
+  /** False when a file of the source language was unusable, so its keys are not all known. */
+  let sourceComplete = true;
+  /**
+   * The file of a source message, relative to the language directory.
+   * @param {string} key
+   */
+  const sourceFileOf = (key) => relative(sourceSeen.get(key) ?? path.join(root, `${sourceLocale}${XLIFF_EXT}`));
 
   for (const code of codes) {
-    const file = path.join(root, `${code}.xlf`);
-    const raw = readXliffFile(file, code, sourceLocale, errors);
-    if (raw === null) continue;
+    const mainFile = path.join(root, `${code}${XLIFF_EXT}`);
+    const main = readXliffFile(mainFile, code, sourceLocale, errors);
+    // The fragments of an unusable language are not read, they would only add noise.
+    if (main === null) continue;
 
-    /** @param {string | undefined} key @param {string} message */
-    const report = (key, message) => {
-      errors.push(key === undefined ? { file, message } : { file, key, message });
-    };
-    catalog.locales.push({ code, name: raw.meta.name, author: raw.meta.author, version: raw.meta.version, file });
+    const listed = fragmentDirs.includes(`${code}${FRAGMENT_DIR_EXT}`)
+      ? listFragments(root, code, errors)
+      : { files: /** @type {string[]} */ ([]), complete: true };
+    /** @type {RawFile[]} */
+    const parts = [main];
+    /** False when a file of this language was unusable, so units may be missing. */
+    let complete = listed.complete;
+    for (const fragmentFile of listed.files) {
+      const part = readXliffFile(fragmentFile, code, sourceLocale, errors, true);
+      if (part === null) complete = false;
+      else parts.push(part);
+    }
+
+    catalog.files.set(code, [mainFile, ...listed.files]);
+    catalog.locales.push({ code, name: main.meta.name, author: main.meta.author, version: main.meta.version, file: mainFile });
 
     /** @type {Map<string, Message>} */
     const messages = new Map();
     catalog.messages.set(code, messages);
 
-    /** @type {Set<string>} */
-    const seen = new Set();
-    for (const unit of raw.units) {
+    // The units of the main file, then of the fragments by name, as one list.
+    const defined = parts.flatMap((part) => part.units.map((unit) => ({ unit, file: part.file })));
+
+    /**
+     * Key to the file of its first definition.
+     * @type {Map<string, string>}
+     */
+    const seen = new Map();
+    for (const { unit, file } of defined) {
       const key = unit.key;
+      const report = reporterFor(errors, file);
       /** @param {string} message */
       const fail = (message) => report(key, message);
 
-      if (seen.has(key)) {
-        fail("duplicate unit id");
+      const first = seen.get(key);
+      if (first !== undefined) {
+        fail(first === file ? "duplicate unit id" : `duplicate unit id: also defined in ${labelOf(first)}`);
         continue;
       }
-      seen.add(key);
+      seen.set(key, file);
       // A unit with an invalid key is still checked, but never becomes a message.
       const validKey = KEY_PATTERN.test(key);
       if (!validKey) fail("the unit id is not a valid message key (lowercase dotted path such as area.some.key)");
       if (!unit.usable) continue;
 
-      if (raw.isSource) {
+      if (main.isSource) {
         const text = unit.source ?? "";
         if (text === "") {
           fail("empty <source>");
@@ -761,13 +947,14 @@ export function loadCatalog(dir, options = {}) {
       if (sourceMessages === undefined) continue; // the source file is unusable, already reported
       const original = sourceMessages.get(key);
       if (original === undefined) {
-        // A source unit that failed validation is reported once, for the source file.
-        if (!sourceKeys.has(key)) fail(`the key is not defined in ${sourceLocale}.xlf`);
+        // A source unit that failed validation is reported once, for the source file; and when
+        // a source file is unusable, its keys are not known.
+        if (sourceComplete && !sourceSeen.has(key)) fail(`the key is not defined in ${sourceLocale}.xlf`);
         continue;
       }
       if (unit.source !== original.text) {
         fail(
-          `stale translation: <source> is ${JSON.stringify(unit.source)} but ${sourceLocale}.xlf now says ${JSON.stringify(original.text)}`,
+          `stale translation: <source> is ${JSON.stringify(unit.source)} but ${sourceFileOf(key)} now says ${JSON.stringify(original.text)}`,
         );
       }
       if (unit.target === undefined) {
@@ -784,22 +971,27 @@ export function loadCatalog(dir, options = {}) {
       for (const [name, type] of compiled.args) {
         const expected = original.args.get(name);
         if (expected === undefined) {
-          fail(`<target> uses the argument "${name}", which ${sourceLocale}.xlf does not have`);
+          fail(`<target> uses the argument "${name}", which ${sourceFileOf(key)} does not have`);
           consistent = false;
         } else if (expected !== type) {
-          fail(`argument "${name}" is ${expected} in ${sourceLocale}.xlf but ${type} in <target>`);
+          fail(`argument "${name}" is ${expected} in ${sourceFileOf(key)} but ${type} in <target>`);
           consistent = false;
         }
       }
       if (consistent) messages.set(key, toMessage(unit, unit.target, compiled));
     }
 
-    if (raw.isSource) {
+    if (main.isSource) {
       sourceMessages = messages;
-      sourceKeys = seen;
-    } else if (sourceMessages !== undefined) {
+      sourceSeen = seen;
+      sourceComplete = complete;
+    } else if (sourceMessages !== undefined && complete) {
+      const report = reporterFor(errors, mainFile);
       for (const key of sourceMessages.keys()) {
-        if (!seen.has(key)) report(key, `no translation: every built-in language must define all keys of ${sourceLocale}.xlf`);
+        if (seen.has(key)) continue;
+        const where = sourceFileOf(key);
+        const detail = where === `${sourceLocale}${XLIFF_EXT}` ? "" : ` (the key is defined in ${where})`;
+        report(key, `no translation: every built-in language must define all keys of ${sourceLocale}.xlf${detail}`);
       }
     }
   }

@@ -1410,6 +1410,7 @@ impl NodeRegistry {
             group: None,
             group_limit: None,
             idempotency: None,
+            node: None,
         };
         let job = engine.run_inline(spec, cx).await?;
         Ok(job.revision)

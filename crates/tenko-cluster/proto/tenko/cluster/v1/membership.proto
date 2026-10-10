@@ -1,0 +1,147 @@
+// Tenko node transport, major version 1: controller membership and write forwarding.
+// See handshake.proto for the transport, the errors and the evolution rule.
+//
+// The service Cluster is how controllers join, forward writes and reads to the leader,
+// compare their state and hand over the installation's key encryption keys. A caller
+// needs the role `controller` and a member record; the exception is Join, which a
+// controller that has just been enrolled calls before it has a member record. It is
+// filled in by work package WP3.1a (the format of the key transfer comes from WP3.4a);
+// until then every method answers UNIMPLEMENTED.
+//
+// Refusals are gRPC statuses with the metadata entry `tenko-error-code`; a forwarded
+// write that the leader rejects keeps the code the store gave it.
+syntax = "proto3";
+
+package tenko.cluster.v1;
+
+// Membership of the controller cluster and the calls one controller makes to another.
+service Cluster {
+  // A newly enrolled controller asks to join. Any member accepts the call and forwards it
+  // to the leader, which adds the caller as a learner and answers with the membership.
+  // The caller's certificate need not have a member record yet; it must have the role
+  // `controller`.
+  rpc Join(JoinRequest) returns (JoinResponse);
+  // Forwards a write batch from a follower to the leader. The leader queues the batch to
+  // its commit queue and answers with the commit once it is durable. Refused with
+  // UNAVAILABLE when the callee is not the leader.
+  rpc Propose(ProposeRequest) returns (ProposeResponse);
+  // Asks the leader for a log index that is safe to read at: the leader confirms its
+  // leadership with a quorum first. The follower waits until it has applied that index.
+  rpc ReadIndex(ReadIndexRequest) returns (ReadIndexResponse);
+  // Lists the members as the callee sees them, with the leader and the term.
+  rpc Members(MembersRequest) returns (MembersResponse);
+  // A SHA-256 over every table of the replicated state at a revision, to compare members.
+  rpc Digest(DigestRequest) returns (DigestResponse);
+  // Hands the installation's key encryption key generations to a joining controller,
+  // sealed to a key only the joiner holds.
+  rpc TransferKek(TransferKekRequest) returns (TransferKekResponse);
+}
+
+message JoinRequest {
+  // The node id of the joining controller, from its enrolment (1001 and up).
+  uint64 node_id = 1;
+  // The cluster port address of the joining controller as `host:port`.
+  string address = 2;
+  // The software version of the joining controller.
+  string version = 3;
+  // Optional features the joining controller supports; see HelloRequest.
+  repeated string capabilities = 4;
+  // The data format version of the joining controller's binary. The cluster refuses a
+  // joiner that does not know its format (`cluster.join.format_newer`).
+  uint32 data_format = 5;
+}
+
+message Member {
+  // The node id of the controller.
+  uint64 node_id = 1;
+  // Its cluster port address as `host:port`.
+  string address = 2;
+  // Whether it votes (true) or only replicates (a learner).
+  bool voter = 3;
+  // The highest log index known to be replicated on it. Absent when the callee is not
+  // the leader or knows nothing yet.
+  optional uint64 matched = 4;
+  // How many log entries it is behind the leader. Absent when `matched` is.
+  optional uint64 lag_entries = 5;
+  // Its software version.
+  string version = 6;
+}
+
+message JoinResponse {
+  // The node id of the leader.
+  uint64 leader_id = 1;
+  // The current term.
+  uint64 term = 2;
+  // The members after the joiner was added.
+  repeated Member members = 3;
+}
+
+message ProposeRequest {
+  // The encoding of `batch`: `tenko-batch/cbor-1`.
+  string wire = 1;
+  // The store write batch, CBOR.
+  bytes batch = 2;
+}
+
+message ProposeResponse {
+  // The encoding of `committed`: `tenko-batch/cbor-1`.
+  string wire = 1;
+  // The store's commit receipt for the batch, CBOR. A refused batch is a gRPC status with
+  // the metadata entry `tenko-error-code`, not a response.
+  bytes committed = 2;
+}
+
+message ReadIndexRequest {}
+
+message ReadIndexResponse {
+  // The log index to read at.
+  uint64 log_index = 1;
+  // The term in which the leader confirmed it.
+  uint64 term = 2;
+  // The node id of the leader that answered.
+  uint64 leader_id = 3;
+}
+
+message MembersRequest {}
+
+message MembersResponse {
+  // The node id of the leader as the callee knows it; 0 when it knows none.
+  uint64 leader_id = 1;
+  // The current term.
+  uint64 term = 2;
+  // The members.
+  repeated Member members = 3;
+}
+
+message DigestRequest {
+  // The revision to digest; 0 for the newest revision the callee has applied.
+  uint64 revision = 1;
+}
+
+message DigestResponse {
+  // The revision that was digested.
+  uint64 revision = 1;
+  // The SHA-256 over every table at that revision, 32 bytes.
+  bytes sha256 = 2;
+  // The number of tables in the digest.
+  uint64 tables = 3;
+  // The number of entries in the digest.
+  uint64 entries = 4;
+}
+
+message TransferKekRequest {
+  // A public key the joiner generated for this call; the answer is sealed to it.
+  bytes ephemeral_public_key = 1;
+  // The id of the join token the joiner enrolled with, so the call can be tied to the
+  // enrolment in the audit log.
+  string join_token_id = 2;
+}
+
+message TransferKekResponse {
+  // The format of `sealed`, named by the key distribution of the installation.
+  string format = 1;
+  // The key encryption key generations, sealed to `ephemeral_public_key`.
+  bytes sealed = 2;
+  // The ids of the generations in `sealed`, newest last.
+  repeated string generation_ids = 3;
+}

@@ -67,6 +67,8 @@ const SEGMENT_MODULE: Readonly<Record<string, ModuleName>> = {
   dhcp: "dhcp",
   discovery: "discovery",
   topology: "discovery",
+  // The scans of the probes (WP3.0 placeholder, WP3.11a): reached from Discovery, no rail area.
+  scans: "discovery",
 };
 
 /** The module an application path belongs to, or null for the paths every installation has. */

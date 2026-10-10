@@ -14,6 +14,7 @@ use super::{
     types::{ProfileInfo, SetupRequest, SetupState},
 };
 use crate::{
+    authz::AuthImage,
     error::AuthError,
     lockout::{LockoutMode, LockoutPolicy, ThrottleKey},
     model::{INSTALLATION, Installation, SETTINGS, USER_NAMES, USERS, UserRecord},
@@ -48,9 +49,12 @@ pub fn validate_host_name(name: &str) -> Result<String, AuthError> {
 }
 
 /// The checked host name, language, administrator name and display name of a request.
-fn validated(request: &SetupRequest) -> Result<(String, String, String, String), AuthError> {
+fn validated(
+    request: &SetupRequest,
+    image: &AuthImage,
+) -> Result<(String, String, String, String), AuthError> {
     let host_name = validate_host_name(&request.host_name)?;
-    let language = valid_language(&request.language)?;
+    let language = valid_language(&request.language, image)?;
     let name = valid_user_name(&request.admin.name)?;
     let display_name = request
         .admin
@@ -149,7 +153,7 @@ impl AuthService {
                 .record_failure(&setup_key(), &setup_policy(), ctx.now);
             return Err(AuthError::SetupTokenInvalid);
         }
-        let (host_name, language, name, display_name) = validated(request)?;
+        let (host_name, language, name, display_name) = validated(request, &self.index.image())?;
         let settings = request.profile.defaults();
         let (password, _) = self
             .new_password(

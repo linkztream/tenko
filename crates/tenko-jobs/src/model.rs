@@ -141,6 +141,11 @@ pub struct JobSpec {
     /// Idempotency key of the submitting request (API-04).
     #[serde(default)]
     pub idempotency: Option<IdempotencyKey>,
+    /// The controller that must run the job when its steps are tied to one host, such as
+    /// the install of a release that this controller downloaded (Slice 3). `None`, the
+    /// default, lets the job runner of the leader run it wherever that is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<NodeId>,
 }
 
 /// One step of a job.
@@ -1017,6 +1022,7 @@ mod tests {
                 group: Some(GroupKey::new("connect.unifi:lab").expect("group")),
                 group_limit: None,
                 idempotency: None,
+                node: None,
             },
             started: None,
             state: JobState::Waiting,
@@ -1047,7 +1053,27 @@ mod tests {
             json["steps"][0]["state"]["state"],
             "waiting_for_observation"
         );
-        assert_eq!(serde_json::from_value::<Job>(json).expect("json"), job);
+        assert_eq!(
+            serde_json::from_value::<Job>(json.clone()).expect("json"),
+            job
+        );
+        assert!(json["spec"].get("node").is_none(), "no node: not written");
+
+        // A job pinned to one controller keeps its node; a job stored before the field
+        // existed reads as not pinned.
+        let mut pinned = job.clone();
+        pinned.spec.node = Some(NodeId(1002));
+        let back: Job = from_cbor(&to_cbor(&pinned).expect("cbor")).expect("cbor");
+        assert_eq!(back.spec.node, Some(NodeId(1002)));
+        let mut older = serde_json::to_value(&pinned).expect("json");
+        older["spec"].as_object_mut().expect("spec").remove("node");
+        assert_eq!(
+            serde_json::from_value::<Job>(older)
+                .expect("json")
+                .spec
+                .node,
+            None
+        );
     }
 
     #[test]

@@ -40,8 +40,9 @@ const X_ACCEL_BUFFERING: HeaderName = HeaderName::from_static("x-accel-buffering
 #[into_params(parameter_in = Query)]
 #[allow(dead_code)]
 struct EventsQuery {
-    /// Comma-separated topics: `ipam`, `jobs`, `audit`, `import`, `system`, `admin`; all
-    /// when absent.
+    /// Comma-separated topics: `ipam`, `jobs`, `audit`, `import`, `system`, `admin`,
+    /// `connectors`, `discovery`, `secrets`, `cluster`, `metrics`; all except `metrics` when
+    /// absent.
     topics: Option<String>,
     /// Resume after this store revision (the `revision` of a list); `Last-Event-ID` wins
     /// on reconnects.

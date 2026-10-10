@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="scans">
+      <unit id="scans.title">
+        <notes><note category="description">Title of the scans page and its entry in the browser tab.</note></notes>
+        <segment><source>Scans</source></segment>
+      </unit>
+      <unit id="scans.placeholder">
+        <notes><note category="description">Placeholder text of the scans page until the page itself exists.</note></notes>
+        <segment><source>The scan page arrives with a later update.</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

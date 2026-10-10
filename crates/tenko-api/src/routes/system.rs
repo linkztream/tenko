@@ -1,14 +1,17 @@
-//! Health, status, the internal CA root, the OpenAPI document and metrics; in-app updates
-//! and the module switch in the submodules [`updates`] and [`modules`].
+//! Health, status, the internal CA root and the OpenAPI document; in-app updates and the
+//! module switch in the submodules [`updates`] and [`modules`]. The metrics moved to their
+//! own area, `routes/metrics.rs` (WP3.0, owned by WP3.5).
 //!
 //! Area: system. Owner: WP1.7 (`GET /system/ca-root`: WP1.8b; [`updates`] and [`modules`]:
 //! WP2.10).
 //! Requirements: API-01, API-10, OPS-05, OPS-19, OPS-22, OPS-24, OPS-25.
 //!
 //! Liveness, readiness, the CA root and the OpenAPI document are open. `GET /system/status`
-//! needs an authenticated principal with read access to the system. `GET /metrics` needs a
-//! token with the `metrics` scope; until scopes exist (WP1.2, Slice 3) any authenticated
-//! principal may read it.
+//! needs an authenticated principal with read access to the system.
+//!
+//! `GET /openapi.json` answers the committed `docs/api/openapi.json`, embedded at build
+//! time, byte for byte: the document that `tenko openapi` prints and CI compares with the
+//! generated one, so the route, the file and the command agree (E3).
 //!
 //! `GET /system/ca-root` answers the root certificate of the internal CA while the listener
 //! is in TLS mode a, so that admin clients and the first-run wizard can install it (Q5). The
@@ -28,7 +31,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use tenko_cluster::ca::{TlsMode, TlsService};
-use tenko_core::{Action, ObjectKind, ObjectRef, Principal, Timestamp};
+use tenko_core::{Action, ObjectKind, ObjectRef, Timestamp};
 use tenko_store::{ReadConsistency, StoreRole};
 use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
@@ -36,7 +39,6 @@ use uuid::Uuid;
 use crate::{
     dto::system::{Health, NodeStatus, Readiness, StoreSummary, SystemStatus, UiStatus},
     extract::Ctx,
-    middleware::metrics::Sample,
     problem::{ApiError, ProblemDetails, codes},
     state::AppState,
 };
@@ -53,11 +55,15 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(system_status))
         .routes(routes!(get_ca_root))
         .routes(routes!(openapi_document))
-        .routes(routes!(metrics))
 }
 
-/// Media type of `GET /metrics`.
-pub const OPENMETRICS: &str = "application/openmetrics-text; version=1.0.0; charset=utf-8";
+/// The committed OpenAPI document (`docs/api/openapi.json`), served by
+/// `GET /openapi.json`. `tenko openapi` writes it anew; CI fails when it differs from the
+/// generated document.
+pub const OPENAPI_DOCUMENT: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../docs/api/openapi.json"
+));
 
 /// Media type of `GET /system/ca-root`.
 pub const PEM_FILE: &str = "application/x-pem-file";
@@ -334,99 +340,15 @@ pub(crate) fn system_object() -> ObjectRef {
         (status = 200, description = "The OpenAPI document", body = Object, content_type = "application/json")
     )
 )]
-async fn openapi_document() -> Json<utoipa::openapi::OpenApi> {
-    Json(crate::openapi())
-}
-
-#[utoipa::path(
-    get,
-    path = "/metrics",
-    tag = "system",
-    operation_id = "metrics",
-    summary = "Metrics in the OpenMetrics text format; needs a token with the metrics scope",
-    responses(
-        (status = 200, description = "Counters and gauges in the OpenMetrics text format", body = String, content_type = "application/openmetrics-text"),
-        (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The token lacks the metrics scope", body = ProblemDetails, content_type = "application/problem+json")
+async fn openapi_document() -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        )],
+        OPENAPI_DOCUMENT,
     )
-)]
-async fn metrics(State(state): State<AppState>, Ctx(ctx): Ctx) -> Result<Response, ApiError> {
-    require_metrics_scope(&state, &ctx.principal)?;
-    let text = render_metrics(&state, ctx.now);
-    let mut response = text.into_response();
-    response
-        .headers_mut()
-        .insert(header::CONTENT_TYPE, HeaderValue::from_static(OPENMETRICS));
-    Ok(response)
-}
-
-/// The scope check of `GET /metrics`. Token scopes arrive with WP1.2 and Slice 3; until
-/// then every authenticated principal that may read the system passes.
-fn require_metrics_scope(state: &AppState, principal: &Principal) -> Result<(), ApiError> {
-    state.authorize(principal, Action::Read, &system_object())
-}
-
-/// The metrics text: request counters, event hub, store and TLS gauges.
-pub(crate) fn render_metrics(state: &AppState, now: Timestamp) -> String {
-    let platform = &state.platform;
-    let store = state.store.status();
-    let hub = state.events();
-    #[allow(clippy::cast_precision_loss)]
-    let mut samples = vec![
-        Sample::gauge(
-            "tenko_build_info",
-            "Version of the server, as a label-free 1.",
-            1.0,
-        ),
-        Sample::gauge(
-            "tenko_uptime_seconds",
-            "Seconds since the API started.",
-            platform.started.elapsed().as_secs_f64(),
-        ),
-        Sample::gauge(
-            "tenko_sse_subscribers",
-            "Open server-sent event streams.",
-            hub.subscribers() as f64,
-        ),
-        Sample::counter(
-            "tenko_sse_events",
-            "Events published to subscribers.",
-            hub.published() as f64,
-        ),
-        Sample::gauge(
-            "tenko_store_revision",
-            "Last applied store revision.",
-            store.revision.get() as f64,
-        ),
-        Sample::gauge(
-            "tenko_audit_head",
-            "Sequence number of the newest audit record.",
-            store.audit_head.get() as f64,
-        ),
-        Sample::gauge(
-            "tenko_store_journal_entries",
-            "Change sets in the store journal.",
-            store.journal_len as f64,
-        ),
-        Sample::gauge(
-            "tenko_store_data_bytes",
-            "Bytes of live data in the store.",
-            store.data_bytes as f64,
-        ),
-    ];
-    if let Some(listener) = platform.listener.load_full()
-        && let Some(certificate) = listener.status(now).0.certificate
-        && let Some(not_after) = certificate.not_after
-    {
-        #[allow(clippy::cast_precision_loss)]
-        let seconds = (not_after.0 - now.0).whole_seconds() as f64;
-        samples.push(Sample::gauge(
-            "tenko_tls_certificate_expiry_seconds",
-            "Seconds until the served certificate expires.",
-            seconds,
-        ));
-    }
-    platform.metrics.render(&samples)
+        .into_response()
 }
 
 #[cfg(test)]
@@ -541,6 +463,27 @@ mod tests {
             .expect("body");
         let json: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
         json["version"].as_str().expect("version").to_owned()
+    }
+
+    #[tokio::test]
+    async fn the_openapi_route_serves_the_committed_bytes() {
+        let request = Request::get("/api/v1/openapi.json")
+            .body(Body::empty())
+            .expect("request");
+        let response = crate::router().oneshot(request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
+        let body = to_bytes(response.into_body(), 16 * 1024 * 1024)
+            .await
+            .expect("body");
+        assert_eq!(body.as_ref(), OPENAPI_DOCUMENT.as_bytes());
+        assert!(
+            OPENAPI_DOCUMENT.ends_with(
+                "}
+"
+            ),
+            "the pretty-printed file"
+        );
     }
 
     #[tokio::test]

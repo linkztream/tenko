@@ -79,7 +79,7 @@ describe("which modules run", () => {
 describe("the shell without IPAM", () => {
   it("shows every area while all modules run", async () => {
     await openShell("/jobs");
-    await waitFor(() => expect(railNames()).toHaveLength(11));
+    await waitFor(() => expect(railNames()).toHaveLength(12));
     expect(railNames().join(" ")).toContain("IPAM");
   });
 

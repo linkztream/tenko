@@ -36,7 +36,8 @@ function withQuery(path: string, query?: Record<string, string | undefined>): st
   return qs ? `${path}?${qs}` : path;
 }
 
-export type SettingsSection = "security" | "users";
+/** The sections of the settings route and the sub-pages that have a route of their own. */
+export type SettingsSection = "security" | "users" | "access" | "audit-export" | "vault" | "backup" | "languages";
 export type AccountSection = "security" | "sessions" | "tokens";
 
 /** Where an object of the move preview comes from: `host:<id>` or `address:<id>`. */

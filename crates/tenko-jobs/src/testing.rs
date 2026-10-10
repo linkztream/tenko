@@ -557,6 +557,7 @@ pub fn spec(steps: Vec<StepSpec>) -> JobSpec {
         group: None,
         group_limit: None,
         idempotency: None,
+        node: None,
     }
 }
 

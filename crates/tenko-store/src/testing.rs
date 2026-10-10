@@ -16,6 +16,23 @@
 //! repository) and maps the configuration hints onto its own settings. Each test also
 //! exists as a public async function in [`conformance`], so an implementation can run a
 //! single test with its own runtime.
+//!
+//! # Followers (Slice 3)
+//!
+//! A replicated store also passes the follower cases: writes through a member that does
+//! not lead (forwarded to the leader, readable on the serving member at once),
+//! linearizable reads on a follower, watch replay across a leader change, and one
+//! consistent view of who leads. They take a [`ClusterFactory`] that builds a
+//! [`ClusterFixture`]; `MemStore` runs them through [`SimulatedCluster`], two handles over
+//! one store, and the three-node fixture of the Raft store (WP3.1a) runs them for real:
+//!
+//! ```ignore
+//! use tenko_store::{mem::MemStore, testing::{ConformanceConfig, SimulatedCluster}};
+//!
+//! tenko_store::follower_conformance_tests!(|config: ConformanceConfig| async move {
+//!     SimulatedCluster::new(MemStore::new(config.mem_store_config()))
+//! });
+//! ```
 
 use std::{
     collections::BTreeMap,
@@ -27,12 +44,14 @@ use std::{
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use tenko_core::{Revision, TableName};
+use tenko_core::{NodeId, Revision, TableName};
+use tokio::sync::watch;
 
 use crate::{
     api::{
-        ChangeSet, DerivedIndex, IndexImage, KeyRange, ReadView, Store, StoreError, WatchFilter,
-        downcast_image,
+        ChangeSet, ChangeStream, Committed, DerivedIndex, IndexImage, KeyRange, Leadership,
+        MemberStatus, QuorumState, ReadConsistency, ReadView, Store, StoreError, StoreRole,
+        StoreStatus, WatchFilter, WriteBatch, downcast_image,
     },
     mem::MemStoreConfig,
 };
@@ -147,8 +166,237 @@ macro_rules! conformance_tests {
             concurrent_proposers,
             concurrent_counter_increments_with_retry,
             status_reports_fields,
+            leadership_of_a_single_member,
         );
     };
+}
+
+/// Generates one `#[test]` per follower case for a cluster factory expression, which must
+/// implement [`ClusterFactory`](crate::testing::ClusterFactory), for example a closure
+/// `|config: ConformanceConfig| async move { SimulatedCluster::new(...) }`.
+#[macro_export]
+macro_rules! follower_conformance_tests {
+    ($factory:expr) => {
+        $crate::__conformance_tests!(
+            $factory;
+            follower_writes_read_their_own_writes,
+            follower_linearizable_reads_see_earlier_commits,
+            follower_watch_replays_across_a_leader_change,
+            members_agree_on_the_leader,
+        );
+    };
+}
+
+/// A replicated store under test with at least two members: the three-node fixture of the
+/// Raft store (WP3.1a), or [`SimulatedCluster`] over one store.
+#[async_trait::async_trait]
+pub trait ClusterFixture: Send + Sync {
+    /// The handle of the member that leads now; waits until there is one.
+    async fn leader(&self) -> Arc<dyn Store>;
+
+    /// The handle of a member that does not lead now.
+    async fn follower(&self) -> Arc<dyn Store>;
+
+    /// Moves leadership to another member and returns once the new leader has taken
+    /// office: its [`Store::leadership`] shows `is_self`.
+    async fn change_leader(&self);
+}
+
+/// Creates fresh, empty replicated stores for the follower cases.
+pub trait ClusterFactory: Send + Sync {
+    /// The fixture type.
+    type Fixture: ClusterFixture;
+
+    /// Builds an empty replicated store honouring `config`.
+    fn create(&self, config: ConformanceConfig) -> BoxFuture<'_, Self::Fixture>;
+}
+
+impl<F, Fut, C> ClusterFactory for F
+where
+    F: Fn(ConformanceConfig) -> Fut + Send + Sync,
+    Fut: Future<Output = C> + Send + 'static,
+    C: ClusterFixture,
+{
+    type Fixture = C;
+
+    fn create(&self, config: ConformanceConfig) -> BoxFuture<'_, C> {
+        Box::pin(self(config))
+    }
+}
+
+/// Two members over one store, for running the follower cases against a store without
+/// replication (`MemStore`). Member 1 leads in term 1; [`ClusterFixture::change_leader`]
+/// swaps the roles and starts the next term.
+///
+/// A member that does not lead behaves as the contract asks of a follower, as far as one
+/// shared store can show it: `propose` hands the batch to the store (the leader) and then
+/// waits until the member's own view has reached the committed revision, so the write is
+/// readable on the member that served it; every read, watch and index is the shared
+/// store's, so lag never shows.
+pub struct SimulatedCluster {
+    shared: Arc<Simulation>,
+    members: [Arc<SimulatedMember>; 2],
+}
+
+struct Simulation {
+    store: Arc<dyn Store>,
+    /// The index of the leading member and the term.
+    state: Mutex<(usize, u64)>,
+    /// The leadership each member sees.
+    seen: [watch::Sender<Option<Leadership>>; 2],
+}
+
+impl Simulation {
+    fn state(&self) -> (usize, u64) {
+        *self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn publish(&self) {
+        let (leader, term) = self.state();
+        for (index, seen) in self.seen.iter().enumerate() {
+            seen.send_replace(Some(Leadership {
+                leader: SimulatedCluster::node(leader),
+                term,
+                is_self: index == leader,
+            }));
+        }
+    }
+}
+
+impl SimulatedCluster {
+    /// Two members over `store`; member 1 leads in term 1.
+    pub fn new(store: impl Store) -> Self {
+        let shared = Arc::new(Simulation {
+            store: Arc::new(store),
+            state: Mutex::new((0, 1)),
+            seen: [watch::channel(None).0, watch::channel(None).0],
+        });
+        shared.publish();
+        let members = [0, 1].map(|index| {
+            Arc::new(SimulatedMember {
+                index,
+                shared: Arc::clone(&shared),
+            })
+        });
+        Self { shared, members }
+    }
+
+    /// The node id of member `index` (1 and 2).
+    fn node(index: usize) -> NodeId {
+        NodeId(u64::try_from(index).unwrap_or(0) + 1)
+    }
+
+    /// The member with node id 1 or 2, whatever its role.
+    ///
+    /// # Panics
+    ///
+    /// Panics for another id.
+    pub fn member(&self, node: NodeId) -> Arc<SimulatedMember> {
+        let index = usize::try_from(node.0.saturating_sub(1)).unwrap_or(usize::MAX);
+        Arc::clone(self.members.get(index).expect("node 1 or 2"))
+    }
+}
+
+#[async_trait::async_trait]
+impl ClusterFixture for SimulatedCluster {
+    async fn leader(&self) -> Arc<dyn Store> {
+        let (leader, _) = self.shared.state();
+        self.members[leader].clone()
+    }
+
+    async fn follower(&self) -> Arc<dyn Store> {
+        let (leader, _) = self.shared.state();
+        self.members[1 - leader].clone()
+    }
+
+    async fn change_leader(&self) {
+        {
+            let mut state = self
+                .shared
+                .state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            *state = (1 - state.0, state.1 + 1);
+        }
+        self.shared.publish();
+    }
+}
+
+/// One member of a [`SimulatedCluster`].
+pub struct SimulatedMember {
+    index: usize,
+    shared: Arc<Simulation>,
+}
+
+impl SimulatedMember {
+    fn leads(&self) -> bool {
+        self.shared.state().0 == self.index
+    }
+}
+
+#[async_trait::async_trait]
+impl Store for SimulatedMember {
+    async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
+        let committed = self.shared.store.propose(batch).await?;
+        if !self.leads() {
+            // A forwarded write returns once this member has applied it.
+            self.read(ReadConsistency::AtLeast(committed.revision))
+                .await?;
+        }
+        Ok(committed)
+    }
+
+    async fn read(&self, consistency: ReadConsistency) -> Result<Arc<dyn ReadView>, StoreError> {
+        self.shared.store.read(consistency).await
+    }
+
+    fn watch(
+        &self,
+        from: Option<Revision>,
+        filter: WatchFilter,
+    ) -> Result<ChangeStream, StoreError> {
+        self.shared.store.watch(from, filter)
+    }
+
+    fn register_index(&self, index: Arc<dyn DerivedIndex>) -> Result<(), StoreError> {
+        self.shared.store.register_index(index)
+    }
+
+    fn status(&self) -> StoreStatus {
+        let (leader, term) = self.shared.state();
+        let leads = leader == self.index;
+        let inner = self.shared.store.status();
+        let members = if leads {
+            (0..2)
+                .map(|index| MemberStatus {
+                    node: SimulatedCluster::node(index),
+                    voter: true,
+                    matched: Some(inner.revision.0),
+                    lag_entries: Some(0),
+                    last_contact_ms: Some(0),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        StoreStatus {
+            role: match inner.role {
+                StoreRole::Shutdown => StoreRole::Shutdown,
+                _ if leads => StoreRole::Leader,
+                _ => StoreRole::Follower,
+            },
+            node: Some(SimulatedCluster::node(self.index)),
+            leader: Some(SimulatedCluster::node(leader)),
+            quorum: QuorumState::Healthy,
+            term,
+            members,
+            ..inner
+        }
+    }
+
+    fn leadership(&self) -> watch::Receiver<Option<Leadership>> {
+        self.shared.seen[self.index].subscribe()
+    }
 }
 
 #[doc(hidden)]
@@ -297,10 +545,13 @@ pub mod conformance {
         secret::VaultEnvelope,
     };
 
-    use super::{ConformanceConfig, RecordingIndex, StoreFactory};
+    use super::{
+        ClusterFactory, ClusterFixture as _, ConformanceConfig, RecordingIndex, StoreFactory,
+    };
     use crate::api::{
-        Change, ChangeSet, ChangeStream, Committed, FailedPrecondition, KeyRange, ReadConsistency,
-        ReadView, ReadViewExt as _, Store, StoreError, WatchError, WatchFilter, WriteBatch, tables,
+        Change, ChangeSet, ChangeStream, Committed, FailedPrecondition, KeyRange, Leadership,
+        QuorumState, ReadConsistency, ReadView, ReadViewExt as _, Store, StoreError, WatchError,
+        WatchFilter, WriteBatch, tables,
     };
 
     const ROWS: TableName = TableName::from_static("ipam.conformance_rows");
@@ -1443,5 +1694,211 @@ pub mod conformance {
         assert_eq!(status.indexes.len(), 1);
         assert_eq!(status.indexes[0].name, "conformance.recording");
         assert_ne!(status.role, crate::api::StoreRole::Shutdown);
+    }
+
+    /// Waits until `receiver` shows a leadership `accept` takes, and returns it.
+    async fn leadership_where(
+        receiver: &mut tokio::sync::watch::Receiver<Option<Leadership>>,
+        accept: impl Fn(&Leadership) -> bool,
+    ) -> Leadership {
+        let seen = tokio::time::timeout(
+            WAIT,
+            receiver.wait_for(|seen| seen.as_ref().is_some_and(&accept)),
+        )
+        .await
+        .expect("the leadership settles within the timeout")
+        .expect("the store keeps its leadership channel open");
+        (*seen).expect("checked above")
+    }
+
+    /// A single member leads, for leader-only work, and is never isolated.
+    pub async fn leadership_of_a_single_member<F: StoreFactory>(factory: &F) {
+        let store = fresh(factory).await;
+        let mut leadership = store.leadership();
+        let leader = leadership_where(&mut leadership, |seen| seen.is_self).await;
+        assert!(leader.term >= 1);
+        let status = store.status();
+        assert_eq!(status.quorum, QuorumState::Single);
+        assert!(status.quorum.accepts_writes());
+        assert_eq!(status.term, leader.term);
+        put(store.as_ref(), &ROWS, 1, "v").await;
+        assert!(
+            store.leadership().borrow().is_some_and(|seen| seen.is_self),
+            "a write does not end leadership"
+        );
+    }
+
+    /// A write through a follower commits through the leader and is readable on the
+    /// follower as soon as `propose` returns (read-your-writes on the serving member);
+    /// preconditions, idempotency and the audit chain hold across members.
+    pub async fn follower_writes_read_their_own_writes<F: ClusterFactory>(factory: &F) {
+        let cluster = factory.create(ConformanceConfig::default()).await;
+        let leader = cluster.leader().await;
+        let follower = cluster.follower().await;
+
+        let mut b = batch();
+        b.put(ROWS, key(1), value("through the follower"))
+            .audit(AuditDraft::success(CREATE, vec![]));
+        let committed = follower
+            .propose(b)
+            .await
+            .expect("a forwarded write commits");
+        assert_eq!(committed.audit.len(), 1);
+        let local = view(follower.as_ref()).await;
+        assert!(local.revision() >= committed.revision);
+        assert_eq!(
+            get(local.as_ref(), &ROWS, 1),
+            Some((value("through the follower"), committed.revision)),
+            "readable on the serving member at once"
+        );
+        let on_leader = leader
+            .read(ReadConsistency::Linearizable)
+            .await
+            .expect("linearizable read on the leader");
+        assert_eq!(
+            get(on_leader.as_ref(), &ROWS, 1).map(|(_, revision)| revision),
+            Some(committed.revision)
+        );
+
+        // Preconditions are checked at apply on every member.
+        let mut stale = batch();
+        stale
+            .expect_version(ROWS, key(1), None)
+            .put(ROWS, key(1), value("lost"));
+        assert!(matches!(
+            follower.propose(stale).await,
+            Err(StoreError::PreconditionFailed(_))
+        ));
+
+        // An idempotent batch first sent through the follower replays on the leader.
+        let mut first = batch();
+        first.idempotency = Some(IdempotencyKey::new("follower-1").expect("key"));
+        first.put(ROWS, key(2), value("once"));
+        let original = follower
+            .propose(first.clone())
+            .await
+            .expect("the first attempt commits");
+        let replay = leader
+            .propose(first)
+            .await
+            .expect("the retry through another member replays");
+        assert!(replay.replayed);
+        assert_eq!(replay.revision, original.revision);
+
+        let records: Vec<_> = view(leader.as_ref())
+            .await
+            .scan_typed(&tables::AUDIT, KeyRange::all(), 100, false)
+            .expect("scan")
+            .into_iter()
+            .map(|(_, record, _)| record)
+            .collect();
+        assert_eq!(
+            verify_chain(&records).expect("the chain verifies").seq,
+            AuditSeq(1)
+        );
+    }
+
+    /// A linearizable read on a follower sees every write committed before it was asked,
+    /// wherever the write was proposed.
+    pub async fn follower_linearizable_reads_see_earlier_commits<F: ClusterFactory>(factory: &F) {
+        let cluster = factory.create(ConformanceConfig::default()).await;
+        let leader = cluster.leader().await;
+        let follower = cluster.follower().await;
+        let mut last = Revision::ZERO;
+        for n in 1..=10 {
+            last = put(leader.as_ref(), &ROWS, n, &format!("v{n}"))
+                .await
+                .revision;
+        }
+        let read = follower
+            .read(ReadConsistency::Linearizable)
+            .await
+            .expect("a linearizable read on a follower");
+        assert!(read.revision() >= last);
+        assert_eq!(get(read.as_ref(), &ROWS, 10), Some((value("v10"), last)));
+        let at_least = follower
+            .read(ReadConsistency::AtLeast(last))
+            .await
+            .expect("an AtLeast read on a follower");
+        assert!(at_least.revision() >= last);
+    }
+
+    /// A watch on a member continues without a gap when leadership moves, and a new watch
+    /// replays the same change sets from the journal on any member.
+    pub async fn follower_watch_replays_across_a_leader_change<F: ClusterFactory>(factory: &F) {
+        let cluster = factory.create(ConformanceConfig::default()).await;
+        let leader = cluster.leader().await;
+        let watcher = cluster.follower().await;
+        let start = put(leader.as_ref(), &ROWS, 100, "before").await.revision;
+        let mut stream = watcher
+            .watch(Some(start), WatchFilter::all())
+            .expect("watch on a follower");
+        for n in 1..=3 {
+            put(leader.as_ref(), &ROWS, n, "first term").await;
+        }
+        cluster.change_leader().await;
+        let leader = cluster.leader().await;
+        let follower = cluster.follower().await;
+        for n in 4..=6 {
+            put(leader.as_ref(), &ROWS, n, "second term").await;
+        }
+        for n in 7..=8 {
+            put(follower.as_ref(), &ROWS, n, "through a follower").await;
+        }
+        let mut seen = Vec::new();
+        for _ in 0..8 {
+            seen.push(next_ok(&mut stream).await.revision);
+        }
+        let expected: Vec<Revision> = (1..=8).map(|n| Revision(start.0 + n)).collect();
+        assert_eq!(
+            seen, expected,
+            "no gap and no repeat across the leader change"
+        );
+
+        let mut replay = leader
+            .watch(Some(start), WatchFilter::all())
+            .expect("a replaying watch on the new leader");
+        let mut replayed = Vec::new();
+        for _ in 0..8 {
+            replayed.push(next_ok(&mut replay).await.revision);
+        }
+        assert_eq!(replayed, expected);
+    }
+
+    /// Every member names the same leader and term; only the leader has `is_self`; after a
+    /// change of leader the term grows and the former leader no longer has `is_self`.
+    pub async fn members_agree_on_the_leader<F: ClusterFactory>(factory: &F) {
+        let cluster = factory.create(ConformanceConfig::default()).await;
+        let leader = cluster.leader().await;
+        let follower = cluster.follower().await;
+        let mut on_leader = leader.leadership();
+        let first = leadership_where(&mut on_leader, |seen| seen.is_self).await;
+        let mut on_follower = follower.leadership();
+        let seen = leadership_where(&mut on_follower, |seen| seen.term == first.term).await;
+        assert_eq!(seen.leader, first.leader);
+        assert!(!seen.is_self);
+        for member in [&leader, &follower] {
+            let status = member.status();
+            assert!(status.quorum.accepts_writes(), "{:?}", status.quorum);
+            assert!(status.term >= first.term);
+        }
+        assert!(
+            leader
+                .status()
+                .members
+                .iter()
+                .filter(|member| member.voter)
+                .count()
+                >= 2,
+            "the leader lists its voters"
+        );
+
+        cluster.change_leader().await;
+        let next = cluster.leader().await;
+        let mut on_next = next.leadership();
+        let second = leadership_where(&mut on_next, |seen| seen.is_self).await;
+        assert!(second.term > first.term);
+        let former = leadership_where(&mut on_leader, |seen| seen.term >= second.term).await;
+        assert!(!former.is_self, "the former leader stopped leading");
     }
 }

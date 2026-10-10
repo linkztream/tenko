@@ -21,8 +21,9 @@
 #        chmod 0600 /etc/tenko/kek.cred
 #   5. Install this file as /etc/systemd/system/tenko.service, then run:
 #        systemctl daemon-reload && systemctl enable --now tenko
-#   6. While first-run setup is open the server prints a one-time setup token; read it with
-#        journalctl -u tenko | grep -E 'Setup token|setup_token='
+#   6. While first-run setup is open the server keeps a one-time setup token in
+#      /var/lib/tenko/setup-token (never in the journal); print it with
+#        sudo -u tenko tenko setup token --config /etc/tenko/tenko.toml
 #      and complete setup in the web UI or with `tenko setup`.
 #
 # If the unit fails at once with status 243/CREDENTIALS, /etc/tenko/kek.cred is missing or

@@ -94,6 +94,10 @@ impl Store for FaultStore {
     fn status(&self) -> StoreStatus {
         self.inner.status()
     }
+
+    fn leadership(&self) -> tokio::sync::watch::Receiver<Option<tenko_store::Leadership>> {
+        self.inner.leadership()
+    }
 }
 
 async fn fault_vault(kek: &Arc<MemKek>) -> (MemStore, Arc<FaultStore>, Arc<StoreVault>) {

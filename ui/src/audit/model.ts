@@ -51,6 +51,10 @@ const COMPONENTS: Record<SystemComponent, true> = {
   connector: true,
   scan: true,
   cluster: true,
+  audit_export: true,
+  backup: true,
+  languages: true,
+  leader: true,
 };
 
 export const SYSTEM_COMPONENTS = Object.keys(COMPONENTS) as SystemComponent[];

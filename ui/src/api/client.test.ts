@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ANY_REVISION, api, buildPath, queryString, setUnauthorizedHandler } from "./client";
+import { ANY_REVISION, api, buildPath, queryString, rawRequest, setUnauthorizedHandler } from "./client";
 import { fetchAll, fetchPage, pages } from "./paginate";
 import { ApiError, CLIENT_CODES, errorMessage, fieldErrorMessage, isApiError, toProblem } from "./problem";
 
@@ -97,6 +97,79 @@ describe("requests", () => {
     expect(header(calls[0], "Idempotency-Key")).toBeUndefined();
     expect(header(calls[1], "If-Match")).toBe("*");
     expect(calls[1]?.url).toBe("/api/v1/users/u1");
+  });
+
+  it("sends a Blob as it is with its own type, and never as JSON", async () => {
+    const calls = stubFetch(() => new Response(null, { status: 204 }));
+    const blob = new Blob(["backup bytes"], { type: "application/x-tenko-backup" });
+    await api.post("/api/v1/imports", { body: blob, idempotencyKey: null });
+    expect(calls[0]?.init.body).toBe(blob);
+    expect(header(calls[0], "Content-Type")).toBe("application/x-tenko-backup");
+    expect(header(calls[0], "Idempotency-Key")).toBeUndefined();
+    expect(header(calls[0], "Accept")).toBe("application/json");
+  });
+
+  it("falls back to application/octet-stream for a Blob without a type", async () => {
+    const calls = stubFetch(() => new Response(null, { status: 204 }));
+    const blob = new Blob(["bytes"]);
+    expect(blob.type).toBe("");
+    await api.post("/api/v1/imports", { body: blob });
+    expect(calls[0]?.init.body).toBe(blob);
+    expect(header(calls[0], "Content-Type")).toBe("application/octet-stream");
+    // A Blob upload keeps the Idempotency-Key unless the caller opts out.
+    expect(header(calls[0], "Idempotency-Key")).toMatch(/^[0-9a-f-]{32,36}$/);
+  });
+
+  it("sends a File like a Blob: its bytes and its type, not a JSON object", async () => {
+    const calls = stubFetch(() => new Response(null, { status: 204 }));
+    const file = new File(["<xliff/>"], "fr.xlf", { type: "application/xliff+xml" });
+    await api.post("/api/v1/imports", { body: file, idempotencyKey: null });
+    expect(calls[0]?.init.body).toBe(file);
+    expect(header(calls[0], "Content-Type")).toBe("application/xliff+xml");
+    const bare = new File(["x"], "pack.bin");
+    await api.post("/api/v1/imports", { body: bare, idempotencyKey: null });
+    expect(calls[1]?.init.body).toBe(bare);
+    expect(header(calls[1], "Content-Type")).toBe("application/octet-stream");
+  });
+
+  it("still sends a FormData as it is, with no Content-Type of its own and a File inside left alone", async () => {
+    const calls = stubFetch(() => new Response(null, { status: 204 }));
+    const form = new FormData();
+    form.append("file", new File(["address,note"], "plan.csv", { type: "text/csv" }));
+    await api.post("/api/v1/imports", { body: form });
+    expect(calls[0]?.init.body).toBe(form);
+    expect(header(calls[0], "Content-Type")).toBeUndefined();
+    expect(header(calls[0], "Idempotency-Key")).toMatch(/^[0-9a-f-]{32,36}$/);
+  });
+
+  it("encodes every other body as JSON, an empty object and a list included", async () => {
+    const calls = stubFetch(() => new Response(null, { status: 204 }));
+    await rawRequest("post", "/api/v1/anything", { body: {} });
+    await rawRequest("post", "/api/v1/anything", { body: [1, 2] });
+    await rawRequest("post", "/api/v1/anything", { body: "text" });
+    expect(calls.map((c) => header(c, "Content-Type"))).toEqual(["application/json", "application/json", "application/json"]);
+    expect(calls.map((c) => c.init.body)).toEqual(["{}", "[1,2]", '"text"']);
+  });
+
+  it("sends If-Match on POST as well, next to the Idempotency-Key", async () => {
+    const calls = stubFetch(() => new Response(null, { status: 204 }));
+    await api.post("/api/v1/auth/logout", { ifMatch: 12, idempotencyKey: "activate-1" });
+    await api.post("/api/v1/auth/logout", { ifMatch: ANY_REVISION });
+    await api.post("/api/v1/auth/logout");
+    expect(header(calls[0], "If-Match")).toBe('"12"');
+    expect(header(calls[0], "Idempotency-Key")).toBe("activate-1");
+    expect(header(calls[1], "If-Match")).toBe("*");
+    expect(header(calls[1], "Idempotency-Key")).toBeDefined();
+    expect(header(calls[2], "If-Match")).toBeUndefined();
+  });
+
+  it("sends If-Match on PUT too and never on GET", async () => {
+    const calls = stubFetch(() => new Response(null, { status: 204 }));
+    await rawRequest("put", "/api/v1/anything", { ifMatch: 3, body: {} });
+    await rawRequest("get", "/api/v1/anything", { ifMatch: 3 });
+    expect(header(calls[0], "If-Match")).toBe('"3"');
+    expect(header(calls[0], "Idempotency-Key")).toBeUndefined();
+    expect(header(calls[1], "If-Match")).toBeUndefined();
   });
 
   it("returns undefined for 204", async () => {

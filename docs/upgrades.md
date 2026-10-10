@@ -375,6 +375,11 @@ A migration must follow these rules:
 
 ### 4.4 Worked example: adding format 2
 
+The example below predates the real format 2, which Slice 3 took for its contract types (an
+empty migration, `crates/tenko/src/upgrade/migrations/v2.rs`, so that a Slice 2 binary
+refuses a Slice 3 data directory). Read it as the next format: the steps are the same with
+every number one higher.
+
 Release 0.3.0 makes label names case-insensitive by storing them in lower case. The table
 `ipam.labels` is an invented table for this example; it is not a table of the product. The
 change satisfies neither half of the rule in section 4.1, so it needs format 2.

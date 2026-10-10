@@ -52,7 +52,7 @@ export function AccountMenu(props: {
   };
   const role = () => {
     const roles = s()?.roles ?? [];
-    const top = roles.includes("admin") ? "admin" : roles.includes("operator") ? "operator" : "viewer";
+    const top = (["admin", "operator", "viewer", "auditor"] as const).find((r) => roles.includes(r)) ?? "viewer";
     return t(`role.${top}.name`);
   };
 

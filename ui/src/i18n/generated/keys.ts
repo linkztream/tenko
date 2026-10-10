@@ -1,5 +1,7 @@
 // Message keys of ui/i18n/en.xlf. Regenerate with `npm run i18n`; do not edit.
 export type MessageKey =
+  | "access.placeholder"
+  | "access.title"
   | "account.codes.lede"
   | "account.codes.title"
   | "account.copy_failed"
@@ -274,6 +276,8 @@ export type MessageKey =
   | "audit.strength.pin"
   | "audit.sub"
   | "audit.title"
+  | "audit_export.placeholder"
+  | "audit_export.title"
   | "auth.signin.back_to_sign_in"
   | "auth.signin.break_glass_button"
   | "auth.signin.break_glass_lead"
@@ -317,8 +321,12 @@ export type MessageKey =
   | "auth.strength.password"
   | "auth.strength.password_totp"
   | "auth.strength.pin"
+  | "backup.placeholder"
+  | "backup.title"
   | "cluster.job.edit"
   | "cluster.job.write_preview"
+  | "cluster.placeholder"
+  | "cluster.title"
   | "common.action.add"
   | "common.action.back"
   | "common.action.cancel"
@@ -2010,6 +2018,8 @@ export type MessageKey =
   | "jobs.view.all"
   | "jobs.view.failed"
   | "jobs.view.finished"
+  | "languages.placeholder"
+  | "languages.title"
   | "move.checklist"
   | "move.checklist_foot"
   | "move.checklist_sum"
@@ -2244,10 +2254,14 @@ export type MessageKey =
   | "recovery.saved"
   | "role.admin.description"
   | "role.admin.name"
+  | "role.auditor.description"
+  | "role.auditor.name"
   | "role.operator.description"
   | "role.operator.name"
   | "role.viewer.description"
   | "role.viewer.name"
+  | "scans.placeholder"
+  | "scans.title"
   | "secrets.action.create"
   | "secrets.action.delete"
   | "secrets.action.delete_named"
@@ -2365,12 +2379,24 @@ export type MessageKey =
   | "secrets.role.web"
   | "secrets.saved"
   | "secrets.title"
+  | "settings.nav.access"
+  | "settings.nav.audit_export"
+  | "settings.nav.backup"
   | "settings.nav.label"
+  | "settings.nav.languages"
   | "settings.nav.secrets"
   | "settings.nav.security"
   | "settings.nav.updates"
   | "settings.nav.users"
+  | "settings.nav.vault"
   | "settings.reloaded"
+  | "settings.security.audit_export.local"
+  | "settings.security.audit_export.local_help"
+  | "settings.security.audit_export.mode"
+  | "settings.security.audit_export.optional"
+  | "settings.security.audit_export.optional_help"
+  | "settings.security.audit_export.required"
+  | "settings.security.audit_export.required_help"
   | "settings.security.col.actions"
   | "settings.security.col.id"
   | "settings.security.col.profile"
@@ -2955,6 +2981,7 @@ export type MessageKey =
   | "shell.keys.title"
   | "shell.keys.undo"
   | "shell.nav.audit"
+  | "shell.nav.cluster"
   | "shell.nav.connectors"
   | "shell.nav.dashboard"
   | "shell.nav.dhcp"
@@ -3041,6 +3068,10 @@ export type MessageKey =
   | "shell.top.role.shutdown"
   | "shell.top.role.unknown"
   | "shell.top.shortcuts_title"
+  | "toggles.audit_export.local"
+  | "toggles.audit_export.name"
+  | "toggles.audit_export.optional"
+  | "toggles.audit_export.required"
   | "toggles.breach_check.name"
   | "toggles.breach_check.off"
   | "toggles.breach_check.offline"
@@ -3285,7 +3316,9 @@ export type MessageKey =
   | "updates.whatsnew.empty"
   | "updates.whatsnew.lead"
   | "updates.whatsnew.lead_first"
-  | "updates.whatsnew.title";
+  | "updates.whatsnew.title"
+  | "vault.placeholder"
+  | "vault.title";
 /** Arguments of the messages that take any. */
 export interface MessageArgs {
   "account.methods.requires": { method: string | number; profile: string | number };
@@ -3962,6 +3995,8 @@ export interface MessageArgs {
   "updates.whatsnew.title": { version: string | number };
 }
 export const messageKeys: readonly MessageKey[] = [
+  "access.placeholder",
+  "access.title",
   "account.codes.lede",
   "account.codes.title",
   "account.copy_failed",
@@ -4236,6 +4271,8 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.strength.pin",
   "audit.sub",
   "audit.title",
+  "audit_export.placeholder",
+  "audit_export.title",
   "auth.signin.back_to_sign_in",
   "auth.signin.break_glass_button",
   "auth.signin.break_glass_lead",
@@ -4279,8 +4316,12 @@ export const messageKeys: readonly MessageKey[] = [
   "auth.strength.password",
   "auth.strength.password_totp",
   "auth.strength.pin",
+  "backup.placeholder",
+  "backup.title",
   "cluster.job.edit",
   "cluster.job.write_preview",
+  "cluster.placeholder",
+  "cluster.title",
   "common.action.add",
   "common.action.back",
   "common.action.cancel",
@@ -5972,6 +6013,8 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.view.all",
   "jobs.view.failed",
   "jobs.view.finished",
+  "languages.placeholder",
+  "languages.title",
   "move.checklist",
   "move.checklist_foot",
   "move.checklist_sum",
@@ -6206,10 +6249,14 @@ export const messageKeys: readonly MessageKey[] = [
   "recovery.saved",
   "role.admin.description",
   "role.admin.name",
+  "role.auditor.description",
+  "role.auditor.name",
   "role.operator.description",
   "role.operator.name",
   "role.viewer.description",
   "role.viewer.name",
+  "scans.placeholder",
+  "scans.title",
   "secrets.action.create",
   "secrets.action.delete",
   "secrets.action.delete_named",
@@ -6327,12 +6374,24 @@ export const messageKeys: readonly MessageKey[] = [
   "secrets.role.web",
   "secrets.saved",
   "secrets.title",
+  "settings.nav.access",
+  "settings.nav.audit_export",
+  "settings.nav.backup",
   "settings.nav.label",
+  "settings.nav.languages",
   "settings.nav.secrets",
   "settings.nav.security",
   "settings.nav.updates",
   "settings.nav.users",
+  "settings.nav.vault",
   "settings.reloaded",
+  "settings.security.audit_export.local",
+  "settings.security.audit_export.local_help",
+  "settings.security.audit_export.mode",
+  "settings.security.audit_export.optional",
+  "settings.security.audit_export.optional_help",
+  "settings.security.audit_export.required",
+  "settings.security.audit_export.required_help",
   "settings.security.col.actions",
   "settings.security.col.id",
   "settings.security.col.profile",
@@ -6917,6 +6976,7 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.keys.title",
   "shell.keys.undo",
   "shell.nav.audit",
+  "shell.nav.cluster",
   "shell.nav.connectors",
   "shell.nav.dashboard",
   "shell.nav.dhcp",
@@ -7003,6 +7063,10 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.top.role.shutdown",
   "shell.top.role.unknown",
   "shell.top.shortcuts_title",
+  "toggles.audit_export.local",
+  "toggles.audit_export.name",
+  "toggles.audit_export.optional",
+  "toggles.audit_export.required",
   "toggles.breach_check.name",
   "toggles.breach_check.off",
   "toggles.breach_check.offline",
@@ -7248,4 +7312,6 @@ export const messageKeys: readonly MessageKey[] = [
   "updates.whatsnew.lead",
   "updates.whatsnew.lead_first",
   "updates.whatsnew.title",
+  "vault.placeholder",
+  "vault.title",
 ];

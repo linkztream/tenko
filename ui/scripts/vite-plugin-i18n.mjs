@@ -1,5 +1,7 @@
 // @ts-check
-// Vite plugin that compiles the XLIFF language packs of ui/i18n into virtual modules.
+// Vite plugin that compiles the XLIFF language packs of ui/i18n into virtual modules. A pack is
+// its main file `<code>.xlf` and the fragment files of `<code>.d/` (see scripts/i18n/compile.mjs);
+// a change to any of them reloads the dev server.
 //
 //   virtual:tenko-i18n/meta          sourceLocale, locales, lazy loaders and message packs
 //                                    (contract: src/i18n/virtual.d.ts)
@@ -20,6 +22,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   formatDiagnostics,
+  languageFiles,
   loadCatalog,
   renderKeysTs,
   renderLocaleModule,
@@ -63,16 +66,27 @@ export function i18n(options = {}) {
   /** True when keys.ts may be rewritten: dev server and vitest, not a production build. */
   let writeKeys = false;
 
-  /** The XLIFF files in the language directory. */
+  /** The XLIFF files of the language directory: the main files and the fragment files. */
   function xliffFiles() {
-    try {
-      return fs
-        .readdirSync(dir, { withFileTypes: true })
-        .filter((e) => e.isFile() && e.name.endsWith(".xlf"))
-        .map((e) => path.join(dir, e.name));
-    } catch {
-      return [];
-    }
+    return languageFiles(dir);
+  }
+
+  /**
+   * True for a fragment directory (`sv.d`) directly in the language directory.
+   * @param {string} resolved
+   */
+  function isFragmentDir(resolved) {
+    return resolved.endsWith(".d") && samePath(path.dirname(resolved), dir);
+  }
+
+  /**
+   * True for a main file (`sv.xlf`) or a fragment file (`sv.d/cluster.xlf`) of the language directory.
+   * @param {string} resolved
+   */
+  function isLanguageFile(resolved) {
+    if (!resolved.endsWith(".xlf")) return false;
+    const parent = path.dirname(resolved);
+    return samePath(parent, dir) || isFragmentDir(parent);
   }
 
   /**
@@ -185,15 +199,27 @@ export function i18n(options = {}) {
         logger.info(`[i18n] reloaded ${next.locales.map((l) => l.code).join(", ")}`, { timestamp: true });
       };
 
-      server.watcher.add([dir, ...xliffFiles()]);
+      const files = xliffFiles();
+      server.watcher.add([...new Set([dir, ...files.map((f) => path.dirname(f)), ...files])]);
       /** @param {string} file */
       const onFileEvent = (file) => {
-        const resolved = path.resolve(file);
-        if (resolved.endsWith(".xlf") && samePath(path.dirname(resolved), dir)) reload();
+        if (isLanguageFile(path.resolve(file))) reload();
+      };
+      /**
+       * A fragment directory (`sv.d`) that appears or disappears changes the language.
+       * @param {string} directory
+       */
+      const onDirectoryEvent = (directory) => {
+        const resolved = path.resolve(directory);
+        if (!isFragmentDir(resolved)) return;
+        server.watcher.add(resolved);
+        reload();
       };
       server.watcher.on("add", onFileEvent);
       server.watcher.on("change", onFileEvent);
       server.watcher.on("unlink", onFileEvent);
+      server.watcher.on("addDir", onDirectoryEvent);
+      server.watcher.on("unlinkDir", onDirectoryEvent);
     },
   };
 }

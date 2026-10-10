@@ -21,8 +21,9 @@
 //!   `<data_dir>/tls/ca-root.pem`.
 //!
 //! Every data directory lives under the operating system's temporary directory, never in
-//! the repository. Secrets are never printed: the only secret in the output of a failing
-//! test is the setup token, which the server prints on purpose, and client commands never
+//! the repository. Secrets are never printed: the server writes the setup token to
+//! `<data_dir>/setup-token` (its standard output is a pipe here, not a terminal, so it only
+//! names the file), [`wait_for_setup_token`] reads it from there, and client commands never
 //! print the API token.
 
 #![allow(
@@ -169,12 +170,15 @@ pub fn assert_in_order(text: &str, needles: &[impl AsRef<str>]) {
     }
 }
 
-/// The setup tokens printed on standard output: the value of every `Setup token:` line.
+/// The setup tokens printed on standard output: the value of every `Setup token:` line that
+/// has the shape of a token. A server whose standard output is not a terminal prints none:
+/// its `Setup token:` line names the file instead.
 pub fn stdout_setup_tokens(stdout: &str) -> Vec<String> {
     stdout
         .lines()
         .filter_map(|line| line.strip_prefix("Setup token: "))
         .map(|token| token.trim().to_owned())
+        .filter(|token| is_setup_token(token))
         .collect()
 }
 
@@ -696,6 +700,44 @@ impl Node {
         self.data_dir().join("kek")
     }
 
+    /// The file with the setup token while first-run setup is open.
+    pub fn setup_token_path(&self) -> PathBuf {
+        self.data_dir().join("setup-token")
+    }
+
+    /// The token in [`Node::setup_token_path`], if the file exists.
+    pub fn read_setup_token(&self) -> Option<String> {
+        read_setup_token_file(&self.setup_token_path())
+    }
+
+    /// Waits until the setup token file is gone; false when it is still there after
+    /// `timeout`.
+    pub fn wait_for_setup_token_removal(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        while self.setup_token_path().exists() {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        true
+    }
+
+    /// `tenko setup token --data-dir <data_dir>`.
+    #[track_caller]
+    pub fn print_setup_token(&self) -> Outcome {
+        let data_dir = self.data_dir();
+        run_tenko(
+            &[
+                "setup",
+                "token",
+                "--data-dir",
+                data_dir.to_str().expect("UTF-8"),
+            ],
+            &[],
+        )
+    }
+
     /// The credentials file the client commands of this node use.
     pub fn credentials_path(&self) -> PathBuf {
         self.root().join("credentials.json")
@@ -931,16 +973,45 @@ impl Node {
     }
 }
 
-/// The setup token a running server printed, waiting for the line to appear (the
-/// readiness line comes first).
+/// The file a `Setup token: in <file>; print it with ...` line of standard output names.
+pub fn setup_token_file_in(line: &str) -> Option<PathBuf> {
+    let rest = line.strip_prefix("Setup token: in ")?;
+    let (file, _) = rest.split_once("; print it with ")?;
+    Some(PathBuf::from(file))
+}
+
+/// The token in a setup token file: the first line, if the file exists.
+pub fn read_setup_token_file(file: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(file).ok()?;
+    text.lines().next().map(|line| line.trim().to_owned())
+}
+
+/// The setup token of a running server. The server writes it to `<data_dir>/setup-token`
+/// before it is ready and says where on standard output (the harness has no terminal, which
+/// is the only place the token itself would be printed): this waits for that line, then
+/// reads the file.
 #[track_caller]
 pub fn wait_for_setup_token(server: &Proc) -> String {
     let line = server
         .wait_stdout_line(Duration::from_secs(30), |line| {
             line.starts_with("Setup token: ")
         })
-        .unwrap_or_else(|| panic!("no setup token was printed\n{}", server.diagnostics()));
-    let token = line["Setup token: ".len()..].trim().to_owned();
+        .unwrap_or_else(|| panic!("no setup token line was printed\n{}", server.diagnostics()));
+    let file = setup_token_file_in(&line)
+        .unwrap_or_else(|| panic!("`{line}` does not name the setup token file"));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let token = loop {
+        if let Some(token) = read_setup_token_file(&file) {
+            break token;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{} was not written\n{}",
+            file.display(),
+            server.diagnostics()
+        );
+        thread::sleep(Duration::from_millis(20));
+    };
     assert!(is_setup_token(&token), "`{token}` is not a setup token");
     token
 }

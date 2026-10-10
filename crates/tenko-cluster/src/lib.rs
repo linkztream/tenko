@@ -6,12 +6,13 @@
 //! | [`ca`] | the internal CA and the TLS model of the API listener (WP1.3); node certificates with roles |
 //! | [`proto`] | the protocol `tenko.cluster.v1`, compiled from `proto/` |
 //! | [`token`] | enrolment tokens: format, generation, digest |
-//! | [`version`] | protocol majors and their negotiation (OPS-08) |
+//! | [`mod@version`] | protocol majors and their negotiation (OPS-08) |
 //! | [`model`] | the records of the node registry and the views and requests of its API |
 //! | [`registry`] | the node registry: tokens, enrolment, renewal, revocation, protocol state |
 //! | [`mtls`] | the mutual TLS of the cluster port: verifiers, revocation, kill switches |
 //! | [`session`] | the live heartbeat sessions and connections of the cluster port |
-//! | [`server`] | the controller's cluster port: accept loop, mutual TLS, the gRPC services |
+//! | [`server`] | the controller's cluster port: accept loop, mutual TLS, the router and the helpers the services share |
+//! | `service` (private) | the gRPC services of the cluster port, one file per service |
 //! | [`probe`] | probe batches, their wire form and the controller's sink |
 //! | [`buffer`] | the resumable, size-bounded observation buffer of a probe (OPS-28) |
 //! | [`identity`] | a node's credentials and status on its own disk |
@@ -32,6 +33,7 @@ pub mod probe;
 pub mod proto;
 pub mod registry;
 pub mod server;
+mod service;
 pub mod session;
 pub mod token;
 pub mod version;

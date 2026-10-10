@@ -1069,7 +1069,7 @@ mod tests {
                 .iter()
                 .map(|item| item["name"].as_str().expect("a name"))
                 .collect();
-            assert_eq!(names, ["admin", "operator", "viewer"]);
+            assert_eq!(names, ["admin", "operator", "viewer", "auditor"]);
             assert!(
                 roles.body["items"]
                     .as_array()

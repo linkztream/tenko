@@ -6,6 +6,8 @@
 // comes from the server's answer.
 import type { MfaRequirement, PasswordPolicy, Profile, SecuritySettings, SecuritySettingsView } from "../api/types";
 import {
+  AUDIT_EXPORT_DEFAULT,
+  auditExportOf,
   REVEAL_DEFAULT,
   revealOf,
   TOGGLES,
@@ -29,6 +31,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     token_max_days: 365,
     breach_check: "online",
     lockout: "progressive_delay",
+    audit_export: AUDIT_EXPORT_DEFAULT.home,
     updates: UPDATES_DEFAULT.home,
     secret_reveal: REVEAL_DEFAULT.home,
   },
@@ -41,6 +44,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     token_max_days: 90,
     breach_check: "online",
     lockout: "delay_then_temporary_lock",
+    audit_export: AUDIT_EXPORT_DEFAULT.standard,
     updates: UPDATES_DEFAULT.standard,
     secret_reveal: REVEAL_DEFAULT.standard,
   },
@@ -53,6 +57,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     token_max_days: 30,
     breach_check: "offline_preferred",
     lockout: "lock_until_unlock",
+    audit_export: AUDIT_EXPORT_DEFAULT.hardened,
     updates: UPDATES_DEFAULT.hardened,
     secret_reveal: REVEAL_DEFAULT.hardened,
   },
@@ -65,6 +70,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     token_max_days: null,
     breach_check: "off",
     lockout: "off",
+    audit_export: AUDIT_EXPORT_DEFAULT.lab,
     updates: UPDATES_DEFAULT.lab,
     secret_reveal: REVEAL_DEFAULT.lab,
   },
@@ -72,6 +78,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
 
 /** The value of one setting the way a toggle reports it (`null` for no token maximum). */
 export function valueOf(settings: SecuritySettings, setting: ToggleSetting): unknown {
+  if (setting === "audit_export") return auditExportOf(settings);
   if (setting === "updates") return updatesOf(settings);
   if (setting === "secret_reveal") return revealOf(settings);
   return setting === "token_max_days" ? (settings.token_max_days ?? null) : settings[setting];

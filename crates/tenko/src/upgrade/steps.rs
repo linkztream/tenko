@@ -201,6 +201,7 @@ pub fn job_spec(
         group: GroupKey::new(JOB_KIND).ok(),
         group_limit: Some(1),
         idempotency: None,
+        node: None,
     })
 }
 

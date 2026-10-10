@@ -23,8 +23,16 @@
 //! `import.imports` to `import`, `sys.audit` to `audit`, and every other `auth.*` or
 //! `users.*` table to `admin` as a table-level event. Tables without a route (secondary
 //! indexes, bookkeeping) produce no event.
+//!
+//! Slice 3 adds (plan section 2.7): `cluster.*` (members, commands, ingest cursors) to
+//! `cluster`; `scan.*` (probe configuration, scopes) to `discovery`; `i18n.*`, `backup.*`
+//! and the `sys.audit_export*` tables to `system`; `auth.grants` and `auth.scoped_tokens`
+//! to `admin` (through the `auth` namespace). The topic `metrics` carries one snapshot per
+//! second from the metrics collector, not from the journal ([`metrics`]). RBAC scopes
+//! install their [`EventFilter`] with [`EventHub::set_filter`].
 
 mod hub;
+pub mod metrics;
 
 use std::{collections::HashMap, time::Duration};
 
@@ -90,6 +98,8 @@ pub struct Route {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventRoutes {
     tables: HashMap<TableName, Route>,
+    /// Table-name prefixes, longest first.
+    prefixes: Vec<(String, Topic)>,
     namespaces: HashMap<String, Topic>,
 }
 
@@ -98,6 +108,7 @@ impl EventRoutes {
     pub fn empty() -> Self {
         Self {
             tables: HashMap::new(),
+            prefixes: Vec::new(),
             namespaces: HashMap::new(),
         }
     }
@@ -105,6 +116,17 @@ impl EventRoutes {
     /// Routes one table. `kind` makes each changed key (a 16-byte id) an object reference.
     pub fn table(&mut self, table: TableName, topic: Topic, kind: Option<ObjectKind>) -> &mut Self {
         self.tables.insert(table, Route { topic, kind });
+        self
+    }
+
+    /// Routes every otherwise unrouted table whose name starts with `prefix` (such as
+    /// `sys.audit_export` for `sys.audit_export_cursors`) to a topic, as table-level events.
+    /// A prefix route wins over a namespace route; the longest matching prefix wins.
+    pub fn table_prefix(&mut self, prefix: &str, topic: Topic) -> &mut Self {
+        self.prefixes.retain(|(known, _)| known != prefix);
+        self.prefixes.push((prefix.to_owned(), topic));
+        self.prefixes
+            .sort_by(|(a, _), (b, _)| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
         self
     }
 
@@ -120,6 +142,16 @@ impl EventRoutes {
     pub fn lookup(&self, table: &TableName) -> Option<Route> {
         if let Some(route) = self.tables.get(table) {
             return Some(*route);
+        }
+        if let Some((_, topic)) = self
+            .prefixes
+            .iter()
+            .find(|(prefix, _)| table.as_str().starts_with(prefix.as_str()))
+        {
+            return Some(Route {
+                topic: *topic,
+                kind: None,
+            });
         }
         self.namespaces.get(table.namespace()).map(|topic| Route {
             topic: *topic,
@@ -209,6 +241,10 @@ impl Default for EventRoutes {
                 None,
             )
             .namespace("cluster", Topic::Cluster)
+            .namespace("scan", Topic::Discovery)
+            .namespace("i18n", Topic::System)
+            .namespace("backup", Topic::System)
+            .table_prefix("sys.audit_export", Topic::System)
             .namespace("auth", Topic::Admin)
             .namespace("users", Topic::Admin);
         routes
@@ -281,5 +317,42 @@ mod tests {
         assert_eq!(route("jobs.transitions"), None);
         assert_eq!(route("vault.secrets"), None);
         assert_eq!(route("sys.audit"), None, "handled by the hub");
+    }
+
+    #[test]
+    fn slice_3_namespaces_route_to_their_topics() {
+        let routes = EventRoutes::default();
+        let topic = |name: &'static str| {
+            routes
+                .lookup(&TableName::from_static(name))
+                .map(|route| route.topic)
+        };
+        assert_eq!(topic("cluster.members"), Some(Topic::Cluster));
+        assert_eq!(topic("cluster.node_commands"), Some(Topic::Cluster));
+        assert_eq!(topic("scan.probe_config"), Some(Topic::Discovery));
+        assert_eq!(topic("scan.scopes"), Some(Topic::Discovery));
+        assert_eq!(topic("i18n.packs"), Some(Topic::System));
+        assert_eq!(topic("backup.settings"), Some(Topic::System));
+        assert_eq!(topic("sys.audit_export_cursors"), Some(Topic::System));
+        assert_eq!(topic("sys.audit_export_sinks"), Some(Topic::System));
+        assert_eq!(topic("auth.grants"), Some(Topic::Admin));
+        assert_eq!(topic("auth.scoped_tokens"), Some(Topic::Admin));
+        assert_eq!(topic("sys.journal"), None);
+        assert_eq!(
+            topic("sys.audit"),
+            None,
+            "the audit table is not an export table"
+        );
+        let mut custom = EventRoutes::empty();
+        custom
+            .table_prefix("sys.a", Topic::Jobs)
+            .table_prefix("sys.audit_export", Topic::System);
+        assert_eq!(
+            custom
+                .lookup(&TableName::from_static("sys.audit_export_cursors"))
+                .map(|route| route.topic),
+            Some(Topic::System),
+            "the longest prefix wins"
+        );
     }
 }

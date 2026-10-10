@@ -89,6 +89,10 @@ impl Store for SpyStore {
     fn status(&self) -> StoreStatus {
         self.inner.status()
     }
+
+    fn leadership(&self) -> tokio::sync::watch::Receiver<Option<tenko_store::Leadership>> {
+        self.inner.leadership()
+    }
 }
 
 /// A secret the workload keeps track of: where it is, what class, what it holds now.

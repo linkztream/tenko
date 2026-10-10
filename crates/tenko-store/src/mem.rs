@@ -29,9 +29,16 @@ use tokio::sync::watch;
 
 use crate::api::{
     Change, ChangeSet, ChangeStream, CoalescerConfig, Committed, DerivedIndex, FailedPrecondition,
-    IndexStatus, KeyRange, Mutation, Precondition, ReadConsistency, ReadView, Store, StoreError,
-    StoreRole, StoreStatus, Versioned, WatchError, WatchFilter, WriteBatch, tables,
+    IndexStatus, KeyRange, Leadership, Mutation, Precondition, QuorumState, ReadConsistency,
+    ReadView, Store, StoreError, StoreRole, StoreStatus, Versioned, WatchError, WatchFilter,
+    WriteBatch, tables,
 };
+
+/// The node id `MemStore` leads as: the id a single controller has by default.
+pub const MEM_STORE_NODE: tenko_core::NodeId = tenko_core::NodeId(1);
+
+/// The term `MemStore` reports: it is elected once, at creation, and never loses office.
+pub const MEM_STORE_TERM: u64 = 1;
 
 /// Configuration of a [`MemStore`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,12 +89,18 @@ impl MemStore {
     /// Creates an empty store.
     pub fn new(config: MemStoreConfig) -> Self {
         let (notify, _) = watch::channel(Revision::ZERO);
+        let (leadership, _) = watch::channel(Some(Leadership {
+            leader: MEM_STORE_NODE,
+            term: MEM_STORE_TERM,
+            is_self: true,
+        }));
         Self {
             inner: Arc::new(Inner {
                 config,
                 state: RwLock::new(State::default()),
                 views: Mutex::new(BTreeMap::new()),
                 notify,
+                leadership,
                 shutdown: AtomicBool::new(false),
             }),
         }
@@ -98,6 +111,8 @@ impl MemStore {
     pub fn shutdown(&self) {
         self.inner.shutdown.store(true, Ordering::SeqCst);
         self.inner.notify.send_modify(|_| {});
+        // A stopped store leads nothing: leader-only work ends.
+        self.inner.leadership.send_replace(None);
     }
 
     /// The configuration.
@@ -121,6 +136,8 @@ struct Inner {
     views: Mutex<BTreeMap<Revision, usize>>,
     /// The last applied revision, for watchers and `AtLeast` readers.
     notify: watch::Sender<Revision>,
+    /// Always the same leader, this store, until it shuts down.
+    leadership: watch::Sender<Option<Leadership>>,
     shutdown: AtomicBool,
 }
 
@@ -955,7 +972,14 @@ impl Store for MemStore {
                     memory_bytes: registered.memory_bytes,
                 })
                 .collect(),
+            quorum: QuorumState::Single,
+            term: MEM_STORE_TERM,
+            members: Vec::new(),
         }
+    }
+
+    fn leadership(&self) -> watch::Receiver<Option<Leadership>> {
+        self.inner.leadership.subscribe()
     }
 }
 
@@ -1037,9 +1061,12 @@ mod tests {
         use futures::StreamExt as _;
         let store = MemStore::default();
         let mut stream = store.watch(None, WatchFilter::all()).expect("watch");
+        let leadership = store.leadership();
+        assert!(leadership.borrow().is_some_and(|leader| leader.is_self));
         store.shutdown();
         assert_eq!(store.propose(batch()).await, Err(StoreError::ShuttingDown));
         assert!(stream.next().await.is_none());
         assert_eq!(store.status().role, StoreRole::Shutdown);
+        assert_eq!(*leadership.borrow(), None, "a stopped store leads nothing");
     }
 }

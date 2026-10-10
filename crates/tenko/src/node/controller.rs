@@ -152,7 +152,7 @@ impl ProbeSink for ReconcilerSink {
 
 fn start_error(error: &ClusterError) -> StartError {
     StartError {
-        step: "cluster",
+        step: "nodes",
         code: error.code().to_owned(),
         message: error.detail().to_owned(),
     }
@@ -170,7 +170,7 @@ fn addresses(addrs: &[SocketAddr]) -> String {
 ///
 /// # Errors
 ///
-/// A [`StartError`] of the step `cluster`: the CA, the registry, the controller
+/// A [`StartError`] of the step `nodes`: the CA, the registry, the controller
 /// certificate or a cluster port that must listen and cannot.
 #[allow(
     clippy::too_many_lines,
@@ -188,11 +188,11 @@ pub async fn start(parts: Parts<'_>) -> Result<(Cluster, String), StartError> {
     let section = &resolved.config.cluster;
     let mode = section
         .listen_mode()
-        .map_err(|error| StartError::new("cluster", error.code, error.message))?;
+        .map_err(|error| StartError::new("nodes", error.code, error.message))?;
     let ctx = RequestCtx::system(SystemComponent::Cluster);
     let ca = InternalCa::load_or_init(store.as_ref(), vault.as_ref(), &ctx, CaPolicy::default())
         .await
-        .map_err(|error| StartError::coded("cluster", &error))?;
+        .map_err(|error| StartError::coded("nodes", &error))?;
     let default_port = match &mode {
         ClusterListen::OnDemand(addrs) | ClusterListen::Always(addrs) => {
             addrs.first().map_or(8444, SocketAddr::port)

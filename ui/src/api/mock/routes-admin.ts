@@ -28,7 +28,7 @@ import {
 } from "./db";
 import { ROLE_DESCRIPTIONS } from "./fixtures";
 import { checkPassword } from "./policy";
-import { profileSettings } from "./profiles";
+import { AUDIT_EXPORT_VALUES, profileSettings } from "./profiles";
 import { created, fail, noContent, ok } from "./reply";
 import { paginate, route, wholePage } from "./route";
 import { iso, randomId, uuidHandle } from "./util";
@@ -41,6 +41,7 @@ import {
   optInt,
   optString,
   reqString,
+  ROLE_NAMES,
   validDisplayName,
   validLanguage,
   validRoles,
@@ -224,7 +225,7 @@ const revokeSessionsOfUser = route("delete", "/api/v1/users/{id}/sessions", (ctx
 
 const listRoles = route("get", "/api/v1/roles", () => {
   requireAdmin();
-  const roles: RoleInfo[] = (["admin", "operator", "viewer"] as const).map((name) => ({
+  const roles: RoleInfo[] = ROLE_NAMES.map((name) => ({
     name,
     description: ROLE_DESCRIPTIONS[name],
   }));
@@ -340,6 +341,10 @@ const updateSecuritySettings = route("patch", "/api/v1/settings/security", async
   if (body.token_max_lifetime !== undefined) next.token_max_days = parseTokenLifetime(body.token_max_lifetime);
   if (body.breach_check !== undefined) next.breach_check = oneOf(body.breach_check, BREACH, "breach_check");
   if (body.lockout !== undefined) next.lockout = oneOf(body.lockout, LOCKOUT, "lockout");
+  // TGL-21; null means "no change", as on the server.
+  if (body.audit_export !== undefined && body.audit_export !== null) {
+    next.audit_export = oneOf(body.audit_export, AUDIT_EXPORT_VALUES, "audit_export");
+  }
 
   // The server's rule (`update_security_settings` in crates/tenko-auth/src/service/admin.rs, IAM-07): a change is
   // refused when the vault holds an operator secret, the result lets a PIN stand alone (a policy that admits a

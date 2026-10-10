@@ -789,6 +789,10 @@ impl Store for RacingStore {
     fn status(&self) -> StoreStatus {
         self.inner.status()
     }
+
+    fn leadership(&self) -> tokio::sync::watch::Receiver<Option<tenko_store::Leadership>> {
+        self.inner.leadership()
+    }
 }
 
 /// A registry over a [`RacingStore`], with its job engine, and one enrolled node: its id,
@@ -898,4 +902,105 @@ async fn a_renewal_that_races_the_heartbeat_is_planned_again_with_the_same_certi
         registry_actions(&store).await,
         ["cluster.node.enrol", "cluster.node.renew"]
     );
+}
+
+use tenko_cluster::proto::v1;
+
+/// A gRPC channel to the controller's cluster port with the credentials of a node that is
+/// enrolled there.
+async fn enrolled_channel(
+    controller: &Controller,
+    dir: &Path,
+    name: &str,
+) -> tonic::transport::Channel {
+    let credentials = controller.enrol(dir, name).await;
+    let config = credentials.client_config().expect("client configuration");
+    client::connect(&controller.addr.to_string(), config)
+        .await
+        .expect("channel")
+}
+
+fn assert_unimplemented<T: std::fmt::Debug>(result: Result<T, tonic::Status>, package: &str) {
+    let status = result.expect_err("a stub service answers with an error");
+    assert_eq!(status.code(), tonic::Code::Unimplemented, "{status:?}");
+    assert!(
+        status.message().contains(package),
+        "the message names {package}: {status:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_services_of_later_packages_answer_unimplemented_to_an_enrolled_node() {
+    let controller = Controller::start().await;
+    let dir = tempfile::tempdir().expect("dir");
+    let channel = enrolled_channel(&controller, dir.path(), "probe-stubs").await;
+
+    let mut raft = v1::raft_client::RaftClient::new(channel.clone());
+    assert_unimplemented(raft.vote(v1::RaftRequest::default()).await, "WP3.1a");
+    assert_unimplemented(
+        raft.append_entries(v1::RaftRequest::default()).await,
+        "WP3.1a",
+    );
+    assert_unimplemented(
+        raft.install_snapshot(futures::stream::iter([v1::SnapshotChunk::default()]))
+            .await,
+        "WP3.1a",
+    );
+
+    let mut cluster = v1::cluster_client::ClusterClient::new(channel.clone());
+    assert_unimplemented(
+        cluster.members(v1::MembersRequest::default()).await,
+        "WP3.1a",
+    );
+    assert_unimplemented(
+        cluster.propose(v1::ProposeRequest::default()).await,
+        "WP3.1a",
+    );
+
+    let mut config = v1::config_client::ConfigClient::new(channel.clone());
+    assert_unimplemented(
+        config.secrets(v1::SecretsRequest::default()).await,
+        "WP3.10",
+    );
+    assert_unimplemented(config.watch(v1::WatchRequest::default()).await, "WP3.10");
+
+    let mut commands = v1::commands_client::CommandsClient::new(channel.clone());
+    assert_unimplemented(commands.report(v1::CommandEvent::default()).await, "WP3.10");
+    assert_unimplemented(
+        commands.subscribe(v1::SubscribeRequest::default()).await,
+        "WP3.10",
+    );
+
+    let mut metrics = v1::metrics_client::MetricsClient::new(channel);
+    assert_unimplemented(
+        metrics.snapshot(v1::SnapshotRequest::default()).await,
+        "WP3.5",
+    );
+}
+
+#[tokio::test]
+async fn hello_answers_with_its_old_fields_and_empty_capabilities_and_endpoints() {
+    let controller = Controller::start().await;
+    let dir = tempfile::tempdir().expect("dir");
+    let channel = enrolled_channel(&controller, dir.path(), "probe-hello").await;
+
+    let mut handshake = v1::handshake_client::HandshakeClient::new(channel);
+    let response = handshake
+        .hello(v1::HelloRequest {
+            majors: vec![1],
+            version: "0.0.1".to_owned(),
+            roles: vec!["probe".to_owned()],
+            capabilities: Vec::new(),
+        })
+        .await
+        .expect("hello")
+        .into_inner();
+    assert_eq!(response.major, 1);
+    assert_eq!(response.majors, [1]);
+    assert_eq!(response.version, tenko_cluster::version());
+    assert_eq!(response.node_id, 1001);
+    assert_eq!(response.heartbeat_secs, 1);
+    assert!(response.server_time.is_some());
+    assert!(response.capabilities.is_empty(), "{response:?}");
+    assert!(response.endpoints.is_empty(), "{response:?}");
 }

@@ -190,10 +190,276 @@ jobs:
           ./target/debug/tenko openapi > "$RUNNER_TEMP/openapi.json"
           diff -u docs/api/openapi.json "$RUNNER_TEMP/openapi.json"
 
-  # ---------------------------------------------------------------------------
-  # PROPOSAL for .github/workflows/ci.yml: add this job under `jobs:` (it is indented for
-  # that). Nothing else in the file changes.
-  #
+  # Quick cluster signal on every push (WP3.0 deliverable 9). It builds the test binaries
+  # first and then runs only the cluster tests under a three-minute limit: the store
+  # conformance suites, the cluster transport tests, the two-process node tests and every
+  # crates/tenko/tests/cluster_smoke*.rs. WP3.1c adds those files; they are picked up by
+  # name, so this job never needs another edit. The full workspace run stays in rust-linux.
+  cluster-smoke:
+    name: Cluster smoke (ubuntu-latest)
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Rust-only builds use a placeholder UI page; release builds refuse it.
+      TENKO_UI_STUB: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Free disk space
+        # The hosted runner ships toolchains this build never uses.
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the test binaries
+        # Compiling stays out of the timed step below. The commands here and in the next
+        # step must stay identical apart from --no-run, so that nothing is rebuilt.
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          smoke=()
+          for f in crates/tenko/tests/cluster_smoke*.rs; do
+            smoke+=(--test "$(basename "$f" .rs)")
+          done
+          cargo test --locked --no-run -p tenko-store --test conformance_mem --test conformance_raft
+          cargo test --locked --no-run -p tenko-cluster --tests
+          cargo test --locked --no-run -p tenko --test node_cluster "${smoke[@]}"
+      - name: Cluster tests
+        # The budget for the quick signal (WP3.0 deliverable 9). --tests leaves out the
+        # doc tests, which would compile again inside the limit; rust-linux runs them.
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          smoke=()
+          for f in crates/tenko/tests/cluster_smoke*.rs; do
+            smoke+=(--test "$(basename "$f" .rs)")
+          done
+          cargo test --locked -p tenko-store --test conformance_mem --test conformance_raft
+          cargo test --locked -p tenko-cluster --tests
+          cargo test --locked -p tenko --test node_cluster "${smoke[@]}"
+
+  # Nightly cluster lab. Runs every crates/tenko/tests/cluster_*.rs including the tests
+  # marked #[ignore] (the slow scenarios), then the compose lab smoke. WP3.1c adds both
+  # (the test files and deploy/compose/lab-cluster/smoke.sh); until then the job only says
+  # so. Helpers of the lab live in the directory tests/cluster_support/, not in a file
+  # named cluster_*.rs, which would be run as a test.
+  cluster-lab:
+    name: Cluster lab (ubuntu-latest, nightly schedule)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      # Rust-only builds use a placeholder UI page; release builds refuse it.
+      TENKO_UI_STUB: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Free disk space
+        # The hosted runner ships toolchains this build never uses.
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Cluster lab tests
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          lab=()
+          for f in crates/tenko/tests/cluster_*.rs; do
+            lab+=(--test "$(basename "$f" .rs)")
+          done
+          if [ "${#lab[@]}" -eq 0 ]; then
+            echo "::notice::No cluster lab tests exist yet (crates/tenko/tests/cluster_*.rs); WP3.1c adds them."
+            exit 0
+          fi
+          cargo test --locked -p tenko "${lab[@]}" -- --include-ignored
+      - name: Compose lab smoke
+        if: ${{ hashFiles('deploy/compose/lab-cluster/smoke.sh') != '' }}
+        # From the repository root, no arguments; the script cleans up after itself.
+        run: bash deploy/compose/lab-cluster/smoke.sh
+      - name: Compose lab smoke (not there yet)
+        if: ${{ hashFiles('deploy/compose/lab-cluster/smoke.sh') == '' }}
+        run: echo "::notice::deploy/compose/lab-cluster/smoke.sh does not exist yet; WP3.1c adds the compose lab."
+
+  # Nightly Windows service smoke (OPS-10, E10). The hosted Windows runner runs elevated,
+  # which the Service Control Manager needs. WP3.6 adds deploy/windows/smoke.ps1 (install,
+  # start, readiness, Event Log, upgrade through the version layout, stop, uninstall); the
+  # job runs it with the debug binary. Until then it runs the unit tests of the service
+  # code, which are all that exists.
+  windows-service-smoke:
+    name: Windows service smoke (windows-latest, nightly schedule)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      # Rust-only builds use a placeholder UI page; release builds refuse it.
+      TENKO_UI_STUB: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build tenko
+        run: cargo build -p tenko --locked
+      - name: Service smoke script
+        if: ${{ hashFiles('deploy/windows/smoke.ps1') != '' }}
+        shell: pwsh
+        run: |
+          $binary = Join-Path $env:GITHUB_WORKSPACE 'target\debug\tenko.exe'
+          pwsh -NoProfile -File deploy/windows/smoke.ps1 -Binary $binary
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Service unit tests (no smoke script yet)
+        if: ${{ hashFiles('deploy/windows/smoke.ps1') == '' }}
+        shell: pwsh
+        run: |
+          Write-Host "::notice::deploy/windows/smoke.ps1 does not exist yet; WP3.6 adds it. Running the unit tests of the Windows service code instead."
+          cargo test -p tenko --locked --lib platform
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  # Nightly systemd smoke (OPS-13, E10). The hosted Linux runner has systemd as PID 1.
+  # Today the job installs the binary and the hardened unit the way the header of
+  # deploy/systemd/tenko.service describes, checks the unit with systemd-analyze verify and
+  # records the exposure score of systemd-analyze security in the run summary. WP3.6 adds
+  # deploy/systemd/smoke.sh (start, stop, upgrade through the layout, restart on exit 12,
+  # the credential path); the job runs it as root with the binary path as its only argument.
+  systemd-smoke:
+    name: systemd smoke (ubuntu-latest, nightly schedule)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # Rust-only builds use a placeholder UI page; release builds refuse it.
+      TENKO_UI_STUB: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build tenko
+        run: cargo build -p tenko --locked
+      - name: Install the binary, the service account and the unit
+        # Install steps 1 to 3 and 5 of the header of deploy/systemd/tenko.service. The
+        # key-encryption key (step 4) and everything after it belong to smoke.sh, which
+        # must therefore accept that the user tenko, /etc/tenko/tenko.toml and the unit
+        # already exist.
+        run: |
+          set -euo pipefail
+          sudo install -m 0755 target/debug/tenko /usr/local/bin/tenko
+          if ! id -u tenko > /dev/null 2>&1; then
+            sudo useradd --system --home-dir /var/lib/tenko --no-create-home \
+              --shell /usr/sbin/nologin tenko
+          fi
+          sudo install -d -m 0750 -o root -g tenko /etc/tenko
+          sudo install -m 0640 -o root -g tenko deploy/tenko.example.toml /etc/tenko/tenko.toml
+          sudo install -m 0644 deploy/systemd/tenko.service /etc/systemd/system/tenko.service
+          # ExecStart= runs /var/lib/tenko/updates/current/tenko, which ExecStartPre=
+          # (`tenko upgrade layout`) creates at the first start. systemd-analyze verify
+          # refuses a unit whose ExecStart= file does not exist, so stand in for it with a
+          # link until the checks below are done; a later step removes it again.
+          sudo install -d /var/lib/tenko/updates/current
+          sudo ln -sf /usr/local/bin/tenko /var/lib/tenko/updates/current/tenko
+      - name: systemd-analyze verify
+        # Strict: any finding fails the job, and the output goes to the run summary
+        # either way.
+        run: |
+          set -euo pipefail
+          status=0
+          systemd-analyze verify /etc/systemd/system/tenko.service > "$RUNNER_TEMP/verify.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/verify.log"
+          {
+            echo "### systemd-analyze verify tenko.service"
+            echo
+            echo "Exit status: $status"
+            echo
+            echo '```text'
+            cat "$RUNNER_TEMP/verify.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - name: systemd-analyze security
+        # Records the exposure score; it must not rise (WP3.6 makes it a gate, target
+        # below 2.5).
+        run: |
+          set -euo pipefail
+          sudo systemctl daemon-reload
+          sudo systemd-analyze security --no-pager tenko.service > "$RUNNER_TEMP/security.txt"
+          cat "$RUNNER_TEMP/security.txt"
+          score="$(grep 'Overall exposure level' "$RUNNER_TEMP/security.txt")" || {
+            echo "::error::systemd-analyze security printed no overall exposure level."
+            exit 1
+          }
+          {
+            echo "### systemd-analyze security tenko.service"
+            echo
+            echo "$score"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove the stand-in for the version layout
+        # smoke.sh starts from the state a real install has: no /var/lib/tenko yet.
+        run: sudo rm -rf /var/lib/tenko
+      - name: Service smoke script
+        if: ${{ hashFiles('deploy/systemd/smoke.sh') != '' }}
+        # Argument 1 is the freshly built binary; /usr/local/bin/tenko is a copy of it.
+        run: sudo bash deploy/systemd/smoke.sh "$GITHUB_WORKSPACE/target/debug/tenko"
+      - name: Service smoke script (not there yet)
+        if: ${{ hashFiles('deploy/systemd/smoke.sh') == '' }}
+        run: echo "::notice::deploy/systemd/smoke.sh does not exist yet; WP3.6 adds it. Only the unit checks ran."
+
+  # Nightly fuzz smoke (API-14): 60 seconds for every target that `cargo fuzz list` prints.
+  # WP3.13 and the packages that add parsers of network input add targets under
+  # fuzz/fuzz_targets/ and fuzz/Cargo.toml; no edit of this file is needed. A directory
+  # fuzz/seeds/<target>/ is used as an extra corpus when it exists. All targets run even
+  # after one crashes, then the job fails and keeps fuzz/artifacts/.
+  fuzz-smoke:
+    name: Fuzz smoke (ubuntu-latest, nightly schedule)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # Targets that link tenko-api embed the web UI. cargo-fuzz builds with debug
+      # assertions, which is what lets the placeholder page through the release check.
+      TENKO_UI_STUB: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # The fuzz crate is its own workspace with its own target directory.
+          workspaces: fuzz
+      - name: Run every target for 60 seconds
+        run: |
+          set -euo pipefail
+          targets="$(cargo +nightly fuzz list)"
+          if [ -z "$targets" ]; then
+            echo "::error::cargo fuzz list printed no targets."
+            exit 1
+          fi
+          failed=()
+          while IFS= read -r target; do
+            [ -n "$target" ] || continue
+            echo "::group::fuzz $target"
+            corpus=()
+            if [ -d "fuzz/seeds/$target" ]; then
+              mkdir -p "fuzz/corpus/$target"
+              corpus=("fuzz/corpus/$target" "fuzz/seeds/$target")
+            fi
+            if ! cargo +nightly fuzz run "$target" "${corpus[@]}" -- -max_total_time=60; then
+              failed+=("$target")
+              echo "::error::Fuzz target $target failed."
+            fi
+            echo "::endgroup::"
+          done <<< "$targets"
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::Failed fuzz targets: ${failed[*]}"
+            exit 1
+          fi
+      - name: Keep the crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
+
   # Changelog rule (OPS-23). Every change to the product adds an entry under
   # "## [Unreleased]" in CHANGELOG.md, because that section becomes the release notes that
   # running installations show. The product is `crates/**` and `ui/src/**`, except tests

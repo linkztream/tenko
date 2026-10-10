@@ -694,7 +694,17 @@ describe("roles", () => {
   it("shows an administrator the settings navigation with the secrets page as the current tab", async () => {
     await openPage();
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual(["Security", "Users", "Updates", "Secrets"]);
+    expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual([
+      "Security",
+      "Users",
+      "Updates",
+      "Secrets",
+      "Access",
+      "Audit export",
+      "Vault",
+      "Backup",
+      "Languages",
+    ]);
     const current = within(nav).getByRole("link", { name: "Secrets" });
     expect(current.getAttribute("href")).toBe("/settings/secrets");
     expect(current.getAttribute("aria-current")).toBe("page");

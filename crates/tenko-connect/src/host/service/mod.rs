@@ -684,6 +684,7 @@ impl ConnectorHost {
             group: None,
             group_limit: None,
             idempotency: None,
+            node: None,
         };
         let job = engine.run_inline(spec, cx).await?;
         Ok(job.revision)
@@ -1099,6 +1100,7 @@ impl ConnectorHost {
             group: GroupKey::new(format!("connect:{id}")).ok(),
             group_limit: Some(1),
             idempotency: None,
+            node: None,
         };
         Ok(engine.submit(spec, cx).await?)
     }

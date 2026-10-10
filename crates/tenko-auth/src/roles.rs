@@ -1,4 +1,5 @@
-//! Global roles of Slice 1 (`admin`, `operator`, `viewer`) and their permissions.
+//! Global roles (`admin`, `operator`, `viewer`, and `auditor` since Slice 3) and their
+//! permissions.
 //!
 //! Object scopes and delegation (IAM-01) come in Slice 3; until then every grant covers
 //! all objects of a kind, so [`Authorizer::scope`](tenko_core::Authorizer::scope) answers
@@ -24,11 +25,14 @@ pub enum RoleName {
     Operator,
     /// Read-only access to the inventory.
     Viewer,
+    /// Reads the audit trail, the audit export status and the system status, and nothing
+    /// else: no inventory, users or settings (owner decision S3-Q18, IAM-18). Global only.
+    Auditor,
 }
 
 impl RoleName {
     /// Every role.
-    pub const ALL: [RoleName; 3] = [Self::Admin, Self::Operator, Self::Viewer];
+    pub const ALL: [RoleName; 4] = [Self::Admin, Self::Operator, Self::Viewer, Self::Auditor];
 
     /// The stable name.
     pub const fn as_str(self) -> &'static str {
@@ -36,6 +40,7 @@ impl RoleName {
             Self::Admin => "admin",
             Self::Operator => "operator",
             Self::Viewer => "viewer",
+            Self::Auditor => "auditor",
         }
     }
 
@@ -47,6 +52,9 @@ impl RoleName {
                 "Reads and changes the IPAM inventory, runs imports and jobs, reveals operator secrets; no administration"
             }
             Self::Viewer => "Reads the IPAM inventory, jobs and imports",
+            Self::Auditor => {
+                "Reads the audit log, the audit export status and the system status; nothing else"
+            }
         }
     }
 
@@ -56,6 +64,10 @@ impl RoleName {
             Self::Admin => true,
             Self::Operator => operator_allows(action, kind),
             Self::Viewer => action == Action::Read && is_inventory(kind),
+            // The audit log, the export status and the system status are reads of the
+            // system object; the route guards that keep the auditor out of the rest of the
+            // system area arrive with scoped authorization (WP3.2).
+            Self::Auditor => action == Action::Read && kind == ObjectKind::System,
         }
     }
 }
@@ -238,6 +250,33 @@ mod tests {
         assert_eq!(
             required_strength(&[RoleName::Operator], &home, Action::Read, false),
             AuthStrength::Pin
+        );
+    }
+
+    #[test]
+    fn auditors_read_the_system_and_nothing_else() {
+        assert!(RoleName::Auditor.allows(Action::Read, ObjectKind::System));
+        for &kind in ObjectKind::ALL {
+            if kind != ObjectKind::System {
+                assert!(!RoleName::Auditor.allows(Action::Read, kind), "{kind}");
+            }
+            for action in [
+                Action::Create,
+                Action::Update,
+                Action::Delete,
+                Action::Execute,
+                Action::Approve,
+                Action::Reveal,
+                Action::Administer,
+            ] {
+                assert!(!RoleName::Auditor.allows(action, kind), "{kind}");
+            }
+        }
+        assert_eq!("auditor".parse::<RoleName>().ok(), Some(RoleName::Auditor));
+        let hardened = Profile::Hardened.defaults();
+        assert_eq!(
+            required_strength(&[RoleName::Auditor], &hardened, Action::Read, true),
+            AuthStrength::PasswordTotp
         );
     }
 

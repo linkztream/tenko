@@ -1072,12 +1072,69 @@ describe("settings", () => {
     const view = await get<SecuritySettingsView>("/api/v1/settings/security");
     expect(view.status).toBe(200);
     expect(view.body.settings).toEqual(PROFILE_MATRIX.standard);
-    expect(view.body.toggles.map((t) => t.id)).toEqual(["TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-23", "TGL-24"]);
+    expect(view.body.toggles.map((t) => t.id)).toEqual([
+      "TGL-01",
+      "TGL-02",
+      "TGL-03",
+      "TGL-04",
+      "TGL-05",
+      "TGL-06",
+      "TGL-07",
+      "TGL-21",
+      "TGL-23",
+      "TGL-24",
+    ]);
     expect(view.body.toggles.every((t) => !t.deviates && !t.weaker_than_home)).toBe(true);
     expect(view.body.banner).toEqual({ lab: false, weaker_than_home: false, deviations: [] });
     expect(view.body.vault_has_operator_secrets).toBe(false);
     expect(view.body.revision).toBe(INITIAL_REVISION);
     expect(view.res.headers.get("etag")).toBe(`"${INITIAL_REVISION}"`);
+  });
+
+  it("carries TGL-21, the audit export, in the settings, the toggle list and the profile switch", async () => {
+    resetMockDb("signed-in");
+    const SECURITY = "/api/v1/settings/security";
+    const view = await get<SecuritySettingsView>(SECURITY);
+    expect(view.body.settings.audit_export).toBe("optional");
+    expect(view.body.toggles.find((t) => t.id === "TGL-21")).toEqual({
+      id: "TGL-21",
+      setting: "audit_export",
+      value: "optional",
+      profile_default: "optional",
+      deviates: false,
+      weaker_than_home: false,
+    });
+
+    // Required is a deviation from Standard, and no value is ever weaker than Home.
+    const required = await patch<SecuritySettingsView>(SECURITY, { audit_export: "required" });
+    expect(required.status).toBe(200);
+    expect(required.body.settings.audit_export).toBe("required");
+    expect(required.body.toggles.find((t) => t.id === "TGL-21")).toMatchObject({ value: "required", deviates: true, weaker_than_home: false });
+    expect(required.body.banner).toEqual({ lab: false, weaker_than_home: false, deviations: ["TGL-21"] });
+    const local = await patch<SecuritySettingsView>(SECURITY, { audit_export: "local" });
+    expect(local.body.toggles.find((t) => t.id === "TGL-21")).toMatchObject({ value: "local", deviates: true, weaker_than_home: false });
+    expect(local.body.banner).toEqual({ lab: false, weaker_than_home: false, deviations: ["TGL-21"] });
+
+    // null and an absent member change nothing; another toggle keeps the value.
+    expect((await patch<SecuritySettingsView>(SECURITY, { audit_export: null })).body.settings.audit_export).toBe("local");
+    expect((await patch<SecuritySettingsView>(SECURITY, { lockout: "lock_until_unlock" })).body.settings.audit_export).toBe("local");
+
+    // A profile switch resets it to the profile; the same request may set it on top.
+    const hardened = await patch<SecuritySettingsView>(SECURITY, { profile: "hardened" });
+    expect(hardened.body.settings.audit_export).toBe("required");
+    expect(hardened.body.toggles.find((t) => t.id === "TGL-21")).toMatchObject({ value: "required", deviates: false });
+    const lab = await patch<SecuritySettingsView>(SECURITY, { profile: "lab" });
+    expect(lab.body.settings.audit_export).toBe("local");
+    const mixed = await patch<SecuritySettingsView>(SECURITY, { profile: "home", audit_export: "optional" });
+    expect(mixed.body.toggles.find((t) => t.id === "TGL-21")).toMatchObject({ value: "optional", profile_default: "local", deviates: true });
+    expect(mixed.body.banner.deviations).toEqual(["TGL-21"]);
+  });
+
+  it("falls back to the profile for settings stored before TGL-21", async () => {
+    resetMockDb("signed-in");
+    delete db.settings.audit_export;
+    const view = await get<SecuritySettingsView>("/api/v1/settings/security");
+    expect(view.body.toggles.find((t) => t.id === "TGL-21")).toMatchObject({ value: "optional", deviates: false });
   });
 
   it("refuses a stale revision and applies a matching one", async () => {
@@ -1156,6 +1213,8 @@ describe("settings", () => {
       { token_max_lifetime: { days: 0 } },
       { password_policy: { preset: "custom", min_length: 2 } },
       { password_policy: { preset: "custom", min_length: 8, pattern: "(" } },
+      { audit_export: "sometimes" },
+      { audit_export: 3 },
     ]) {
       expectProblem(await patch("/api/v1/settings/security", body), 400, "auth.invalid_request");
     }
@@ -1459,11 +1518,20 @@ describe("users", () => {
     expectProblem(await get("/api/v1/auth/session"), 401, "auth.unauthenticated");
   });
 
-  it("lists the three roles", async () => {
+  it("lists the four roles, the auditor last", async () => {
     resetMockDb("signed-in");
     const roles = await get<Page<{ name: string; description: string }>>("/api/v1/roles");
-    expect(roles.body.items.map((r) => r.name)).toEqual(["admin", "operator", "viewer"]);
+    expect(roles.body.items.map((r) => r.name)).toEqual(["admin", "operator", "viewer", "auditor"]);
     for (const role of roles.body.items) expect(role.description).toMatch(/^[A-Z]/);
+    expect(roles.body.items.find((r) => r.name === "auditor")?.description).toContain("audit log");
+  });
+
+  it("gives a user the auditor role and keeps the roles in their fixed order", async () => {
+    resetMockDb("signed-in");
+    const made = await post<UserInfo>("/api/v1/users", { name: "greta", roles: ["auditor", "viewer"], password: "a long unusual passphrase 7391" });
+    expect(made.status).toBe(201);
+    expect(made.body.roles).toEqual(["viewer", "auditor"]);
+    expectProblem(await post("/api/v1/users", { name: "hugo", roles: ["auditor", "boss"], password: "a long unusual passphrase 7391" }), 400, "auth.invalid_request");
   });
 });
 
@@ -1775,6 +1843,12 @@ describe("profiles", () => {
       lockout: "lock_until_unlock",
     });
     expect(PROFILE_MATRIX.lab).toMatchObject({ token_max_days: null, breach_check: "off", lockout: "off" });
+    expect(["home", "standard", "hardened", "lab"].map((p) => PROFILE_MATRIX[p as keyof typeof PROFILE_MATRIX].audit_export)).toEqual([
+      "local",
+      "optional",
+      "required",
+      "local",
+    ]);
     // profileSettings hands out a copy.
     const copy = profileSettings("home");
     copy.session.idle_secs = 1;

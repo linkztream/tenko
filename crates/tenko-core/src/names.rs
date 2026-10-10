@@ -24,16 +24,19 @@ use crate::{
 /// | Namespace | Owner |
 /// |---|---|
 /// | `auth` | authentication, users, sessions, settings (WP1.2) |
-/// | `cluster` | enrolment, mTLS, internal CA (WP1.3, WP2.2) |
+/// | `backup` | backups: settings, schedule and history (WP3.4b) |
+/// | `cluster` | enrolment, mTLS, internal CA (WP1.3, WP2.2); controller membership (WP3.1a) |
 /// | `connect` | connectors (WP2.5, WP2.6) |
+/// | `i18n` | language packs held in the store (WP3.7) |
 /// | `import` | import and export (WP1.5) |
 /// | `ipam` | the IPAM domain (WP1.4) |
 /// | `jobs` | the job engine (WP1.6) |
 /// | `scan` | discovery probes (WP2.3) |
 /// | `sys` | store, API platform and shared codes (WP1.0, WP1.1, WP1.7) |
 /// | `vault` | the vault (WP1.3) |
-pub const NAMESPACES: [&str; 9] = [
-    "auth", "cluster", "connect", "import", "ipam", "jobs", "scan", "sys", "vault",
+pub const NAMESPACES: [&str; 11] = [
+    "auth", "backup", "cluster", "connect", "i18n", "import", "ipam", "jobs", "scan", "sys",
+    "vault",
 ];
 
 /// Maximum length of a namespaced name in bytes.

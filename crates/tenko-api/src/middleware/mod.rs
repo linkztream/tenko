@@ -9,7 +9,8 @@
 //!   this order: the `Origin` CSRF guard (`csrf`), the per-address rate limit (before
 //!   authentication, so it shields the login path), authentication through the
 //!   [`Authenticator`](tenko_core::Authenticator) of the state (once per request; the
-//!   outcome goes to [`AuthOutcome`] for `Ctx`), the per-principal rate limit, the
+//!   outcome goes to [`AuthOutcome`] for `Ctx`), the per-principal rate limit, the quorum
+//!   gate of an isolated controller (`quorum`, WP3.9; pass-through until then), the
 //!   `Idempotency-Key` replay ([`idempotency`]), and `Cache-Control: no-store` on API
 //!   responses that set no caching themselves.
 //!
@@ -22,6 +23,7 @@ pub(crate) mod csrf;
 pub mod headers;
 pub mod idempotency;
 pub(crate) mod metrics;
+pub(crate) mod quorum;
 pub mod rate_limit;
 
 use std::{sync::Arc, time::Instant};
@@ -155,7 +157,11 @@ pub(crate) async fn api(
         || UNMATCHED_ROUTE.to_owned(),
         |path| path.as_str().to_owned(),
     );
-    let mut response = if let Some(refusal) = guard(&layers, &mut request).await {
+    let refusal = match guard(&layers, &mut request).await {
+        Some(refusal) => Some(refusal),
+        None => quorum::check(&layers.state, &request),
+    };
+    let mut response = if let Some(refusal) = refusal {
         refusal
     } else {
         let principal = match &layers.state.auth {

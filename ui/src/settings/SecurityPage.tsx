@@ -1,4 +1,4 @@
-// The security profile and the toggles TGL-01 to TGL-07, TGL-23 and TGL-24 (SECURITY-PROFILES.md): what the
+// The security profile and the toggles TGL-01 to TGL-07, TGL-21, TGL-23 and TGL-24 (SECURITY-PROFILES.md): what the
 // profile is, which settings differ from it, which are weaker than Home, and the ways to
 // change them. The shell banner follows every change (`updateBanner`).
 import { createEffect, createSignal, For, Show } from "solid-js";

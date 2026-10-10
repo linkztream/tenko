@@ -1,9 +1,10 @@
 // A real `tenko serve` for one test: its own temporary directory with a `tenko.toml`, the
 // data directory, a key file and a free loopback port. The server's standard output and
 // standard error are collected line by line (support/process.ts), so a test can wait for the
-// readiness line, read the setup token the server prints on purpose, and attach the whole
-// log when it fails. Nothing of the person running the tests is read: `TENKO_*` variables,
-// proxies and log filters are removed from the environment of the child process.
+// readiness line, read the setup token from `<data_dir>/setup-token` (the server keeps it out
+// of its output unless standard output is a terminal), and attach the whole log when it fails.
+// Nothing of the person running the tests is read: `TENKO_*` variables, proxies and log
+// filters are removed from the environment of the child process.
 //
 // Transports:
 // - `plain`: the Lab profile with `tls.mode = "plain"` on http://localhost:<port>. Plain
@@ -102,7 +103,7 @@ const EXE = process.platform === "win32" ? "tenko.exe" : "tenko";
 
 export class TenkoServer {
   private readonly proc = new Proc();
-  /** The setup token the server printed (empty once setup is complete). */
+  /** The setup token the server wrote to its data directory (empty once setup is complete). */
   setupToken = "";
   /** The SHA-256 fingerprint of the internal CA root, as printed at readiness. */
   caFingerprint = "";
@@ -117,7 +118,7 @@ export class TenkoServer {
     readonly options: ServerOptions,
   ) {}
 
-  /** Starts a server and waits until it is ready and has printed its setup token. */
+  /** Starts a server and waits until it is ready and has announced its setup token file. */
   static async start(options: ServerOptions = {}): Promise<TenkoServer> {
     const transport = options.transport ?? "plain";
     const profile = options.profile ?? (transport === "plain" ? "lab" : "home");
@@ -139,8 +140,10 @@ export class TenkoServer {
         server.port = await freePort();
         if (options.cluster) server.clusterPort = await freePort();
       }
-      const token = await server.waitForLine((line) => line.stream === "stdout" && line.text.startsWith("Setup token: "), 10_000);
-      server.setupToken = token?.text.slice("Setup token: ".length).trim() ?? "";
+      // The console block comes after the readiness line; its token line says where the
+      // file is, and waiting for it also makes sure the CA lines before it were collected.
+      await server.waitForLine((line) => line.stream === "stdout" && line.text.startsWith("Setup token: "), 10_000);
+      server.setupToken = await server.readSetupToken();
       const fingerprint = server.proc.lines.find((line) => line.text.trimStart().startsWith("SHA-256 fingerprint: "));
       server.caFingerprint = fingerprint?.text.trim().slice("SHA-256 fingerprint: ".length) ?? "";
       await server.waitForProbe();
@@ -149,6 +152,18 @@ export class TenkoServer {
       await server.proc.stop(STOP_TIMEOUT_MS);
       await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       throw error;
+    }
+  }
+
+  /**
+   * The token in `<data_dir>/setup-token`, which the server writes before it is ready while
+   * first-run setup is open; empty when there is no such file.
+   */
+  private async readSetupToken(): Promise<string> {
+    try {
+      return (await readFile(join(this.dataDir, "setup-token"), "utf8")).trim();
+    } catch {
+      return "";
     }
   }
 

@@ -62,6 +62,17 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   nodes: ["nodes.", "errors.cluster."],
   // The topology map (WP2.7).
   topology: ["topology."],
+  // The areas of Slice 3, each with the fragment ui/i18n/<language>.d/<area>.xlf of its package:
+  // the cluster page, the scans of discovery and the settings sub-pages for access, audit export,
+  // the vault keys, backup and language packs. `cluster.job.` is a key of the jobs pack, which
+  // is listed above and so wins.
+  cluster: ["cluster."],
+  scans: ["scans."],
+  access: ["access."],
+  audit_export: ["audit_export."],
+  vault: ["vault."],
+  backup: ["backup."],
+  languages: ["languages."],
 };
 
 export default defineConfig(({ command, mode }) => {

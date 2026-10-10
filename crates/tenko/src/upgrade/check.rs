@@ -558,12 +558,14 @@ mod tests {
             disposable: true,
             ..options()
         };
-        let report = tokio::time::timeout(
-            Duration::from_secs(60),
-            check(&copy, &options, Registry::builtin()),
-        )
-        .await
-        .expect("the check finishes");
+        // The store was written at format 1; the binary of format 1 finds it current.
+        let one = Registry {
+            current: 1,
+            migrations: &[],
+        };
+        let report = tokio::time::timeout(Duration::from_secs(60), check(&copy, &options, one))
+            .await
+            .expect("the check finishes");
         assert_eq!(report.verdict, Verdict::Current, "{report:?}");
         running.shutdown().await.expect("shutdown");
         drop(running);

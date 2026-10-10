@@ -1,0 +1,58 @@
+// Tenko node transport, major version 1: commands to nodes.
+// See handshake.proto for the transport, the errors and the evolution rule.
+//
+// The service Commands carries work a controller wants a node to do (run a scan, stop,
+// resume) and the node's progress back. Every controller streams the pending commands of
+// the nodes connected to it, so a node reached through a follower gets them too. A caller
+// needs a node record; each method states the role it requires. It is filled in by work
+// package WP3.10; until then every method answers UNIMPLEMENTED.
+syntax = "proto3";
+
+package tenko.cluster.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Commands from the controllers to a node, and the node's reports back.
+service Commands {
+  // Streams the commands for the calling node. The first messages replay the commands the
+  // node has not acknowledged since `after`; later ones arrive as they are issued. The
+  // stream stays open until the node closes it.
+  rpc Subscribe(SubscribeRequest) returns (stream Command);
+  // Reports the state of a command: accepted, running with a progress, finished or
+  // failed. Reporting a state twice is harmless.
+  rpc Report(CommandEvent) returns (ReportResponse);
+}
+
+message SubscribeRequest {
+  // The id of the last command the node has seen; empty when it has seen none.
+  string after = 1;
+}
+
+message Command {
+  // The id of the command, unique within the installation and ordered by issue time.
+  string id = 1;
+  // What to do: `scan.run`, `scan.stop`, `scan.resume`. A node reports a kind it does not
+  // know as failed.
+  string kind = 2;
+  // When the controller issued it.
+  google.protobuf.Timestamp issued_at = 3;
+  // The encoding of `payload`, for example `cbor/1`.
+  string encoding = 4;
+  // The arguments of the command (method, target, run id), in `encoding`.
+  bytes payload = 5;
+}
+
+message CommandEvent {
+  // The id of the command this reports on.
+  string command_id = 1;
+  // The state: `accepted`, `running`, `done`, `failed`, `rejected`.
+  string state = 2;
+  // How far along the command is, 0 to 100.
+  uint32 progress_percent = 3;
+  // English detail for the audit log and the job log; empty when there is none.
+  string detail = 4;
+  // The node's clock when the state was reached.
+  google.protobuf.Timestamp at = 5;
+}
+
+message ReportResponse {}

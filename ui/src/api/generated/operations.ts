@@ -96,7 +96,7 @@ export const apiOperations = [
   { id: "get_job", method: "get", path: "/api/v1/jobs/{id}", tags: ["jobs"], summary: "Get one job with its steps" },
   { id: "cancel_job", method: "post", path: "/api/v1/jobs/{id}/cancel", tags: ["jobs"], summary: "Cancel a job" },
   { id: "complete_job_step", method: "post", path: "/api/v1/jobs/{id}/steps/{index}/complete", tags: ["jobs"], summary: "Complete a manual step of a job" },
-  { id: "metrics", method: "get", path: "/api/v1/metrics", tags: ["system"], summary: "Metrics in the OpenMetrics text format; needs a token with the metrics scope" },
+  { id: "metrics", method: "get", path: "/api/v1/metrics", tags: ["metrics"], summary: "Metrics in the OpenMetrics text format; needs a token with the metrics scope" },
   { id: "create_move", method: "post", path: "/api/v1/moves", tags: ["moves"], summary: "Preview or start a move to another network" },
   { id: "list_nodes", method: "get", path: "/api/v1/nodes", tags: ["nodes"], summary: "List cluster nodes" },
   { id: "enrol_node", method: "post", path: "/api/v1/nodes/enrol", tags: ["nodes"], summary: "Enrol a node with a token" },

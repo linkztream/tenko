@@ -12,6 +12,8 @@ publish = false
 testing = []
 
 [dependencies]
+# The leader-only service contract (`cluster::LeaderService`).
+async-trait = { workspace = true }
 bytes = { workspace = true }
 ciborium = { workspace = true }
 ipnet = { workspace = true }
@@ -20,6 +22,7 @@ serde = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
+tokio-util = { workspace = true }
 utoipa = { workspace = true }
 uuid = { workspace = true }
 

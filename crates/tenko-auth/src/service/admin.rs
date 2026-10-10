@@ -16,6 +16,7 @@ use super::{
     },
 };
 use crate::{
+    authz::AuthImage,
     error::AuthError,
     lockout::ThrottleKey,
     model::{
@@ -31,8 +32,6 @@ const ADMINS: tenko_core::CounterKey = tenko_core::CounterKey::new("auth.admins"
 
 /// Longest user name.
 const MAX_NAME_CHARS: usize = 64;
-/// Languages built into the UI (API-08).
-pub(super) const LANGUAGES: [&str; 2] = ["en", "sv"];
 
 /// Checks a login name: 1 to 64 characters, no whitespace or control characters.
 pub(super) fn valid_user_name(name: &str) -> Result<String, AuthError> {
@@ -49,13 +48,15 @@ pub(super) fn valid_user_name(name: &str) -> Result<String, AuthError> {
     Ok(name.to_owned())
 }
 
-pub(super) fn valid_language(language: &str) -> Result<String, AuthError> {
-    if LANGUAGES.contains(&language) {
+/// Checks a language against the active set of the authorization index: the built-in
+/// languages and the active language packs (API-21).
+pub(super) fn valid_language(language: &str, image: &AuthImage) -> Result<String, AuthError> {
+    if image.is_language(language) {
         Ok(language.to_owned())
     } else {
         Err(AuthError::invalid(
             "language",
-            "supported languages are en and sv",
+            format!("supported languages are {}", image.languages().join(", ")),
         ))
     }
 }
@@ -254,7 +255,7 @@ impl AuthService {
         let language = request
             .language
             .as_deref()
-            .map(valid_language)
+            .map(|language| valid_language(language, &self.index.image()))
             .transpose()?;
         let view = self.view().await?;
         let key = UserRecord::name_key(&name);
@@ -337,7 +338,7 @@ impl AuthService {
             updated.language = if language.is_empty() {
                 None
             } else {
-                Some(valid_language(language)?)
+                Some(valid_language(language, &self.index.image())?)
             };
             fields.push(FieldChange {
                 object: None,
@@ -802,8 +803,9 @@ mod tests {
         assert!(valid_user_name("").is_err());
         assert!(valid_user_name("two words").is_err());
         assert!(valid_user_name(&"x".repeat(65)).is_err());
-        assert!(valid_language("sv").is_ok());
-        assert!(valid_language("de").is_err());
+        let image = AuthImage::default();
+        assert!(valid_language("sv", &image).is_ok());
+        assert!(valid_language("de", &image).is_err());
         assert!(valid_roles(&[]).is_err());
         assert_eq!(
             valid_roles(&[RoleName::Viewer, RoleName::Admin, RoleName::Viewer]).expect("roles"),

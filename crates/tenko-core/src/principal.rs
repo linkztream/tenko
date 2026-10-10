@@ -128,6 +128,14 @@ pub enum SystemComponent {
     Scan,
     /// Cluster management (enrolment, membership).
     Cluster,
+    /// The audit export (Slice 3, IAM-18): sinks, cursors and checkpoints.
+    AuditExport,
+    /// Backups and restores (Slice 3, OPS-07).
+    Backup,
+    /// Language packs (Slice 3, API-21).
+    Languages,
+    /// The leader supervisor: taking office and the epoch of leader-only work (Slice 3).
+    Leader,
 }
 
 impl SystemComponent {
@@ -146,6 +154,10 @@ impl SystemComponent {
             SystemComponent::Connector => "connector",
             SystemComponent::Scan => "scan",
             SystemComponent::Cluster => "cluster",
+            SystemComponent::AuditExport => "audit_export",
+            SystemComponent::Backup => "backup",
+            SystemComponent::Languages => "languages",
+            SystemComponent::Leader => "leader",
         }
     }
 }
@@ -373,22 +385,127 @@ impl ScopeFilter {
     pub fn is_all(&self) -> bool {
         matches!(self, ScopeFilter::All)
     }
+
+    /// Whether an object with these anchors is inside the scope (IAM-01).
+    ///
+    /// `All` admits everything and `Nothing` nothing. For `Only(rules)`, a tenant, VRF,
+    /// site or object rule covers the object as a whole; a prefix rule covers one prefix
+    /// chain of [`Anchors::prefixes`]. With [`AnchorMode::Any`] (reads) one covering rule
+    /// suffices. With [`AnchorMode::All`] (create, update, delete) the object must be
+    /// covered as a whole, or every prefix chain must be covered by some prefix rule: a
+    /// scoped operator cannot change a host that also sits in a prefix outside the scope.
+    /// A write that moves an object is checked against its anchors before and after the
+    /// change.
+    pub fn admits(&self, anchors: &Anchors, mode: AnchorMode) -> bool {
+        let rules = match self {
+            ScopeFilter::All => return true,
+            ScopeFilter::Nothing => return false,
+            ScopeFilter::Only(rules) => rules,
+        };
+        if rules.iter().any(|rule| rule.covers_whole(anchors)) {
+            return true;
+        }
+        let covered = |chain: &Vec<PrefixId>| rules.iter().any(|rule| rule.covers_chain(chain));
+        match mode {
+            AnchorMode::Any => anchors.prefixes.iter().any(covered),
+            AnchorMode::All => !anchors.prefixes.is_empty() && anchors.prefixes.iter().all(covered),
+        }
+    }
 }
 
 /// One rule of a scoped grant (IAM-01, Slice 3).
+///
+/// A rule with `subtree: true` covers the site or prefix and everything below it; with
+/// `subtree: false` it covers the site or prefix itself and the objects directly in it,
+/// not those of a child site or a child prefix.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum ScopeRule {
     /// Objects of a tenant.
     Tenant(TenantId),
     /// Objects of a VRF.
     Vrf(VrfId),
-    /// Objects of a site and its child sites.
-    Site(SiteId),
-    /// A prefix and everything inside it.
-    Prefix(PrefixId),
+    /// Objects of a site, and with `subtree` those of its child sites.
+    Site {
+        /// The site.
+        id: SiteId,
+        /// Whether child sites are included.
+        subtree: bool,
+    },
+    /// A prefix and the objects directly in it, and with `subtree` everything inside it.
+    Prefix {
+        /// The prefix.
+        id: PrefixId,
+        /// Whether child prefixes are included.
+        subtree: bool,
+    },
     /// One object.
     Object(ObjectRef),
+}
+
+impl ScopeRule {
+    /// Whether the rule covers the object as a whole (tenant, VRF, site or object rules).
+    fn covers_whole(&self, anchors: &Anchors) -> bool {
+        match self {
+            ScopeRule::Tenant(tenant) => anchors.tenant == Some(*tenant),
+            ScopeRule::Vrf(vrf) => anchors.vrf == Some(*vrf),
+            ScopeRule::Site { id, subtree: true } => anchors.sites.contains(id),
+            ScopeRule::Site { id, subtree: false } => anchors.sites.first() == Some(id),
+            ScopeRule::Object(object) => anchors.object.as_ref() == Some(object),
+            ScopeRule::Prefix { .. } => false,
+        }
+    }
+
+    /// Whether a prefix rule covers one prefix chain (the most specific prefix first).
+    fn covers_chain(&self, chain: &[PrefixId]) -> bool {
+        match self {
+            ScopeRule::Prefix { id, subtree: true } => chain.contains(id),
+            ScopeRule::Prefix { id, subtree: false } => chain.first() == Some(id),
+            _ => false,
+        }
+    }
+}
+
+/// Where an object sits in the scope dimensions of IAM-01, as an `AnchorResolver`
+/// (`tenko_store::AnchorResolver`, implemented over the prefix tree by `tenko-ipam`) finds
+/// it: a prefix anchors to itself and its ancestors, its VRF, tenant and site; an address or
+/// a range to its most specific prefix; a host to its site and the prefixes of its
+/// addresses; an interface to its host; a VLAN to its site; observations and proposals to
+/// the prefix of their subject address; a job to its targets.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Anchors {
+    /// The object itself, for [`ScopeRule::Object`].
+    pub object: Option<ObjectRef>,
+    /// The tenant.
+    pub tenant: Option<TenantId>,
+    /// The VRF.
+    pub vrf: Option<VrfId>,
+    /// The object's site first, then its ancestors up to the root; empty without a site.
+    pub sites: Vec<SiteId>,
+    /// One chain per prefix the object lies in, each with the most specific prefix first
+    /// and then its ancestors up to the root: one chain for a prefix (starting with itself),
+    /// an address or a range, one per address prefix for a host, none for an object outside
+    /// the prefix tree.
+    pub prefixes: Vec<Vec<PrefixId>>,
+}
+
+impl Anchors {
+    /// The anchors of an object that has nothing but itself.
+    pub fn of(object: ObjectRef) -> Self {
+        Self {
+            object: Some(object),
+            ..Self::default()
+        }
+    }
+}
+
+/// How many anchors of an object must be in scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AnchorMode {
+    /// One is enough: reading an object.
+    Any,
+    /// The whole object, or every prefix chain: creating, changing or deleting it.
+    All,
 }
 
 /// An authorizer that allows everything. Only for tests and only with the `testing`
@@ -411,7 +528,10 @@ impl Authorizer for AllowAll {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codec::{from_cbor, to_cbor};
+    use crate::{
+        codec::{from_cbor, to_cbor},
+        id::HostId,
+    };
 
     fn user() -> Principal {
         Principal::User {
@@ -472,6 +592,130 @@ mod tests {
             ..denied
         };
         assert_eq!(unauthenticated.http_status(), 401);
+    }
+
+    fn ids() -> (TenantId, VrfId, [SiteId; 2], [PrefixId; 3]) {
+        (
+            TenantId::generate(),
+            VrfId::generate(),
+            [SiteId::generate(), SiteId::generate()],
+            [
+                PrefixId::generate(),
+                PrefixId::generate(),
+                PrefixId::generate(),
+            ],
+        )
+    }
+
+    fn prefix(id: PrefixId, subtree: bool) -> ScopeFilter {
+        ScopeFilter::Only(vec![ScopeRule::Prefix { id, subtree }])
+    }
+
+    #[test]
+    fn prefix_rules_follow_subtree_semantics() {
+        let (_, _, _, [root, child, other]) = ids();
+        // An address directly in `child`, which lies in `root`.
+        let anchors = Anchors {
+            prefixes: vec![vec![child, root]],
+            ..Anchors::default()
+        };
+        for mode in [AnchorMode::Any, AnchorMode::All] {
+            assert!(prefix(root, true).admits(&anchors, mode));
+            assert!(prefix(child, false).admits(&anchors, mode));
+            assert!(!prefix(root, false).admits(&anchors, mode));
+            assert!(!prefix(other, true).admits(&anchors, mode));
+        }
+        assert!(ScopeFilter::All.admits(&anchors, AnchorMode::All));
+        assert!(!ScopeFilter::Nothing.admits(&anchors, AnchorMode::Any));
+        assert!(!ScopeFilter::Only(Vec::new()).admits(&anchors, AnchorMode::Any));
+    }
+
+    #[test]
+    fn writes_need_every_prefix_chain_and_reads_need_one() {
+        let (_, _, _, [root, child, other]) = ids();
+        // A host with one address under `root` and one in the unrelated `other`.
+        let host = Anchors {
+            prefixes: vec![vec![child, root], vec![other]],
+            ..Anchors::default()
+        };
+        let scoped = prefix(root, true);
+        assert!(scoped.admits(&host, AnchorMode::Any));
+        assert!(!scoped.admits(&host, AnchorMode::All));
+        let both = ScopeFilter::Only(vec![
+            ScopeRule::Prefix {
+                id: root,
+                subtree: true,
+            },
+            ScopeRule::Prefix {
+                id: other,
+                subtree: false,
+            },
+        ]);
+        assert!(both.admits(&host, AnchorMode::All));
+        // Prefix rules never admit a write to an object outside the prefix tree.
+        assert!(!scoped.admits(&Anchors::default(), AnchorMode::All));
+    }
+
+    #[test]
+    fn tenant_vrf_site_and_object_rules_cover_the_whole_object() {
+        let (tenant, vrf, [site, parent], [first, ..]) = ids();
+        let object = ObjectRef::new(ObjectKind::Host, HostId::generate().0);
+        let anchors = Anchors {
+            object: Some(object),
+            tenant: Some(tenant),
+            vrf: Some(vrf),
+            sites: vec![site, parent],
+            prefixes: vec![vec![first]],
+        };
+        for rule in [
+            ScopeRule::Tenant(tenant),
+            ScopeRule::Vrf(vrf),
+            ScopeRule::Site {
+                id: parent,
+                subtree: true,
+            },
+            ScopeRule::Site {
+                id: site,
+                subtree: false,
+            },
+            ScopeRule::Object(object),
+        ] {
+            let filter = ScopeFilter::Only(vec![rule.clone()]);
+            assert!(filter.admits(&anchors, AnchorMode::All), "{rule:?}");
+            assert!(filter.admits(&anchors, AnchorMode::Any), "{rule:?}");
+        }
+        let parent_only = ScopeFilter::Only(vec![ScopeRule::Site {
+            id: parent,
+            subtree: false,
+        }]);
+        assert!(!parent_only.admits(&anchors, AnchorMode::Any));
+        assert!(
+            ScopeFilter::Only(vec![ScopeRule::Object(object)])
+                .admits(&Anchors::of(object), AnchorMode::All)
+        );
+        assert!(
+            !ScopeFilter::Only(vec![ScopeRule::Tenant(TenantId::generate())])
+                .admits(&anchors, AnchorMode::Any)
+        );
+    }
+
+    #[test]
+    fn scope_rules_and_components_serialize_with_stable_names() {
+        let (_, _, _, [first, ..]) = ids();
+        let rule = ScopeRule::Prefix {
+            id: first,
+            subtree: true,
+        };
+        let json = serde_json::to_value(&rule).expect("json");
+        assert_eq!(json["kind"], "prefix");
+        assert_eq!(json["value"]["subtree"], true);
+        let back: ScopeRule = from_cbor(&to_cbor(&rule).expect("cbor")).expect("cbor");
+        assert_eq!(back, rule);
+        assert_eq!(SystemComponent::AuditExport.as_str(), "audit_export");
+        assert_eq!(
+            serde_json::to_value(SystemComponent::Leader).expect("json"),
+            "leader"
+        );
     }
 
     #[test]

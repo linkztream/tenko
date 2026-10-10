@@ -17,7 +17,9 @@
 //! | [`id`] | `id_type!`, entity identifiers (UUIDv7), [`NodeId`], [`Revision`], [`AuditSeq`] |
 //! | [`timestamp`] | [`Timestamp`] (UTC, RFC 3339) |
 //! | [`object`] | [`ObjectKind`], [`ObjectRef`] |
-//! | [`principal`] | [`Principal`], [`RequestCtx`], [`Authorizer`], [`Action`], [`Denied`] |
+//! | [`principal`] | [`Principal`], [`RequestCtx`], [`Authorizer`], [`Action`], [`Denied`], scopes: [`ScopeFilter`], [`ScopeRule`], [`Anchors`], [`AnchorMode`] |
+//! | [`cluster`] | leader-only work: [`cluster::LeaderService`], the epoch counter [`cluster::LEADER_EPOCH`] |
+//! | [`i18n`] | language packs in the store: [`i18n::PACKS`], the built-in languages |
 //! | [`auth`] | [`Credentials`], [`Authenticated`], [`Authenticator`], [`AuthFailure`] |
 //! | [`names`] | namespaces, [`TableName`], [`CounterKey`], [`MessageKey`], [`IdempotencyKey`] |
 //! | [`error`] | [`Coded`], [`CodedError`], [`FieldError`], [`InvalidValue`] |
@@ -42,8 +44,10 @@ pub mod __private {
 
 pub mod audit;
 pub mod auth;
+pub mod cluster;
 pub mod codec;
 pub mod error;
+pub mod i18n;
 pub mod id;
 pub mod ipam;
 pub mod ir;
@@ -69,8 +73,8 @@ pub use names::{CounterKey, IdempotencyKey, MessageKey, TableName};
 pub use net::MacAddr;
 pub use object::{ObjectKind, ObjectRef};
 pub use principal::{
-    Action, AuthStrength, Authorizer, Denied, DenyReason, Principal, RequestCtx, ScopeFilter,
-    SystemComponent,
+    Action, AnchorMode, Anchors, AuthStrength, Authorizer, Denied, DenyReason, Principal,
+    RequestCtx, ScopeFilter, ScopeRule, SystemComponent,
 };
 pub use role::{ParseRoleError, Role, RoleSet};
 pub use timestamp::Timestamp;

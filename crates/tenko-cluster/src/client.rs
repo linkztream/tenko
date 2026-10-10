@@ -351,6 +351,7 @@ pub async fn hello(
                 .iter()
                 .map(|role| role.as_str().to_owned())
                 .collect(),
+            capabilities: Vec::new(),
         })
         .await
         .map_err(|status| refused_status(&status))?

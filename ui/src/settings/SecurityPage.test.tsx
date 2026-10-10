@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { api } from "../api/client";
 import { db } from "../api/mock/db";
-import { profileSettings } from "../api/mock/profiles";
+import { PROFILE_MATRIX as MOCK_PROFILE_MATRIX, profileSettings } from "../api/mock/profiles";
 import { server } from "../api/mock/node";
 import { REVEAL_DEFAULT as MOCK_REVEAL_DEFAULT } from "../api/mock/reveal-policy";
 import { isApiError } from "../api/problem";
@@ -14,7 +14,7 @@ import { PROFILE_DEFAULTS, valueOf } from "./profileMatrix";
 import SecurityPage from "./SecurityPage";
 import { SETTINGS_PATH, signInAs } from "./testkit";
 import { patchFor } from "./toggleEdit";
-import { formatToggle, REVEAL_DEFAULT, TOGGLES, weakerThan } from "./toggles";
+import { AUDIT_EXPORT, AUDIT_EXPORT_DEFAULT, auditExportOf, formatToggle, REVEAL_DEFAULT, TOGGLES, weakerThan } from "./toggles";
 
 afterEach(() => setSessionForTest(null));
 
@@ -36,12 +36,13 @@ async function openEditor(name: string) {
 }
 
 describe("the security page", () => {
-  it("lists TGL-01 to TGL-07, TGL-23 and TGL-24 in order with the current and the profile value", async () => {
+  it("lists TGL-01 to TGL-07, TGL-21, TGL-23 and TGL-24 in order with the current and the profile value", async () => {
     await signInAs();
     await openPage();
     const ids = Array.from(document.querySelectorAll("tbody tr[data-toggle]")).map((r) => r.getAttribute("data-toggle"));
     expect(ids).toEqual(TOGGLES.map((d) => d.id));
-    expect(ids).toHaveLength(9);
+    expect(ids).toHaveLength(10);
+    expect(ids).toEqual(["TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-21", "TGL-23", "TGL-24"]);
     // The Standard profile: administrators need MFA, passwords are at least 12 characters.
     expect(within(row("TGL-02")).getAllByText("Required for administrators")).toHaveLength(2);
     expect(within(row("TGL-01")).getAllByText("Standard: at least 12 characters")).toHaveLength(2);
@@ -216,10 +217,11 @@ describe("the security page", () => {
     expect(
       await within(dialog).findByText("Switching to Hardened resets every setting to the Hardened values."),
     ).toBeTruthy();
-    expect(within(dialog).getByText("9 settings change:")).toBeTruthy();
+    expect(within(dialog).getByText("10 settings change:")).toBeTruthy();
     const table = within(dialog).getByRole("table", { name: "Settings that change" });
     expect(within(table).getByText("Password policy preset")).toBeTruthy();
     expect(within(table).getByText("Lockout")).toBeTruthy();
+    expect(within(table).getByText("Audit export")).toBeTruthy();
     expect(within(table).getByText("Updates")).toBeTruthy();
     expect(within(table).getByText("Secret reveal")).toBeTruthy();
     // The database has not changed before the confirmation.
@@ -494,7 +496,7 @@ describe("TGL-24: what revealing an operator secret takes", () => {
     expect(within(reveal).getAllByText(STANDARD)).toHaveLength(2);
     expect(within(reveal).getByText("Follows the profile")).toBeTruthy();
     expect(within(reveal).queryByRole("button", { name: /Reset to profile/ })).toBeNull();
-    expect(screen.getByText("TGL-01 to TGL-07, TGL-23 and TGL-24")).toBeTruthy();
+    expect(screen.getByText("TGL-01 to TGL-07, TGL-21, TGL-23 and TGL-24")).toBeTruthy();
     expect(session()?.banner.deviations).toEqual([]);
   });
 
@@ -667,6 +669,187 @@ describe("TGL-24: what revealing an operator secret takes", () => {
     await signInAs();
     await openPage();
     const dialog = await openEditor("Secret reveal");
+    expect(await axeViolations(dialog)).toEqual([]);
+  });
+});
+
+describe("TGL-21: whether the audit log leaves the installation", () => {
+  const LOCAL = "Local only";
+  const OPTIONAL = "Local, export optional";
+  const REQUIRED = "Export required";
+
+  afterEach(() => server.events.removeAllListeners());
+
+  /** The bodies of the PATCH requests of the settings, as they were sent. */
+  function recordPatches(): unknown[] {
+    const bodies: unknown[] = [];
+    server.events.on("request:start", ({ request }) => {
+      if (request.method === "PATCH" && new URL(request.url).pathname === "/api/v1/settings/security") {
+        void request
+          .clone()
+          .json()
+          .then((body: unknown) => bodies.push(body));
+      }
+    });
+    return bodies;
+  }
+
+  it("lists the toggle between lockout and updates with the value of the profile and no deviation", async () => {
+    await signInAs();
+    await openPage();
+    const rows = Array.from(document.querySelectorAll("tbody tr[data-toggle]")).map((r) => r.getAttribute("data-toggle"));
+    expect(rows.indexOf("TGL-21")).toBe(rows.indexOf("TGL-07") + 1);
+    expect(rows.indexOf("TGL-23")).toBe(rows.indexOf("TGL-21") + 1);
+    const audit = row("TGL-21");
+    expect(within(audit).getByText("Audit export")).toBeTruthy();
+    expect(within(audit).getAllByText(OPTIONAL)).toHaveLength(2);
+    expect(within(audit).getByText("Follows the profile")).toBeTruthy();
+    expect(within(audit).queryByRole("button", { name: /Reset to profile/ })).toBeNull();
+    expect(session()?.banner.deviations).toEqual([]);
+  });
+
+  it("has the four profile values of SECURITY-PROFILES.md in the matrix, in step with the mock", () => {
+    const matrix = Object.fromEntries(
+      (["home", "standard", "hardened", "lab"] as const).map((p) => [p, valueOf(PROFILE_DEFAULTS[p], "audit_export")]),
+    );
+    expect(matrix).toEqual({ home: "local", standard: "optional", hardened: "required", lab: "local" });
+    expect(AUDIT_EXPORT_DEFAULT).toEqual(matrix);
+    expect(Object.fromEntries(Object.entries(MOCK_PROFILE_MATRIX).map(([p, v]) => [p, v.audit_export]))).toEqual(matrix);
+    expect(AUDIT_EXPORT).toEqual(["local", "optional", "required"]);
+    expect(formatToggle("audit_export", "local")).toBe(LOCAL);
+    expect(formatToggle("audit_export", "optional")).toBe(OPTIONAL);
+    expect(formatToggle("audit_export", "required")).toBe(REQUIRED);
+    // Home keeps the log local, the weakest value: no value is weaker, and the toggle never raises the banner.
+    for (const value of AUDIT_EXPORT) expect(weakerThan("audit_export", value, "local")).toBe(false);
+    expect(weakerThan("audit_export", "local", "required")).toBe(false);
+  });
+
+  it("follows the profile for settings stored before the toggle", () => {
+    const old = { ...profileSettings("hardened") };
+    delete old.audit_export;
+    expect(auditExportOf(old)).toBe("required");
+    expect(auditExportOf({ ...old, audit_export: "local" })).toBe("local");
+    expect(auditExportOf({ ...profileSettings("lab"), audit_export: null })).toBe("local");
+  });
+
+  it("edits the choice, explains each option and sends it", async () => {
+    await signInAs();
+    await openPage();
+    const bodies = recordPatches();
+    const dialog = await openEditor("Audit export");
+    const modes = AUDIT_EXPORT.map((mode) => within(dialog).getByTestId(`field-audit_export-${mode}`) as HTMLInputElement);
+    expect(modes.map((m) => m.checked)).toEqual([false, true, false]);
+    expect(within(dialog).getByRole("radiogroup", { name: "How the audit log leaves this installation" })).toBeTruthy();
+    // Each option says what it means.
+    expect(within(dialog).getByText("The audit log stays on this installation. No export is set up.")).toBeTruthy();
+    expect(within(dialog).getByText(/you may send it on to syslog, CEF or JSON sinks/)).toBeTruthy();
+    expect(within(dialog).getByText("At least one export sink must be set up, and an alarm shows while a sink fails.")).toBeTruthy();
+    expect((within(dialog).getByRole("button", { name: "Save setting" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(modes[2] as HTMLElement);
+    expect(await within(dialog).findByText(/Differs from the Standard profile/)).toBeTruthy();
+    // A stronger value is not weaker than Home: no warning.
+    expect(within(dialog).queryByText("Weaker than Home")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save setting" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(bodies).toEqual([{ audit_export: "required" }]);
+    expect(db.settings.audit_export).toBe("required");
+    const audit = row("TGL-21");
+    expect(within(audit).getByText(REQUIRED)).toBeTruthy();
+    expect(within(audit).getByText("Differs from the profile")).toBeTruthy();
+    expect(within(audit).queryByText("Weaker than Home")).toBeNull();
+    expect(session()?.banner.deviations).toEqual(["TGL-21"]);
+    expect(session()?.banner.weaker_than_home).toBe(false);
+    expect(await screen.findByText("Saved Audit export")).toBeTruthy();
+  });
+
+  it("does not call the weakest value weaker than Home", async () => {
+    await signInAs();
+    await openPage();
+    const dialog = await openEditor("Audit export");
+    fireEvent.click(within(dialog).getByTestId("field-audit_export-local"));
+    expect(await within(dialog).findByText(/Differs from the Standard profile/)).toBeTruthy();
+    expect(within(dialog).queryByText(/Weaker than Home/)).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save setting" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(db.settings.audit_export).toBe("local");
+    expect(within(row("TGL-21")).queryByText("Weaker than Home")).toBeNull();
+    expect(within(row("TGL-21")).getByText("Differs from the profile")).toBeTruthy();
+    expect(session()?.banner.weaker_than_home).toBe(false);
+  });
+
+  it("shows a deviation set on the server and resets it to the profile", async () => {
+    await signInAs();
+    db.settings.audit_export = "required";
+    await openPage();
+    const audit = row("TGL-21");
+    expect(within(audit).getByText(REQUIRED)).toBeTruthy();
+    expect(within(audit).getByText(OPTIONAL)).toBeTruthy();
+    expect(within(audit).getByText("Differs from the profile")).toBeTruthy();
+
+    const bodies = recordPatches();
+    fireEvent.click(within(audit).getByRole("button", { name: "Reset to profile: Audit export" }));
+    await waitFor(() => expect(within(row("TGL-21")).queryByText("Differs from the profile")).toBeNull());
+    expect(within(row("TGL-21")).getByText("Follows the profile")).toBeTruthy();
+    expect(bodies).toEqual([{ audit_export: "optional" }]);
+    expect(db.settings.audit_export).toBe("optional");
+    expect(session()?.banner.deviations).toEqual([]);
+  });
+
+  it("previews the value of the target profile in the profile dialog and puts the default back on a switch", async () => {
+    await signInAs("lab");
+    await openPage();
+    expect(within(row("TGL-21")).getAllByText(LOCAL)).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Change profile" }));
+    const dialog = await screen.findByRole("dialog", { name: "Change security profile" });
+
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Hardened/ }));
+    const table = await within(dialog).findByRole("table", { name: "Settings that change" });
+    const changed = within(table).getByText("Audit export").closest("tr") as HTMLElement;
+    expect(within(changed).getByText(LOCAL)).toBeTruthy();
+    expect(within(changed).getByText(REQUIRED)).toBeTruthy();
+    expect(within(changed).queryByText("Weaker than Home")).toBeNull();
+
+    // Home has the value that Lab has: nothing to change for this toggle.
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Home/ }));
+    const home = await within(dialog).findByRole("table", { name: "Settings that change" });
+    expect(within(home).queryByText("Audit export")).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Hardened/ }));
+    await within(dialog).findByRole("button", { name: "Switch to Hardened" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Switch to Hardened" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(db.settings.audit_export).toBe("required");
+    expect(within(row("TGL-21")).getAllByText(REQUIRED)).toHaveLength(2);
+    expect(within(row("TGL-21")).getByText("Follows the profile")).toBeTruthy();
+  });
+
+  it("keeps the choice when another toggle changes", async () => {
+    await signInAs();
+    db.settings.audit_export = "required";
+    await openPage();
+    const dialog = await openEditor("Lockout");
+    fireEvent.change(within(dialog).getByLabelText("Lockout"), { target: { value: "lock_until_unlock" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save setting" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(db.settings.audit_export).toBe("required");
+    expect(session()?.banner.deviations).toEqual(["TGL-07", "TGL-21"]);
+  });
+
+  it("builds the request body of the toggle and refuses a value the server does not know", async () => {
+    expect(patchFor("audit_export", "required")).toEqual({ audit_export: "required" });
+    await signInAs();
+    const bad = { audit_export: "sometimes" } as unknown as SettingsPatch;
+    const error = await api.patch("/api/v1/settings/security", { body: bad }).catch((e: unknown) => e);
+    expect(isApiError(error)).toBe(true);
+    expect(db.settings.audit_export).toBe("optional");
+  });
+
+  it("is accessible", async () => {
+    await signInAs();
+    await openPage();
+    const dialog = await openEditor("Audit export");
     expect(await axeViolations(dialog)).toEqual([]);
   });
 });

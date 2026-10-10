@@ -1,0 +1,31 @@
+// Tenko node transport, major version 1: metrics of a controller.
+// See handshake.proto for the transport, the errors and the evolution rule.
+//
+// The service Metrics lets a controller read another controller's current figures, so the
+// dashboard of any controller shows the whole cluster. A caller needs the role
+// `controller`. It is filled in by work package WP3.5; until then every method answers
+// UNIMPLEMENTED.
+syntax = "proto3";
+
+package tenko.cluster.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// A controller's metrics, read by its peers.
+service Metrics {
+  // The callee's newest one-second snapshot of its metrics.
+  rpc Snapshot(SnapshotRequest) returns (MetricsSnapshot);
+}
+
+message SnapshotRequest {}
+
+message MetricsSnapshot {
+  // The node id of the controller that took the snapshot.
+  uint64 node_id = 1;
+  // When it was taken, by the callee's clock.
+  google.protobuf.Timestamp at = 2;
+  // The encoding of `payload`, for example `cbor/1`.
+  string encoding = 3;
+  // The snapshot, in `encoding`.
+  bytes payload = 4;
+}

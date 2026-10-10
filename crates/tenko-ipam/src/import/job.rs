@@ -229,6 +229,7 @@ pub fn apply_job(id: ImportId, model: Digest, chunks: &[Range<usize>]) -> IpamRe
         group: GroupKey::new("import").ok(),
         group_limit: None,
         idempotency: None,
+        node: None,
     })
 }
 

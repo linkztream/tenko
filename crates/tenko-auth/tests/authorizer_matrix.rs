@@ -248,7 +248,9 @@ fn required(profile: Profile, role: RoleName) -> AuthStrength {
         (Profile::Hardened, RoleName::Admin) => AuthStrength::Passkey,
         (Profile::Standard, RoleName::Admin) | (Profile::Hardened, _) => AuthStrength::PasswordTotp,
         (Profile::Home | Profile::Lab, _)
-        | (Profile::Standard, RoleName::Operator | RoleName::Viewer) => AuthStrength::Pin,
+        | (Profile::Standard, RoleName::Operator | RoleName::Viewer | RoleName::Auditor) => {
+            AuthStrength::Pin
+        }
     }
 }
 

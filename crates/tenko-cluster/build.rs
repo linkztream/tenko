@@ -5,10 +5,15 @@
 use std::path::Path;
 
 const PROTO_ROOT: &str = "proto";
-const FILES: [&str; 3] = [
+const FILES: [&str; 8] = [
     "tenko/cluster/v1/handshake.proto",
     "tenko/cluster/v1/node.proto",
     "tenko/cluster/v1/observations.proto",
+    "tenko/cluster/v1/raft.proto",
+    "tenko/cluster/v1/membership.proto",
+    "tenko/cluster/v1/config.proto",
+    "tenko/cluster/v1/commands.proto",
+    "tenko/cluster/v1/metrics.proto",
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

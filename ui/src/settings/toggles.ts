@@ -1,4 +1,4 @@
-// The security toggles of Slice 1 (TGL-01 to TGL-07, TGL-23 and TGL-24, docs/SECURITY-PROFILES.md): their
+// The security toggles of the UI (TGL-01 to TGL-07, TGL-21, TGL-23 and TGL-24, docs/SECURITY-PROFILES.md): their
 // names, how a value reads in the UI, and whether a value is weaker than the Home profile.
 // Shared by the first-run wizard (profile preview) and the security settings page.
 import type {
@@ -20,6 +20,7 @@ export type ToggleSetting =
   | "token_max_days"
   | "breach_check"
   | "lockout"
+  | "audit_export"
   | "updates"
   | "secret_reveal";
 
@@ -37,6 +38,7 @@ export const TOGGLES: readonly ToggleDef[] = [
   { id: "TGL-05", setting: "token_max_days", name: "toggles.token_max_days.name" },
   { id: "TGL-06", setting: "breach_check", name: "toggles.breach_check.name" },
   { id: "TGL-07", setting: "lockout", name: "toggles.lockout.name" },
+  { id: "TGL-21", setting: "audit_export", name: "toggles.audit_export.name" },
   { id: "TGL-23", setting: "updates", name: "toggles.updates.name" },
   { id: "TGL-24", setting: "secret_reveal", name: "toggles.secret_reveal.name" },
 ];
@@ -50,6 +52,24 @@ export function toggleById(id: string): ToggleDef | undefined {
 
 export function toggleBySetting(setting: string): ToggleDef | undefined {
   return TOGGLES.find((x) => x.setting === setting);
+}
+
+/** TGL-21 (IAM-18): whether the audit log leaves the installation. The log itself is never off. */
+export type AuditExport = NonNullable<SecuritySettings["audit_export"]>;
+/** The values from the weakest to the strongest. */
+export const AUDIT_EXPORT: readonly AuditExport[] = ["local", "optional", "required"];
+
+/** The value of TGL-21 in each profile (docs/SECURITY-PROFILES.md). Home keeps the log local, the weakest value. */
+export const AUDIT_EXPORT_DEFAULT: Readonly<Record<Profile, AuditExport>> = {
+  home: "local",
+  standard: "optional",
+  hardened: "required",
+  lab: "local",
+};
+
+/** The audit export of a settings object; one without it (an older answer) follows its profile. */
+export function auditExportOf(settings: SecuritySettings): AuditExport {
+  return settings.audit_export ?? AUDIT_EXPORT_DEFAULT[settings.profile];
 }
 
 /** TGL-23 (OPS-24): the daily update check and who may install a new version. */
@@ -145,6 +165,8 @@ export function formatToggle(setting: string, value: unknown): string {
       return t(`toggles.breach_check.${value as BreachMode}`);
     case "lockout":
       return t(`toggles.lockout.${value as LockoutMode}`);
+    case "audit_export":
+      return t(`toggles.audit_export.${value as AuditExport}`);
     case "updates":
       return formatUpdates(value);
     case "secret_reveal":
@@ -196,6 +218,9 @@ export function weakerThan(setting: string, value: unknown, home: unknown): bool
       return value === "off" && home !== "off";
     case "lockout":
       return LOCKOUT_RANK[value as LockoutMode] < LOCKOUT_RANK[home as LockoutMode];
+    case "audit_export":
+      // Home keeps the audit log local, the weakest value there is, so no value is weaker.
+      return false;
     case "updates":
       // Not looking for new versions is weaker than Home; who installs them is a matter of taste.
       return (value as UpdatesPolicy).check === false && (home as UpdatesPolicy).check === true;
@@ -209,6 +234,7 @@ export function weakerThan(setting: string, value: unknown, home: unknown): bool
 
 /** The value of a toggle in a settings object. */
 export function settingValue(settings: SecuritySettings, setting: ToggleSetting): unknown {
+  if (setting === "audit_export") return auditExportOf(settings);
   if (setting === "updates") return updatesOf(settings);
   return setting === "secret_reveal" ? revealOf(settings) : settings[setting];
 }

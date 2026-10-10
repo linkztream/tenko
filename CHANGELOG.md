@@ -66,6 +66,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - Moves change the network of each device through the network controller: the switch port of a wired device gets a port profile that carries the target VLAN untagged, and a wireless device gets a per-client VLAN override. Each change is read from the controller again when the job reaches it, refused when the device or its port changed since the move started, written after a dry run and verified by reading back. When the device is not seen at its new address in time, the change is undone with the controller's undo steps. A device the controller cannot move gets a manual step that says exactly what to do and why: no controller, not seen by it, writes off (TGL-20), a port shared with other devices, no port profile for the VLAN, an access point that does not carry the VLAN (join the named wireless network instead), or a guardrail.
 - The move preview shows the network change of every device: the port profile on which switch port, the VLAN override on which access point, or the manual step and its reason, with the change on the controller, its side effects and the wireless networks that carry the target VLAN. A device on an uplink, on the port through which Tenko or the controller is reached, or that is the controller itself is refused by a guardrail, shown with the rule and left to a person after an acknowledgement; the other devices of the move are not held up. A move starts only the plan that was previewed, and asks for a new look at the preview when the network changed in between.
 - The jobs view shows the network step of a move with the change the controller read back, when it was written and verified, the undo steps kept for a rollback, and the rollback itself.
+- The role `auditor`, for people who check the installation without working in it: it reads the audit log, the state of the audit export and the system status, and nothing else.
+- The security profile toggle TGL-21, the audit export: the local audit log only (Home, Lab), export optional (Standard), export required (Hardened). The export itself arrives in a later release.
+- `tenko setup token` prints the one-time setup token of a first start from the data directory.
+- New settings in `tenko.toml`, checked by `tenko config check`, for features of later releases: in `[cluster]` the isolation timeout, the catch-up timeout, the automatic promotion of new controllers and its lag limit, and a bandwidth cap for node configuration; `[telemetry]` with an OTLP endpoint for traces (off by default); `[metrics]` with an optional metrics listener on a loopback address; `[backup]` with the directory for backup files.
 
 ### Changed
 
@@ -75,6 +79,9 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - A move completes its observation step by itself when the device is seen at its new address from its own MAC address; a person can still confirm the step by hand.
 - The operator secrets page moved under Settings, to `/settings/secrets`, as a tab beside Security, Users and Updates; the former `/secrets` address and the links to one secret keep working and redirect there.
 - A bulk move runs four devices at a time by default, instead of two; the preview still offers 1, 2, 4 and 8.
+- `GET /api/v1/openapi.json` answers the committed OpenAPI document byte for byte, in the same pretty-printed form that `tenko openapi` prints, instead of compact JSON.
+- `tenko serve` starts in eleven steps: a new `cluster` step after the store, and the step of the node transport is now called `nodes`.
+- The data-directory format is 2. The first start of this version migrates the data directory (after the usual copy), and earlier versions refuse it afterwards; to go back, restore the copy taken before the migration.
 
 ### Fixed
 
@@ -92,3 +99,4 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - Connectors can be given a secret only by people who may change secrets, so the reveal policy cannot be bypassed through a connector.
 - Repeated requests with an idempotency key are recognised by a fingerprint keyed with a random secret that exists only in memory and changes at every start, so the stored fingerprints reveal nothing about the requests; sign-in, setup and password requests are never fingerprinted. A retry after a restart of a request sent before it is answered as already performed instead of being run again.
 - Before a rollback undoes a write through a network controller (a VLAN network or the network change of a move), the undo steps are checked against the guardrails on a fresh read of the controller, so an undo never changes an uplink or the path through which Tenko or the controller is reached.
+- The one-time setup token of a first start no longer appears in the log or in the output of a service. It is kept in `setup-token` in the data directory, readable only by the service account, until setup is complete; `tenko setup token` prints it, and a start in a terminal still shows it on the console.

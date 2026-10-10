@@ -7,10 +7,13 @@ import { Switch as SwitchControl } from "../components/Switch";
 import { t } from "../i18n";
 import { FieldHelp, SelectField } from "./fields";
 import {
+  AUDIT_EXPORT,
+  AUDIT_EXPORT_DEFAULT,
   REVEAL_DEFAULT,
   REVEAL_STEP_UP,
   UPDATES_DEFAULT,
   UPDATES_INSTALL,
+  type AuditExport,
   type RevealPolicy,
   type RevealStepUp,
   type UpdatesInstall,
@@ -351,6 +354,42 @@ export function TokenEditor(props: EditorProps<number | null>) {
         </div>
       </Show>
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------------
+// TGL-21: whether the audit log leaves the installation
+
+export function AuditExportEditor(props: EditorProps<AuditExport>) {
+  const [value, setValue] = createSignal<AuditExport>(untrack(() => props.initial) ?? AUDIT_EXPORT_DEFAULT.home);
+  createEffect(() => props.onDraft(value()));
+
+  return (
+    <div class="field">
+      <span class="label" id="tg-audit-export-label">
+        {t("settings.security.audit_export.mode")}
+      </span>
+      <div class="choices" role="radiogroup" aria-labelledby="tg-audit-export-label">
+        <For each={AUDIT_EXPORT}>
+          {(mode) => (
+            <label class="choice">
+              <input
+                type="radio"
+                name="tg-audit-export"
+                value={mode}
+                data-testid={`field-audit_export-${mode}`}
+                checked={value() === mode}
+                onChange={() => setValue(mode)}
+              />
+              <span>
+                {t(`settings.security.audit_export.${mode}`)}
+                <small class="muted">{t(`settings.security.audit_export.${mode}_help`)}</small>
+              </span>
+            </label>
+          )}
+        </For>
+      </div>
+    </div>
   );
 }
 

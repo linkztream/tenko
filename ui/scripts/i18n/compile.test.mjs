@@ -6,8 +6,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  FRAGMENT_NAME_PATTERN,
   KEY_PATTERN,
   formatDiagnostics,
+  languageFiles,
   loadCatalog,
   renderKeysTs,
   renderLocaleModule,
@@ -912,6 +914,594 @@ describe("formatDiagnostics", () => {
 
   it("is empty for no diagnostics", () => {
     expect(formatDiagnostics([])).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Fragments
+// ---------------------------------------------------------------------------------------
+
+/**
+ * A fragment of the source language: a complete document without language-pack metadata.
+ * @param {string} units
+ * @param {Parameters<typeof xliff>[0]} [o]
+ */
+function enFragment(units, o = {}) {
+  return xliff({ units, meta: "", ...o });
+}
+
+/**
+ * A fragment of the Swedish translation.
+ * @param {string} units
+ * @param {Parameters<typeof xliff>[0]} [o]
+ */
+function svFragment(units, o = {}) {
+  return sv(units, { meta: "", ...o });
+}
+
+/**
+ * A diagnostic's file relative to the language directory, with forward slashes.
+ * @param {string} dir
+ * @param {import("./compile.mjs").Diagnostic} d
+ */
+function relFile(dir, d) {
+  return path.relative(dir, d.file).split(path.sep).join("/");
+}
+
+/**
+ * @param {string} dir
+ * @param {Catalog} catalog
+ * @returns {string}
+ */
+function describeErrorsIn(dir, catalog) {
+  return catalog.errors.map((d) => `${relFile(dir, d)} | ${d.key ?? "-"} | ${d.message}`).join("\n");
+}
+
+/**
+ * Asserts that exactly one error was reported, in the given file (relative to `dir`).
+ * @param {string} dir
+ * @param {Catalog} catalog
+ * @param {{ file: string, key?: string, message: RegExp }} expected
+ */
+function expectSingleErrorIn(dir, catalog, { file, key, message }) {
+  expect(catalog.errors, describeErrorsIn(dir, catalog)).toHaveLength(1);
+  const error = /** @type {import("./compile.mjs").Diagnostic} */ (catalog.errors[0]);
+  expect(relFile(dir, error)).toBe(file);
+  expect(error.key).toBe(key);
+  expect(error.message).toMatch(message);
+}
+
+describe("fragments", () => {
+  it("merges the units of the fragments into their language, main file first, then by name", () => {
+    const dir = makeDir({
+      "en.xlf": xliff({ units: unit("a.main", "Main") }),
+      "en.d/cluster.xlf": enFragment(unit("cluster.title", "Cluster")),
+      "en.d/audit.xlf": enFragment(unit("audit.title", "Audit", undefined, "Heading of the audit page.")),
+      "sv.xlf": sv(unit("a.main", "Main", "Huvud")),
+      "sv.d/cluster.xlf": svFragment(unit("cluster.title", "Cluster", "Kluster")),
+      "sv.d/audit.xlf": svFragment(unit("audit.title", "Audit", "Granskning", "Heading of the audit page.")),
+    });
+    const catalog = loadCatalog(dir);
+
+    expect(catalog.errors, describeErrorsIn(dir, catalog)).toEqual([]);
+    expect(catalog.locales.map((l) => l.file)).toEqual([path.join(dir, "en.xlf"), path.join(dir, "sv.xlf")]);
+    expect(catalog.files.get("en")).toEqual([
+      path.join(dir, "en.xlf"),
+      path.join(dir, "en.d", "audit.xlf"),
+      path.join(dir, "en.d", "cluster.xlf"),
+    ]);
+    expect(catalog.files.get("sv")).toEqual([
+      path.join(dir, "sv.xlf"),
+      path.join(dir, "sv.d", "audit.xlf"),
+      path.join(dir, "sv.d", "cluster.xlf"),
+    ]);
+    const en = /** @type {Map<string, import("./compile.mjs").Message>} */ (catalog.messages.get("en"));
+    expect([...en.keys()]).toEqual(["a.main", "audit.title", "cluster.title"]);
+    expect(en.get("audit.title")).toMatchObject({ text: "Audit", group: "g", description: "Heading of the audit page." });
+    const swedish = /** @type {Map<string, import("./compile.mjs").Message>} */ (catalog.messages.get("sv"));
+    expect([...swedish.entries()].map(([key, m]) => [key, m.text])).toEqual([
+      ["a.main", "Huvud"],
+      ["audit.title", "Granskning"],
+      ["cluster.title", "Kluster"],
+    ]);
+  });
+
+  it("lists only the main file for a language without fragments", () => {
+    const dir = makeDir(validPair());
+    const catalog = loadCatalog(dir);
+    expect(catalog.files).toEqual(
+      new Map([
+        ["en", [path.join(dir, "en.xlf")]],
+        ["sv", [path.join(dir, "sv.xlf")]],
+      ]),
+    );
+  });
+
+  it("ignores files that do not end in .xlf and the subdirectories of <lang>.d", () => {
+    const dir = makeDir({
+      ...validPair(),
+      "en.d/notes.txt": "not a fragment",
+      "en.d/readme": "not a fragment",
+      "en.d/nested/deep.xlf": enFragment(unit("deep.key", "x")),
+    });
+    const catalog = loadCatalog(dir);
+    expect(catalog.errors, describeErrorsIn(dir, catalog)).toEqual([]);
+    expect(catalog.files.get("en")).toEqual([path.join(dir, "en.xlf")]);
+    expect(catalog.messages.get("en")?.has("deep.key")).toBe(false);
+  });
+
+  it("accepts an empty <lang>.d directory", () => {
+    const dir = makeDir(validPair());
+    fs.mkdirSync(path.join(dir, "en.d"));
+    const catalog = loadCatalog(dir);
+    expect(catalog.errors, describeErrorsIn(dir, catalog)).toEqual([]);
+  });
+
+  it("accepts a source language that is made of fragments only", () => {
+    const dir = makeDir({
+      "en.xlf": xliff(),
+      "en.d/cluster.xlf": enFragment(unit("cluster.title", "Cluster")),
+    });
+    const catalog = loadCatalog(dir);
+    expect(catalog.errors, describeErrorsIn(dir, catalog)).toEqual([]);
+    expect([...(catalog.messages.get("en")?.keys() ?? [])]).toEqual(["cluster.title"]);
+  });
+
+  it.each(["cluster", "cluster-nodes", "a1", "x"])("accepts the fragment name %j", (name) => {
+    expect(FRAGMENT_NAME_PATTERN.test(name)).toBe(true);
+    const dir = makeDir({
+      ...validPair(),
+      [`en.d/${name}.xlf`]: enFragment(unit("frag.key", "x")),
+      [`sv.d/${name}.xlf`]: svFragment(unit("frag.key", "x", "y")),
+    });
+    const catalog = loadCatalog(dir);
+    expect(catalog.errors, describeErrorsIn(dir, catalog)).toEqual([]);
+  });
+
+  describe("completeness and checks across the merge", () => {
+    it("takes a translation in a fragment of sv.d for a key from en.d", () => {
+      const dir = makeDir({
+        "en.xlf": xliff(),
+        "en.d/cluster.xlf": enFragment(unit("cluster.title", "Cluster") + unit("cluster.nodes", "{count} nodes")),
+        "sv.xlf": sv(""),
+        "sv.d/other.xlf": svFragment(unit("cluster.title", "Cluster", "Kluster") + unit("cluster.nodes", "{count} nodes", "{count} noder")),
+      });
+      const catalog = loadCatalog(dir);
+      expect(catalog.errors, describeErrorsIn(dir, catalog)).toEqual([]);
+      expect(catalog.messages.get("sv")?.get("cluster.title")?.text).toBe("Kluster");
+      expect(catalog.messages.get("sv")?.get("cluster.nodes")?.args).toEqual(new Map([["count", "text"]]));
+    });
+
+    it("takes a translation in the main file of sv for a key from a fragment of en, and the reverse", () => {
+      const dir = makeDir({
+        "en.xlf": xliff({ units: unit("a.main", "Main") }),
+        "en.d/cluster.xlf": enFragment(unit("cluster.title", "Cluster")),
+        "sv.xlf": sv(unit("cluster.title", "Cluster", "Kluster")),
+        "sv.d/cluster.xlf": svFragment(unit("a.main", "Main", "Huvud")),
+      });
+      const catalog = loadCatalog(dir);
+      expect(catalog.errors, describeErrorsIn(dir, catalog)).toEqual([]);
+      expect([...(catalog.messages.get("sv")?.keys() ?? [])]).toEqual(["cluster.title", "a.main"]);
+    });
+
+    it("reports a key without translation on the main file of the language, naming the source fragment", () => {
+      const dir = makeDir({
+        "en.xlf": xliff({ units: unit("a.main", "Main") }),
+        "en.d/cluster.xlf": enFragment(unit("cluster.title", "Cluster")),
+        "sv.xlf": sv(unit("a.main", "Main", "Huvud")),
+        "sv.d/audit.xlf": svFragment(""),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, {
+        file: "sv.xlf",
+        key: "cluster.title",
+        message: /^no translation: .*\(the key is defined in en\.d\/cluster\.xlf\)$/,
+      });
+    });
+
+    it("keeps the message of a key that lacks a translation in the main file unchanged", () => {
+      const dir = makeDir({
+        "en.xlf": xliff({ units: unit("a.main", "Main") }),
+        "en.d/cluster.xlf": enFragment(unit("cluster.title", "Cluster")),
+        "sv.xlf": sv(""),
+        "sv.d/cluster.xlf": svFragment(unit("cluster.title", "Cluster", "Kluster")),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, {
+        file: "sv.xlf",
+        key: "a.main",
+        message: /^no translation: every built-in language must define all keys of en\.xlf$/,
+      });
+    });
+
+    it("reports a stale translation in a fragment, naming the fragment of the source", () => {
+      const dir = makeDir({
+        "en.xlf": xliff(),
+        "en.d/cluster.xlf": enFragment(unit("cluster.title", "New text")),
+        "sv.xlf": sv(""),
+        "sv.d/cluster.xlf": svFragment(unit("cluster.title", "Old text", "Gammal text")),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, {
+        file: "sv.d/cluster.xlf",
+        key: "cluster.title",
+        message: /stale translation.*"Old text".*but en\.d\/cluster\.xlf now says "New text"/,
+      });
+    });
+
+    it("reports a key of a fragment that the source language does not define", () => {
+      const dir = makeDir({
+        "en.xlf": xliff({ units: unit("a.main", "Main") }),
+        "sv.xlf": sv(unit("a.main", "Main", "Huvud")),
+        "sv.d/cluster.xlf": svFragment(unit("cluster.extra", "x", "y")),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, {
+        file: "sv.d/cluster.xlf",
+        key: "cluster.extra",
+        message: /the key is not defined in en\.xlf/,
+      });
+    });
+
+    it("checks the arguments of a translation against a source unit in a fragment", () => {
+      const dir = makeDir({
+        "en.xlf": xliff(),
+        "en.d/cluster.xlf": enFragment(unit("cluster.title", "Hello {name}")),
+        "sv.xlf": sv(unit("cluster.title", "Hello {name}", "Hej {user}")),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, {
+        file: "sv.xlf",
+        key: "cluster.title",
+        message: /uses the argument "user", which en\.d\/cluster\.xlf does not have/,
+      });
+    });
+
+    it("reports an ICU error in a fragment with the key and the fragment", () => {
+      const dir = makeDir({
+        "en.xlf": xliff(),
+        "en.d/cluster.xlf": enFragment(unit("cluster.title", "Hello {name")),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, { file: "en.d/cluster.xlf", key: "cluster.title", message: /ICU syntax error/ });
+    });
+  });
+
+  describe("duplicate keys", () => {
+    it("refuses a key in the main file and in a fragment, naming both files", () => {
+      const dir = makeDir({
+        "en.xlf": xliff({ units: unit("a.b", "main text") }),
+        "en.d/cluster.xlf": enFragment(unit("a.b", "fragment text")),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, {
+        file: "en.d/cluster.xlf",
+        key: "a.b",
+        message: new RegExp(`^duplicate unit id: also defined in ${path.basename(dir)}/en\\.xlf$`),
+      });
+      expect(catalog.messages.get("en")?.get("a.b")?.text).toBe("main text");
+    });
+
+    it("refuses a key in two fragments, keeping the first by file name", () => {
+      const dir = makeDir({
+        "en.xlf": xliff(),
+        "en.d/cluster.xlf": enFragment(unit("a.b", "cluster text")),
+        "en.d/audit.xlf": enFragment(unit("a.b", "audit text")),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, {
+        file: "en.d/cluster.xlf",
+        key: "a.b",
+        message: new RegExp(`^duplicate unit id: also defined in ${path.basename(dir)}/en\\.d/audit\\.xlf$`),
+      });
+      expect(catalog.messages.get("en")?.get("a.b")?.text).toBe("audit text");
+    });
+
+    it("refuses a key in a fragment and in the main file of a translation", () => {
+      const dir = makeDir({
+        "en.xlf": xliff({ units: unit("a.b", "x") }),
+        "sv.xlf": sv(unit("a.b", "x", "main")),
+        "sv.d/cluster.xlf": svFragment(unit("a.b", "x", "fragment")),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, {
+        file: "sv.d/cluster.xlf",
+        key: "a.b",
+        message: new RegExp(`^duplicate unit id: also defined in ${path.basename(dir)}/sv\\.xlf$`),
+      });
+      expect(catalog.messages.get("sv")?.get("a.b")?.text).toBe("main");
+    });
+
+    it("keeps the short message for a key twice in one fragment", () => {
+      const dir = makeDir({
+        "en.xlf": xliff(),
+        "en.d/cluster.xlf": enFragment(unit("a.b", "one") + unit("a.b", "two")),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, { file: "en.d/cluster.xlf", key: "a.b", message: /^duplicate unit id$/ });
+    });
+
+    it("allows the same key in different languages", () => {
+      const dir = makeDir({
+        "en.xlf": xliff(),
+        "en.d/cluster.xlf": enFragment(unit("a.b", "x")),
+        "sv.xlf": sv(""),
+        "sv.d/cluster.xlf": svFragment(unit("a.b", "x", "y")),
+      });
+      const catalog = loadCatalog(dir);
+      expect(catalog.errors, describeErrorsIn(dir, catalog)).toEqual([]);
+    });
+  });
+
+  describe("reports", () => {
+    it("language-pack metadata in a fragment", () => {
+      const dir = makeDir({
+        "en.xlf": xliff(),
+        "en.d/cluster.xlf": enFragment(unit("cluster.title", "Cluster"), { meta: meta("English") }),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, { file: "en.d/cluster.xlf", message: /language-pack metadata belongs in en\.xlf only/ });
+    });
+
+    it("language-pack metadata in a fragment of a translation", () => {
+      const dir = makeDir({
+        "en.xlf": xliff({ units: unit("a.b", "x") }),
+        "sv.xlf": sv(unit("a.b", "x", "y")),
+        "sv.d/cluster.xlf": svFragment("", { meta: meta("Svenska") }),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, { file: "sv.d/cluster.xlf", message: /language-pack metadata belongs in sv\.xlf only/ });
+    });
+
+    it("allows other metadata in a fragment", () => {
+      const other = meta("English").replace("language-pack", "other");
+      const dir = makeDir({
+        "en.xlf": xliff(),
+        "en.d/cluster.xlf": enFragment(unit("cluster.title", "Cluster"), { meta: other }),
+      });
+      const catalog = loadCatalog(dir);
+      expect(catalog.errors, describeErrorsIn(dir, catalog)).toEqual([]);
+    });
+
+    it.each(["Cluster", "my_area", "1st", "-lead", "UPPER", "a b", "a.b"])("the bad fragment file name %j", (name) => {
+      const dir = makeDir({
+        ...validPair(),
+        [`en.d/${name}.xlf`]: enFragment(unit("frag.key", "x")),
+      });
+      const catalog = loadCatalog(dir);
+      expect(FRAGMENT_NAME_PATTERN.test(name)).toBe(false);
+      expectSingleErrorIn(dir, catalog, { file: `en.d/${name}.xlf`, message: /invalid fragment file name/ });
+      // The file is not read: its unit is no message, and the translations need no cascade.
+      expect(catalog.messages.get("en")?.has("frag.key")).toBe(false);
+      expect(catalog.files.get("en")).toEqual([path.join(dir, "en.xlf")]);
+    });
+
+    it("a <lang>.d directory without its main file, once", () => {
+      const dir = makeDir({
+        "en.xlf": xliff({ units: unit("a.b", "x") }),
+        "sv.d/cluster.xlf": svFragment(unit("a.b", "x", "y")),
+        "sv.d/audit.xlf": svFragment(unit("a.c", "x", "y")),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleError(catalog, { file: "sv.d", message: /fragment directory without its main file sv\.xlf/ });
+      expect(catalog.locales.map((l) => l.code)).toEqual(["en"]);
+    });
+
+    it("a source language directory without its main file, besides the missing source file", () => {
+      const dir = makeDir({ "en.d/cluster.xlf": enFragment(unit("a.b", "x")) });
+      const catalog = loadCatalog(dir);
+      expect(catalog.errors.map((d) => `${relFile(dir, d)}: ${d.message}`)).toEqual([
+        "en.xlf: source language file not found",
+        "en.d: fragment directory without its main file en.xlf",
+      ]);
+    });
+
+    it("a trgLang that does not match the language of the fragment", () => {
+      const dir = makeDir({
+        "en.xlf": xliff({ units: unit("a.b", "x") }),
+        "sv.xlf": sv(unit("a.b", "x", "y")),
+        "sv.d/cluster.xlf": svFragment(unit("a.c", "x", "y"), { trgLang: "nb" }),
+        "en.d/cluster.xlf": enFragment(unit("a.c", "x")),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, { file: "sv.d/cluster.xlf", message: /trgLang "nb" must equal the language "sv"/ });
+    });
+
+    it("a fragment of a translation without trgLang", () => {
+      const dir = makeDir({
+        "en.xlf": xliff({ units: unit("a.b", "x") }),
+        "sv.xlf": sv(unit("a.b", "x", "y")),
+        "sv.d/cluster.xlf": enFragment(""),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, { file: "sv.d/cluster.xlf", message: /missing trgLang/ });
+    });
+
+    it("a fragment of a translation whose srcLang is not the source language", () => {
+      const dir = makeDir({
+        "en.xlf": xliff({ units: unit("a.b", "x") }),
+        "sv.xlf": sv(unit("a.b", "x", "y")),
+        "sv.d/cluster.xlf": svFragment("", { srcLang: "de" }),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, {
+        file: "sv.d/cluster.xlf",
+        message: /srcLang "de" must be the source language "en"/,
+      });
+    });
+
+    it("a fragment of the source language whose srcLang is not the language", () => {
+      const dir = makeDir({
+        "en.xlf": xliff(),
+        "en.d/cluster.xlf": enFragment("", { srcLang: "de" }),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, { file: "en.d/cluster.xlf", message: /srcLang "de" must equal the language "en"/ });
+    });
+
+    it("the root checks of a main file, in a fragment", () => {
+      const dir = makeDir({
+        "en.xlf": xliff(),
+        "en.d/version.xlf": enFragment("", { version: "1.2" }),
+        "en.d/namespace.xlf": enFragment("", { ns: "urn:oasis:names:tc:xliff:document:1.2" }),
+        "en.d/root.xlf": enFragment("", { root: "tmx" }),
+        "en.d/syntax.xlf": "<xliff><file></xliff>",
+        "en.d/files.xlf": enFragment("").replace("</xliff>", '<file id="second"/></xliff>'),
+      });
+      const catalog = loadCatalog(dir);
+      expect(catalog.errors.map((d) => [relFile(dir, d), d.message])).toEqual([
+        ["en.d/files.xlf", expect.stringMatching(/expected exactly one <file> element, found 2/)],
+        ["en.d/namespace.xlf", expect.stringMatching(/namespace urn:oasis:names:tc:xliff:document:2\.0/)],
+        ["en.d/root.xlf", expect.stringMatching(/root element must be <xliff>, found <tmx>/)],
+        ["en.d/syntax.xlf", expect.stringMatching(/XML is not well formed/)],
+        ["en.d/version.xlf", expect.stringMatching(/version must be "2\.0", found "1\.2"/)],
+      ]);
+    });
+
+    it("an unusable fragment of the source language once, without cascading errors in the translations", () => {
+      const dir = makeDir({
+        "en.xlf": xliff({ units: unit("a.main", "Main") }),
+        "en.d/cluster.xlf": "<xliff",
+        "sv.xlf": sv(unit("a.main", "Main", "Huvud")),
+        "sv.d/cluster.xlf": svFragment(unit("cluster.title", "Cluster", "Kluster")),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, { file: "en.d/cluster.xlf", message: /not well formed/ });
+    });
+
+    it("an unusable fragment of a translation once, without a cascade of missing translations", () => {
+      const dir = makeDir({
+        "en.xlf": xliff({ units: unit("a.main", "Main") }),
+        "en.d/cluster.xlf": enFragment(unit("cluster.title", "Cluster")),
+        "sv.xlf": sv(unit("a.main", "Main", "Huvud")),
+        "sv.d/cluster.xlf": "<xliff",
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, { file: "sv.d/cluster.xlf", message: /not well formed/ });
+    });
+
+    it("an unusable main file without reading the fragments", () => {
+      const dir = makeDir({
+        "en.xlf": "<xliff",
+        "en.d/cluster.xlf": enFragment(unit("cluster.title", "Cluster")),
+        "sv.xlf": sv(""),
+        "sv.d/cluster.xlf": svFragment(unit("cluster.title", "Cluster", "Kluster")),
+      });
+      const catalog = loadCatalog(dir);
+      expectSingleErrorIn(dir, catalog, { file: "en.xlf", message: /not well formed/ });
+    });
+
+    it("all problems at once, in the order main file, fragments by name, then the next language", () => {
+      const dir = makeDir({
+        "en.xlf": xliff({ units: unit("a.one", "Hi {name") }),
+        "en.d/zeta.xlf": enFragment(unit("z.key", "ok") + unit("Bad", "x")),
+        "en.d/alpha.xlf": enFragment(unit("a.one", "again")),
+        "sv.xlf": sv(unit("z.key", "stale", "gammal")),
+        "sv.d/alpha.xlf": svFragment(unit("a.extra", "x", "y")),
+      });
+      const catalog = loadCatalog(dir);
+      expect(catalog.errors.map((d) => `${relFile(dir, d)}:${d.key}`)).toEqual([
+        "en.xlf:a.one",
+        "en.d/alpha.xlf:a.one",
+        "en.d/zeta.xlf:Bad",
+        "sv.xlf:z.key",
+        "sv.d/alpha.xlf:a.extra",
+      ]);
+    });
+  });
+
+  describe("rendering", () => {
+    const flat = {
+      "en.xlf": xliff({
+        units:
+          unit("app.save", "Save", undefined, "Button.") +
+          unit("app.items", "{count, plural, one {# item} other {# items}}") +
+          unit("cluster.title", "Cluster") +
+          unit("cluster.nodes", "{count} nodes") +
+          unit("audit.title", "Audit"),
+      }),
+      "sv.xlf": sv(
+        unit("app.save", "Save", "Spara", "Button.") +
+          unit("app.items", "{count, plural, one {# item} other {# items}}", "{count, plural, one {# objekt} other {# objekt}}") +
+          unit("cluster.title", "Cluster", "Kluster") +
+          unit("cluster.nodes", "{count} nodes", "{count} noder") +
+          unit("audit.title", "Audit", "Granskning"),
+      ),
+    };
+    // The same messages, spread over the main files and fragments; the translations are placed
+    // differently from their source keys.
+    const split = {
+      "en.xlf": xliff({ units: unit("app.items", "{count, plural, one {# item} other {# items}}") }),
+      "en.d/cluster.xlf": enFragment(unit("cluster.title", "Cluster") + unit("cluster.nodes", "{count} nodes")),
+      "en.d/app.xlf": enFragment(unit("app.save", "Save", undefined, "Button.")),
+      "en.d/audit.xlf": enFragment(unit("audit.title", "Audit")),
+      "sv.xlf": sv(
+        unit("cluster.nodes", "{count} nodes", "{count} noder") +
+          unit("audit.title", "Audit", "Granskning") +
+          unit("app.save", "Save", "Spara", "Button."),
+      ),
+      "sv.d/misc.xlf": svFragment(
+        unit("app.items", "{count, plural, one {# item} other {# items}}", "{count, plural, one {# objekt} other {# objekt}}") +
+          unit("cluster.title", "Cluster", "Kluster"),
+      ),
+    };
+
+    /** @param {Catalog} catalog */
+    const renderAll = (catalog) => [
+      renderLocaleModule(catalog, "en"),
+      renderLocaleModule(catalog, "sv"),
+      renderLocaleModule(catalog, "sv", { include: (key) => key.startsWith("cluster.") }),
+      renderLocaleModule(catalog, "en", { include: (key) => !key.startsWith("cluster.") }),
+      renderMetaModule(catalog, { packs: ["cluster", "audit"] }),
+      renderKeysTs(catalog),
+    ];
+
+    it("renders the same modules whether a key sits in the main file or in a fragment", () => {
+      const flatCatalog = load(flat);
+      const splitCatalog = load(split);
+      expect(flatCatalog.errors, describeErrors(flatCatalog)).toEqual([]);
+      expect(splitCatalog.errors, describeErrors(splitCatalog)).toEqual([]);
+      expect(renderAll(splitCatalog)).toEqual(renderAll(flatCatalog));
+    });
+
+    it("keeps the metadata of the main file and sorts the keys of the merged table", async () => {
+      const catalog = load(split);
+      const mod = await evaluateModule(renderLocaleModule(catalog, "sv"));
+      expect(Object.keys(mod["default"])).toEqual(["app.items", "app.save", "audit.title", "cluster.nodes", "cluster.title"]);
+      expect(renderMetaModule(catalog)).toContain('{"code":"sv","name":"Svenska","author":"Test Author","version":"1.2.3"}');
+    });
+
+    it("does not depend on the order in which the fragments were written", () => {
+      const reversed = Object.fromEntries(Object.entries(split).reverse());
+      expect(renderAll(load(reversed))).toEqual(renderAll(load(split)));
+    });
+  });
+
+  describe("languageFiles", () => {
+    it("lists the main files, then the fragment files by directory and name", () => {
+      const dir = makeDir({
+        "sv.xlf": "x",
+        "en.xlf": "x",
+        "sv.d/zeta.xlf": "x",
+        "sv.d/alpha.xlf": "x",
+        "en.d/cluster.xlf": "x",
+        "en.d/notes.txt": "x",
+        "en.d/nested/deep.xlf": "x",
+        "readme.txt": "x",
+        "other/en.xlf": "x",
+      });
+      expect(languageFiles(dir).map((file) => path.relative(dir, file).split(path.sep).join("/"))).toEqual([
+        "en.xlf",
+        "sv.xlf",
+        "en.d/cluster.xlf",
+        "sv.d/alpha.xlf",
+        "sv.d/zeta.xlf",
+      ]);
+    });
+
+    it("is empty for a directory that does not exist", () => {
+      expect(languageFiles(path.join(os.tmpdir(), "tenko-i18n-test-does-not-exist"))).toEqual([]);
+    });
   });
 });
 

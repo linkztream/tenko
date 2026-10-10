@@ -82,17 +82,17 @@ export function validLanguage(raw: string, field = "language"): string {
   return raw;
 }
 
-const ROLE_ORDER: readonly RoleName[] = ["admin", "operator", "viewer"];
+export const ROLE_NAMES: readonly RoleName[] = ["admin", "operator", "viewer", "auditor"];
 
-/** Known roles, at least one, in the order admin, operator, viewer. */
+/** Known roles, at least one, in the order admin, operator, viewer, auditor. */
 export function validRoles(value: unknown, field = "roles"): RoleName[] {
   if (!Array.isArray(value)) return invalid(field, "a list of roles is required");
   for (const role of value) {
-    if (typeof role !== "string" || !(ROLE_ORDER as readonly string[]).includes(role)) {
+    if (typeof role !== "string" || !(ROLE_NAMES as readonly string[]).includes(role)) {
       return invalid(field, `unknown role ${JSON.stringify(role)}`);
     }
   }
-  const roles = ROLE_ORDER.filter((r) => value.includes(r));
+  const roles = ROLE_NAMES.filter((r) => value.includes(r));
   if (roles.length === 0) return invalid(field, "at least one role");
   return roles;
 }

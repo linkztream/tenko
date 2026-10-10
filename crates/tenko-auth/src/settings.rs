@@ -1,5 +1,6 @@
 //! Security profiles, the authentication toggles TGL-01 to TGL-07, the in-app update
-//! toggle TGL-23 and the secret reveal toggle TGL-24 (SECURITY-PROFILES.md).
+//! toggle TGL-23, the secret reveal toggle TGL-24 and the audit export toggle TGL-21
+//! (SECURITY-PROFILES.md).
 //!
 //! A profile is a bundle of toggle values, not a code path: [`Profile::defaults`] gives the
 //! values, every toggle can then be changed on its own, and [`SecuritySettings::toggles`]
@@ -68,6 +69,7 @@ impl Profile {
                 lockout: LockoutMode::ProgressiveDelay,
                 updates: Some(UpdatePolicy::new(UpdateInstall::Ui)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Session, false)),
+                audit_export: Some(AuditExport::Local),
             },
             Self::Standard => SecuritySettings {
                 profile: self,
@@ -83,6 +85,7 @@ impl Profile {
                 lockout: LockoutMode::DelayThenTemporaryLock,
                 updates: Some(UpdatePolicy::new(UpdateInstall::UiStepUp)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Fresh, false)),
+                audit_export: Some(AuditExport::Optional),
             },
             Self::Hardened => SecuritySettings {
                 profile: self,
@@ -98,6 +101,7 @@ impl Profile {
                 lockout: LockoutMode::LockUntilUnlock,
                 updates: Some(UpdatePolicy::new(UpdateInstall::UploadOnly)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Passkey, true)),
+                audit_export: Some(AuditExport::Required),
             },
             Self::Lab => SecuritySettings {
                 profile: self,
@@ -113,6 +117,7 @@ impl Profile {
                 lockout: LockoutMode::Off,
                 updates: Some(UpdatePolicy::new(UpdateInstall::Ui)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Session, false)),
+                audit_export: Some(AuditExport::Local),
             },
         }
     }
@@ -162,6 +167,22 @@ impl UpdatePolicy {
             install,
         }
     }
+}
+
+/// How the audit trail leaves the installation (TGL-21, IAM-18). The audit log itself is
+/// never off; the toggle decides whether export sinks are required. The variants are
+/// ordered from the weakest to the strongest.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditExport {
+    /// The local, hash-chained audit log only (Home, Lab).
+    Local,
+    /// The local log; export sinks (syslog, CEF, JSON) may be configured (Standard).
+    Optional,
+    /// At least one export sink, with an alarm while one fails (Hardened).
+    Required,
 }
 
 /// The authentication a reveal of an operator secret needs (TGL-24). The variants are
@@ -266,6 +287,10 @@ pub struct SecuritySettings {
     /// toggle existed: the profile's value applies ([`SecuritySettings::secret_reveal`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_reveal: Option<RevealPolicy>,
+    /// TGL-21: the audit export. `None` in settings stored before the toggle existed: the
+    /// profile's value applies ([`SecuritySettings::audit_export`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit_export: Option<AuditExport>,
 }
 
 impl Default for SecuritySettings {
@@ -301,6 +326,13 @@ impl SecuritySettings {
             .unwrap_or(UpdatePolicy::new(UpdateInstall::UiStepUp))
     }
 
+    /// The effective TGL-21 value: the stored one, else the profile's.
+    pub fn audit_export(&self) -> AuditExport {
+        self.audit_export
+            .or_else(|| self.profile.defaults().audit_export)
+            .unwrap_or(AuditExport::Optional)
+    }
+
     /// The effective TGL-24 value: the stored one, else the profile's.
     pub fn secret_reveal(&self) -> RevealPolicy {
         self.secret_reveal
@@ -308,7 +340,7 @@ impl SecuritySettings {
             .unwrap_or(RevealPolicy::new(RevealStepUp::Fresh, false))
     }
 
-    /// The toggles TGL-01 to TGL-07, TGL-23 and TGL-24 with deviation and weakness markers.
+    /// The toggles TGL-01 to TGL-07, TGL-21, TGL-23 and TGL-24 with deviation and weakness markers.
     pub fn toggles(&self) -> Vec<ToggleState> {
         let profile = self.profile.defaults();
         let home = Profile::Home.defaults();
@@ -376,6 +408,14 @@ impl SecuritySettings {
                 json(serde_json::to_value(self.lockout)),
                 json(serde_json::to_value(profile.lockout)),
                 self.lockout == LockoutMode::Off && home.lockout != LockoutMode::Off,
+            ),
+            // Home keeps the audit log local, the weakest value, so no value is weaker.
+            entry(
+                "TGL-21",
+                "audit_export",
+                json(serde_json::to_value(self.audit_export())),
+                json(serde_json::to_value(profile.audit_export())),
+                self.audit_export() < home.audit_export(),
             ),
             // No install mode is weaker than the Home value (install from the UI); a check
             // that is off is, because security fixes then go unnoticed.
@@ -490,6 +530,9 @@ pub struct SettingsPatch {
     /// TGL-24.
     #[serde(default)]
     pub secret_reveal: Option<RevealPolicy>,
+    /// TGL-21.
+    #[serde(default)]
+    pub audit_export: Option<AuditExport>,
 }
 
 /// The TGL-05 value in a patch.
@@ -538,6 +581,9 @@ impl SettingsPatch {
         if let Some(reveal) = self.secret_reveal {
             next.secret_reveal = Some(reveal);
         }
+        if let Some(export) = self.audit_export {
+            next.audit_export = Some(export);
+        }
         next
     }
 }
@@ -573,6 +619,47 @@ pub fn changes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audit_export_follows_the_matrix_and_old_settings() {
+        assert_eq!(Profile::Home.defaults().audit_export(), AuditExport::Local);
+        assert_eq!(
+            Profile::Standard.defaults().audit_export(),
+            AuditExport::Optional
+        );
+        assert_eq!(
+            Profile::Hardened.defaults().audit_export(),
+            AuditExport::Required
+        );
+        assert_eq!(Profile::Lab.defaults().audit_export(), AuditExport::Local);
+        let mut stored = serde_json::to_value(Profile::Hardened.defaults()).expect("json");
+        stored
+            .as_object_mut()
+            .expect("an object")
+            .remove("audit_export");
+        let old: SecuritySettings = serde_json::from_value(stored).expect("older settings");
+        assert_eq!(old.audit_export, None);
+        assert_eq!(old.audit_export(), AuditExport::Required);
+        let toggles = Profile::Home.defaults().toggles();
+        let toggle = toggles
+            .iter()
+            .find(|toggle| toggle.id == "TGL-21")
+            .expect("TGL-21 is listed");
+        assert_eq!(toggle.setting, "audit_export");
+        assert!(!toggle.weaker_than_home);
+        let patched = SettingsPatch {
+            audit_export: Some(AuditExport::Required),
+            ..SettingsPatch::default()
+        }
+        .apply(&Profile::Home.defaults());
+        assert_eq!(patched.audit_export(), AuditExport::Required);
+        assert!(
+            patched
+                .toggles()
+                .iter()
+                .any(|toggle| toggle.id == "TGL-21" && toggle.deviates)
+        );
+    }
 
     #[test]
     fn profile_defaults_follow_the_matrix() {

@@ -6,17 +6,26 @@
 //! | # | Step | What comes up |
 //! |---|---|---|
 //! | 1 | `kek` | the key-encryption keys (created on the first start, required afterwards) |
-//! | 2 | `store` | the replicated store: openraft over redb, one voter, with the fsync probe (OPS-19) |
-//! | 3 | `vault` | the vault; it refuses to open when the store holds secrets no loaded KEK opens |
-//! | 4 | `tls` | the TLS mode (OPS-22): the internal CA's certificate, imported files or the reverse proxy |
-//! | 5 | `auth` | users, sessions, passkeys, TOTP, settings; prints the setup token while setup is open |
-//! | 6 | `ipam` | the IPAM domain over the job engine, its prefix tree and alarms |
-//! | 7 | `jobs` | the job runner |
-//! | 8 | `connectors` | connector plugins and their supervisor (ADR 0012) |
-//! | 9 | `cluster` | the node transport: internal CA node certificate, node registry, the mutual TLS listener for enrolled nodes (OPS-04) |
-//! | 10 | `api` | the HTTP API, the web UI and server-sent events |
+//! | 2 | `store` | the replicated store: openraft over redb, with the fsync probe (OPS-19) |
+//! | 3 | `cluster` | the controller cluster (WP3.1a): peer transport and Raft service, join or rejoin, missing key generations, the catch-up gate; nothing to do on a single controller |
+//! | 4 | `vault` | the vault; it refuses to open when the store holds secrets no loaded KEK opens |
+//! | 5 | `tls` | the TLS mode (OPS-22): the internal CA's certificate, imported files or the reverse proxy |
+//! | 6 | `auth` | users, sessions, passkeys, TOTP, settings; the setup token while setup is open |
+//! | 7 | `ipam` | the IPAM domain over the job engine, its prefix tree and alarms |
+//! | 8 | `jobs` | the job runner |
+//! | 9 | `connectors` | connector plugins and their supervisor (ADR 0012) |
+//! | 10 | `nodes` | the node transport: internal CA node certificate, node registry, the mutual TLS listener for enrolled nodes (OPS-04), the probe role in process |
+//! | 11 | `api` | the HTTP API, the web UI and server-sent events |
 //!
-//! The vault needs the store to check its envelopes, so it opens right after the store.
+//! After the last step the leader supervisor (WP3.1b) starts the leader-only services
+//! (`tenko_core::cluster::LeaderService`) once this controller has taken office; on a single
+//! controller that is at once. Until it lands, the loops that will become leader services
+//! start in their steps as before.
+//!
+//! The cluster step comes before the vault because a controller that was offline during an
+//! online KEK rotation fetches the new key generation from its peers before the vault opens
+//! its envelopes. The vault needs the store to check its envelopes, so it opens right after
+//! the store and the cluster.
 //!
 //! Shutdown (Ctrl-C, `SIGTERM`, the service manager, or the end of standard input with
 //! `--stop-on-eof`) runs in reverse: the API ends its event streams and lets open requests
@@ -25,10 +34,12 @@
 //!
 //! The data directory holds `kek/` (key generations), `store/` (`log.redb`, `sm.redb`,
 //! `snapshots/`), `tls/ca-root.pem` (the public root of the internal CA) and `logs/`
-//! (the service log).
+//! (the service log). While first-run setup is open it also holds `setup-token`, the
+//! one-time setup token that `tenko setup token` prints (see [`setup_token`]).
 
 mod imports;
 mod maintenance;
+pub mod setup_token;
 mod tls;
 
 use std::{
@@ -76,9 +87,13 @@ pub const FSYNC_WARN_MICROS: u64 = 10_000;
 const RUNNER_STOP_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The start steps of the controller role, in order.
-pub const START_ORDER: [(&str, &str); 10] = [
+pub const START_ORDER: [(&str, &str); 11] = [
     ("kek", "key-encryption keys"),
     ("store", "replicated store (openraft over redb)"),
+    (
+        "cluster",
+        "controller cluster: peers, join, key generations, catch-up",
+    ),
     ("vault", "envelope encryption of secrets"),
     ("tls", "TLS mode and certificate"),
     ("auth", "users, sessions, passkeys and TOTP"),
@@ -86,7 +101,7 @@ pub const START_ORDER: [(&str, &str); 10] = [
     ("jobs", "job runner"),
     ("connectors", "connector plugins and their supervisor"),
     (
-        "cluster",
+        "nodes",
         "node transport: enrolment, mutual TLS listener, node registry",
     ),
     ("api", "HTTP API, web UI and server-sent events"),
@@ -866,6 +881,10 @@ async fn start(
     }
     let ipam_on = modules.contains(crate::modules::Module::Ipam);
 
+    steps
+        .run("cluster", crate::cluster::start(resolved, &store))
+        .await?;
+
     let vault = steps
         .run("vault", async {
             let vault = StoreVault::open(Arc::clone(&store_dyn), ring)
@@ -899,6 +918,8 @@ async fn start(
                 .prepare_setup()
                 .await
                 .map_err(|error| StartError::coded("auth", &error))?;
+            // The token goes to a file, not to the log (API-10); a closed setup leaves none.
+            publish_setup_token(&layout.setup_token(), token.as_ref())?;
             let summary = match (&token, auth.installation().await) {
                 (Some(_), _) => "first-run setup is open".to_owned(),
                 (None, Ok(Some(installation))) => format!(
@@ -911,6 +932,13 @@ async fn start(
             Ok(((auth, token), summary))
         })
         .await?;
+    if setup_token.is_some() {
+        running.tasks.extend(setup_token::follow(
+            Arc::clone(&store_dyn),
+            layout.setup_token(),
+            running.stop.subscribe(),
+        ));
+    }
 
     // The network controllers of the VLAN provision job and the topology (WP2.7): filled
     // once the connector service runs; the job steps read it when they run.
@@ -1115,7 +1143,7 @@ async fn start(
     ));
     let mut cluster = steps
         .run(
-            "cluster",
+            "nodes",
             crate::node::controller::start(crate::node::controller::Parts {
                 resolved,
                 store: Arc::clone(&store_dyn),
@@ -1134,7 +1162,7 @@ async fn start(
             resolved.node_id,
             running.stop.subscribe(),
         )
-        .map_err(|error| StartError::new("cluster", error.code(), error.detail()))?;
+        .map_err(|error| StartError::new("nodes", error.code(), error.detail()))?;
         tracing::info!("probe role: {summary}");
         running.tasks.extend(task);
     }
@@ -1485,16 +1513,26 @@ fn announce(resolved: &Resolved, services: &Services, ready: &Ready) {
         );
     }
     if let Some(token) = &services.setup_token {
-        // The setup token is the one secret this binary prints, by design (API-10): it is
-        // single-use, changes at every start and only works until setup completes.
-        tracing::warn!(
-            setup_token = token.expose(),
-            "first-run setup is open; complete it in the web UI or with `tenko setup`"
-        );
+        use std::io::IsTerminal as _;
+
+        // The setup token is single-use, changes at every start and only works until setup
+        // completes (API-10). The log never carries it: it names the command that prints it
+        // from `<data_dir>/setup-token`. Standard output shows it to a terminal only, so
+        // that the journal or a container log never holds it either.
+        tracing::warn!("{}", setup_token::open_notice(&resolved.data_dir));
         let rule = "=".repeat(72);
         let _ = writeln!(out, "{rule}");
         let _ = writeln!(out, "First-run setup is open.");
-        let _ = writeln!(out, "Setup token: {}", token.expose());
+        let _ = writeln!(
+            out,
+            "{}",
+            setup_token::console_line(
+                token.expose(),
+                &resolved.layout().setup_token(),
+                &resolved.data_dir,
+                out.is_terminal(),
+            )
+        );
         let _ = writeln!(out, "Open {url} in a browser, or run:");
         let _ = writeln!(
             out,
@@ -1507,6 +1545,34 @@ fn announce(resolved: &Resolved, services: &Services, ready: &Ready) {
         let _ = writeln!(out, "{rule}");
     }
     let _ = out.flush();
+}
+
+/// Writes the setup token of this start to its file while setup is open, atomically and
+/// before the server is ready; removes a leftover file when setup is closed.
+fn publish_setup_token(
+    path: &std::path::Path,
+    token: Option<&tenko_auth::secret::SetupToken>,
+) -> Result<(), StartError> {
+    let Some(token) = token else {
+        if let Err(error) = setup_token::remove(path) {
+            tracing::warn!(
+                %error,
+                path = %path.display(),
+                "a leftover setup token file could not be removed"
+            );
+        }
+        return Ok(());
+    };
+    setup_token::write(path, token.expose()).map_err(|error| {
+        StartError::new(
+            "auth",
+            "start.setup_token",
+            format!(
+                "cannot write the setup token file {}: {error}",
+                path.display()
+            ),
+        )
+    })
 }
 
 /// The URL clients use: the public host behind a proxy, else the first bound address.
@@ -1539,13 +1605,14 @@ mod tests {
             [
                 "kek",
                 "store",
+                "cluster",
                 "vault",
                 "tls",
                 "auth",
                 "ipam",
                 "jobs",
                 "connectors",
-                "cluster",
+                "nodes",
                 "api"
             ]
         );

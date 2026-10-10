@@ -1,6 +1,7 @@
-// The toggle matrix TGL-01 to TGL-07 of the four security profiles (docs/SECURITY-PROFILES.md)
-// and the rules that turn a set of settings into toggle states and a banner. They mirror
-// crates/tenko-auth/src/settings.rs.
+// The toggle matrix TGL-01 to TGL-07 and TGL-21 of the four security profiles
+// (docs/SECURITY-PROFILES.md) and the rules that turn a set of settings into toggle states and a
+// banner. They mirror crates/tenko-auth/src/settings.rs. TGL-23 and TGL-24 are added by the
+// update and reveal routes (routes-updates.ts, routes-reveal-policy.ts).
 import type {
   Banner,
   BreachMode,
@@ -26,6 +27,7 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     token_max_days: 365,
     breach_check: "online",
     lockout: "progressive_delay",
+    audit_export: "local",
   },
   standard: {
     profile: "standard",
@@ -36,6 +38,7 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     token_max_days: 90,
     breach_check: "online",
     lockout: "delay_then_temporary_lock",
+    audit_export: "optional",
   },
   hardened: {
     profile: "hardened",
@@ -46,6 +49,7 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     token_max_days: 30,
     breach_check: "offline_preferred",
     lockout: "lock_until_unlock",
+    audit_export: "required",
   },
   lab: {
     profile: "lab",
@@ -56,8 +60,17 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     token_max_days: null,
     breach_check: "off",
     lockout: "off",
+    audit_export: "local",
   },
 };
+
+/** The values TGL-21 takes, from the weakest to the strongest. */
+export const AUDIT_EXPORT_VALUES: readonly NonNullable<SecuritySettings["audit_export"]>[] = ["local", "optional", "required"];
+
+/** TGL-21 of a settings object: its own value, or the default of its profile (settings older than the toggle). */
+export function auditExportOf(settings: SecuritySettings): NonNullable<SecuritySettings["audit_export"]> {
+  return settings.audit_export ?? PROFILE_MATRIX[settings.profile].audit_export ?? "optional";
+}
 
 /** A fresh copy of the settings a profile sets. */
 export function profileSettings(profile: Profile): SecuritySettings {
@@ -73,6 +86,7 @@ export const TOGGLE_IDS = {
   token_max_days: "TGL-05",
   breach_check: "TGL-06",
   lockout: "TGL-07",
+  audit_export: "TGL-21",
 } as const;
 
 type ToggleSetting = keyof typeof TOGGLE_IDS;
@@ -140,6 +154,9 @@ export function isWeakerThanHome(setting: ToggleSetting, settings: SecuritySetti
       return BREACH_RANK[settings.breach_check] < BREACH_RANK[HOME.breach_check];
     case "lockout":
       return LOCKOUT_RANK[settings.lockout] < LOCKOUT_RANK[HOME.lockout];
+    case "audit_export":
+      // Home keeps the audit log local, the weakest value there is, so no value is weaker.
+      return false;
   }
 }
 
@@ -157,10 +174,11 @@ function stable(value: unknown): string {
 
 /** The value of a setting as the toggle list reports it (JSON, `null` for no maximum). */
 function toggleValue(setting: ToggleSetting, settings: SecuritySettings): unknown {
+  if (setting === "audit_export") return auditExportOf(settings);
   return setting === "token_max_days" ? (settings.token_max_days ?? null) : structuredClone(settings[setting]);
 }
 
-/** TGL-01 to TGL-07 with their profile defaults, deviation and weakness markers. */
+/** TGL-01 to TGL-07 and TGL-21 with their profile defaults, deviation and weakness markers. */
 export function toggleStates(settings: SecuritySettings): ToggleState[] {
   const profile = PROFILE_MATRIX[settings.profile];
   return (Object.keys(TOGGLE_IDS) as ToggleSetting[]).map((setting) => {

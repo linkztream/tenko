@@ -154,6 +154,9 @@
       <unit id="role.viewer.name">
         <segment><source>Viewer</source><target>Läsare</target></segment>
       </unit>
+      <unit id="role.auditor.name">
+        <segment><source>Auditor</source><target>Granskare</target></segment>
+      </unit>
       <unit id="role.admin.description">
         <segment><source>Everything, including users, settings and the system.</source><target>Allt, även användare, inställningar och systemet.</target></segment>
       </unit>
@@ -162,6 +165,9 @@
       </unit>
       <unit id="role.viewer.description">
         <segment><source>Read-only access to the inventory.</source><target>Läsbehörighet till inventariet.</target></segment>
+      </unit>
+      <unit id="role.auditor.description">
+        <segment><source>Reads the audit log, the audit export status and the system status, and nothing else.</source><target>Läser granskningsloggen, statusen för granskningsexporten och systemstatusen, men inget annat.</target></segment>
       </unit>
     </group>
     <group id="node">
@@ -910,7 +916,7 @@
         <segment><source>Setup is already complete. Sign in instead.</source><target>Installationen är redan klar. Logga in i stället.</target></segment>
       </unit>
       <unit id="errors.auth.setup.token_invalid">
-        <segment><source>The setup token is wrong. Copy it again from the console or the log of this node.</source><target>Installationstoken är fel. Kopiera den igen från konsolen eller loggen på den här noden.</target></segment>
+        <segment><source>The setup token is wrong. Print it again on the server with tenko setup token.</source><target>Installationstoken är fel. Skriv ut den igen på servern med tenko setup token.</target></segment>
       </unit>
       <unit id="errors.auth.setup.invalid_host_name">
         <segment><source>{host_name} is not a valid host name. Use a DNS name, not an IP address.</source><target>{host_name} är inget giltigt värdnamn. Använd ett DNS-namn, inte en IP-adress.</target></segment>
@@ -1649,7 +1655,7 @@
         <segment><source>Security settings</source><target>Säkerhetsinställningar</target></segment>
       </unit>
       <unit id="settings.security.toggles.range">
-        <segment><source>TGL-01 to TGL-07, TGL-23 and TGL-24</source><target>TGL-01 till TGL-07, TGL-23 och TGL-24</target></segment>
+        <segment><source>TGL-01 to TGL-07, TGL-21, TGL-23 and TGL-24</source><target>TGL-01 till TGL-07, TGL-21, TGL-23 och TGL-24</target></segment>
       </unit>
       <unit id="settings.security.toggles.table">
         <segment><source>Security settings and their values</source><target>Säkerhetsinställningar och deras värden</target></segment>
@@ -7651,6 +7657,26 @@
         <notes><note category="description">Link in the settings navigation to the operator secrets page.</note></notes>
         <segment><source>Secrets</source><target>Hemligheter</target></segment>
       </unit>
+      <unit id="settings.nav.access">
+        <notes><note category="description">Link in the settings navigation to the page of grants, service accounts and scoped tokens.</note></notes>
+        <segment><source>Access</source><target>Åtkomst</target></segment>
+      </unit>
+      <unit id="settings.nav.audit_export">
+        <notes><note category="description">Link in the settings navigation to the page that sends the audit log to other systems.</note></notes>
+        <segment><source>Audit export</source><target>Granskningsexport</target></segment>
+      </unit>
+      <unit id="settings.nav.vault">
+        <notes><note category="description">Link in the settings navigation to the page of the key-encryption keys of the vault.</note></notes>
+        <segment><source>Vault</source><target>Valv</target></segment>
+      </unit>
+      <unit id="settings.nav.backup">
+        <notes><note category="description">Link in the settings navigation to the backup page.</note></notes>
+        <segment><source>Backup</source><target>Säkerhetskopiering</target></segment>
+      </unit>
+      <unit id="settings.nav.languages">
+        <notes><note category="description">Link in the settings navigation to the page of language packs.</note></notes>
+        <segment><source>Languages</source><target>Språk</target></segment>
+      </unit>
     </group>
     <group id="secrets">
       <unit id="secrets.title">
@@ -8577,6 +8603,10 @@
       </unit>
       <unit id="shell.nav.nodes">
         <segment><source>Nodes</source><target>Noder</target></segment>
+      </unit>
+      <unit id="shell.nav.cluster">
+        <notes><note category="description">Rail entry of the cluster area.</note></notes>
+        <segment><source>Cluster</source><target>Kluster</target></segment>
       </unit>
     </group>
     <group id="ipam-adoption">
@@ -10195,6 +10225,46 @@
       </unit>
       <unit id="move.plan_changed">
         <segment><source>The plan changed since this preview. Here is the new one: check it and start again.</source><target>Planen ändrades efter förhandsvisningen. Här är den nya: granska den och starta igen.</target></segment>
+      </unit>
+    </group>
+    <group id="toggles-audit-export">
+      <unit id="toggles.audit_export.name">
+        <notes><note category="description">Name of the toggle TGL-21: whether the audit log is sent to other systems.</note></notes>
+        <segment><source>Audit export</source><target>Granskningsexport</target></segment>
+      </unit>
+      <unit id="toggles.audit_export.local">
+        <notes><note category="description">Value of TGL-21: the audit log stays on this installation.</note></notes>
+        <segment><source>Local only</source><target>Endast lokalt</target></segment>
+      </unit>
+      <unit id="toggles.audit_export.optional">
+        <notes><note category="description">Value of TGL-21: export sinks may be set up but are not required.</note></notes>
+        <segment><source>Local, export optional</source><target>Lokalt, export valfri</target></segment>
+      </unit>
+      <unit id="toggles.audit_export.required">
+        <notes><note category="description">Value of TGL-21: at least one export sink must be set up.</note></notes>
+        <segment><source>Export required</source><target>Export krävs</target></segment>
+      </unit>
+      <unit id="settings.security.audit_export.mode">
+        <notes><note category="description">Label of the choice of audit export (TGL-21).</note></notes>
+        <segment><source>How the audit log leaves this installation</source><target>Hur granskningsloggen lämnar installationen</target></segment>
+      </unit>
+      <unit id="settings.security.audit_export.local">
+        <segment><source>Keep the log here</source><target>Behåll loggen här</target></segment>
+      </unit>
+      <unit id="settings.security.audit_export.local_help">
+        <segment><source>The audit log stays on this installation. No export is set up.</source><target>Granskningsloggen stannar på den här installationen. Ingen export ställs in.</target></segment>
+      </unit>
+      <unit id="settings.security.audit_export.optional">
+        <segment><source>Allow export</source><target>Tillåt export</target></segment>
+      </unit>
+      <unit id="settings.security.audit_export.optional_help">
+        <segment><source>The log stays here, and you may send it on to syslog, CEF or JSON sinks. Nothing forces you to.</source><target>Loggen stannar här, och du kan skicka den vidare till syslog-, CEF- eller JSON-mottagare. Inget tvingar dig.</target></segment>
+      </unit>
+      <unit id="settings.security.audit_export.required">
+        <segment><source>Require export</source><target>Kräv export</target></segment>
+      </unit>
+      <unit id="settings.security.audit_export.required_help">
+        <segment><source>At least one export sink must be set up, and an alarm shows while a sink fails.</source><target>Minst en exportmottagare måste vara inställd, och ett larm visas medan en mottagare inte fungerar.</target></segment>
       </unit>
     </group>
   </file>

@@ -15,6 +15,11 @@
 //! and review the diff: the redb files differ at every generation (time stamps,
 //! identifiers), the objects in `expected.json` must not. Documentation data only
 //! (RFC 5737, RFC 3849, RFC 7042, `.test` names).
+//!
+//! A directory that this binary has migrated must also be refused by a binary of the
+//! previous format: after each migrated start the test runs the preflight of the previous
+//! format's registry on the migrated store and expects `upgrade.format_newer`, so that an
+//! older binary cannot be started on the directory by mistake.
 
 mod serve_support;
 
@@ -25,6 +30,10 @@ use std::{
 
 use serde_json::{Value, json};
 use serve_support::{Node, api::Api, run_tenko, wait_for_setup_token};
+use tenko::upgrade::{
+    datadir::{UpgradeError, preflight},
+    migrations::{INITIAL, MIGRATIONS, Registry},
+};
 
 /// The directory of the fixtures.
 fn fixtures() -> PathBuf {
@@ -208,9 +217,14 @@ fn every_earlier_format_opens_with_its_objects() {
         .map(|format| dir_size(&fixtures().join(format!("v{format}"))))
         .sum();
     assert!(size < 4 * 1024 * 1024, "the fixtures grew to {size} bytes");
-    for format in formats {
-        opens(format, current);
-    }
+    let migrated: Vec<u64> = formats
+        .into_iter()
+        .filter(|format| opens(*format, current))
+        .collect();
+    assert!(
+        migrated.contains(&1),
+        "this binary migrates the fixture of format 1; migrated: {migrated:?}"
+    );
 }
 
 fn dir_size(dir: &Path) -> u64 {
@@ -228,8 +242,9 @@ fn dir_size(dir: &Path) -> u64 {
     })
 }
 
-/// Opens a copy of the fixture of `format` with this binary and finds its objects.
-fn opens(format: u64, current: u64) {
+/// Opens a copy of the fixture of `format` with this binary and finds its objects. Returns
+/// whether the start migrated the copy.
+fn opens(format: u64, current: u64) -> bool {
     let fixture = fixtures().join(format!("v{format}"));
     let expected: Value =
         serde_json::from_slice(&fs::read(fixture.join("expected.json")).expect("expected.json"))
@@ -270,7 +285,8 @@ fn opens(format: u64, current: u64) {
     assert_eq!(status["format"], current);
     let outcome = server.stop();
     outcome.assert_code(0);
-    if format != current {
+    let migrated = format != current;
+    if migrated {
         outcome.assert_stderr_contains(&format!("migrated from format {format}"));
         assert!(
             node.data_dir().join("upgrade-backups").is_dir(),
@@ -282,5 +298,39 @@ fn opens(format: u64, current: u64) {
     assert!(
         marker.starts_with(&format!("tenko-data-format {current}\n")),
         "{marker}"
+    );
+    if migrated {
+        assert_previous_binary_refuses(
+            &node.data_dir().join("store"),
+            u32::try_from(current).expect("a small format number"),
+        );
+    }
+    migrated
+}
+
+/// The registry of the binary of format `current - 1`: the migrations up to that format.
+fn previous_registry(current: u32) -> Registry<'static> {
+    let previous = current - 1;
+    let count = usize::try_from(previous - INITIAL).expect("a small format number");
+    Registry {
+        current: previous,
+        migrations: &MIGRATIONS[..count],
+    }
+}
+
+/// A binary of format `current - 1` reads the marker of the migrated store directory and
+/// refuses it with `upgrade.format_newer`, naming both formats, before it opens a file.
+fn assert_previous_binary_refuses(store_dir: &Path, current: u32) {
+    let previous = current - 1;
+    let rule = format!("a binary of format {previous} refuses the migrated directory");
+    let error = preflight(store_dir, previous_registry(current)).expect_err(&rule);
+    assert_eq!(error.code(), "upgrade.format_newer", "{rule}: {error}");
+    assert!(
+        matches!(
+            error,
+            UpgradeError::Newer { found, supported }
+                if found == current && supported == previous
+        ),
+        "{rule}, with format {current} found and {previous} supported: {error:?}"
     );
 }

@@ -320,5 +320,6 @@ fn job_spec(
         group: Some(group_key.clone()),
         group_limit: Some(preview.parallelism),
         idempotency,
+        node: None,
     })
 }

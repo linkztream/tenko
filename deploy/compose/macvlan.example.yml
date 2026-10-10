@@ -28,8 +28,8 @@
 # - Create the key-encryption key secret as described in controller.example.yml
 #   (./secrets/tenko_kek, owned by uid 65532, mode 0400). The container has no
 #   systemd-creds, so without it the key would be a plain file on the data volume.
-# - First-run setup: read the one-time setup token with
-#     docker compose -f macvlan.example.yml logs tenko | grep -E 'Setup token|setup_token'
+# - First-run setup: print the one-time setup token with
+#     docker compose -f macvlan.example.yml exec tenko tenko setup token
 #   and open https://192.0.2.10:8443/ (see controller.example.yml for `tenko setup`).
 #
 # Start with: docker compose -f macvlan.example.yml up --build

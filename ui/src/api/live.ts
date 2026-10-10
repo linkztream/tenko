@@ -22,6 +22,23 @@ export interface LiveQuery<T> {
   refetch: () => void;
   /** The revision the current value was read at. */
   revision: () => number | undefined;
+  /**
+   * The value last read, or undefined while nothing is loaded yet or the last read failed. Use
+   * it where `value.latest` was read: that getter throws the error of a failed read, so a view
+   * has to look at `value.error` first, and a view that forgets crashes instead of showing
+   * its error notice. This one never throws; the error stays on `value.error`.
+   */
+  latest: () => T | undefined;
+}
+
+/**
+ * The guard for the pattern "`latest` rethrows the error of a failed read": the latest value of a
+ * live query (or of any resource), or undefined while nothing is loaded or the last read failed.
+ * Reactive like the resource itself.
+ */
+export function latest<T>(query: LiveQuery<T> | Resource<T>): T | undefined {
+  const resource = typeof query === "function" ? query : query.value;
+  return resource.error ? undefined : resource.latest;
 }
 
 /** Must be called inside a component or another reactive owner. */
@@ -65,5 +82,5 @@ export function createLiveQuery<T>(options: LiveQueryOptions<T>): LiveQuery<T> {
     for (const off of offs) off();
   });
 
-  return { value, refetch: reload, revision: () => revision };
+  return { value, refetch: reload, revision: () => revision, latest: () => latest(value) };
 }

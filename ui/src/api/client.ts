@@ -5,8 +5,12 @@
 // - POST carries an `Idempotency-Key` (API-04). Pass the same `idempotencyKey` when
 //   retrying one logical operation; otherwise every call gets a fresh one. `null` sends
 //   none: the server buffers keyed requests under a smaller size limit than an upload.
-// - PATCH and DELETE carry `If-Match: "<revision>"` when `ifMatch` is given; use the
-//   revision from the object you edit, or ANY_REVISION where no revision applies.
+// - Every write (POST, PUT, PATCH, DELETE) carries `If-Match: "<revision>"` when `ifMatch` is
+//   given; use the revision from the object you edit, or ANY_REVISION where no revision
+//   applies. A POST that acts on an existing object (an activation, say) passes it too.
+// - A body is JSON unless it is a FormData (multipart, the browser sets the boundary) or a
+//   Blob, which includes File: a Blob is sent as it is with its own type as `Content-Type`
+//   (`application/octet-stream` when it has none) and is never JSON-encoded.
 // - Errors are thrown as ApiError with the problem's stable code (see problem.ts).
 //
 // Request and response types come from the OpenAPI document. While an operation is still
@@ -103,7 +107,7 @@ type PathOption<P extends string> = [PathParamNames<P>] extends [never]
 export type GetOptions<P extends string> = CommonOptions & PathOption<P>;
 export type WriteOptions<P extends string, B> = CommonOptions &
   PathOption<P> & {
-    body?: B | FormData | undefined;
+    body?: B | FormData | Blob | undefined;
     ifMatch?: Revision | undefined;
     /** The key of one logical operation; null sends none (large uploads, see the import). */
     idempotencyKey?: string | null | undefined;
@@ -172,6 +176,7 @@ async function readBody(res: Response): Promise<unknown> {
  */
 export interface RawOptions extends CommonOptions {
   path?: Record<string, string | number> | undefined;
+  /** A JSON value, or a FormData or Blob (a File too), which are sent as they are. */
   body?: unknown;
   ifMatch?: Revision | undefined;
   idempotencyKey?: string | null | undefined;
@@ -182,14 +187,17 @@ export async function rawRequest<T>(method: Method, template: string, options: R
   const headers: Record<string, string> = { Accept: "application/json", ...options.headers };
   let body: BodyInit | undefined;
   if (options.body instanceof FormData) body = options.body;
-  else if (options.body !== undefined) {
+  else if (options.body instanceof Blob) {
+    headers["Content-Type"] = options.body.type || "application/octet-stream";
+    body = options.body;
+  } else if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(options.body);
   }
   if (method === "post" && options.idempotencyKey !== null) {
     headers["Idempotency-Key"] = options.idempotencyKey ?? newIdempotencyKey();
   }
-  if ((method === "patch" || method === "delete" || method === "put") && options.ifMatch !== undefined) {
+  if (method !== "get" && options.ifMatch !== undefined) {
     headers["If-Match"] = options.ifMatch === ANY_REVISION ? ANY_REVISION : `"${options.ifMatch}"`;
   }
 

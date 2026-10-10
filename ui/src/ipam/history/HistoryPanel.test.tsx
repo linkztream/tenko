@@ -39,7 +39,9 @@ describe("history panel", () => {
   it("restores a deleted host from its history and shows the restore", async () => {
     const id = HOST_IDS["old-printer"] as string;
     const onRestored = vi.fn();
-    renderRoute(() => <HistoryPanel collection="hosts" id={id} label="old-printer" deleted revision={1} onRestored={onRestored} />);
+    // The revision the page saw: the restore is a POST with If-Match, which the client now sends.
+    const revision = ipamState().data.host.get(id)?.meta.revision;
+    renderRoute(() => <HistoryPanel collection="hosts" id={id} label="old-printer" deleted revision={revision} onRestored={onRestored} />);
     await waitFor(() => expect(entries()).toHaveLength(2));
     expect(actions()).toEqual(["delete", "create"]);
     fireEvent.click(screen.getByTestId("history-restore"));
@@ -55,7 +57,8 @@ describe("history panel", () => {
 
   it("restores the deleted address 192.0.2.35 once the host it belonged to is back", async () => {
     const id = ADDRESS_IDS["192.0.2.35"] as string;
-    renderRoute(() => <HistoryPanel collection="addresses" id={id} label="192.0.2.35" deleted revision={1} />);
+    const revision = ipamState().data.address.get(id)?.meta.revision;
+    renderRoute(() => <HistoryPanel collection="addresses" id={id} label="192.0.2.35" deleted revision={revision} />);
     await waitFor(() => expect(actions()).toEqual(["delete", "create"]));
     expect(screen.getByTestId("history-restore").textContent).toBe("Restore");
     // The address belongs to the interface of the deleted old-printer: the server says so.

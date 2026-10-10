@@ -1,0 +1,63 @@
+// Tenko node transport, major version 1: configuration sync to nodes.
+// See handshake.proto for the transport, the errors and the evolution rule.
+//
+// The service Config gives a node its configuration and the secrets it needs. Any
+// controller serves it from its own copy of the replicated state. A caller needs a node
+// record; each method states the role it requires. It is filled in by work package
+// WP3.10; until then every method answers UNIMPLEMENTED.
+syntax = "proto3";
+
+package tenko.cluster.v1;
+
+// A node's configuration and secrets, served by the controllers.
+service Config {
+  // Streams the node's configuration. The first message answers `from_revision`: deltas
+  // from the journal when it still covers that revision, otherwise a compressed snapshot
+  // of the node's subset of the configuration. Later messages are deltas as they are
+  // committed. The stream stays open until the node closes it. Any enrolled node may call
+  // it; it sees only its own subset.
+  rpc Watch(WatchRequest) returns (stream ConfigDelta);
+  // Hands the node the secrets its configuration names, by purpose. The controller
+  // decides per call and audits it; the node keeps the values in memory only. Refused
+  // with PERMISSION_DENIED when the node's roles do not use the purpose.
+  rpc Secrets(SecretsRequest) returns (SecretsResponse);
+}
+
+message WatchRequest {
+  // The revision of the configuration the node already holds; 0 when it holds none.
+  uint64 from_revision = 1;
+}
+
+message ConfigDelta {
+  // The revision of the configuration after this message.
+  uint64 revision = 1;
+  // True when `payload` is a complete snapshot of the node's subset that replaces what
+  // the node holds, false when it is a delta to apply on top.
+  bool snapshot = 2;
+  // The encoding of `payload`, for example `cbor+zstd/1`; the node refuses one it does not
+  // know and keeps its configuration.
+  string encoding = 3;
+  // The delta or the snapshot, in `encoding`.
+  bytes payload = 4;
+}
+
+message SecretsRequest {
+  // The purposes to fetch, for example `snmp`. Empty means none.
+  repeated string purposes = 1;
+}
+
+// A secret value for one purpose. The node holds it in memory only and never writes it to
+// disk.
+message NodeSecret {
+  // The purpose it serves, one of those requested.
+  string purpose = 1;
+  // The name the configuration refers to it by.
+  string name = 2;
+  // The value.
+  bytes value = 3;
+}
+
+message SecretsResponse {
+  // The secrets of the requested purposes that the node may have.
+  repeated NodeSecret secrets = 1;
+}

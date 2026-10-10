@@ -32,7 +32,20 @@
 //! | [`topology`] | the topology map (IPAM-20) | WP2.7 |
 //! | [`audit`] | audit log and chain verification | WP1.7 |
 //! | [`events`] | server-sent events | WP1.7 |
-//! | [`system`] | health, status, OpenAPI document, metrics | WP1.7 |
+//! | [`system`] | health, status, OpenAPI document | WP1.7 |
+//! | [`metrics`] | metrics in the `OpenMetrics` text format (split from `system`) | WP3.5 |
+//! | [`cluster`] | controller members, promotion, removal, step-down | WP3.1a |
+//! | [`access`] | scoped grants and service accounts | WP3.2 |
+//! | [`audit_export`] | audit export sinks, status and test | WP3.3 |
+//! | [`kek`] | key-encryption keys: status and online rotation | WP3.4a |
+//! | [`backup`] | backups: create, status, schedule | WP3.4b |
+//! | [`i18n`] | language packs (partly public) | WP3.7 |
+//! | [`queue`] | changes queued on an isolated controller (IPAM module) | WP3.9 |
+//! | [`scans`] | scan jobs, probe scan configuration, kill switch (Discovery module) | WP3.10 |
+//!
+//! The Slice 3 modules were created empty by WP3.0 with their tags registered, so each
+//! package adds its operations in its own file. The quorum gate of WP3.9 sits in the API
+//! middleware (`middleware::quorum`), not here.
 //!
 //! Every path is registered in exactly one module (axum panics on overlapping routes), and
 //! the stubs answer `501` with `sys.not_implemented` until their owner replaces them.
@@ -50,22 +63,31 @@ use crate::{
     state::AppState,
 };
 
+pub mod access;
 pub mod addresses;
 pub mod audit;
+pub mod audit_export;
 pub mod auth;
+pub mod backup;
+pub mod cluster;
 pub mod common;
 pub mod connectors;
 pub mod events;
 pub mod export;
 pub mod hosts;
+pub mod i18n;
 pub mod import;
 pub mod jobs;
+pub mod kek;
+pub mod metrics;
 pub mod moves;
 pub mod nodes;
 pub mod observations;
 pub mod prefixes;
 pub mod proposals;
+pub mod queue;
 pub mod remote;
+pub mod scans;
 pub mod secrets;
 pub mod settings;
 pub mod setup;
@@ -98,13 +120,22 @@ pub mod vlans;
         (name = "moves", description = "Moving hosts and addresses to another network"),
         (name = "audit", description = "Audit log and chain verification"),
         (name = "events", description = "Server-sent events"),
-        (name = "system", description = "Health, status, the OpenAPI document and metrics"),
+        (name = "system", description = "Health, status and the OpenAPI document"),
+        (name = "metrics", description = "Metrics in the OpenMetrics text format"),
         (name = "connectors", description = "Connector plugins and connector instances"),
         (name = "observations", description = "Observations of connectors and probes, per source and across sources"),
         (name = "proposals", description = "Proposals of the reconciler, their decisions and adoption policies"),
         (name = "nodes", description = "Cluster nodes: enrolment tokens, enrolment, the node registry and revocation"),
         (name = "secrets", description = "Operator secrets, their reveal, host credentials and the remote access hand-off"),
         (name = "topology", description = "The topology map: nodes, edges, ports and neighbours"),
+        (name = "cluster", description = "The controller cluster: members, their replication state, promotion, removal and step-down"),
+        (name = "access", description = "Scoped grants over VRFs, sites and prefixes, delegation and service accounts"),
+        (name = "audit_export", description = "Audit export sinks (syslog, CEF, JSON lines), their status and test records"),
+        (name = "kek", description = "Key-encryption keys: provider, protection, generations and online rotation"),
+        (name = "backup", description = "Backups: creation, status and schedule"),
+        (name = "i18n", description = "Language packs: the active languages, upload, preview, activation and the template"),
+        (name = "queue", description = "Changes queued on an isolated controller and their conflicts"),
+        (name = "scans", description = "Scan jobs, probe scan configuration and the remote kill switch"),
     ),
     components(schemas(ProblemDetails, crate::dto::SortOrder, tenko_ipam::query::Deleted)),
     modifiers(&SecurityAddon)
@@ -155,7 +186,9 @@ pub fn router() -> OpenApiRouter<AppState> {
 /// module registers nothing, so its paths answer 404 `sys.route_not_found` like any
 /// unknown path. The platform areas (setup, auth, users, settings, jobs, audit, events,
 /// system) are always registered; IPAM owns tenancy, prefixes, addresses, hosts, common,
-/// import, export and moves; DNS, DHCP and Discovery have no routes yet.
+/// import, export, moves and the queue of an isolated controller; Discovery owns the scan
+/// jobs; DNS and DHCP have no routes yet. The Slice 3 platform areas (cluster, access,
+/// audit export, KEK, backup, metrics, language packs) are always registered.
 pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
     let mut router = OpenApiRouter::with_openapi(api_doc())
         .merge(setup::routes())
@@ -166,9 +199,16 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
         .merge(audit::routes())
         .merge(events::routes())
         .merge(system::routes())
+        .merge(metrics::routes())
         .merge(connectors::routes())
         .merge(secrets::routes())
-        .merge(nodes::routes());
+        .merge(nodes::routes())
+        .merge(cluster::routes())
+        .merge(access::routes())
+        .merge(audit_export::routes())
+        .merge(kek::routes())
+        .merge(backup::routes())
+        .merge(i18n::routes());
     if modules.contains(Module::Ipam) {
         router = router
             .merge(tenancy::routes())
@@ -184,7 +224,11 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
             .merge(secrets::host_routes())
             .merge(remote::routes())
             .merge(vlans::routes())
-            .merge(topology::routes());
+            .merge(topology::routes())
+            .merge(queue::routes());
+    }
+    if modules.contains(Module::Discovery) {
+        router = router.merge(scans::routes());
     }
     router
 }

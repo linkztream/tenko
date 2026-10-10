@@ -121,17 +121,17 @@ Under the SCM there is no console. The service writes its log, appended, to
 `<data_dir>\logs\tenko.log`, or to `log.file` when the file sets one. `log.level` and
 `log.format` apply as usual. The Windows Event Log comes in Slice 3.
 
-At the first start the server has no administrator yet and opens first-run setup. The log
-file then holds a line with `setup_token=`; use that token in the web UI or with
-`tenko setup`:
+At the first start the server has no administrator yet and opens first-run setup. It keeps
+the one-time setup token in the file `setup-token` of the data directory, never in the log;
+print it in an administrator shell and use it in the web UI or with `tenko setup`:
 
 ```
-findstr setup_token C:\ProgramData\Tenko\logs\tenko.log
+tenko setup token --config C:\ProgramData\Tenko\tenko.toml
 ```
 
-The token is single-use and changes at every start until setup is complete. Treat the log
-file as sensitive until then; the directory is limited to the service account and
-administrators for this reason.
+The token is single-use and changes at every start until setup is complete; the file is
+removed when setup completes. It inherits the access control list of the data directory,
+which is limited to the service account, Administrators and SYSTEM.
 
 If the service cannot open its log, or its configuration stopped being valid after the
 install, there is nowhere to write the reason. The SCM then shows only the exit status of

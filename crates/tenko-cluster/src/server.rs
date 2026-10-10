@@ -1,5 +1,10 @@
 //! The controller side of the node transport: the cluster port, its accept loop with the
-//! mutual TLS handshake, and the gRPC services `Handshake`, `Node` and `Observations`.
+//! mutual TLS handshake, and the router that serves the gRPC services of package
+//! `tenko.cluster.v1`.
+//!
+//! This file holds the listener, the router and the helpers every service shares. Each
+//! service is implemented for [`ClusterService`] in its own file under `service/` (see the
+//! table there), so work packages edit disjoint files.
 //!
 //! Every call is checked twice: the TLS verifier refused certificates of another CA and
 //! revoked serials during the handshake; each service then requires that the certificate's
@@ -10,30 +15,26 @@ use std::{
     collections::HashMap,
     io,
     net::SocketAddr,
-    pin::Pin,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
-use futures::Stream;
 use rustls::{ServerConfig, server::ResolvesServerCert};
-use tenko_core::{NodeId, Role, Timestamp};
+use tenko_core::{NodeId, Timestamp};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, watch},
     task::JoinHandle,
 };
 use tokio_rustls::{TlsAcceptor, server::TlsStream};
-use tonic::{Request, Response, Status, Streaming, metadata::MetadataValue};
+use tonic::{Request, Status, metadata::MetadataValue};
 
 use crate::{
     error::ClusterError,
-    model::ConnectionView,
     mtls::{KillSwitch, NodeStream, PeerIdentity, PeerInfo},
-    probe::{IngestCounts, ProbeBatch, ProbeSink, timestamp_from_proto, timestamp_to_proto},
+    probe::ProbeSink,
     proto::v1,
     registry::NodeRegistry,
-    version,
 };
 
 /// Metadata entry with the stable error code of a refused call.
@@ -74,7 +75,8 @@ pub fn code_of(status: &Status) -> Option<&str> {
         .and_then(|value| value.to_str().ok())
 }
 
-fn peer_of<T>(request: &Request<T>) -> Result<PeerInfo, Status> {
+/// The mutual TLS identity of the caller, which the accept loop attached to the connection.
+pub(crate) fn peer_of<T>(request: &Request<T>) -> Result<PeerInfo, Status> {
     request
         .extensions()
         .get::<PeerInfo>()
@@ -91,10 +93,12 @@ fn peer_of<T>(request: &Request<T>) -> Result<PeerInfo, Status> {
 /// The gRPC services of the cluster port.
 #[derive(Clone)]
 pub struct ClusterService {
-    registry: Arc<NodeRegistry>,
-    sink: Arc<dyn ProbeSink>,
+    /// The node registry the services authenticate against.
+    pub(crate) registry: Arc<NodeRegistry>,
+    /// Where the `Observations` service hands probe batches.
+    pub(crate) sink: Arc<dyn ProbeSink>,
     /// The last ingested batch of each node: (epoch, sequence).
-    ingested: Arc<Mutex<HashMap<NodeId, (String, u64)>>>,
+    pub(crate) ingested: Arc<Mutex<HashMap<NodeId, (String, u64)>>>,
 }
 
 impl std::fmt::Debug for ClusterService {
@@ -113,7 +117,12 @@ impl ClusterService {
         }
     }
 
-    async fn authenticate(&self, peer: &PeerInfo) -> Result<crate::model::NodeRecord, Status> {
+    /// Requires that the caller's node is enrolled and still holds the presented
+    /// certificate.
+    pub(crate) async fn authenticate(
+        &self,
+        peer: &PeerInfo,
+    ) -> Result<crate::model::NodeRecord, Status> {
         self.registry
             .authenticate(peer.identity.node, &peer.identity.serial, Timestamp::now())
             .await
@@ -137,231 +146,28 @@ impl ClusterService {
                     .max_decoding_message_size(MAX_MESSAGE_BYTES)
                     .max_encoding_message_size(MAX_MESSAGE_BYTES),
             )
-    }
-}
-
-#[tonic::async_trait]
-impl v1::handshake_server::Handshake for ClusterService {
-    async fn hello(
-        &self,
-        request: Request<v1::HelloRequest>,
-    ) -> Result<Response<v1::HelloResponse>, Status> {
-        let peer = peer_of(&request)?;
-        self.authenticate(&peer).await?;
-        let node = peer.identity.node;
-        let hello = request.into_inner();
-        let ours = &self.registry.config().majors;
-        match version::negotiate(ours, &hello.majors) {
-            Ok(major) => {
-                if let Err(error) = self
-                    .registry
-                    .hello_ok(node, &hello.majors, major, &hello.version)
-                    .await
-                {
-                    tracing::warn!(node = %node, %error, "the handshake could not be recorded");
-                }
-                Ok(Response::new(v1::HelloResponse {
-                    major,
-                    majors: ours.clone(),
-                    version: crate::version().to_owned(),
-                    node_id: node.0,
-                    heartbeat_secs: self.registry.config().heartbeat_secs,
-                    server_time: Some(timestamp_to_proto(Timestamp::now())),
-                }))
-            }
-            Err(mismatch) => {
-                let now = Timestamp::now();
-                if let Err(error) = self
-                    .registry
-                    .hello_mismatch(node, &mismatch, &hello.version, now)
-                    .await
-                {
-                    tracing::warn!(node = %node, %error, "the refused handshake could not be recorded");
-                }
-                let error = ClusterError::new(
-                    "cluster.protocol.unsupported",
-                    409,
-                    mismatch.detail("the controller", "the node"),
-                );
-                let mut status = status_of(&error);
-                if let Ok(value) = MetadataValue::try_from(version::format_majors(ours)) {
-                    status.metadata_mut().insert(MAJORS_METADATA, value);
-                }
-                Err(status)
-            }
-        }
-    }
-}
-
-type DirectiveStream = Pin<Box<dyn Stream<Item = Result<v1::Directive, Status>> + Send>>;
-
-#[tonic::async_trait]
-impl v1::node_server::Node for ClusterService {
-    type HeartbeatStream = DirectiveStream;
-
-    async fn heartbeat(
-        &self,
-        request: Request<Streaming<v1::Beat>>,
-    ) -> Result<Response<Self::HeartbeatStream>, Status> {
-        let peer = peer_of(&request)?;
-        self.authenticate(&peer).await?;
-        let node = peer.identity.node;
-        let mut inbound = request.into_inner();
-        let (push, mut directives) = mpsc::channel(16);
-        let now = Timestamp::now();
-        let view = ConnectionView {
-            since: now,
-            peer: peer.remote,
-            major: 0,
-            version: String::new(),
-            last_beat: None,
-            buffered_batches: 0,
-            buffered_bytes: 0,
-            dropped_batches: 0,
-            certificate_not_after: Some(peer.identity.not_after),
-        };
-        let guard = self.registry.sessions().open(node, view, push.clone());
-        if let Err(error) = self.registry.touch(node, now, true).await {
-            tracing::warn!(node = %node, %error, "last_seen could not be written");
-        }
-        tracing::info!(node = %node, peer = ?peer.remote, "node connected");
-        let registry = Arc::clone(&self.registry);
-        let renew_before = i64::from(registry.ca().policy().renew_before_days);
-        tokio::spawn(async move {
-            loop {
-                let beat = match inbound.message().await {
-                    Ok(Some(beat)) => beat,
-                    Ok(None) => break,
-                    Err(status) => {
-                        tracing::debug!(node = %node, %status, "heartbeat stream ended");
-                        break;
-                    }
-                };
-                let now = Timestamp::now();
-                let not_after = beat
-                    .certificate_not_after
-                    .as_ref()
-                    .and_then(timestamp_from_proto);
-                guard.update(|view| {
-                    view.major = beat.major;
-                    view.version.clone_from(&beat.version);
-                    view.last_beat = Some(now);
-                    view.buffered_batches = beat.buffered_batches;
-                    view.buffered_bytes = beat.buffered_bytes;
-                    view.dropped_batches = beat.dropped_batches;
-                    if not_after.is_some() {
-                        view.certificate_not_after = not_after;
-                    }
-                });
-                if let Err(error) = registry.touch(node, now, false).await {
-                    tracing::debug!(node = %node, %error, "last_seen could not be written");
-                }
-                let expires = not_after.unwrap_or(peer.identity.not_after);
-                let renew = (expires.0 - now.0).whole_days() < renew_before;
-                let directive = v1::Directive {
-                    sequence: beat.sequence,
-                    server_time: Some(timestamp_to_proto(now)),
-                    renew,
-                    revoked: false,
-                    detail: String::new(),
-                };
-                if push.send(Ok(directive)).await.is_err() {
-                    break;
-                }
-            }
-            drop(guard);
-            if let Err(error) = registry.touch(node, Timestamp::now(), true).await {
-                tracing::debug!(node = %node, %error, "last_seen could not be written");
-            }
-            tracing::info!(node = %node, "node disconnected");
-        });
-        let stream: DirectiveStream =
-            Box::pin(futures::stream::poll_fn(move |cx| directives.poll_recv(cx)));
-        Ok(Response::new(stream))
-    }
-
-    async fn renew(
-        &self,
-        request: Request<v1::RenewRequest>,
-    ) -> Result<Response<v1::RenewResponse>, Status> {
-        let peer = peer_of(&request)?;
-        self.authenticate(&peer).await?;
-        let csr = request.into_inner().csr;
-        let issued = self
-            .registry
-            .renew(
-                peer.identity.node,
-                &peer.identity.serial,
-                &csr,
-                Timestamp::now(),
+            // A snapshot chunk is 1 MiB and a forwarded write batch at most 16 MiB.
+            .add_service(
+                v1::raft_server::RaftServer::new(self.clone())
+                    .max_decoding_message_size(MAX_MESSAGE_BYTES),
             )
-            .await
-            .map_err(|error| status_of(&error))?;
-        Ok(Response::new(v1::RenewResponse {
-            certificate_pem: issued.chain_pem(),
-            not_after: Some(timestamp_to_proto(issued.info.not_after)),
-        }))
-    }
-}
-
-#[tonic::async_trait]
-impl v1::observations_server::Observations for ClusterService {
-    async fn ingest(
-        &self,
-        request: Request<v1::IngestRequest>,
-    ) -> Result<Response<v1::IngestResponse>, Status> {
-        let peer = peer_of(&request)?;
-        let record = self.authenticate(&peer).await?;
-        let node = peer.identity.node;
-        if !record.roles.contains(&Role::Probe) {
-            return Err(status_of(&ClusterError::new(
-                "cluster.node.role",
-                403,
-                format!("node {node} does not have the role probe"),
-            )));
-        }
-        let request = request.into_inner();
-        let epoch = request.epoch.clone();
-        let sequence = request.sequence;
-        let duplicate = self
-            .lock_ingested()
-            .get(&node)
-            .is_some_and(|(last_epoch, last)| *last_epoch == epoch && sequence <= *last);
-        if duplicate {
-            return Ok(Response::new(v1::IngestResponse {
-                sequence,
-                duplicate: true,
-                ..v1::IngestResponse::default()
-            }));
-        }
-        let (batch, skipped) =
-            ProbeBatch::from_request(request).map_err(|error| status_of(&error))?;
-        let vrf = batch.vrf.or(record.vrf);
-        let counts: IngestCounts = self
-            .sink
-            .ingest(node, vrf, batch)
-            .await
-            .map_err(|error| status_of(&error))?;
-        self.lock_ingested().insert(node, (epoch, sequence));
-        if let Err(error) = self.registry.touch(node, Timestamp::now(), false).await {
-            tracing::debug!(node = %node, %error, "last_seen could not be written");
-        }
-        Ok(Response::new(v1::IngestResponse {
-            sequence,
-            duplicate: false,
-            new: counts.new,
-            changed: counts.changed,
-            refreshed: counts.refreshed,
-            unchanged: counts.unchanged,
-            gone: counts.gone,
-            skipped: counts.skipped.saturating_add(skipped),
-        }))
-    }
-}
-
-impl ClusterService {
-    fn lock_ingested(&self) -> std::sync::MutexGuard<'_, HashMap<NodeId, (String, u64)>> {
-        self.ingested.lock().unwrap_or_else(PoisonError::into_inner)
+            .add_service(
+                v1::cluster_server::ClusterServer::new(self.clone())
+                    .max_decoding_message_size(MAX_MESSAGE_BYTES),
+            )
+            .add_service(
+                v1::config_server::ConfigServer::new(self.clone())
+                    .max_decoding_message_size(1024 * 1024)
+                    .max_encoding_message_size(MAX_MESSAGE_BYTES),
+            )
+            .add_service(
+                v1::commands_server::CommandsServer::new(self.clone())
+                    .max_decoding_message_size(1024 * 1024),
+            )
+            .add_service(
+                v1::metrics_server::MetricsServer::new(self.clone())
+                    .max_decoding_message_size(1024 * 1024),
+            )
     }
 }
 

@@ -2,7 +2,46 @@ import { lazy } from "solid-js";
 import type { AppRoute } from "../app/router";
 import { withPacks } from "../i18n";
 
+// The settings pages Security and Users are sections of one route, /settings/:section?/:id?.
+// The other sub-pages (WP3.0 placeholders; WP3.11b builds access, audit export, vault and backup,
+// WP3.7 languages) have a route of their own, like the secrets page: the static segment ranks
+// above the section route. Each loads its own message pack beside `settings`, which holds the
+// settings navigation they show. Administrators only.
+const PAGE_ROUTES: readonly AppRoute[] = [
+  {
+    path: "/settings/access",
+    component: lazy(withPacks(["settings", "access"], () => import("./access/AccessPage"))),
+    access: "admin",
+    title: "access.title",
+  },
+  {
+    path: "/settings/audit-export",
+    component: lazy(withPacks(["settings", "audit_export"], () => import("./audit-export/AuditExportPage"))),
+    access: "admin",
+    title: "audit_export.title",
+  },
+  {
+    path: "/settings/vault",
+    component: lazy(withPacks(["settings", "vault"], () => import("./vault/VaultPage"))),
+    access: "admin",
+    title: "vault.title",
+  },
+  {
+    path: "/settings/backup",
+    component: lazy(withPacks(["settings", "backup"], () => import("./backup/BackupPage"))),
+    access: "admin",
+    title: "backup.title",
+  },
+  {
+    path: "/settings/languages",
+    component: lazy(withPacks(["settings", "languages"], () => import("./languages/LanguagesPage"))),
+    access: "admin",
+    title: "languages.title",
+  },
+];
+
 export const routes: AppRoute[] = [
+  ...PAGE_ROUTES,
   {
     path: "/settings/:section?/:id?",
     component: lazy(withPacks(["settings"], () => import("./Settings"))),

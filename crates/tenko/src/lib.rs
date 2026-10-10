@@ -9,6 +9,8 @@
 //! | [`platform`] | systemd `sd_notify` and the Windows service |
 //! | [`client`] | the client commands over the public API |
 //! | [`kek`] | `tenko kek rotate`: key-encryption key rotation with the server stopped |
+//! | [`cluster`] | `tenko cluster` and the cluster start step of `tenko serve` (controller cluster, Slice 3) |
+//! | [`backup`] | `tenko backup`: create, verify and restore backups (Slice 3) |
 //! | [`modules`] | the module switch of OPS-25 |
 //! | [`node`] | `tenko node`: enrol, status, renew, enrolment tokens; the cluster step of `tenko serve` and the data-plane node process |
 //! | [`upgrade`] | `tenko upgrade`, the data-directory format and its migrations, in-app updates (OPS-23, OPS-24) |
@@ -22,7 +24,9 @@ use std::io::Write;
 
 use clap::{Args, Parser, Subcommand};
 
+pub mod backup;
 pub mod client;
+pub mod cluster;
 pub mod config;
 pub mod exit;
 pub mod kek;
@@ -153,9 +157,38 @@ pub enum Command {
         action: node::NodeCommand,
     },
 
+    /// The controller cluster: status, members, join, promote, remove, step-down.
+    Cluster {
+        /// The `cluster` subcommand to run.
+        #[command(subcommand)]
+        action: cluster::ClusterCommand,
+    },
+
+    /// Backups: create, verify and restore.
+    Backup {
+        /// The `backup` subcommand to run.
+        #[command(subcommand)]
+        action: backup::BackupCommand,
+    },
+
     /// Print the OpenAPI document of the API (CI compares it with `docs/api/openapi.json`).
     #[command(hide = true)]
     Openapi,
+}
+
+/// The arguments of a command that this build declares but does not implement yet:
+/// anything, ignored. The command prints that it is not available and exits with status 2.
+#[derive(Debug, Clone, Args)]
+pub struct Pending {
+    /// Ignored until the command is implemented.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+    pub args: Vec<String>,
+}
+
+/// Reports a declared command that this build does not implement yet; exit status 2.
+pub fn not_available(name: &str, err: &mut impl Write) -> u8 {
+    let _ = writeln!(err, "tenko {name}: not available in this build yet");
+    exit::USAGE
 }
 
 /// Subcommands of `tenko roles`.
@@ -204,7 +237,10 @@ impl Command {
             Command::Roles {
                 action: RolesCommand::List,
             } => "roles list",
-            Command::Setup(_) => "setup",
+            Command::Setup(args) => match &args.action {
+                Some(action) => action.name(),
+                None => "setup",
+            },
             Command::Login(_) => "login",
             Command::Logout(_) => "logout",
             Command::Prefix { action } => action.name(),
@@ -215,6 +251,11 @@ impl Command {
             Command::Audit {
                 action: client::audit::AuditCommand::Verify(_),
             } => "audit verify",
+            Command::Audit {
+                action: client::audit::AuditCommand::Export(_),
+            } => "audit export",
+            Command::Cluster { action } => action.name(),
+            Command::Backup { action } => action.name(),
             Command::Hibp {
                 action: client::hibp::HibpCommand::Build(_),
             } => "hibp build",
@@ -250,6 +291,11 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
         }
         Command::Plugin { action } => plugin::command(action, out, err),
         Command::Node { action } => node::command(action, out, err),
+        Command::Cluster { action } => cluster::command(action, err),
+        Command::Backup { action } => backup::command(action, err),
+        Command::Audit {
+            action: client::audit::AuditCommand::Export(_),
+        } => not_available(name, err),
         Command::Openapi => {
             let _ = write!(out, "{}", tenko_api::openapi_json());
             exit::OK
@@ -264,10 +310,15 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
             }
             Err(failure) => failure.report(name, false, out, err),
         },
-        Command::Setup(args) => {
-            logging::init_client();
-            client::block_on(name, args.client.json, out, err, client::login::setup(args))
-        }
+        Command::Setup(args) => match &args.action {
+            Some(client::login::SetupCommand::Token(token)) => {
+                client::login::token(token, out, err)
+            }
+            None => {
+                logging::init_client();
+                client::block_on(name, args.client.json, out, err, client::login::setup(args))
+            }
+        },
         Command::Login(args) => {
             logging::init_client();
             client::block_on(name, args.client.json, out, err, client::login::login(args))
@@ -542,7 +593,20 @@ mod tests {
 
     #[test]
     fn command_names_match_the_command_line() {
-        let cases: [(&[&str], &str); 18] = [
+        let cases: [(&[&str], &str); 33] = [
+            (&["audit", "export"], "audit export"),
+            (&["audit", "export", "--from", "7"], "audit export"),
+            (&["cluster", "status"], "cluster status"),
+            (&["cluster", "members"], "cluster members"),
+            (&["cluster", "join", "--controller", "x"], "cluster join"),
+            (&["cluster", "promote", "1002"], "cluster promote"),
+            (&["cluster", "remove", "1002"], "cluster remove"),
+            (&["cluster", "step-down"], "cluster step-down"),
+            (&["cluster", "verify"], "cluster verify"),
+            (&["cluster", "upgrade-check"], "cluster upgrade-check"),
+            (&["backup", "create"], "backup create"),
+            (&["backup", "verify", "file.tkbk"], "backup verify"),
+            (&["backup", "restore", "file.tkbk"], "backup restore"),
             (&["kek", "rotate"], "kek rotate"),
             (&["plugin", "list"], "plugin list"),
             (&["upgrade", "check"], "upgrade check"),
@@ -552,6 +616,8 @@ mod tests {
             (&["serve", "--data-dir", "d"], "serve"),
             (&["config", "check"], "config check"),
             (&["roles", "list"], "roles list"),
+            (&["setup", "--admin", "a", "--host-name", "h"], "setup"),
+            (&["setup", "token"], "setup token"),
             (&["login"], "login"),
             (&["logout"], "logout"),
             (&["prefix", "list"], "prefix list"),
@@ -565,6 +631,25 @@ mod tests {
         for (args, name) in cases {
             let cli = parse(args).expect("valid arguments");
             assert_eq!(cli.command.name(), name);
+        }
+    }
+
+    #[test]
+    fn declared_commands_that_are_not_built_yet_exit_with_status_2() {
+        for args in [
+            &["cluster", "status"][..],
+            &["cluster", "join", "--token", "t"],
+            &["backup", "create", "--data-dir", "d"],
+            &["audit", "export", "--from", "1"],
+        ] {
+            let (status, output, err) = run(args);
+            assert_eq!(status, exit::USAGE, "{args:?}");
+            assert_eq!(output, "", "{args:?}");
+            assert!(err.contains("not available in this build yet"), "{err}");
+            assert!(
+                err.starts_with(&format!("tenko {} {}", args[0], args[1])),
+                "{err}"
+            );
         }
     }
 

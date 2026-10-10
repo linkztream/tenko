@@ -253,6 +253,7 @@ export const ROLE_DESCRIPTIONS: Readonly<Record<RoleName, string>> = {
   admin: "Full access, including users, security settings and the system",
   operator: "Reads and changes the IPAM inventory, runs imports and jobs; no administration",
   viewer: "Reads the IPAM inventory, jobs and imports",
+  auditor: "Reads the audit log, the audit export status and the system status; nothing else",
 };
 
 /** The personal token alex starts with. */

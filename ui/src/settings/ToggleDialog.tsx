@@ -18,6 +18,7 @@ import { ReloadedNote } from "./fields";
 import { homeValue, pinCoupled, sameValue } from "./profileMatrix";
 import { patchFor } from "./toggleEdit";
 import {
+  AuditExportEditor,
   BreachEditor,
   LockoutEditor,
   MfaEditor,
@@ -28,7 +29,7 @@ import {
   TokenEditor,
   UpdatesEditor,
 } from "./ToggleEditors";
-import { formatToggle, weakerThan, type RevealPolicy, type ToggleDef, type UpdatesPolicy } from "./toggles";
+import { formatToggle, weakerThan, type AuditExport, type RevealPolicy, type ToggleDef, type UpdatesPolicy } from "./toggles";
 
 export function ToggleDialog(props: {
   view: SecuritySettingsView;
@@ -135,6 +136,9 @@ export function ToggleDialog(props: {
             </Match>
             <Match when={setting === "lockout"}>
               <LockoutEditor initial={initial as LockoutMode} onDraft={onDraft} />
+            </Match>
+            <Match when={setting === "audit_export"}>
+              <AuditExportEditor initial={initial as AuditExport} onDraft={onDraft} />
             </Match>
             <Match when={setting === "updates"}>
               <UpdatesEditor initial={initial as UpdatesPolicy} onDraft={onDraft} />

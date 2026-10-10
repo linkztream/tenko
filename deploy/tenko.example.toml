@@ -270,6 +270,43 @@ enrolment_ttl_secs = 3600
 # Data-plane node: mebibytes the observation buffer keeps on disk while no controller is
 # reachable; the oldest batches go first when it is full.
 buffer_mib = 64
+# Controller in a cluster of controllers (OPS-03, OPS-26): milliseconds without contact to
+# a quorum after which this controller counts as isolated. An isolated controller refuses
+# writes with 503 cluster.no_quorum and serves reads from its local copy (500 to 60000).
+isolation_after_ms = 3000
+# Controller in a cluster: seconds a start waits for the local store to catch up with the
+# leader before the controller starts isolated (5 to 3600).
+catch_up_timeout_secs = 120
+# Controller in a cluster: the leader promotes a caught-up learner to a voter on its own,
+# and only to an odd number of voters (two voters are less available than one).
+auto_promote = true
+# Controller in a cluster: a learner counts as caught up while it stays fewer than this many
+# log entries behind the leader for 10 seconds.
+promote_lag_entries = 100
+# Controller: the bandwidth cap of each node's configuration stream in kilobits per second
+# (OPS-28); 0 is no cap.
+sync_kbps = 0
+
+[telemetry]
+# OpenTelemetry traces over OTLP (OPS-05). Off unless an endpoint is set: no exporter runs.
+# otlp_endpoint = "http://127.0.0.1:4317"
+# The share of traces exported while an endpoint is set, from 0.0 to 1.0.
+sampling_ratio = 1.0
+
+[metrics]
+# The API serves /api/v1/metrics (OpenMetrics text) to a token with the metrics scope.
+# Optionally the same text without authentication on a loopback address, for a scraper on
+# this host; only 127.0.0.1 or [::1] are accepted. Not set: no such listener.
+# listen = "127.0.0.1:9464"
+# Seconds between two computations of the gauges read from status interfaces (5 to 3600).
+gauge_interval_secs = 30
+
+[backup]
+# An absolute directory for backup files (OPS-07). Not set: backups/ in the data directory.
+# Prefer another disk. The schedule and how many backups are kept are settings of the
+# installation (the API and the UI), the same on every controller; backups are always
+# encrypted.
+# target_dir = "/srv/backup/tenko"
 
 [scan]
 # The scanner of the probe role (SCAN-01 to SCAN-09). A probe reads this section of its own

@@ -48,10 +48,11 @@ pub mod raft;
 pub mod testing;
 
 pub use api::{
-    Change, ChangeSet, ChangeStream, CoalescerConfig, Committed, DerivedIndex, FailedPrecondition,
-    IndexImage, IndexStatus, KeyRange, Mutation, Precondition, ReadConsistency, ReadView,
-    ReadViewExt, Store, StoreError, StoreRole, StoreStatus, Versioned, WatchError, WatchFilter,
-    WriteBatch, downcast_image, tables,
+    AnchorResolver, Change, ChangeSet, ChangeStream, CoalescerConfig, Committed, DerivedIndex,
+    FailedPrecondition, IndexImage, IndexStatus, KeyRange, Leadership, MemberStatus, Mutation,
+    Precondition, QuorumState, ReadConsistency, ReadView, ReadViewExt, Store, StoreError,
+    StoreRole, StoreStatus, Versioned, WatchError, WatchFilter, WriteBatch, downcast_image, fence,
+    tables,
 };
 pub use mem::{MemStore, MemStoreConfig};
 pub use tenko_core::{CounterKey, TableName};

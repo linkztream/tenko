@@ -1,0 +1,64 @@
+// Tenko node transport, major version 1: replication between controllers.
+// See handshake.proto for the transport, the errors and the evolution rule.
+//
+// The service Raft carries the consensus traffic of the controller cluster (openraft 0.9)
+// over the cluster port. It is not for nodes: a caller needs the role `controller` and a
+// member record; any other certificate is refused with PERMISSION_DENIED. It is filled in
+// by work package WP3.1a; until then every method answers UNIMPLEMENTED.
+//
+// Payloads are the request and response types of openraft 0.9 in CBOR. The field `wire`
+// names the encoding of the payload (`openraft-0.9/cbor-1`); a peer that gets another
+// value refuses the call with FAILED_PRECONDITION and the error code
+// `cluster.forward.wire`, so a rolling upgrade never mixes two encodings. A new encoding
+// is a new `wire` value, not a changed field.
+syntax = "proto3";
+
+package tenko.cluster.v1;
+
+// Consensus traffic between controllers.
+service Raft {
+  // Replicates log entries, or sends a heartbeat when the entry list is empty. `payload`
+  // is the openraft AppendEntriesRequest in CBOR; the response carries the openraft
+  // AppendEntriesResponse.
+  rpc AppendEntries(RaftRequest) returns (RaftResponse);
+  // Asks a peer for its vote in an election. `payload` is the openraft VoteRequest in
+  // CBOR; the response carries the openraft VoteResponse.
+  rpc Vote(RaftRequest) returns (RaftResponse);
+  // Sends a snapshot to a peer that is too far behind for the log, as a client stream of
+  // chunks of at most 1 MiB. The receiver installs the snapshot only when the SHA-256 of
+  // the whole file, announced in the first chunk, matches what it received; the answer
+  // carries the openraft InstallSnapshotResponse. A broken transfer starts again from the
+  // first chunk.
+  rpc InstallSnapshot(stream SnapshotChunk) returns (RaftResponse);
+}
+
+message RaftRequest {
+  // The encoding of `payload`: `openraft-0.9/cbor-1`.
+  string wire = 1;
+  // The openraft request, CBOR.
+  bytes payload = 2;
+}
+
+message RaftResponse {
+  // The encoding of `payload`: `openraft-0.9/cbor-1`.
+  string wire = 1;
+  // The openraft response, CBOR.
+  bytes payload = 2;
+}
+
+message SnapshotChunk {
+  // The encoding of `vote` and `meta`: `openraft-0.9/cbor-1`. Set on every chunk.
+  string wire = 1;
+  // The vote of the sending leader, CBOR. First chunk only.
+  bytes vote = 2;
+  // The snapshot metadata (last log id and membership), CBOR. First chunk only.
+  bytes meta = 3;
+  // The SHA-256 of the whole snapshot file, 32 bytes. First chunk only.
+  bytes sha256 = 4;
+  // The position of `data` within the snapshot file, in bytes. Chunks arrive in order.
+  uint64 offset = 5;
+  // A part of the snapshot file, at most 1 MiB.
+  bytes data = 6;
+  // Set on the last chunk. The receiver checks the digest and installs after it.
+  bool done = 7;
+}

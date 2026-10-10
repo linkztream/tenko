@@ -1,11 +1,8 @@
 //! Exit criterion E3 (API-01) against the real binary: the OpenAPI document the server
-//! serves at `GET /api/v1/openapi.json` is the committed `docs/api/openapi.json`, and
-//! `tenko openapi` prints that file byte for byte (the CI drift check runs the same
-//! command).
-//!
-//! The server answers the document as compact JSON, the committed file is the pretty
-//! printed form of `tenko openapi`; the served document is therefore compared as JSON
-//! (every member and value equal), the printed one as bytes.
+//! serves at `GET /api/v1/openapi.json` is the committed `docs/api/openapi.json` byte for
+//! byte (the server embeds the file at build time), and `tenko openapi` prints that file
+//! byte for byte (the CI drift check runs the same command). Together they prove that the
+//! route, the file and the code agree.
 
 mod serve_support;
 
@@ -61,7 +58,7 @@ fn the_served_document_is_the_committed_file() {
             serde_json::from_slice(&committed()).expect("the committed document is JSON");
         assert_eq!(from_server["openapi"], from_file["openapi"]);
         assert_eq!(from_server["info"]["version"], from_file["info"]["version"]);
-        if from_server != from_file {
+        if reply.text.as_bytes() != committed().as_slice() {
             let paths = |doc: &serde_json::Value| -> Vec<String> {
                 doc["paths"]
                     .as_object()

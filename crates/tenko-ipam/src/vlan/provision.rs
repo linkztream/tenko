@@ -731,5 +731,6 @@ fn job_spec(computed: &Computed, cx: &RequestCtx) -> IpamResult<JobSpec> {
         group,
         group_limit,
         idempotency,
+        node: None,
     })
 }

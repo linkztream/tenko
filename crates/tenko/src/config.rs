@@ -53,9 +53,12 @@ pub const ENV_SEPARATOR: &str = "__";
 pub const DEFAULT_LISTEN: &str = "0.0.0.0:8443";
 
 /// The top-level keys of the file; environment variables are matched against them.
-const TOP_LEVEL_KEYS: [&str; 19] = [
+const TOP_LEVEL_KEYS: [&str; 22] = [
     "cluster",
     "scan",
+    "telemetry",
+    "metrics",
+    "backup",
     "data_dir",
     "roles",
     "modules",
@@ -126,6 +129,12 @@ pub struct Config {
     /// The scanner of the probe role (SCAN-01 to SCAN-09); read by the probe itself until
     /// the controller hands out scan configuration (WP3.1).
     pub scan: tenko_scan::config::ScanConfig,
+    /// OpenTelemetry traces (OPS-05), off unless an endpoint is set.
+    pub telemetry: TelemetrySection,
+    /// The metrics collector and the optional loopback listener (OPS-05, OPS-21).
+    pub metrics: MetricsSection,
+    /// Where backups of this node are written (OPS-07).
+    pub backup: BackupSection,
 }
 
 impl Default for Config {
@@ -150,6 +159,9 @@ impl Default for Config {
             updates: UpdatesSection::default(),
             cluster: ClusterSection::default(),
             scan: tenko_scan::config::ScanConfig::default(),
+            telemetry: TelemetrySection::default(),
+            metrics: MetricsSection::default(),
+            backup: BackupSection::default(),
         }
     }
 }
@@ -197,6 +209,22 @@ pub struct ClusterSection {
     /// Data-plane node: mebibytes the observation buffer keeps on disk while no controller
     /// is reachable; the oldest batches go first when it is full (default 64).
     pub buffer_mib: u64,
+    /// Controller in a cluster: milliseconds without contact to a quorum after which this
+    /// controller counts as isolated, refuses writes and serves reads from its local copy
+    /// (OPS-26; default 3000, 500 to 60000).
+    pub isolation_after_ms: u64,
+    /// Controller in a cluster: seconds a start waits for the local store to catch up with
+    /// the leader before the controller starts isolated (default 120, 5 to 3600).
+    pub catch_up_timeout_secs: u64,
+    /// Controller in a cluster: the leader promotes a caught-up learner to a voter on its
+    /// own, and only to an odd number of voters (default true).
+    pub auto_promote: bool,
+    /// Controller in a cluster: a learner counts as caught up while it stays fewer than
+    /// this many log entries behind the leader for 10 seconds (default 100, 1 to 1000000).
+    pub promote_lag_entries: u64,
+    /// Controller: the bandwidth cap per node configuration stream in kilobits per second;
+    /// 0 is no cap (default 0, at most 10000000; OPS-28).
+    pub sync_kbps: u64,
 }
 
 impl Default for ClusterSection {
@@ -207,6 +235,11 @@ impl Default for ClusterSection {
             heartbeat_secs: 10,
             enrolment_ttl_secs: 3600,
             buffer_mib: 64,
+            isolation_after_ms: 3_000,
+            catch_up_timeout_secs: 120,
+            auto_promote: true,
+            promote_lag_entries: 100,
+            sync_kbps: 0,
         }
     }
 }
@@ -276,7 +309,161 @@ impl ClusterSection {
                 "cluster.buffer_mib must be between 1 and 4096",
             ));
         }
+        if !(500..=60_000).contains(&self.isolation_after_ms) {
+            return Err(ConfigError::invalid(
+                "cluster.isolation_after_ms must be between 500 and 60000",
+            ));
+        }
+        if !(5..=3_600).contains(&self.catch_up_timeout_secs) {
+            return Err(ConfigError::invalid(
+                "cluster.catch_up_timeout_secs must be between 5 and 3600",
+            ));
+        }
+        if !(1..=1_000_000).contains(&self.promote_lag_entries) {
+            return Err(ConfigError::invalid(
+                "cluster.promote_lag_entries must be between 1 and 1000000",
+            ));
+        }
+        if self.sync_kbps > 10_000_000 {
+            return Err(ConfigError::invalid(
+                "cluster.sync_kbps must be at most 10000000 (0 is no cap)",
+            ));
+        }
         Ok(())
+    }
+}
+
+/// `[telemetry]`: OpenTelemetry traces exported over OTLP (OPS-05, owner decision S3-Q7).
+/// Off by default: no endpoint, no traces, no exporter task.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TelemetrySection {
+    /// The OTLP endpoint traces go to, `http://` or `https://` with host and port, such as
+    /// `http://127.0.0.1:4317`. Not set (the default): traces are off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub otlp_endpoint: Option<String>,
+    /// The share of traces exported, from 0.0 to 1.0 (default 1.0: every trace while an
+    /// endpoint is set).
+    pub sampling_ratio: f64,
+}
+
+impl Default for TelemetrySection {
+    fn default() -> Self {
+        Self {
+            otlp_endpoint: None,
+            sampling_ratio: 1.0,
+        }
+    }
+}
+
+impl TelemetrySection {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if let Some(endpoint) = &self.otlp_endpoint {
+            let rest = endpoint
+                .strip_prefix("https://")
+                .or_else(|| endpoint.strip_prefix("http://"));
+            let host = rest.map(|rest| rest.split('/').next().unwrap_or_default());
+            if !host.is_some_and(|host| !host.is_empty() && !host.starts_with(':')) {
+                return Err(ConfigError::invalid(format!(
+                    "telemetry.otlp_endpoint: `{endpoint}` is not an http(s) URL with a host, \
+                     such as http://127.0.0.1:4317"
+                )));
+            }
+        }
+        if !self.sampling_ratio.is_finite() || !(0.0..=1.0).contains(&self.sampling_ratio) {
+            return Err(ConfigError::invalid(
+                "telemetry.sampling_ratio must be between 0.0 and 1.0",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// `[metrics]`: the metrics collector (OPS-05, OPS-21). The API serves
+/// `GET /api/v1/metrics` to a token with the `metrics` scope (owner decision S3-Q7); the
+/// optional listener serves the same text without authentication, on loopback only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MetricsSection {
+    /// A loopback address and port for an unauthenticated metrics listener, such as
+    /// `127.0.0.1:9464`. Not set (the default): no such listener.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub listen: Option<String>,
+    /// Seconds between two computations of the gauges read from status interfaces (store
+    /// size, jobs by state, buffers; default 30, 5 to 3600).
+    pub gauge_interval_secs: u64,
+}
+
+impl Default for MetricsSection {
+    fn default() -> Self {
+        Self {
+            listen: None,
+            gauge_interval_secs: 30,
+        }
+    }
+}
+
+impl MetricsSection {
+    /// The address of the loopback listener, if one is configured.
+    ///
+    /// # Errors
+    ///
+    /// `config.invalid` for a value that is not an address with a port, or not a loopback
+    /// address.
+    pub fn listen_addr(&self) -> Result<Option<SocketAddr>, ConfigError> {
+        let Some(text) = &self.listen else {
+            return Ok(None);
+        };
+        let addr: SocketAddr = text.parse().map_err(|_| {
+            ConfigError::invalid(format!(
+                "metrics.listen: `{text}` is not an address with a port, such as 127.0.0.1:9464"
+            ))
+        })?;
+        if !addr.ip().is_loopback() {
+            return Err(ConfigError::invalid(format!(
+                "metrics.listen: `{text}` is not a loopback address; the listener has no \
+                 authentication, so it binds 127.0.0.1 or [::1] only"
+            )));
+        }
+        Ok(Some(addr))
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        self.listen_addr()?;
+        if !(5..=3_600).contains(&self.gauge_interval_secs) {
+            return Err(ConfigError::invalid(
+                "metrics.gauge_interval_secs must be between 5 and 3600",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// `[backup]`: where this node writes backups (OPS-07, owner decision S3-Q11). The
+/// schedule and the number of backups kept are settings in the store, the same on every
+/// controller; the directory belongs to the host.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BackupSection {
+    /// An absolute directory for backup files. Not set (the default): `backups/` in the data
+    /// directory. Prefer another disk: a backup next to the data it protects does not survive
+    /// the loss of that disk.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_dir: Option<PathBuf>,
+}
+
+impl BackupSection {
+    fn validate(&self) -> Result<(), ConfigError> {
+        match &self.target_dir {
+            Some(dir) if dir.as_os_str().is_empty() => {
+                Err(ConfigError::invalid("backup.target_dir is empty"))
+            }
+            Some(dir) if !dir.is_absolute() => Err(ConfigError::invalid(format!(
+                "backup.target_dir: `{}` is not an absolute path",
+                dir.display()
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -1168,6 +1355,23 @@ impl DataLayout {
         self.root.join("logs")
     }
 
+    /// The default directory of backup files (`[backup] target_dir` overrides it).
+    pub fn backups(&self) -> PathBuf {
+        self.root.join("backups")
+    }
+
+    /// The one-time setup token of a first start, readable by the service account only,
+    /// while first-run setup is open (`tenko setup token` prints it).
+    pub fn setup_token(&self) -> PathBuf {
+        self.root.join("setup-token")
+    }
+
+    /// The identity of this node in the cluster: the node key and certificate of a
+    /// controller or a data-plane node (Slice 3 moves a controller's identity here).
+    pub fn node(&self) -> PathBuf {
+        self.root.join("node")
+    }
+
     /// Whether the store was never created here: the first start.
     pub fn is_fresh(&self) -> bool {
         !self.store().join("log.redb").exists()
@@ -1180,6 +1384,16 @@ impl Resolved {
         DataLayout {
             root: self.data_dir.clone(),
         }
+    }
+
+    /// Where backups are written: `[backup] target_dir`, else `backups/` in the data
+    /// directory.
+    pub fn backup_dir(&self) -> PathBuf {
+        self.config
+            .backup
+            .target_dir
+            .clone()
+            .unwrap_or_else(|| self.layout().backups())
     }
 }
 
@@ -1225,6 +1439,9 @@ impl Config {
         self.log.validate()?;
         self.updates.validate()?;
         self.cluster.validate()?;
+        self.telemetry.validate()?;
+        self.metrics.validate()?;
+        self.backup.validate()?;
         self.scan
             .validate()
             .map_err(|error| ConfigError::invalid(error.detail().to_owned()))?;
@@ -1785,12 +2002,79 @@ mod tests {
             "advertise = [\"ddi.example.net\"]",
             "buffer_mib = 0",
             "enrolment_ttl_secs = 10",
+            "isolation_after_ms = 100",
+            "catch_up_timeout_secs = 0",
+            "promote_lag_entries = 0",
+            "sync_kbps = 20000000",
         ] {
             let loaded =
                 from_text(&format!("data_dir = \"/d\"\n[cluster]\n{bad}\n"), &[]).expect("loads");
             let error = loaded.config.resolve().expect_err(bad);
             assert_eq!(error.code, "config.invalid", "{bad}");
             assert!(error.message.starts_with("cluster."), "{bad}: {error}");
+        }
+    }
+
+    #[test]
+    fn the_slice_3_cluster_keys_have_defaults_and_are_read() {
+        let default = from_text("data_dir = \"/d\"\n", &[]).expect("loads");
+        let cluster = &default.config.cluster;
+        assert_eq!(cluster.isolation_after_ms, 3_000);
+        assert_eq!(cluster.catch_up_timeout_secs, 120);
+        assert!(cluster.auto_promote);
+        assert_eq!(cluster.promote_lag_entries, 100);
+        assert_eq!(cluster.sync_kbps, 0);
+        let loaded = from_text(
+            "data_dir = \"/d\"\n[cluster]\nisolation_after_ms = 5000\nauto_promote = false\n",
+            &[("TENKO_CLUSTER__SYNC_KBPS", "512")],
+        )
+        .expect("loads");
+        assert_eq!(loaded.config.cluster.isolation_after_ms, 5_000);
+        assert!(!loaded.config.cluster.auto_promote);
+        assert_eq!(loaded.config.cluster.sync_kbps, 512);
+        loaded.config.resolve().expect("valid");
+    }
+
+    #[test]
+    fn telemetry_metrics_and_backup_sections_are_checked() {
+        let default = from_text("data_dir = \"/d\"\n", &[]).expect("loads");
+        assert_eq!(default.config.telemetry.otlp_endpoint, None);
+        assert!((default.config.telemetry.sampling_ratio - 1.0).abs() < f64::EPSILON);
+        assert_eq!(default.config.metrics.listen_addr().expect("valid"), None);
+        assert_eq!(default.config.metrics.gauge_interval_secs, 30);
+        let resolved = default.config.resolve().expect("valid");
+        assert_eq!(resolved.backup_dir(), resolved.layout().backups());
+
+        let loaded = from_text(
+            "data_dir = \"/d\"\n[telemetry]\notlp_endpoint = \"http://127.0.0.1:4317\"\n\
+             sampling_ratio = 0.25\n[metrics]\nlisten = \"127.0.0.1:9464\"\n",
+            &[("TENKO_BACKUP__TARGET_DIR", "/mnt/backup/tenko")],
+        )
+        .expect("loads");
+        assert_eq!(
+            loaded.config.metrics.listen_addr().expect("valid"),
+            Some("127.0.0.1:9464".parse().expect("address"))
+        );
+        if cfg!(unix) {
+            let resolved = loaded.config.resolve().expect("valid");
+            assert_eq!(resolved.backup_dir(), Path::new("/mnt/backup/tenko"));
+        }
+
+        for (section, bad) in [
+            ("telemetry", "otlp_endpoint = \"collector:4317\""),
+            ("telemetry", "otlp_endpoint = \"http://\""),
+            ("telemetry", "sampling_ratio = 1.5"),
+            ("metrics", "listen = \"0.0.0.0:9464\""),
+            ("metrics", "listen = \"nowhere\""),
+            ("metrics", "gauge_interval_secs = 1"),
+            ("backup", "target_dir = \"relative/backups\""),
+            ("backup", "target_dir = \"\""),
+        ] {
+            let loaded =
+                from_text(&format!("data_dir = \"/d\"\n[{section}]\n{bad}\n"), &[]).expect("loads");
+            let error = loaded.config.resolve().expect_err(bad);
+            assert_eq!(error.code, "config.invalid", "{bad}");
+            assert!(error.message.starts_with(section), "{bad}: {error}");
         }
     }
 

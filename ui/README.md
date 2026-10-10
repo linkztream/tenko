@@ -28,7 +28,10 @@ Before a change is handed over: `npm run typecheck`, `npm run lint`, `npm run te
 
 ```
 ui/
-  i18n/                 en.xlf (English source) and sv.xlf (Swedish targets), XLIFF 2.0
+  i18n/                 en.xlf (English source) and sv.xlf (Swedish targets), XLIFF 2.0; fragments
+                        <lang>.d/<area>.xlf beside them: each package adds its keys only in its own
+                        fragment, and the lead folds the fragments into the main files at the end
+                        of the slice
   public/               favicon, theme-init.js, fonts/ (JetBrains Mono + OFL.txt), licenses/
   scripts/              i18n compiler, Vite i18n plugin, API type generator, size report,
                         the ESLint plugin with the project rules
@@ -44,7 +47,10 @@ ui/
                         cells, selection, keyboard focus, sources, drag and drop
     shell/              rail, top bar, status bar, command palette, keyboard chords, search
     auth/, setup/, settings/   sign-in, account, first-run wizard, settings (WP1.9); SettingsNav.tsx
-                        is the settings navigation (security, users, updates, secrets)
+                        is the settings navigation (security, users, updates, secrets, access, audit
+                        export, vault, backup, languages); the last five are sub-pages in folders of
+                        their own (settings/access/, audit-export/, vault/, backup/, languages/) with a
+                        route each in settings/routes.ts
     dashboard/          the start page (decision 13)
     ipam/               networks (tree and prefix pane), addresses, tenancy collections,
                         forms, plan dialogs, history, move preview, utilization alarms
@@ -71,6 +77,8 @@ ui/
                         schema (schema.ts, SchemaForm.tsx); api.ts is its only API module
     nodes/              cluster nodes and enrolment tokens (WP2.9): the node list with the docked
                         node panel, revocation, the token dialog; the requests are api/nodes.ts
+    cluster/, scans/    the cluster area on the rail and the scans of the discovery module, which has
+                        no rail entry (WP3.0 placeholders; WP3.11a builds them)
 ```
 
 Every area folder owns a `routes.ts` that exports `routes: AppRoute[]`; `src/app/router.ts`
@@ -87,14 +95,21 @@ component is loaded with `lazy()`, so every area is its own chunk. Build every l
   (an ESLint rule enforces it). Area-specific request modules (`src/api/moves.ts`,
   `src/import/api.ts`) wrap the client and keep the rest of an area free of wire details.
 - POST sends an `Idempotency-Key`; pass the same key when retrying one logical operation,
-  `idempotencyKey: null` to send none (uploads). PATCH and DELETE send `If-Match` with the
-  revision of the object being edited, or `ANY_REVISION` where none applies.
+  `idempotencyKey: null` to send none (uploads). Every write sends `If-Match` when `ifMatch` is
+  given (POST too, for an action on an existing object): the revision of the object being
+  edited, or `ANY_REVISION` where none applies.
+- A body is JSON, except a `FormData` (multipart) and a `Blob` or `File`, which are sent as they
+  are; a Blob travels with its own type as `Content-Type` (`application/octet-stream` when it
+  has none).
 - Errors arrive as `ApiError` with the stable problem code; show them with the translated
   `errors.<code>` message, never with the server's English `detail`.
 - Lists are cursor paginated: `fetchPage`, `fetchAll` in `src/api/paginate.ts`.
 - Live data: `createLiveQuery({ topics, relevant, fetch })` refetches when an event of its
   topics arrives (debounced) and after a stream reset. Grids use `createListSource` in
   `src/grid/source.ts`, which adds paging, sorting and the brief highlight of changed rows.
+  Read the value of a query with `query.latest()` (or `latest(resource)`), not with
+  `query.value.latest`: that getter throws the error of a failed read, the guard answers
+  `undefined` and leaves the error on `query.value.error`.
 - Address lists are read with `expand=host`, so host, mode and MAC arrive with each row;
   do not fetch per row.
 
@@ -144,6 +159,13 @@ other key stays in the core table that the first load carries.
 | `discovery` | `discovery.`, `errors.ipam.proposal.`, `errors.ipam.reconciler.` (also loaded by the host views) |
 | `connectors` | `connectors.`, `errors.connect.` |
 | `nodes` | `nodes.`, `errors.cluster.` |
+| `cluster` | `cluster.` (`cluster.job.` stays in `jobs`, which is listed first) |
+| `scans` | `scans.` |
+| `access` | `access.` (the settings sub-pages of Slice 3 load `settings` too, for the settings navigation) |
+| `audit_export` | `audit_export.` |
+| `vault` | `vault.` |
+| `backup` | `backup.` |
+| `languages` | `languages.` |
 
 The `jobs` pack also holds `connect.job.` and `cluster.job.`, the job titles the server sends
 for connector and node edits, and the `ipam` pack `errors.ipam.adoption.` for the adoption tab.
@@ -231,6 +253,9 @@ Page roots in this version:
 | `/jobs`, `/jobs/:id` | `page-jobs`, `page-job` |
 | `/audit`, `/audit/:seq` | `page-audit`, `page-audit-record` |
 | `/settings/secrets`, `/settings/secrets/:id` (`/secrets` and everything under it redirect here) | `page-secrets` |
+| `/settings/access`, `/settings/audit-export`, `/settings/vault`, `/settings/backup`, `/settings/languages` | `page-access`, `page-audit-export`, `page-vault`, `page-backup`, `page-languages` (placeholders with `<name>-placeholder`) |
+| `/cluster` | `page-cluster` (placeholder with `cluster-placeholder`) |
+| `/scans`, `/scans/:id` | `page-scans` (placeholder with `scans-placeholder`) |
 | `/discovery`, `/discovery/:id` | `page-discovery` (with `proposal-panel`) |
 | `/discovery/observations`, `/discovery/observations/:subject` | `page-discovery-observations`, `page-discovery-subject` |
 | `/connectors`, `/connectors/:id` | `page-connectors`, `page-connector` |
@@ -255,8 +280,8 @@ The hooks of the WP2.9 views beyond the generic ones:
 | Dashboard | `dashboard-proposals`, `dashboard-proposals-link`, `dashboard-proposals-hint` (`data-conflicts`), `dashboard-connectors`, `dashboard-connectors-link`, `dashboard-connectors-hint` (`data-total`, `data-failing`), `dashboard-nodes`, `dashboard-nodes-link`, `dashboard-nodes-hint` (`data-total`, `data-mismatched`). The hints are translated plural messages, so their numbers are data attributes; a tile that has not read its data (or the nodes tile without a cluster summary) leaves them off |
 | Host connect panel | `host-connect` with `remote-target` (`data-key` the address, or the host name), `host-rdp` and `host-ssh` (`data-key`), `field-user`, `field-rdp_port` and `field-ssh_port` |
 | Release notes (`Markdown` of `updates/markdown.tsx`, in `update-release`, `update-action` and the install confirmation) | `md-heading` (`data-level` the level of the element, 1 to 6), `md-paragraph`, `md-list` (`data-ordered` `true` or `false`), `md-item`, `md-strong`, `md-em`, `md-code` (inline code), `md-pre` (fenced code), `md-link`; text that stays text has none |
-| Settings navigation (the tabs of the settings pages and of the secrets page, which administrators see) | `settings-nav` with `settings-nav-link` (`data-key` `security`, `users`, `updates` or `secrets`) |
-| Security settings | `toggle` (`data-key` the toggle id, e.g. `TGL-24`) with `toggle-edit` and `toggle-reset` (only while the value deviates from the profile); `dialog-toggle` with `form-submit`, `form-cancel`, `toggle-pin-coupling` (the PIN coupling rule refuses the draft) and the editor's fields: `field-password_policy`, `field-mfa`, `field-breach_check`, `field-lockout`, `field-step_up-<session, fresh or passkey>`, `field-bound_host_only`; the profile dialog shows `profile-pin-coupling` |
+| Settings navigation (the tabs of the settings pages and of the secrets page, which administrators see) | `settings-nav` with `settings-nav-link` (`data-key` `security`, `users`, `updates`, `secrets`, `access`, `audit-export`, `vault`, `backup` or `languages`) |
+| Security settings | `toggle` (`data-key` the toggle id, e.g. `TGL-24`) with `toggle-edit` and `toggle-reset` (only while the value deviates from the profile); `dialog-toggle` with `form-submit`, `form-cancel`, `toggle-pin-coupling` (the PIN coupling rule refuses the draft) and the editor's fields: `field-password_policy`, `field-mfa`, `field-breach_check`, `field-lockout`, `field-audit_export-<local, optional or required>`, `field-step_up-<session, fresh or passkey>`, `field-bound_host_only`; the profile dialog shows `profile-pin-coupling` |
 
 A new view follows the same pattern: a page root id, `grid-<id>` for each grid, the generic
 row and cell hooks from `DataGrid`, and `<area>-<action>` for its actions.

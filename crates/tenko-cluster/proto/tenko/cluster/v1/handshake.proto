@@ -10,12 +10,24 @@
 //
 // Versioning (OPS-08): a node calls Handshake.Hello first, offering every major version it
 // implements; the controller answers with the highest major both implement, or refuses
-// with FAILED_PRECONDITION and the error code `cluster.protocol.unsupported`. This service
-// and its two messages are frozen: every later major keeps serving them unchanged, so two
-// nodes of different majors can always find out what they share.
+// with FAILED_PRECONDITION and the error code `cluster.protocol.unsupported`. The method
+// Hello and the fields it has today are frozen: every later major keeps serving them
+// unchanged, so two nodes of different majors can always find out what they share. Only
+// new fields are added, under new numbers, and a side that does not know one ignores it.
 //
 // Errors: a refused call carries the metadata entry `tenko-error-code` with a stable code
 // (`cluster.*`) and an English message.
+//
+// Services of this package and who may call them (each file names the package that fills
+// it in):
+//   Handshake     any enrolled node                                (this file)
+//   Node          any enrolled node                                (node.proto)
+//   Observations  a node with the role `probe`                     (observations.proto)
+//   Raft          a controller with a member record                (raft.proto)
+//   Cluster       a controller with a member record                (membership.proto)
+//   Config        a node record with the role the call needs       (config.proto)
+//   Commands      a node record with the role the call needs       (commands.proto)
+//   Metrics       a controller                                     (metrics.proto)
 //
 // Evolution: within major version 1 every change is additive. New fields take new numbers;
 // no field, enum value or method is removed, renamed or renumbered, and both sides ignore
@@ -43,6 +55,9 @@ message HelloRequest {
   string version = 2;
   // The roles the node runs: `probe`, `dns`, `dhcp`.
   repeated string roles = 3;
+  // Optional features the node supports within the agreed major, as short lower-case
+  // names. Empty today; a controller ignores names it does not know.
+  repeated string capabilities = 4;
 }
 
 message HelloResponse {
@@ -58,4 +73,11 @@ message HelloResponse {
   uint32 heartbeat_secs = 5;
   // The controller's clock.
   google.protobuf.Timestamp server_time = 6;
+  // Optional features the controller supports within the agreed major. Empty today; a
+  // node ignores names it does not know.
+  repeated string capabilities = 7;
+  // The current controller endpoints of the cluster port, each as `host:port`, so a node
+  // refreshes the list it dials. Empty until a controller cluster fills it; a node that
+  // gets an empty list keeps the endpoints it has.
+  repeated string endpoints = 8;
 }

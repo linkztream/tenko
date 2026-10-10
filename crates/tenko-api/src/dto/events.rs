@@ -12,7 +12,7 @@ use tenko_core::{AuditSeq, InvalidValue, ObjectRef, Revision};
 use utoipa::ToSchema;
 
 /// An event topic. `GET /events?topics=ipam,jobs` subscribes to a subset; no `topics`
-/// parameter subscribes to all of them.
+/// parameter subscribes to all of them except `metrics`, which a client names to receive it.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
 )]
@@ -37,13 +37,16 @@ pub enum Topic {
     Discovery,
     /// Operator secrets: metadata, reveals and host credential bindings (never values).
     Secrets,
-    /// Cluster nodes and enrolment tokens.
+    /// Cluster nodes, enrolment tokens and controller members.
     Cluster,
+    /// One metrics snapshot per second while a client listens (OPS-20); published by the
+    /// metrics collector, not from the store journal, and never replayed.
+    Metrics,
 }
 
 impl Topic {
     /// Every topic, in declaration order.
-    pub const ALL: [Topic; 10] = [
+    pub const ALL: [Topic; 11] = [
         Topic::Ipam,
         Topic::Jobs,
         Topic::Audit,
@@ -54,6 +57,7 @@ impl Topic {
         Topic::Discovery,
         Topic::Secrets,
         Topic::Cluster,
+        Topic::Metrics,
     ];
 
     /// The stable lower-case name, also the SSE `event` field.
@@ -69,6 +73,7 @@ impl Topic {
             Topic::Discovery => "discovery",
             Topic::Secrets => "secrets",
             Topic::Cluster => "cluster",
+            Topic::Metrics => "metrics",
         }
     }
 
@@ -101,12 +106,15 @@ pub struct TopicSet(u16);
 
 impl TopicSet {
     /// Every topic.
-    pub const ALL: TopicSet = TopicSet(0b11_1111_1111);
+    pub const ALL: TopicSet = TopicSet(0b111_1111_1111);
     /// No topic.
     pub const EMPTY: TopicSet = TopicSet(0);
+    /// The topics of a subscription that names none: every topic except `metrics`, whose
+    /// one-second snapshots only a client that asks for them receives.
+    pub const DEFAULT: TopicSet = TopicSet(Self::ALL.0 & !Topic::Metrics.bit());
 
     /// Parses a comma-separated list such as `ipam,jobs`; blanks around names are ignored
-    /// and an empty list means every topic.
+    /// and an empty list means [`TopicSet::DEFAULT`].
     ///
     /// # Errors
     ///
@@ -121,7 +129,7 @@ impl TopicSet {
             set.insert(name.parse()?);
         }
         Ok(if set == TopicSet::EMPTY {
-            TopicSet::ALL
+            TopicSet::DEFAULT
         } else {
             set
         })
@@ -244,7 +252,18 @@ mod tests {
 
     #[test]
     fn topic_sets() {
-        assert_eq!(TopicSet::parse("").expect("empty"), TopicSet::ALL);
+        assert_eq!(TopicSet::parse("").expect("empty"), TopicSet::DEFAULT);
+        assert!(!TopicSet::DEFAULT.contains(Topic::Metrics));
+        assert_eq!(
+            TopicSet::DEFAULT.topics().count(),
+            Topic::ALL.len() - 1,
+            "only metrics is left out"
+        );
+        assert!(
+            TopicSet::parse("metrics")
+                .expect("metrics")
+                .contains(Topic::Metrics)
+        );
         let set = TopicSet::parse(" ipam , jobs,").expect("set");
         assert!(set.contains(Topic::Ipam) && set.contains(Topic::Jobs));
         assert!(!set.contains(Topic::Audit));

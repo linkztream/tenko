@@ -476,7 +476,9 @@ fn operations_have_a_declared_tag_and_a_summary() {
         .flatten()
         .map(|tag| tag.name.as_str())
         .collect();
-    assert_eq!(tags.len(), 22, "one tag per area");
+    // 22 areas of Slices 1 and 2, nine Slice 3 areas (metrics split from system, and eight
+    // that start empty: cluster, access, audit_export, kek, backup, i18n, queue, scans).
+    assert_eq!(tags.len(), 31, "one tag per area");
     for (path, item) in &document.paths.paths {
         for (method, operation) in operations(item) {
             let operation_tags = operation.tags.as_deref().unwrap_or_default();

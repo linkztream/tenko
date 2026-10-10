@@ -81,7 +81,17 @@ describe("the secrets page under Settings", () => {
   it("is reached from the settings navigation, and leads back to the other settings pages", async () => {
     const app = await renderApp("/settings/security");
     const nav = await screen.findByTestId("settings-nav", {}, { timeout: 5000 });
-    expect(within(nav).getAllByTestId("settings-nav-link").map((a) => a.dataset.key)).toEqual(["security", "users", "updates", "secrets"]);
+    expect(within(nav).getAllByTestId("settings-nav-link").map((a) => a.dataset.key)).toEqual([
+      "security",
+      "users",
+      "updates",
+      "secrets",
+      "access",
+      "audit-export",
+      "vault",
+      "backup",
+      "languages",
+    ]);
     fireEvent.click(within(nav).getByRole("link", { name: "Secrets" }));
     await waitFor(() => expect(app.location()).toBe("/settings/secrets"));
     expect(await screen.findByTestId("page-secrets")).toBeTruthy();

@@ -1,6 +1,8 @@
-//! `tenko setup`, `tenko login` and `tenko logout`.
+//! `tenko setup`, `tenko setup token`, `tenko login` and `tenko logout`.
 
-use clap::Args;
+use std::{io::Write, path::PathBuf};
+
+use clap::{Args, Subcommand};
 use serde::Serialize;
 use tenko_auth::{
     service::{
@@ -14,17 +16,23 @@ use super::{
     ClientOpts, Credentials, Failure, Output, Raw, Secret, Target, load_credentials, read_line,
     read_secret, store_credentials,
 };
-use crate::exit;
+use crate::{config, exit, serve::setup_token};
 
-/// Arguments of `tenko setup`.
+/// Arguments of `tenko setup`. With the subcommand `token` the other options do not apply
+/// and are not required.
 #[derive(Debug, Clone, Args)]
+#[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
 pub struct SetupArgs {
+    /// What to do instead of completing setup.
+    #[command(subcommand)]
+    pub action: Option<SetupCommand>,
+
     /// Connection options.
     #[command(flatten)]
     pub client: ClientOpts,
 
-    /// The one-time setup token the server prints at start while setup is open. Asked for
-    /// when not given.
+    /// The one-time setup token of the server while setup is open; `tenko setup token`
+    /// prints it on the server. Asked for when not given.
     #[arg(
         long,
         value_name = "TOKEN",
@@ -34,8 +42,8 @@ pub struct SetupArgs {
     pub setup_token: Option<String>,
 
     /// Login name of the first administrator.
-    #[arg(long, value_name = "NAME")]
-    pub admin: String,
+    #[arg(long, value_name = "NAME", required = true)]
+    pub admin: Option<String>,
 
     /// Display name of the first administrator.
     #[arg(long, value_name = "TEXT")]
@@ -43,8 +51,8 @@ pub struct SetupArgs {
 
     /// The host name clients use: TLS subject and passkey relying-party ID; not an IP
     /// address.
-    #[arg(long, value_name = "HOST")]
-    pub host_name: String,
+    #[arg(long, value_name = "HOST", required = true)]
+    pub host_name: Option<String>,
 
     /// The security profile: home, standard, hardened or lab.
     #[arg(long, value_name = "PROFILE", default_value = "home", value_parser = parse_profile)]
@@ -58,6 +66,36 @@ pub struct SetupArgs {
     /// asking for it.
     #[arg(long)]
     pub password_stdin: bool,
+}
+
+/// Subcommands of `tenko setup`.
+#[derive(Debug, Clone, Subcommand)]
+pub enum SetupCommand {
+    /// Print the one-time setup token of this node (run it on the server, as the account
+    /// that runs `tenko serve`).
+    Token(SetupTokenArgs),
+}
+
+impl SetupCommand {
+    /// The command as typed on the command line.
+    pub fn name(&self) -> &'static str {
+        match self {
+            SetupCommand::Token(_) => "setup token",
+        }
+    }
+}
+
+/// Arguments of `tenko setup token`: they find the data directory like `tenko serve` does.
+#[derive(Debug, Clone, Args)]
+pub struct SetupTokenArgs {
+    /// The configuration file (`tenko.toml`), for its `data_dir`.
+    #[arg(long, value_name = "FILE", env = "TENKO_CONFIG")]
+    pub config: Option<PathBuf>,
+
+    /// The data directory of the server; overrides `data_dir` of the file and
+    /// `TENKO_DATA_DIR`.
+    #[arg(long, value_name = "PATH")]
+    pub data_dir: Option<PathBuf>,
 }
 
 fn parse_profile(text: &str) -> Result<Profile, String> {
@@ -109,25 +147,32 @@ pub struct LogoutArgs {
 ///
 /// The [`Failure`] of the first step that failed.
 pub async fn setup(args: &SetupArgs) -> Result<Output, Failure> {
+    // Clap requires both options unless the subcommand `token` is given.
+    let (Some(admin), Some(host_name)) = (&args.admin, &args.host_name) else {
+        return Err(Failure::new(
+            exit::USAGE,
+            "--admin and --host-name are required",
+        ));
+    };
     let target = Target::resolve(&args.client, false)?;
     let raw = target.raw()?;
     let token = match &args.setup_token {
         Some(token) => Secret::new(token.clone()),
-        None => read_secret("Setup token: ", false)?,
+        None => read_secret(
+            "Setup token (print it on the server with `tenko setup token`): ",
+            false,
+        )?,
     };
-    let password = read_secret(
-        &format!("Password for {}: ", args.admin),
-        args.password_stdin,
-    )?;
+    let password = read_secret(&format!("Password for {admin}: "), args.password_stdin)?;
     let request = SetupRequest {
         setup_token: token.to_dto(),
         profile: args.profile,
         admin: SetupAdmin {
-            name: args.admin.clone(),
+            name: admin.clone(),
             display_name: args.display_name.clone(),
             password: password.to_dto(),
         },
-        host_name: args.host_name.clone(),
+        host_name: host_name.clone(),
         language: args.language.clone(),
     };
     let response = raw.post_json("/setup", &request, None).await?;
@@ -145,12 +190,61 @@ pub async fn setup(args: &SetupArgs) -> Result<Output, Failure> {
         "setup complete: profile {}, administrator {}, host name {}\n",
         session.profile.as_str(),
         session.user.name,
-        args.host_name
+        host_name
     ))
     .note(format!(
         "sign in with: tenko login --url {} --user {}",
         target.url, session.user.name
     )))
+}
+
+/// `tenko setup token`: prints the setup token that the running server wrote to
+/// `<data_dir>/setup-token`: the token and a newline on standard output, nothing else.
+///
+/// The data directory is found like `tenko serve` finds it: `--data-dir`, else
+/// `TENKO_DATA_DIR`, else `data_dir` of the file named by `--config` or `TENKO_CONFIG`. The
+/// exit status is 0 when the token was printed, 3 when the configuration names no valid
+/// data directory, and 1 when there is no token to print (setup is complete or the server
+/// has not started yet) or the file cannot be read.
+pub fn token(args: &SetupTokenArgs, out: &mut impl Write, err: &mut impl Write) -> u8 {
+    let sources = config::Sources {
+        file: args.config.clone(),
+        data_dir: args.data_dir.clone(),
+        roles: None,
+    };
+    let resolved =
+        match config::load(&sources, std::env::vars()).and_then(|loaded| loaded.config.resolve()) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                let _ = writeln!(err, "tenko setup token: {error}");
+                return exit::CONFIG;
+            }
+        };
+    let path = resolved.layout().setup_token();
+    match setup_token::read(&path) {
+        Ok(Some(token)) => {
+            let _ = writeln!(out, "{token}");
+            exit::OK
+        }
+        Ok(None) => {
+            let _ = writeln!(
+                err,
+                "tenko setup token: there is no setup token in {}: first-run setup is complete, \
+                 or the server has not been started on this data directory yet",
+                path.display()
+            );
+            exit::FAILURE
+        }
+        Err(error) => {
+            let _ = writeln!(
+                err,
+                "tenko setup token: cannot read {}: {error}; run it as the account that runs \
+                 `tenko serve`",
+                path.display()
+            );
+            exit::FAILURE
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -347,5 +441,123 @@ pub async fn logout(args: &LogoutArgs) -> Result<Output, Failure> {
             ),
             ..failure
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser as _;
+
+    use super::*;
+    use crate::{Cli, Command};
+
+    fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
+        Cli::try_parse_from(std::iter::once("tenko").chain(args.iter().copied()))
+    }
+
+    fn setup_args(args: &[&str]) -> SetupArgs {
+        match parse(args).expect("valid arguments").command {
+            Command::Setup(args) => args,
+            other => panic!("not a setup command: {other:?}"),
+        }
+    }
+
+    fn run_token(args: &[&str]) -> (u8, String, String) {
+        let SetupArgs {
+            action: Some(SetupCommand::Token(args)),
+            ..
+        } = setup_args(args)
+        else {
+            panic!("not `setup token`");
+        };
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let status = token(&args, &mut out, &mut err);
+        (
+            status,
+            String::from_utf8(out).expect("UTF-8"),
+            String::from_utf8(err).expect("UTF-8"),
+        )
+    }
+
+    #[test]
+    fn setup_keeps_its_options_and_needs_the_administrator() {
+        let args = setup_args(&[
+            "setup",
+            "--url",
+            "https://ddi.example.org",
+            "--admin",
+            "alice",
+            "--host-name",
+            "ddi.example.org",
+            "--setup-token",
+            "X",
+        ]);
+        assert!(args.action.is_none());
+        assert_eq!(args.admin.as_deref(), Some("alice"));
+        assert_eq!(args.host_name.as_deref(), Some("ddi.example.org"));
+        assert!(parse(&["setup"]).is_err());
+        assert!(parse(&["setup", "--admin", "alice"]).is_err());
+        assert!(parse(&["setup", "--host-name", "h"]).is_err());
+    }
+
+    #[test]
+    fn the_token_subcommand_needs_none_of_the_setup_options() {
+        let args = setup_args(&["setup", "token", "--data-dir", "d"]);
+        let Some(SetupCommand::Token(token)) = args.action else {
+            panic!("not `setup token`");
+        };
+        assert_eq!(token.data_dir.as_deref(), Some(std::path::Path::new("d")));
+        assert!(token.config.is_none());
+        // The options of `tenko setup` do not mix with the subcommand.
+        assert!(parse(&["setup", "--admin", "alice", "token"]).is_err());
+        assert!(parse(&["setup", "--url", "https://x", "token"]).is_err());
+    }
+
+    #[test]
+    fn the_token_is_printed_alone_with_a_newline() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let data = dir.path().to_str().expect("UTF-8");
+        setup_token::write(&dir.path().join("setup-token"), "ABCDE-FGHIJ-KLMNO-PQRST")
+            .expect("write the token");
+        let (status, out, err) = run_token(&["setup", "token", "--data-dir", data]);
+        assert_eq!(status, exit::OK, "{err}");
+        assert_eq!(out, "ABCDE-FGHIJ-KLMNO-PQRST\n");
+        assert_eq!(err, "");
+    }
+
+    #[test]
+    fn the_data_directory_can_come_from_the_file() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let data = dir.path().join("data");
+        std::fs::create_dir(&data).expect("data directory");
+        setup_token::write(&data.join("setup-token"), "ABCDE-FGHIJ-KLMNO-PQRST")
+            .expect("write the token");
+        let file = dir.path().join("tenko.toml");
+        std::fs::write(&file, format!("data_dir = '{}'\n", data.display())).expect("config");
+        let (status, out, err) =
+            run_token(&["setup", "token", "--config", file.to_str().expect("UTF-8")]);
+        assert_eq!(status, exit::OK, "{err}");
+        assert_eq!(out, "ABCDE-FGHIJ-KLMNO-PQRST\n");
+    }
+
+    #[test]
+    fn without_a_file_the_status_is_1_and_the_message_says_why() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let data = dir.path().to_str().expect("UTF-8");
+        let (status, out, err) = run_token(&["setup", "token", "--data-dir", data]);
+        assert_eq!(status, exit::FAILURE);
+        assert_eq!(out, "");
+        assert!(
+            err.contains("first-run setup is complete") && err.contains("not been started"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_bad_configuration_is_status_3() {
+        let (status, out, err) = run_token(&["setup", "token", "--config", "does/not/exist.toml"]);
+        assert_eq!(status, exit::CONFIG);
+        assert_eq!(out, "");
+        assert!(err.contains("config.read"), "{err}");
     }
 }
