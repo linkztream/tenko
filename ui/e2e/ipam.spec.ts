@@ -19,9 +19,8 @@ import {
   planChange,
   prefixByCidr,
   rowMenuItem,
-  withIndex,
 } from "./support/ipam";
-import { cell, gridRow, withKey } from "./support/ui";
+import { cell, gridRow, withIndex, withKey } from "./support/ui";
 
 /** The hexadecimal digits of a MAC address, whatever its separators and case. */
 function macDigits(text: string): string {

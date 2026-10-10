@@ -3,6 +3,8 @@
 //
 // - `transport`: the option a spec sets with `test.use({ transport: "internal_ca" })`;
 //   `plain` (Lab profile, http://localhost) by default.
+// - `serverOptions`: the other options of the server (support/server.ts): a cluster port,
+//   a release source, the version layout, the profile; `transport` wins over its transport.
 // - `server`: the running server, set up by nobody yet; its log is attached to a failing
 //   test.
 // - `baseURL`: the server's origin, so `page.goto("/ipam")` works.
@@ -12,10 +14,11 @@
 
 import { test as base, expect } from "@playwright/test";
 import { Api, type SessionInfo } from "./api";
-import { TenkoServer, type Transport } from "./server";
+import { TenkoServer, type ServerOptions, type Transport } from "./server";
 
 export interface Options {
   transport: Transport;
+  serverOptions: ServerOptions;
 }
 
 export interface SignedIn {
@@ -30,9 +33,10 @@ export interface Fixtures {
 
 export const test = base.extend<Options & Fixtures>({
   transport: ["plain", { option: true }],
+  serverOptions: [{}, { option: true }],
 
-  server: async ({ transport }, use, testInfo) => {
-    const server = await TenkoServer.start({ transport });
+  server: async ({ transport, serverOptions }, use, testInfo) => {
+    const server = await TenkoServer.start({ ...serverOptions, transport });
     try {
       await use(server);
     } finally {

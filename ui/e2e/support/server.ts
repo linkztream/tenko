@@ -1,9 +1,9 @@
 // A real `tenko serve` for one test: its own temporary directory with a `tenko.toml`, the
 // data directory, a key file and a free loopback port. The server's standard output and
-// standard error are collected line by line, so a test can wait for the readiness line,
-// read the setup token the server prints on purpose, and attach the whole log when it
-// fails. Nothing of the person running the tests is read: `TENKO_*` variables, proxies and
-// log filters are removed from the environment of the child process.
+// standard error are collected line by line (support/process.ts), so a test can wait for the
+// readiness line, read the setup token the server prints on purpose, and attach the whole
+// log when it fails. Nothing of the person running the tests is read: `TENKO_*` variables,
+// proxies and log filters are removed from the environment of the child process.
 //
 // Transports:
 // - `plain`: the Lab profile with `tls.mode = "plain"` on http://localhost:<port>. Plain
@@ -13,25 +13,57 @@
 //   https://localhost:<port>. The browser does not trust that CA, so the Playwright
 //   configuration sets `ignoreHTTPSErrors`.
 //
+// Nothing leaves the machine and no fixed port is taken: the release source is never
+// contacted unless a test names its own (`updates.air_gapped`), and the cluster port is
+// closed unless a test asks for one (`cluster`), in which case it gets a free loopback port
+// of its own instead of the on-demand default 0.0.0.0:8444.
+//
+// `layout` runs the server the way a service manager does after `tenko upgrade layout`:
+// from `<data_dir>/updates/current` with `TENKO_SUPERVISED=1`, so an install from the UI is
+// possible; the test then plays the service manager and calls `restart()` when the server
+// exits with status 12. Debug builds started with `TENKO_TEST_VERSION_FROM_LAYOUT=1` take
+// their version from the layout directory they run from, so the same build installs as a
+// newer version.
+//
 // `TENKO_E2E_UI_DIR` serves the UI from a directory instead of the embedded build
 // (`server.ui_dir`, debug builds only): a shortcut while writing tests against a fresh
 // `vite build --outDir <dir>`. The acceptance run uses the embedded UI.
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { request } from "@playwright/test";
+import { Proc, runTenko, tenkoBinary, type Line } from "./process";
+
+export { resolveBuiltBinary, tenkoBinary } from "./process";
 
 export type Transport = "plain" | "internal_ca";
 export type Profile = "home" | "standard" | "hardened" | "lab";
+
+export interface UpdatesOptions {
+  /** `updates.source_url`, the manifest; plain `http` is accepted on the loopback only. */
+  sourceUrl?: string;
+  /** `updates.ready_timeout_secs`: how long a new version has to become ready (30 to 3600). */
+  readyTimeoutSecs?: number;
+}
 
 export interface ServerOptions {
   transport?: Transport;
   /** The bootstrap profile (`profile.name`); Lab for `plain`, Home for `internal_ca`. */
   profile?: Profile;
+  /**
+   * A cluster port of its own on the loopback (`[cluster] listen`) with one-second
+   * heartbeats, for enrolling a second process as a node. Enrolment pins the internal CA,
+   * so this goes with the `internal_ca` transport.
+   */
+  cluster?: boolean;
+  /** A release source of the test; without one the server is air-gapped. */
+  updates?: UpdatesOptions;
+  /** Run from the version layout as a supervised service (see the top of this file). */
+  layout?: boolean;
+  /** With `layout`: take the version from the layout directory (default true). */
+  versionFromLayout?: boolean;
 }
 
 /** How long a server may take to print its readiness line and answer the probe. */
@@ -39,40 +71,6 @@ const READY_TIMEOUT_MS = 60_000;
 /** How long a server may take to stop after its standard input closed. */
 const STOP_TIMEOUT_MS = 30_000;
 const READY_PATH = "/api/v1/health/ready";
-
-interface Line {
-  stream: "stdout" | "stderr";
-  text: string;
-}
-
-/** The binary the tests run: the copy the global setup made, else the build output. */
-export function tenkoBinary(): string {
-  const copy = process.env.TENKO_E2E_BIN;
-  if (copy && existsSync(copy)) return copy;
-  return resolveBuiltBinary();
-}
-
-/**
- * The debug build of `tenko`: `TENKO_BIN`, else `<CARGO_TARGET_DIR>/debug/tenko`, else
- * `<repository>/target/debug/tenko`. It must embed the real web UI (built without
- * `TENKO_UI_STUB`).
- */
-export function resolveBuiltBinary(): string {
-  const exe = process.platform === "win32" ? "tenko.exe" : "tenko";
-  const candidates = [
-    process.env.TENKO_BIN,
-    process.env.CARGO_TARGET_DIR ? join(process.env.CARGO_TARGET_DIR, "debug", exe) : undefined,
-    resolve(import.meta.dirname, "..", "..", "..", "target", "debug", exe),
-  ].filter((path): path is string => !!path);
-  const found = candidates.find((path) => existsSync(path));
-  if (!found) {
-    throw new Error(
-      `no tenko binary found (looked at ${candidates.join(", ")}); build it with the real UI: ` +
-        "cd ui && npm run build && cargo build -p tenko, or set TENKO_BIN",
-    );
-  }
-  return found;
-}
 
 /** A free TCP port on the loopback interface: bind port 0, read the port, release it. */
 export async function freePort(): Promise<number> {
@@ -86,39 +84,37 @@ export async function freePort(): Promise<number> {
   return port;
 }
 
-/** The environment of the child: nothing that could steer the server from outside the test. */
-function cleanEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [name, value] of Object.entries(process.env)) {
-    const upper = name.toUpperCase();
-    if (upper.startsWith("TENKO_")) continue;
-    if (["RUST_LOG", "NOTIFY_SOCKET", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"].includes(upper)) continue;
-    env[name] = value;
-  }
-  return env;
-}
-
 /** A TOML literal string for a path (no escaping of Windows backslashes). */
 function tomlPath(path: string): string {
   if (path.includes("'")) throw new Error(`${path} cannot be a TOML literal string`);
   return `'${path}'`;
 }
 
+/** A TOML basic string for a value without quotes, backslashes or control characters. */
+function tomlString(value: string): string {
+  if (/["\\]/.test(value) || [...value].some((char) => char.charCodeAt(0) < 0x20)) {
+    throw new Error(`${value} cannot be a plain TOML string`);
+  }
+  return `"${value}"`;
+}
+
+const EXE = process.platform === "win32" ? "tenko.exe" : "tenko";
+
 export class TenkoServer {
-  readonly lines: Line[] = [];
-  private waiters: Array<() => void> = [];
-  private exitCode: number | null | undefined = undefined;
-  private child!: ChildProcessWithoutNullStreams;
+  private readonly proc = new Proc();
   /** The setup token the server printed (empty once setup is complete). */
   setupToken = "";
   /** The SHA-256 fingerprint of the internal CA root, as printed at readiness. */
   caFingerprint = "";
+  /** The cluster port (`cluster` option), else 0. */
+  clusterPort = 0;
 
   private constructor(
     readonly root: string,
     public port: number,
     readonly transport: Transport,
     readonly profile: Profile,
+    readonly options: ServerOptions,
   ) {}
 
   /** Starts a server and waits until it is ready and has printed its setup token. */
@@ -126,27 +122,34 @@ export class TenkoServer {
     const transport = options.transport ?? "plain";
     const profile = options.profile ?? (transport === "plain" ? "lab" : "home");
     const root = await mkdtemp(join(tmpdir(), "tenko-e2e-"));
-    const server = new TenkoServer(root, await freePort(), transport, profile);
-    for (let attempt = 1; ; attempt += 1) {
-      await server.spawn();
-      const ready = await server.waitForLine((line) => line.stream === "stdout" && line.text.includes(" ready at "), READY_TIMEOUT_MS);
-      if (ready) break;
-      await server.waitForExit(STOP_TIMEOUT_MS);
-      const bindRace = server.output().includes("start.api.bind");
-      if (!bindRace || attempt >= 5) {
-        const output = server.output();
-        await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-        throw new Error(`tenko serve did not become ready\n${output}`);
+    const server = new TenkoServer(root, await freePort(), transport, profile, options);
+    try {
+      if (options.cluster) server.clusterPort = await freePort();
+      if (options.layout) await server.createLayout();
+      for (let attempt = 1; ; attempt += 1) {
+        const from = server.proc.mark();
+        await server.spawn();
+        const ready = await server.waitForLine((line) => line.stream === "stdout" && line.text.includes(" ready at "), READY_TIMEOUT_MS, from);
+        if (ready) break;
+        await server.proc.waitForExit(STOP_TIMEOUT_MS);
+        const failed = server.proc.lines.slice(from).map((line) => line.text).join("\n");
+        const bindRace = failed.includes("start.api.bind") || failed.includes("cluster.listen");
+        if (!bindRace || attempt >= 5) throw new Error(`tenko serve did not become ready\n${server.output()}`);
+        // Another process took a port between the probe and the bind: try other ones.
+        server.port = await freePort();
+        if (options.cluster) server.clusterPort = await freePort();
       }
-      // Another process took the port between the probe and the bind: try another one.
-      server.port = await freePort();
+      const token = await server.waitForLine((line) => line.stream === "stdout" && line.text.startsWith("Setup token: "), 10_000);
+      server.setupToken = token?.text.slice("Setup token: ".length).trim() ?? "";
+      const fingerprint = server.proc.lines.find((line) => line.text.trimStart().startsWith("SHA-256 fingerprint: "));
+      server.caFingerprint = fingerprint?.text.trim().slice("SHA-256 fingerprint: ".length) ?? "";
+      await server.waitForProbe();
+      return server;
+    } catch (error) {
+      await server.proc.stop(STOP_TIMEOUT_MS);
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      throw error;
     }
-    const token = await server.waitForLine((line) => line.stream === "stdout" && line.text.startsWith("Setup token: "), 10_000);
-    server.setupToken = token?.text.slice("Setup token: ".length).trim() ?? "";
-    const fingerprint = server.lines.find((line) => line.text.trimStart().startsWith("SHA-256 fingerprint: "));
-    server.caFingerprint = fingerprint?.text.trim().slice("SHA-256 fingerprint: ".length) ?? "";
-    await server.waitForProbe();
-    return server;
   }
 
   /** The origin the browser and the API helpers use. */
@@ -171,12 +174,24 @@ export class TenkoServer {
     return readFile(this.caRootPath, "utf8");
   }
 
+  /** Collected output lines of every run of this server, in order. */
+  get lines(): readonly Line[] {
+    return this.proc.lines;
+  }
+
   /** The configuration file of this server. */
   configText(): string {
     const tls =
       this.transport === "plain"
         ? ['mode = "plain"']
         : ['mode = "internal_ca"', 'host_name = "localhost"'];
+    const cluster = this.options.cluster ? [`listen = ["127.0.0.1:${this.clusterPort}"]`, "heartbeat_secs = 1"] : ["listen = []"];
+    const updates = this.options.updates?.sourceUrl
+      ? [
+          `source_url = ${tomlString(this.options.updates.sourceUrl)}`,
+          ...(this.options.updates.readyTimeoutSecs ? [`ready_timeout_secs = ${this.options.updates.readyTimeoutSecs}`] : []),
+        ]
+      : ["air_gapped = true"];
     return [
       `data_dir = ${tomlPath(this.dataDir)}`,
       'roles = "controller"',
@@ -204,92 +219,68 @@ export class TenkoServer {
       "[rate_limit]",
       "enabled = false",
       "",
+      "[cluster]",
+      ...cluster,
+      "",
+      "[updates]",
+      ...updates,
+      "",
       "[log]",
       'level = "info"',
       "",
     ].join("\n");
   }
 
+  /** `tenko upgrade layout`: copies the binary to `<data_dir>/updates/<version>/` and points `current` at it. */
+  private async createLayout(): Promise<void> {
+    const result = await runTenko(["upgrade", "layout", "--data-dir", this.dataDir], { cwd: this.root });
+    if (result.code !== 0) throw new Error(`tenko upgrade layout failed (${result.code})\n${result.stdout}\n${result.stderr}`);
+  }
+
+  /** The binary of the next start: the build, or what `current` points at in the layout. */
+  private get binary(): string {
+    return this.options.layout ? join(this.dataDir, "updates", "current", EXE) : tenkoBinary();
+  }
+
   private async spawn(): Promise<void> {
     await writeFile(this.configPath, this.configText());
-    this.exitCode = undefined;
-    const child = spawn(tenkoBinary(), ["serve", "--config", this.configPath, "--stop-on-eof"], {
-      cwd: this.root,
-      env: cleanEnv(),
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    this.child = child;
-    for (const stream of ["stdout", "stderr"] as const) {
-      let rest = "";
-      child[stream].setEncoding("utf8");
-      child[stream].on("data", (chunk: string) => {
-        rest += chunk;
-        let at = rest.indexOf("\n");
-        while (at >= 0) {
-          this.push({ stream, text: rest.slice(0, at).replace(/\r$/, "") });
-          rest = rest.slice(at + 1);
-          at = rest.indexOf("\n");
-        }
-      });
-      child[stream].on("end", () => {
-        if (rest) this.push({ stream, text: rest });
-        rest = "";
-      });
+    const env: Record<string, string> = {};
+    if (this.options.layout) {
+      env.TENKO_SUPERVISED = "1";
+      if (this.options.versionFromLayout !== false) env.TENKO_TEST_VERSION_FROM_LAYOUT = "1";
     }
-    child.on("exit", (code) => {
-      this.exitCode = code;
-      this.notify();
-    });
-    child.on("error", (error) => {
-      this.push({ stream: "stderr", text: `spawn failed: ${error.message}` });
-      this.exitCode = -1;
-      this.notify();
-    });
+    this.proc.start(this.binary, ["serve", "--config", this.configPath, "--stop-on-eof"], { cwd: this.root, env });
   }
 
-  private push(line: Line): void {
-    this.lines.push(line);
-    this.notify();
+  /**
+   * The first line from position `from` on that `wanted` accepts, waiting for it; null when
+   * the process ended or time is up.
+   */
+  waitForLine(wanted: (line: Line) => boolean, timeoutMs: number, from = 0): Promise<Line | null> {
+    return this.proc.waitForLine(wanted, timeoutMs, from);
   }
 
-  private notify(): void {
-    const waiters = this.waiters;
-    this.waiters = [];
-    for (const wake of waiters) wake();
+  /** Waits until the server process ended (an install exits with status 12); false when time is up. */
+  waitForExit(timeoutMs: number): Promise<boolean> {
+    return this.proc.waitForExit(timeoutMs);
   }
 
-  private changed(timeoutMs: number): Promise<void> {
-    return new Promise((done) => {
-      const timer = setTimeout(done, timeoutMs);
-      this.waiters.push(() => {
-        clearTimeout(timer);
-        done();
-      });
-    });
+  /** The exit status of the server process: undefined while it runs. */
+  get exitCode(): number | null | undefined {
+    return this.proc.code;
   }
 
-  /** The first line `wanted` accepts, waiting for it; null when the process ended or time is up. */
-  async waitForLine(wanted: (line: Line) => boolean, timeoutMs: number): Promise<Line | null> {
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      const line = this.lines.find(wanted);
-      if (line) return line;
-      if (this.exitCode !== undefined) return null;
-      const left = deadline - Date.now();
-      if (left <= 0) return null;
-      await this.changed(left);
-    }
-  }
-
-  private async waitForExit(timeoutMs: number): Promise<boolean> {
-    const deadline = Date.now() + timeoutMs;
-    while (this.exitCode === undefined) {
-      const left = deadline - Date.now();
-      if (left <= 0) return false;
-      await this.changed(left);
-    }
-    return true;
+  /**
+   * Starts the server again on the same directory and ports after it ended, as a service
+   * manager does, and waits until it is ready.
+   */
+  async restart(): Promise<void> {
+    if (this.proc.running) throw new Error("the server is still running");
+    const from = this.proc.mark();
+    await this.spawn();
+    const ready = await this.waitForLine((line) => line.stream === "stdout" && line.text.includes(" ready at "), READY_TIMEOUT_MS, from);
+    if (!ready) throw new Error(`tenko serve did not become ready after the restart\n${this.output()}`);
+    await this.waitForProbe();
   }
 
   private async waitForProbe(): Promise<void> {
@@ -298,7 +289,7 @@ export class TenkoServer {
       const deadline = Date.now() + READY_TIMEOUT_MS;
       let last = "";
       while (Date.now() < deadline) {
-        if (this.exitCode !== undefined) break;
+        if (!this.proc.running) break;
         try {
           const response = await context.get(READY_PATH, { timeout: 5_000 });
           if (response.status() === 200) return;
@@ -316,12 +307,12 @@ export class TenkoServer {
 
   /** Standard output and standard error so far, labelled per line. */
   output(): string {
-    return this.lines.map((line) => `${line.stream === "stdout" ? "out" : "err"} | ${line.text}`).join("\n");
+    return this.proc.output();
   }
 
   /** Whether the server is still running. */
   get running(): boolean {
-    return this.exitCode === undefined;
+    return this.proc.running;
   }
 
   /**
@@ -330,14 +321,8 @@ export class TenkoServer {
    * removes its directory. Returns the exit code.
    */
   async stop(): Promise<number | null> {
-    if (this.exitCode === undefined) {
-      this.child.stdin.end();
-      if (!(await this.waitForExit(STOP_TIMEOUT_MS))) {
-        this.child.kill();
-        await this.waitForExit(5_000);
-      }
-    }
+    const code = await this.proc.stop(STOP_TIMEOUT_MS);
     await rm(this.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-    return this.exitCode ?? null;
+    return code;
   }
 }

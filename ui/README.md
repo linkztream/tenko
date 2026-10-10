@@ -254,10 +254,13 @@ row and cell hooks from `DataGrid`, and `<area>-<action>` for its actions.
 
 ## End-to-end tests
 
-`ui/e2e/` holds the browser tests of the embedded UI against the real server (WP1.11): first-run
-wizard, sign-in with TOTP and passkeys, IPAM, import, move, audit and language. Every test
-starts its own `tenko serve` with a temporary data directory and a free port
-(`e2e/support/server.ts`), so tests are independent and run in parallel.
+`ui/e2e/` holds the browser tests of the embedded UI against the real server: first-run wizard,
+sign-in with TOTP and passkeys, IPAM, import, move, audit and language (WP1.11), and discovery,
+connectors, nodes, secrets and updates (WP2.11). Every test starts its own `tenko serve` with a
+temporary data directory and a free port (`e2e/support/server.ts`), so tests are independent and
+run in parallel; the Slice 2 specs also start a second `tenko` process as a probe node, a local
+release source and the bundled sample connector. `e2e/README.md` describes the specs, the
+support modules and the server options.
 
 - Build first: `npm run build`, then `cargo build -p tenko` without `TENKO_UI_STUB`. The binary
   is found through `TENKO_BIN`, `CARGO_TARGET_DIR/debug/tenko` or `../target/debug/tenko`; the

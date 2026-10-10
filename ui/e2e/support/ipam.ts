@@ -24,11 +24,6 @@ export async function confirmPlan(page: Page): Promise<void> {
   await expect(confirm).toHaveCount(0);
 }
 
-/** The repeated item `testid` that is number `index` (`data-index`, counted from 0). */
-export function withIndex(scope: Page | Locator, testid: string, index: number): Locator {
-  return scope.locator(`[data-testid="${testid}"][data-index="${index}"]`);
-}
-
 /** The changes of the previewed plan for one kind of object and one action (`data-kind`, `data-action`). */
 export function planChange(page: Page, kind: string, action: string): Locator {
   return page.locator(`[data-testid="plan-change"][data-kind="${kind}"][data-action="${action}"]`);

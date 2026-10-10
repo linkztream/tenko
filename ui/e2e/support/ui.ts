@@ -17,6 +17,11 @@ export function withId(scope: Scope, testid: string, id: string): Locator {
   return scope.locator(`[data-testid="${testid}"][data-id="${id}"]`);
 }
 
+/** The repeated item `testid` that is number `index` (`data-index`, counted from 0). */
+export function withIndex(scope: Scope, testid: string, index: number): Locator {
+  return scope.locator(`[data-testid="${testid}"][data-index="${index}"]`);
+}
+
 /** The cell of column `col` in a grid row. */
 export function cell(row: Locator, col: string): Locator {
   return row.locator(`[data-col="${col}"]`);
