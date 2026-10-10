@@ -242,6 +242,8 @@ impl Default for EventRoutes {
             )
             .namespace("cluster", Topic::Cluster)
             .namespace("scan", Topic::Discovery)
+            .table_prefix("vault.kek", Topic::System)
+            .table(TableName::from_static("vault.alarms"), Topic::System, None)
             .namespace("i18n", Topic::System)
             .namespace("backup", Topic::System)
             .table_prefix("sys.audit_export", Topic::System)
@@ -251,14 +253,39 @@ impl Default for EventRoutes {
     }
 }
 
-/// The authorization hook of the event stream: whether a subscriber may see an event.
+/// The authorization hook of the event stream: what a subscriber may see of an event.
 ///
-/// Called once per subscriber and event with the references the event carries; frames are
-/// shared, so a filter can drop an event but not edit it. The default admits everything;
-/// RBAC scopes (Slice 3) install a real filter with [`EventHub::set_filter`].
+/// Called once per subscriber and event with the references the event carries. Frames are
+/// shared, so a filter answers with an [`Admission`]: the whole event, nothing, or only some
+/// of its references, in which case the hub re-encodes the event for that subscriber. The
+/// default admits everything; RBAC scopes (Slice 3) install a real filter with
+/// [`EventHub::set_filter`].
 pub trait EventFilter: Send + Sync + 'static {
     /// Whether `principal` may receive an event of `topic` about `objects`.
     fn admit(&self, principal: &Principal, topic: Topic, objects: &[ObjectRef]) -> bool;
+
+    /// What of an event `principal` may see; by default all of it when [`EventFilter::admit`]
+    /// says so, else nothing. A scoped filter narrows the references instead.
+    fn select(&self, principal: &Principal, topic: Topic, objects: &[ObjectRef]) -> Admission {
+        if self.admit(principal, topic, objects) {
+            Admission::All
+        } else {
+            Admission::None
+        }
+    }
+}
+
+/// What a subscriber may see of one event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Admission {
+    /// The whole event.
+    All,
+    /// Nothing: the event is not sent to this subscriber.
+    None,
+    /// Only these of the event's object references (a subset of `objects` and `deleted`);
+    /// the hub re-encodes the event without the others for this subscriber and sends nothing
+    /// when none is left.
+    Only(Vec<ObjectRef>),
 }
 
 /// The filter that admits every event.

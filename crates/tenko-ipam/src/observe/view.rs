@@ -301,6 +301,21 @@ impl<'a> FactFilter<'a> {
 /// `ipam.invalid_filter` for an unknown sort field or subject type, `ipam.invalid_cursor`
 /// for a malformed cursor, store and decoding errors.
 pub fn list_facts(view: &dyn ReadView, query: &FactQuery, now: Timestamp) -> IpamResult<FactPage> {
+    list_facts_where(view, query, now, &|_| true)
+}
+
+/// [`list_facts`] with a further condition: only facts for which `keep` answers `true` count,
+/// so a scoped reader gets full pages with valid cursors (IAM-01).
+///
+/// # Errors
+///
+/// As [`list_facts`].
+pub fn list_facts_where(
+    view: &dyn ReadView,
+    query: &FactQuery,
+    now: Timestamp,
+    keep: &dyn Fn(&ObservedFact) -> bool,
+) -> IpamResult<FactPage> {
     let limit = limit_of(query.limit)?;
     let sorts = parse_sorts(&query.sort)?;
     let after = decode_cursor(query.cursor.as_deref())?;
@@ -310,9 +325,7 @@ pub fn list_facts(view: &dyn ReadView, query: &FactQuery, now: Timestamp) -> Ipa
         .into_iter()
         .filter_map(|(_, mut fact, revision)| {
             fact.revision = revision;
-            filter
-                .keeps(&fact)
-                .then(|| (composite_key(&fact, &sorts), fact))
+            (filter.keeps(&fact) && keep(&fact)).then(|| (composite_key(&fact, &sorts), fact))
         })
         .filter(|(key, _)| after.as_ref().is_none_or(|after| key > after))
         .collect();

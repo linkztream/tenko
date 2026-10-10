@@ -459,6 +459,20 @@ fn decode_cursor(cursor: Option<&str>) -> IpamResult<Option<Vec<u8>>> {
 ///
 /// `ipam.invalid_filter`, `ipam.invalid_cursor`, store and decoding errors.
 pub fn list<T: Listable>(view: &dyn ReadView, query: &ListQuery) -> IpamResult<Page<T>> {
+    list_where(view, query, &|_| true)
+}
+
+/// [`list`] with a further condition: only objects for which `keep` answers `true` count,
+/// so a scoped reader gets full pages with valid cursors (IAM-01).
+///
+/// # Errors
+///
+/// As [`list`].
+pub fn list_where<T: Listable>(
+    view: &dyn ReadView,
+    query: &ListQuery,
+    keep: &dyn Fn(&T) -> bool,
+) -> IpamResult<Page<T>> {
     let limit = limit_of(query.limit)?;
     let sorts = parse_sorts::<T>(&query.sort)?;
     let after = decode_cursor(query.cursor.as_deref())?;
@@ -486,7 +500,7 @@ pub fn list<T: Listable>(view: &dyn ReadView, query: &ListQuery) -> IpamResult<P
         .filter_map(|(_, mut object, revision)| {
             object.meta_mut().revision = revision;
             let deleted = object.meta().is_deleted();
-            let keep = match query.deleted {
+            let wanted = match query.deleted {
                 Deleted::Exclude => !deleted,
                 Deleted::Include => true,
                 Deleted::Only => deleted,
@@ -495,7 +509,7 @@ pub fn list<T: Listable>(view: &dyn ReadView, query: &ListQuery) -> IpamResult<P
                 && needle
                     .as_ref()
                     .is_none_or(|n| n.is_empty() || object.text().to_lowercase().contains(n));
-            keep.then(|| (composite_key(&object, &sorts), object))
+            (wanted && keep(&object)).then(|| (composite_key(&object, &sorts), object))
         })
         .filter(|(key, _)| after.as_ref().is_none_or(|after| key > after))
         .collect();
@@ -918,6 +932,22 @@ pub fn search(
     limit: Option<usize>,
     readable: impl Fn(ObjectKind) -> bool,
 ) -> IpamResult<Vec<SearchHit>> {
+    search_where(view, q, limit, |item| readable(item.object_ref().kind))
+}
+
+/// [`search`] with a condition on each hit instead of on its kind: only objects for which
+/// `keep` answers `true` count towards `limit`, so a scoped reader gets full result lists
+/// (IAM-01).
+///
+/// # Errors
+///
+/// Store and decoding errors.
+pub fn search_where(
+    view: &dyn ReadView,
+    q: &str,
+    limit: Option<usize>,
+    keep: impl Fn(&IpamObject) -> bool,
+) -> IpamResult<Vec<SearchHit>> {
     let limit = limit_of(limit)?;
     let q = q.trim();
     if q.is_empty() {
@@ -925,7 +955,7 @@ pub fn search(
     }
     let mut hits = Vec::new();
     let mut push = |item: IpamObject| {
-        if hits.len() < limit && readable(item.object_ref().kind) {
+        if hits.len() < limit && keep(&item) {
             hits.push(SearchHit {
                 object: item.object_ref(),
                 label: item.label(),

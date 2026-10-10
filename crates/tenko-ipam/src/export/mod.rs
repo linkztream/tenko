@@ -46,7 +46,7 @@ use std::{collections::HashMap, fmt, hash::Hash, sync::Arc};
 use bytes::Bytes;
 use csv::{QuoteStyle, Terminator, WriterBuilder};
 use tenko_core::{
-    HostId, InterfaceId, ObjectKind, SiteId, TableName, TenantId, VlanId, VrfId,
+    HostId, InterfaceId, ObjectKind, ObjectRef, SiteId, TableName, TenantId, VlanId, VrfId,
     codec::encode_key,
     ipam::{
         Address, AllocPolicy, AssignmentMode, FieldKey, Host, Interface, Meta, Prefix, PrefixRole,
@@ -172,6 +172,8 @@ pub struct CsvExport {
     header: Vec<String>,
     /// The custom fields with a column, sorted by key.
     custom: Vec<FieldKey>,
+    /// Objects for which this answers `false` are left out (scoped readers, IAM-01).
+    keep: Arc<dyn Fn(ObjectRef) -> bool + Send + Sync>,
     /// The last raw key of the uniqueness index that was exported.
     after: Option<Bytes>,
     /// Whether the first chunk (BOM and header) has been produced.
@@ -204,11 +206,34 @@ impl CsvExport {
         Self::with_chunk_rows(view, kind, Self::CHUNK_ROWS)
     }
 
+    /// Starts an export that leaves out every object for which `keep` answers `false`, so a
+    /// scoped reader exports only what it may read (IAM-01); the chunks stay bounded.
+    ///
+    /// # Errors
+    ///
+    /// As [`CsvExport::new`].
+    pub fn with_filter(
+        view: Arc<dyn ReadView>,
+        kind: ExportKind,
+        keep: Arc<dyn Fn(ObjectRef) -> bool + Send + Sync>,
+    ) -> IpamResult<Self> {
+        Self::build(view, kind, Self::CHUNK_ROWS, keep)
+    }
+
     /// Starts an export with `chunk_rows` rows per chunk (at least one).
     fn with_chunk_rows(
         view: Arc<dyn ReadView>,
         kind: ExportKind,
         chunk_rows: usize,
+    ) -> IpamResult<Self> {
+        Self::build(view, kind, chunk_rows, Arc::new(|_| true))
+    }
+
+    fn build(
+        view: Arc<dyn ReadView>,
+        kind: ExportKind,
+        chunk_rows: usize,
+        keep: Arc<dyn Fn(ObjectRef) -> bool + Send + Sync>,
     ) -> IpamResult<Self> {
         let applies = kind.object_kind();
         let mut custom: Vec<FieldKey> = view
@@ -232,6 +257,7 @@ impl CsvExport {
             chunk_rows: chunk_rows.max(1),
             header,
             custom,
+            keep,
             after: None,
             started: false,
             finished: false,
@@ -303,17 +329,27 @@ impl CsvExport {
     fn row(&self, lookups: &mut Lookups<'_>, indexed: &[u8]) -> IpamResult<Option<Vec<String>>> {
         match self.kind {
             ExportKind::Prefixes => {
-                let prefix =
-                    query::get::<Prefix>(self.view.as_ref(), PREFIX_CIDRS.decode(indexed)?)?;
+                let id = PREFIX_CIDRS.decode(indexed)?;
+                if !(self.keep)(ObjectRef::from(id)) {
+                    return Ok(None);
+                }
+                let prefix = query::get::<Prefix>(self.view.as_ref(), id)?;
                 self.prefix_row(lookups, &prefix)
             }
             ExportKind::Addresses => {
-                let address =
-                    query::get::<Address>(self.view.as_ref(), ADDRESS_IPS.decode(indexed)?)?;
+                let id = ADDRESS_IPS.decode(indexed)?;
+                if !(self.keep)(ObjectRef::from(id)) {
+                    return Ok(None);
+                }
+                let address = query::get::<Address>(self.view.as_ref(), id)?;
                 self.address_row(lookups, &address)
             }
             ExportKind::Hosts => {
-                let host = query::get::<Host>(self.view.as_ref(), HOST_NAMES.decode(indexed)?)?;
+                let id = HOST_NAMES.decode(indexed)?;
+                if !(self.keep)(ObjectRef::from(id)) {
+                    return Ok(None);
+                }
+                let host = query::get::<Host>(self.view.as_ref(), id)?;
                 self.host_row(lookups, &host)
             }
         }

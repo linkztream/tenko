@@ -24,7 +24,9 @@ use tokio::sync::{
 };
 use uuid::Uuid;
 
-use super::{AdmitAll, EventData, EventFilter, EventRoutes, ResetData, ResetReason, SseConfig};
+use super::{
+    Admission, AdmitAll, EventData, EventFilter, EventRoutes, ResetData, ResetReason, SseConfig,
+};
 use crate::dto::events::{Topic, TopicSet};
 
 const KEEPALIVE_FRAME: Bytes = Bytes::from_static(b": keep-alive\n\n");
@@ -38,6 +40,8 @@ pub(crate) struct Frame {
     topic: Topic,
     /// References the event carries, for the authorization filter.
     objects: Vec<ObjectRef>,
+    /// The event itself, re-encoded when a filter keeps only some of its references.
+    data: EventData,
     /// The complete SSE frame.
     bytes: Bytes,
 }
@@ -491,6 +495,7 @@ fn encode(revision: Option<Revision>, data: &EventData) -> Frame {
         revision,
         topic: data.topic,
         objects: data.objects.iter().chain(&data.deleted).copied().collect(),
+        data: data.clone(),
         bytes: bytes.freeze(),
     }
 }
@@ -526,17 +531,28 @@ struct Subscriber {
 }
 
 impl Subscriber {
-    fn admits(&self, frame: &Frame) -> bool {
-        self.topics.contains(frame.topic)
+    /// The bytes of `frame` this subscriber may see: the frame as it is, the frame re-encoded
+    /// with the references the filter keeps, or nothing.
+    fn render(&self, frame: &Frame) -> Option<Bytes> {
+        let fresh = self.topics.contains(frame.topic)
             && self
                 .skip_upto
-                .is_none_or(|skip| frame.revision.is_none_or(|revision| revision > skip))
-            && self
-                .hub
-                .inner
-                .filter
-                .load()
-                .admit(&self.principal, frame.topic, &frame.objects)
+                .is_none_or(|skip| frame.revision.is_none_or(|revision| revision > skip));
+        if !fresh {
+            return None;
+        }
+        let filter = self.hub.inner.filter.load();
+        match filter.select(&self.principal, frame.topic, &frame.objects) {
+            Admission::All => Some(frame.bytes.clone()),
+            Admission::None => None,
+            Admission::Only(kept) => {
+                let mut data = frame.data.clone();
+                data.objects.retain(|object| kept.contains(object));
+                data.deleted.retain(|object| kept.contains(object));
+                (!data.objects.is_empty() || !data.deleted.is_empty())
+                    .then(|| encode(frame.revision, &data).bytes)
+            }
+        }
     }
 
     async fn next_chunk(&mut self) -> Option<Bytes> {
@@ -549,14 +565,14 @@ impl Subscriber {
         loop {
             match self.rx.recv().await {
                 Ok(Msg::Frame(frame)) => {
-                    if self.admits(&frame) {
-                        return Some(frame.bytes.clone());
+                    if let Some(bytes) = self.render(&frame) {
+                        return Some(bytes);
                     }
                 }
                 Ok(Msg::Batch(frames)) => {
                     let mut chunk = BytesMut::new();
-                    for frame in frames.iter().filter(|frame| self.admits(frame)) {
-                        chunk.extend_from_slice(&frame.bytes);
+                    for bytes in frames.iter().filter_map(|frame| self.render(frame)) {
+                        chunk.extend_from_slice(&bytes);
                     }
                     if !chunk.is_empty() {
                         return Some(chunk.freeze());
@@ -623,8 +639,8 @@ pub(crate) async fn event_stream(
             Vec::new()
         }
     };
-    for frame in frames.iter().filter(|frame| subscriber.admits(frame)) {
-        first.extend_from_slice(&frame.bytes);
+    for bytes in frames.iter().filter_map(|frame| subscriber.render(frame)) {
+        first.extend_from_slice(&bytes);
     }
     subscriber.first = Some(first.freeze());
     stream::unfold(subscriber, |mut subscriber| async move {
@@ -871,6 +887,66 @@ mod tests {
         drop(stream);
         assert_eq!(hub.subscribers(), 0);
         assert!(hub.is_shutting_down());
+    }
+
+    /// A filter that keeps only the first reference of an `ipam` event, and only when it is
+    /// object 1.
+    struct FirstOnly;
+
+    impl EventFilter for FirstOnly {
+        fn admit(&self, _: &Principal, _: Topic, _: &[ObjectRef]) -> bool {
+            true
+        }
+
+        fn select(&self, _: &Principal, topic: Topic, objects: &[ObjectRef]) -> Admission {
+            match (topic, objects.first()) {
+                (Topic::Ipam, Some(first)) if first.id == id(1) => Admission::Only(vec![*first]),
+                (Topic::Ipam, _) => Admission::None,
+                _ => Admission::All,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_narrowing_filter_re_encodes_the_event_for_the_subscriber() {
+        let hub = hub(SseConfig::default());
+        hub.set_filter(Box::new(FirstOnly));
+        let store = tenko_store::MemStore::default();
+        let principal = Principal::system(SystemComponent::Api);
+        let ipam = TopicSet::parse("ipam").expect("topics");
+        let mut stream = Box::pin(event_stream(&hub, &store, None, ipam, principal).await);
+        stream.next().await.expect("hello").expect("ok");
+
+        hub.publish_change_set(&change_set(
+            21,
+            vec![
+                change(PREFIXES, encode_key(&id(1)), false),
+                change(PREFIXES, encode_key(&id(2)), true),
+            ],
+        ));
+        let chunk = stream.next().await.expect("event").expect("ok");
+        let text = String::from_utf8(chunk.to_vec()).expect("utf-8");
+        assert!(
+            text.starts_with(
+                "id: 21
+event: ipam
+"
+            ),
+            "{text}"
+        );
+        assert!(text.contains(&id(1).to_string()), "{text}");
+        assert!(
+            !text.contains(&id(2).to_string()),
+            "the reference outside the admission is dropped: {text}"
+        );
+
+        hub.publish_change_set(&prefix_change(22, 2));
+        hub.keepalive();
+        assert_eq!(
+            stream.next().await.expect("ka").expect("ok"),
+            KEEPALIVE_FRAME,
+            "an event with no reference left is not sent"
+        );
     }
 
     #[tokio::test]

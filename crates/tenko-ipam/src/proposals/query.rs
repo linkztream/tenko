@@ -201,6 +201,20 @@ fn about_prefix(proposal: &IntentProposal, prefix: &Prefix) -> bool {
 /// `ipam.invalid_filter` for an unknown sort field, `ipam.invalid_cursor`, `ipam.not_found`
 /// for an unknown prefix filter, store and decoding errors.
 pub fn list(view: &dyn ReadView, query: &ProposalQuery) -> IpamResult<ProposalPage> {
+    list_where(view, query, &|_| true)
+}
+
+/// [`list`] with a further condition: only proposals for which `keep` answers `true` count,
+/// so a scoped reader gets full pages with valid cursors (IAM-01).
+///
+/// # Errors
+///
+/// As [`list`].
+pub fn list_where(
+    view: &dyn ReadView,
+    query: &ProposalQuery,
+    keep: &dyn Fn(&IntentProposal) -> bool,
+) -> IpamResult<ProposalPage> {
     let limit = match query.limit {
         None => DEFAULT_LIMIT,
         Some(limit) if (1..=MAX_LIMIT).contains(&limit) => limit,
@@ -237,7 +251,7 @@ pub fn list(view: &dyn ReadView, query: &ProposalQuery) -> IpamResult<ProposalPa
         .into_iter()
         .filter_map(|(_, mut proposal, revision)| {
             proposal.revision = revision;
-            let keep = (query.kinds.is_empty() || query.kinds.contains(&proposal.kind))
+            let wanted = (query.kinds.is_empty() || query.kinds.contains(&proposal.kind))
                 && (query.states.is_empty() || query.states.contains(&proposal.state))
                 && (query.severities.is_empty() || query.severities.contains(&proposal.severity))
                 && prefix
@@ -246,7 +260,7 @@ pub fn list(view: &dyn ReadView, query: &ProposalQuery) -> IpamResult<ProposalPa
                 && subject
                     .as_ref()
                     .is_none_or(|subject| subject.matches(&proposal));
-            keep.then(|| (sort_key(&proposal, &sorts), proposal))
+            (wanted && keep(&proposal)).then(|| (sort_key(&proposal, &sorts), proposal))
         })
         .filter(|(key, _)| after.as_ref().is_none_or(|after| key > after))
         .collect();
