@@ -2885,6 +2885,7 @@ dependencies = [
  "tenko-connect",
  "tenko-connect-hass",
  "tenko-connect-proxmox",
+ "tenko-connect-unifi",
  "tenko-core",
  "tenko-ipam",
  "tenko-jobs",
@@ -3076,6 +3077,20 @@ dependencies = [
 [[package]]
 name = "tenko-connect-unifi"
 version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "axum",
+ "ipnet",
+ "rcgen",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tenko-connect",
+ "tenko-core",
+ "tokio",
+ "tokio-rustls",
+ "zeroize",
+]
 
 [[package]]
 name = "tenko-connect-windows"

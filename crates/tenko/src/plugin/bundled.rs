@@ -41,6 +41,11 @@ pub const BUNDLED: &[Entry] = &[
         manifest: tenko_connect_hass::manifest,
         run: tenko_connect_hass::run_status,
     },
+    Entry {
+        name: tenko_connect_unifi::NAME,
+        manifest: tenko_connect_unifi::manifest,
+        run: tenko_connect_unifi::run_status,
+    },
 ];
 
 fn run_sample() -> u8 {

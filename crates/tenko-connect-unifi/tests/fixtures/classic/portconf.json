@@ -1,0 +1,69 @@
+{
+  "meta": {
+    "rc": "ok"
+  },
+  "data": [
+    {
+      "_id": "5f2000000000000000000001",
+      "site_id": "5f0000000000000000000001",
+      "name": "All",
+      "forward": "all",
+      "attr_hidden_id": "All",
+      "attr_no_delete": true,
+      "poe_mode": "auto",
+      "isolation": false,
+      "stp_port_mode": true,
+      "op_mode": "switch"
+    },
+    {
+      "_id": "5f2000000000000000000002",
+      "site_id": "5f0000000000000000000001",
+      "name": "Disabled",
+      "forward": "disabled",
+      "poe_mode": "off",
+      "isolation": false,
+      "stp_port_mode": true,
+      "op_mode": "switch"
+    },
+    {
+      "_id": "5f2000000000000000000003",
+      "site_id": "5f0000000000000000000001",
+      "name": "IoT",
+      "forward": "native",
+      "native_networkconf_id": "5f1000000000000000000002",
+      "poe_mode": "auto",
+      "isolation": false,
+      "stp_port_mode": true,
+      "op_mode": "switch"
+    },
+    {
+      "_id": "5f2000000000000000000004",
+      "site_id": "5f0000000000000000000001",
+      "name": "Trunk",
+      "forward": "customize",
+      "native_networkconf_id": "5f1000000000000000000001",
+      "tagged_networkconf_ids": [
+        "5f1000000000000000000002",
+        "5f1000000000000000000003"
+      ],
+      "poe_mode": "off",
+      "isolation": false,
+      "stp_port_mode": true,
+      "op_mode": "switch"
+    },
+    {
+      "_id": "5f2000000000000000000005",
+      "site_id": "5f0000000000000000000001",
+      "name": "Old custom",
+      "forward": "customize",
+      "native_networkconf_id": "5f1000000000000000000001",
+      "excluded_networkconf_ids": [
+        "5f1000000000000000000003"
+      ],
+      "poe_mode": "off",
+      "isolation": false,
+      "stp_port_mode": true,
+      "op_mode": "switch"
+    }
+  ]
+}

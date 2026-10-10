@@ -1,0 +1,67 @@
+{
+  "meta": {
+    "rc": "ok"
+  },
+  "data": [
+    {
+      "_id": "5f3000000000000000000001",
+      "site_id": "5f0000000000000000000001",
+      "name": "home.example",
+      "enabled": true,
+      "security": "wpapsk",
+      "wpa_mode": "wpa2",
+      "wpa_enc": "ccmp",
+      "networkconf_id": "5f1000000000000000000001",
+      "usergroup_id": "5f6000000000000000000001",
+      "hide_ssid": false,
+      "is_guest": false
+    },
+    {
+      "_id": "5f3000000000000000000002",
+      "site_id": "5f0000000000000000000001",
+      "name": "iot.example",
+      "enabled": true,
+      "security": "wpapsk",
+      "wpa_mode": "wpa2",
+      "wpa_enc": "ccmp",
+      "networkconf_id": "5f1000000000000000000002",
+      "usergroup_id": "5f6000000000000000000001",
+      "hide_ssid": true,
+      "is_guest": false
+    },
+    {
+      "_id": "5f3000000000000000000003",
+      "site_id": "5f0000000000000000000001",
+      "name": "guest.example",
+      "enabled": true,
+      "security": "open",
+      "networkconf_id": "5f1000000000000000000003",
+      "usergroup_id": "5f6000000000000000000001",
+      "hide_ssid": false,
+      "is_guest": true
+    },
+    {
+      "_id": "5f3000000000000000000004",
+      "site_id": "5f0000000000000000000001",
+      "name": "legacy.example",
+      "enabled": true,
+      "security": "wpapsk",
+      "wpa_mode": "wpa2",
+      "usergroup_id": "5f6000000000000000000001",
+      "vlan_enabled": true,
+      "vlan": 30,
+      "is_guest": false
+    },
+    {
+      "_id": "5f3000000000000000000005",
+      "site_id": "5f0000000000000000000001",
+      "name": "off.example",
+      "enabled": false,
+      "security": "wpapsk",
+      "wpa_mode": "wpa2",
+      "networkconf_id": "5f1000000000000000000001",
+      "usergroup_id": "5f6000000000000000000001",
+      "is_guest": false
+    }
+  ]
+}

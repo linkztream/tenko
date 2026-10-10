@@ -68,7 +68,7 @@ Read before changing anything substantial:
 | `tenko-jobs`            | Job engine: steps, state, timeouts, rollback                         |
 | `tenko-connect`         | Connector plugin SDK: protocol, host runner, helper library, manifest, conformance test |
 | `tenko-connect-proxmox` | Proxmox VE connector (inventory, bundled plugin)                    |
-| `tenko-connect-unifi`   | UniFi connector (stub)                                               |
+| `tenko-connect-unifi`   | UniFi connector (network controller and inventory, bundled plugin)  |
 | `tenko-connect-hass`    | Home Assistant connector (inventory, bundled plugin)                |
 | `tenko-connect-windows` | Windows DNS/DHCP Server connector (stub)                             |
 | `tenko-migrate`         | Plan/apply/verify migration pipeline over connectors                 |

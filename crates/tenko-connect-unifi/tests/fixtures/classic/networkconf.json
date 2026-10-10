@@ -1,0 +1,92 @@
+{
+  "meta": {
+    "rc": "ok"
+  },
+  "data": [
+    {
+      "_id": "5f1000000000000000000001",
+      "site_id": "5f0000000000000000000001",
+      "name": "Default",
+      "purpose": "corporate",
+      "networkgroup": "LAN",
+      "enabled": true,
+      "vlan_enabled": false,
+      "ip_subnet": "192.0.2.1/24",
+      "dhcpd_enabled": true,
+      "dhcpd_start": "192.0.2.100",
+      "dhcpd_stop": "192.0.2.199",
+      "dhcpd_leasetime": 86400,
+      "domain_name": "example.test",
+      "igmp_snooping": false,
+      "attr_no_delete": true,
+      "attr_hidden_id": "LAN"
+    },
+    {
+      "_id": "5f1000000000000000000002",
+      "site_id": "5f0000000000000000000001",
+      "name": "IoT",
+      "purpose": "corporate",
+      "networkgroup": "LAN",
+      "enabled": true,
+      "vlan_enabled": true,
+      "vlan": "30",
+      "ip_subnet": "198.51.100.1/24",
+      "dhcpd_enabled": true,
+      "dhcpd_start": "198.51.100.100",
+      "dhcpd_stop": "198.51.100.199",
+      "dhcpd_leasetime": 86400,
+      "domain_name": "iot.example.test",
+      "igmp_snooping": false
+    },
+    {
+      "_id": "5f1000000000000000000003",
+      "site_id": "5f0000000000000000000001",
+      "name": "Guest",
+      "purpose": "guest",
+      "networkgroup": "LAN",
+      "enabled": true,
+      "vlan_enabled": true,
+      "vlan": 40,
+      "ip_subnet": "203.0.113.1/25",
+      "dhcpd_enabled": true,
+      "dhcpd_start": "203.0.113.20",
+      "dhcpd_stop": "203.0.113.120",
+      "dhcpd_leasetime": 43200,
+      "igmp_snooping": false
+    },
+    {
+      "_id": "5f1000000000000000000004",
+      "site_id": "5f0000000000000000000001",
+      "name": "Lab",
+      "purpose": "vlan-only",
+      "networkgroup": "LAN",
+      "enabled": true,
+      "vlan_enabled": true,
+      "vlan": 50
+    },
+    {
+      "_id": "5f1000000000000000000005",
+      "site_id": "5f0000000000000000000001",
+      "name": "Relay",
+      "purpose": "corporate",
+      "networkgroup": "LAN",
+      "enabled": true,
+      "vlan_enabled": true,
+      "vlan": 60,
+      "ip_subnet": "203.0.113.129/25",
+      "dhcpd_enabled": false,
+      "dhcp_relay_enabled": true,
+      "igmp_snooping": false
+    },
+    {
+      "_id": "5f1000000000000000000006",
+      "site_id": "5f0000000000000000000001",
+      "name": "Internet",
+      "purpose": "wan",
+      "wan_networkgroup": "WAN",
+      "wan_type": "dhcp",
+      "wan_load_balance_type": "failover-only",
+      "enabled": true
+    }
+  ]
+}

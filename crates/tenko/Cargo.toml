@@ -39,6 +39,7 @@ tenko-cluster = { workspace = true }
 tenko-connect = { workspace = true }
 tenko-connect-hass = { workspace = true }
 tenko-connect-proxmox = { workspace = true }
+tenko-connect-unifi = { workspace = true }
 tenko-core = { workspace = true }
 tenko-ipam = { workspace = true }
 tenko-jobs = { workspace = true }

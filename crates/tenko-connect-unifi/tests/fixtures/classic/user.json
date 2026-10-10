@@ -1,0 +1,121 @@
+{
+  "meta": {
+    "rc": "ok"
+  },
+  "data": [
+    {
+      "_id": "5f5000000000000000000001",
+      "site_id": "5f0000000000000000000001",
+      "mac": "00:00:5e:00:53:40",
+      "is_wired": true,
+      "is_guest": false,
+      "hostname": "printer",
+      "name": "printer.example.test",
+      "first_seen": 1700000000,
+      "last_seen": 1760000000,
+      "use_fixedip": false,
+      "noted": false,
+      "virtual_network_override_enabled": false,
+      "virtual_network_override_id": ""
+    },
+    {
+      "_id": "5f5000000000000000000002",
+      "site_id": "5f0000000000000000000001",
+      "mac": "00:00:5e:00:53:80",
+      "is_wired": true,
+      "is_guest": false,
+      "hostname": "nas",
+      "first_seen": 1700000000,
+      "last_seen": 1760000000,
+      "use_fixedip": false,
+      "noted": false,
+      "virtual_network_override_enabled": false,
+      "virtual_network_override_id": ""
+    },
+    {
+      "_id": "5f5000000000000000000003",
+      "site_id": "5f0000000000000000000001",
+      "mac": "00:00:5e:00:53:41",
+      "is_wired": true,
+      "is_guest": false,
+      "hostname": "controller",
+      "first_seen": 1700000000,
+      "last_seen": 1760000000,
+      "use_fixedip": false,
+      "noted": false,
+      "virtual_network_override_enabled": false,
+      "virtual_network_override_id": ""
+    },
+    {
+      "_id": "5f5000000000000000000004",
+      "site_id": "5f0000000000000000000001",
+      "mac": "00:00:5e:00:53:42",
+      "is_wired": false,
+      "is_guest": false,
+      "hostname": "phone",
+      "name": "phone.example.test",
+      "first_seen": 1700000000,
+      "last_seen": 1760000000,
+      "use_fixedip": false,
+      "noted": false,
+      "virtual_network_override_enabled": true,
+      "virtual_network_override_id": "5f1000000000000000000002"
+    },
+    {
+      "_id": "5f5000000000000000000005",
+      "site_id": "5f0000000000000000000001",
+      "mac": "00:00:5e:00:53:43",
+      "is_wired": false,
+      "is_guest": false,
+      "hostname": "sensor",
+      "first_seen": 1700000000,
+      "last_seen": 1760000000,
+      "use_fixedip": false,
+      "noted": false,
+      "virtual_network_override_enabled": false,
+      "virtual_network_override_id": ""
+    },
+    {
+      "_id": "5f5000000000000000000006",
+      "site_id": "5f0000000000000000000001",
+      "mac": "00:00:5e:00:53:44",
+      "is_wired": false,
+      "is_guest": true,
+      "hostname": "laptop",
+      "first_seen": 1700000000,
+      "last_seen": 1760000000,
+      "use_fixedip": false,
+      "noted": false,
+      "virtual_network_override_enabled": false,
+      "virtual_network_override_id": ""
+    },
+    {
+      "_id": "5f5000000000000000000007",
+      "site_id": "5f0000000000000000000001",
+      "mac": "00:00:5e:00:53:45",
+      "is_wired": true,
+      "is_guest": false,
+      "hostname": "idle",
+      "first_seen": 1700000000,
+      "last_seen": 1760000000,
+      "use_fixedip": false,
+      "noted": false,
+      "virtual_network_override_enabled": false,
+      "virtual_network_override_id": ""
+    },
+    {
+      "_id": "5f5000000000000000000008",
+      "site_id": "5f0000000000000000000001",
+      "mac": "00:00:5e:00:53:46",
+      "is_wired": false,
+      "is_guest": false,
+      "hostname": "tablet",
+      "first_seen": 1700000000,
+      "last_seen": 1750000000,
+      "use_fixedip": false,
+      "noted": false,
+      "virtual_network_override_enabled": false,
+      "virtual_network_override_id": ""
+    }
+  ]
+}

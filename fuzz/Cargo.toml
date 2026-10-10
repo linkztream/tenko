@@ -16,6 +16,7 @@ libfuzzer-sys = "0.4"
 serde_json = "1"
 tenko-connect-hass = { path = "../crates/tenko-connect-hass" }
 tenko-connect-proxmox = { path = "../crates/tenko-connect-proxmox" }
+tenko-connect-unifi = { path = "../crates/tenko-connect-unifi" }
 tenko-core = { path = "../crates/tenko-core" }
 tenko-scan = { path = "../crates/tenko-scan" }
 
@@ -57,6 +58,13 @@ bench = false
 [[bin]]
 name = "connect_hass_inventory"
 path = "fuzz_targets/connect_hass_inventory.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "connect_unifi_answers"
+path = "fuzz_targets/connect_unifi_answers.rs"
 test = false
 doc = false
 bench = false
