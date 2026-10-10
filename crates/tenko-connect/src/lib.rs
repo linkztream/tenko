@@ -127,6 +127,7 @@ impl HealthReport {
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
 )]
 #[serde(rename_all = "snake_case")]
+#[schema(as = RemoteHealth)]
 pub enum Health {
     /// Reachable, authenticated, working.
     Healthy,
