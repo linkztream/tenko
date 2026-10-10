@@ -21109,6 +21109,15 @@
               }
             ]
           },
+          "controller": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The controller the node is connected to; heartbeat figures are known only to that\ncontroller.",
+            "minimum": 0
+          },
           "dropped_batches": {
             "type": "integer",
             "format": "int64",
@@ -28520,7 +28529,7 @@
           },
           "connected": {
             "type": "boolean",
-            "description": "Whether the node is connected to this controller now."
+            "description": "Whether the node is connected to a controller of the cluster now (this one or\nanother; `connection.controller` names it)."
           },
           "connection": {
             "oneOf": [
@@ -30451,7 +30460,7 @@
                 },
                 "connected": {
                   "type": "boolean",
-                  "description": "Whether the node is connected to this controller now."
+                  "description": "Whether the node is connected to a controller of the cluster now (this one or\nanother; `connection.controller` names it)."
                 },
                 "connection": {
                   "oneOf": [

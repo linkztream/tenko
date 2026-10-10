@@ -1,10 +1,10 @@
 # Cluster: nodes, enrolment and the node transport
 
-This page describes how Tenko DDI connects its data-plane nodes to its controllers: how an administrator enrols a node with a single-use token, which certificates the internal CA issues and how they renew, how a node is revoked, the gRPC protocol the two sides speak and how its version is negotiated, how heartbeats show the health of a node, how the observations of a probe travel through a disk buffer that survives outages, and which ports and settings an installation needs. It is for an administrator who adds a probe to a site and for a developer who works on the transport. It describes the behaviour of the `tenko-cluster` crate, of `tenko node` and the node process of `tenko serve` in the `tenko` crate, and of the `/nodes` routes in `tenko-api`; where this page and the code differ, the code is right. The requirements are OPS-04, OPS-08 and OPS-28 in [REQUIREMENTS.md](REQUIREMENTS.md). The messages are defined in the `.proto` files in [`crates/tenko-cluster/proto/tenko/cluster/v1/`](../crates/tenko-cluster/proto/tenko/cluster/v1/), package `tenko.cluster.v1`; their comments are part of the contract.
+This page describes how Tenko DDI connects its data-plane nodes to its controllers: how an administrator enrols a node with a single-use token, which certificates the internal CA issues and how they renew, how a node is revoked, the gRPC protocol the two sides speak and how its version is negotiated, how heartbeats show the health of a node, how the observations of a probe travel through a disk buffer that survives outages, and which ports and settings an installation needs. It also describes how several controllers form one cluster that replicates the store. It is for an administrator who adds a probe to a site or a controller to an installation, and for a developer who works on the transport. It describes the behaviour of the `tenko-cluster` crate, of `tenko node`, `tenko cluster` and the node process of `tenko serve` in the `tenko` crate, of the Raft store in `tenko-store`, and of the `/nodes` and `/cluster` routes in `tenko-api`; where this page and the code differ, the code is right. The requirements are OPS-03, OPS-04, OPS-08 and OPS-28 in [REQUIREMENTS.md](REQUIREMENTS.md). The messages are defined in the `.proto` files in [`crates/tenko-cluster/proto/tenko/cluster/v1/`](../crates/tenko-cluster/proto/tenko/cluster/v1/), package `tenko.cluster.v1`; their comments are part of the contract.
 
-Controllers run the API, the web UI and the store. Data-plane nodes run `probe` today and `dns` and `dhcp` later. Controllers and nodes talk gRPC over mutual TLS on the cluster port (OPS-04), with certificates from the internal CA of the installation. The mechanism is the same for native, Docker and LXC installations. mTLS is structural: no security profile turns it off, and the transport speaks TLS 1.3 only. Nodes negotiate the protocol version with the controller (OPS-08) and keep working across controller outages (OPS-28): a probe keeps its observations on disk and sends them when a controller is back. This slice (Slice 2, WP2.2) carries node to controller traffic only: the handshake, heartbeats, certificate renewal and probe observations. Section 12 lists what comes next.
+Controllers run the API, the web UI and the store. Data-plane nodes run `probe` today and `dns` and `dhcp` later. Controllers and nodes talk gRPC over mutual TLS on the cluster port (OPS-04), with certificates from the internal CA of the installation. The mechanism is the same for native, Docker and LXC installations. mTLS is structural: no security profile turns it off, and the transport speaks TLS 1.3 only. Nodes negotiate the protocol version with the controller (OPS-08) and keep working across controller outages (OPS-28): a probe keeps its observations on disk and sends them when a controller is back. Slice 2 (WP2.2) brought the traffic from nodes to controllers: the handshake, heartbeats, certificate renewal and probe observations. Slice 3 (WP3.1a) adds the traffic between controllers on the same port: Raft, joining, forwarded writes and the transfer of the key encryption keys (section 12). Section 13 lists what comes next.
 
-Terms used below: a **controller** is an installation that runs the `controller` role. A **node** is an enrolled data-plane installation with the roles `probe`, `dns` or `dhcp`. The **cluster port** is the TCP port on which controllers accept nodes (8444 by default). The **internal CA** is the certificate authority of the installation; its key lives in the vault of the controllers. An **enrolment token** is a single-use, time-limited secret that lets one node obtain its first certificate.
+Terms used below: a **controller** is an installation that runs the `controller` role. A **node** is an enrolled data-plane installation with the roles `probe`, `dns` or `dhcp`. The **cluster port** is the TCP port on which controllers accept nodes and each other (8444 by default). The **internal CA** is the certificate authority of the installation; its key lives in the vault of the controllers. An **enrolment token** is a single-use, time-limited secret that lets one node obtain its first certificate.
 
 Contents:
 
@@ -19,7 +19,8 @@ Contents:
 9. [API](#9-api)
 10. [Audit actions](#10-audit-actions)
 11. [Error codes](#11-error-codes)
-12. [What comes next](#12-what-comes-next)
+12. [The controller cluster](#12-the-controller-cluster)
+13. [What comes next](#13-what-comes-next)
 
 ## 1. Enrolment
 
@@ -41,10 +42,10 @@ Every field is optional. The command line flags are `--roles` (comma-separated),
 
 | Field | Meaning | Default |
 |---|---|---|
-| `roles` | The roles the node may take: `probe`, `dns`, `dhcp`. A token for `controller` is refused with 422 `cluster.enrolment.roles`; controllers join in Slice 3 | `["probe"]` |
+| `roles` | The roles the node may take: `probe`, `dns`, `dhcp`; or `controller` alone, for a controller that joins the cluster (section 12.1; beside another role 422 `cluster.enrolment.roles`). Only an administrator who signed in within the last five minutes creates a controller token (403 `auth.step_up_required`; a personal API token cannot) | `["probe"]` |
 | `name` | The name the node gets. It must be unique among nodes and has 1 to 63 letters, digits, dots, hyphens and underscores, starting with a letter or digit | The node chooses one, its host name |
 | `vrf` | The VRF, by id, of the node's observations when a batch names none (section 6) | The default VRF |
-| `expires_in_secs` | Seconds until the token expires, 60 to 604,800 (seven days) | 3,600, or `[cluster] enrolment_ttl_secs` |
+| `expires_in_secs` | Seconds until the token expires, 60 to 604,800 (seven days); at most 3,600 for a controller token | 3,600, or `[cluster] enrolment_ttl_secs` (at most 3,600 for a controller token) |
 
 The answer shows the token once and carries `Cache-Control: no-store`. It holds the stored token record, the SHA-256 fingerprint of the CA root and the command line to run on the node. `tenko node enrol-token` prints the token on standard output and the other lines as notes, so a script can capture the token. The controller keeps only a digest, SHA-256 over a fixed label, the token id and the secret, so a copy of its store reveals no token.
 
@@ -149,7 +150,7 @@ All certificates come from the internal CA, an ECDSA P-256 root with a validity 
 
 Host names play no part. A node accepts a server only when its certificate chains to the CA root of its enrolment and carries the role `controller`; the controller accepts a client only when its certificate chains to the same root, names a node and is not revoked. A controller of another installation is refused (`cluster.tls.foreign_ca`).
 
-A controller keeps its certificate for the cluster port and its key in the vault. It checks them daily and issues new ones 30 days before expiry (audit action `cluster.node.controller_cert`); the cluster port uses the new certificate for the next connection.
+A controller keeps its certificate for the cluster port and its key in the vault. It checks them daily and issues new ones 30 days before expiry (audit action `cluster.node.controller_cert`); the cluster port uses the new certificate for the next connection. A controller in a cluster of controllers keeps its certificate and key under `<data_dir>/node/` instead, like a node (section 12.1). It checks them every six hours, renews them by the rule of a node below and presents the new pair to nodes and peers.
 
 A node renews its certificate over the mutual TLS channel (`Node.Renew`). It generates a new key and sends a certificate request; the controller issues a certificate with the same node id and roles. The renewal is due when less than a third of the lifetime or fewer than 30 days remain, which for a one-year certificate is about 122 days before expiry. The node checks this with every heartbeat and tries again hourly while a renewal fails; the controller also asks for one in the answer to a heartbeat once fewer than 30 days remain. `tenko node renew` renews at once, also beside a running node process, which loads the new pair for its next connection.
 
@@ -161,7 +162,7 @@ The old certificate stays valid until it expires. Both serials are in the node r
 
 A revoked node does not come back by itself. It needs a new token and gets a new id; its name becomes free again. An entry leaves the revocation list after the expiry of its certificate, when the hourly maintenance pass finds it. The revocation is audited as `cluster.node.revoke`.
 
-Today a controller reads the revocation list from the store at start and every hour. With several controllers (Slice 3) the list replicates through the store.
+A controller reads the revocation list from the store at start, every hour and whenever the table changes. In a cluster of controllers the list replicates with the store, so a revocation made on one controller takes effect on every other within a moment (section 12.6).
 
 ## 4. The protocol and its versioning rule
 
@@ -173,10 +174,11 @@ The protocol is the package `tenko.cluster.v1`. Like the plugin protocol of [plu
 | `Node` | `Heartbeat` | A bidirectional stream: a beat from the node, a directive from the controller for every beat, and directives the controller pushes (a revocation) |
 | `Node` | `Renew` | Issues a new certificate for the key of a certificate request |
 | `Observations` | `Ingest` | Hands one batch of the buffer of a probe to the reconciler. Needs the role `probe` (`cluster.node.role`) |
+| `Raft`, `Cluster` | | Between controllers only; section 12.5 |
 
 ### 4.1 Version negotiation (OPS-08)
 
-The node offers every major it implements in `Hello`, with its software version and its roles. The controller answers with the highest major both sides implement, together with its own majors, its version, the node id it knows the certificate by, the heartbeat interval and its clock. When the sides share no major, the controller refuses with gRPC `FAILED_PRECONDITION`, the metadata entry `tenko-error-code: cluster.protocol.unsupported` and the entry `tenko-majors` with its own majors, for example `1, 2`. `Hello` and its two messages are frozen: every later major serves them unchanged, so two nodes of different majors can always find out what they share. Enrolment applies the same rule before it issues a certificate (section 1.3).
+The node offers every major it implements in `Hello`, with its software version and its roles. The controller answers with the highest major both sides implement, together with its own majors, its version, the node id it knows the certificate by, the heartbeat interval, its clock and the cluster ports of every controller of the cluster (`endpoints`, its own first). When the sides share no major, the controller refuses with gRPC `FAILED_PRECONDITION`, the metadata entry `tenko-error-code: cluster.protocol.unsupported` and the entry `tenko-majors` with its own majors, for example `1, 2`. `Hello` and its two messages are frozen: every later major serves them unchanged, so two nodes of different majors can always find out what they share. Enrolment applies the same rule before it issues a certificate (section 1.3).
 
 The controller records a refusal on the node (`protocol.mismatch` in the node record: the majors on both sides, the time and the version of the node), audits it as `cluster.node.version_mismatch` at most once an hour per node and offer, and `GET /api/v1/system/status` shows a `cluster.protocol.mismatch` warning until the node connects with a common major. The node reports the state `protocol_mismatch` and retries every five minutes.
 
@@ -200,7 +202,7 @@ Today only major 1 exists.
 
 The node sends a beat every `heartbeat_secs` seconds (default 10). The controller names the interval in the handshake, so a change of `[cluster] heartbeat_secs` takes effect at the next connection of each node. A beat carries the software version, the roles, the agreed major, the number and size of the batches in the buffer, the batches dropped since the process started, the expiry of the certificate and the node's clock. The controller answers every beat with a directive that asks for a renewal when one is due. HTTP/2 keepalive pings in both directions close a dead connection after about 40 s. A node that sees a controller clock more than five minutes away logs a warning.
 
-A node counts as connected while its heartbeat stream is open. The controller holds this in memory, and writes `last_seen` to the store at connect, at disconnect and at most every five minutes in between, so a quiet cluster does not write on every beat. `GET /api/v1/nodes` and `GET /api/v1/nodes/{id}` show `connected` and the live `connection`: since when, the address the controller sees, the major, the version, the last beat, the buffer and the certificate expiry as the node reports them.
+A node counts as connected while its heartbeat stream is open. The controller holds this in memory, and writes `last_seen` to the store at connect, at disconnect and at most every five minutes in between, so a quiet cluster does not write on every beat. `GET /api/v1/nodes` and `GET /api/v1/nodes/{id}` show `connected` and the live `connection`: since when, the address the controller sees, the major, the version, the last beat, the buffer and the certificate expiry as the node reports them. In a cluster of controllers each controller also records which nodes are connected to it (section 12.6), so every controller shows the same `connected` view; `connection.controller` names the controller that holds the connection, and only that controller knows the last beat and the buffer.
 
 `GET /api/v1/system/status` has a `cluster` object: the addresses the cluster port listens on, the majors of the controller, the number of nodes and of connected nodes, the software versions of the connected nodes with their counts, and the number of nodes whose handshake was refused. The object is refreshed as soon as anything under `cluster.*` is written (a node enrols, connects, disconnects, is revoked or has its handshake refused) and every five seconds otherwise; a new summary is announced with an event of the `cluster` topic (`kind` `cluster.status`, no revision), so a client reads the status again. Nodes with a refused handshake also produce the warning `cluster.protocol.mismatch`.
 
@@ -274,18 +276,18 @@ Other processes on the host hand batches to the node by dropping files into `buf
 | Port | On | Used for | Direction |
 |---|---|---|---|
 | 8443/TCP | Controller | API and UI, also the CA root and the enrolment of a node | Administrators and, once at enrolment, the node, to the controller |
-| 8444/TCP | Controller | The cluster port: gRPC over mutual TLS | Nodes to the controllers |
+| 8444/TCP | Controller | The cluster port: gRPC over mutual TLS | Nodes to the controllers, and controllers to each other |
 | none | Node | A node opens no port | |
 
-Nodes connect out to the controller. Allow 8444/TCP from the node networks to the controllers, and from no other source; the cluster port is not meant for administrators or clients. A probe in a DMZ needs only that outbound path in normal operation, and 8443/TCP to the controller once, while it enrols. The mutual TLS must reach the controller: a layer 4 forwarder in between works, a proxy that terminates TLS does not.
+Nodes connect out to the controller. Allow 8444/TCP from the node networks to the controllers, and from no other source; the cluster port is not meant for administrators or clients. A probe in a DMZ needs only that outbound path in normal operation, and 8443/TCP to the controller once, while it enrols. The mutual TLS must reach the controller: a layer 4 forwarder in between works, a proxy that terminates TLS does not. In a cluster of controllers, also allow 8444/TCP between every pair of controllers.
 
 ### 7.2 When the cluster port is open
 
 | `[cluster] listen` | Behaviour |
 |---|---|
-| Not set | `0.0.0.0:8444`. The port opens at start when a node is enrolled or a token is waiting, and else when the first token is created |
+| Not set | `0.0.0.0:8444`. The port opens at start when a node is enrolled or a token is waiting, and else when the first token is created. A member of a cluster of controllers opens it at once, in start step 3 (section 12.2) |
 | A list of addresses | The port is always open on those addresses. The server does not start when one cannot be bound (`cluster.listen`) |
-| `[]` | The port is never open |
+| `[]` | The port is never open. A member of a cluster of controllers does not start with it (`cluster.member.port_off`) |
 
 `[cluster] advertise` is a list of `host:port` endpoints that the controller tells nodes at enrolment. Use it for NAT, for a port other than 8444, or for a name that nodes resolve and administrators do not. When it is empty, the node uses the host name it enrolled through together with the port of the first listening address of the controller (`ddi.example.net:8444` for the example above). The node keeps the endpoints in `identity.json`.
 
@@ -304,8 +306,14 @@ The `[cluster]` section of `tenko.toml`, with the example in `deploy/tenko.examp
 | `heartbeat_secs` | `TENKO_CLUSTER__HEARTBEAT_SECS` | Controller | 10 | Seconds between two heartbeats of a node, 1 to 300 |
 | `enrolment_ttl_secs` | `TENKO_CLUSTER__ENROLMENT_TTL_SECS` | Controller | 3600 | Lifetime of a token whose request names none, 60 to 604,800 |
 | `buffer_mib` | `TENKO_CLUSTER__BUFFER_MIB` | Node | 64 | Size of the observation buffer in MiB, 1 to 4,096 |
+| `isolation_after_ms` | `TENKO_CLUSTER__ISOLATION_AFTER_MS` | Controller | 3000 | Milliseconds without contact to a quorum after which a controller counts as isolated, 500 to 60,000 (section 12.4) |
+| `catch_up_timeout_secs` | `TENKO_CLUSTER__CATCH_UP_TIMEOUT_SECS` | Controller | 120 | Seconds a starting member waits to catch up with the leader before it starts isolated, 5 to 3,600 (section 12.2) |
+| `auto_promote` | `TENKO_CLUSTER__AUTO_PROMOTE` | Controller | `true` | The leader promotes caught-up learners to voters (section 12.3) |
+| `promote_lag_entries` | `TENKO_CLUSTER__PROMOTE_LAG_ENTRIES` | Controller | 100 | How many log entries a learner may lag and still count as caught up, 1 to 1,000,000 |
 
 An invalid value stops the start with `config.invalid`. A node reads `buffer_mib` from its own configuration, like the data directory.
+
+Two keys of the `[node]` section matter to a cluster of controllers. `id` is the node id of the controller, which is also its Raft id: 1 for the first controller (the default), the id of its enrolment for a joined one. `address` is the cluster port as the other controllers reach it (`host:port`); without it the first controller names the first `[cluster] advertise` endpoint, else the address the first join arrived at. `tenko cluster join` writes both (section 12.1).
 
 ## 9. API
 
@@ -318,8 +326,13 @@ An invalid value stops the start with `config.invalid`. A node reads `buffer_mib
 | `GET /api/v1/nodes/enrolments` | `list_enrolments` | Administrators |
 | `DELETE /api/v1/nodes/enrolments/{id}` | `delete_enrolment` | Administrators |
 | `POST /api/v1/nodes/enrol` | `enrol_node` | Public; the token is the credential. The answer carries `Cache-Control: no-store` |
+| `GET /api/v1/cluster/members` | `list_cluster_members` | `read` on nodes. The controllers of the cluster (section 12.3) |
+| `POST /api/v1/cluster/members/{id}/promote` | `promote_cluster_member` | `update` on the node: administrators. Body `{"force": false, "replace": <node id>}`, both optional |
+| `DELETE /api/v1/cluster/members/{id}` | `remove_cluster_member` | `delete` on the node: administrators |
+| `POST /api/v1/cluster/step-down` | `step_down_cluster_leader` | `update` on nodes: administrators |
+| `GET /api/v1/cluster/digests` | `get_cluster_digests` | `read` on nodes. `?revision=` names the revision (section 12.7) |
 
-The edits (creating and deleting a token, enrolment, renewal, revocation) run as inline jobs of the kind `cluster.edit`, with the step `cluster.write`. The change, the job record and the audit record commit as one write. Changes of the tables of the `cluster` namespace are events of the `cluster` topic of the event stream. Like every event they carry references, not bodies, so a client fetches again what it shows.
+The edits (creating and deleting a token, enrolment, renewal, revocation) run as inline jobs of the kind `cluster.edit`, with the step `cluster.write`; a promotion or removal of a controller is a job of the same kind with the step `cluster.member`. The change, the job record and the audit record commit as one write. Changes of the tables of the `cluster` namespace are events of the `cluster` topic of the event stream. Like every event they carry references, not bodies, so a client fetches again what it shows.
 
 ## 10. Audit actions
 
@@ -332,6 +345,11 @@ The edits (creating and deleting a token, enrolment, renewal, revocation) run as
 | `cluster.node.revoke` | A node was revoked; records the revoked serials | The administrator |
 | `cluster.node.version_mismatch` | A handshake was refused for want of a common major; at most once an hour per node and offer | The cluster component |
 | `cluster.node.controller_cert` | A controller issued a certificate for its cluster port | The cluster component |
+| `cluster.member.join` | A controller joined the cluster as a learner, or the first controller recorded itself as a member | The cluster component |
+| `cluster.member.promote` | Learners became voters, by the leader or by an administrator; records the voters afterwards, `force` and a replaced voter | The administrator, or the cluster component for an automatic promotion |
+| `cluster.member.remove` | A controller left the cluster; its certificates were revoked | The administrator |
+| `cluster.member.step_down` | The leader handed leadership over; records the new leader | The administrator |
+| `vault.kek.transfer` | A controller handed the key encryption keys to a joining controller (`purpose` `join`) or to a member that lacked generations (`purpose` `fetch`); records the generation ids, never the keys | The cluster component |
 
 The certificate authority itself writes `cluster.ca.create` and `cluster.tls.issue`.
 
@@ -366,6 +384,37 @@ A code is stable. The API answers with the HTTP status; on the cluster port the 
 | `cluster.probe.invalid_batch` | 400 | The batch cannot be ingested; the node drops it |
 | `cluster.probe.no_vrf` | 503 | The default VRF does not exist yet; the node keeps the batch |
 | `cluster.listen` | 500 | The cluster port cannot listen on an address |
+| `cluster.join.request` | 400 | A join names no node or no cluster port as `host:port` |
+| `cluster.join.not_controller` | 403 | The joining node was not enrolled with a controller token |
+| `cluster.join.format_newer` | 409 | The cluster's data is in a format the joining binary does not know; upgrade the joining host |
+| `cluster.member.not_found` | 404 | The node is not a member of the cluster |
+| `cluster.member.even_voters` | 409 | A promotion would leave an even number of voters; join another learner first, or use `force` |
+| `cluster.member.not_caught_up` | 409 | The learner lags or is out of contact; wait, or use `force` |
+| `cluster.member.last_voter` | 409 | The cluster cannot lose its last voter |
+| `cluster.member.is_leader` | 409 | The member leads; step it down first |
+| `cluster.member.changing` | 409 | Another membership change is in progress |
+| `cluster.member.no_successor` | 409 | No other voter is in contact to take over leadership |
+| `cluster.member.no_address` | 409 | The first controller does not know its own cluster port; set `[node] address` |
+| `cluster.member.not_leader` | 503 | No leader is known to take the change; try again after the election |
+| `cluster.member.starting` | 503 | The controller is still starting |
+| `cluster.member.step_down_timeout` | 504 | Leadership did not move in time; the leader keeps leading |
+| `cluster.single` | 409 | The controller is not part of a cluster of controllers |
+| `cluster.port.starting` | 503 | A member's node services are not ready yet; the node retries |
+| `cluster.peer.not_controller` | 403 | A caller of `Raft` or `Cluster` has no `controller` role |
+| `cluster.peer.impersonation` | 403 | A Raft message speaks for another node than its sender |
+| `cluster.peer.unreachable`, `cluster.peer.no_endpoint`, `cluster.peer.no_credentials`, `cluster.peer.call` | 503 | Another controller cannot be reached: no connection, no known cluster port, no certificate of this controller yet, or a failed call |
+| `cluster.forward.not_leader` | 503 | The controller asked to take a forwarded write does not lead; nothing was queued and the write goes to the leader it names |
+| `cluster.forward.no_answer` | 504 | A forwarded write got no answer; it may have committed |
+| `cluster.forward.wire` | 409 | A peer sent a payload in another encoding; upgrade the older controller |
+| `cluster.wire.payload` | 400 | A payload between controllers does not decode |
+| `cluster.snapshot.empty`, `.digest`, `.offset`, `.chunk`, `.truncated` | 400 | A snapshot stream is incomplete, out of order, has chunks over 1 MiB or a wrong SHA-256; the leader sends it again |
+| `cluster.raft.stopped` | 503 | The Raft node of the controller stopped |
+| `vault.kek.transfer.token` | 400, 403 | The join token id is malformed, is not the one the caller enrolled with, or a fetch came from a controller that is not a member |
+| `vault.kek.transfer.key` | 400 | The one-time public key is not 32 bytes |
+| `vault.kek.transfer.used` | 409 | The keys were transferred with this join token already |
+| `vault.kek.transfer.unavailable` | 503 | The controller cannot hand over keys yet |
+
+Start step 3 of `tenko serve` stops with `cluster.member.identity` (the cluster identity under `<data_dir>/node/` belongs to another node id than `[node] id`), `cluster.member.no_identity` (a member without a cluster identity), `cluster.member.port_off` (a member with `[cluster] listen = []`) or `cluster.config.batch_limit` (the store's batch and entry limits allow a Raft entry larger than an append request between controllers).
 
 ### 11.2 Reported on the node
 
@@ -388,8 +437,93 @@ These codes appear in `status.json`, in the output of `tenko node` and in the lo
 | `cluster.buffer.too_large` | A batch is larger than the limit of one batch (413) |
 | `cluster.buffer.config` | The limits of the buffer are unusable (500) |
 
-## 12. What comes next
+## 12. The controller cluster
 
-- **Slice 3, WP3.1.** Controllers join by the same enrolment and mutual TLS, first as learner and then as voter, and Raft runs over this transport. Configuration flows from the controllers to `dns` and `dhcp` nodes as resumable deltas with a bandwidth cap (OPS-28). Revocations and the state of the nodes replicate between controllers. The scheduling of jobs becomes leader-only.
-- **WP2.3.** The scanner feeds the observation buffer of the probe. What comes next for the probe is in [scanning.md](scanning.md#14-what-comes-next).
-- **WP2.9.** The nodes page of the UI: enrolment tokens, node health and revocation.
+Several controllers form one cluster (OPS-03): one Raft group replicates the store (ADR 0002), so every controller serves the API, the UI and the nodes from the same data, and the cluster keeps accepting writes while a majority of its voters is up. Three controllers survive the loss of one. The decisions behind this section are in [ADR 0014](adr/0014-controller-cluster.md).
+
+Terms: a **member** is a controller in the Raft group. A **voter** counts for the majority; a **learner** replicates without voting (a controller catching up). The **leader** is the voter that orders the writes; the other members are **followers**.
+
+### 12.1 Growing from one controller to three
+
+The first controller is an ordinary installation. Each further controller joins it, on its own host and with an empty data directory:
+
+1. An administrator who signed in within the last five minutes creates a controller token on any controller (the token lets a host receive the installation's key encryption keys), with the API: `POST /api/v1/nodes/enrolments` with `{"roles": ["controller"]}`. The token carries the role `controller` alone and lives at most an hour. A personal API token cannot create it (403 `auth.step_up_required`). The answer shows the command to run, with the token and the CA fingerprint filled in.
+2. On the new host:
+
+   ```sh
+   tenko cluster join --controller https://ddi.example.test:8443 \
+     --token tnk1.… --ca-fingerprint 3f9a… \
+     --address controller-2.example.test:8444 --data-dir /var/lib/tenko \
+     --config /etc/tenko/tenko.toml
+   ```
+
+   The command enrols the host as a node with the role `controller` (node id 1001 and up, which is also its Raft id; the key is generated and sealed on the host, as for a probe), receives the key encryption keys and seals them with its own KEK provider, opens an empty store and its cluster port, asks to join, and waits until it has copied the cluster's data, from the log or as a snapshot (at most `--timeout-secs`, default 600). Then it writes `[node] id` and `address` and `[cluster] listen` into the configuration file, the one of `--config` or else `tenko.toml` in the data directory: a new file, or appended to one without `[node]` and `[cluster]` tables. When the file has such a table already, the command exits with status 2 and prints the lines to set there. `--address` is the cluster port as the other controllers reach it; `--listen` overrides where the port listens (default all addresses on that port). The default name is the host and port of `--address`, joined by a hyphen.
+3. Start it with `tenko serve --config …`. It starts as a learner; the leader promotes it to a voter once it stays caught up (section 12.3).
+4. Repeat for the third controller. With one voter and one caught-up learner the leader waits; when the second learner has caught up, both become voters together, so the cluster goes from one voter straight to three.
+
+Nothing in the first controller's data directory changes format: the cluster is state in the store (the Raft membership and the member records). When the first peer joins, the first controller records itself as a member and moves its cluster identity from the vault to `<data_dir>/node/`, like the identity of a joined controller.
+
+A join refuses a cluster whose data is in a format the joining binary does not know (`cluster.join.format_newer`, exit status 11): upgrade the joining host first. A store directory remembers its node id (the file `node-id` in it); a configuration with another `[node] id` does not start. A store directory that a join prepared is never initialized as a cluster of its own: run the join again, or start over with an empty directory.
+
+### 12.2 Starting a member
+
+`tenko serve` brings the cluster up in start step 3, before the vault:
+
+- A single controller has nothing to join; its cluster port opens in step 10 as before, with the controller services beside the node services, ready for the first join.
+- A member opens its cluster port at once with the identity under `<data_dir>/node/`, so its peers replicate to it while it starts. The node services answer `UNAVAILABLE` (`cluster.port.starting`) until step 10; a node retries.
+- The member waits until it has applied what the leader committed (a linearizable read through the leader), at most `[cluster] catch_up_timeout_secs` (default 120). After that it starts isolated and catches up in the background.
+- It fetches key generations it lacks (an online rotation while it was stopped) from another member, before the vault opens them.
+
+### 12.3 Membership
+
+`GET /api/v1/cluster/members` and `tenko cluster members` show each member with its role, whether it leads, its cluster port, version and data format, and, from the leader, the log index it matched, how far it lags and when the leader last heard from it. `tenko cluster status` shows the leader, the term and the quorum state.
+
+| Change | How | Rule |
+|---|---|---|
+| Promotion | Automatic, or `tenko cluster promote <id>` (`POST /cluster/members/{id}/promote`) | A learner that stayed within `[cluster] promote_lag_entries` (default 100) of the leader and in contact for 10 seconds is promoted when `[cluster] auto_promote` is on, and only to an odd number of voters. By hand the same rules apply (`cluster.member.even_voters`, `cluster.member.not_caught_up`) unless `--force` |
+| Replacement | `tenko cluster promote <new> --replace <dead>` | One joint change removes the dead voter and adds the learner, so the cluster never has two or four voters; the dead voter's certificates are revoked |
+| Removal | `tenko cluster remove <id> --yes` (`DELETE /cluster/members/{id}`) | The member leaves the Raft group, its member record goes and its certificates are revoked. The leader cannot remove itself (`cluster.member.is_leader`): step it down first |
+| Step-down | `tenko cluster step-down` (`POST /cluster/step-down`) | Before a planned restart of the leader: new writes wait, the most caught-up voter in contact receives every entry and campaigns, and the command answers when it leads (`cluster.member.no_successor` without one) |
+
+Any controller takes these requests; a follower hands them to the leader. A promotion or removal is an inline job `cluster.edit` (step `cluster.member`) on the controller that took the request, and its answer carries the job id (`job_id`). The changes are audited as `cluster.member.promote`, `.remove` and `.step_down`. They need the rights of an administrator (`update` and `delete` on nodes), which the token of `tenko login` carries. To restart every controller in turn, step the leader down first and restart the followers one at a time, waiting for each to be caught up again.
+
+### 12.4 Writes, reads and quorum
+
+A write on a follower goes to the leader over the cluster port and returns once the follower has applied it, so the controller that answered shows the change at once (read-your-writes). A write that reaches no leader within five seconds fails with 503 `sys.store.no_quorum`; one whose answer was lost fails with 503 `sys.store.timeout`, and the idempotency key of the request or its precondition makes a retry safe. Reads are served from the local copy; a linearizable read on a follower asks the leader how far to catch up first.
+
+Each controller knows whether it reaches a quorum:
+
+| State | Meaning |
+|---|---|
+| `single` | The only voter |
+| `healthy` | In contact with a quorum |
+| `electing` | No leader known; since when |
+| `isolated` | No contact with a quorum for `[cluster] isolation_after_ms` (default 3,000): reads serve the local copy, writes are refused; since when, the last contact and the revision applied |
+
+The state is in `GET /api/v1/cluster/members` (`quorum`) and `GET /api/v1/system/status`; every change is an event of the `cluster` topic with the kind `cluster.quorum` and the parameters `state`, `since`, `last_contact` and `applied`. How an isolated controller treats writes and queued changes is in [partitions.md](partitions.md).
+
+### 12.5 The controller services
+
+Controllers talk to each other on the cluster port with two services of `tenko.cluster.v1`:
+
+| Service | Methods | Purpose |
+|---|---|---|
+| `Raft` | `AppendEntries`, `Vote`, `InstallSnapshot` | Consensus. Payloads are openraft 0.9 types in CBOR, tagged `openraft-0.9/cbor-1`. An append request stays below 30 MiB; a larger one is cut and sent in parts. A snapshot streams in chunks of 1 MiB, the first carrying the vote, the metadata and the SHA-256 of the file; the receiver installs only a complete stream whose digest matches, building every index aside (a broken transfer starts again) |
+| `Cluster` | `Join`, `Propose`, `ReadIndex`, `Members`, `Digest`, `TransferKek`, `Campaign`, `Change` | Joining, forwarded writes (`tenko-batch/cbor-1`) and read indexes, the member list, state digests, the key transfer, the hand-over of leadership and forwarded membership changes (`tenko-cluster/cbor-1`) |
+
+Every caller presents a certificate of the installation's CA with the role `controller`; a probe gets `cluster.peer.not_controller`, and another installation's CA fails the handshake. `Cluster` also needs the caller's node record holding the certificate. `Raft` accepts a controller whose record this member has not replicated yet (a learner catching up from an empty store knows nobody), and refuses a message that speaks for another node than its sender (`cluster.peer.impersonation`). A payload in another encoding is refused with `cluster.forward.wire`, so two versions of the Raft encoding never mix during an upgrade. The decoders of these payloads are fuzzed by the target `raft_payloads`.
+
+Peers find each other's cluster ports in the member records (`cluster.members`, written when a controller joins). Each controller's cluster port must be reachable from every other controller: allow 8444/TCP between the controllers.
+
+### 12.6 Revocations and nodes across controllers
+
+A revocation made on any controller replicates; every controller reads its revocation list again when the table changes and closes the connections of the revoked node within a moment. A node enrolled through another controller is looked up with a read through the leader before it is refused (`cluster.node.unknown`). Each controller records which nodes are connected to it (`cluster.connections`), so `GET /api/v1/nodes` shows the same connected view on every controller: a node connected to another controller shows that controller in `connection.controller`, without its heartbeat figures, and a connection held by a controller that left the cluster no longer counts. `Hello` answers with the cluster ports of every controller (`endpoints`), so a node can reach another controller when its own is down. The hourly prune of expired revocations and old tokens runs on the leader only, as leader-only work with the leader epoch as a precondition (`cluster.prune`).
+
+### 12.7 State digests
+
+`tenko cluster verify` (`GET /api/v1/cluster/digests?revision=`) asks every member for a SHA-256 over every non-empty table at one revision and compares them; it exits with status 9 when they differ. Without a revision it asks again at the newest revision a member reported, so a quiet cluster agrees; under constant writes a member may answer at a later revision than the others, which the column `REVISION` of the command shows.
+
+## 13. What comes next
+
+- **Slice 3.** Configuration flows from the controllers to `dns` and `dhcp` nodes as resumable deltas with a bandwidth cap (OPS-28). The leader-only work (the job runner, the reconciler loop, purges, the prune of the node registry `cluster.prune`) moves under one supervisor that starts it when a controller takes office (WP3.1b).
+- **The probe.** What comes next for the scanner of the probe is in [scanning.md](scanning.md#14-what-comes-next).

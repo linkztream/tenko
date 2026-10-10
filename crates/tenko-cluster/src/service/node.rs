@@ -40,8 +40,15 @@ impl v1::node_server::Node for ClusterService {
             buffered_bytes: 0,
             dropped_batches: 0,
             certificate_not_after: Some(peer.identity.not_after),
+            controller: Some(self.registry.config().local_node),
         };
-        let guard = self.registry.sessions().open(node, view, push.clone());
+        let guard = self
+            .registry
+            .sessions()
+            .open(node, view.clone(), push.clone());
+        if let Err(error) = self.registry.record_connection(node, &view).await {
+            tracing::debug!(node = %node, %error, "the connection record could not be written");
+        }
         if let Err(error) = self.registry.touch(node, now, true).await {
             tracing::warn!(node = %node, %error, "last_seen could not be written");
         }
@@ -91,6 +98,11 @@ impl v1::node_server::Node for ClusterService {
                 }
             }
             drop(guard);
+            if registry.sessions().view(node).is_none()
+                && let Err(error) = registry.clear_connection(node).await
+            {
+                tracing::debug!(node = %node, %error, "the connection record could not be removed");
+            }
             if let Err(error) = registry.touch(node, Timestamp::now(), true).await {
                 tracing::debug!(node = %node, %error, "last_seen could not be written");
             }

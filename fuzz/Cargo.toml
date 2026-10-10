@@ -17,6 +17,7 @@ serde_json = "1"
 tenko-connect-hass = { path = "../crates/tenko-connect-hass" }
 tenko-connect-proxmox = { path = "../crates/tenko-connect-proxmox" }
 tenko-connect-unifi = { path = "../crates/tenko-connect-unifi" }
+tenko-cluster = { path = "../crates/tenko-cluster" }
 tenko-core = { path = "../crates/tenko-core" }
 tenko-scan = { path = "../crates/tenko-scan" }
 tenko-vault = { path = "../crates/tenko-vault" }
@@ -73,6 +74,13 @@ bench = false
 [[bin]]
 name = "kek_transfer"
 path = "fuzz_targets/kek_transfer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "raft_payloads"
+path = "fuzz_targets/raft_payloads.rs"
 test = false
 doc = false
 bench = false

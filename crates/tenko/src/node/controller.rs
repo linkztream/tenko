@@ -25,18 +25,20 @@ use tenko_api::{
     state::AppState,
 };
 use tenko_cluster::{
-    admin::ClusterAdmin,
-    ca::{CaPolicy, InternalCa, TlsResolver},
+    admin::{ClusterAdmin, QuorumKind, QuorumView},
+    ca::{CaPolicy, CertSource, InternalCa, TlsMaterial, TlsResolver, generate_csr},
     error::ClusterError,
-    identity::NodePaths,
+    identity::{Credentials, NodePaths},
     kek::VaultKekSource,
     peers::{Peers, VaultIdentity},
     probe::{DiscardProbes, IngestCounts, ProbeBatch, ProbeSink},
-    registry::{NodeRegistry, RegistryConfig},
+    registry::{NodeRegistry, PruneService, RegistryConfig},
     server::{ClusterListener, ClusterService},
 };
+use tenko_core::cluster::LeaderService;
 use tenko_core::{NodeId, RequestCtx, SystemComponent, Timestamp, VrfId};
 use tenko_jobs::JobEngine;
+use tenko_store::QuorumState;
 use tenko_store::{ChangeStream, ReadViewExt as _, Store, WatchFilter};
 use tenko_vault::StoreVault;
 use tokio::{sync::watch, task::JoinHandle};
@@ -56,6 +58,10 @@ const HEALTH_INTERVAL: Duration = Duration::from_secs(5);
 /// The `kind` of the `cluster` event that announces a new cluster summary (no store
 /// change, so no revision).
 pub const STATUS_EVENT: &str = "cluster.status";
+/// The `kind` of the `cluster` event that announces a change of this controller's quorum
+/// state (OPS-26); its parameters are `state` (`single`, `healthy`, `electing`,
+/// `isolated`) and, when known, `since`, `last_contact` (RFC 3339) and `applied`.
+pub const QUORUM_EVENT: &str = "cluster.quorum";
 /// How often expired revocations and old tokens are pruned and the revocation list is read
 /// again (other controllers revoke too, Slice 3).
 const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(3600);
@@ -244,6 +250,10 @@ pub async fn start_with(
         None => NodeRegistry::new(Arc::clone(&store), Arc::new(ca), config),
     };
     registry.register_steps(&engine);
+    // Connections recorded by an earlier run of this controller are gone.
+    if let Err(error) = registry.clear_own_connections().await {
+        tracing::warn!(code = %error.code(), "old connection records could not be removed: {}", error.detail());
+    }
     registry.set_node_sync(
         tenko_cluster::node_sync::NodeSync::new(Arc::clone(&store))
             .with_vault(Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>)
@@ -261,6 +271,7 @@ pub async fn start_with(
     if let Some(layer) = &layer {
         layer.attach_registry(Arc::clone(&registry));
         layer.attach_kek(Arc::new(VaultKekSource::new(Arc::clone(&vault))));
+        layer.register_steps(&engine);
     }
     if let Some(port) = &open_port {
         // A member: the cluster port opened in step 3 with the identity under
@@ -270,17 +281,27 @@ pub async fn start_with(
             Arc::clone(&sink),
         ));
         registry.set_listening(port.addrs.clone());
-        let mut tasks = Vec::new();
+        let mut tasks = vec![registry.follow_revocations(stop.clone())];
         tasks.push(tokio::spawn(maintenance(
             Arc::clone(&registry),
             Arc::clone(&vault),
             None,
             stop.clone(),
         )));
+        if let Some(layer) = &layer {
+            tasks.push(tokio::spawn(renew_identity(
+                Arc::clone(&registry),
+                layer.clone(),
+                Arc::clone(&port.resolver),
+                NodePaths::new(&resolved.data_dir),
+                stop.clone(),
+            )));
+        }
         let state = Arc::new(OnceLock::new());
         tasks.push(tokio::spawn(health(
             Arc::clone(&registry),
             Arc::clone(&state),
+            layer.as_ref().map(|layer| layer.store().quorum()),
             stop,
         )));
         let nodes = registry
@@ -383,6 +404,7 @@ pub async fn start_with(
         }
         ClusterListen::Off => "cluster port off ([cluster] listen = [])".to_owned(),
     };
+    tasks.push(registry.follow_revocations(stop.clone()));
     tasks.push(tokio::spawn(maintenance(
         Arc::clone(&registry),
         Arc::clone(&vault),
@@ -393,6 +415,7 @@ pub async fn start_with(
     tasks.push(tokio::spawn(health(
         Arc::clone(&registry),
         Arc::clone(&state),
+        layer.as_ref().map(|layer| layer.store().quorum()),
         stop,
     )));
     let nodes = registry
@@ -433,6 +456,13 @@ impl Cluster {
     /// The node registry.
     pub fn registry(&self) -> &Arc<NodeRegistry> {
         &self.registry
+    }
+
+    /// The leader-only work of the node registry, for the leader supervisor: the hourly
+    /// prune of expired revocations and old enrolment tokens (`cluster.prune`). Until the
+    /// supervisor runs it, the maintenance task prunes while this controller leads.
+    pub fn leader_services(&self) -> Vec<Arc<dyn LeaderService>> {
+        vec![Arc::new(PruneService::new(Arc::clone(&self.registry)))]
     }
 
     /// Where probe batches go on this controller: a probe role on the controller node
@@ -491,10 +521,18 @@ async fn maintenance(
         tokio::select! {
             () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
             _ = prune.tick() => {
-                match registry.prune(Timestamp::now()).await {
-                    Ok(0) => {}
-                    Ok(count) => tracing::info!(count, "expired revocations and old enrolment tokens removed"),
-                    Err(error) => tracing::warn!(code = %error.code(), "{}", error.detail()),
+                // Leader-only work: the other controllers would only race the leader.
+                let leads = registry
+                    .store()
+                    .leadership()
+                    .borrow()
+                    .is_some_and(|seen| seen.is_self);
+                if leads {
+                    match registry.prune(Timestamp::now()).await {
+                        Ok(0) => {}
+                        Ok(count) => tracing::info!(count, "expired revocations and old enrolment tokens removed"),
+                        Err(error) => tracing::warn!(code = %error.code(), "{}", error.detail()),
+                    }
                 }
                 if let Err(error) = registry.load_revocations().await {
                     tracing::warn!(code = %error.code(), "{}", error.detail());
@@ -526,6 +564,7 @@ async fn maintenance(
 async fn health(
     registry: Arc<NodeRegistry>,
     state: Arc<OnceLock<AppState>>,
+    mut quorum: Option<watch::Receiver<QuorumState>>,
     mut stop: watch::Receiver<bool>,
 ) {
     let mut tick = tokio::time::interval(HEALTH_INTERVAL);
@@ -533,10 +572,21 @@ async fn health(
     let filter = WatchFilter::namespaces(["cluster"]);
     let mut changes = registry.store().watch(None, filter.clone()).ok();
     let mut shown: Option<(ClusterStatus, Option<StatusWarning>)> = None;
+    let mut shown_quorum: Option<QuorumState> = None;
     loop {
         tokio::select! {
             () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
             _ = tick.tick() => {}
+            open = async {
+                match quorum.as_mut() {
+                    Some(quorum) => quorum.changed().await.is_ok(),
+                    None => std::future::pending().await,
+                }
+            } => {
+                if !open {
+                    quorum = None;
+                }
+            }
             received = next_change(&mut changes) => {
                 if received {
                     // A burst of writes (an enrolment writes the node and its token) is one
@@ -550,6 +600,12 @@ async fn health(
         let Some(state) = state.get() else {
             continue;
         };
+        if let Some(current) = quorum.as_ref().map(|quorum| *quorum.borrow())
+            && shown_quorum != Some(current)
+        {
+            shown_quorum = Some(current);
+            state.events().publish_system(&quorum_event(current));
+        }
         let health = match registry.health().await {
             Ok(health) => health,
             Err(error) => {
@@ -579,6 +635,88 @@ async fn health(
             state.events().publish_system(&event);
         }
     }
+}
+
+/// The `cluster` event of a quorum state ([`QUORUM_EVENT`]).
+fn quorum_event(quorum: QuorumState) -> EventData {
+    let view = QuorumView::from(quorum);
+    let mut event = EventData::new(Topic::Cluster, None);
+    event.kind = Some(QUORUM_EVENT.to_owned());
+    let state = match view.state {
+        QuorumKind::Single => "single",
+        QuorumKind::Healthy => "healthy",
+        QuorumKind::Electing => "electing",
+        QuorumKind::Isolated => "isolated",
+    };
+    event.params.insert("state".to_owned(), state.to_owned());
+    if let Some(since) = view.since {
+        event.params.insert("since".to_owned(), since.to_rfc3339());
+    }
+    if let Some(contact) = view.last_contact {
+        event
+            .params
+            .insert("last_contact".to_owned(), contact.to_rfc3339());
+    }
+    if let Some(applied) = view.applied {
+        event
+            .params
+            .insert("applied".to_owned(), applied.0.to_string());
+    }
+    event
+}
+
+/// How often a member checks whether its cluster certificate is due for renewal.
+const IDENTITY_INTERVAL: Duration = Duration::from_secs(6 * 3600);
+
+/// Renews the certificate of a member's cluster identity under `<data_dir>/node/` when it
+/// is due (a third of its lifetime or 30 days left): a new key and certificate from the
+/// internal CA through the registry (the node record keeps both serials until the old one
+/// expires), written beside the old pair and switched atomically, then presented to nodes
+/// and peers.
+async fn renew_identity(
+    registry: Arc<NodeRegistry>,
+    peers: Peers,
+    resolver: Arc<TlsResolver>,
+    paths: NodePaths,
+    mut stop: watch::Receiver<bool>,
+) {
+    let mut tick = tokio::time::interval(IDENTITY_INTERVAL);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
+            _ = tick.tick() => {}
+        }
+        if let Err(error) = renew_once(&registry, &peers, &resolver, &paths).await {
+            tracing::warn!(code = %error.code(), "the cluster certificate of this controller could not be renewed: {}", error.detail());
+        }
+    }
+}
+
+async fn renew_once(
+    registry: &NodeRegistry,
+    peers: &Peers,
+    resolver: &TlsResolver,
+    paths: &NodePaths,
+) -> Result<(), ClusterError> {
+    let current = Credentials::load(paths)?;
+    let now = Timestamp::now();
+    if !current.needs_renewal(now) {
+        return Ok(());
+    }
+    let (key, csr) = generate_csr()?;
+    let issued = registry
+        .renew(current.identity.node, &current.info.serial, &csr, now)
+        .await?;
+    let renewed = current.renewed(paths, issued.chain, key)?;
+    resolver.set(Some(TlsMaterial::from_der(
+        renewed.chain.clone(),
+        &renewed.key,
+        CertSource::Inline,
+    )?));
+    peers.network().set_tls(renewed.client_config()?);
+    tracing::info!(not_after = %renewed.info.not_after, "renewed the cluster certificate of this controller");
+    Ok(())
 }
 
 /// The warning of nodes that share no protocol major with this controller, if any.
@@ -636,5 +774,77 @@ async fn next_change(changes: &mut Option<ChangeStream>) -> bool {
 fn drain(changes: &mut Option<ChangeStream>) {
     if let Some(stream) = changes {
         while let Some(Some(Ok(_))) = stream.next().now_or_never() {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tenko_cluster::{
+        model::{ClusterHealth, MismatchRecord, NodeMismatch},
+        version::VersionMismatch,
+    };
+    use tenko_core::Revision;
+
+    use super::*;
+
+    fn at(text: &str) -> Timestamp {
+        text.parse().expect("time")
+    }
+
+    #[test]
+    fn a_refused_handshake_becomes_a_warning_naming_the_nodes() {
+        let mut health = ClusterHealth {
+            majors: vec![1],
+            ..ClusterHealth::default()
+        };
+        assert_eq!(mismatch_warning(&health), None);
+        health.mismatched.push(NodeMismatch {
+            node: NodeId(1001),
+            name: "probe-dmz".to_owned(),
+            mismatch: MismatchRecord {
+                majors: VersionMismatch::new(&[1], &[2, 3]),
+                at: at("2026-10-10T08:00:00Z"),
+                version: "0.9.0".to_owned(),
+            },
+        });
+        let warning = mismatch_warning(&health).expect("a warning");
+        assert_eq!(warning.code, MISMATCH_NOTICE);
+        assert_eq!(warning.params["count"], "1");
+        assert_eq!(warning.params["nodes"], "1001");
+        assert!(
+            warning
+                .detail
+                .contains("probe-dmz (node 1001) offers protocol major(s) 2, 3"),
+            "{}",
+            warning.detail
+        );
+        assert!(
+            warning.detail.contains("which implements 1: probe-dmz"),
+            "{}",
+            warning.detail
+        );
+    }
+
+    #[test]
+    fn quorum_changes_become_cluster_events() {
+        let single = quorum_event(QuorumState::Single);
+        assert_eq!(single.topic, Topic::Cluster);
+        assert_eq!(single.kind.as_deref(), Some(QUORUM_EVENT));
+        assert_eq!(single.params["state"], "single");
+        assert_eq!(single.params.len(), 1);
+        let isolated = quorum_event(QuorumState::Isolated {
+            since: at("2026-10-10T08:00:03Z"),
+            last_contact: Some(at("2026-10-10T08:00:00Z")),
+            applied: Revision(42),
+        });
+        assert_eq!(isolated.params["state"], "isolated");
+        assert_eq!(isolated.params["since"], "2026-10-10T08:00:03Z");
+        assert_eq!(isolated.params["last_contact"], "2026-10-10T08:00:00Z");
+        assert_eq!(isolated.params["applied"], "42");
+        let electing = quorum_event(QuorumState::Electing {
+            since: at("2026-10-10T08:00:01Z"),
+        });
+        assert_eq!(electing.params["state"], "electing");
+        assert!(!electing.params.contains_key("applied"));
     }
 }

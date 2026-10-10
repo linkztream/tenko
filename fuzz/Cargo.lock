@@ -2626,6 +2626,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
@@ -2741,6 +2742,7 @@ version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
  "serde_json",
+ "tenko-cluster",
  "tenko-connect-hass",
  "tenko-connect-proxmox",
  "tenko-connect-unifi",

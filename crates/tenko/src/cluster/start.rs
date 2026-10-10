@@ -28,7 +28,7 @@ use tenko_cluster::{
     identity::{Credentials, NodePaths},
     kek::PeerKekFetch,
     mtls::RevocationSet,
-    peers::{NodeDirIdentity, PeerConfig, PeerNetwork, PeerTimings, Peers},
+    peers::{MAX_APPEND_BYTES, NodeDirIdentity, PeerConfig, PeerNetwork, PeerTimings, Peers},
     server::{ClusterListener, NodeServices, Port},
     session::Sessions,
 };
@@ -50,6 +50,8 @@ use crate::{
 pub struct OpenPort {
     /// The node services the `nodes` step attaches.
     pub nodes: NodeServices,
+    /// The certificate the port presents (renewed by the `nodes` step).
+    pub resolver: Arc<TlsResolver>,
     /// The revoked serials the TLS verifier checks (the registry shares them).
     pub revocations: Arc<RevocationSet>,
     /// The connections by node (the registry shares them).
@@ -166,6 +168,26 @@ fn identity(resolved: &Resolved) -> Result<Option<Credentials>, StartError> {
     Ok(Some(credentials))
 }
 
+/// Refuses store limits under which one Raft entry could exceed the largest append
+/// request the peer transport sends ([`MAX_APPEND_BYTES`]): such an entry could never
+/// replicate.
+fn check_entry_limit(store: &RaftStore) -> Result<(), StartError> {
+    let coalescer = store.config().coalescer;
+    // A batch travels alone when it is larger than an entry; the encoding and the audit
+    // drafts add to its payload.
+    let largest = coalescer.max_entry_bytes.max(coalescer.max_batch_bytes) * 5 / 4 + 1024 * 1024;
+    if largest > MAX_APPEND_BYTES {
+        return Err(start_error(
+            "cluster.config.batch_limit",
+            format!(
+                "a Raft entry of up to {largest} bytes cannot replicate within the {MAX_APPEND_BYTES} \
+                 bytes of an append request; lower the store's batch and entry limits"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Runs step 3 and returns the peer layer and the key ring for the vault.
 ///
 /// # Errors
@@ -186,6 +208,7 @@ pub async fn start_peers(
         stop,
     } = start;
     let section = &resolved.config.cluster;
+    check_entry_limit(store)?;
     store.set_isolation_after(Duration::from_millis(section.isolation_after_ms));
     let network = PeerNetwork::new(resolved.node_id, PeerTimings::from_store(store.config()));
     let credentials = identity(resolved)?;
@@ -265,8 +288,8 @@ pub async fn start_peers(
     revocations.replace(revoked.into_iter().map(|(serial, _, _)| serial));
     let sessions = Sessions::new();
     let nodes = NodeServices::new();
-    let resolver = Arc::new(TlsResolver::default());
-    resolver.set(Some(
+    let certificate = Arc::new(TlsResolver::default());
+    certificate.set(Some(
         TlsMaterial::from_der(
             credentials.chain.clone(),
             &credentials.key,
@@ -278,7 +301,7 @@ pub async fn start_peers(
         .serve_port(
             Port {
                 ca_root: credentials.ca_root.clone(),
-                resolver,
+                resolver: Arc::clone(&certificate) as _,
                 revocations: Arc::clone(&revocations),
                 sessions: Arc::clone(&sessions),
                 nodes: nodes.clone(),
@@ -341,6 +364,7 @@ pub async fn start_peers(
                 peers,
                 port: Some(OpenPort {
                     nodes,
+                    resolver: certificate,
                     revocations,
                     sessions,
                     addrs: bound,

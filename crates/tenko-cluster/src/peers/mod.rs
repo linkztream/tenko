@@ -27,7 +27,8 @@
 //! `force`, replaces a dead voter in one joint change (`replace`), removes a member (its
 //! certificates are revoked) and hands leadership over before a planned restart
 //! (step-down). Membership changes run on the leader; a follower hands them over
-//! (`Cluster.Change`). Each is an inline job `cluster.edit` with the audit actions
+//! (`Cluster.Change`). A promotion or removal is an inline job `cluster.edit` (step
+//! `cluster.member`) on the controller that took the request. The audit actions are
 //! `cluster.member.join`, `.promote`, `.remove` and `.step_down`.
 //!
 //! The first controller has no node record and keeps its cluster key in the vault. When
@@ -40,17 +41,23 @@ mod network;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     net::SocketAddr,
-    sync::{Arc, Mutex, OnceLock, PoisonError},
+    sync::{Arc, Mutex, OnceLock, PoisonError, Weak},
     time::{Duration, Instant},
 };
 
 use tenko_core::{
-    NodeId, ObjectRef, RequestCtx, Revision, Role, SystemComponent, Timestamp,
+    MessageKey, NodeId, ObjectRef, RequestCtx, Revision, Role, SystemComponent, Timestamp,
     audit::{AuditAction, AuditDraft},
+    codec::{from_cbor, to_cbor},
+    serde_util::HexBytes,
+};
+use tenko_jobs::{
+    JobEngine, JobKind, JobSpec, StepContext, StepError, StepHandler, StepKind, StepOutcome,
+    StepPreview, StepSpec,
 };
 use tenko_store::{
-    KeyRange, MemberStatus, ReadConsistency, ReadViewExt as _, Store as _, StoreError, StoreRole,
-    WriteBatch,
+    KeyRange, MemberStatus, ReadConsistency, ReadView, ReadViewExt as _, Store as _, StoreError,
+    StoreRole, WriteBatch,
     raft::{Membership, RaftStore},
 };
 use tokio::{sync::watch, task::JoinHandle};
@@ -72,7 +79,7 @@ use crate::{
     model::{KekTransferRecord, MemberRecord, NodeRecord, ProtocolState, tables},
     mtls::PeerInfo,
     proto::v1,
-    registry::{NodeRegistry, check_name},
+    registry::{EDIT_JOB, EDIT_TITLE, NodeRegistry, WRITE_PREVIEW, check_name},
     server::{code_of, status_of},
     wire::{self, CLUSTER_WIRE, ChangeEnvelope, ChangeResult, MemberChange, WireCtx},
 };
@@ -163,6 +170,8 @@ struct Inner {
     registry: OnceLock<Arc<NodeRegistry>>,
     identity: OnceLock<Arc<dyn ControllerIdentity>>,
     kek: OnceLock<Arc<dyn KekSource>>,
+    /// The job engine of this controller, once [`Peers::register_steps`] ran.
+    jobs: OnceLock<JobEngine>,
     /// Learners and since when they are caught up (on the leader).
     caught_up: Mutex<HashMap<NodeId, Instant>>,
     /// One membership change at a time on this controller.
@@ -256,6 +265,7 @@ impl Peers {
                 registry: OnceLock::new(),
                 identity: OnceLock::new(),
                 kek: OnceLock::new(),
+                jobs: OnceLock::new(),
                 caught_up: Mutex::new(HashMap::new()),
                 changes: tokio::sync::Mutex::new(()),
             }),
@@ -265,6 +275,53 @@ impl Peers {
     /// The settings.
     pub fn config(&self) -> &PeerConfig {
         &self.inner.config
+    }
+
+    /// Registers the step `cluster.member`: from now on a promotion or removal through
+    /// [`ClusterAdmin`] runs as an inline job `cluster.edit`, whose id the answer carries.
+    pub fn register_steps(&self, engine: &JobEngine) {
+        let mut registered = engine.clone();
+        registered.register(Arc::new(MemberStep {
+            peers: Arc::downgrade(&self.inner),
+        }));
+        let _ = self.inner.jobs.set(engine.clone());
+    }
+
+    /// A promotion or removal, as an inline job `cluster.edit` once the job engine is
+    /// registered: the step hands the change to the leader and records the members after it.
+    async fn change_as_job(
+        &self,
+        cx: &RequestCtx,
+        node: NodeId,
+        change: MemberChange,
+    ) -> Result<ClusterView, ClusterError> {
+        let Some(engine) = self.inner.jobs.get() else {
+            return view_of(self.apply_change(cx, change).await?);
+        };
+        let spec = JobSpec {
+            kind: JobKind::from_static(EDIT_JOB),
+            title: MessageKey::from_static(EDIT_TITLE),
+            targets: vec![ObjectRef::node(node)],
+            steps: vec![StepSpec {
+                kind: StepKind::from_static(MEMBER_STEP),
+                params: HexBytes(to_cbor(&change)?.to_vec()),
+                timeout: None,
+            }],
+            timeout: MEMBER_JOB_TIMEOUT,
+            group: None,
+            group_limit: None,
+            idempotency: None,
+            node: None,
+        };
+        let job = engine.run_inline(spec, cx).await?;
+        let output = job
+            .steps
+            .first()
+            .and_then(|step| step.output.as_ref())
+            .ok_or_else(|| ClusterError::internal("the membership change recorded no members"))?;
+        let mut view: ClusterView = from_cbor(&output.0)?;
+        view.job_id = Some(job.id);
+        Ok(view)
     }
 
     /// The store.
@@ -799,7 +856,6 @@ impl Peers {
         targets: &[NodeId],
         context: Vec<(&'static str, String)>,
     ) -> Result<(), ClusterError> {
-        let registry = Arc::clone(self.registry()?);
         self.store()
             .set_voters(voters.clone(), true)
             .await
@@ -820,18 +876,12 @@ impl Peers {
         for (key, value) in context {
             draft = draft.with_context(key, value);
         }
+        // A plain write: the Raft change cannot commit with it, and a change an
+        // administrator asked for is already the inline job `cluster.edit`.
         let mut batch = WriteBatch::for_request(cx);
         batch.audit(draft);
-        if let Err(error) = registry
-            .commit(
-                cx,
-                format!("{} {}", action.as_str(), list(targets)),
-                targets.iter().copied().map(ObjectRef::node).collect(),
-                batch,
-            )
-            .await
-        {
-            tracing::warn!(code = %error.code(), "a membership change could not be audited: {}", error.detail());
+        if let Err(error) = self.store().propose(batch).await {
+            tracing::warn!(%error, "a membership change could not be audited");
         }
         Ok(())
     }
@@ -997,21 +1047,13 @@ impl Peers {
         } else if !self.member_records().await?.contains_key(&node) {
             return Err(member_not_found(node));
         }
-        let registry = Arc::clone(self.registry()?);
         let mut batch = WriteBatch::for_request(cx);
         batch.delete_typed(&tables::MEMBERS, &node.0);
         batch.audit(
             AuditDraft::success(actions::MEMBER_REMOVE, vec![ObjectRef::node(node)])
                 .with_source_ip(cx.source_ip),
         );
-        registry
-            .commit(
-                cx,
-                format!("controller {node} leaves the cluster"),
-                vec![ObjectRef::node(node)],
-                batch,
-            )
-            .await?;
+        self.store().propose(batch).await?;
         self.forget_member(cx, node).await;
         self.view_local(None).await
     }
@@ -1404,20 +1446,13 @@ impl ClusterAdmin for Peers {
         node: NodeId,
         request: PromoteRequest,
     ) -> Result<ClusterView, ClusterError> {
-        match self
-            .apply_change(cx, MemberChange::Promote { node, request })
-            .await?
-        {
-            ChangeResult::View(view) => Ok(view),
-            ChangeResult::StepDown(_) => Err(ClusterError::internal("unexpected change result")),
-        }
+        self.change_as_job(cx, node, MemberChange::Promote { node, request })
+            .await
     }
 
     async fn remove(&self, cx: &RequestCtx, node: NodeId) -> Result<ClusterView, ClusterError> {
-        match self.apply_change(cx, MemberChange::Remove { node }).await? {
-            ChangeResult::View(view) => Ok(view),
-            ChangeResult::StepDown(_) => Err(ClusterError::internal("unexpected change result")),
-        }
+        self.change_as_job(cx, node, MemberChange::Remove { node })
+            .await
     }
 
     async fn step_down(&self, cx: &RequestCtx) -> Result<StepDown, ClusterError> {
@@ -1540,6 +1575,98 @@ fn hex(bytes: &[u8]) -> String {
             let _ = write!(out, "{byte:02x}");
             out
         })
+}
+
+/// The step of a promotion or removal inside the inline job `cluster.edit`.
+pub const MEMBER_STEP: &str = "cluster.member";
+
+/// How long a membership change as a job may take: a joint change and the catch-up of the
+/// leader's figures.
+const MEMBER_JOB_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The members after a promotion or removal.
+fn view_of(result: ChangeResult) -> Result<ClusterView, ClusterError> {
+    match result {
+        ChangeResult::View(view) => Ok(view),
+        ChangeResult::StepDown(_) => Err(ClusterError::internal("unexpected change result")),
+    }
+}
+
+/// A refusal of the cluster as a step error, with its code and status.
+fn step_error(error: ClusterError) -> StepError {
+    StepError::Coded(Box::new(error.into_coded()))
+}
+
+/// `cluster.member`: hands a promotion or removal ([`MemberChange`]) to the leader and
+/// records the members after it as the step output.
+struct MemberStep {
+    peers: Weak<Inner>,
+}
+
+#[async_trait::async_trait]
+impl StepHandler for MemberStep {
+    fn kind(&self) -> StepKind {
+        StepKind::from_static(MEMBER_STEP)
+    }
+
+    /// Not idempotent: a promotion that happened refuses a second one.
+    fn idempotent(&self) -> bool {
+        false
+    }
+
+    async fn preview(&self, params: &[u8], _view: &dyn ReadView) -> Result<StepPreview, StepError> {
+        let change: MemberChange =
+            from_cbor(params).map_err(|error| StepError::InvalidParams(error.to_string()))?;
+        let (summary, node) = match &change {
+            MemberChange::Promote { node, .. } => (format!("promote controller {node}"), *node),
+            MemberChange::Remove { node } => (format!("remove controller {node}"), *node),
+            MemberChange::StepDown => {
+                return Err(StepError::InvalidParams(
+                    "a step-down is not a job step".to_owned(),
+                ));
+            }
+        };
+        Ok(StepPreview {
+            summary: MessageKey::from_static(WRITE_PREVIEW),
+            args: BTreeMap::from([("summary".to_owned(), summary)]),
+            changes: vec![ObjectRef::node(node)],
+            manual: None,
+            warnings: Vec::new(),
+        })
+    }
+
+    async fn execute(&self, params: &[u8], cx: &StepContext) -> Result<StepOutcome, StepError> {
+        let change: MemberChange =
+            from_cbor(params).map_err(|error| StepError::InvalidParams(error.to_string()))?;
+        if matches!(change, MemberChange::StepDown) {
+            return Err(StepError::InvalidParams(
+                "a step-down is not a job step".to_owned(),
+            ));
+        }
+        let peers = Peers {
+            inner: self.peers.upgrade().ok_or_else(|| step_error(starting()))?,
+        };
+        let view = view_of(
+            peers
+                .apply_change(&cx.request, change)
+                .await
+                .map_err(step_error)?,
+        )
+        .map_err(step_error)?;
+        let output = to_cbor(&view).map_err(|error| step_error(error.into()))?;
+        Ok(StepOutcome::Done {
+            output: Some(output),
+        })
+    }
+
+    async fn compensate(
+        &self,
+        _params: &[u8],
+        _output: Option<&[u8]>,
+        _cx: &StepContext,
+    ) -> Result<(), StepError> {
+        Err(StepError::NotCompensable)
+    }
 }
 
 #[cfg(test)]

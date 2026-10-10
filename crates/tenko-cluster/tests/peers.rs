@@ -84,7 +84,7 @@ struct Member {
     addr: SocketAddr,
     stop: watch::Sender<bool>,
     tasks: Vec<JoinHandle<()>>,
-    _engine: JobEngine,
+    engine: JobEngine,
 }
 
 impl Member {
@@ -135,6 +135,7 @@ async fn start_member(
         .await
         .expect("bind");
     let addr = listener.local_addrs()[0];
+    registry.set_listening(vec![addr]);
     let network = PeerNetwork::new(node, PeerTimings::from_store(store.config()));
     network.set_tls(
         tenko_cluster::mtls::client_config(ca.root_der(), chain.clone(), key)
@@ -146,6 +147,7 @@ async fn start_member(
     let peers = Peers::new(store.clone(), network, config);
     if bookkeeping {
         peers.attach_registry(Arc::clone(&registry));
+        peers.register_steps(&engine);
     }
     peers.attach_identity(identity);
     peers.attach_kek(Arc::new(EchoKek));
@@ -155,6 +157,7 @@ async fn start_member(
     ));
     let (stop, stopped) = watch::channel(false);
     let mut tasks = peers.spawn(stopped.clone());
+    tasks.push(registry.follow_revocations(stopped.clone()));
     tasks.push(
         listener
             .serve_port(
@@ -163,7 +166,10 @@ async fn start_member(
                     resolver,
                     revocations,
                     sessions,
-                    nodes: NodeServices::new(),
+                    nodes: NodeServices::ready(&tenko_cluster::server::ClusterService::new(
+                        Arc::clone(&registry),
+                        Arc::new(tenko_cluster::probe::DiscardProbes),
+                    )),
                     peers: Some(peers.clone()),
                 },
                 stopped,
@@ -178,7 +184,7 @@ async fn start_member(
         addr,
         stop,
         tasks,
-        _engine: engine,
+        engine,
     }
 }
 
@@ -753,6 +759,10 @@ async fn key_transfer_forwarded_changes_and_step_down() {
         .await
         .expect("removal through a follower");
     assert_eq!(view.members.len(), 2);
+    // The removal ran as an inline job on the follower that took the request.
+    let job = view.job_id.expect("the job of the removal");
+    let record = follower.engine.job(job).await.expect("the job is recorded");
+    assert_eq!(record.spec.kind.as_str(), "cluster.edit");
     assert!(
         lab.first
             .registry
@@ -779,4 +789,251 @@ async fn key_transfer_forwarded_changes_and_step_down() {
     drop(read);
     let _ = Path::new(".");
     lab.stop().await;
+}
+
+/// Enrols a probe through the first controller's registry: its id and client credentials.
+async fn enrol_probe(lab: &Lab, name: &str) -> (NodeId, Arc<rustls::ClientConfig>, String) {
+    let (_, token) = lab
+        .first
+        .registry
+        .create_enrolment(&system(), NewEnrolment::default())
+        .await
+        .expect("probe token");
+    let (key, csr) = generate_csr().expect("csr");
+    let probe = lab
+        .first
+        .registry
+        .enrol(
+            &system(),
+            EnrolRequest {
+                token: token.to_text().to_string(),
+                csr: pem_block("CERTIFICATE REQUEST", &csr),
+                name: Some(name.to_owned()),
+                roles: Vec::new(),
+                address: None,
+                version: "0.0.1".to_owned(),
+                majors: vec![1],
+            },
+        )
+        .await
+        .expect("enrol a probe");
+    let chain = rustls::pki_types::CertificateDer::pem_slice_iter(probe.certificate_pem.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        .expect("chain");
+    let config =
+        tenko_cluster::mtls::client_config(lab.ca.root_der(), chain, &key).expect("config");
+    (probe.node.id, config, probe.certificate.info.serial.clone())
+}
+
+/// A revocation made on the leader reaches every member: their TLS verifiers refuse the
+/// node within a moment, and a node that another member enrolled a moment ago is not
+/// refused as unknown. `Hello` names the cluster ports of every controller.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn revocations_and_endpoints_reach_every_member() {
+    let lab = Lab::three(&no_change).await;
+    let (probe, config, serial) = enrol_probe(&lab, "probe-everywhere").await;
+    let second = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != NodeId(1))
+        .expect("another member");
+    let channel = tenko_cluster::client::connect(&second.addr.to_string(), Arc::clone(&config))
+        .await
+        .expect("the probe reaches another member");
+    let mut handshake = v1::handshake_client::HandshakeClient::new(channel);
+    let hello = handshake
+        .hello(v1::HelloRequest {
+            majors: vec![1],
+            version: "0.0.1".to_owned(),
+            roles: vec!["probe".to_owned()],
+            capabilities: Vec::new(),
+        })
+        .await
+        .expect("hello on another member")
+        .into_inner();
+    let mut endpoints = hello.endpoints.clone();
+    endpoints.sort();
+    let mut expected: Vec<String> = lab
+        .members()
+        .iter()
+        .map(|member| member.addr.to_string())
+        .collect();
+    expected.sort();
+    assert_eq!(endpoints, expected);
+    assert_eq!(
+        hello.endpoints[0],
+        second.addr.to_string(),
+        "the answering controller first"
+    );
+
+    lab.first
+        .registry
+        .revoke(&system(), probe)
+        .await
+        .expect("revoke on the first controller");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !second.registry.revocations().is_revoked(&serial) {
+        assert!(
+            Instant::now() < deadline,
+            "the revocation did not reach the other member"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    // In TLS 1.3 the client may finish its side before the alert arrives; the first call
+    // fails then.
+    let answered = async {
+        let channel = tenko_cluster::client::connect(&second.addr.to_string(), config)
+            .await
+            .ok()?;
+        v1::handshake_client::HandshakeClient::new(channel)
+            .hello(v1::HelloRequest {
+                majors: vec![1],
+                version: "0.0.1".to_owned(),
+                roles: vec!["probe".to_owned()],
+                capabilities: Vec::new(),
+            })
+            .await
+            .ok()
+    }
+    .await;
+    assert!(
+        answered.is_none(),
+        "another member still accepts the revoked probe"
+    );
+    lab.stop().await;
+}
+
+/// The connected view: a node connected to another controller of the cluster shows as
+/// connected to that controller; once that controller has left, it does not.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn connections_through_other_controllers_are_shown() {
+    let lab = Lab::three(&no_change).await;
+    let (probe, _, _) = enrol_probe(&lab, "probe-elsewhere").await;
+    let second = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != NodeId(1))
+        .expect("another member");
+    let live = tenko_cluster::model::ConnectionView {
+        since: tenko_core::Timestamp::now(),
+        peer: Some("192.0.2.20:50000".parse().expect("address")),
+        major: 1,
+        version: "0.0.1".to_owned(),
+        last_beat: None,
+        buffered_batches: 0,
+        buffered_bytes: 0,
+        dropped_batches: 0,
+        certificate_not_after: None,
+        controller: Some(second.node()),
+    };
+    second
+        .registry
+        .record_connection(probe, &live)
+        .await
+        .expect("record");
+    let deadline = Instant::now() + WAIT;
+    let view = loop {
+        let view = lab.first.registry.get_node(probe).await.expect("node");
+        if view.connected {
+            break view;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the connection did not replicate"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(
+        view.connection.and_then(|connection| connection.controller),
+        Some(second.node())
+    );
+    // The first controller's own view of the node it does not hold is no session of its
+    // own: clearing there changes nothing, clearing on the holder removes it.
+    lab.first
+        .registry
+        .clear_connection(probe)
+        .await
+        .expect("noop");
+    assert!(
+        lab.first
+            .registry
+            .get_node(probe)
+            .await
+            .expect("node")
+            .connected
+    );
+    second
+        .registry
+        .clear_connection(probe)
+        .await
+        .expect("clear");
+    let deadline = Instant::now() + WAIT;
+    while lab
+        .first
+        .registry
+        .get_node(probe)
+        .await
+        .expect("node")
+        .connected
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the disconnect did not replicate"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    lab.stop().await;
+}
+
+/// The prune as leader-only work carries the leader epoch: with another epoch it changes
+/// nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_fenced_prune_needs_the_current_epoch() {
+    let store = Arc::new(tenko_store::mem::MemStore::default());
+    let vault = tenko_vault::MemVault::with_store(Arc::clone(&store));
+    let ca = InternalCa::load_or_init(store.as_ref(), &vault, &system(), CaPolicy::default())
+        .await
+        .expect("CA");
+    let registry = NodeRegistry::new(
+        store.clone() as Arc<dyn Store>,
+        Arc::new(ca),
+        RegistryConfig::new(NodeId(1)),
+    );
+    assert_eq!(
+        registry
+            .prune_fenced(tenko_core::Timestamp::now(), Some(0))
+            .await
+            .expect("epoch 0 holds before anyone took office"),
+        0
+    );
+    // Nothing to prune is not a write; make one: an expired revocation.
+    let mut batch = tenko_store::WriteBatch::new(
+        tenko_core::Principal::system(SystemComponent::Cluster),
+        tenko_core::Timestamp::now(),
+    );
+    batch
+        .put_typed(
+            &tenko_cluster::model::tables::REVOCATIONS,
+            &"0a".to_owned(),
+            &tenko_cluster::model::Revocation {
+                node: NodeId(1005),
+                revoked_at: "2025-01-01T00:00:00Z".parse().expect("time"),
+                not_after: "2025-02-01T00:00:00Z".parse().expect("time"),
+            },
+        )
+        .expect("revocation");
+    batch.bump(tenko_core::cluster::LEADER_EPOCH);
+    store.propose(batch).await.expect("write");
+    let stale = registry
+        .prune_fenced(tenko_core::Timestamp::now(), Some(0))
+        .await
+        .expect_err("a deposed leader's prune fails");
+    assert_eq!(stale.code(), "sys.store.precondition_failed");
+    assert_eq!(
+        registry
+            .prune_fenced(tenko_core::Timestamp::now(), Some(1))
+            .await
+            .expect("the current epoch prunes"),
+        1
+    );
 }

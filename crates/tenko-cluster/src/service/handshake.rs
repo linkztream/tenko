@@ -41,7 +41,7 @@ impl v1::handshake_server::Handshake for ClusterService {
                     heartbeat_secs: self.registry.config().heartbeat_secs,
                     server_time: Some(timestamp_to_proto(Timestamp::now())),
                     capabilities: Vec::new(),
-                    endpoints: Vec::new(),
+                    endpoints: self.registry.cluster_endpoints().await,
                 }))
             }
             Err(mismatch) => {

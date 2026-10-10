@@ -27,13 +27,14 @@
 //! (`last_seen`, the protocol state, pruning) is written directly.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     net::SocketAddr,
     sync::{Arc, Mutex, OnceLock, PoisonError},
     time::{Duration, Instant},
 };
 
 use arc_swap::ArcSwap;
+use futures::StreamExt as _;
 use rustls::pki_types::{CertificateDer, CertificateSigningRequestDer, pem::PemObject};
 use serde::{Deserialize, Serialize};
 use tenko_core::{
@@ -48,21 +49,25 @@ use tenko_jobs::{
     JobEngine, JobKind, JobSpec, StepContext, StepError, StepHandler, StepKind, StepOutcome,
     StepPreview, StepSpec,
 };
+use tenko_store::WatchFilter;
 use tenko_store::{
     KeyRange, ReadConsistency, ReadView, ReadViewExt, Store, StoreError, WriteBatch,
 };
 use tenko_vault::{SecretPurpose, SecretSpec, Vault, VaultError};
-use tokio::sync::Notify;
+use tokio::{
+    sync::{Notify, watch},
+    task::JoinHandle,
+};
 use uuid::Uuid;
 
 use crate::{
     ca::{CertSource, InternalCa, NodeCert, TlsMaterial},
     error::ClusterError,
     model::{
-        CertificateRef, ClusterHealth, ControllerCertRecord, EnrolRequest, EnrolmentRecord,
-        EnrolmentView, FIRST_ENROLLED_NODE_ID, LAST_SEEN_INTERVAL_SECS, MismatchRecord,
-        NewEnrolment, NodeMismatch, NodeRecord, NodeView, Revocation, TokenUse, tables,
-        valid_address,
+        CertificateRef, ClusterHealth, ConnectionRecord, ConnectionView, ControllerCertRecord,
+        EnrolRequest, EnrolmentRecord, EnrolmentView, FIRST_ENROLLED_NODE_ID,
+        LAST_SEEN_INTERVAL_SECS, MismatchRecord, NewEnrolment, NodeMismatch, NodeRecord, NodeView,
+        Revocation, TokenUse, tables, valid_address,
     },
     mtls::RevocationSet,
     session::Sessions,
@@ -384,9 +389,26 @@ impl NodeRegistry {
     ///
     /// A store error.
     pub async fn prune(&self, now: Timestamp) -> Result<usize, ClusterError> {
+        self.prune_fenced(now, None).await
+    }
+
+    /// [`NodeRegistry::prune`] as leader-only work: the batch carries the leader epoch
+    /// (`tenko_store::fence`), so a deposed leader's prune fails instead of racing.
+    ///
+    /// # Errors
+    ///
+    /// A store error.
+    pub async fn prune_fenced(
+        &self,
+        now: Timestamp,
+        epoch: Option<u64>,
+    ) -> Result<usize, ClusterError> {
         let view = self.store.read(ReadConsistency::Local).await?;
         let ctx = RequestCtx::system(SystemComponent::Cluster);
         let mut batch = WriteBatch::for_request(&ctx);
+        if let Some(epoch) = epoch {
+            batch.preconditions.push(tenko_store::fence(epoch));
+        }
         let mut removed = 0;
         for (serial, revocation, revision) in
             view.scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?
@@ -1039,24 +1061,183 @@ impl NodeRegistry {
     /// A store error.
     pub async fn list_nodes(&self) -> Result<Vec<NodeView>, ClusterError> {
         let view = self.store.read(ReadConsistency::Local).await?;
+        let remote = remote_connections(view.as_ref(), self.config.local_node)?;
         Ok(view
             .scan_typed(&tables::NODES, KeyRange::all(), usize::MAX, false)?
             .into_iter()
             .map(|(_, record, revision)| {
-                let live = self.sessions.view(record.id);
+                let live = self
+                    .sessions
+                    .view(record.id)
+                    .or_else(|| remote.get(&record.id).cloned());
                 NodeView::new(record, revision, live)
             })
             .collect())
     }
 
-    /// One node with its live connection.
+    /// One node with its live connection, to this controller or another one.
     ///
     /// # Errors
     ///
     /// `cluster.node.not_found` (404), or a store error.
     pub async fn get_node(&self, node: NodeId) -> Result<NodeView, ClusterError> {
-        let (record, revision) = self.record(node).await?.ok_or_else(|| not_found(node))?;
-        Ok(NodeView::new(record, revision, self.sessions.view(node)))
+        let view = self.store.read(ReadConsistency::Local).await?;
+        let (record, revision) = view
+            .get_typed(&tables::NODES, &node.0)?
+            .ok_or_else(|| not_found(node))?;
+        let live = match self.sessions.view(node) {
+            Some(live) => Some(live),
+            None => remote_connections(view.as_ref(), self.config.local_node)?.remove(&node),
+        };
+        Ok(NodeView::new(record, revision, live))
+    }
+
+    /// Records that `node` is connected to this controller (written when it connects).
+    ///
+    /// # Errors
+    ///
+    /// A store error.
+    pub async fn record_connection(
+        &self,
+        node: NodeId,
+        live: &ConnectionView,
+    ) -> Result<(), ClusterError> {
+        let mut ctx = RequestCtx::system(SystemComponent::Cluster);
+        ctx.now = live.since;
+        let mut batch = WriteBatch::for_request(&ctx);
+        batch.put_typed(
+            &tables::CONNECTIONS,
+            &node.0,
+            &ConnectionRecord {
+                controller: self.config.local_node,
+                since: live.since,
+                peer: live.peer,
+                version: live.version.clone(),
+                major: live.major,
+            },
+        )?;
+        self.store.propose(batch).await?;
+        Ok(())
+    }
+
+    /// Removes the connection record of `node` while it names this controller (written
+    /// when the node disconnects; a newer connection to another controller stays).
+    ///
+    /// # Errors
+    ///
+    /// A store error.
+    pub async fn clear_connection(&self, node: NodeId) -> Result<(), ClusterError> {
+        let view = self.store.read(ReadConsistency::Local).await?;
+        let Some((record, revision)) = view.get_typed(&tables::CONNECTIONS, &node.0)? else {
+            return Ok(());
+        };
+        drop(view);
+        if record.controller != self.config.local_node {
+            return Ok(());
+        }
+        let ctx = RequestCtx::system(SystemComponent::Cluster);
+        let mut batch = WriteBatch::for_request(&ctx);
+        batch.expect_typed(&tables::CONNECTIONS, &node.0, Some(revision));
+        batch.delete_typed(&tables::CONNECTIONS, &node.0);
+        match self.store.propose(batch).await {
+            Ok(_) | Err(StoreError::PreconditionFailed(_)) => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Removes every connection record that names this controller: the connections of a
+    /// previous run (call at start, before the cluster port serves nodes).
+    ///
+    /// # Errors
+    ///
+    /// A store error.
+    pub async fn clear_own_connections(&self) -> Result<usize, ClusterError> {
+        let view = self.store.read(ReadConsistency::Local).await?;
+        let ctx = RequestCtx::system(SystemComponent::Cluster);
+        let mut batch = WriteBatch::for_request(&ctx);
+        let mut removed = 0;
+        for (node, record, revision) in
+            view.scan_typed(&tables::CONNECTIONS, KeyRange::all(), usize::MAX, false)?
+        {
+            if record.controller == self.config.local_node {
+                batch.expect_typed(&tables::CONNECTIONS, &node, Some(revision));
+                batch.delete_typed(&tables::CONNECTIONS, &node);
+                removed += 1;
+            }
+        }
+        drop(view);
+        if removed > 0 {
+            match self.store.propose(batch).await {
+                Ok(_) | Err(StoreError::PreconditionFailed(_)) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(removed)
+    }
+
+    /// Follows `cluster.revocations` until `stop` turns true: every revocation, made on
+    /// this controller or another one, reaches the TLS verifier's set, and the connections
+    /// of a revoked node close, within a moment of its replication.
+    pub fn follow_revocations(self: &Arc<Self>, mut stop: watch::Receiver<bool>) -> JoinHandle<()> {
+        let registry = Arc::clone(self);
+        tokio::spawn(async move {
+            let filter = WatchFilter::tables([tables::REVOCATIONS.name().clone()]);
+            let mut known: HashSet<String> = HashSet::new();
+            if let Err(error) = registry.apply_revocations(&mut known).await {
+                tracing::debug!(code = %error.code(), "revocations: {}", error.detail());
+            }
+            loop {
+                let Ok(mut changes) = registry.store.watch(None, filter.clone()) else {
+                    tokio::select! {
+                        () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
+                        () = tokio::time::sleep(Duration::from_secs(1)) => continue,
+                    }
+                };
+                loop {
+                    tokio::select! {
+                        () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
+                        change = changes.next() => {
+                            let following = matches!(change, Some(Ok(_)));
+                            if let Err(error) = registry.apply_revocations(&mut known).await {
+                                tracing::warn!(code = %error.code(), "revocations could not be read: {}", error.detail());
+                            }
+                            // Lagged or compacted: everything was read again; a new stream
+                            // follows from here.
+                            if !following {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    /// Reloads the revocation set and closes the connections of nodes revoked since
+    /// `known`.
+    async fn apply_revocations(&self, known: &mut HashSet<String>) -> Result<(), ClusterError> {
+        let view = self.store.read(ReadConsistency::Local).await?;
+        let rows = view.scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?;
+        drop(view);
+        let fresh: BTreeSet<NodeId> = rows
+            .iter()
+            .filter(|(serial, _, _)| !known.contains(serial))
+            .map(|(_, revocation, _)| revocation.node)
+            .collect();
+        let serials: HashSet<String> = rows.into_iter().map(|(serial, _, _)| serial).collect();
+        self.revoked.replace(serials.iter().cloned());
+        let first = known.is_empty();
+        *known = serials;
+        if !first {
+            let now = Timestamp::now();
+            for node in fresh {
+                if self.sessions.connection_count(node) > 0 {
+                    tracing::warn!(node = %node, "closing the connections of a node revoked on another controller");
+                }
+                self.sessions.revoke(node, now);
+            }
+        }
+        Ok(())
     }
 
     /// The record of `node` for an edit: as this node has applied it on the first attempt,
@@ -1247,11 +1428,21 @@ impl NodeRegistry {
         serial: &str,
         now: Timestamp,
     ) -> Result<NodeRecord, ClusterError> {
-        let (record, _) = self.record(node).await?.ok_or_else(|| {
+        let local = self.record(node).await?;
+        let record = match local {
+            Some(record) => Some(record),
+            // Enrolled through another controller a moment ago: ask the leader before
+            // refusing.
+            None => match self.store.read(ReadConsistency::Linearizable).await {
+                Ok(view) => view.get_typed(&tables::NODES, &node.0)?,
+                Err(_) => None,
+            },
+        };
+        let (record, _) = record.ok_or_else(|| {
             ClusterError::new(
                 "cluster.node.unknown",
                 403,
-                format!("node {node} is not enrolled with this controller"),
+                format!("node {node} is not enrolled in this installation"),
             )
         })?;
         if !record.holds(serial, now) {
@@ -1441,6 +1632,29 @@ impl NodeRegistry {
         self.config.advertise.clone()
     }
 
+    /// The cluster ports of every controller of the cluster (`host:port`, from the member
+    /// records): what a node's `Hello` answer lists so that it can reach another controller
+    /// when this one is down. Empty on a single controller.
+    pub async fn cluster_endpoints(&self) -> Vec<String> {
+        let Ok(view) = self.store.read(ReadConsistency::Local).await else {
+            return Vec::new();
+        };
+        let Ok(members) = view.scan_typed(&tables::MEMBERS, KeyRange::all(), usize::MAX, false)
+        else {
+            return Vec::new();
+        };
+        let mut endpoints: Vec<String> = members
+            .into_iter()
+            .map(|(_, member, _)| member.address)
+            .filter(|address| !address.is_empty())
+            .collect();
+        // The answering controller first.
+        if let Some(position) = members_position(&endpoints, &self.listening()) {
+            endpoints.swap(0, position);
+        }
+        endpoints
+    }
+
     /// The cluster port: the first listening address, else the configured default.
     pub fn cluster_port(&self) -> u16 {
         self.listening()
@@ -1495,6 +1709,116 @@ impl NodeRegistry {
         let job = engine.run_inline(spec, cx).await?;
         Ok(job.revision)
     }
+}
+
+/// The connections that other controllers of the cluster hold, from their records: a record
+/// whose controller is no longer a member (no member record) counts as disconnected.
+fn remote_connections(
+    view: &dyn ReadView,
+    local: NodeId,
+) -> Result<HashMap<NodeId, ConnectionView>, ClusterError> {
+    let members: HashSet<u64> = view
+        .scan_typed(&tables::MEMBERS, KeyRange::all(), usize::MAX, false)?
+        .into_iter()
+        .map(|(node, _, _)| node)
+        .collect();
+    Ok(view
+        .scan_typed(&tables::CONNECTIONS, KeyRange::all(), usize::MAX, false)?
+        .into_iter()
+        .filter(|(_, record, _)| {
+            record.controller != local && members.contains(&record.controller.0)
+        })
+        .map(|(node, record, _)| {
+            (
+                NodeId(node),
+                ConnectionView {
+                    since: record.since,
+                    peer: record.peer,
+                    major: record.major,
+                    version: record.version,
+                    last_beat: None,
+                    buffered_batches: 0,
+                    buffered_bytes: 0,
+                    dropped_batches: 0,
+                    certificate_not_after: None,
+                    controller: Some(record.controller),
+                },
+            )
+        })
+        .collect())
+}
+
+/// The hourly prune of expired revocations and old enrolment tokens as leader-only work
+/// (`tenko_core::cluster::LeaderService`, name `cluster.prune`): every prune carries the
+/// leader epoch.
+pub struct PruneService {
+    registry: Arc<NodeRegistry>,
+    every: Duration,
+}
+
+impl std::fmt::Debug for PruneService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PruneService")
+            .field("every", &self.every)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PruneService {
+    /// The prune of `registry`, once an hour.
+    pub fn new(registry: Arc<NodeRegistry>) -> Self {
+        Self {
+            registry,
+            every: Duration::from_secs(3600),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl tenko_core::cluster::LeaderService for PruneService {
+    fn name(&self) -> &'static str {
+        "cluster.prune"
+    }
+
+    async fn run(
+        &self,
+        epoch: u64,
+        stop: tokio_util::sync::CancellationToken,
+    ) -> Result<(), String> {
+        let mut tick = tokio::time::interval(self.every);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                () = stop.cancelled() => return Ok(()),
+                _ = tick.tick() => {}
+            }
+            match self
+                .registry
+                .prune_fenced(Timestamp::now(), Some(epoch))
+                .await
+            {
+                Ok(0) => {}
+                Ok(count) => tracing::info!(
+                    count,
+                    "expired revocations and old enrolment tokens removed"
+                ),
+                Err(error) if error.code() == PRECONDITION_FAILED => {
+                    return Err("another controller took office".to_owned());
+                }
+                Err(error) => tracing::warn!(code = %error.code(), "{}", error.detail()),
+            }
+        }
+    }
+}
+
+/// The position of the endpoint that names one of `listening` (by port), if any.
+fn members_position(endpoints: &[String], listening: &[SocketAddr]) -> Option<usize> {
+    endpoints.iter().position(|endpoint| {
+        endpoint
+            .rsplit_once(':')
+            .and_then(|(_, port)| port.parse::<u16>().ok())
+            .is_some_and(|port| listening.iter().any(|addr| addr.port() == port))
+    })
 }
 
 fn role_list(roles: &[Role]) -> String {

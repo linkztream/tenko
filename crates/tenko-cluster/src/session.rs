@@ -219,6 +219,7 @@ mod tests {
             buffered_bytes: 0,
             dropped_batches: 0,
             certificate_not_after: None,
+            controller: None,
         }
     }
 

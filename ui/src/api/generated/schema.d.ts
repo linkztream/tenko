@@ -3414,6 +3414,12 @@ export interface components {
             certificate_not_after?: components["schemas"]["Timestamp"] | null;
             /**
              * Format: int64
+             * @description The controller the node is connected to; heartbeat figures are known only to that
+             *     controller.
+             */
+            controller?: number | null;
+            /**
+             * Format: int64
              * @description Batches the node dropped since it started because its buffer was full.
              */
             dropped_batches: number;
@@ -6013,7 +6019,10 @@ export interface components {
             address?: string | null;
             /** @description The newest certificate. */
             certificate: components["schemas"]["CertificateRef"];
-            /** @description Whether the node is connected to this controller now. */
+            /**
+             * @description Whether the node is connected to a controller of the cluster now (this one or
+             *     another; `connection.controller` names it).
+             */
             connected: boolean;
             connection?: components["schemas"]["ConnectionView"] | null;
             /** @description When the node enrolled. */
@@ -6703,7 +6712,10 @@ export interface components {
                 address?: string | null;
                 /** @description The newest certificate. */
                 certificate: components["schemas"]["CertificateRef"];
-                /** @description Whether the node is connected to this controller now. */
+                /**
+                 * @description Whether the node is connected to a controller of the cluster now (this one or
+                 *     another; `connection.controller` names it).
+                 */
                 connected: boolean;
                 connection?: components["schemas"]["ConnectionView"] | null;
                 /** @description When the node enrolled. */

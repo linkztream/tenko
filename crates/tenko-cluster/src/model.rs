@@ -11,6 +11,7 @@
 //! | `cluster.controller_certs` | node id | [`ControllerCertRecord`] |
 //! | `cluster.members` | node id | [`MemberRecord`]: a controller of the Raft group and its cluster port |
 //! | `cluster.kek_transfers` | enrolment token id | [`KekTransferRecord`]: the one key transfer a join token allows |
+//! | `cluster.connections` | node id | [`ConnectionRecord`]: the controller a node is connected to |
 //!
 //! Heartbeats are kept in memory; `last_seen` is written at connect, at disconnect and at
 //! most every [`LAST_SEEN_INTERVAL_SECS`] seconds in between, so a quiet cluster does not
@@ -36,8 +37,8 @@ pub const LAST_SEEN_INTERVAL_SECS: u64 = 300;
 /// The store tables of the node registry.
 pub mod tables {
     use super::{
-        ControllerCertRecord, EnrolmentRecord, KekTransferRecord, MemberRecord, NodeRecord,
-        Revocation, TableDef, Uuid,
+        ConnectionRecord, ControllerCertRecord, EnrolmentRecord, KekTransferRecord, MemberRecord,
+        NodeRecord, Revocation, TableDef, Uuid,
     };
 
     /// Enrolled nodes by id.
@@ -59,6 +60,9 @@ pub mod tables {
     /// Key transfers to joining controllers by the id of the enrolment token they used.
     pub const KEK_TRANSFERS: TableDef<Uuid, KekTransferRecord> =
         TableDef::new("cluster.kek_transfers");
+    /// The controller each connected node is connected to, written when the node connects
+    /// and disconnects, so every controller shows the same connected view.
+    pub const CONNECTIONS: TableDef<u64, ConnectionRecord> = TableDef::new("cluster.connections");
 }
 
 /// The first id handed to an enrolled node. Controllers take theirs from `[node] id`
@@ -248,6 +252,22 @@ pub struct MemberRecord {
     pub joined_at: Timestamp,
 }
 
+/// The controller a node is connected to (written at connect, removed at disconnect by the
+/// same controller).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConnectionRecord {
+    /// The controller that holds the connection.
+    pub controller: NodeId,
+    /// When the heartbeat stream opened.
+    pub since: Timestamp,
+    /// The node's address as that controller sees it.
+    pub peer: Option<SocketAddr>,
+    /// The software version the node reported.
+    pub version: String,
+    /// The agreed protocol major.
+    pub major: u32,
+}
+
 /// The key transfer a joining controller received with its enrolment token (single use).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KekTransferRecord {
@@ -293,7 +313,8 @@ pub struct NodeView {
     pub version: Option<String>,
     /// Protocol negotiation, with the last refused handshake.
     pub protocol: ProtocolState,
-    /// Whether the node is connected to this controller now.
+    /// Whether the node is connected to a controller of the cluster now (this one or
+    /// another; `connection.controller` names it).
     pub connected: bool,
     /// The live connection, while there is one.
     pub connection: Option<ConnectionView>,
@@ -361,6 +382,11 @@ pub struct ConnectionView {
     pub dropped_batches: u64,
     /// When the node's certificate expires, as the node reports it.
     pub certificate_not_after: Option<Timestamp>,
+    /// The controller the node is connected to; heartbeat figures are known only to that
+    /// controller.
+    #[serde(default)]
+    #[schema(value_type = Option<u64>)]
+    pub controller: Option<NodeId>,
 }
 
 /// An enrolment token as `GET /nodes/enrolments` shows it (never the secret).

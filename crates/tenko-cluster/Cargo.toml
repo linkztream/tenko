@@ -33,6 +33,8 @@ tenko-vault = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
+# The cancellation token of leader-only services (`tenko_core::cluster::LeaderService`).
+tokio-util = { workspace = true }
 # Mutual TLS of the node transport (same version and features as tenko-api).
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "logging", "tls12"] }
 tonic = { workspace = true }

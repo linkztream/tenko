@@ -79,6 +79,12 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - `tenko kek rotate` rotates the `file` key provider too, keeping new generations in the data directory, wrapped under the key file.
 - API tokens can carry grants and scopes (`POST /auth/tokens`): a scoped token reaches only the metrics or the audit log, or the objects within the grants of its owner. The scoped views of the API follow.
 - The installation's default language is set with `PUT /settings/default-language`.
+- Controllers of a cluster apply a revocation made on any of them within a second, look up nodes enrolled through another controller via the leader, and show the same connected view of the nodes (`connection.controller`) everywhere.
+- `Hello` answers with the cluster ports of every controller (`endpoints`).
+- Every change of a controller's quorum state is a `cluster.quorum` event.
+- A member renews its cluster certificate under `<data_dir>/node/` by the rule nodes use.
+- Promoting or removing a controller is an inline job `cluster.edit` (step `cluster.member`), and the answer carries `job_id`.
+- New fuzz target `raft_payloads` with a seed corpus.
 
 ### Changed
 
@@ -93,6 +99,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - The data-directory format is 2. The first start of this version migrates the data directory (after the usual copy), and earlier versions refuse it afterwards; to go back, restore the copy taken before the migration.
 - `tenko kek rotate` refuses to run on a member of a cluster.
 - A user may hold no global role at all: grants within a scope can be their only access.
+- The prune of the node registry runs on the leader only (`cluster.prune`).
 
 ### Fixed
 
