@@ -10,6 +10,11 @@
 //! handed to openraft in queue order (`client_write_ff`), and the state machine applies the
 //! batches of an entry in order, each against its own preconditions; the answer for each
 //! batch goes back to its own proposer.
+//!
+//! When openraft refuses an entry because this node no longer leads, every proposer of the
+//! entry learns it as [`Refused::NotLeader`]: nothing was appended, so the store forwards
+//! the batch to the new leader. A hand-over of leadership holds the coalescer
+//! ([`Hold`]) so that no entry refreshes the followers' leader lease meanwhile.
 
 use std::sync::Arc;
 
@@ -20,11 +25,23 @@ use openraft::raft::ClientWriteResult;
 use super::types::{BatchOutcome, Proposal, ProposedBatch, Raft, TypeConfig};
 use crate::api::{CoalescerConfig, Committed, StoreError};
 
+/// Why the coalescer did not commit a batch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Refused {
+    /// This node does not lead: the batch was not appended.
+    NotLeader,
+    /// The batch failed (preconditions, idempotency, ...) or the store stopped.
+    Store(StoreError),
+}
+
 /// A batch waiting for an entry, with the channel its proposer waits on.
 pub(crate) struct Queued {
     pub(crate) batch: ProposedBatch,
-    pub(crate) reply: oneshot::Sender<Result<Committed, StoreError>>,
+    pub(crate) reply: oneshot::Sender<Result<Committed, Refused>>,
 }
+
+/// Holds the coalescer: while a writer holds it, no entry goes to openraft.
+pub(crate) type Hold = Arc<tokio::sync::RwLock<()>>;
 
 /// Counters of the coalescer.
 #[derive(Debug, Default)]
@@ -40,8 +57,9 @@ pub(crate) fn spawn(
     journal: (u64, u64),
     queue: mpsc::Receiver<Queued>,
     stats: Arc<CoalescerStats>,
+    hold: Hold,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(run(raft, config, journal, queue, stats))
+    tokio::spawn(run(raft, config, journal, queue, stats, hold))
 }
 
 async fn run(
@@ -50,6 +68,7 @@ async fn run(
     (journal_retention, journal_max_bytes): (u64, u64),
     mut queue: mpsc::Receiver<Queued>,
     stats: Arc<CoalescerStats>,
+    hold: Hold,
 ) {
     let inflight = Arc::new(Semaphore::new(config.max_inflight_entries.max(1)));
     let max_batches = config.max_batches_per_entry.max(1);
@@ -63,9 +82,10 @@ async fn run(
             },
         };
         let Ok(permit) = Arc::clone(&inflight).acquire_owned().await else {
-            fail(vec![first], &StoreError::ShuttingDown);
+            fail(vec![first], &Refused::Store(StoreError::ShuttingDown));
             return;
         };
+        let not_held = hold.read().await;
         // Whatever arrived while the permit was awaited joins this entry.
         let mut bytes = first.batch.batch.len();
         let mut entry = vec![first];
@@ -100,10 +120,11 @@ async fn run(
         };
         let Ok(response) = raft.client_write_ff(proposal).await else {
             for reply in replies {
-                let _ = reply.send(Err(StoreError::ShuttingDown));
+                let _ = reply.send(Err(Refused::Store(StoreError::ShuttingDown)));
             }
             return;
         };
+        drop(not_held);
         tokio::spawn(answer(response, replies, permit));
     }
 }
@@ -111,7 +132,7 @@ async fn run(
 /// Waits for an entry's response and answers each proposer.
 async fn answer<E>(
     response: impl Future<Output = Result<ClientWriteResult<TypeConfig>, E>>,
-    replies: Vec<oneshot::Sender<Result<Committed, StoreError>>>,
+    replies: Vec<oneshot::Sender<Result<Committed, Refused>>>,
     permit: OwnedSemaphorePermit,
 ) {
     let result = response.await;
@@ -127,41 +148,39 @@ async fn answer<E>(
         }
         Err(_) => {
             for reply in replies {
-                let _ = reply.send(Err(StoreError::ShuttingDown));
+                let _ = reply.send(Err(Refused::Store(StoreError::ShuttingDown)));
             }
             return;
         }
     };
     if outcomes.len() != replies.len() {
-        let error = StoreError::Storage(format!(
+        let error = Refused::Store(StoreError::Storage(format!(
             "the state machine answered {} of {} batches",
             outcomes.len(),
             replies.len()
-        ));
+        )));
         for reply in replies {
             let _ = reply.send(Err(error.clone()));
         }
         return;
     }
     for (outcome, reply) in outcomes.into_iter().zip(replies) {
-        let _ = reply.send(BatchOutcome::into_result(outcome));
+        let _ = reply.send(BatchOutcome::into_result(outcome).map_err(Refused::Store));
     }
 }
 
-/// Maps a client write error. Without write forwarding (Slice 3) a follower cannot accept
-/// writes, which callers see as no quorum on this node.
-fn map_write_error(
-    error: &openraft::error::ClientWriteError<u64, openraft::BasicNode>,
-) -> StoreError {
+/// Maps a client write error: a refusal because another node leads proves that nothing was
+/// appended (the store forwards the batch).
+fn map_write_error(error: &openraft::error::ClientWriteError<u64, openraft::BasicNode>) -> Refused {
     match error {
-        openraft::error::ClientWriteError::ForwardToLeader(_) => StoreError::NoQuorum,
+        openraft::error::ClientWriteError::ForwardToLeader(_) => Refused::NotLeader,
         openraft::error::ClientWriteError::ChangeMembershipError(error) => {
-            StoreError::Storage(error.to_string())
+            Refused::Store(StoreError::Storage(error.to_string()))
         }
     }
 }
 
-fn fail(queued: Vec<Queued>, error: &StoreError) {
+fn fail(queued: Vec<Queued>, error: &Refused) {
     for queued in queued {
         let _ = queued.reply.send(Err(error.clone()));
     }

@@ -67,15 +67,28 @@
 //! whole state: about 4 s for 1,000,000 records in M6); reads continue. The measured effect is
 //! in `bench/phase1-store/results/2026-10-09-windows.md` (M6).
 //!
-//! # Cluster readiness
+//! # Clusters
 //!
-//! A store with `bootstrap` set initializes a single-voter cluster on first start (Slice 1).
-//! The node id, membership changes ([`RaftStore::add_learner`],
-//! [`RaftStore::change_membership`]) and the transport ([`network::PeerTransport`],
-//! with [`network::InProcessNetwork`] for tests) are in place for Slice 3, which adds the
-//! mTLS transport and write forwarding; until then a follower answers proposals with
-//! [`StoreError::NoQuorum`].
+//! A store with `bootstrap` set initializes a single-voter cluster on first start and
+//! waits for its own leadership at every start while it is the only voter. A member of a
+//! cluster of several voters opens without waiting: its leader is elected once the peer
+//! transport is up ([`RaftStore::set_transport`]), which `tenko serve` does in its cluster
+//! step. A store directory that `tenko cluster join` prepared carries the marker
+//! [`JOINING_MARKER`] until the join completed, and is never initialized as a cluster of
+//! its own. The directory remembers its node id ([`NODE_ID_FILE`]) and refuses to open
+//! under another one, so two members can never share a Raft id.
+//!
+//! Membership changes ([`RaftStore::add_learner`], [`RaftStore::change_membership`]) go
+//! through the leader. A follower forwards its writes to the leader over the transport's
+//! leader link ([`network::LeaderLink`]) and returns once it has applied the commit
+//! itself, so a write is readable on the member that served it at once (read-your-writes);
+//! a forward goes to another leader only when the answer proves that nothing was queued. A
+//! linearizable read on a follower asks the leader for a read index and waits until it has
+//! applied that far. [`StoreStatus::quorum`] reports whether this member is in contact with
+//! a quorum, and [`RaftStore::digest`] hashes the whole state to compare members.
 
+#[cfg(feature = "testing")]
+pub mod fixture;
 pub mod fsync;
 pub mod log;
 pub mod network;
@@ -94,7 +107,7 @@ mod watch;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs, io,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex, PoisonError, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -102,8 +115,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-use openraft::{BasicNode, ServerState, error::Fatal};
-use tenko_core::{NodeId, Revision, codec::to_cbor};
+use bytes::Bytes;
+use openraft::{
+    BasicNode, ServerState,
+    error::{CheckIsLeaderError, Fatal, RaftError},
+};
+use tenko_core::{
+    NodeId, Revision,
+    audit::Digest,
+    codec::{from_cbor, to_cbor},
+};
 use tokio::{
     io::AsyncWriteExt as _,
     sync::{mpsc, oneshot},
@@ -111,18 +132,83 @@ use tokio::{
 };
 
 use self::{
-    coalescer::{CoalescerStats, Queued},
+    coalescer::{CoalescerStats, Hold, Queued, Refused},
     fsync::FsyncProbe,
     leadership::LeadershipState,
     log::LogStore,
-    network::{NetworkFactory, NoPeers, PeerTransport},
+    network::{
+        ContactBook, ForwardError, LeaderLink as _, NetworkFactory, NoPeers, PeerTransport,
+        ReadIndex, SwitchTransport,
+    },
     sm::{SmOptions, StateMachine},
     types::{ProposedBatch, Raft, RaftNodeId, Snapshot, SnapshotFile, SnapshotMeta, Vote},
 };
 use crate::api::{
-    ChangeStream, CoalescerConfig, Committed, DerivedIndex, Leadership, ReadConsistency, ReadView,
-    Store, StoreError, StoreRole, StoreStatus, WatchFilter, WriteBatch,
+    ChangeStream, CoalescerConfig, Committed, DerivedIndex, Leadership, QuorumState,
+    ReadConsistency, ReadView, Store, StoreError, StoreRole, StoreStatus, WatchFilter, WriteBatch,
 };
+
+/// openraft 0.9 as the store uses it: a peer transport (`tenko-cluster`) takes the wire
+/// types from here, so both sides always agree on the version.
+pub use openraft;
+
+/// The file in a store directory that marks a pending `tenko cluster join`: such a
+/// directory is never initialized as a cluster of its own.
+pub const JOINING_MARKER: &str = "joining";
+/// The file in a store directory that holds the node id the directory belongs to.
+pub const NODE_ID_FILE: &str = "node-id";
+
+/// Marks `dir` (a store directory) as joining a cluster; creates the directory.
+///
+/// # Errors
+///
+/// The I/O error.
+pub fn mark_joining(dir: &Path) -> io::Result<()> {
+    fs::create_dir_all(dir)?;
+    fs::write(dir.join(JOINING_MARKER), b"tenko cluster join\n")
+}
+
+/// Removes the join marker of `dir` (the join completed).
+///
+/// # Errors
+///
+/// The I/O error, except for a marker that is not there.
+pub fn clear_joining(dir: &Path) -> io::Result<()> {
+    match fs::remove_file(dir.join(JOINING_MARKER)) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
+/// Whether `dir` (a store directory) carries the join marker.
+pub fn is_joining(dir: &Path) -> bool {
+    dir.join(JOINING_MARKER).exists()
+}
+
+/// A SHA-256 over every store table at one revision ([`RaftStore::digest`]): equal on two
+/// members exactly when their states are equal at that revision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StateDigest {
+    /// The revision the digest covers.
+    pub revision: Revision,
+    /// The SHA-256.
+    pub sha256: [u8; 32],
+    /// Non-empty tables in the digest.
+    pub tables: u64,
+    /// Rows in the digest.
+    pub entries: u64,
+}
+
+/// The members of the Raft group as this node knows them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Membership {
+    /// The voters.
+    pub voters: BTreeSet<NodeId>,
+    /// The learners (replicating, not voting).
+    pub learners: BTreeSet<NodeId>,
+    /// Whether a membership change is in progress (joint consensus).
+    pub changing: bool,
+}
 
 /// When `sm.redb` makes its commits durable. The Raft log is fsynced before an entry
 /// commits in either case, so a crash never loses a committed write: the entries after the
@@ -209,6 +295,12 @@ pub struct RaftStoreConfig {
     pub read_wait: Duration,
     /// How long `propose` waits for its entry to apply.
     pub write_timeout: Duration,
+    /// How long `propose` and a linearizable read look for a leader that takes them (an
+    /// election, an unreachable leader) before they fail with [`StoreError::NoQuorum`].
+    pub leader_wait: Duration,
+    /// Contact with a quorum may lapse this long before the member counts as isolated
+    /// (`[cluster] isolation_after_ms`; see [`StoreStatus::quorum`]).
+    pub isolation_after: Duration,
     /// redb page cache of `log.redb` (home profile default 4 MiB, OPS-15).
     pub log_cache_bytes: usize,
     /// redb page cache of `sm.redb` (home profile default 32 MiB, OPS-15).
@@ -241,6 +333,8 @@ impl RaftStoreConfig {
             watch_max_lag: 10_000,
             read_wait: Duration::from_secs(5),
             write_timeout: Duration::from_secs(60),
+            leader_wait: Duration::from_secs(5),
+            isolation_after: Duration::from_secs(3),
             log_cache_bytes: 4 * 1024 * 1024,
             sm_cache_bytes: 32 * 1024 * 1024,
             durability: SmDurability::Deferred {
@@ -366,6 +460,12 @@ impl WeakRaftStore {
 struct Inner {
     config: RaftStoreConfig,
     raft: Raft,
+    /// The peer transport, replaceable while the store runs.
+    transport: Arc<SwitchTransport>,
+    /// When each peer last answered this node's replication requests.
+    contacts: Arc<ContactBook>,
+    /// Held by a hand-over of leadership: no entry goes to openraft meanwhile.
+    hold: Hold,
     sm: StateMachine,
     log: LogStore,
     queue: Mutex<Option<mpsc::Sender<Queued>>>,
@@ -411,6 +511,7 @@ pub enum SnapshotInstallError {
 /// [`network::PeerTransport::full_snapshot`]).
 pub struct SnapshotReceiver {
     raft: Raft,
+    leadership: Arc<LeadershipState>,
     path: PathBuf,
     file: Option<tokio::io::BufWriter<tokio::fs::File>>,
 }
@@ -459,6 +560,9 @@ impl SnapshotReceiver {
             }),
         };
         let result = self.raft.install_full_snapshot(vote, snapshot).await;
+        if result.is_ok() {
+            self.leadership.heard_from_leader();
+        }
         // Installed snapshots are renamed; a rejected one is left behind as a `.part` file.
         let _ = fs::remove_file(&self.path);
         result.map_err(|fatal| SnapshotInstallError::Fatal(Box::new(fatal)))
@@ -577,6 +681,10 @@ impl RaftStore {
         Self::open_inner(config, transport, None).await
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the opening sequence reads best as one function"
+    )]
     async fn open_inner(
         config: RaftStoreConfig,
         transport: Arc<dyn PeerTransport>,
@@ -584,6 +692,7 @@ impl RaftStore {
     ) -> Result<Self, StoreError> {
         let dir = config.data_dir.clone();
         fs::create_dir_all(&dir).map_err(|error| open_error("data directory", error))?;
+        check_node_id(&dir, config.node_id)?;
         let samples = config.fsync_probe_samples;
         let fsync = if samples == 0 {
             None
@@ -613,18 +722,37 @@ impl RaftStore {
 
         let raft_config = Arc::new(raft_config(&config)?);
         let node = config.node_id.0;
+        let reaches_peers = transport.reaches_peers();
+        let transport = Arc::new(SwitchTransport::new(transport));
+        let contacts = Arc::new(ContactBook::default());
         let raft = Raft::new(
             node,
             raft_config,
-            NetworkFactory { transport },
+            NetworkFactory {
+                transport: Arc::clone(&transport) as Arc<dyn PeerTransport>,
+                contacts: Arc::clone(&contacts),
+            },
             log.clone(),
             sm.clone(),
         )
         .await
         .map_err(|error| open_error("Raft start", error))?;
 
-        if config.bootstrap {
-            bootstrap(&raft, node, &config.address).await?;
+        let member = raft
+            .is_initialized()
+            .await
+            .map_err(|error| open_error("Raft state", error))?
+            && !sole_voter(&raft, node);
+        if member && !reaches_peers {
+            // A member of a cluster without its peer transport yet: an election could only
+            // raise the term. `set_transport` turns elections on.
+            raft.runtime_config().elect(false);
+        }
+        if config.bootstrap
+            && let Err(error) = bootstrap(&raft, node, &config.address, is_joining(&dir)).await
+        {
+            release(raft, &log, &sm).await;
+            return Err(error);
         }
 
         let (queue, receiver) = mpsc::channel(4_096);
@@ -633,16 +761,22 @@ impl RaftStore {
             u64::try_from(config.journal_retention.max(1)).unwrap_or(u64::MAX),
             config.journal_max_bytes,
         );
+        let hold: Hold = Arc::new(tokio::sync::RwLock::new(()));
         let coalescer = coalescer::spawn(
             raft.clone(),
             config.coalescer,
             retention,
             receiver,
             Arc::clone(&coalescer_stats),
+            Arc::clone(&hold),
         );
+        let isolation_after = config.isolation_after;
         let inner = Arc::new(Inner {
             config,
             raft,
+            transport,
+            contacts,
+            hold,
             sm,
             log,
             queue: Mutex::new(Some(queue)),
@@ -655,16 +789,21 @@ impl RaftStore {
             snapshot_bytes: AtomicU64::new(0),
             at_open,
             coalescer: coalescer_stats,
-            leadership: Arc::new(LeadershipState::new()),
+            leadership: Arc::new(LeadershipState::new(isolation_after)),
             tasks: Mutex::new(vec![coalescer]),
             temp_dir,
         });
         inner.refresh_sizes();
         let maintenance = tokio::spawn(maintain(Arc::downgrade(&inner)));
+        let applied = {
+            let sm = inner.sm.clone();
+            move || sm.meta().revision
+        };
         let leadership = tokio::spawn(leadership::follow(
             inner.raft.metrics(),
             Arc::clone(&inner.leadership),
             Arc::clone(&inner.shutdown),
+            applied,
         ));
         lock(&inner.tasks).extend([maintenance, leadership]);
         Ok(Self { inner })
@@ -853,6 +992,303 @@ impl RaftStore {
             .map_err(|error| map_membership_error(&error))
     }
 
+    /// Hands the store another peer transport (the cluster step of `tenko serve` replaces
+    /// the transport the store was opened with). A member of a cluster starts elections
+    /// once the transport reaches peers.
+    pub fn set_transport(&self, transport: Arc<dyn PeerTransport>) {
+        let reaches = transport.reaches_peers();
+        self.inner.transport.set(transport);
+        if reaches {
+            self.inner.raft.runtime_config().elect(true);
+        }
+    }
+
+    /// Changes how long contact with a quorum may lapse before this member counts as
+    /// isolated (`[cluster] isolation_after_ms`).
+    pub fn set_isolation_after(&self, threshold: Duration) {
+        self.inner.leadership.set_isolation_after(threshold);
+    }
+
+    /// The quorum state, re-evaluated on every Raft metrics change and every quarter second
+    /// (the partition layer and the `cluster` events follow it).
+    pub fn quorum(&self) -> tokio::sync::watch::Receiver<QuorumState> {
+        self.inner.leadership.subscribe_quorum()
+    }
+
+    /// The voters and learners this node knows.
+    pub fn membership(&self) -> Membership {
+        let metrics = self.inner.raft.metrics();
+        let metrics = metrics.borrow();
+        let config = metrics.membership_config.membership();
+        let voters: BTreeSet<NodeId> = config.voter_ids().map(NodeId).collect();
+        let learners = config
+            .nodes()
+            .map(|(id, _)| NodeId(*id))
+            .filter(|id| !voters.contains(id))
+            .collect();
+        Membership {
+            voters,
+            learners,
+            changing: config.get_joint_config().len() > 1,
+        }
+    }
+
+    /// The leader this node knows, if any.
+    pub fn current_leader(&self) -> Option<NodeId> {
+        self.inner.leader().map(NodeId)
+    }
+
+    /// The log index this node has applied.
+    pub fn applied_index(&self) -> Option<u64> {
+        self.inner
+            .raft
+            .metrics()
+            .borrow()
+            .last_applied
+            .map(|log_id| log_id.index)
+    }
+
+    /// Waits until this node has applied the log up to `index`, at most `timeout`.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Timeout`] or [`StoreError::ShuttingDown`].
+    pub async fn wait_applied_index(
+        &self,
+        index: Option<u64>,
+        timeout: Duration,
+    ) -> Result<(), StoreError> {
+        self.inner
+            .wait_applied_index(index, Instant::now() + timeout)
+            .await
+    }
+
+    /// Serves a write a follower forwarded (the leader side of
+    /// [`network::LeaderLink::forward_propose`]): checks that this node leads, decodes and
+    /// validates the batch, and proposes it like a local write.
+    ///
+    /// # Errors
+    ///
+    /// [`ForwardError::NotLeader`] when another node leads (nothing was queued),
+    /// [`ForwardError::NoAnswer`] when the entry did not apply in time, or the store's error
+    /// for the batch.
+    pub async fn accept_forwarded(&self, batch: Bytes) -> Result<Committed, ForwardError> {
+        let inner = &self.inner;
+        inner.check_running().map_err(ForwardError::Store)?;
+        let leader = inner.leader();
+        if leader != Some(inner.me()) {
+            return Err(ForwardError::NotLeader { leader });
+        }
+        let decoded: WriteBatch =
+            from_cbor(&batch).map_err(|error| ForwardError::Store(error.into()))?;
+        decoded
+            .validate(inner.config.coalescer.max_batch_bytes)
+            .map_err(ForwardError::Store)?;
+        let fingerprint = match &decoded.idempotency {
+            Some(_) => Some(decoded.fingerprint().map_err(ForwardError::Store)?),
+            None => None,
+        };
+        match inner
+            .queue_local(ProposedBatch { batch, fingerprint })
+            .await
+        {
+            Ok(committed) => Ok(committed),
+            Err(Refused::NotLeader) => Err(ForwardError::NotLeader {
+                leader: inner.leader(),
+            }),
+            Err(Refused::Store(StoreError::Timeout)) => Err(ForwardError::NoAnswer(
+                "the forwarded batch did not apply in time".to_owned(),
+            )),
+            Err(Refused::Store(error)) => Err(ForwardError::Store(error)),
+        }
+    }
+
+    /// Confirms this node's leadership with a quorum and returns the log index a
+    /// linearizable read must wait for (the leader side of
+    /// [`network::LeaderLink::forward_read_index`]).
+    ///
+    /// # Errors
+    ///
+    /// [`ForwardError::NotLeader`], or [`StoreError::NoQuorum`], [`StoreError::Timeout`]
+    /// or [`StoreError::ShuttingDown`] as [`ForwardError::Store`].
+    pub async fn read_index(&self) -> Result<ReadIndex, ForwardError> {
+        let inner = &self.inner;
+        inner.check_running().map_err(ForwardError::Store)?;
+        let confirmed = tokio::time::timeout(inner.config.read_wait, inner.raft.get_read_log_id())
+            .await
+            .map_err(|_| ForwardError::Store(StoreError::Timeout))?;
+        match confirmed {
+            Ok((read, _)) => Ok(ReadIndex {
+                log_index: read.map(|log_id| log_id.index),
+                term: inner.raft.metrics().borrow().current_term,
+                leader: inner.me(),
+            }),
+            Err(RaftError::APIError(CheckIsLeaderError::ForwardToLeader(forward))) => {
+                Err(ForwardError::NotLeader {
+                    leader: forward.leader_id,
+                })
+            }
+            Err(RaftError::APIError(CheckIsLeaderError::QuorumNotEnough(_))) => {
+                Err(ForwardError::Store(StoreError::NoQuorum))
+            }
+            Err(RaftError::Fatal(_)) => Err(ForwardError::Store(StoreError::ShuttingDown)),
+        }
+    }
+
+    /// A SHA-256 over every store table, after this node has applied `at_least` (waiting up
+    /// to the read timeout). The digest covers the revision it reports, which is the newest
+    /// one this node has applied: members compare equal digests at equal revisions.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Timeout`] when this node does not reach `at_least` in time, or a
+    /// storage error.
+    pub async fn digest(&self, at_least: Option<Revision>) -> Result<StateDigest, StoreError> {
+        let inner = &self.inner;
+        inner.check_running()?;
+        if let Some(revision) = at_least {
+            inner
+                .wait_applied(revision, Instant::now() + inner.config.read_wait)
+                .await?;
+        }
+        let sm = inner.sm.clone();
+        tokio::task::spawn_blocking(move || sm.digest())
+            .await
+            .map_err(|error| StoreError::Storage(error.to_string()))?
+    }
+
+    /// Replaces the voters in one joint change (a replacement of a dead voter never passes
+    /// through an even count). A voter that is not in `voters` stays as a learner with
+    /// `keep_as_learners`, else it leaves the cluster.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::NoQuorum`] if this node is not the leader, or a storage error.
+    pub async fn set_voters(
+        &self,
+        voters: BTreeSet<NodeId>,
+        keep_as_learners: bool,
+    ) -> Result<(), StoreError> {
+        let voters: BTreeSet<RaftNodeId> = voters.into_iter().map(|node| node.0).collect();
+        self.inner
+            .raft
+            .change_membership(
+                openraft::ChangeMembers::ReplaceAllVoters(voters),
+                keep_as_learners,
+            )
+            .await
+            .map(|_| ())
+            .map_err(|error| map_membership_error(&error))
+    }
+
+    /// Removes a learner from the cluster.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::NoQuorum`] if this node is not the leader, or a storage error (a voter
+    /// is removed with [`RaftStore::set_voters`]).
+    pub async fn remove_learner(&self, node: NodeId) -> Result<(), StoreError> {
+        self.inner
+            .raft
+            .change_membership(
+                openraft::ChangeMembers::RemoveNodes(BTreeSet::from([node.0])),
+                false,
+            )
+            .await
+            .map(|_| ())
+            .map_err(|error| map_membership_error(&error))
+    }
+
+    /// Starts an election on this node at once: the target of a hand-over of leadership
+    /// ([`RaftStore::step_down`]) campaigns this way.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::ShuttingDown`].
+    pub async fn campaign(&self) -> Result<(), StoreError> {
+        self.inner.check_running()?;
+        self.inner
+            .raft
+            .trigger()
+            .elect()
+            .await
+            .map_err(|_| StoreError::ShuttingDown)
+    }
+
+    /// Hands leadership to the voter `target` before a planned restart of this leader
+    /// (openraft 0.9 has no transfer call). Holds new writes (they wait in the queue and go
+    /// to the new leader afterwards), waits until `target` has every entry, stops this
+    /// node's heartbeats so the followers' leader leases run out, asks `target` to campaign
+    /// through `campaign` (an RPC in a cluster, a direct call in a test), and waits until
+    /// another member leads, at most `timeout`. Returns the new leader, which is `target`
+    /// unless another caught-up voter won the election first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::NoQuorum`] when this node does not lead or `target` is not another
+    /// voter, [`StoreError::Timeout`] when leadership did not move in time (this node then
+    /// keeps leading), or the error of `campaign`.
+    pub async fn step_down<F, Fut>(
+        &self,
+        target: NodeId,
+        campaign: F,
+        timeout: Duration,
+    ) -> Result<NodeId, StoreError>
+    where
+        F: FnOnce() -> Fut + Send,
+        Fut: Future<Output = Result<(), StoreError>> + Send,
+    {
+        let inner = &self.inner;
+        inner.check_running()?;
+        let me = inner.me();
+        if inner.leader() != Some(me)
+            || target.0 == me
+            || !self.membership().voters.contains(&target)
+        {
+            return Err(StoreError::NoQuorum);
+        }
+        let deadline = Instant::now() + timeout;
+        let paused = Arc::clone(&inner.hold).write_owned().await;
+        // The target gets every entry before the leases run out.
+        let caught_up = inner
+            .raft
+            .wait(Some(deadline.saturating_duration_since(Instant::now())))
+            .metrics(
+                |metrics| {
+                    let last = metrics.last_log_index;
+                    metrics.replication.as_ref().is_some_and(|replication| {
+                        replication
+                            .get(&target.0)
+                            .is_some_and(|matched| matched.map(|log_id| log_id.index) == last)
+                    })
+                },
+                "the hand-over target has every entry",
+            )
+            .await;
+        if caught_up.is_err() {
+            drop(paused);
+            return Err(StoreError::Timeout);
+        }
+        inner.raft.runtime_config().heartbeat(false);
+        let moved = async {
+            campaign().await?;
+            inner
+                .raft
+                .wait(Some(deadline.saturating_duration_since(Instant::now())))
+                .metrics(
+                    |metrics| metrics.current_leader.is_some_and(|leader| leader != me),
+                    "another member leads",
+                )
+                .await
+                .map(|metrics| metrics.current_leader.map(NodeId))
+                .map_err(|_| StoreError::Timeout)
+        }
+        .await;
+        inner.raft.runtime_config().heartbeat(true);
+        drop(paused);
+        moved?.ok_or(StoreError::Timeout)
+    }
+
     /// Handles a replication request from the leader (receiving side of a transport).
     ///
     /// # Errors
@@ -869,7 +1305,11 @@ impl RaftStore {
         openraft::raft::AppendEntriesResponse<RaftNodeId>,
         openraft::error::RaftError<RaftNodeId>,
     > {
-        self.inner.raft.append_entries(rpc).await
+        let result = self.inner.raft.append_entries(rpc).await;
+        if result.is_ok() {
+            self.inner.leadership.heard_from_leader();
+        }
+        result
     }
 
     /// Handles a vote request (receiving side of a transport).
@@ -900,6 +1340,7 @@ impl RaftStore {
         let file = std::fs::File::create(&path)?;
         Ok(SnapshotReceiver {
             raft: self.inner.raft.clone(),
+            leadership: Arc::clone(&self.inner.leadership),
             path,
             file: Some(tokio::io::BufWriter::with_capacity(
                 network::SNAPSHOT_CHUNK,
@@ -968,27 +1409,81 @@ fn map_membership_error(error: &MembershipError) -> StoreError {
     }
 }
 
+/// Stops a Raft node that failed to start and waits until its tasks released both
+/// databases, so the directory can be opened again.
+async fn release(raft: Raft, log: &LogStore, sm: &StateMachine) {
+    let _ = raft.shutdown().await;
+    drop(raft);
+    log.shutdown();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while (sm.handles() > 1 || log.handles() > 1) && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
+/// Whether `node` is the only voter of the membership `raft` knows.
+fn sole_voter(raft: &Raft, node: RaftNodeId) -> bool {
+    let metrics = raft.metrics().borrow().clone();
+    let voters: BTreeSet<RaftNodeId> = metrics.membership_config.membership().voter_ids().collect();
+    voters.len() == 1 && voters.contains(&node)
+}
+
+/// Checks the node id a store directory belongs to, and records it on first use.
+fn check_node_id(dir: &Path, node: NodeId) -> Result<(), StoreError> {
+    let path = dir.join(NODE_ID_FILE);
+    match fs::read_to_string(&path) {
+        Ok(text) => {
+            let recorded = text.trim();
+            if recorded == node.0.to_string() {
+                Ok(())
+            } else {
+                Err(StoreError::Storage(format!(
+                    "the store in {} belongs to node {recorded}, but this node is {node} \
+                     ([node] id); start it with the configuration that `tenko cluster join` \
+                     wrote",
+                    dir.display()
+                )))
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            fs::write(&path, format!("{}\n", node.0))
+                .map_err(|error| open_error("node id file", error))
+        }
+        Err(error) => Err(open_error("node id file", error)),
+    }
+}
+
 /// Initializes an empty single-voter cluster, or speeds up the election of a single voter
-/// after a restart, then waits until this node leads and has applied its whole log.
-async fn bootstrap(raft: &Raft, node: RaftNodeId, address: &str) -> Result<(), StoreError> {
+/// after a restart, then waits until this node leads and has applied its whole log. A member
+/// of a cluster of several voters does not wait: its leader is elected once the peer
+/// transport runs. A directory marked as joining is never initialized.
+async fn bootstrap(
+    raft: &Raft,
+    node: RaftNodeId,
+    address: &str,
+    joining: bool,
+) -> Result<(), StoreError> {
     let initialized = raft
         .is_initialized()
         .await
         .map_err(|error| open_error("Raft state", error))?;
     if initialized {
-        let sole_voter = {
-            let metrics = raft.metrics().borrow().clone();
-            let voters: BTreeSet<RaftNodeId> =
-                metrics.membership_config.membership().voter_ids().collect();
-            voters.len() == 1 && voters.contains(&node)
-        };
-        if sole_voter {
-            raft.trigger()
-                .elect()
-                .await
-                .map_err(|error| open_error("Raft election", error))?;
+        if !sole_voter(raft, node) {
+            return Ok(());
         }
+        raft.trigger()
+            .elect()
+            .await
+            .map_err(|error| open_error("Raft election", error))?;
     } else {
+        if joining {
+            return Err(StoreError::Storage(
+                "this data directory is joining a controller cluster and holds no state yet; \
+                 finish `tenko cluster join` (run it again) or start over with an empty data \
+                 directory"
+                    .to_owned(),
+            ));
+        }
         let members = BTreeMap::from([(node, BasicNode::new(address))]);
         match raft.initialize(members).await {
             Ok(()) | Err(openraft::error::RaftError::APIError(_)) => {}
@@ -1039,6 +1534,186 @@ async fn recover_purged_gap(log: &LogStore, sm: &StateMachine) -> Result<(), Sto
 }
 
 impl Inner {
+    fn me(&self) -> RaftNodeId {
+        self.config.node_id.0
+    }
+
+    fn leader(&self) -> Option<RaftNodeId> {
+        self.raft.metrics().borrow().current_leader
+    }
+
+    /// Queues an encoded batch to this node's coalescer and waits for its answer.
+    async fn queue_local(&self, batch: ProposedBatch) -> Result<Committed, Refused> {
+        let sender = lock(&self.queue)
+            .clone()
+            .ok_or(Refused::Store(StoreError::ShuttingDown))?;
+        let (reply, answer) = oneshot::channel();
+        sender
+            .send(Queued { batch, reply })
+            .await
+            .map_err(|_| Refused::Store(StoreError::ShuttingDown))?;
+        drop(sender);
+        match tokio::time::timeout(self.config.write_timeout, answer).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(Refused::Store(StoreError::ShuttingDown)),
+            Err(_) => Err(Refused::Store(StoreError::Timeout)),
+        }
+    }
+
+    /// Waits until the leader this node knows differs from `seen`, at most 100 ms and never
+    /// past `until`.
+    async fn wait_for_leader_change(&self, seen: Option<RaftNodeId>, until: Instant) {
+        let mut metrics = self.raft.metrics();
+        let changed = async {
+            loop {
+                if metrics.borrow_and_update().current_leader != seen {
+                    return;
+                }
+                if metrics.changed().await.is_err() {
+                    return;
+                }
+            }
+        };
+        let pause = until
+            .saturating_duration_since(Instant::now())
+            .min(Duration::from_millis(100));
+        let _ = tokio::time::timeout(pause, changed).await;
+    }
+
+    /// Waits until this node has applied `revision`, at most until `until`.
+    async fn wait_applied(&self, revision: Revision, until: Instant) -> Result<(), StoreError> {
+        let mut applied = self.sm.subscribe();
+        let reached = async {
+            loop {
+                if *applied.borrow_and_update() >= revision {
+                    return Ok(());
+                }
+                if applied.changed().await.is_err() {
+                    return Err(StoreError::ShuttingDown);
+                }
+                self.check_running()?;
+            }
+        };
+        tokio::time::timeout(until.saturating_duration_since(Instant::now()), reached)
+            .await
+            .map_err(|_| StoreError::Timeout)?
+    }
+
+    /// Waits until this node has applied the log up to `index`, at most until `until`.
+    async fn wait_applied_index(
+        &self,
+        index: Option<u64>,
+        until: Instant,
+    ) -> Result<(), StoreError> {
+        let Some(index) = index else {
+            return Ok(());
+        };
+        self.raft
+            .wait(Some(until.saturating_duration_since(Instant::now())))
+            .applied_index_at_least(Some(index), "read index")
+            .await
+            .map(|_| ())
+            .map_err(|error| match error {
+                openraft::metrics::WaitError::Timeout(..) => StoreError::Timeout,
+                openraft::metrics::WaitError::ShuttingDown => StoreError::ShuttingDown,
+            })
+    }
+
+    /// Proposes an encoded batch: on the leader through the coalescer, on any other member
+    /// by forwarding it to the leader and waiting until this node has applied the commit.
+    async fn propose_encoded(
+        &self,
+        encoded: Bytes,
+        fingerprint: Option<Digest>,
+    ) -> Result<Committed, StoreError> {
+        let started = Instant::now();
+        let deadline = started + self.config.write_timeout;
+        let leader_deadline = started + self.config.leader_wait;
+        loop {
+            self.check_running()?;
+            let leader = self.leader();
+            match leader {
+                Some(id) if id == self.me() => {
+                    let batch = ProposedBatch {
+                        batch: encoded.clone(),
+                        fingerprint,
+                    };
+                    match self.queue_local(batch).await {
+                        Ok(committed) => return Ok(committed),
+                        Err(Refused::Store(error)) => return Err(error),
+                        // openraft refused the entry: nothing was appended.
+                        Err(Refused::NotLeader) => {}
+                    }
+                }
+                Some(id) => match self
+                    .transport
+                    .forward_propose(self.me(), id, encoded.clone())
+                    .await
+                {
+                    Ok(committed) => {
+                        self.wait_applied(committed.revision, deadline).await?;
+                        return Ok(committed);
+                    }
+                    Err(error) if error.not_queued() => {
+                        tracing::debug!(leader = id, %error, "a forwarded write goes to the leader again");
+                    }
+                    Err(ForwardError::Store(error)) => return Err(error),
+                    Err(ForwardError::Wire(detail)) => {
+                        tracing::error!(leader = id, code = "cluster.forward.wire", "{detail}");
+                        return Err(StoreError::NoQuorum);
+                    }
+                    Err(error) => {
+                        tracing::warn!(leader = id, %error, "a forwarded write got no answer");
+                        return Err(StoreError::Timeout);
+                    }
+                },
+                None => {}
+            }
+            if Instant::now() >= leader_deadline {
+                return Err(StoreError::NoQuorum);
+            }
+            self.wait_for_leader_change(leader, leader_deadline).await;
+        }
+    }
+
+    /// Waits until this node may serve a linearizable read: confirmed leadership on the
+    /// leader, a read index from the leader on any other member.
+    async fn linearizable(&self) -> Result<(), StoreError> {
+        let deadline = Instant::now() + self.config.read_wait;
+        let leader_deadline = Instant::now() + self.config.leader_wait.min(self.config.read_wait);
+        loop {
+            self.check_running()?;
+            let leader = self.leader();
+            match leader {
+                Some(id) if id == self.me() => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    match tokio::time::timeout(remaining, self.raft.ensure_linearizable()).await {
+                        Err(_) => return Err(StoreError::Timeout),
+                        Ok(Ok(_)) => return Ok(()),
+                        Ok(Err(RaftError::APIError(CheckIsLeaderError::ForwardToLeader(_)))) => {}
+                        Ok(Err(RaftError::APIError(_))) => return Err(StoreError::NoQuorum),
+                        Ok(Err(RaftError::Fatal(_))) => return Err(StoreError::ShuttingDown),
+                    }
+                }
+                Some(id) => match self.transport.forward_read_index(self.me(), id).await {
+                    Ok(index) => return self.wait_applied_index(index.log_index, deadline).await,
+                    Err(error) if error.not_queued() => {}
+                    Err(ForwardError::Store(error)) => return Err(error),
+                    Err(ForwardError::Wire(detail)) => {
+                        tracing::error!(leader = id, code = "cluster.forward.wire", "{detail}");
+                        return Err(StoreError::NoQuorum);
+                    }
+                    Err(_) => return Err(StoreError::Timeout),
+                },
+                None => {}
+            }
+            if Instant::now() >= leader_deadline {
+                return Err(StoreError::NoQuorum);
+            }
+            self.wait_for_leader_change(leader, leader_deadline).await;
+        }
+    }
+
     fn check_running(&self) -> Result<(), StoreError> {
         if self.shutdown.load(Ordering::SeqCst) || self.closed.load(Ordering::SeqCst) {
             Err(StoreError::ShuttingDown)
@@ -1167,24 +1842,7 @@ impl Store for RaftStore {
             None => None,
         };
         let encoded = to_cbor(&batch)?;
-        let sender = lock(&inner.queue).clone().ok_or(StoreError::ShuttingDown)?;
-        let (reply, answer) = oneshot::channel();
-        sender
-            .send(Queued {
-                batch: ProposedBatch {
-                    batch: encoded,
-                    fingerprint,
-                },
-                reply,
-            })
-            .await
-            .map_err(|_| StoreError::ShuttingDown)?;
-        drop(sender);
-        match tokio::time::timeout(inner.config.write_timeout, answer).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(StoreError::ShuttingDown),
-            Err(_) => Err(StoreError::Timeout),
-        }
+        inner.propose_encoded(encoded, fingerprint).await
     }
 
     async fn read(&self, consistency: ReadConsistency) -> Result<Arc<dyn ReadView>, StoreError> {
@@ -1209,16 +1867,7 @@ impl Store for RaftStore {
                     .await
                     .map_err(|_| StoreError::Timeout)??;
             }
-            ReadConsistency::Linearizable => {
-                let confirmed =
-                    tokio::time::timeout(inner.config.read_wait, inner.raft.ensure_linearizable())
-                        .await
-                        .map_err(|_| StoreError::Timeout)?;
-                confirmed.map_err(|error| match error {
-                    openraft::error::RaftError::Fatal(_) => StoreError::ShuttingDown,
-                    openraft::error::RaftError::APIError(_) => StoreError::NoQuorum,
-                })?;
-            }
+            ReadConsistency::Linearizable => inner.linearizable().await?,
         }
         Ok(Arc::new(inner.sm.view()?))
     }
@@ -1246,6 +1895,7 @@ impl Store for RaftStore {
 
     fn status(&self) -> StoreStatus {
         let inner = &self.inner;
+        let meta = inner.sm.meta();
         let (role, leader, lag, quorum, term, members) = {
             let metrics = inner.raft.metrics();
             let metrics = metrics.borrow();
@@ -1265,9 +1915,9 @@ impl Store for RaftStore {
                 role,
                 metrics.current_leader.map(NodeId),
                 lag,
-                inner.leadership.quorum(&metrics),
+                inner.leadership.quorum(&metrics, meta.revision),
                 metrics.current_term,
-                leadership::members(&metrics),
+                leadership::members(&metrics, &inner.contacts),
             )
         };
         let role = if inner.check_running().is_err() {
@@ -1275,7 +1925,6 @@ impl Store for RaftStore {
         } else {
             role
         };
-        let meta = inner.sm.meta();
         StoreStatus {
             role,
             node: Some(inner.config.node_id),

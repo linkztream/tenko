@@ -102,6 +102,97 @@ pub struct StoreSummary {
     pub data_bytes: u64,
     /// Bytes on disk, when the store is persistent.
     pub disk_bytes: Option<u64>,
+    /// Whether this controller reaches a quorum (OPS-26). Absent in answers of servers
+    /// that predate the controller cluster: a single controller.
+    #[serde(default)]
+    pub quorum: QuorumView,
+}
+
+/// The kind of quorum state of a controller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum QuorumKind {
+    /// The only voter.
+    Single,
+    /// In contact with a quorum.
+    Healthy,
+    /// No leader known; an election runs.
+    Electing,
+    /// Out of contact with a quorum: reads serve the local copy, writes are refused.
+    Isolated,
+}
+
+/// The quorum state of a controller (OPS-26), for `GET /system/status` and `/cluster`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct QuorumView {
+    /// The state.
+    pub state: QuorumKind,
+    /// When an election started (`electing`) or the controller became isolated
+    /// (`isolated`).
+    pub since: Option<Timestamp>,
+    /// The last contact with a quorum while isolated.
+    pub last_contact: Option<Timestamp>,
+    /// The revision the controller applied last, while isolated: the age of its copy.
+    pub applied: Option<Revision>,
+}
+
+impl Default for QuorumView {
+    /// A single controller.
+    fn default() -> Self {
+        Self {
+            state: QuorumKind::Single,
+            since: None,
+            last_contact: None,
+            applied: None,
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+impl From<tenko_store::QuorumState> for QuorumView {
+    fn from(state: tenko_store::QuorumState) -> Self {
+        use tenko_store::QuorumState;
+        match state {
+            QuorumState::Single => Self::default(),
+            QuorumState::Healthy => Self {
+                state: QuorumKind::Healthy,
+                ..Self::default()
+            },
+            QuorumState::Electing { since } => Self {
+                state: QuorumKind::Electing,
+                since: Some(since),
+                ..Self::default()
+            },
+            QuorumState::Isolated {
+                since,
+                last_contact,
+                applied,
+            } => Self {
+                state: QuorumKind::Isolated,
+                since: Some(since),
+                last_contact,
+                applied: Some(applied),
+            },
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+impl From<tenko_cluster::admin::QuorumView> for QuorumView {
+    fn from(view: tenko_cluster::admin::QuorumView) -> Self {
+        use tenko_cluster::admin::QuorumKind as Kind;
+        Self {
+            state: match view.state {
+                Kind::Single => QuorumKind::Single,
+                Kind::Healthy => QuorumKind::Healthy,
+                Kind::Electing => QuorumKind::Electing,
+                Kind::Isolated => QuorumKind::Isolated,
+            },
+            since: view.since,
+            last_contact: view.last_contact,
+            applied: view.applied,
+        }
+    }
 }
 
 /// How the listener secures connections (OPS-22, TGL-08).

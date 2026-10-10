@@ -84,6 +84,7 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     // settings
     ("GET", "/settings/security", "get_security_settings"),
     ("PATCH", "/settings/security", "update_security_settings"),
+    ("PUT", "/settings/default-language", "set_default_language"),
     // tenancy
     ("GET", "/tenants", "list_tenants"),
     ("POST", "/tenants", "create_tenant"),
@@ -237,6 +238,16 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/nodes/enrolments", "list_enrolments"),
     ("POST", "/nodes/enrolments", "create_enrolment"),
     ("DELETE", "/nodes/enrolments/{id}", "delete_enrolment"),
+    // cluster
+    ("GET", "/cluster/members", "list_cluster_members"),
+    (
+        "POST",
+        "/cluster/members/{id}/promote",
+        "promote_cluster_member",
+    ),
+    ("DELETE", "/cluster/members/{id}", "remove_cluster_member"),
+    ("POST", "/cluster/step-down", "step_down_cluster_leader"),
+    ("GET", "/cluster/digests", "get_cluster_digests"),
     ("POST", "/nodes/enrol", "enrol_node"),
     // secrets
     ("GET", "/secrets", "list_secrets"),

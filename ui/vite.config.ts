@@ -59,7 +59,17 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   // Connector plugins and instances, with the error texts of the connector endpoints (WP2.9).
   connectors: ["connectors.", "errors.connect."],
   // Cluster nodes and enrolment tokens, with the error texts of the node endpoints (WP2.9).
-  nodes: ["nodes.", "errors.cluster."],
+  nodes: [
+    "nodes.",
+    "errors.cluster.enrolment.",
+    "errors.cluster.node.",
+    "errors.cluster.member.",
+    "errors.cluster.join.",
+    "errors.cluster.forward.",
+    "errors.cluster.protocol.",
+    "errors.cluster.ca.",
+    "errors.cluster.single",
+  ],
   // The topology map (WP2.7).
   topology: ["topology."],
   // The areas of Slice 3, each with the fragment ui/i18n/<language>.d/<area>.xlf of its package:
@@ -67,7 +77,7 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   // the vault keys, backup and language packs. `cluster.job.` is a key of the jobs pack, which
   // is listed above and so wins.
   cluster: ["cluster."],
-  scans: ["scans."],
+  scans: ["scans.", "errors.scan.", "errors.node.config."],
   access: ["access."],
   audit_export: ["audit_export."],
   vault: ["vault."],

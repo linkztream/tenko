@@ -11,11 +11,18 @@
 //!
 //! The device addresses are configured explicitly and may lie outside the scan prefixes
 //! (a management network); polling them is not a scan.
+//!
+//! Passwords come from a file, the configuration file itself, or the vault: devices that
+//! name vault secrets get their values from the [`SecretSource`] at the start of every
+//! run, held in memory for the run only. A device whose secret is not available (no
+//! controller reached since the probe started, or a configuration still waiting for an
+//! administrator to pick the secret) is skipped with a note, and the run is partial.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
     net::{IpAddr, SocketAddr},
     path::Path,
+    sync::Arc,
     time::Duration,
 };
 
@@ -34,6 +41,7 @@ use crate::{
     methods::neighbours::usable_mac,
     oui,
     scope::Scope,
+    secrets::{SecretSource, VaultSecrets},
     snmp::{self, AuthProtocol, Credentials, DeviceTables, PollOptions, PrivProtocol},
 };
 
@@ -47,13 +55,38 @@ pub struct Device {
     pub config: SnmpDevice,
 }
 
-/// Reads a password from its file (first line, trimmed) or from the inline value.
+/// Where one password of a device comes from.
+#[derive(Clone, Copy)]
+struct PasswordSource<'a> {
+    inline: Option<&'a SecretText>,
+    file: Option<&'a Path>,
+    secret: Option<tenko_core::SecretId>,
+}
+
+/// Reads a password from the vault values, its file (first line, trimmed) or the inline
+/// value.
 fn password(
-    inline: Option<&SecretText>,
-    file: Option<&Path>,
+    source: PasswordSource<'_>,
+    vault: &VaultSecrets,
     what: &str,
     at: SocketAddr,
 ) -> Result<Zeroizing<String>, ScanError> {
+    let PasswordSource {
+        inline,
+        file,
+        secret,
+    } = source;
+    if let Some(secret) = secret {
+        return vault
+            .get(secret)
+            .map(|value| Zeroizing::new(value.expose().to_owned()))
+            .ok_or_else(|| {
+                ScanError::unavailable(format!(
+                    "scan.snmp.devices ({at}): the {what} password is the vault secret \
+                     {secret}, which this probe has not received from a controller"
+                ))
+            });
+    }
     if let Some(file) = file {
         let text = Zeroizing::new(std::fs::read_to_string(file).map_err(|error| {
             ScanError::config(format!(
@@ -69,12 +102,13 @@ fn password(
         .ok_or_else(|| ScanError::config(format!("scan.snmp.devices ({at}): no {what} password")))
 }
 
-/// The SNMPv3 credentials of a device.
+/// The SNMPv3 credentials of a device, with vault secrets from `vault`.
 ///
 /// # Errors
 ///
-/// `scan.config` when a password file cannot be read.
-pub fn credentials(device: &SnmpDevice) -> Result<Credentials, ScanError> {
+/// `scan.config` when a password file cannot be read or a password is missing,
+/// `scan.unavailable` when a vault secret has not been received.
+pub fn credentials(device: &SnmpDevice, vault: &VaultSecrets) -> Result<Credentials, ScanError> {
     let at = device.socket();
     let auth = match device.auth {
         Some(protocol) => Some((
@@ -86,8 +120,12 @@ pub fn credentials(device: &SnmpDevice) -> Result<Credentials, ScanError> {
                 SnmpAuth::Sha512 => AuthProtocol::Sha512,
             },
             password(
-                device.auth_password.as_ref(),
-                device.auth_password_file.as_deref(),
+                PasswordSource {
+                    inline: device.auth_password.as_ref(),
+                    file: device.auth_password_file.as_deref(),
+                    secret: device.auth_secret,
+                },
+                vault,
                 "authentication",
                 at,
             )?,
@@ -98,8 +136,12 @@ pub fn credentials(device: &SnmpDevice) -> Result<Credentials, ScanError> {
         Some(SnmpPrivacy::Aes128) => Some((
             PrivProtocol::Aes128,
             password(
-                device.privacy_password.as_ref(),
-                device.privacy_password_file.as_deref(),
+                PasswordSource {
+                    inline: device.privacy_password.as_ref(),
+                    file: device.privacy_password_file.as_deref(),
+                    secret: device.privacy_secret,
+                },
+                vault,
                 "privacy",
                 at,
             )?,
@@ -241,6 +283,7 @@ pub struct SnmpPoll {
     devices: Vec<SnmpDevice>,
     options: PollOptions,
     attach_on_lldp_ports: bool,
+    secrets: Option<Arc<dyn SecretSource>>,
 }
 
 impl SnmpPoll {
@@ -259,6 +302,42 @@ impl SnmpPoll {
                 ..PollOptions::default()
             },
             attach_on_lldp_ports,
+            secrets: None,
+        }
+    }
+
+    /// With the source of the vault secrets the devices name.
+    #[must_use]
+    pub fn with_secrets(mut self, secrets: Option<Arc<dyn SecretSource>>) -> Self {
+        self.secrets = secrets;
+        self
+    }
+
+    /// The values of the vault secrets the devices name, fetched for this run.
+    async fn vault_values(&self, notes: &mut Vec<String>) -> VaultSecrets {
+        let mut wanted: Vec<tenko_core::SecretId> =
+            self.devices.iter().flat_map(SnmpDevice::secrets).collect();
+        wanted.sort_unstable_by_key(|secret| secret.uuid());
+        wanted.dedup();
+        if wanted.is_empty() {
+            return VaultSecrets::new();
+        }
+        let Some(source) = &self.secrets else {
+            notes.push(
+                "the devices name vault secrets, but this probe has no controller to fetch them from"
+                    .to_owned(),
+            );
+            return VaultSecrets::new();
+        };
+        match source.fetch(&wanted).await {
+            Ok(values) => values,
+            Err(error) => {
+                notes.push(format!(
+                    "the vault secrets could not be fetched: {}",
+                    error.detail()
+                ));
+                VaultSecrets::new()
+            }
         }
     }
 }
@@ -282,13 +361,21 @@ impl Method for SnmpPoll {
             covered_all: true,
             ..MethodOutput::default()
         };
+        let vault = self.vault_values(&mut output.notes).await;
         for device in &self.devices {
             if ctx.cancel.is_cancelled() {
                 output.covered_all = false;
                 break;
             }
             let at = device.socket();
-            let credentials = match credentials(device) {
+            if !device.has_credentials() {
+                output.covered_all = false;
+                output.notes.push(format!(
+                    "{at}: waits for a vault secret for its passwords (the scan-config of this probe)"
+                ));
+                continue;
+            }
+            let credentials = match credentials(device, &vault) {
                 Ok(credentials) => credentials,
                 Err(error) => {
                     output.covered_all = false;
@@ -347,6 +434,8 @@ mod tests {
             privacy: Some(SnmpPrivacy::Aes128),
             privacy_password: Some(SecretText::new("example-priv-secret")),
             privacy_password_file: None,
+            auth_secret: None,
+            privacy_secret: None,
             context: String::new(),
         }
     }
@@ -476,7 +565,7 @@ mod tests {
         std::fs::write(&file, "example-file-secret\n").expect("write");
         let mut device = device();
         device.auth_password_file = Some(file);
-        let credentials = credentials(&device).expect("credentials");
+        let credentials = credentials(&device, &VaultSecrets::new()).expect("credentials");
         let (protocol, secret) = credentials.auth.expect("auth");
         assert_eq!(protocol, AuthProtocol::Sha256);
         assert_eq!(secret.as_str(), "example-file-secret");
@@ -556,9 +645,70 @@ mod tests {
     }
 
     fn credentials_error(device: &SnmpDevice) -> String {
-        credentials(device)
+        credentials(device, &VaultSecrets::new())
             .expect_err("missing")
             .detail()
             .to_owned()
+    }
+
+    #[test]
+    fn credentials_come_from_the_vault_values_when_the_device_names_a_secret() {
+        let secret = tenko_core::SecretId::generate();
+        let mut device = device();
+        device.auth_password = None;
+        device.auth_secret = Some(secret);
+        let error = credentials_error(&device);
+        assert!(error.contains("vault secret"), "{error}");
+        let mut vault = VaultSecrets::new();
+        vault.insert(secret, SecretText::new("example-vault-secret"));
+        let credentials = credentials(&device, &vault).expect("credentials");
+        let (_, value) = credentials.auth.expect("auth");
+        assert_eq!(value.as_str(), "example-vault-secret");
+    }
+
+    #[tokio::test]
+    async fn a_run_fetches_the_vault_secrets_and_skips_devices_without_them() {
+        let secret = tenko_core::SecretId::generate();
+        let mut waiting = device();
+        waiting.auth_password = None;
+        waiting.privacy_password = None;
+        let mut named = device();
+        named.address = "192.0.2.250".parse().expect("ip");
+        named.auth_password = None;
+        named.auth_secret = Some(secret);
+        let method = SnmpPoll::new(vec![waiting, named], Duration::from_millis(50), 0, false)
+            .with_secrets(Some(Arc::new(crate::secrets::StaticSecrets::default())));
+        let ctx = RunContext {
+            scope: std::sync::Arc::new(
+                Scope::parse(&["192.0.2.0/24".to_owned()], &[], 256).expect("scope"),
+            ),
+            narrowed: false,
+            known: Vec::new(),
+            pacer: std::sync::Arc::new(crate::limit::Pacer::new(crate::limit::PaceLimits {
+                per_second: None,
+                per_host_interval: Duration::ZERO,
+                concurrency: 4,
+            })),
+            cancel: crate::method::Cancel::never(),
+        };
+        let output = method.run(&ctx).await.expect("run");
+        assert!(!output.covered_all);
+        assert!(
+            output
+                .notes
+                .iter()
+                .any(|note| note.contains("waits for a vault secret")),
+            "{:?}",
+            output.notes
+        );
+        assert!(
+            output
+                .notes
+                .iter()
+                .any(|note| note.contains("has not received")),
+            "{:?}",
+            output.notes
+        );
+        assert_eq!(output.probes, 0, "nothing was sent without credentials");
     }
 }

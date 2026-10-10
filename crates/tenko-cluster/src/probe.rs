@@ -8,22 +8,170 @@
 //! method expires only what that method of that node reported before.
 //!
 //! On the wire a batch is an `IngestRequest` of `tenko.cluster.v1`; [`ProbeBatch::encode`]
-//! and [`ProbeBatch::decode`] convert, and the buffer keeps the encoded form.
+//! and [`ProbeBatch::decode`] convert, and the buffer keeps the encoded form. A batch that
+//! answers a command carries the command id in the request's `run` field
+//! ([`ProbeBatch::encode_with_run`], [`run_of`]).
+//!
+//! Each probe reports the scope it applies ([`ProbeScope`], table `scan.scopes`), so the
+//! reconciler can tell a device that is gone from one that no probe scans.
 
 use std::{net::IpAddr, time::Duration};
 
 use async_trait::async_trait;
+use ipnet::IpNet;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use tenko_core::{
     MacAddr, NodeId, ObservationId, Timestamp, VrfId,
     observe::{Endpoint, LinkKind, Observation, ObservationSource, Observed, ProbeMethod},
 };
+use utoipa::ToSchema;
+use uuid::Uuid;
 
 use crate::{error::ClusterError, proto::v1};
 
 /// Most sightings in one batch.
 pub const MAX_SIGHTINGS: usize = 250_000;
+
+/// The store tables of the probes' own reports.
+pub mod tables {
+    use tenko_core::table::TableDef;
+
+    use super::ProbeScope;
+
+    /// The scope each probe applies, keyed by node id: written when the probe reports
+    /// the configuration it applies (`Config.Report`), read by the reconciler's orphan
+    /// rule and by scan jobs.
+    pub const SCOPES: TableDef<u64, ProbeScope> = TableDef::new("scan.scopes");
+}
+
+/// Where the configuration a node applies came from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigOrigin {
+    /// The node's own file, before its first sync.
+    #[default]
+    Local,
+    /// The controllers.
+    Synced,
+}
+
+impl ConfigOrigin {
+    /// The stable name.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Synced => "synced",
+        }
+    }
+}
+
+/// The scope a probe applies, as it last reported it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ProbeScope {
+    /// The probe.
+    #[schema(value_type = u64)]
+    pub node: NodeId,
+    /// The prefixes it covers.
+    #[schema(value_type = Vec<String>)]
+    pub prefixes: Vec<IpNet>,
+    /// Prefixes and addresses inside them it never probes (an address as a host prefix).
+    #[schema(value_type = Vec<String>)]
+    pub exclude: Vec<IpNet>,
+    /// The methods that run on schedule, by name (`arp`, `snmp`).
+    pub methods: Vec<String>,
+    /// The VRF its batches name, when its configuration names one.
+    #[serde(default)]
+    #[schema(value_type = Option<String>, format = Uuid)]
+    pub vrf: Option<VrfId>,
+    /// Whether active probing is on (TGL-18).
+    pub active: bool,
+    /// Whether its kill switch is on.
+    pub stopped: bool,
+    /// Why, as recorded with the kill switch.
+    #[serde(default)]
+    pub stop_reason: Option<String>,
+    /// Where its configuration came from.
+    pub origin: ConfigOrigin,
+    /// The configuration revision it applies; 0 for its own file.
+    pub revision: u64,
+    /// Why the newest configuration it received does not apply.
+    #[serde(default)]
+    pub error: Option<String>,
+    /// When it applied the configuration, by its clock.
+    #[serde(default)]
+    pub applied_at: Option<Timestamp>,
+    /// When a controller recorded the report.
+    pub reported_at: Timestamp,
+}
+
+impl ProbeScope {
+    /// The scope of a report; prefixes that do not parse are left out.
+    pub fn from_report(
+        node: NodeId,
+        report: &v1::ConfigReport,
+        probe: &v1::ProbeScopeReport,
+        reported_at: Timestamp,
+    ) -> Self {
+        let nets = |texts: &[String]| -> Vec<IpNet> {
+            texts
+                .iter()
+                .take(10_000)
+                .filter_map(|text| {
+                    let text = text.trim();
+                    text.parse::<IpNet>()
+                        .ok()
+                        .or_else(|| text.parse::<IpAddr>().ok().map(IpNet::from))
+                })
+                .collect()
+        };
+        Self {
+            node,
+            prefixes: nets(&probe.prefixes),
+            exclude: nets(&probe.exclude),
+            methods: probe
+                .methods
+                .iter()
+                .take(64)
+                .map(|method| method.chars().take(40).collect())
+                .collect(),
+            vrf: probe.vrf.as_deref().and_then(|text| text.parse().ok()),
+            active: probe.active,
+            stopped: probe.stopped,
+            stop_reason: Some(probe.stop_reason.chars().take(500).collect::<String>())
+                .filter(|reason| !reason.is_empty()),
+            origin: if report.source == ConfigOrigin::Synced.as_str() {
+                ConfigOrigin::Synced
+            } else {
+                ConfigOrigin::Local
+            },
+            revision: report.revision,
+            error: Some(report.error.chars().take(2000).collect::<String>())
+                .filter(|error| !error.is_empty()),
+            applied_at: report.at.as_ref().and_then(timestamp_from_proto),
+            reported_at,
+        }
+    }
+
+    /// Whether the scope covers `ip`: inside a prefix and outside every exclusion.
+    pub fn covers(&self, ip: IpAddr) -> bool {
+        self.prefixes.iter().any(|net| net.contains(&ip))
+            && !self.exclude.iter().any(|net| net.contains(&ip))
+    }
+
+    /// Whether the scope reaches into `net`: a prefix of the scope overlaps it.
+    pub fn overlaps(&self, net: &IpNet) -> bool {
+        self.prefixes
+            .iter()
+            .any(|prefix| prefix.contains(net) || net.contains(prefix))
+    }
+}
+
+/// The command a request answers, from its `run` field; `None` when it has none or the
+/// field is not a UUID.
+pub fn run_of(request: &v1::IngestRequest) -> Option<Uuid> {
+    request.run.as_deref().and_then(|text| text.parse().ok())
+}
 
 /// One batch of a probe: one method, one run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -412,12 +560,50 @@ impl ProbeBatch {
             complete: self.complete,
             collected_at: Some(timestamp_to_proto(self.collected_at)),
             sightings: self.sightings.iter().map(Sighting::to_proto).collect(),
+            run: None,
         }
     }
 
     /// The batch as protobuf bytes, the payload the buffer keeps.
     pub fn encode(&self) -> Vec<u8> {
         self.to_request().encode_to_vec()
+    }
+
+    /// The batch as protobuf bytes, tagged with the command it answers.
+    pub fn encode_with_run(&self, run: Option<Uuid>) -> Vec<u8> {
+        let mut request = self.to_request();
+        request.run = run.map(|run| run.to_string());
+        request.encode_to_vec()
+    }
+
+    /// Splits the batch into parts whose encoding fits `max_bytes`, halving the sightings
+    /// until each part fits. A part of a split batch is never complete: facts the method no
+    /// longer reports then expire by their time to live instead of at once. A batch that
+    /// fits comes back whole; a single sighting larger than the limit stays in a part of
+    /// its own.
+    pub fn split_to_fit(self, max_bytes: usize) -> Vec<ProbeBatch> {
+        if self.sightings.len() <= 1 || self.encode().len() <= max_bytes {
+            return vec![self];
+        }
+        let mut pending = vec![ProbeBatch {
+            complete: false,
+            ..self
+        }];
+        let mut out = Vec::new();
+        while let Some(mut batch) = pending.pop() {
+            if batch.sightings.len() <= 1 || batch.encode().len() <= max_bytes {
+                out.push(batch);
+                continue;
+            }
+            let tail = batch.sightings.split_off(batch.sightings.len() / 2);
+            let second = ProbeBatch {
+                sightings: tail,
+                ..batch.clone()
+            };
+            pending.push(second);
+            pending.push(batch);
+        }
+        out
     }
 
     /// The batch of a request and the number of malformed sightings left out.
@@ -730,6 +916,79 @@ mod tests {
         assert_eq!(observations[0].expires_at, Some(at("2026-10-10T08:10:01Z")));
         assert_eq!(observations[1].expires_at, None);
         assert!(observations.iter().all(|o| o.received_at == received));
+    }
+
+    #[test]
+    fn a_run_tag_rides_along_and_a_bad_one_is_ignored() {
+        let run = Uuid::now_v7();
+        let bytes = batch().encode_with_run(Some(run));
+        let request = v1::IngestRequest::decode(bytes.as_slice()).expect("decode");
+        assert_eq!(run_of(&request), Some(run));
+        let (back, _) = ProbeBatch::from_request(request).expect("batch");
+        assert_eq!(back, batch());
+        let mut request = batch().to_request();
+        assert_eq!(run_of(&request), None);
+        request.run = Some("seven".to_owned());
+        assert_eq!(run_of(&request), None);
+    }
+
+    #[test]
+    fn a_large_batch_splits_into_parts_that_fit_and_are_not_complete() {
+        let mut big = batch();
+        big.sightings = (0..2000u32)
+            .map(|index| Sighting {
+                observed_at: at("2026-10-10T08:00:01Z"),
+                ttl_secs: Some(600),
+                subject: SightingSubject::Name {
+                    ip: IpAddr::from([192, 0, 2, u8::try_from(index % 250).expect("octet")]),
+                    name: format!("host-{index:05}.example.test"),
+                },
+            })
+            .collect();
+        let whole = big.encode().len();
+        let limit = whole / 5;
+        let parts = big.clone().split_to_fit(limit);
+        assert!(parts.len() >= 5, "{} parts", parts.len());
+        assert!(parts.iter().all(|part| part.encode().len() <= limit));
+        assert!(parts.iter().all(|part| !part.complete));
+        let joined: Vec<Sighting> = parts.into_iter().flat_map(|part| part.sightings).collect();
+        assert_eq!(joined, big.sightings, "order and content are kept");
+        // A batch that fits stays whole and complete.
+        let parts = batch().split_to_fit(whole);
+        assert_eq!(parts, vec![batch()]);
+    }
+
+    #[test]
+    fn a_scope_report_becomes_a_scope() {
+        let report = v1::ConfigReport {
+            revision: 42,
+            source: "synced".to_owned(),
+            error: String::new(),
+            probe: None,
+            at: Some(timestamp_to_proto(at("2026-10-10T08:00:00Z"))),
+        };
+        let probe = v1::ProbeScopeReport {
+            prefixes: vec!["192.0.2.0/24".to_owned(), "nonsense".to_owned()],
+            exclude: vec!["192.0.2.1".to_owned()],
+            methods: vec!["arp".to_owned(), "icmp".to_owned()],
+            vrf: None,
+            active: true,
+            stopped: true,
+            stop_reason: "change window".to_owned(),
+        };
+        let scope =
+            ProbeScope::from_report(NodeId(1001), &report, &probe, at("2026-10-10T08:00:01Z"));
+        assert_eq!(scope.prefixes.len(), 1);
+        assert_eq!(scope.origin, ConfigOrigin::Synced);
+        assert_eq!(scope.revision, 42);
+        assert_eq!(scope.stop_reason.as_deref(), Some("change window"));
+        assert!(scope.error.is_none());
+        assert!(scope.covers("192.0.2.10".parse().expect("ip")));
+        assert!(!scope.covers("192.0.2.1".parse().expect("ip")));
+        assert!(!scope.covers("198.51.100.1".parse().expect("ip")));
+        assert!(scope.overlaps(&"192.0.2.0/28".parse().expect("net")));
+        assert!(scope.overlaps(&"192.0.0.0/16".parse().expect("net")));
+        assert!(!scope.overlaps(&"198.51.100.0/24".parse().expect("net")));
     }
 
     #[test]

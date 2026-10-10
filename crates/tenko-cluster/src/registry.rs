@@ -110,6 +110,9 @@ pub const DEFAULT_TOKEN_TTL: Duration = Duration::from_secs(3600);
 pub const MIN_TOKEN_TTL: Duration = Duration::from_secs(60);
 /// Longest lifetime of an enrolment token.
 pub const MAX_TOKEN_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
+/// Longest lifetime of a token for a controller (it lets a host join the cluster and
+/// receive the key encryption keys, R22).
+pub const MAX_CONTROLLER_TOKEN_TTL: Duration = Duration::from_secs(3600);
 /// Used and expired tokens stay listed this long.
 pub const TOKEN_RETENTION: Duration = Duration::from_secs(7 * 24 * 3600);
 /// A repeated refused handshake with the same offer is recorded and audited at most this
@@ -217,6 +220,7 @@ pub struct NodeRegistry {
     wanted: std::sync::atomic::AtomicBool,
     touched: Mutex<HashMap<NodeId, Instant>>,
     mismatches: Mutex<HashMap<NodeId, (VersionMismatch, Instant)>>,
+    node_sync: OnceLock<crate::node_sync::NodeSync>,
 }
 
 impl std::fmt::Debug for NodeRegistry {
@@ -230,19 +234,53 @@ impl std::fmt::Debug for NodeRegistry {
 impl NodeRegistry {
     /// A registry over `store` with the internal CA `ca`.
     pub fn new(store: Arc<dyn Store>, ca: Arc<InternalCa>, config: RegistryConfig) -> Arc<Self> {
+        Self::with_port(
+            store,
+            ca,
+            config,
+            Arc::new(RevocationSet::new()),
+            Sessions::new(),
+        )
+    }
+
+    /// A registry that shares the revocation set and the sessions of a cluster port that
+    /// opened before it (a member of a controller cluster opens its port in the `cluster`
+    /// start step).
+    pub fn with_port(
+        store: Arc<dyn Store>,
+        ca: Arc<InternalCa>,
+        config: RegistryConfig,
+        revoked: Arc<RevocationSet>,
+        sessions: Arc<Sessions>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             store,
             ca,
             config,
             jobs: OnceLock::new(),
-            revoked: Arc::new(RevocationSet::new()),
-            sessions: Sessions::new(),
+            revoked,
+            sessions,
             listening: ArcSwap::from_pointee(Vec::new()),
             listener_wanted: Notify::new(),
             wanted: std::sync::atomic::AtomicBool::new(false),
             touched: Mutex::new(HashMap::new()),
             mismatches: Mutex::new(HashMap::new()),
+            node_sync: OnceLock::new(),
         })
+    }
+
+    /// Hands the registry the node-sync services (configuration, commands, node secrets)
+    /// that the cluster port serves; called once by the `nodes` start step before the port
+    /// listens.
+    pub fn set_node_sync(&self, sync: crate::node_sync::NodeSync) {
+        let _ = self.node_sync.set(sync);
+    }
+
+    /// The node-sync services; without `set_node_sync`, ones over the registry's store with
+    /// no vault and no bandwidth cap.
+    pub fn node_sync(&self) -> &crate::node_sync::NodeSync {
+        self.node_sync
+            .get_or_init(|| crate::node_sync::NodeSync::new(Arc::clone(&self.store)))
     }
 
     /// Registers the `cluster.write` step; from now on every edit is an inline job.
@@ -448,6 +486,34 @@ impl NodeRegistry {
         Ok(issued.material()?)
     }
 
+    /// The certificate chain and key this controller presents on the cluster port (issued
+    /// as by [`NodeRegistry::controller_material`] when needed): what moves to
+    /// `<data_dir>/node/` when the first peer joins.
+    ///
+    /// # Errors
+    ///
+    /// A CA, vault or store error.
+    pub async fn controller_identity(
+        &self,
+        vault: &dyn Vault,
+        ctx: &RequestCtx,
+    ) -> Result<(Vec<CertificateDer<'static>>, tenko_vault::SecretBytes), ClusterError> {
+        self.controller_material(vault, ctx).await?;
+        let node = self.config.local_node;
+        let view = self.store.read(ReadConsistency::Local).await?;
+        let (record, _) = view
+            .get_typed(&tables::CONTROLLER_CERTS, &node.0)?
+            .ok_or_else(|| ClusterError::internal("the controller certificate is missing"))?;
+        drop(view);
+        let chain = CertificateDer::pem_slice_iter(record.chain_pem.as_bytes())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                ClusterError::internal(format!("the controller certificate is unreadable: {error}"))
+            })?;
+        let key = vault.get_system(ctx, record.key).await?;
+        Ok((chain, key))
+    }
+
     async fn reusable(
         &self,
         vault: &dyn Vault,
@@ -481,8 +547,9 @@ impl NodeRegistry {
     ///
     /// # Errors
     ///
-    /// `cluster.enrolment.roles` (422) for a controller role or an empty list after the
-    /// default, `cluster.enrolment.lifetime` (422), `cluster.node.name` (422),
+    /// `cluster.enrolment.roles` (422) for the role controller beside another role,
+    /// `cluster.enrolment.lifetime` (422; a controller token lives at most an hour),
+    /// `cluster.node.name` (422),
     /// `cluster.node.name_taken` (409), or a store or job error.
     pub async fn create_enrolment(
         &self,
@@ -495,18 +562,31 @@ impl NodeRegistry {
         }
         roles.sort();
         roles.dedup();
-        if roles.contains(&Role::Controller) {
+        let controller = roles.contains(&Role::Controller);
+        if controller && roles.len() > 1 {
             return Err(ClusterError::new(
                 "cluster.enrolment.roles",
                 422,
-                "controllers do not enrol with a token yet; a token is for probe, dns and dhcp nodes",
+                "a controller token carries the role controller alone",
             )
             .with_param("field", "roles"));
         }
         let ttl = match request.expires_in_secs {
             Some(secs) => Duration::from_secs(secs),
+            None if controller => self.config.default_token_ttl.min(MAX_CONTROLLER_TOKEN_TTL),
             None => self.config.default_token_ttl,
         };
+        if controller && ttl > MAX_CONTROLLER_TOKEN_TTL {
+            return Err(ClusterError::new(
+                "cluster.enrolment.lifetime",
+                422,
+                format!(
+                    "a controller token lives at most {} seconds",
+                    MAX_CONTROLLER_TOKEN_TTL.as_secs()
+                ),
+            )
+            .with_param("field", "expires_in_secs"));
+        }
         if !(MIN_TOKEN_TTL..=MAX_TOKEN_TTL).contains(&ttl) {
             return Err(ClusterError::new(
                 "cluster.enrolment.lifetime",
@@ -1382,7 +1462,7 @@ impl NodeRegistry {
 
     /// Commits an edit as an inline job (or directly before the engine is registered) and
     /// returns its revision.
-    async fn commit(
+    pub(crate) async fn commit(
         &self,
         cx: &RequestCtx,
         summary: String,

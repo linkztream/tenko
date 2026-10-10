@@ -327,7 +327,7 @@ export interface paths {
         /** List the personal API tokens of the current user */
         get: operations["list_tokens"];
         put?: never;
-        /** Create a personal API token, shown once */
+        /** Create a personal or scoped API token, shown once */
         post: operations["create_token"];
         delete?: never;
         options?: never;
@@ -499,6 +499,91 @@ export interface paths {
         put?: never;
         /** Start registering a WebAuthn credential and return the challenge */
         post: operations["webauthn_register_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cluster/digests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Compare the state digests of the members */
+        get: operations["get_cluster_digests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cluster/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the controller cluster members */
+        get: operations["list_cluster_members"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cluster/members/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a controller from the cluster */
+        delete: operations["remove_cluster_member"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cluster/members/{id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Promote a learner to a voter */
+        post: operations["promote_cluster_member"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cluster/step-down": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Hand leadership to another controller */
+        post: operations["step_down_cluster_leader"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1888,6 +1973,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/default-language": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set the default language of the installation */
+        put: operations["set_default_language"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/security": {
         parameters: {
             query?: never;
@@ -3191,6 +3293,42 @@ export interface components {
                 [key: string]: number;
             };
         };
+        /**
+         * @description What changing the membership needs: the system.
+         *     The cluster as one controller sees it: the answer of `GET /cluster/members` and of a
+         *     membership change.
+         */
+        ClusterView: {
+            /** @description Whether a membership change is in progress (joint consensus). */
+            changing: boolean;
+            /**
+             * Format: uuid
+             * @description The inline job `cluster.edit` of a promotion or removal; absent on `GET`.
+             */
+            job_id?: string | null;
+            /**
+             * Format: int64
+             * @description The leader it knows, if any.
+             */
+            leader?: number | null;
+            /**
+             * @description The members by node id. Replication figures (`matched`, `lag_entries`,
+             *     `last_contact_ms`) come from the leader; a follower asks it.
+             */
+            members: components["schemas"]["MemberView"][];
+            /**
+             * Format: int64
+             * @description The controller that answered.
+             */
+            node: number;
+            /** @description Whether it is in contact with a quorum. */
+            quorum: components["schemas"]["QuorumView"];
+            /**
+             * Format: int64
+             * @description The Raft term it knows.
+             */
+            term: number;
+        };
         /** @description `POST /auth/login/totp` and `POST /auth/login/recovery`. */
         CodeLogin: {
             /** @description The challenge from the password step. */
@@ -3692,6 +3830,11 @@ export interface components {
             /** @description Warnings of the plan. */
             warnings: components["schemas"]["PlanWarning"][];
         };
+        /** @description `PUT /settings/default-language` and its answer (API-21). */
+        DefaultLanguage: {
+            /** @description The language tag: a built-in language or an active language pack. */
+            language: string;
+        };
         /** @description Defaults a manifest suggests for new instances; the host enforces its own bounds. */
         Defaults: {
             /**
@@ -3721,6 +3864,19 @@ export interface components {
         };
         /** @description SHA-256 digest as 64 lowercase hexadecimal characters */
         Digest: string;
+        /** @description Answer of `GET /cluster/digests`: the digests of every member at one revision. */
+        DigestReport: {
+            /** @description Whether every member answered with the same digest at the same revision. */
+            agree: boolean;
+            /** @description The digests by node id. */
+            members: components["schemas"]["MemberDigest"][];
+            /**
+             * Format: int64
+             * @description The revision every member was asked for (the newest one the answering controller
+             *     knows, unless the request named one).
+             */
+            revision: number;
+        };
         /** @description DHCPv6 DUID as lowercase hexadecimal */
         Duid: string;
         /**
@@ -4012,6 +4168,8 @@ export interface components {
         };
         /** @description DNS name */
         Fqdn: string;
+        /** Format: uuid */
+        GrantId: string;
         /**
          * @description Groups jobs that share a parallelism limit, for example every write through one
          *     network controller (CONN-09): 1 to 128 visible ASCII characters.
@@ -5168,6 +5326,77 @@ export interface components {
          * @enum {string}
          */
         MaskSource: "index" | "name" | "row_count" | "addresses" | "user";
+        /** @description The state digest of one member. */
+        MemberDigest: {
+            /**
+             * Format: int64
+             * @description Rows in the digest.
+             */
+            entries?: number | null;
+            /** @description Why the member gave no digest (an error code), if it did not. */
+            error?: string | null;
+            /**
+             * Format: int64
+             * @description The member.
+             */
+            node: number;
+            /**
+             * Format: int64
+             * @description The revision the digest covers.
+             */
+            revision?: number | null;
+            /** @description The SHA-256 over every table at that revision, lower-case hex. */
+            sha256?: string | null;
+            /**
+             * Format: int64
+             * @description Non-empty tables in the digest.
+             */
+            tables?: number | null;
+        };
+        /**
+         * @description Whether a member votes.
+         * @enum {string}
+         */
+        MemberRole: "voter" | "learner";
+        /** @description One member of the controller cluster. */
+        MemberView: {
+            /** @description Its cluster port as `host:port`. */
+            address?: string | null;
+            /**
+             * Format: int32
+             * @description The data format its binary knows.
+             */
+            data_format?: number | null;
+            joined_at?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: int64
+             * @description Log entries it is behind the leader.
+             */
+            lag_entries?: number | null;
+            /**
+             * Format: int64
+             * @description Milliseconds since the leader last heard from it.
+             */
+            last_contact_ms?: number | null;
+            /** @description Whether it leads. */
+            leader: boolean;
+            /**
+             * Format: int64
+             * @description The last log index known to match the leader's log.
+             */
+            matched?: number | null;
+            /** @description Its name in the node registry. */
+            name?: string | null;
+            /**
+             * Format: int64
+             * @description The node id (also its Raft id).
+             */
+            node: number;
+            /** @description Voter or learner. */
+            role: components["schemas"]["MemberRole"];
+            /** @description The software version it reported when it joined or last started. */
+            version?: string | null;
+        };
         /** @description Namespaced message key */
         MessageKey: string;
         /** @description Metadata shared by every IPAM object (IPAM-08, IPAM-09). */
@@ -6840,6 +7069,8 @@ export interface components {
                 /** @description When it was created. */
                 created_at: components["schemas"]["Timestamp"];
                 expires_at?: components["schemas"]["Timestamp"] | null;
+                /** @description The grants of a scoped token. */
+                grants?: components["schemas"]["TokenGrant"][];
                 /** @description The token id. */
                 id: components["schemas"]["ApiTokenId"];
                 last_used_at?: components["schemas"]["Timestamp"] | null;
@@ -6847,6 +7078,10 @@ export interface components {
                 name: string;
                 /** @description The first characters of the token. */
                 prefix: string;
+                /** @description A scoped token (IAM-10); absent for a personal token. */
+                scoped?: boolean;
+                /** @description The special scopes of a scoped token. */
+                scopes?: components["schemas"]["TokenScope"][];
             }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
@@ -6876,12 +7111,15 @@ export interface components {
                 factors: components["schemas"]["FactorSummary"];
                 /** @description The id. */
                 id: components["schemas"]["UserId"];
+                /** @description A service account (IAM-10); absent for a person. */
+                kind?: components["schemas"]["UserKind"];
                 /** @description The fixed UI language. */
                 language?: string | null;
                 last_login_at?: components["schemas"]["Timestamp"] | null;
                 lock?: components["schemas"]["AccountLock"] | null;
                 /** @description The login name. */
                 name: string;
+                owner?: components["schemas"]["UserId"] | null;
                 /** @description The password must be changed. */
                 password_change_required: boolean;
                 /** @description The revision for `If-Match`. */
@@ -7436,6 +7674,20 @@ export interface components {
             /** @description Its toggle values. */
             settings: components["schemas"]["SecuritySettings"];
         };
+        /** @description Body of `POST /cluster/members/{id}/promote`. */
+        PromoteRequest: {
+            /**
+             * @description Promote although the result has an even number of voters or the learner is not
+             *     caught up.
+             */
+            force?: boolean;
+            /**
+             * Format: int64
+             * @description A voter to remove in the same change: replaces a dead voter without passing
+             *     through an even number of voters.
+             */
+            replace?: number | null;
+        };
         /** @description A proposed prefix for addresses outside every known network (rule 4). */
         Proposal: {
             /** @description Whether it is created (the mapping options decide; accepted by default). */
@@ -7518,6 +7770,19 @@ export interface components {
             mismatch?: components["schemas"]["MismatchRecord"] | null;
             /** @description The majors the node offered in its last handshake. */
             offered?: number[];
+        };
+        /**
+         * @description The kind of quorum state of a controller.
+         * @enum {string}
+         */
+        QuorumKind: "single" | "healthy" | "electing" | "isolated";
+        /** @description The quorum state of a controller (OPS-26), for `GET /system/status` and `/cluster`. */
+        QuorumView: {
+            applied?: components["schemas"]["Revision"] | null;
+            last_contact?: components["schemas"]["Timestamp"] | null;
+            since?: components["schemas"]["Timestamp"] | null;
+            /** @description The state. */
+            state: components["schemas"]["QuorumKind"];
         };
         /** @description A range of addresses inside a prefix. */
         Range: {
@@ -7937,6 +8202,47 @@ export interface components {
          * @enum {string}
          */
         RunTrigger: "schedule" | "manual";
+        /**
+         * @description A scope rule in the API (IAM-01): `{"kind": "prefix", "value": {"id": "...",
+         *     "subtree": true}}`. Grants use `vrf`, `site` and `prefix`; `tenant` and `object` are
+         *     part of the model and not granted in Phase 1.
+         */
+        ScopeRule: {
+            /** @enum {string} */
+            kind: "tenant";
+            /** @description Objects of a tenant. */
+            value: components["schemas"]["TenantId"];
+        } | {
+            /** @enum {string} */
+            kind: "vrf";
+            /** @description Objects of a VRF. */
+            value: components["schemas"]["VrfId"];
+        } | {
+            /** @enum {string} */
+            kind: "site";
+            /** @description Objects of a site, and with `subtree` those of its child sites. */
+            value: {
+                /** @description The site. */
+                id: components["schemas"]["SiteId"];
+                /** @description Whether child sites are included. */
+                subtree: boolean;
+            };
+        } | {
+            /** @enum {string} */
+            kind: "prefix";
+            /** @description A prefix and the objects directly in it, and with `subtree` everything inside it. */
+            value: {
+                /** @description The prefix. */
+                id: components["schemas"]["PrefixId"];
+                /** @description Whether child prefixes are included. */
+                subtree: boolean;
+            };
+        } | {
+            /** @enum {string} */
+            kind: "object";
+            /** @description One object. */
+            value: components["schemas"]["ObjectRef"];
+        };
         /** @description One search hit. */
         SearchHit: {
             /** @description The object itself. */
@@ -8069,6 +8375,17 @@ export interface components {
             /** @description The password no longer meets the policy and must be changed. */
             password_change_required: boolean;
         };
+        /** @description One scoped grant as a session shows it. */
+        SessionGrant: {
+            /** @description Whether the holder may delegate it. */
+            delegable: boolean;
+            /** @description The grant. */
+            id: components["schemas"]["GrantId"];
+            /** @description The role. */
+            role: components["schemas"]["RoleName"];
+            /** @description Where it applies. */
+            scope: components["schemas"]["ScopeRule"];
+        };
         /** Format: uuid */
         SessionId: string;
         /** @description `GET /auth/session` (IAM-08). */
@@ -8085,6 +8402,8 @@ export interface components {
             expires_at: components["schemas"]["Timestamp"];
             /** @description Flags. */
             flags: components["schemas"]["SessionFlags"];
+            /** @description The scoped grants of the account (IAM-01), for display gating; the server decides. */
+            grants?: components["schemas"]["SessionGrant"][];
             /** @description The selected profile. */
             profile: components["schemas"]["Profile"];
             /** @description The strength the profile requires of this account. */
@@ -8393,6 +8712,24 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description Answer of `POST /cluster/step-down`. */
+        StepDown: {
+            /**
+             * Format: int64
+             * @description The controller that leads now.
+             */
+            leader: number;
+            /**
+             * Format: int64
+             * @description The controller that led before.
+             */
+            previous: number;
+            /**
+             * Format: int64
+             * @description The term of the new leadership.
+             */
+            term: number;
+        };
         /** @description Namespaced step kind */
         StepKind: string;
         /** @description What a step would do, for the preview before apply (API-09). */
@@ -8532,6 +8869,11 @@ export interface components {
              */
             lag?: number | null;
             leader?: components["schemas"]["NodeId"] | null;
+            /**
+             * @description Whether this controller reaches a quorum (OPS-26). Absent in answers of servers
+             *     that predate the controller cluster: a single controller.
+             */
+            quorum?: components["schemas"]["QuorumView"];
             /** @description Last applied revision. */
             revision: components["schemas"]["Revision"];
             /** @description `memory`, `leader`, `follower`, `learner`, `candidate` or `shutdown`. */
@@ -8775,21 +9117,41 @@ export interface components {
             /** @description Whether the value is weaker than the Home baseline (shown as a warning banner). */
             weaker_than_home: boolean;
         };
-        /** @description `POST /auth/tokens`. */
+        /**
+         * @description `POST /auth/tokens` and `POST /access/service-accounts/{id}/tokens`. With `grants` or
+         *     `scopes` the token is a scoped token (IAM-10): it acts with the intersection of its
+         *     grants and the owner's, never more. Without them, `POST /auth/tokens` creates a
+         *     personal token that acts with the owner's roles and grants.
+         */
         TokenCreate: {
             /**
              * Format: int32
              * @description Lifetime in days; defaults to the TGL-05 maximum (or no expiry where it allows).
              */
             expires_in_days?: number | null;
+            /**
+             * @description The grants of a scoped token: each a role no higher than one the owner holds, over
+             *     the whole installation or a scope inside one of the owner's grants.
+             */
+            grants?: components["schemas"]["TokenGrant"][] | null;
             /** @description A name for the token. */
             name: string;
+            /** @description The special scopes of a scoped token: `metrics`, `audit:read`. */
+            scopes?: components["schemas"]["TokenScope"][];
+        };
+        /** @description One grant of a scoped token: a role, globally or over one scope rule. */
+        TokenGrant: {
+            /** @description The role. */
+            role: components["schemas"]["RoleName"];
+            scope?: components["schemas"]["ScopeRule"] | null;
         };
         /** @description A personal token without its secret. */
         TokenInfo: {
             /** @description When it was created. */
             created_at: components["schemas"]["Timestamp"];
             expires_at?: components["schemas"]["Timestamp"] | null;
+            /** @description The grants of a scoped token. */
+            grants?: components["schemas"]["TokenGrant"][];
             /** @description The token id. */
             id: components["schemas"]["ApiTokenId"];
             last_used_at?: components["schemas"]["Timestamp"] | null;
@@ -8797,6 +9159,10 @@ export interface components {
             name: string;
             /** @description The first characters of the token. */
             prefix: string;
+            /** @description A scoped token (IAM-10); absent for a personal token. */
+            scoped?: boolean;
+            /** @description The special scopes of a scoped token. */
+            scopes?: components["schemas"]["TokenScope"][];
         };
         /** @description The TGL-05 value in a patch. */
         TokenMaxLifetime: {
@@ -8806,6 +9172,11 @@ export interface components {
              */
             days: number;
         } | "unlimited";
+        /**
+         * @description A special scope of a scoped token, beyond its grants (IAM-10, S3-Q7).
+         * @enum {string}
+         */
+        TokenScope: "metrics" | "audit:read";
         /** @description The enrolment a token was used for. */
         TokenUse: {
             /** @description When. */
@@ -9309,7 +9680,7 @@ export interface components {
             /** @description The login name: 1 to 64 characters, no spaces or control characters. */
             name: string;
             password?: components["schemas"]["SecretString"] | null;
-            /** @description Global roles. */
+            /** @description Global roles; may be empty for an account that acts through scoped grants only. */
             roles: components["schemas"]["RoleName"][];
         };
         /** @description The account a credential is created for. */
@@ -9337,12 +9708,15 @@ export interface components {
             factors: components["schemas"]["FactorSummary"];
             /** @description The id. */
             id: components["schemas"]["UserId"];
+            /** @description A service account (IAM-10); absent for a person. */
+            kind?: components["schemas"]["UserKind"];
             /** @description The fixed UI language. */
             language?: string | null;
             last_login_at?: components["schemas"]["Timestamp"] | null;
             lock?: components["schemas"]["AccountLock"] | null;
             /** @description The login name. */
             name: string;
+            owner?: components["schemas"]["UserId"] | null;
             /** @description The password must be changed. */
             password_change_required: boolean;
             /** @description The revision for `If-Match`. */
@@ -9350,6 +9724,11 @@ export interface components {
             /** @description Global roles. */
             roles: components["schemas"]["RoleName"][];
         };
+        /**
+         * @description What kind of account a user record is (IAM-10).
+         * @enum {string}
+         */
+        UserKind: "person" | "service";
         /** @description The account of a session. */
         UserSummary: {
             /** @description The display name. */
@@ -11491,7 +11870,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The session is not strong enough (`auth.step_up_required`) or is the break-glass session (`auth.break_glass.hardware_key_only`) */
+            /** @description The session is not strong enough (`auth.step_up_required`) is the break-glass session (`auth.break_glass.hardware_key_only`), or a grant of a scoped token goes beyond the owner's (`auth.grant.exceeds_own`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -11500,7 +11879,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The lifetime exceeds the maximum of the profile (`auth.token.lifetime_exceeded`) */
+            /** @description The lifetime exceeds the maximum of the profile (`auth.token.lifetime_exceeded`), a grant names a global-only role (`auth.grant.invalid_role`) or a scope that cannot be granted or does not exist (`auth.grant.invalid_scope`) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -12067,6 +12446,326 @@ export interface operations {
                 };
             };
             /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_cluster_digests: {
+        parameters: {
+            query?: {
+                /** @description The revision to compare at; default the newest revision the answering controller applied */
+                revision?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The digest of every member at one revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DigestReport"];
+                };
+            };
+            /** @description The revision is not a number (`sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to read nodes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The controller is still starting (`cluster.member.starting`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_cluster_members: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The cluster as this controller sees it */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterView"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to read nodes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No leader is known to answer the replication figures (`cluster.member.not_leader`) or the controller is still starting (`cluster.member.starting`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    remove_cluster_member: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id of the member */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The cluster after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterView"];
+                };
+            };
+            /** @description The identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to change the controller cluster (an administrator right) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node is not a member (`cluster.member.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The change would remove the last voter (`cluster.member.last_voter`), another change is in progress (`cluster.member.changing`) or the controller is not part of a cluster (`cluster.single`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No leader is known to take the change (`cluster.member.not_leader`) or the controller is still starting (`cluster.member.starting`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    promote_cluster_member: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id of the learner */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromoteRequest"];
+            };
+        };
+        responses: {
+            /** @description The cluster after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterView"];
+                };
+            };
+            /** @description The identifier or the body is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to change the controller cluster (an administrator right) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node, or the voter to replace, is not a member (`cluster.member.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The result would have an even number of voters (`cluster.member.even_voters`), the learner is too far behind or out of contact (`cluster.member.not_caught_up`), another change is in progress (`cluster.member.changing`) or the controller is not part of a cluster (`cluster.single`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No leader is known to take the change (`cluster.member.not_leader`) or the controller is still starting (`cluster.member.starting`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    step_down_cluster_leader: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The controller that led, the one that leads now and the new term */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StepDown"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to change the controller cluster (an administrator right) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No other voter is caught up (`cluster.member.no_successor`), a membership change is in progress (`cluster.member.changing`) or the controller is not part of a cluster (`cluster.single`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No leader is known (`cluster.member.not_leader`) or the controller is still starting (`cluster.member.starting`) */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -16042,7 +16741,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not allowed to enrol nodes */
+            /** @description Not allowed to enrol nodes, or a controller token without a sign-in in the last five minutes (`auth.step_up_required`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -16060,7 +16759,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description A controller role (`cluster.enrolment.roles`), a lifetime outside 60 s to 7 days (`cluster.enrolment.lifetime`) or a bad name (`cluster.node.name`) */
+            /** @description The role controller beside another role (`cluster.enrolment.roles`), a lifetime outside 60 s to 7 days or a controller token for more than an hour (`cluster.enrolment.lifetime`), or a bad name (`cluster.node.name`) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -19267,6 +19966,75 @@ export interface operations {
             };
             /** @description Too many reveals (`vault.reveal.rate_limited`), with `Retry-After` */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    set_default_language: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DefaultLanguage"];
+            };
+        };
+        responses: {
+            /** @description The default language now in force */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DefaultLanguage"];
+                };
+            };
+            /** @description The body is malformed (`sys.invalid_request`) or the tag is not an active language (`auth.invalid_request`, field `language`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A concurrent change (`auth.conflict`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

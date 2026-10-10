@@ -25,12 +25,22 @@ serde_json = { workspace = true }
 socket2 = { version = "0.6.5", features = ["all"] }
 tenko-cluster = { workspace = true }
 tenko-core = { workspace = true }
+tenko-ipam = { workspace = true }
+tenko-jobs = { workspace = true }
+tenko-store = { workspace = true }
+tenko-vault = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
+utoipa = { workspace = true }
+uuid = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+tenko-jobs = { workspace = true, features = ["testing"] }
+tenko-store = { workspace = true, features = ["testing"] }
+tenko-vault = { workspace = true, features = ["testing"] }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

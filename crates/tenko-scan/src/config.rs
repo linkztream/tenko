@@ -1,9 +1,18 @@
 //! The `[scan]` section of `tenko.toml`: what a probe scans, how fast and when.
 //!
-//! The probe reads its own configuration file for now; the controller hands the scan
-//! configuration to its probes with the configuration sync of a later package (WP3.1).
-//! Every key has a default, so an empty section is valid; without `prefixes` the scanner
-//! scans nothing, because scans never leave the configured prefixes.
+//! A probe reads this section of its own configuration file until its first sync with the
+//! controllers; from then on the configuration the controllers hold for it
+//! (`scan.probe_config`, `PUT /nodes/{id}/scan-config`) wins, and the file serves only
+//! `tenko node scan run --dry-run` and the probe's offer of an initial configuration at its
+//! first connection. Every key has a default, so an empty section is valid; without
+//! `prefixes` the scanner scans nothing, because scans never leave the configured
+//! prefixes.
+//!
+//! SNMP passwords come from one of three places: a file (`auth_password_file`), the file
+//! itself (`auth_password`, for a lab), or an operator secret of the vault
+//! (`auth_secret`), which the probe fetches from the controllers when it polls and keeps in
+//! memory only (S3-Q19). A configuration held by the controllers names vault secrets only
+//! ([`ScanConfig::validate_stored`]).
 //!
 //! ```toml
 //! [scan]
@@ -32,7 +41,8 @@ use std::{
 };
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use tenko_core::VrfId;
+use tenko_core::{SecretId, VrfId};
+use utoipa::ToSchema;
 use zeroize::Zeroizing;
 
 use crate::{
@@ -47,8 +57,9 @@ pub const DEFAULT_TCP_PORTS: [u16; 28] = [
 ];
 
 /// The rate profile of TGL-19.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = ScanRateProfile)]
 pub enum RateProfile {
     /// 100 probes per second (Home).
     #[default]
@@ -109,7 +120,7 @@ impl<'de> Deserialize<'de> for SecretText {
 }
 
 /// `[scan]`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct ScanConfig {
     /// Runs the scanner when the node has the `probe` role (default true).
@@ -223,8 +234,9 @@ fn default_ttl(interval_secs: u64, ttl_secs: Option<u64>) -> Duration {
 }
 
 /// A method with only the schedule keys.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(default, deny_unknown_fields)]
+#[schema(as = ScanBasicMethod)]
 pub struct BasicMethod {
     /// Runs on schedule (default true).
     pub enabled: bool,
@@ -261,7 +273,7 @@ impl Default for BasicMethod {
 }
 
 /// `[scan.icmp]`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct IcmpMethod {
     /// Runs on schedule (default true; needs `active`).
@@ -287,8 +299,9 @@ impl Default for IcmpMethod {
 }
 
 /// Which addresses `tcp_connect` scans.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = ScanTcpTargets)]
 pub enum TcpTargets {
     /// The addresses the other methods of this probe saw (default).
     #[default]
@@ -298,7 +311,7 @@ pub enum TcpTargets {
 }
 
 /// `[scan.tcp_connect]`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct TcpConnectMethod {
     /// Runs on schedule (default true; needs `active`).
@@ -334,7 +347,7 @@ impl Default for TcpConnectMethod {
 }
 
 /// `[scan.reverse_dns]`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct ReverseDnsMethod {
     /// Runs on schedule (default true).
@@ -363,7 +376,7 @@ impl Default for ReverseDnsMethod {
 }
 
 /// `[scan.mdns]`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct MdnsMethod {
     /// Runs on schedule (default true).
@@ -399,7 +412,7 @@ impl Default for MdnsMethod {
 }
 
 /// `[scan.llmnr]`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct LlmnrMethod {
     /// Runs on schedule (default true).
@@ -428,7 +441,7 @@ impl Default for LlmnrMethod {
 }
 
 /// SNMPv3 authentication protocols.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SnmpAuth {
     /// HMAC-SHA-96 (RFC 3414).
@@ -444,7 +457,7 @@ pub enum SnmpAuth {
 }
 
 /// SNMPv3 privacy protocols.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SnmpPrivacy {
     /// AES-128-CFB (RFC 3826).
@@ -452,10 +465,11 @@ pub enum SnmpPrivacy {
 }
 
 /// One switch to poll.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SnmpDevice {
     /// Its management address.
+    #[schema(value_type = String)]
     pub address: IpAddr,
     /// Its SNMP port (default 161).
     #[serde(default = "snmp_port")]
@@ -468,21 +482,38 @@ pub struct SnmpDevice {
     /// The authentication protocol; not set: no authentication (lab use only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<SnmpAuth>,
-    /// The authentication password, in clear in this file.
+    /// The authentication password, in clear in this file. Never in a configuration held
+    /// by the controllers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(ignore)]
     pub auth_password: Option<SecretText>,
     /// A file that holds the authentication password (preferred over `auth_password`).
+    /// Never in a configuration held by the controllers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(ignore)]
     pub auth_password_file: Option<PathBuf>,
+    /// The operator secret of the vault that holds the authentication password; the probe
+    /// fetches it from the controllers when it polls and keeps it in memory only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = Uuid)]
+    pub auth_secret: Option<SecretId>,
     /// The privacy protocol; not set: no encryption.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub privacy: Option<SnmpPrivacy>,
-    /// The privacy password, in clear in this file.
+    /// The privacy password, in clear in this file. Never in a configuration held by the
+    /// controllers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(ignore)]
     pub privacy_password: Option<SecretText>,
-    /// A file that holds the privacy password.
+    /// A file that holds the privacy password. Never in a configuration held by the
+    /// controllers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(ignore)]
     pub privacy_password_file: Option<PathBuf>,
+    /// The operator secret of the vault that holds the privacy password.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = Uuid)]
+    pub privacy_secret: Option<SecretId>,
     /// The SNMPv3 context name (default empty).
     #[serde(default)]
     pub context: String,
@@ -500,7 +531,7 @@ impl SnmpDevice {
 }
 
 /// `[scan.snmp]`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct SnmpMethod {
     /// Runs on schedule (default true; needs at least one device).
@@ -536,8 +567,9 @@ impl Default for SnmpMethod {
 }
 
 /// A raw-socket method: declared, switched off, not implemented yet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(default, deny_unknown_fields)]
+#[schema(as = ScanRawMethod)]
 pub struct RawMethod {
     /// Runs on schedule once implemented (default false).
     pub enabled: bool,
@@ -653,12 +685,16 @@ impl ScanConfig {
             .transpose()
     }
 
-    /// Checks every key.
+    /// Checks every key of a probe's own file.
     ///
     /// # Errors
     ///
     /// `scan.config` naming the first key that is out of range.
     pub fn validate(&self) -> Result<(), ScanError> {
+        self.validate_with(Credentials::Local)
+    }
+
+    fn validate_with(&self, credentials: Credentials) -> Result<(), ScanError> {
         self.scope()?;
         self.blackout()?;
         self.vrf()?;
@@ -726,9 +762,52 @@ impl ScanConfig {
             return Err(ScanError::config("scan.snmp.retries must be at most 10"));
         }
         for device in &self.snmp.devices {
-            validate_device(device)?;
+            validate_device(device, credentials)?;
         }
         Ok(())
+    }
+
+    /// Checks a configuration that the controllers hold for a probe (`PUT
+    /// /nodes/{id}/scan-config`, a probe's offer): every key as [`validate`](Self::validate),
+    /// SNMP passwords only as vault secrets, and a device may still lack its secret.
+    ///
+    /// # Errors
+    ///
+    /// `scan.config` naming the first key that is out of range.
+    pub fn validate_stored(&self) -> Result<(), ScanError> {
+        self.validate_with(Credentials::Stored)
+    }
+
+    /// The configuration a probe offers the controllers as its initial one: this one with
+    /// every SNMP password and password file removed (vault secrets stay), and the
+    /// addresses of the devices that then lack a password, which an administrator has to
+    /// give a vault secret.
+    pub fn offer_form(&self) -> (ScanConfig, Vec<IpAddr>) {
+        let mut offer = self.clone();
+        let mut lacking = Vec::new();
+        for device in &mut offer.snmp.devices {
+            device.auth_password = None;
+            device.auth_password_file = None;
+            device.privacy_password = None;
+            device.privacy_password_file = None;
+            if !device.has_credentials() {
+                lacking.push(device.address);
+            }
+        }
+        (offer, lacking)
+    }
+
+    /// The vault secrets the configuration names, each once.
+    pub fn secrets(&self) -> Vec<SecretId> {
+        let mut secrets: Vec<SecretId> = self
+            .snmp
+            .devices
+            .iter()
+            .flat_map(SnmpDevice::secrets)
+            .collect();
+        secrets.sort_unstable_by_key(|secret| secret.uuid());
+        secrets.dedup();
+        secrets
     }
 
     /// The DNS servers of `reverse_dns` as socket addresses (port 53 unless given).
@@ -779,32 +858,70 @@ fn parse_server(text: &str) -> Result<SocketAddr, ScanError> {
         })
 }
 
-fn validate_device(device: &SnmpDevice) -> Result<(), ScanError> {
+/// Where the passwords of a device may come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Credentials {
+    /// A file of the probe: files, inline passwords or vault secrets, each required.
+    Local,
+    /// A configuration held by the controllers: vault secrets only; a device without one
+    /// is kept but not polled until an administrator picks the secret.
+    Stored,
+}
+
+fn validate_device(device: &SnmpDevice, credentials: Credentials) -> Result<(), ScanError> {
     let at = device.address;
     if device.user.trim().is_empty() || device.user.len() > 32 {
         return Err(ScanError::config(format!(
             "scan.snmp.devices ({at}): user must have 1 to 32 characters"
         )));
     }
-    if device.auth.is_some()
-        && device.auth_password.is_none()
-        && device.auth_password_file.is_none()
+    let sources = |inline: bool, file: bool, secret: bool| {
+        usize::from(inline) + usize::from(file) + usize::from(secret)
+    };
+    let auth_sources = sources(
+        device.auth_password.is_some(),
+        device.auth_password_file.is_some(),
+        device.auth_secret.is_some(),
+    );
+    let privacy_sources = sources(
+        device.privacy_password.is_some(),
+        device.privacy_password_file.is_some(),
+        device.privacy_secret.is_some(),
+    );
+    if credentials == Credentials::Stored
+        && (device.auth_password.is_some()
+            || device.auth_password_file.is_some()
+            || device.privacy_password.is_some()
+            || device.privacy_password_file.is_some())
     {
         return Err(ScanError::config(format!(
-            "scan.snmp.devices ({at}): auth needs auth_password_file or auth_password"
+            "scan.snmp.devices ({at}): a configuration held by the controllers names vault              secrets (auth_secret, privacy_secret), never passwords or password files"
+        )));
+    }
+    if device.auth_secret.is_some() && auth_sources > 1 {
+        return Err(ScanError::config(format!(
+            "scan.snmp.devices ({at}): auth_secret cannot be combined with auth_password or              auth_password_file"
+        )));
+    }
+    if device.privacy_secret.is_some() && privacy_sources > 1 {
+        return Err(ScanError::config(format!(
+            "scan.snmp.devices ({at}): privacy_secret cannot be combined with              privacy_password or privacy_password_file"
+        )));
+    }
+    if device.auth.is_some() && auth_sources == 0 && credentials == Credentials::Local {
+        return Err(ScanError::config(format!(
+            "scan.snmp.devices ({at}): auth needs auth_password_file, auth_password or              auth_secret"
         )));
     }
     if device.privacy.is_some() {
         if device.auth.is_none() {
             return Err(ScanError::config(format!(
-                "scan.snmp.devices ({at}): privacy needs auth (SNMPv3 has no privacy without \
-                 authentication)"
+                "scan.snmp.devices ({at}): privacy needs auth (SNMPv3 has no privacy without                  authentication)"
             )));
         }
-        if device.privacy_password.is_none() && device.privacy_password_file.is_none() {
+        if privacy_sources == 0 && credentials == Credentials::Local {
             return Err(ScanError::config(format!(
-                "scan.snmp.devices ({at}): privacy needs privacy_password_file or \
-                 privacy_password"
+                "scan.snmp.devices ({at}): privacy needs privacy_password_file,                  privacy_password or privacy_secret"
             )));
         }
     }
@@ -815,6 +932,28 @@ fn validate_device(device: &SnmpDevice) -> Result<(), ScanError> {
     }
     Ok(())
 }
+
+impl SnmpDevice {
+    /// Whether the device has every password its protocols need, so it can be polled; a
+    /// device of a configuration held by the controllers may wait for its vault secret.
+    pub fn has_credentials(&self) -> bool {
+        let auth = self.auth_password.is_some()
+            || self.auth_password_file.is_some()
+            || self.auth_secret.is_some();
+        let privacy = self.privacy_password.is_some()
+            || self.privacy_password_file.is_some()
+            || self.privacy_secret.is_some();
+        (self.auth.is_none() || auth) && (self.privacy.is_none() || privacy)
+    }
+
+    /// The vault secrets the device names.
+    pub fn secrets(&self) -> impl Iterator<Item = SecretId> {
+        self.auth_secret.into_iter().chain(self.privacy_secret)
+    }
+}
+
+/// The purpose under which a probe fetches SNMP secrets from the controllers.
+pub const SNMP_SECRET_PURPOSE: &str = "snmp";
 
 #[cfg(test)]
 mod tests {
@@ -967,19 +1106,129 @@ mod tests {
             privacy: Some(SnmpPrivacy::Aes128),
             privacy_password: Some(SecretText::new("example-priv-secret")),
             privacy_password_file: None,
+            privacy_secret: None,
+            auth_secret: None,
             context: String::new(),
         };
-        let error = validate_device(&device).expect_err("privacy without auth");
+        let error = validate_device(&device, Credentials::Local).expect_err("privacy without auth");
         assert!(error.detail().contains("privacy needs auth"));
         let device = SnmpDevice {
             auth: Some(SnmpAuth::Sha1),
             ..device
         };
         assert!(
-            validate_device(&device)
+            validate_device(&device, Credentials::Local)
                 .expect_err("no password")
                 .detail()
                 .contains("auth_password")
         );
+    }
+
+    fn vault_device() -> SnmpDevice {
+        SnmpDevice {
+            address: "192.0.2.3".parse().expect("ip"),
+            port: 161,
+            name: None,
+            user: "tenko".to_owned(),
+            auth: Some(SnmpAuth::Sha256),
+            auth_password: None,
+            auth_password_file: None,
+            auth_secret: Some(SecretId::generate()),
+            privacy: Some(SnmpPrivacy::Aes128),
+            privacy_password: None,
+            privacy_password_file: None,
+            privacy_secret: Some(SecretId::generate()),
+            context: String::new(),
+        }
+    }
+
+    #[test]
+    fn vault_secrets_are_a_password_source_of_their_own() {
+        let device = vault_device();
+        validate_device(&device, Credentials::Local).expect("local");
+        validate_device(&device, Credentials::Stored).expect("stored");
+        assert!(device.has_credentials());
+        assert_eq!(device.secrets().count(), 2);
+        let both = SnmpDevice {
+            auth_password_file: Some(PathBuf::from("/etc/tenko/snmp-auth")),
+            ..device.clone()
+        };
+        assert!(
+            validate_device(&both, Credentials::Local)
+                .expect_err("two sources")
+                .detail()
+                .contains("cannot be combined")
+        );
+    }
+
+    #[test]
+    fn a_stored_configuration_names_vault_secrets_only() {
+        let mut config = ScanConfig::default();
+        config.snmp.devices.push(vault_device());
+        config.validate_stored().expect("vault secrets");
+        // A device still waiting for its secret is kept, but cannot be polled yet.
+        let waiting = SnmpDevice {
+            auth_secret: None,
+            privacy_secret: None,
+            ..vault_device()
+        };
+        config.snmp.devices.push(waiting.clone());
+        config.validate_stored().expect("waiting for its secret");
+        assert!(config.validate().is_err(), "a file needs every password");
+        assert!(!waiting.has_credentials());
+        // Inline passwords and password files are refused.
+        for device in [
+            SnmpDevice {
+                auth_password: Some(SecretText::new("example-auth-secret")),
+                auth_secret: None,
+                ..vault_device()
+            },
+            SnmpDevice {
+                privacy_password_file: Some(PathBuf::from("/etc/tenko/snmp-priv")),
+                privacy_secret: None,
+                ..vault_device()
+            },
+        ] {
+            let mut config = ScanConfig::default();
+            config.snmp.devices.push(device);
+            let error = config.validate_stored().expect_err("password");
+            assert!(error.detail().contains("vault"), "{}", error.detail());
+        }
+    }
+
+    #[test]
+    fn an_offer_leaves_the_passwords_on_the_probe() {
+        let mut config = ScanConfig::default();
+        config.snmp.devices.push(SnmpDevice {
+            address: "192.0.2.4".parse().expect("ip"),
+            port: 161,
+            name: None,
+            user: "tenko".to_owned(),
+            auth: Some(SnmpAuth::Sha1),
+            auth_password: Some(SecretText::new("example-auth-secret")),
+            auth_password_file: None,
+            auth_secret: None,
+            privacy: None,
+            privacy_password: None,
+            privacy_password_file: None,
+            privacy_secret: None,
+            context: String::new(),
+        });
+        config.snmp.devices.push(vault_device());
+        let (offer, lacking) = config.offer_form();
+        assert_eq!(lacking, vec!["192.0.2.4".parse::<IpAddr>().expect("ip")]);
+        assert!(
+            offer
+                .snmp
+                .devices
+                .iter()
+                .all(|device| device.auth_password.is_none())
+        );
+        offer
+            .validate_stored()
+            .expect("the offer validates as a stored configuration");
+        assert_eq!(offer.secrets().len(), 2);
+        let encoded = serde_json::to_string(&offer).expect("json");
+        assert!(!encoded.contains("example-auth-secret"));
     }
 }

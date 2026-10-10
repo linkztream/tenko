@@ -881,9 +881,18 @@ async fn start(
     }
     let ipam_on = modules.contains(crate::modules::Module::Ipam);
 
-    steps
-        .run("cluster", crate::cluster::start(resolved, &store))
+    let (mut cluster_peers, ring) = steps
+        .run(
+            "cluster",
+            crate::cluster::start_peers(crate::cluster::Start {
+                resolved,
+                store: &store,
+                ring,
+                stop: running.stop.subscribe(),
+            }),
+        )
         .await?;
+    running.tasks.extend(cluster_peers.tasks());
 
     let vault = steps
         .run("vault", async {
@@ -1144,14 +1153,17 @@ async fn start(
     let mut cluster = steps
         .run(
             "nodes",
-            crate::node::controller::start(crate::node::controller::Parts {
-                resolved,
-                store: Arc::clone(&store_dyn),
-                vault: Arc::clone(&vault),
-                engine: engine.clone(),
-                reconciler: reconciler.clone(),
-                stop: running.stop.subscribe(),
-            }),
+            crate::node::controller::start_with(
+                crate::node::controller::Parts {
+                    resolved,
+                    store: Arc::clone(&store_dyn),
+                    vault: Arc::clone(&vault),
+                    engine: engine.clone(),
+                    reconciler: reconciler.clone(),
+                    stop: running.stop.subscribe(),
+                },
+                Some(cluster_peers.clone()),
+            ),
         )
         .await?;
     running.tasks.extend(cluster.tasks());

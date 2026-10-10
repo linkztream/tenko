@@ -4,9 +4,11 @@
 //! | Module | Contents |
 //! |---|---|
 //! | [`scanner`] | the scheduler: schedules, on-demand runs, the kill switch, one batch per run |
-//! | [`config`] | the `[scan]` section of `tenko.toml` |
+//! | [`config`] | the `[scan]` section of `tenko.toml`, and the configuration the controllers hold for a probe |
+//! | [`control`] | the controller side: probe configurations, scans on demand as jobs, the remote kill switch |
 //! | [`method`] | the methods, the [`method::Method`] trait the scheduler drives |
 //! | [`scope`] | the prefixes a probe covers; scans never leave them |
+//! | [`secrets`] | vault secrets of the SNMP devices, fetched from the controllers, in memory only |
 //! | [`limit`] | probes per second, spacing per address, probes in flight (TGL-19) |
 //! | [`blackout`] | blackout windows (SCAN-06) |
 //! | [`oui`] | vendor names from the OUI of a MAC address |
@@ -23,6 +25,7 @@
 pub mod blackout;
 pub mod capability;
 pub mod config;
+pub mod control;
 pub mod dns;
 pub mod error;
 pub mod known;
@@ -32,6 +35,7 @@ pub mod methods;
 pub mod oui;
 pub mod scanner;
 pub mod scope;
+pub mod secrets;
 pub mod snmp;
 pub mod status;
 pub mod sys;

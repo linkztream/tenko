@@ -1,7 +1,9 @@
-//! The gRPC services of the cluster port, one file per service, all implemented by
-//! [`ClusterService`](crate::server::ClusterService). The listener, the router and the
-//! shared helpers stay in [`server`](crate::server); a service file holds the `impl` of
-//! one generated server trait and nothing else, so work packages edit disjoint files.
+//! The gRPC services of the cluster port, one file per service: the node services
+//! implemented by [`ClusterService`](crate::server::ClusterService), the controller
+//! services `Raft` and `Cluster` by [`PeerService`](crate::peers::PeerService). The
+//! listener, the router and the shared helpers stay in [`server`](crate::server); a
+//! service file holds the `impl` of one generated server trait and nothing else, so work
+//! packages edit disjoint files.
 //!
 //! | File | Service | Callers | Owner |
 //! |---|---|---|---|
@@ -14,9 +16,8 @@
 //! | `membership.rs` | `Cluster`: join, forwarding, digest, key transfer | a controller with a member record | WP3.1a |
 //! | `metrics.rs` | `Metrics`: one controller's snapshot | a controller | WP3.5 |
 //!
-//! `raft.rs`, `membership.rs`, `config.rs`, `commands.rs` and `metrics.rs` are stubs from
-//! WP3.0: every method answers `UNIMPLEMENTED` with a message that names the package that
-//! implements it. Replacing a stub body is not a protocol change.
+//! A service that is still a stub answers `UNIMPLEMENTED` with a message that names the
+//! package that implements it. Replacing a stub body is not a protocol change.
 
 use tonic::Status;
 

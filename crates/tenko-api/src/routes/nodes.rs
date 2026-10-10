@@ -8,7 +8,7 @@
 //! | `GET /nodes` | 200 page of [`NodeView`] by id, each with its live connection | 400 `sys.invalid_query`, `sys.invalid_cursor` |
 //! | `GET /nodes/{id}` | 200 [`NodeView`] with `ETag` | 400, 403, 404 `cluster.node.not_found` |
 //! | `DELETE /nodes/{id}` | 204: the node is revoked, its connections close | 403, 404, 409 `cluster.node.conflict` |
-//! | `POST /nodes/enrolments` | 201 [`CreatedEnrolment`] with the token, `Cache-Control: no-store` | 400, 403, 409 `cluster.node.name_taken`, 422 `cluster.enrolment.*`, `cluster.node.name` |
+//! | `POST /nodes/enrolments` | 201 [`CreatedEnrolment`] with the token, `Cache-Control: no-store` | 400, 403 (`auth.step_up_required` for a controller token), 409 `cluster.node.name_taken`, 422 `cluster.enrolment.*`, `cluster.node.name` |
 //! | `GET /nodes/enrolments` | 200 [`EnrolmentList`], newest first, never a secret | 403 |
 //! | `DELETE /nodes/enrolments/{id}` | 204 | 403, 404 `cluster.enrolment.not_found` |
 //! | `POST /nodes/enrol` | 201 [`EnrolResponse`] (public: the token authenticates) | 400, 401 `cluster.enrolment.invalid_token`, `.used`, `.expired`; 403 `cluster.enrolment.roles`; 409 `cluster.protocol.unsupported`, `cluster.node.name_taken`; 422 `cluster.ca.invalid_csr`, `cluster.node.name`, `cluster.node.address` |
@@ -22,8 +22,11 @@
 //!
 //! Reading nodes needs [`Action::Read`] on nodes (viewers and operators have it); creating,
 //! listing and deleting enrolment tokens needs [`Action::Create`] on nodes, revoking
-//! [`Action::Delete`] on the node: both are administrator rights. `POST /nodes/enrol` takes
-//! no session: the single-use token is the credential, and every refusal is audited.
+//! [`Action::Delete`] on the node: both are administrator rights. A token for the role
+//! `controller` (a host that joins the controller cluster and receives the key encryption
+//! keys, R22) also needs a sign-in within the last five minutes, like installs, and lives
+//! at most an hour. `POST /nodes/enrol` takes no session: the single-use token is the
+//! credential, and every refusal is audited.
 
 use std::sync::Arc;
 
@@ -286,15 +289,16 @@ async fn list_enrolments(
         (status = 201, description = "The token, shown once (`Cache-Control: no-store`)", body = CreatedEnrolment),
         (status = 400, description = "The body is not valid JSON (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "Not allowed to enrol nodes", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Not allowed to enrol nodes, or a controller token without a sign-in in the last five minutes (`auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "A node has the name (`cluster.node.name_taken`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 422, description = "A controller role (`cluster.enrolment.roles`), a lifetime outside 60 s to 7 days (`cluster.enrolment.lifetime`) or a bad name (`cluster.node.name`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 422, description = "The role controller beside another role (`cluster.enrolment.roles`), a lifetime outside 60 s to 7 days or a controller token for more than an hour (`cluster.enrolment.lifetime`), or a bad name (`cluster.node.name`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn create_enrolment(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
     registry: Registry,
+    auth: Option<Extension<Arc<tenko_auth::AuthService>>>,
     client: ClientInfo,
     ApiJson(request): ApiJson<NewEnrolment>,
 ) -> Result<Response, ApiError> {
@@ -304,18 +308,42 @@ async fn create_enrolment(
         Action::Create,
         &ObjectRef::singleton(ObjectKind::Node),
     )?;
+    let controller = request.roles.contains(&tenko_core::Role::Controller);
+    if controller && let Some(Extension(auth)) = &auth {
+        // A controller receives the installation's key encryption keys (R22): only an
+        // interactive sign-in within the last five minutes creates its token.
+        if !matches!(cx.principal, Principal::User { .. }) {
+            return Err(ApiError::from_coded_error(
+                CodedError::new(
+                    "auth.step_up_required",
+                    403,
+                    "a controller token needs an interactive sign-in within the last five minutes; a personal API token cannot create one",
+                )
+                .with_param("required", "fresh"),
+            ));
+        }
+        auth.require_fresh_session(&cx)
+            .await
+            .map_err(|error| ApiError::from_coded_error(CodedError::from_coded(&error)))?;
+    }
     let (enrolment, token) = registry
         .create_enrolment(&cx, request)
         .await
         .map_err(failed)?;
     let ca_fingerprint = registry.ca().root_info().sha256.clone();
-    let controller = client
+    let origin = client
         .origin()
         .unwrap_or_else(|| "https://<controller>:8443".to_owned());
     let token = token.to_text().to_string();
-    let command = format!(
-        "tenko node enrol --controller {controller} --token {token} --ca-fingerprint {ca_fingerprint}"
-    );
+    let command = if controller {
+        format!(
+            "tenko cluster join --controller {origin} --token {token} --ca-fingerprint {ca_fingerprint} --address HOST:PORT --data-dir D"
+        )
+    } else {
+        format!(
+            "tenko node enrol --controller {origin} --token {token} --ca-fingerprint {ca_fingerprint}"
+        )
+    };
     let body = CreatedEnrolment {
         enrolment,
         token,
@@ -602,10 +630,41 @@ mod tests {
             &router,
             "POST",
             "/nodes/enrolments",
-            Some(json!({ "roles": ["controller"] })),
+            Some(json!({ "roles": ["controller", "probe"] })),
         )
         .await
         .assert_problem(422, "cluster.enrolment.roles");
+        send(
+            &router,
+            "POST",
+            "/nodes/enrolments",
+            Some(json!({ "roles": ["controller"], "expires_in_secs": 7200 })),
+        )
+        .await
+        .assert_problem(422, "cluster.enrolment.lifetime");
+        let controller = send(
+            &router,
+            "POST",
+            "/nodes/enrolments",
+            Some(json!({ "roles": ["controller"] })),
+        )
+        .await;
+        assert_eq!(
+            controller.status,
+            StatusCode::CREATED,
+            "{}",
+            controller.body
+        );
+        assert!(
+            controller.body["command"]
+                .as_str()
+                .is_some_and(
+                    |command| command.starts_with("tenko cluster join --controller")
+                        && command.ends_with("--address HOST:PORT --data-dir D")
+                ),
+            "{}",
+            controller.body
+        );
         send(
             &router,
             "POST",

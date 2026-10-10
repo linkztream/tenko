@@ -1,11 +1,17 @@
 import { For } from "solid-js";
 import { ICON_PATHS, type IconName } from "./icons";
 
+/// Glyphs that point along the inline axis and mirror under a right-to-left direction.
+const INLINE_DIRECTIONAL: ReadonlySet<IconName> = new Set<IconName>(["arrow-r", "chev-r", "move", "undo"]);
+
 export type { IconName } from "./icons";
 
 /** One icon from the sprite. Decorative: give the surrounding control its accessible name. */
 export function Icon(props: { name: IconName; size?: "sm" | "xs" | undefined; class?: string | undefined }) {
-  const cls = () => ["i", props.size, props.class].filter(Boolean).join(" ");
+  const cls = () =>
+    ["i", props.size, INLINE_DIRECTIONAL.has(props.name) ? "inline-dir" : undefined, props.class]
+      .filter(Boolean)
+      .join(" ");
   return (
     <svg class={cls()} aria-hidden="true">
       <use href={`#i-${props.name}`} />

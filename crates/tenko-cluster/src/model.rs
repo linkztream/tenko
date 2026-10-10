@@ -9,6 +9,8 @@
 //! | `cluster.enrolments` | token id | [`EnrolmentRecord`] |
 //! | `cluster.revocations` | certificate serial (hex) | [`Revocation`] |
 //! | `cluster.controller_certs` | node id | [`ControllerCertRecord`] |
+//! | `cluster.members` | node id | [`MemberRecord`]: a controller of the Raft group and its cluster port |
+//! | `cluster.kek_transfers` | enrolment token id | [`KekTransferRecord`]: the one key transfer a join token allows |
 //!
 //! Heartbeats are kept in memory; `last_seen` is written at connect, at disconnect and at
 //! most every [`LAST_SEEN_INTERVAL_SECS`] seconds in between, so a quiet cluster does not
@@ -33,7 +35,10 @@ pub const LAST_SEEN_INTERVAL_SECS: u64 = 300;
 
 /// The store tables of the node registry.
 pub mod tables {
-    use super::{ControllerCertRecord, EnrolmentRecord, NodeRecord, Revocation, TableDef, Uuid};
+    use super::{
+        ControllerCertRecord, EnrolmentRecord, KekTransferRecord, MemberRecord, NodeRecord,
+        Revocation, TableDef, Uuid,
+    };
 
     /// Enrolled nodes by id.
     pub const NODES: TableDef<u64, NodeRecord> = TableDef::new("cluster.nodes");
@@ -48,6 +53,12 @@ pub mod tables {
     /// The cluster-port certificate of each controller.
     pub const CONTROLLER_CERTS: TableDef<u64, ControllerCertRecord> =
         TableDef::new("cluster.controller_certs");
+    /// The controllers of the Raft group by node id, with the cluster port their peers
+    /// dial. Peers resolve endpoints here, not from the Raft membership.
+    pub const MEMBERS: TableDef<u64, MemberRecord> = TableDef::new("cluster.members");
+    /// Key transfers to joining controllers by the id of the enrolment token they used.
+    pub const KEK_TRANSFERS: TableDef<Uuid, KekTransferRecord> =
+        TableDef::new("cluster.kek_transfers");
 }
 
 /// The first id handed to an enrolled node. Controllers take theirs from `[node] id`
@@ -219,6 +230,33 @@ pub struct ControllerCertRecord {
     pub key: SecretRef,
     /// When it was issued.
     pub issued_at: Timestamp,
+}
+
+/// A controller of the Raft group. Written when it joins (by the leader) and when the
+/// first controller registers itself at the first join; removed with the member.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemberRecord {
+    /// The node id, also its Raft id.
+    pub node: NodeId,
+    /// Its cluster port as `host:port`.
+    pub address: String,
+    /// The software version it reported.
+    pub version: String,
+    /// The data format its binary knows.
+    pub data_format: u32,
+    /// When it joined.
+    pub joined_at: Timestamp,
+}
+
+/// The key transfer a joining controller received with its enrolment token (single use).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KekTransferRecord {
+    /// The joining controller.
+    pub node: NodeId,
+    /// When.
+    pub at: Timestamp,
+    /// The ids of the transferred generations (never the material).
+    pub generations: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------------------

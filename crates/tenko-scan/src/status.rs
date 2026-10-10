@@ -183,6 +183,9 @@ pub struct RunRecord {
     /// Notes of the method (devices that did not answer and so on).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
+    /// How many batches the run queued (a sink splits a batch that is too large).
+    #[serde(default)]
+    pub batches: u32,
 }
 
 /// One method in the status.

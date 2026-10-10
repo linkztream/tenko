@@ -13,7 +13,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use tenko_cluster::{
-    buffer::ObservationBuffer,
+    buffer::{DEFAULT_MAX_BATCH_BYTES, ObservationBuffer},
     client::Agent,
     identity::create_private_dir,
     probe::{ProbeBatch, ProbeSink},
@@ -25,6 +25,7 @@ use tenko_scan::{
     status::ScanPaths,
 };
 use tokio::{sync::watch, task::JoinHandle};
+use uuid::Uuid;
 
 use crate::config::Resolved;
 
@@ -48,10 +49,9 @@ impl AgentSink {
 
 #[async_trait]
 impl BatchSink for AgentSink {
-    async fn deliver(&self, batch: ProbeBatch) -> Result<(), ScanError> {
+    async fn deliver(&self, batch: ProbeBatch, run: Option<Uuid>) -> Result<u32, ScanError> {
         self.0
-            .push(&batch)
-            .map(|_| ())
+            .push_run(&batch, run)
             .map_err(|error| ScanError::io(format!("[{}] {}", error.code(), error.detail())))
     }
 }
@@ -79,12 +79,12 @@ impl ControllerSink {
 
 #[async_trait]
 impl BatchSink for ControllerSink {
-    async fn deliver(&self, batch: ProbeBatch) -> Result<(), ScanError> {
+    async fn deliver(&self, batch: ProbeBatch, _run: Option<Uuid>) -> Result<u32, ScanError> {
         let vrf = batch.vrf;
         self.sink
             .ingest(self.node, vrf, batch)
             .await
-            .map(|_| ())
+            .map(|_| 1)
             .map_err(|error| ScanError::io(format!("[{}] {}", error.code(), error.detail())))
     }
 }
@@ -105,12 +105,16 @@ impl IncomingSink {
 
 #[async_trait]
 impl BatchSink for IncomingSink {
-    async fn deliver(&self, batch: ProbeBatch) -> Result<(), ScanError> {
+    async fn deliver(&self, batch: ProbeBatch, run: Option<Uuid>) -> Result<u32, ScanError> {
         create_private_dir(&self.buffer)
             .map_err(|error| ScanError::io(error.detail().to_owned()))?;
-        ObservationBuffer::drop_incoming(&self.buffer, &batch.encode())
-            .map(|_| ())
-            .map_err(|error| ScanError::io(error.to_string()))
+        let mut count = 0u32;
+        for part in batch.split_to_fit(DEFAULT_MAX_BATCH_BYTES - 128) {
+            ObservationBuffer::drop_incoming(&self.buffer, &part.encode_with_run(run))
+                .map_err(|error| ScanError::io(error.to_string()))?;
+            count = count.saturating_add(1);
+        }
+        Ok(count)
     }
 }
 

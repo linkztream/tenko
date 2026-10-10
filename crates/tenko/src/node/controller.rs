@@ -1,8 +1,15 @@
-//! The `cluster` start step of `tenko serve` on a controller: the internal CA (created here
+//! The `nodes` start step of `tenko serve` on a controller: the internal CA (created here
 //! when the API listener does not use it), the node registry with its job step, the
 //! controller's certificate on the cluster port, the cluster port itself (always, on demand
 //! or off, `[cluster] listen`), the hand-over of probe batches to the reconciler, and the
 //! cluster summary and notices of `GET /system/status`.
+//!
+//! With the peer layer of start step 3 ([`ClusterPeers`]) the step also hands the
+//! registry, this controller's identity and its key generations to the controller cluster:
+//! on a member, whose cluster port opened in step 3, it attaches the node services to that
+//! port; on a single controller it opens the port with the `Raft` and `Cluster` services
+//! beside the node services, ready for the first controller that joins, and gives the
+//! peer transport the controller's certificate.
 
 use std::{
     net::SocketAddr,
@@ -18,11 +25,15 @@ use tenko_api::{
     state::AppState,
 };
 use tenko_cluster::{
+    admin::ClusterAdmin,
     ca::{CaPolicy, InternalCa, TlsResolver},
     error::ClusterError,
+    identity::NodePaths,
+    kek::VaultKekSource,
+    peers::{Peers, VaultIdentity},
     probe::{DiscardProbes, IngestCounts, ProbeBatch, ProbeSink},
     registry::{NodeRegistry, RegistryConfig},
-    server::ClusterListener,
+    server::{ClusterListener, ClusterService},
 };
 use tenko_core::{NodeId, RequestCtx, SystemComponent, Timestamp, VrfId};
 use tenko_jobs::JobEngine;
@@ -31,6 +42,7 @@ use tenko_vault::StoreVault;
 use tokio::{sync::watch, task::JoinHandle};
 
 use crate::{
+    cluster::ClusterPeers,
     config::{ClusterListen, Resolved},
     serve::StartError,
 };
@@ -69,6 +81,7 @@ pub struct Parts<'a> {
 /// The running node transport of a controller.
 pub struct Cluster {
     registry: Arc<NodeRegistry>,
+    peers: Option<Peers>,
     sink: Arc<dyn ProbeSink>,
     state: Arc<OnceLock<AppState>>,
     tasks: Vec<JoinHandle<()>>,
@@ -166,7 +179,16 @@ fn addresses(addrs: &[SocketAddr]) -> String {
         .join(", ")
 }
 
-/// Starts the node transport of a controller.
+/// Starts the node transport of a controller without the controller cluster.
+///
+/// # Errors
+///
+/// As [`start_with`].
+pub async fn start(parts: Parts<'_>) -> Result<(Cluster, String), StartError> {
+    start_with(parts, None).await
+}
+
+/// Starts the node transport of a controller, with the peer layer of start step 3.
 ///
 /// # Errors
 ///
@@ -176,7 +198,10 @@ fn addresses(addrs: &[SocketAddr]) -> String {
     clippy::too_many_lines,
     reason = "the start step reads best as one sequence"
 )]
-pub async fn start(parts: Parts<'_>) -> Result<(Cluster, String), StartError> {
+pub async fn start_with(
+    parts: Parts<'_>,
+    peers: Option<ClusterPeers>,
+) -> Result<(Cluster, String), StartError> {
     let Parts {
         resolved,
         store,
@@ -207,22 +232,99 @@ pub async fn start(parts: Parts<'_>) -> Result<(Cluster, String), StartError> {
         default_token_ttl: Duration::from_secs(section.enrolment_ttl_secs),
         ..RegistryConfig::new(resolved.node_id)
     };
-    let registry = NodeRegistry::new(Arc::clone(&store), Arc::new(ca), config);
+    let open_port = peers.as_ref().and_then(|peers| peers.port().cloned());
+    let registry = match &open_port {
+        Some(port) => NodeRegistry::with_port(
+            Arc::clone(&store),
+            Arc::new(ca),
+            config,
+            Arc::clone(&port.revocations),
+            Arc::clone(&port.sessions),
+        ),
+        None => NodeRegistry::new(Arc::clone(&store), Arc::new(ca), config),
+    };
     registry.register_steps(&engine);
+    registry.set_node_sync(
+        tenko_cluster::node_sync::NodeSync::new(Arc::clone(&store))
+            .with_vault(Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>)
+            .with_rate_kbps(section.sync_kbps),
+    );
     let revoked = registry
         .load_revocations()
         .await
         .map_err(|error| start_error(&error))?;
+    let sink: Arc<dyn ProbeSink> = match reconciler {
+        Some(reconciler) => Arc::new(ReconcilerSink { reconciler }),
+        None => Arc::new(DiscardProbes),
+    };
+    let layer = peers.as_ref().map(|peers| peers.peers().clone());
+    if let Some(layer) = &layer {
+        layer.attach_registry(Arc::clone(&registry));
+        layer.attach_kek(Arc::new(VaultKekSource::new(Arc::clone(&vault))));
+    }
+    if let Some(port) = &open_port {
+        // A member: the cluster port opened in step 3 with the identity under
+        // `<data_dir>/node/`; it serves the node services from now on.
+        port.nodes.attach(&ClusterService::new(
+            Arc::clone(&registry),
+            Arc::clone(&sink),
+        ));
+        registry.set_listening(port.addrs.clone());
+        let mut tasks = Vec::new();
+        tasks.push(tokio::spawn(maintenance(
+            Arc::clone(&registry),
+            Arc::clone(&vault),
+            None,
+            stop.clone(),
+        )));
+        let state = Arc::new(OnceLock::new());
+        tasks.push(tokio::spawn(health(
+            Arc::clone(&registry),
+            Arc::clone(&state),
+            stop,
+        )));
+        let nodes = registry
+            .list_nodes()
+            .await
+            .map_err(|error| start_error(&error))?
+            .len();
+        return Ok((
+            Cluster {
+                registry,
+                peers: layer,
+                sink,
+                state,
+                tasks,
+            },
+            format!(
+                "node services on the cluster port of step 3 ({}), {nodes} node(s) enrolled, {revoked} certificate(s) revoked",
+                addresses(&port.addrs)
+            ),
+        ));
+    }
     let material = registry
         .controller_material(vault.as_ref(), &ctx)
         .await
         .map_err(|error| start_error(&error))?;
     let resolver = Arc::new(TlsResolver::default());
     resolver.set(Some(material));
-    let sink: Arc<dyn ProbeSink> = match reconciler {
-        Some(reconciler) => Arc::new(ReconcilerSink { reconciler }),
-        None => Arc::new(DiscardProbes),
-    };
+    if let Some(layer) = &layer {
+        // The first controller: its peer transport presents the vault-held certificate,
+        // which moves to `<data_dir>/node/` when the first peer joins.
+        let (chain, key) = registry
+            .controller_identity(vault.as_ref(), &ctx)
+            .await
+            .map_err(|error| start_error(&error))?;
+        let client = tenko_cluster::mtls::client_config(registry.ca().root_der(), chain, &key)
+            .map_err(|error| start_error(&error))?;
+        layer.network().set_tls(client);
+        layer.attach_identity(Arc::new(VaultIdentity::new(
+            Arc::clone(&registry),
+            Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>,
+            NodePaths::new(&resolved.data_dir),
+            format!("controller-{}", resolved.node_id.0),
+        )));
+    }
     let in_use = registry
         .in_use(Timestamp::now())
         .await
@@ -236,7 +338,13 @@ pub async fn start(parts: Parts<'_>) -> Result<(Cluster, String), StartError> {
             let bound = listener.local_addrs();
             tasks.push(
                 listener
-                    .serve(&registry, Arc::clone(&sink), resolver.clone(), stop.clone())
+                    .serve_with_peers(
+                        &registry,
+                        Arc::clone(&sink),
+                        resolver.clone(),
+                        layer.clone(),
+                        stop.clone(),
+                    )
                     .map_err(|error| start_error(&error))?,
             );
             format!("cluster port on {}", addresses(&bound))
@@ -248,7 +356,13 @@ pub async fn start(parts: Parts<'_>) -> Result<(Cluster, String), StartError> {
             let bound = listener.local_addrs();
             tasks.push(
                 listener
-                    .serve(&registry, Arc::clone(&sink), resolver.clone(), stop.clone())
+                    .serve_with_peers(
+                        &registry,
+                        Arc::clone(&sink),
+                        resolver.clone(),
+                        layer.clone(),
+                        stop.clone(),
+                    )
                     .map_err(|error| start_error(&error))?,
             );
             format!("cluster port on {}", addresses(&bound))
@@ -259,6 +373,7 @@ pub async fn start(parts: Parts<'_>) -> Result<(Cluster, String), StartError> {
                 addrs.clone(),
                 Arc::clone(&sink),
                 resolver.clone(),
+                layer.clone(),
                 stop.clone(),
             )));
             format!(
@@ -271,7 +386,7 @@ pub async fn start(parts: Parts<'_>) -> Result<(Cluster, String), StartError> {
     tasks.push(tokio::spawn(maintenance(
         Arc::clone(&registry),
         Arc::clone(&vault),
-        resolver,
+        Some(resolver),
         stop.clone(),
     )));
     let state = Arc::new(OnceLock::new());
@@ -288,6 +403,7 @@ pub async fn start(parts: Parts<'_>) -> Result<(Cluster, String), StartError> {
     Ok((
         Cluster {
             registry,
+            peers: layer,
             sink,
             state,
             tasks,
@@ -307,6 +423,10 @@ impl Cluster {
     /// cluster's health through `state`.
     pub fn register(&self, server: &mut tenko_api::ServerConfig, state: &AppState) {
         server.extensions.insert(Arc::clone(&self.registry));
+        if let Some(peers) = &self.peers {
+            let admin: Arc<dyn ClusterAdmin> = Arc::new(peers.clone());
+            server.extensions.insert(admin);
+        }
         let _ = self.state.set(state.clone());
     }
 
@@ -329,6 +449,7 @@ async fn on_demand(
     addrs: Vec<SocketAddr>,
     sink: Arc<dyn ProbeSink>,
     resolver: Arc<TlsResolver>,
+    peers: Option<Peers>,
     mut stop: watch::Receiver<bool>,
 ) {
     tokio::select! {
@@ -342,7 +463,7 @@ async fn on_demand(
             return;
         }
     };
-    match listener.serve(&registry, sink, resolver, stop) {
+    match listener.serve_with_peers(&registry, sink, resolver, peers, stop) {
         Ok(task) => {
             let _ = task.await;
         }
@@ -351,11 +472,12 @@ async fn on_demand(
 }
 
 /// Prunes expired revocations and old tokens, reads the revocation list again and renews
-/// the controller's certificate on the cluster port when it is due.
+/// the controller's certificate on the cluster port when it is due (a single controller:
+/// `resolver`; a member's identity under `<data_dir>/node/` is renewed elsewhere).
 async fn maintenance(
     registry: Arc<NodeRegistry>,
     vault: Arc<StoreVault>,
-    resolver: Arc<TlsResolver>,
+    resolver: Option<Arc<TlsResolver>>,
     mut stop: watch::Receiver<bool>,
 ) {
     let mut prune = tokio::time::interval(MAINTENANCE_INTERVAL);
@@ -379,6 +501,9 @@ async fn maintenance(
                 }
             }
             _ = certificate.tick() => {
+                let Some(resolver) = &resolver else {
+                    continue;
+                };
                 let ctx = RequestCtx::system(SystemComponent::Cluster);
                 match registry.controller_material(vault.as_ref(), &ctx).await {
                     Ok(material) => resolver.set(Some(material)),
@@ -477,7 +602,7 @@ fn mismatch_warning(health: &tenko_cluster::model::ClusterHealth) -> Option<Stat
     Some(StatusWarning {
         code: MISMATCH_NOTICE.to_owned(),
         detail: format!(
-            "nodes share no protocol major with this controller, which implements {}:              {detail}; upgrade the older side",
+            "nodes share no protocol major with this controller, which implements {}: {detail}; upgrade the older side",
             tenko_cluster::version::format_majors(&health.majors)
         ),
         params: [

@@ -72,6 +72,13 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - New settings in `tenko.toml`, checked by `tenko config check`, for features of later releases: in `[cluster]` the isolation timeout, the catch-up timeout, the automatic promotion of new controllers and its lag limit, and a bandwidth cap for node configuration; `[telemetry]` with an OTLP endpoint for traces (off by default); `[metrics]` with an optional metrics listener on a loopback address; `[backup]` with the directory for backup files.
 - Right-to-left layout: the interface mirrors itself for languages written right to left, ready for the language packs of a later release.
 - The key-encryption key can be handed to another controller sealed to a one-time key of the receiver, so every controller of a cluster opens the same envelopes; the cluster join that uses it arrives with the controller cluster.
+- Controller cluster: more controllers join with `tenko cluster join` and a controller enrolment token. They copy the data over the cluster port (mutual TLS), become voters once caught up, and only ever to an odd number of voters, and forward writes to the leader; a write is readable at once on the controller that served it.
+- `tenko cluster status`, `members`, `join`, `promote`, `remove`, `step-down` and `verify`, and the API `GET /cluster/members`, `POST /cluster/members/{id}/promote`, `DELETE /cluster/members/{id}`, `POST /cluster/step-down` and `GET /cluster/digests`.
+- `/system/status` shows whether the controller reaches a quorum (`store.quorum`: single, healthy, electing or isolated).
+- Controllers of a cluster share the installation's key-encryption key: a joining controller receives every key generation from a member over the cluster port, sealed to a one-time key only it holds, and seals them with its own key store; a controller that was stopped during a key rotation fetches the new generation when it starts.
+- `tenko kek rotate` rotates the `file` key provider too, keeping new generations in the data directory, wrapped under the key file.
+- API tokens can carry grants and scopes (`POST /auth/tokens`): a scoped token reaches only the metrics or the audit log, or the objects within the grants of its owner. The scoped views of the API follow.
+- The installation's default language is set with `PUT /settings/default-language`.
 
 ### Changed
 
@@ -84,6 +91,8 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - `GET /api/v1/openapi.json` answers the committed OpenAPI document byte for byte, in the same pretty-printed form that `tenko openapi` prints, instead of compact JSON.
 - `tenko serve` starts in eleven steps: a new `cluster` step after the store, and the step of the node transport is now called `nodes`.
 - The data-directory format is 2. The first start of this version migrates the data directory (after the usual copy), and earlier versions refuse it afterwards; to go back, restore the copy taken before the migration.
+- `tenko kek rotate` refuses to run on a member of a cluster.
+- A user may hold no global role at all: grants within a scope can be their only access.
 
 ### Fixed
 
@@ -102,3 +111,5 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - Repeated requests with an idempotency key are recognised by a fingerprint keyed with a random secret that exists only in memory and changes at every start, so the stored fingerprints reveal nothing about the requests; sign-in, setup and password requests are never fingerprinted. A retry after a restart of a request sent before it is answered as already performed instead of being run again.
 - Before a rollback undoes a write through a network controller (a VLAN network or the network change of a move), the undo steps are checked against the guardrails on a fresh read of the controller, so an undo never changes an uplink or the path through which Tenko or the controller is reached.
 - The one-time setup token of a first start no longer appears in the log or in the output of a service. It is kept in `setup-token` in the data directory, readable only by the service account, until setup is complete; `tenko setup token` prints it, and a start in a terminal still shows it on the console.
+- A token for the role `controller` needs an interactive sign-in within the last five minutes and lives at most an hour; the installation's key encryption keys reach a joining controller only sealed to a one-time key of that host, once per token, audited as `vault.kek.transfer`.
+- The controller services of the cluster port accept only controller certificates of the installation, and a data directory refuses to start under another node id.

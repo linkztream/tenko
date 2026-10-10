@@ -291,7 +291,7 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
         }
         Command::Plugin { action } => plugin::command(action, out, err),
         Command::Node { action } => node::command(action, out, err),
-        Command::Cluster { action } => cluster::command(action, err),
+        Command::Cluster { action } => cluster::run(action, out, err),
         Command::Backup { action } => backup::command(action, err),
         Command::Audit {
             action: client::audit::AuditCommand::Export(_),
@@ -598,7 +598,10 @@ mod tests {
             (&["audit", "export", "--from", "7"], "audit export"),
             (&["cluster", "status"], "cluster status"),
             (&["cluster", "members"], "cluster members"),
-            (&["cluster", "join", "--controller", "x"], "cluster join"),
+            (
+                &["cluster", "join", "--controller", "x", "--address", "h:1"],
+                "cluster join",
+            ),
             (&["cluster", "promote", "1002"], "cluster promote"),
             (&["cluster", "remove", "1002"], "cluster remove"),
             (&["cluster", "step-down"], "cluster step-down"),
@@ -637,8 +640,7 @@ mod tests {
     #[test]
     fn declared_commands_that_are_not_built_yet_exit_with_status_2() {
         for args in [
-            &["cluster", "status"][..],
-            &["cluster", "join", "--token", "t"],
+            &["cluster", "upgrade-check"][..],
             &["backup", "create", "--data-dir", "d"],
             &["audit", "export", "--from", "1"],
         ] {

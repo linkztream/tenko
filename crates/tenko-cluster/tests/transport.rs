@@ -610,7 +610,33 @@ async fn tokens_are_single_use_expire_and_limit_the_roles() {
         .await
         .expect_err("role");
     assert_eq!(refused.code(), "cluster.enrolment.roles");
-    let controller_token = controller
+    // A controller token carries the role alone and lives at most an hour.
+    let mixed = controller
+        .registry
+        .create_enrolment(
+            &system(),
+            NewEnrolment {
+                roles: vec![Role::Controller, Role::Probe],
+                ..NewEnrolment::default()
+            },
+        )
+        .await
+        .expect_err("controller beside another role");
+    assert_eq!(mixed.code(), "cluster.enrolment.roles");
+    let long = controller
+        .registry
+        .create_enrolment(
+            &system(),
+            NewEnrolment {
+                roles: vec![Role::Controller],
+                expires_in_secs: Some(7_200),
+                ..NewEnrolment::default()
+            },
+        )
+        .await
+        .expect_err("a controller token for two hours");
+    assert_eq!(long.code(), "cluster.enrolment.lifetime");
+    let (token, _) = controller
         .registry
         .create_enrolment(
             &system(),
@@ -620,8 +646,9 @@ async fn tokens_are_single_use_expire_and_limit_the_roles() {
             },
         )
         .await
-        .expect_err("controller role");
-    assert_eq!(controller_token.code(), "cluster.enrolment.roles");
+        .expect("a controller token");
+    assert_eq!(token.roles, vec![Role::Controller]);
+    assert!(token.expires_at.saturating_since(token.created_at) <= Duration::from_secs(3_600));
 
     // A node offering no common major cannot enrol either.
     let token = controller.token(NewEnrolment::default()).await;
@@ -930,45 +957,27 @@ fn assert_unimplemented<T: std::fmt::Debug>(result: Result<T, tonic::Status>, pa
 }
 
 #[tokio::test]
-async fn the_services_of_later_packages_answer_unimplemented_to_an_enrolled_node() {
+async fn a_port_without_controller_services_and_a_stub_answer_unimplemented() {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
     let channel = enrolled_channel(&controller, dir.path(), "probe-stubs").await;
 
+    // A port that serves no controller cluster has no `Raft` and `Cluster` services.
+    let unimplemented = |status: tonic::Status| {
+        assert_eq!(status.code(), tonic::Code::Unimplemented, "{status:?}");
+    };
     let mut raft = v1::raft_client::RaftClient::new(channel.clone());
-    assert_unimplemented(raft.vote(v1::RaftRequest::default()).await, "WP3.1a");
-    assert_unimplemented(
-        raft.append_entries(v1::RaftRequest::default()).await,
-        "WP3.1a",
+    unimplemented(
+        raft.vote(v1::RaftRequest::default())
+            .await
+            .expect_err("no Raft"),
     );
-    assert_unimplemented(
-        raft.install_snapshot(futures::stream::iter([v1::SnapshotChunk::default()]))
-            .await,
-        "WP3.1a",
-    );
-
     let mut cluster = v1::cluster_client::ClusterClient::new(channel.clone());
-    assert_unimplemented(
-        cluster.members(v1::MembersRequest::default()).await,
-        "WP3.1a",
-    );
-    assert_unimplemented(
-        cluster.propose(v1::ProposeRequest::default()).await,
-        "WP3.1a",
-    );
-
-    let mut config = v1::config_client::ConfigClient::new(channel.clone());
-    assert_unimplemented(
-        config.secrets(v1::SecretsRequest::default()).await,
-        "WP3.10",
-    );
-    assert_unimplemented(config.watch(v1::WatchRequest::default()).await, "WP3.10");
-
-    let mut commands = v1::commands_client::CommandsClient::new(channel.clone());
-    assert_unimplemented(commands.report(v1::CommandEvent::default()).await, "WP3.10");
-    assert_unimplemented(
-        commands.subscribe(v1::SubscribeRequest::default()).await,
-        "WP3.10",
+    unimplemented(
+        cluster
+            .propose(v1::ProposeRequest::default())
+            .await
+            .expect_err("no Cluster"),
     );
 
     let mut metrics = v1::metrics_client::MetricsClient::new(channel);

@@ -15,12 +15,16 @@ use std::{
 };
 
 use async_trait::async_trait;
-use tenko_cluster::probe::{MAX_SIGHTINGS, ProbeBatch, Sighting};
+use tenko_cluster::{
+    probe::{MAX_SIGHTINGS, ProbeBatch, Sighting},
+    proto::v1,
+};
 use tenko_core::{Timestamp, VrfId};
 use tokio::{
     sync::watch,
     time::{Instant, sleep, sleep_until},
 };
+use uuid::Uuid;
 
 use crate::{
     blackout::Blackout,
@@ -40,6 +44,7 @@ use crate::{
         tcp::TcpConnect,
     },
     scope::Scope,
+    secrets::SecretSource,
     status::{MethodState, MethodStatus, RunOutcome, RunRecord, ScanPaths, ScanStatus},
     sys::System,
 };
@@ -48,24 +53,36 @@ use crate::{
 /// the `incoming/` directory for a one-shot run.
 #[async_trait]
 pub trait BatchSink: Send + Sync {
-    /// Takes one batch.
+    /// Takes one batch. `run` is the command the batch answers (a scan on demand from the
+    /// controllers), which the batch carries to the controller. Returns how many batches
+    /// were queued: a sink may split a batch that is too large.
     ///
     /// # Errors
     ///
     /// A [`ScanError`] when the batch cannot be queued (the buffer is full, the disk
     /// fails).
-    async fn deliver(&self, batch: ProbeBatch) -> Result<(), ScanError>;
+    async fn deliver(&self, batch: ProbeBatch, run: Option<Uuid>) -> Result<u32, ScanError>;
 }
 
 /// A sink that keeps the batches in memory (diagnostics and tests).
 #[derive(Debug, Default)]
 pub struct MemorySink {
-    batches: Mutex<Vec<ProbeBatch>>,
+    batches: Mutex<Vec<(ProbeBatch, Option<Uuid>)>>,
 }
 
 impl MemorySink {
     /// The batches so far.
     pub fn batches(&self) -> Vec<ProbeBatch> {
+        self.batches
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|(batch, _)| batch.clone())
+            .collect()
+    }
+
+    /// The batches so far, with the command each answers.
+    pub fn tagged(&self) -> Vec<(ProbeBatch, Option<Uuid>)> {
         self.batches
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -75,12 +92,12 @@ impl MemorySink {
 
 #[async_trait]
 impl BatchSink for MemorySink {
-    async fn deliver(&self, batch: ProbeBatch) -> Result<(), ScanError> {
+    async fn deliver(&self, batch: ProbeBatch, run: Option<Uuid>) -> Result<u32, ScanError> {
         self.batches
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .push(batch);
-        Ok(())
+            .push((batch, run));
+        Ok(1)
     }
 }
 
@@ -148,6 +165,9 @@ pub struct Environment {
     pub system: Arc<dyn System>,
     /// Raw sockets and ICMP.
     pub capabilities: Capabilities,
+    /// Where vault secrets of SNMP devices come from: the controllers, through the node
+    /// agent; `None` on a host without a controller connection.
+    pub secrets: Option<Arc<dyn SecretSource>>,
 }
 
 impl Environment {
@@ -158,7 +178,15 @@ impl Environment {
         Self {
             system,
             capabilities,
+            secrets: None,
         }
+    }
+
+    /// With the source of vault secrets.
+    #[must_use]
+    pub fn with_secrets(mut self, secrets: Arc<dyn SecretSource>) -> Self {
+        self.secrets = Some(secrets);
+        self
     }
 }
 
@@ -214,12 +242,15 @@ pub fn build_methods(
                     config.llmnr.port,
                     ms(config.llmnr.timeout_ms),
                 )),
-                MethodKind::Snmp => Arc::new(SnmpPoll::new(
-                    config.snmp.devices.clone(),
-                    ms(config.snmp.timeout_ms),
-                    config.snmp.retries,
-                    config.snmp.attach_on_lldp_ports,
-                )),
+                MethodKind::Snmp => Arc::new(
+                    SnmpPoll::new(
+                        config.snmp.devices.clone(),
+                        ms(config.snmp.timeout_ms),
+                        config.snmp.retries,
+                        config.snmp.attach_on_lldp_ports,
+                    )
+                    .with_secrets(environment.secrets.clone()),
+                ),
                 MethodKind::ArpSweep
                 | MethodKind::TcpSyn
                 | MethodKind::OsFingerprint
@@ -241,6 +272,8 @@ struct Inner {
     last: BTreeMap<MethodKind, RunRecord>,
     reported: BTreeSet<MethodKind>,
     running: BTreeSet<MethodKind>,
+    /// The cancel switches of runs on demand, by the command they answer.
+    cancels: BTreeMap<Uuid, watch::Sender<bool>>,
 }
 
 /// The scanner of a probe.
@@ -279,6 +312,7 @@ enum StopReason {
     KillSwitch,
     Blackout,
     Deadline,
+    Cancelled,
 }
 
 impl StopReason {
@@ -288,6 +322,7 @@ impl StopReason {
             StopReason::KillSwitch => "stopped by the kill switch",
             StopReason::Blackout => "stopped by a blackout window",
             StopReason::Deadline => "stopped at its deadline",
+            StopReason::Cancelled => "cancelled by the controllers",
         }
     }
 }
@@ -300,6 +335,9 @@ pub struct RunRequest {
     pub target: Option<String>,
     /// Runs inside a blackout window too.
     pub ignore_blackout: bool,
+    /// The command the run answers (a scan on demand from the controllers): its batch
+    /// carries the id, and [`Scanner::cancel_run`] stops it.
+    pub run: Option<Uuid>,
 }
 
 impl Scanner {
@@ -473,13 +511,21 @@ impl Scanner {
             None => None,
         };
         let (_stop, stop) = watch::channel(false);
+        let (cancel_tx, cancel) = watch::channel(false);
+        if let Some(run) = request.run {
+            self.lock().cancels.insert(run, cancel_tx);
+        }
         let run = self.execute(
             method.as_ref(),
-            target,
-            request.target.clone(),
-            true,
-            !request.ignore_blackout,
+            Request {
+                target,
+                target_text: request.target.clone(),
+                on_demand: true,
+                respect_blackout: !request.ignore_blackout,
+                run: request.run,
+            },
             stop,
+            Some(cancel),
         );
         tokio::pin!(run);
         // The kill switch file stops an on-demand run too, also in a process of its own
@@ -499,7 +545,83 @@ impl Scanner {
             record = &mut run => record,
             never = &mut watch_file => match never {},
         };
+        if let Some(run) = request.run {
+            self.lock().cancels.remove(&run);
+        }
         Ok(record)
+    }
+
+    /// Cancels the run on demand that answers `run`; whether one was running.
+    pub fn cancel_run(&self, run: Uuid) -> bool {
+        self.lock()
+            .cancels
+            .get(&run)
+            .is_some_and(|cancel| cancel.send(true).is_ok())
+    }
+
+    /// Switches the kill switch on (with `reason`) or off, at once: every running scan
+    /// stops and no scan starts until it is off. The file in `<data_dir>/scan/` keeps the
+    /// state across restarts.
+    ///
+    /// # Errors
+    ///
+    /// `scan.io` when the file cannot be written or removed.
+    pub fn set_kill(&self, on: bool, reason: &str) -> Result<(), ScanError> {
+        if on {
+            self.paths.kill(reason)?;
+            tracing::warn!(%reason, "kill switch on: every scan stops");
+        } else if self.paths.resume()? {
+            tracing::info!("kill switch off: scans resume");
+        }
+        self.kill.send_replace(on);
+        self.write_status();
+        Ok(())
+    }
+
+    /// The reason recorded with the kill switch, when it is on.
+    pub fn kill_reason(&self) -> Option<String> {
+        if !self.paths.killed() {
+            return None;
+        }
+        let text = std::fs::read_to_string(self.paths.kill_switch()).unwrap_or_default();
+        // The file holds the time, a space and the reason.
+        let reason = text
+            .trim()
+            .split_once(' ')
+            .map_or("", |(_, reason)| reason)
+            .trim()
+            .to_owned();
+        Some(reason)
+    }
+
+    /// The scope the scanner applies, as the probe reports it to the controllers.
+    pub fn scope_report(&self) -> v1::ProbeScopeReport {
+        let methods = self
+            .methods
+            .iter()
+            .filter(|method| self.hold(method.kind(), method.as_ref()).is_none())
+            .map(|method| method.kind().name().to_owned())
+            .collect();
+        let stop_reason = self.kill_reason();
+        v1::ProbeScopeReport {
+            prefixes: self
+                .scope
+                .prefixes()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            exclude: self
+                .scope
+                .exclusions()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            methods,
+            vrf: self.vrf.map(|vrf| vrf.to_string()),
+            active: self.config.active,
+            stopped: stop_reason.is_some() || *self.kill.borrow(),
+            stop_reason: stop_reason.unwrap_or_default(),
+        }
     }
 
     /// Runs the schedule until `stop` turns true.
@@ -648,7 +770,18 @@ impl Scanner {
                 continue;
             }
             let record = self
-                .execute(method.as_ref(), None, None, false, true, stop.clone())
+                .execute(
+                    method.as_ref(),
+                    Request {
+                        target: None,
+                        target_text: None,
+                        on_demand: false,
+                        respect_blackout: true,
+                        run: None,
+                    },
+                    stop.clone(),
+                    None,
+                )
                 .await;
             if *stop.borrow() {
                 return;
@@ -662,12 +795,17 @@ impl Scanner {
     async fn execute(
         &self,
         method: &dyn Method,
-        target: Option<Scope>,
-        target_text: Option<String>,
-        on_demand: bool,
-        respect_blackout: bool,
+        request: Request,
         mut stop: watch::Receiver<bool>,
+        cancel: Option<watch::Receiver<bool>>,
     ) -> RunRecord {
+        let Request {
+            target,
+            target_text,
+            on_demand,
+            respect_blackout,
+            run,
+        } = request;
         let kind = method.kind();
         let started_at = Timestamp::now();
         let (narrowed, scope) = match target {
@@ -693,7 +831,14 @@ impl Scanner {
         }
         self.write_status();
         let (result, stopped) = self
-            .drive(method, &ctx, &cancel_tx, &mut stop, respect_blackout)
+            .drive(
+                method,
+                &ctx,
+                &cancel_tx,
+                &mut stop,
+                cancel,
+                respect_blackout,
+            )
             .await;
         let finished_at = Timestamp::now();
         let mut record = RunRecord {
@@ -708,6 +853,7 @@ impl Scanner {
             error: None,
             delivery_error: None,
             notes: Vec::new(),
+            batches: 0,
         };
         match result {
             None => {
@@ -733,7 +879,7 @@ impl Scanner {
                 }
                 record.probes = output.probes;
                 record.notes.clone_from(&output.notes);
-                self.deliver(kind, output, complete, &mut record).await;
+                self.deliver(kind, output, complete, &mut record, run).await;
             }
         }
         {
@@ -757,6 +903,7 @@ impl Scanner {
         ctx: &RunContext,
         cancel: &watch::Sender<bool>,
         stop: &mut watch::Receiver<bool>,
+        mut cancelled: Option<watch::Receiver<bool>>,
         respect_blackout: bool,
     ) -> (Option<Result<MethodOutput, ScanError>>, Option<StopReason>) {
         let kind = method.kind();
@@ -779,7 +926,7 @@ impl Scanner {
         let result = loop {
             tokio::select! {
                 result = &mut run => break Some(result),
-                reason = stop_reason(stop, &mut kill, deadline, blackout_at), if stopped.is_none() => {
+                reason = stop_reason(stop, &mut kill, cancelled.as_mut(), deadline, blackout_at), if stopped.is_none() => {
                     tracing::info!(method = %kind, "{}", reason.text());
                     stopped = Some(reason);
                     let _ = cancel.send(true);
@@ -798,6 +945,7 @@ impl Scanner {
         output: MethodOutput,
         complete: bool,
         record: &mut RunRecord,
+        run: Option<Uuid>,
     ) {
         let ttl = self.config.schedule(kind).ttl;
         let (batch, truncated) = build_batch(kind, output, complete, self.vrf, ttl);
@@ -817,10 +965,13 @@ impl Scanner {
             .checked_add(ttl)
             .unwrap_or_else(Timestamp::now);
         let subjects: Vec<_> = batch.sightings.iter().map(|s| s.subject.clone()).collect();
-        if let Err(error) = self.sink.deliver(batch).await {
-            tracing::warn!(method = %kind, code = error.code(), "the batch could not be queued: {}", error.detail());
-            record.delivery_error = Some(error.to_string());
-            return;
+        match self.sink.deliver(batch, run).await {
+            Ok(batches) => record.batches = batches,
+            Err(error) => {
+                tracing::warn!(method = %kind, code = error.code(), "the batch could not be queued: {}", error.detail());
+                record.delivery_error = Some(error.to_string());
+                return;
+            }
         }
         record.queued = true;
         let snapshot = {
@@ -918,9 +1069,20 @@ impl Scanner {
 async fn stop_reason(
     stop: &mut watch::Receiver<bool>,
     kill: &mut watch::Receiver<bool>,
+    cancelled: Option<&mut watch::Receiver<bool>>,
     deadline: Instant,
     blackout_at: Option<Instant>,
 ) -> StopReason {
+    let cancel = async {
+        match cancelled {
+            Some(cancelled) => {
+                if cancelled.wait_for(|cancelled| *cancelled).await.is_err() {
+                    std::future::pending::<()>().await;
+                }
+            }
+            None => std::future::pending::<()>().await,
+        }
+    };
     let blackout = async {
         match blackout_at {
             Some(at) => sleep_until(at).await,
@@ -942,7 +1104,18 @@ async fn stop_reason(
         () = killed => StopReason::KillSwitch,
         () = blackout => StopReason::Blackout,
         () = sleep_until(deadline) => StopReason::Deadline,
+        () = cancel => StopReason::Cancelled,
     }
+}
+
+/// How one run is asked for.
+#[derive(Debug, Clone)]
+struct Request {
+    target: Option<Scope>,
+    target_text: Option<String>,
+    on_demand: bool,
+    respect_blackout: bool,
+    run: Option<Uuid>,
 }
 
 /// `interval` moved by up to a tenth either way, so that probes started together drift

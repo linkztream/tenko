@@ -12,6 +12,8 @@ build = "build.rs"
 arc-swap = { workspace = true }
 async-trait = { workspace = true }
 aws-lc-rs = { workspace = true }
+# The compressed configuration snapshot of the node sync (deflate).
+flate2 = "1.1.10"
 futures = { workspace = true }
 # The client side of the node transport: a TLS stream as a hyper connection (same version
 # and features as tenko-connect).
@@ -26,7 +28,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tenko-core = { workspace = true }
 tenko-jobs = { workspace = true }
-tenko-store = { workspace = true }
+tenko-store = { workspace = true, features = ["raft"] }
 tenko-vault = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }

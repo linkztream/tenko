@@ -417,6 +417,9 @@ pub struct PeerInfo {
     pub identity: PeerIdentity,
     /// The TCP peer.
     pub remote: Option<SocketAddr>,
+    /// The local address the connection arrived on (the cluster port as the peer reached
+    /// it).
+    pub local: Option<SocketAddr>,
     /// The connection's kill switch.
     pub kill: Arc<KillSwitch>,
 }

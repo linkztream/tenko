@@ -1985,7 +1985,7 @@
         "tags": [
           "auth"
         ],
-        "summary": "Create a personal API token, shown once",
+        "summary": "Create a personal or scoped API token, shown once",
         "operationId": "create_token",
         "requestBody": {
           "content": {
@@ -2029,7 +2029,7 @@
             }
           },
           "403": {
-            "description": "The session is not strong enough (`auth.step_up_required`) or is the break-glass session (`auth.break_glass.hardware_key_only`)",
+            "description": "The session is not strong enough (`auth.step_up_required`) is the break-glass session (`auth.break_glass.hardware_key_only`), or a grant of a scoped token goes beyond the owner's (`auth.grant.exceeds_own`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2039,7 +2039,7 @@
             }
           },
           "422": {
-            "description": "The lifetime exceeds the maximum of the profile (`auth.token.lifetime_exceeded`)",
+            "description": "The lifetime exceeds the maximum of the profile (`auth.token.lifetime_exceeded`), a grant names a global-only role (`auth.grant.invalid_role`) or a scope that cannot be granted or does not exist (`auth.grant.invalid_scope`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2763,6 +2763,390 @@
             "session": []
           }
         ]
+      }
+    },
+    "/api/v1/cluster/digests": {
+      "get": {
+        "tags": [
+          "cluster"
+        ],
+        "summary": "Compare the state digests of the members",
+        "operationId": "get_cluster_digests",
+        "parameters": [
+          {
+            "name": "revision",
+            "in": "query",
+            "description": "The revision to compare at; default the newest revision the answering controller applied",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The digest of every member at one revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DigestReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The revision is not a number (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to read nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The controller is still starting (`cluster.member.starting`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cluster/members": {
+      "get": {
+        "tags": [
+          "cluster"
+        ],
+        "summary": "List the controller cluster members",
+        "operationId": "list_cluster_members",
+        "responses": {
+          "200": {
+            "description": "The cluster as this controller sees it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to read nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No leader is known to answer the replication figures (`cluster.member.not_leader`) or the controller is still starting (`cluster.member.starting`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cluster/members/{id}": {
+      "delete": {
+        "tags": [
+          "cluster"
+        ],
+        "summary": "Remove a controller from the cluster",
+        "operationId": "remove_cluster_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id of the member",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The cluster after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to change the controller cluster (an administrator right)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The node is not a member (`cluster.member.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The change would remove the last voter (`cluster.member.last_voter`), another change is in progress (`cluster.member.changing`) or the controller is not part of a cluster (`cluster.single`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No leader is known to take the change (`cluster.member.not_leader`) or the controller is still starting (`cluster.member.starting`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cluster/members/{id}/promote": {
+      "post": {
+        "tags": [
+          "cluster"
+        ],
+        "summary": "Promote a learner to a voter",
+        "operationId": "promote_cluster_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id of the learner",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The cluster after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier or the body is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to change the controller cluster (an administrator right)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The node, or the voter to replace, is not a member (`cluster.member.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The result would have an even number of voters (`cluster.member.even_voters`), the learner is too far behind or out of contact (`cluster.member.not_caught_up`), another change is in progress (`cluster.member.changing`) or the controller is not part of a cluster (`cluster.single`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No leader is known to take the change (`cluster.member.not_leader`) or the controller is still starting (`cluster.member.starting`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cluster/step-down": {
+      "post": {
+        "tags": [
+          "cluster"
+        ],
+        "summary": "Hand leadership to another controller",
+        "operationId": "step_down_cluster_leader",
+        "responses": {
+          "200": {
+            "description": "The controller that led, the one that leads now and the new term",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepDown"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to change the controller cluster (an administrator right)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No other voter is caught up (`cluster.member.no_successor`), a membership change is in progress (`cluster.member.changing`) or the controller is not part of a cluster (`cluster.single`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No leader is known (`cluster.member.not_leader`) or the controller is still starting (`cluster.member.starting`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/connectors": {
@@ -8211,7 +8595,7 @@
             }
           },
           "403": {
-            "description": "Not allowed to enrol nodes",
+            "description": "Not allowed to enrol nodes, or a controller token without a sign-in in the last five minutes (`auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8231,7 +8615,7 @@
             }
           },
           "422": {
-            "description": "A controller role (`cluster.enrolment.roles`), a lifetime outside 60 s to 7 days (`cluster.enrolment.lifetime`) or a bad name (`cluster.node.name`)",
+            "description": "The role controller beside another role (`cluster.enrolment.roles`), a lifetime outside 60 s to 7 days or a controller token for more than an hour (`cluster.enrolment.lifetime`), or a bad name (`cluster.node.name`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12840,6 +13224,92 @@
           },
           "429": {
             "description": "Too many reveals (`vault.reveal.rate_limited`), with `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/settings/default-language": {
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Set the default language of the installation",
+        "operationId": "set_default_language",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DefaultLanguage"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The default language now in force",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefaultLanguage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is malformed (`sys.invalid_request`) or the tag is not an active language (`auth.invalid_request`, field `language`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A concurrent change (`auth.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20396,6 +20866,63 @@
           }
         }
       },
+      "ClusterView": {
+        "type": "object",
+        "description": "What changing the membership needs: the system.\nThe cluster as one controller sees it: the answer of `GET /cluster/members` and of a\nmembership change.",
+        "required": [
+          "node",
+          "term",
+          "quorum",
+          "changing",
+          "members"
+        ],
+        "properties": {
+          "changing": {
+            "type": "boolean",
+            "description": "Whether a membership change is in progress (joint consensus)."
+          },
+          "job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The inline job `cluster.edit` of a promotion or removal; absent on `GET`."
+          },
+          "leader": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The leader it knows, if any.",
+            "minimum": 0
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemberView"
+            },
+            "description": "The members by node id. Replication figures (`matched`, `lag_entries`,\n`last_contact_ms`) come from the leader; a follower asks it."
+          },
+          "node": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The controller that answered.",
+            "minimum": 0
+          },
+          "quorum": {
+            "$ref": "#/components/schemas/QuorumView",
+            "description": "Whether it is in contact with a quorum."
+          },
+          "term": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The Raft term it knows.",
+            "minimum": 0
+          }
+        }
+      },
       "CodeLogin": {
         "type": "object",
         "description": "`POST /auth/login/totp` and `POST /auth/login/recovery`.",
@@ -21771,6 +22298,19 @@
           }
         }
       },
+      "DefaultLanguage": {
+        "type": "object",
+        "description": "`PUT /settings/default-language` and its answer (API-21).",
+        "required": [
+          "language"
+        ],
+        "properties": {
+          "language": {
+            "type": "string",
+            "description": "The language tag: a built-in language or an active language pack."
+          }
+        }
+      },
       "Defaults": {
         "type": "object",
         "description": "Defaults a manifest suggests for new instances; the host enforces its own bounds.",
@@ -21835,6 +22375,34 @@
       "Digest": {
         "type": "string",
         "description": "SHA-256 digest as 64 lowercase hexadecimal characters"
+      },
+      "DigestReport": {
+        "type": "object",
+        "description": "Answer of `GET /cluster/digests`: the digests of every member at one revision.",
+        "required": [
+          "revision",
+          "agree",
+          "members"
+        ],
+        "properties": {
+          "agree": {
+            "type": "boolean",
+            "description": "Whether every member answered with the same digest at the same revision."
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemberDigest"
+            },
+            "description": "The digests by node id."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The revision every member was asked for (the newest one the answering controller\nknows, unless the request named one).",
+            "minimum": 0
+          }
+        }
       },
       "Duid": {
         "type": "string",
@@ -22619,6 +23187,10 @@
       "Fqdn": {
         "type": "string",
         "description": "DNS name"
+      },
+      "GrantId": {
+        "type": "string",
+        "format": "uuid"
       },
       "GroupKey": {
         "type": "string",
@@ -26120,6 +26692,163 @@
           "addresses",
           "user"
         ]
+      },
+      "MemberDigest": {
+        "type": "object",
+        "description": "The state digest of one member.",
+        "required": [
+          "node"
+        ],
+        "properties": {
+          "entries": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Rows in the digest.",
+            "minimum": 0
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the member gave no digest (an error code), if it did not."
+          },
+          "node": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The member.",
+            "minimum": 0
+          },
+          "revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The revision the digest covers.",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The SHA-256 over every table at that revision, lower-case hex."
+          },
+          "tables": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Non-empty tables in the digest.",
+            "minimum": 0
+          }
+        }
+      },
+      "MemberRole": {
+        "type": "string",
+        "description": "Whether a member votes.",
+        "enum": [
+          "voter",
+          "learner"
+        ]
+      },
+      "MemberView": {
+        "type": "object",
+        "description": "One member of the controller cluster.",
+        "required": [
+          "node",
+          "role",
+          "leader"
+        ],
+        "properties": {
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its cluster port as `host:port`."
+          },
+          "data_format": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The data format its binary knows.",
+            "minimum": 0
+          },
+          "joined_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When it joined."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lag_entries": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Log entries it is behind the leader.",
+            "minimum": 0
+          },
+          "last_contact_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Milliseconds since the leader last heard from it.",
+            "minimum": 0
+          },
+          "leader": {
+            "type": "boolean",
+            "description": "Whether it leads."
+          },
+          "matched": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The last log index known to match the leader's log.",
+            "minimum": 0
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its name in the node registry."
+          },
+          "node": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The node id (also its Raft id).",
+            "minimum": 0
+          },
+          "role": {
+            "$ref": "#/components/schemas/MemberRole",
+            "description": "Voter or learner."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The software version it reported when it joined or last started."
+          }
+        }
       },
       "MessageKey": {
         "type": "string",
@@ -30598,6 +31327,13 @@
                     }
                   ]
                 },
+                "grants": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TokenGrant"
+                  },
+                  "description": "The grants of a scoped token."
+                },
                 "id": {
                   "$ref": "#/components/schemas/ApiTokenId",
                   "description": "The token id."
@@ -30620,6 +31356,17 @@
                 "prefix": {
                   "type": "string",
                   "description": "The first characters of the token."
+                },
+                "scoped": {
+                  "type": "boolean",
+                  "description": "A scoped token (IAM-10); absent for a personal token."
+                },
+                "scopes": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TokenScope"
+                  },
+                  "description": "The special scopes of a scoped token."
                 }
               }
             },
@@ -30688,6 +31435,10 @@
                   "$ref": "#/components/schemas/UserId",
                   "description": "The id."
                 },
+                "kind": {
+                  "$ref": "#/components/schemas/UserKind",
+                  "description": "A service account (IAM-10); absent for a person."
+                },
                 "language": {
                   "type": [
                     "string",
@@ -30720,6 +31471,17 @@
                 "name": {
                   "type": "string",
                   "description": "The login name."
+                },
+                "owner": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/UserId",
+                      "description": "The administrator who owns a service account."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "password_change_required": {
                   "type": "boolean",
@@ -32455,6 +33217,26 @@
           }
         }
       },
+      "PromoteRequest": {
+        "type": "object",
+        "description": "Body of `POST /cluster/members/{id}/promote`.",
+        "properties": {
+          "force": {
+            "type": "boolean",
+            "description": "Promote although the result has an even number of voters or the learner is not\ncaught up."
+          },
+          "replace": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "A voter to remove in the same change: replaces a dead voter without passing\nthrough an even number of voters.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "Proposal": {
         "type": "object",
         "description": "A proposed prefix for addresses outside every known network (rule 4).",
@@ -32694,6 +33476,62 @@
               "minimum": 0
             },
             "description": "The majors the node offered in its last handshake."
+          }
+        }
+      },
+      "QuorumKind": {
+        "type": "string",
+        "description": "The kind of quorum state of a controller.",
+        "enum": [
+          "single",
+          "healthy",
+          "electing",
+          "isolated"
+        ]
+      },
+      "QuorumView": {
+        "type": "object",
+        "description": "The quorum state of a controller (OPS-26), for `GET /system/status` and `/cluster`.",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "applied": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Revision",
+                "description": "The revision the controller applied last, while isolated: the age of its copy."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_contact": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "The last contact with a quorum while isolated."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "since": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When an election started (`electing`) or the controller became isolated\n(`isolated`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/QuorumKind",
+            "description": "The state."
           }
         }
       },
@@ -33610,6 +34448,139 @@
           "manual"
         ]
       },
+      "ScopeRule": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Objects of a tenant.",
+            "required": [
+              "value",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "tenant"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/TenantId",
+                "description": "Objects of a tenant."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Objects of a VRF.",
+            "required": [
+              "value",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "vrf"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/VrfId",
+                "description": "Objects of a VRF."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Objects of a site, and with `subtree` those of its child sites.",
+            "required": [
+              "value",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "site"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "description": "Objects of a site, and with `subtree` those of its child sites.",
+                "required": [
+                  "id",
+                  "subtree"
+                ],
+                "properties": {
+                  "id": {
+                    "$ref": "#/components/schemas/SiteId",
+                    "description": "The site."
+                  },
+                  "subtree": {
+                    "type": "boolean",
+                    "description": "Whether child sites are included."
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A prefix and the objects directly in it, and with `subtree` everything inside it.",
+            "required": [
+              "value",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "prefix"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "description": "A prefix and the objects directly in it, and with `subtree` everything inside it.",
+                "required": [
+                  "id",
+                  "subtree"
+                ],
+                "properties": {
+                  "id": {
+                    "$ref": "#/components/schemas/PrefixId",
+                    "description": "The prefix."
+                  },
+                  "subtree": {
+                    "type": "boolean",
+                    "description": "Whether child prefixes are included."
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "One object.",
+            "required": [
+              "value",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "object"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/ObjectRef",
+                "description": "One object."
+              }
+            }
+          }
+        ],
+        "description": "A scope rule in the API (IAM-01): `{\"kind\": \"prefix\", \"value\": {\"id\": \"...\",\n\"subtree\": true}}`. Grants use `vrf`, `site` and `prefix`; `tenant` and `object` are\npart of the model and not granted in Phase 1."
+      },
       "SearchHit": {
         "type": "object",
         "description": "One search hit.",
@@ -33959,6 +34930,34 @@
           }
         }
       },
+      "SessionGrant": {
+        "type": "object",
+        "description": "One scoped grant as a session shows it.",
+        "required": [
+          "id",
+          "role",
+          "scope",
+          "delegable"
+        ],
+        "properties": {
+          "delegable": {
+            "type": "boolean",
+            "description": "Whether the holder may delegate it."
+          },
+          "id": {
+            "$ref": "#/components/schemas/GrantId",
+            "description": "The grant."
+          },
+          "role": {
+            "$ref": "#/components/schemas/RoleName",
+            "description": "The role."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ScopeRule",
+            "description": "Where it applies."
+          }
+        }
+      },
       "SessionId": {
         "type": "string",
         "format": "uuid"
@@ -34006,6 +35005,13 @@
           "flags": {
             "$ref": "#/components/schemas/SessionFlags",
             "description": "Flags."
+          },
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionGrant"
+            },
+            "description": "The scoped grants of the account (IAM-01), for display gating; the server decides."
           },
           "profile": {
             "$ref": "#/components/schemas/Profile",
@@ -34901,6 +35907,35 @@
           }
         }
       },
+      "StepDown": {
+        "type": "object",
+        "description": "Answer of `POST /cluster/step-down`.",
+        "required": [
+          "previous",
+          "leader",
+          "term"
+        ],
+        "properties": {
+          "leader": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The controller that leads now.",
+            "minimum": 0
+          },
+          "previous": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The controller that led before.",
+            "minimum": 0
+          },
+          "term": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The term of the new leadership.",
+            "minimum": 0
+          }
+        }
+      },
       "StepKind": {
         "type": "string",
         "description": "Namespaced step kind"
@@ -35353,6 +36388,10 @@
                 "type": "null"
               }
             ]
+          },
+          "quorum": {
+            "$ref": "#/components/schemas/QuorumView",
+            "description": "Whether this controller reaches a quorum (OPS-26). Absent in answers of servers\nthat predate the controller cluster: a single controller."
           },
           "revision": {
             "$ref": "#/components/schemas/Revision",
@@ -36026,7 +37065,7 @@
       },
       "TokenCreate": {
         "type": "object",
-        "description": "`POST /auth/tokens`.",
+        "description": "`POST /auth/tokens` and `POST /access/service-accounts/{id}/tokens`. With `grants` or\n`scopes` the token is a scoped token (IAM-10): it acts with the intersection of its\ngrants and the owner's, never more. Without them, `POST /auth/tokens` creates a\npersonal token that acts with the owner's roles and grants.",
         "required": [
           "name"
         ],
@@ -36040,9 +37079,50 @@
             "description": "Lifetime in days; defaults to the TGL-05 maximum (or no expiry where it allows).",
             "minimum": 0
           },
+          "grants": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/TokenGrant"
+            },
+            "description": "The grants of a scoped token: each a role no higher than one the owner holds, over\nthe whole installation or a scope inside one of the owner's grants."
+          },
           "name": {
             "type": "string",
             "description": "A name for the token."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TokenScope"
+            },
+            "description": "The special scopes of a scoped token: `metrics`, `audit:read`."
+          }
+        }
+      },
+      "TokenGrant": {
+        "type": "object",
+        "description": "One grant of a scoped token: a role, globally or over one scope rule.",
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/RoleName",
+            "description": "The role."
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScopeRule",
+                "description": "Where it applies (`{kind, value}` as in a grant); absent for the whole installation."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -36071,6 +37151,13 @@
               }
             ]
           },
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TokenGrant"
+            },
+            "description": "The grants of a scoped token."
+          },
           "id": {
             "$ref": "#/components/schemas/ApiTokenId",
             "description": "The token id."
@@ -36093,6 +37180,17 @@
           "prefix": {
             "type": "string",
             "description": "The first characters of the token."
+          },
+          "scoped": {
+            "type": "boolean",
+            "description": "A scoped token (IAM-10); absent for a personal token."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TokenScope"
+            },
+            "description": "The special scopes of a scoped token."
           }
         }
       },
@@ -36122,6 +37220,14 @@
           }
         ],
         "description": "The TGL-05 value in a patch."
+      },
+      "TokenScope": {
+        "type": "string",
+        "description": "A special scope of a scoped token, beyond its grants (IAM-10, S3-Q7).",
+        "enum": [
+          "metrics",
+          "audit:read"
+        ]
       },
       "TokenUse": {
         "type": "object",
@@ -37485,7 +38591,7 @@
             "items": {
               "$ref": "#/components/schemas/RoleName"
             },
-            "description": "Global roles."
+            "description": "Global roles; may be empty for an account that acts through scoped grants only."
           }
         }
       },
@@ -37556,6 +38662,10 @@
             "$ref": "#/components/schemas/UserId",
             "description": "The id."
           },
+          "kind": {
+            "$ref": "#/components/schemas/UserKind",
+            "description": "A service account (IAM-10); absent for a person."
+          },
           "language": {
             "type": [
               "string",
@@ -37589,6 +38699,17 @@
             "type": "string",
             "description": "The login name."
           },
+          "owner": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UserId",
+                "description": "The administrator who owns a service account."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "password_change_required": {
             "type": "boolean",
             "description": "The password must be changed."
@@ -37605,6 +38726,14 @@
             "description": "Global roles."
           }
         }
+      },
+      "UserKind": {
+        "type": "string",
+        "description": "What kind of account a user record is (IAM-10).",
+        "enum": [
+          "person",
+          "service"
+        ]
       },
       "UserSummary": {
         "type": "object",

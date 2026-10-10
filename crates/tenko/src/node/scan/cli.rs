@@ -436,6 +436,7 @@ async fn run_method(args: &RunArgs) -> Result<Output, Failure> {
     let request = RunRequest {
         target: args.target.clone(),
         ignore_blackout: args.ignore_blackout,
+        run: None,
     };
     let record = scanner
         .run_now(kind, &request)

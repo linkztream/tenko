@@ -8,6 +8,7 @@
 //! | `node-key.pem` (Unix) or `node-key.dpapi` (Windows) | the node's private key |
 //! | `status.json` | what the running node process last saw (see [`AgentStatus`]) |
 //! | `buffer/` | the observation buffer ([`crate::buffer`]) |
+//! | `config/` | the configuration the controllers hand the node ([`crate::node_sync::local`]) |
 //!
 //! The key never leaves the node. On Unix the directory is `0700` and the files `0600`;
 //! on Windows the key is sealed with DPAPI in the machine scope, so a copied data directory
@@ -97,6 +98,11 @@ impl NodePaths {
     /// `buffer/`.
     pub fn buffer(&self) -> PathBuf {
         self.root.join("buffer")
+    }
+
+    /// `config/`: the configuration the controllers hand the node.
+    pub fn config(&self) -> PathBuf {
+        self.root.join("config")
     }
 
     /// Whether the node is enrolled (its identity file exists).
@@ -482,6 +488,40 @@ impl Credentials {
         Ok(next)
     }
 
+    /// The credentials with the cluster endpoints a controller named (`HelloResponse`),
+    /// written to `identity.json`; `None` when the list is empty or unchanged.
+    ///
+    /// # Errors
+    ///
+    /// `cluster.node.files`.
+    pub fn with_endpoints(
+        &self,
+        paths: &NodePaths,
+        endpoints: &[String],
+    ) -> Result<Option<Self>, ClusterError> {
+        let endpoints: Vec<String> = endpoints
+            .iter()
+            .filter(|endpoint| split_host_port(endpoint).is_ok())
+            .take(32)
+            .cloned()
+            .collect();
+        if endpoints.is_empty() || endpoints == self.identity.endpoints {
+            return Ok(None);
+        }
+        let mut identity = self.identity.clone();
+        identity.endpoints = endpoints;
+        let bytes = serde_json::to_vec_pretty(&identity)
+            .map_err(|error| io_error(&paths.identity(), &error))?;
+        write_private(&paths.identity(), &bytes)?;
+        Ok(Some(Self {
+            identity,
+            chain: self.chain.clone(),
+            key: self.key.clone(),
+            ca_root: self.ca_root.clone(),
+            info: self.info.clone(),
+        }))
+    }
+
     /// The chain as PEM.
     pub fn chain_pem(&self) -> String {
         self.chain
@@ -542,6 +582,10 @@ pub struct AgentStatus {
     pub certificate_not_after: Option<Timestamp>,
     /// The process id of the node process.
     pub pid: u32,
+    /// The revision of the configuration the controllers handed the node; `None` before
+    /// its first sync.
+    #[serde(default)]
+    pub config_revision: Option<u64>,
 }
 
 /// The state of a node process.
@@ -683,6 +727,7 @@ mod tests {
             buffer: None,
             certificate_not_after: None,
             pid: 4242,
+            config_revision: Some(17),
         };
         status.save(&paths).expect("save");
         assert_eq!(AgentStatus::load(&paths).expect("load"), Some(status));

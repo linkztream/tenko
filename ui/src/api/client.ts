@@ -121,6 +121,28 @@ export function setUnauthorizedHandler(handler: ((err: ApiError) => void) | unde
   onUnauthorized = handler;
 }
 
+/** What a refused write sent, for [`setNoQuorumHandler`]. */
+export interface SentWrite {
+  method: Method;
+  url: string;
+  body: unknown;
+  ifMatch: Revision | undefined;
+}
+
+let onNoQuorum: ((err: ApiError, write: SentWrite) => void) | undefined;
+
+/** Called for every write refused with 503 `cluster.no_quorum` (an isolated controller, OPS-26); the error is still thrown. */
+export function setNoQuorumHandler(handler: ((err: ApiError, write: SentWrite) => void) | undefined): void {
+  onNoQuorum = handler;
+}
+
+let onStaleness: ((value: string | null) => void) | undefined;
+
+/** Called with the `Tenko-Staleness` header of every answer, `null` when absent. */
+export function setStalenessHandler(handler: ((value: string | null) => void) | undefined): void {
+  onStaleness = handler;
+}
+
 export function newIdempotencyKey(): string {
   const c = globalThis.crypto;
   if (typeof c?.randomUUID === "function") return c.randomUUID();
@@ -215,6 +237,7 @@ export async function rawRequest<T>(method: Method, template: string, options: R
     throw new ApiError({ status: 0, code: CLIENT_CODES.network, title: "", detail: String(err) });
   }
 
+  onStaleness?.(res.headers.get("tenko-staleness"));
   let parsed: unknown;
   try {
     parsed = await readBody(res);
@@ -226,6 +249,14 @@ export async function rawRequest<T>(method: Method, template: string, options: R
     // A missing or expired session, not a failed sign-in attempt.
     if (res.status === 401 && (err.code === "auth.unauthenticated" || err.code === "auth.session_expired")) {
       onUnauthorized?.(err);
+    }
+    if (res.status === 503 && err.code === "cluster.no_quorum" && method !== "get") {
+      onNoQuorum?.(err, {
+        method,
+        url,
+        body: options.body instanceof FormData || options.body instanceof Blob ? undefined : options.body,
+        ifMatch: options.ifMatch,
+      });
     }
     throw err;
   }

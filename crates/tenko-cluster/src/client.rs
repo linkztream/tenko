@@ -11,14 +11,34 @@
 //! node, a controller of another CA, a revocation) are reported in the status file and
 //! retried only every few minutes.
 //!
+//! A controller that cannot write (`cluster.no_quorum`) or has not caught up with the
+//! node's configuration (`node.config.behind`) makes the agent try the next endpoint at
+//! once, keeping every batch; only after a full round over the endpoints does it pause. The
+//! endpoint list follows what the controllers announce in `HelloResponse.endpoints`. In the
+//! first minutes after enrolment, a controller that does not know the node yet (it has not
+//! applied the enrolment) is retried like a broken connection, not after the long pause.
+//!
+//! While connected the agent also follows the node's configuration (`Config.Watch`),
+//! applying it atomically to `<data_dir>/node/config/` ([`crate::node_sync::local`]) and
+//! publishing it to the roles ([`Agent::config`]); takes commands (`Commands.Subscribe`)
+//! and hands them to the role that carries them out ([`Agent::set_command_handler`]),
+//! sending the reports back in order; offers the node's own configuration at its first
+//! connection ([`Agent::set_offer`]); reports what the node applies
+//! ([`Agent::report_config`]); and fetches the secrets its configuration names when a role
+//! asks ([`Agent::secrets`]), keeping them in memory only.
+//!
 //! Producers (the scanner of WP2.3) put batches into the buffer with
-//! [`Agent::outbox`]; other processes on the host drop batches into the buffer's
-//! `incoming/` directory ([`crate::buffer::ObservationBuffer::drop_incoming`]), which the
-//! agent adopts every second.
+//! [`Agent::push`] or [`Agent::outbox`]; other processes on the host drop batches into the
+//! buffer's `incoming/` directory ([`crate::buffer::ObservationBuffer::drop_incoming`]),
+//! which the agent adopts every second.
 
 use std::{
+    collections::{HashSet, VecDeque},
     io,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
@@ -27,19 +47,27 @@ use rustls::{
     ClientConfig,
     pki_types::{CertificateDer, pem::PemObject as _},
 };
-use tenko_core::Timestamp;
+use tenko_core::{Timestamp, codec::key::encode_key};
 use tokio::{
     net::TcpStream,
-    sync::{mpsc, watch},
+    sync::{Notify, mpsc, watch},
+    task::JoinSet,
 };
 use tokio_rustls::TlsConnector;
 use tonic::transport::Channel;
+use uuid::Uuid;
 
 use crate::{
     buffer::{BufferConfig, ObservationBuffer},
     ca::generate_csr,
     error::ClusterError,
     identity::{AgentState, AgentStatus, Credentials, NodePaths, StatusError, split_host_port},
+    node_sync::{
+        codes,
+        commands::{CommandHandler, CommandReporter, IncomingCommand, Report, ReportSink},
+        local::{Assembler, ConfigFiles, NodeConfig, Received},
+        secrets::HeldSecrets,
+    },
     probe::{ProbeBatch, timestamp_from_proto, timestamp_to_proto},
     proto::v1,
     server::{MAJORS_METADATA, MAX_MESSAGE_BYTES, code_of},
@@ -50,18 +78,30 @@ use crate::{
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Timeout of one call (an ingest of a large batch may take a while).
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(120);
+/// Timeout of a secrets request.
+pub const SECRETS_TIMEOUT: Duration = Duration::from_secs(15);
 /// Shortest pause between two connection attempts.
 pub const BACKOFF_MIN: Duration = Duration::from_secs(1);
 /// Longest pause between two connection attempts.
 pub const BACKOFF_MAX: Duration = Duration::from_secs(60);
 /// Pause after a refusal a retry cannot fix soon.
 pub const REFUSED_PAUSE: Duration = Duration::from_secs(300);
+/// Pause before the next endpoint when a controller cannot serve the node now
+/// (`cluster.no_quorum`, `node.config.behind`).
+pub const ROTATE_PAUSE: Duration = Duration::from_millis(200);
+/// How long after enrolment a controller that does not know the node is retried like a
+/// broken connection.
+pub const ENROLMENT_GRACE: Duration = Duration::from_secs(600);
+/// Pause before a configuration or command stream is opened again on the same connection.
+pub const STREAM_RETRY: Duration = Duration::from_secs(5);
 /// How often a connected node rewrites its status file when nothing else changed.
 pub const STATUS_REFRESH: Duration = Duration::from_secs(60);
 /// Pause between two renewal attempts while the certificate is due.
 pub const RENEW_RETRY: Duration = Duration::from_secs(3600);
 /// How often the agent looks into `incoming/`.
 pub const ADOPT_INTERVAL: Duration = Duration::from_secs(1);
+/// Most command reports waiting for a connection; older ones are dropped beyond it.
+pub const MAX_QUEUED_REPORTS: usize = 10_000;
 
 /// Settings of a node process.
 #[derive(Debug, Clone)]
@@ -80,6 +120,10 @@ pub struct AgentConfig {
     pub backoff_max: Duration,
     /// Pause after a refusal (protocol, unknown node, foreign CA, revocation).
     pub refused_pause: Duration,
+    /// Pause before the next endpoint when a controller cannot serve the node now.
+    pub rotate_pause: Duration,
+    /// Pause before a configuration or command stream is opened again.
+    pub stream_retry: Duration,
 }
 
 impl AgentConfig {
@@ -94,6 +138,8 @@ impl AgentConfig {
             backoff_min: BACKOFF_MIN,
             backoff_max: BACKOFF_MAX,
             refused_pause: REFUSED_PAUSE,
+            rotate_pause: ROTATE_PAUSE,
+            stream_retry: STREAM_RETRY,
         }
     }
 }
@@ -117,6 +163,14 @@ fn status_error(code: &str, detail: impl Into<String>) -> StatusError {
     }
 }
 
+/// Whether a refusal asks the node to try the next controller at once.
+fn rotates(code: &str) -> bool {
+    code == codes::NO_QUORUM || code == codes::CONFIG_BEHIND
+}
+
+/// The capabilities this node announces in the handshake.
+pub const CAPABILITIES: [&str; 2] = ["config-sync", "commands"];
+
 /// What a handshake agreed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agreed {
@@ -128,6 +182,8 @@ pub struct Agreed {
     pub heartbeat_secs: u32,
     /// The endpoint.
     pub endpoint: String,
+    /// The cluster endpoints the controller announced; empty when it announced none.
+    pub endpoints: Vec<String>,
 }
 
 /// Classifies a failed connection: a controller of another CA, a revoked certificate, or a
@@ -319,6 +375,13 @@ fn refused_status(status: &tonic::Status) -> (AgentState, StatusError) {
     (state, status_error(&code, detail))
 }
 
+fn session_end(status: &tonic::Status) -> SessionEnd {
+    match refused_status(status) {
+        (AgentState::Disconnected, error) => SessionEnd::Broken(error),
+        (state, error) => SessionEnd::Refused(state, error),
+    }
+}
+
 /// The innermost cause of an error, when it says more than the error itself.
 fn root_cause(error: &(dyn std::error::Error + 'static)) -> Option<String> {
     let mut cause = error.source()?;
@@ -351,7 +414,7 @@ pub async fn hello(
                 .iter()
                 .map(|role| role.as_str().to_owned())
                 .collect(),
-            capabilities: Vec::new(),
+            capabilities: CAPABILITIES.iter().map(|name| (*name).to_owned()).collect(),
         })
         .await
         .map_err(|status| refused_status(&status))?
@@ -373,6 +436,7 @@ pub async fn hello(
         controller_version: response.version,
         heartbeat_secs: response.heartbeat_secs.clamp(1, 3600),
         endpoint: endpoint.to_owned(),
+        endpoints: response.endpoints,
     })
 }
 
@@ -417,20 +481,85 @@ pub async fn renew(
     Ok(next)
 }
 
-/// The node process: supervised connection, heartbeats, buffer replay, renewal.
+/// Command reports waiting to be sent, in order.
+#[derive(Default)]
+struct ReportQueue {
+    reports: Mutex<VecDeque<Report>>,
+    changed: Notify,
+}
+
+impl ReportQueue {
+    fn lock(&self) -> std::sync::MutexGuard<'_, VecDeque<Report>> {
+        self.reports.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn front(&self) -> Option<Report> {
+        self.lock().front().cloned()
+    }
+
+    fn pop(&self) {
+        self.lock().pop_front();
+    }
+}
+
+impl ReportSink for ReportQueue {
+    fn push(&self, report: Report) {
+        {
+            let mut reports = self.lock();
+            if reports.len() >= MAX_QUEUED_REPORTS {
+                reports.pop_front();
+            }
+            reports.push_back(report);
+        }
+        self.changed.notify_one();
+    }
+}
+
+/// The node's own configuration of one table, offered at the first connection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Offer {
+    table: String,
+    encoding: String,
+    payload: Vec<u8>,
+}
+
+/// The node process: supervised connection, heartbeats, buffer replay, renewal,
+/// configuration, commands and secrets.
 pub struct Agent {
     config: AgentConfig,
     buffer: ObservationBuffer,
     credentials: Mutex<Arc<Credentials>>,
     status: Mutex<AgentStatus>,
-    renew_now: tokio::sync::Notify,
+    renew_now: Notify,
     /// Set when a session got past the handshake; read and cleared after it ends, so a
     /// connection that worked resets the pause between attempts.
-    connected: std::sync::atomic::AtomicBool,
+    connected: AtomicBool,
     /// The modification time of the certificate file the credentials came from.
     loaded: Mutex<Option<std::time::SystemTime>>,
     /// When the status file was last written.
     written: Mutex<Option<std::time::Instant>>,
+    /// Where the configuration from the controllers is kept.
+    config_files: ConfigFiles,
+    /// The configuration from the controllers, published to the roles.
+    node_config: watch::Sender<Arc<NodeConfig>>,
+    /// The channel of the current session, for calls the roles make (secrets).
+    channel: Mutex<Option<Channel>>,
+    /// The secrets fetched in this process, in memory only.
+    held: Mutex<Option<HeldSecrets>>,
+    /// The role that carries out commands.
+    handler: Mutex<Option<Arc<dyn CommandHandler>>>,
+    /// The commands handed to the handler in this process.
+    handled: Mutex<HashSet<Uuid>>,
+    /// Command reports not sent yet.
+    reports: Arc<ReportQueue>,
+    /// The node's own configuration, offered once per process.
+    offer: Mutex<Option<Offer>>,
+    /// Whether the offer was answered.
+    offered: AtomicBool,
+    /// What the node applies, for `Config.Report`, and a version that moves with it.
+    config_report: Mutex<Option<v1::ConfigReport>>,
+    report_version: AtomicU64,
+    report_changed: Notify,
 }
 
 impl std::fmt::Debug for Agent {
@@ -442,7 +571,8 @@ impl std::fmt::Debug for Agent {
 }
 
 impl Agent {
-    /// Loads the credentials and opens the buffer.
+    /// Loads the credentials, the configuration from the controllers and opens the
+    /// buffer.
     ///
     /// # Errors
     ///
@@ -451,6 +581,14 @@ impl Agent {
         let paths_certificate = config.paths.certificate();
         let credentials = Credentials::load(&config.paths)?;
         let buffer = ObservationBuffer::open(config.buffer.clone())?;
+        let config_files = ConfigFiles::new(config.paths.config());
+        let held = match config_files.load() {
+            Ok(held) => held.unwrap_or_default(),
+            Err(error) => {
+                tracing::warn!(code = %error.code(), "the configuration from the controllers does not load; the node waits for a new one: {}", error.detail());
+                NodeConfig::default()
+            }
+        };
         let now = Timestamp::now();
         let status = AgentStatus {
             state: AgentState::Connecting,
@@ -463,16 +601,30 @@ impl Agent {
             buffer: Some(buffer.stats()),
             certificate_not_after: Some(credentials.info.not_after),
             pid: std::process::id(),
+            config_revision: held.synced().then_some(held.revision),
         };
+        let (node_config, _) = watch::channel(Arc::new(held));
         Ok(Arc::new(Self {
             config,
             buffer,
             credentials: Mutex::new(Arc::new(credentials)),
             status: Mutex::new(status),
-            renew_now: tokio::sync::Notify::new(),
-            connected: std::sync::atomic::AtomicBool::new(false),
+            renew_now: Notify::new(),
+            connected: AtomicBool::new(false),
             loaded: Mutex::new(modified(&paths_certificate)),
             written: Mutex::new(None),
+            config_files,
+            node_config,
+            channel: Mutex::new(None),
+            held: Mutex::new(None),
+            handler: Mutex::new(None),
+            handled: Mutex::new(HashSet::new()),
+            reports: Arc::new(ReportQueue::default()),
+            offer: Mutex::new(None),
+            offered: AtomicBool::new(false),
+            config_report: Mutex::new(None),
+            report_version: AtomicU64::new(0),
+            report_changed: Notify::new(),
         }))
     }
 
@@ -481,13 +633,36 @@ impl Agent {
         &self.buffer
     }
 
-    /// Queues a batch for the controller.
+    /// Queues a batch for the controller; returns how many buffer entries it took (a batch
+    /// larger than the buffer's limit for one entry is split).
     ///
     /// # Errors
     ///
-    /// A buffer error (the batch is too large, the disk fails).
-    pub fn push(&self, batch: &ProbeBatch) -> Result<u64, ClusterError> {
-        Ok(self.buffer.push(&batch.encode())?)
+    /// A buffer error (a single sighting is too large, the disk fails).
+    pub fn push(&self, batch: &ProbeBatch) -> Result<u32, ClusterError> {
+        self.push_run(batch, None)
+    }
+
+    /// Queues a batch that answers the command `run` (a scan on demand), tagged with its
+    /// id; returns how many buffer entries it took.
+    ///
+    /// # Errors
+    ///
+    /// A buffer error.
+    pub fn push_run(&self, batch: &ProbeBatch, run: Option<Uuid>) -> Result<u32, ClusterError> {
+        // Room for the epoch, the sequence and the run id the sender adds.
+        let limit = self
+            .config
+            .buffer
+            .max_batch_bytes
+            .saturating_sub(128)
+            .max(1);
+        let mut count = 0u32;
+        for part in batch.clone().split_to_fit(limit) {
+            self.buffer.push(&part.encode_with_run(run))?;
+            count = count.saturating_add(1);
+        }
+        Ok(count)
     }
 
     /// The node's credentials.
@@ -498,6 +673,91 @@ impl Agent {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner),
         )
+    }
+
+    /// The configuration from the controllers, as it changes. Revision 0 means the node
+    /// has not synced yet.
+    pub fn config(&self) -> watch::Receiver<Arc<NodeConfig>> {
+        self.node_config.subscribe()
+    }
+
+    /// Sets the role that carries out commands; without one, every command is rejected.
+    pub fn set_command_handler(&self, handler: Arc<dyn CommandHandler>) {
+        *self.handler.lock().unwrap_or_else(PoisonError::into_inner) = Some(handler);
+    }
+
+    /// Sets the node's own configuration of `table`, offered at the first connection when
+    /// the node holds none of that kind from the controllers.
+    pub fn set_offer(&self, table: &str, encoding: &str, payload: Vec<u8>) {
+        *self.offer.lock().unwrap_or_else(PoisonError::into_inner) = Some(Offer {
+            table: table.to_owned(),
+            encoding: encoding.to_owned(),
+            payload,
+        });
+    }
+
+    /// Reports what the node applies; sent now when connected, else at the next
+    /// connection.
+    pub fn report_config(&self, report: v1::ConfigReport) {
+        *self
+            .config_report
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(report);
+        self.report_version.fetch_add(1, Ordering::SeqCst);
+        self.report_changed.notify_one();
+    }
+
+    /// The secrets of `purposes` that the node's configuration names: fetched from the
+    /// connected controller (which audits the hand-over), else the values of the last
+    /// fetch in this process. Never written to disk.
+    ///
+    /// # Errors
+    ///
+    /// `node.config.secrets_unavailable` (503) when no controller answers and nothing was
+    /// fetched before.
+    pub async fn secrets(&self, purposes: &[&str]) -> Result<HeldSecrets, ClusterError> {
+        let channel = self
+            .channel
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(channel) = channel {
+            let mut client = v1::config_client::ConfigClient::new(channel);
+            let request = v1::SecretsRequest {
+                purposes: purposes
+                    .iter()
+                    .map(|purpose| (*purpose).to_owned())
+                    .collect(),
+            };
+            match tokio::time::timeout(SECRETS_TIMEOUT, client.secrets(request)).await {
+                Ok(Ok(response)) => {
+                    let held = HeldSecrets::from_proto(response.into_inner());
+                    *self.held.lock().unwrap_or_else(PoisonError::into_inner) = Some(held.clone());
+                    return Ok(held);
+                }
+                Ok(Err(status)) => {
+                    tracing::warn!(
+                        code = code_of(&status).unwrap_or_default(),
+                        "the controller did not hand out the secrets: {}",
+                        status.message()
+                    );
+                }
+                Err(_) => {
+                    tracing::warn!("the controller did not answer the secrets request in time");
+                }
+            }
+        }
+        self.held
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .ok_or_else(|| {
+                ClusterError::new(
+                    codes::SECRETS_UNAVAILABLE,
+                    503,
+                    "no controller answered, and no secrets were fetched since this node started",
+                )
+            })
     }
 
     /// The current status.
@@ -543,8 +803,10 @@ impl Agent {
     /// Runs until `stop` turns true.
     pub async fn run(self: Arc<Self>, mut stop: watch::Receiver<bool>) {
         let adopter = tokio::spawn(Arc::clone(&self).adopt(stop.clone()));
+        let reports = tokio::spawn(Arc::clone(&self).send_reports(stop.clone()));
         let mut backoff = self.config.backoff_min;
         let mut next_target = 0usize;
+        let mut rotated = 0usize;
         loop {
             if *stop.borrow() {
                 break;
@@ -572,19 +834,28 @@ impl Agent {
             if self.connected_once() {
                 backoff = self.config.backoff_min;
             }
+            let end = Self::soften(end, &credentials);
             let pause = match end {
                 SessionEnd::Stopped => break,
                 SessionEnd::Broken(error) => {
                     tracing::info!(endpoint = %target, code = %error.code, "{}", error.detail);
+                    let rotate = rotates(&error.code) && rotated + 1 < targets.len();
                     self.set_status(|status| {
                         status.state = AgentState::Disconnected;
                         status.last_error = Some(error);
                     });
-                    let pause = jitter(backoff);
-                    backoff = (backoff * 2).min(self.config.backoff_max);
-                    pause
+                    if rotate {
+                        rotated += 1;
+                        self.config.rotate_pause
+                    } else {
+                        rotated = 0;
+                        let pause = jitter(backoff);
+                        backoff = (backoff * 2).min(self.config.backoff_max);
+                        pause
+                    }
                 }
                 SessionEnd::Refused(state, error) => {
+                    rotated = 0;
                     tracing::warn!(endpoint = %target, code = %error.code, "{}", error.detail);
                     self.set_status(|status| {
                         status.state = state;
@@ -599,14 +870,30 @@ impl Agent {
             }
         }
         adopter.abort();
+        reports.abort();
         let _ = adopter.await;
+        let _ = reports.await;
         self.set_status(|status| status.state = AgentState::Stopped);
         tracing::info!("node process stopped");
     }
 
+    /// A refusal as an unknown node shortly after enrolment is a broken connection: the
+    /// controller has not applied the enrolment yet.
+    fn soften(end: SessionEnd, credentials: &Credentials) -> SessionEnd {
+        match end {
+            SessionEnd::Refused(AgentState::Refused, error)
+                if error.code == "cluster.node.unknown"
+                    && Timestamp::now().saturating_since(credentials.identity.enrolled_at)
+                        < ENROLMENT_GRACE =>
+            {
+                SessionEnd::Broken(error)
+            }
+            other => other,
+        }
+    }
+
     fn connected_once(&self) -> bool {
-        self.connected
-            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        self.connected.swap(false, Ordering::SeqCst)
     }
 
     /// Loads the credentials again when the certificate file changed (`tenko node renew`
@@ -628,6 +915,24 @@ impl Agent {
             }
             Err(error) => {
                 tracing::warn!(code = %error.code(), "the node certificate files changed but do not load: {}", error.detail());
+            }
+        }
+    }
+
+    /// Takes the endpoints a controller announced into the identity.
+    fn refresh_endpoints(&self, endpoints: &[String]) {
+        let credentials = self.credentials();
+        match credentials.with_endpoints(&self.config.paths, endpoints) {
+            Ok(Some(fresh)) => {
+                tracing::info!(endpoints = %fresh.identity.endpoints.join(", "), "the controllers announced their cluster endpoints");
+                *self
+                    .credentials
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Arc::new(fresh);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(code = %error.code(), "the announced endpoints could not be written: {}", error.detail());
             }
         }
     }
@@ -657,13 +962,17 @@ impl Agent {
         }
     }
 
-    /// One connection: hello, then heartbeats, buffer replay and renewal until something
-    /// breaks or `stop` turns true.
+    /// One connection: hello, then heartbeats, buffer replay, renewal, configuration,
+    /// commands and reports until something breaks or `stop` turns true.
     #[allow(
         clippy::too_many_lines,
         reason = "one select loop over the parts of a session"
     )]
-    async fn session(&self, target: &str, stop: &mut watch::Receiver<bool>) -> SessionEnd {
+    async fn session(
+        self: &Arc<Self>,
+        target: &str,
+        stop: &mut watch::Receiver<bool>,
+    ) -> SessionEnd {
         let credentials = self.credentials();
         let config = match credentials.client_config() {
             Ok(config) => config,
@@ -702,8 +1011,8 @@ impl Agent {
             controller = %agreed.controller_version,
             "connected to the controller"
         );
-        self.connected
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.refresh_endpoints(&agreed.endpoints);
+        self.connected.store(true, Ordering::SeqCst);
         self.set_status(|status| {
             status.state = AgentState::Connected;
             status.major = Some(agreed.major);
@@ -718,13 +1027,14 @@ impl Agent {
         });
         let mut directives = match node_client.heartbeat(outbound).await {
             Ok(response) => response.into_inner(),
-            Err(status) => {
-                return match refused_status(&status) {
-                    (AgentState::Disconnected, error) => SessionEnd::Broken(error),
-                    (state, error) => SessionEnd::Refused(state, error),
-                };
-            }
+            Err(status) => return session_end(&status),
         };
+        *self.channel.lock().unwrap_or_else(PoisonError::into_inner) = Some(channel.clone());
+        let (ends, mut ended) = mpsc::channel::<SessionEnd>(4);
+        let mut parts = JoinSet::new();
+        parts.spawn(Arc::clone(self).follow_config(channel.clone(), ends.clone()));
+        parts.spawn(Arc::clone(self).follow_commands(channel.clone()));
+        parts.spawn(Arc::clone(self).offer_and_report(channel.clone()));
         let interval = Duration::from_secs(u64::from(agreed.heartbeat_secs));
         let mut ticker = tokio::time::interval(interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -732,11 +1042,12 @@ impl Agent {
         let mut last_renewal: Option<std::time::Instant> = None;
         let sender = self.send_buffer(channel.clone());
         tokio::pin!(sender);
-        loop {
+        let end = loop {
             tokio::select! {
                 () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => {
-                    return SessionEnd::Stopped;
+                    break SessionEnd::Stopped;
                 }
+                Some(end) = ended.recv() => break end,
                 _ = ticker.tick() => {
                     sequence += 1;
                     let due = self.credentials().needs_renewal(Timestamp::now());
@@ -757,7 +1068,7 @@ impl Agent {
                         sent_at: Some(timestamp_to_proto(Timestamp::now())),
                     };
                     if beats.send(beat).await.is_err() {
-                        return SessionEnd::Broken(status_error("cluster.heartbeat", "the heartbeat stream closed"));
+                        break SessionEnd::Broken(status_error("cluster.heartbeat", "the heartbeat stream closed"));
                     }
                     self.refresh_status();
                 }
@@ -765,7 +1076,7 @@ impl Agent {
                     match directive {
                         Some(Ok(directive)) => {
                             if directive.revoked {
-                                return SessionEnd::Refused(
+                                break SessionEnd::Refused(
                                     AgentState::Revoked,
                                     status_error("cluster.node.revoked", if directive.detail.is_empty() {
                                         "this node was revoked; enrol it again".to_owned()
@@ -784,14 +1095,9 @@ impl Agent {
                                 }
                             }
                         }
-                        Some(Err(status)) => {
-                            return match refused_status(&status) {
-                                (AgentState::Disconnected, error) => SessionEnd::Broken(error),
-                                (state, error) => SessionEnd::Refused(state, error),
-                            };
-                        }
+                        Some(Err(status)) => break session_end(&status),
                         None => {
-                            return SessionEnd::Broken(status_error("cluster.heartbeat", "the controller closed the heartbeat stream"));
+                            break SessionEnd::Broken(status_error("cluster.heartbeat", "the controller closed the heartbeat stream"));
                         }
                     }
                 }
@@ -804,7 +1110,313 @@ impl Agent {
                         Err(error) => tracing::warn!(code = %error.code(), "renewal failed: {}", error.detail()),
                     }
                 }
-                end = &mut sender => return end,
+                end = &mut sender => break end,
+            }
+        };
+        *self.channel.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        parts.abort_all();
+        end
+    }
+
+    /// Follows the node's configuration on `channel`: applies every message, keeps it on
+    /// disk and publishes it. A controller that cannot serve the node now ends the session
+    /// through `ends`, so the agent tries the next one; a message that does not apply is
+    /// reported and the stream is opened again from the revision the node holds.
+    async fn follow_config(self: Arc<Self>, channel: Channel, ends: mpsc::Sender<SessionEnd>) {
+        let mut client = v1::config_client::ConfigClient::new(channel)
+            .max_decoding_message_size(MAX_MESSAGE_BYTES);
+        loop {
+            let from = self.node_config.borrow().revision;
+            let failure = match client
+                .watch(v1::WatchRequest {
+                    from_revision: from,
+                })
+                .await
+            {
+                Ok(response) => self.apply_stream(response.into_inner()).await,
+                Err(status) => Err(status),
+            };
+            match failure {
+                Ok(()) => {}
+                Err(status) if status.code() == tonic::Code::Unimplemented => {
+                    tracing::info!(
+                        "the controller does not sync configuration; the node keeps its own"
+                    );
+                    return;
+                }
+                Err(status) => {
+                    let end = session_end(&status);
+                    let leave = match &end {
+                        SessionEnd::Broken(error) => {
+                            rotates(&error.code) || status.code() == tonic::Code::Unavailable
+                        }
+                        _ => true,
+                    };
+                    if leave {
+                        let _ = ends.send(end).await;
+                        return;
+                    }
+                    tracing::warn!(
+                        code = code_of(&status).unwrap_or_default(),
+                        "the configuration stream failed: {}",
+                        status.message()
+                    );
+                }
+            }
+            tokio::time::sleep(self.config.stream_retry).await;
+        }
+    }
+
+    /// Applies the messages of one configuration stream until it ends or a message does
+    /// not apply (`Ok`: opened again after a pause).
+    async fn apply_stream(
+        &self,
+        mut stream: tonic::Streaming<v1::ConfigDelta>,
+    ) -> Result<(), tonic::Status> {
+        let mut assembler = Assembler::default();
+        loop {
+            let Some(frame) = stream.message().await? else {
+                return Err(tonic::Status::unavailable(
+                    "the controller closed the configuration stream",
+                ));
+            };
+            let received = match assembler.push(frame) {
+                Ok(None) => continue,
+                Ok(Some(received)) => received,
+                Err(error) => {
+                    tracing::warn!(code = %error.code(), "a configuration message was refused; the node keeps its configuration: {}", error.detail());
+                    self.note_config_error(error.detail());
+                    return Ok(());
+                }
+            };
+            if let Err(error) = self.apply_config(&received) {
+                tracing::warn!(code = %error.code(), "the configuration could not be kept: {}", error.detail());
+                self.note_config_error(error.detail());
+                return Ok(());
+            }
+        }
+    }
+
+    /// Applies one message: writes the new configuration, then publishes it.
+    fn apply_config(&self, received: &Received) -> Result<(), ClusterError> {
+        let current = Arc::clone(&self.node_config.borrow());
+        let Some(next) = current.apply(received, Timestamp::now()) else {
+            tracing::debug!(
+                revision = received.revision,
+                held = current.revision,
+                "an older configuration message was ignored"
+            );
+            return Ok(());
+        };
+        if next == *current {
+            return Ok(());
+        }
+        let changed = next.rows != current.rows;
+        self.config_files.save(&next)?;
+        let revision = next.revision;
+        self.node_config.send_replace(Arc::new(next));
+        self.set_status(|status| status.config_revision = Some(revision));
+        if changed {
+            tracing::info!(
+                revision,
+                snapshot = received.snapshot,
+                bytes = received.wire_bytes,
+                "configuration revision {revision} applied"
+            );
+        } else {
+            tracing::debug!(revision, "configuration revision moved, nothing changed");
+        }
+        Ok(())
+    }
+
+    /// Records a configuration that did not apply in the next report.
+    fn note_config_error(&self, detail: &str) {
+        let mut report = self
+            .config_report
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .unwrap_or_default();
+        report.error = detail.chars().take(2000).collect();
+        self.report_config(report);
+    }
+
+    /// Takes the node's commands on `channel` and hands each new one to the handler.
+    async fn follow_commands(self: Arc<Self>, channel: Channel) {
+        let mut client = v1::commands_client::CommandsClient::new(channel);
+        loop {
+            // Every non-final command comes again on a new subscription; those handled in
+            // this process are skipped.
+            match client
+                .subscribe(v1::SubscribeRequest {
+                    after: String::new(),
+                })
+                .await
+            {
+                Ok(response) => {
+                    let mut stream = response.into_inner();
+                    loop {
+                        match stream.message().await {
+                            Ok(Some(command)) => self.dispatch(command).await,
+                            Ok(None) => break,
+                            Err(status) => {
+                                tracing::debug!(%status, "the command stream ended");
+                                break;
+                            }
+                        }
+                    }
+                }
+                Err(status) if status.code() == tonic::Code::Unimplemented => {
+                    tracing::info!("the controller sends no commands");
+                    return;
+                }
+                Err(status) => tracing::debug!(%status, "the command stream could not open"),
+            }
+            tokio::time::sleep(self.config.stream_retry).await;
+        }
+    }
+
+    async fn dispatch(&self, command: v1::Command) {
+        let Some(command) = IncomingCommand::from_proto(command) else {
+            tracing::warn!("a command without a valid id was ignored");
+            return;
+        };
+        let fresh = self
+            .handled
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(command.id);
+        if !fresh {
+            return;
+        }
+        tracing::info!(command = %command.id, kind = %command.kind, "command received");
+        let sink: Arc<dyn ReportSink> = Arc::clone(&self.reports) as Arc<dyn ReportSink>;
+        let reporter = CommandReporter::new(command.id, sink);
+        let handler = self
+            .handler
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        match handler {
+            Some(handler) => handler.handle(command, reporter).await,
+            None => reporter.rejected("this node runs no role that takes commands"),
+        }
+    }
+
+    /// Sends the command reports in order, whenever a session is up.
+    async fn send_reports(self: Arc<Self>, mut stop: watch::Receiver<bool>) {
+        loop {
+            let Some(report) = self.reports.front() else {
+                tokio::select! {
+                    () = self.reports.changed.notified() => continue,
+                    () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
+                }
+            };
+            let channel = self
+                .channel
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            let Some(channel) = channel else {
+                tokio::select! {
+                    () = tokio::time::sleep(Duration::from_millis(500)) => continue,
+                    () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
+                }
+            };
+            let mut client = v1::commands_client::CommandsClient::new(channel);
+            match client.report(report.to_proto()).await {
+                Ok(_) => self.reports.pop(),
+                Err(status)
+                    if matches!(
+                        status.code(),
+                        tonic::Code::NotFound
+                            | tonic::Code::InvalidArgument
+                            | tonic::Code::Unimplemented
+                    ) =>
+                {
+                    tracing::debug!(command = %report.command, %status, "a command report was dropped");
+                    self.reports.pop();
+                }
+                Err(status) => {
+                    tracing::debug!(command = %report.command, %status, "a command report is retried");
+                    tokio::select! {
+                        () = tokio::time::sleep(Duration::from_secs(1)) => {}
+                        () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
+                    }
+                }
+            }
+        }
+    }
+
+    /// Offers the node's own configuration once (when the node holds none of that kind from
+    /// the controllers), then sends every new report of what the node applies.
+    async fn offer_and_report(self: Arc<Self>, channel: Channel) {
+        let mut client = v1::config_client::ConfigClient::new(channel);
+        self.offer_once(&mut client).await;
+        let mut sent = None;
+        loop {
+            let version = self.report_version.load(Ordering::SeqCst);
+            let report = self
+                .config_report
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            if sent != Some(version)
+                && let Some(report) = report
+            {
+                match client.report(report).await {
+                    Ok(_) => sent = Some(version),
+                    Err(status) if status.code() == tonic::Code::Unimplemented => return,
+                    Err(status) => {
+                        tracing::debug!(%status, "the configuration report is retried");
+                        tokio::time::sleep(self.config.stream_retry).await;
+                        continue;
+                    }
+                }
+            }
+            self.report_changed.notified().await;
+        }
+    }
+
+    async fn offer_once(&self, client: &mut v1::config_client::ConfigClient<Channel>) {
+        if self.offered.load(Ordering::SeqCst) {
+            return;
+        }
+        let offer = self
+            .offer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let Some(offer) = offer else {
+            return;
+        };
+        let key = encode_key(&self.credentials().identity.node.0);
+        if self.node_config.borrow().get(&offer.table, &key).is_some() {
+            self.offered.store(true, Ordering::SeqCst);
+            return;
+        }
+        match client
+            .offer(v1::OfferRequest {
+                table: offer.table.clone(),
+                encoding: offer.encoding,
+                payload: offer.payload,
+            })
+            .await
+        {
+            Ok(response) => {
+                let response = response.into_inner();
+                tracing::info!(table = %offer.table, accepted = response.accepted, "{}", response.detail);
+                self.offered.store(true, Ordering::SeqCst);
+            }
+            Err(status) if status.code() == tonic::Code::Unimplemented => {
+                self.offered.store(true, Ordering::SeqCst);
+            }
+            Err(status) => {
+                tracing::warn!(
+                    code = code_of(&status).unwrap_or_default(),
+                    "the node's configuration could not be offered: {}",
+                    status.message()
+                );
             }
         }
     }
@@ -875,12 +1487,7 @@ impl Agent {
                     );
                     self.ack(pending.sequence).await;
                 }
-                Err(status) => {
-                    return match refused_status(&status) {
-                        (AgentState::Disconnected, error) => SessionEnd::Broken(error),
-                        (state, error) => SessionEnd::Refused(state, error),
-                    };
-                }
+                Err(status) => return session_end(&status),
             }
         }
     }
@@ -980,4 +1587,67 @@ pub async fn renew_once(paths: &NodePaths, version: &str) -> Result<Credentials,
         return renew(channel, &credentials, paths).await;
     }
     Err(last)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_quorum_and_lag_refusals_rotate_at_once() {
+        assert!(rotates(codes::NO_QUORUM));
+        assert!(rotates(codes::CONFIG_BEHIND));
+        assert!(!rotates("cluster.connect"));
+        assert!(!rotates("cluster.node.unknown"));
+    }
+
+    #[test]
+    fn a_status_keeps_its_code_and_detail() {
+        let mut status = tonic::Status::unavailable("cut off");
+        status.metadata_mut().insert(
+            crate::server::ERROR_CODE_METADATA,
+            codes::NO_QUORUM.parse().expect("value"),
+        );
+        match session_end(&status) {
+            SessionEnd::Broken(error) => {
+                assert_eq!(error.code, codes::NO_QUORUM);
+                assert_eq!(error.detail, "cut off");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let mut status = tonic::Status::permission_denied("unknown");
+        status.metadata_mut().insert(
+            crate::server::ERROR_CODE_METADATA,
+            "cluster.node.unknown".parse().expect("value"),
+        );
+        assert!(matches!(
+            session_end(&status),
+            SessionEnd::Refused(AgentState::Refused, _)
+        ));
+    }
+
+    #[test]
+    fn reports_queue_in_order_and_drop_the_oldest_beyond_the_limit() {
+        let queue = ReportQueue::default();
+        let report = |progress: u8| Report {
+            command: Uuid::nil(),
+            state: crate::node_sync::commands::CommandState::Running,
+            progress,
+            detail: None,
+            at: None,
+            batches: None,
+        };
+        queue.push(report(1));
+        queue.push(report(2));
+        assert_eq!(queue.front().map(|r| r.progress), Some(1));
+        queue.pop();
+        assert_eq!(queue.front().map(|r| r.progress), Some(2));
+        queue.pop();
+        assert!(queue.front().is_none());
+        for index in 0..=MAX_QUEUED_REPORTS {
+            queue.push(report(u8::try_from(index % 100).expect("small")));
+        }
+        assert_eq!(queue.lock().len(), MAX_QUEUED_REPORTS);
+        assert_eq!(queue.front().map(|r| r.progress), Some(1));
+    }
 }

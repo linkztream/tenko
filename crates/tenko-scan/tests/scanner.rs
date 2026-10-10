@@ -288,6 +288,7 @@ async fn on_demand_runs_on_a_target_are_never_complete() {
             &RunRequest {
                 target: Some("192.0.2.10".to_owned()),
                 ignore_blackout: false,
+                run: None,
             },
         )
         .await
@@ -304,6 +305,7 @@ async fn on_demand_runs_on_a_target_are_never_complete() {
             &RunRequest {
                 target: Some("198.51.100.0/24".to_owned()),
                 ignore_blackout: false,
+                run: None,
             },
         )
         .await
@@ -418,6 +420,7 @@ async fn blackout_windows_hold_every_method_that_sends_packets() {
             &RunRequest {
                 target: None,
                 ignore_blackout: true,
+                run: None,
             },
         )
         .await
@@ -595,7 +598,11 @@ struct FullSink;
 
 #[async_trait]
 impl tenko_scan::scanner::BatchSink for FullSink {
-    async fn deliver(&self, _batch: ProbeBatch) -> Result<(), ScanError> {
+    async fn deliver(
+        &self,
+        _batch: ProbeBatch,
+        _run: Option<uuid::Uuid>,
+    ) -> Result<u32, ScanError> {
         Err(ScanError::io("the buffer is full"))
     }
 }

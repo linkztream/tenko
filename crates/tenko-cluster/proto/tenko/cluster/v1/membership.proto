@@ -2,14 +2,18 @@
 // See handshake.proto for the transport, the errors and the evolution rule.
 //
 // The service Cluster is how controllers join, forward writes and reads to the leader,
-// compare their state and hand over the installation's key encryption keys. A caller
-// needs the role `controller` and a member record; the exception is Join, which a
-// controller that has just been enrolled calls before it has a member record. It is
-// filled in by work package WP3.1a (the format of the key transfer comes from WP3.4a);
-// until then every method answers UNIMPLEMENTED.
+// compare their state, hand over leadership and the installation's key encryption keys.
+// A caller needs the role `controller` and a record in the node registry that holds the
+// presented certificate; Join and TransferKek are called by a controller that was just
+// enrolled and is not a member of the Raft group yet. Work package WP3.1a fills it in
+// (the format of the key transfer comes from WP3.4a).
 //
-// Refusals are gRPC statuses with the metadata entry `tenko-error-code`; a forwarded
-// write that the leader rejects keeps the code the store gave it.
+// Refusals are gRPC statuses with the metadata entry `tenko-error-code`. A forwarded
+// write or read that the store refuses keeps the store's code, and the status details
+// carry the store error in CBOR (`tenko-batch/cbor-1`), so the follower returns exactly
+// what the leader's store returned. A callee that does not lead answers UNAVAILABLE with
+// `cluster.forward.not_leader` and, when it knows one, the leader's node id in the
+// metadata entry `tenko-leader`; nothing was queued then.
 syntax = "proto3";
 
 package tenko.cluster.v1;
@@ -35,6 +39,14 @@ service Cluster {
   // Hands the installation's key encryption key generations to a joining controller,
   // sealed to a key only the joiner holds.
   rpc TransferKek(TransferKekRequest) returns (TransferKekResponse);
+  // The leader asks a caught-up voter to start an election now: the hand-over of
+  // leadership before a planned restart (`tenko cluster step-down`). Only the current
+  // leader may call it.
+  rpc Campaign(CampaignRequest) returns (CampaignResponse);
+  // Hands a membership change (promote, remove, step-down) that an administrator asked a
+  // follower for to the leader, with the request context for the audit record. The
+  // payload is CBOR (`tenko-cluster/cbor-1`).
+  rpc Change(ChangeRequest) returns (ChangeResponse);
 }
 
 message JoinRequest {
@@ -94,8 +106,8 @@ message ProposeResponse {
 message ReadIndexRequest {}
 
 message ReadIndexResponse {
-  // The log index to read at.
-  uint64 log_index = 1;
+  // The log index to read at; absent while the log is empty.
+  optional uint64 log_index = 1;
   // The term in which the leader confirmed it.
   uint64 term = 2;
   // The node id of the leader that answered.
@@ -144,4 +156,25 @@ message TransferKekResponse {
   bytes sealed = 2;
   // The ids of the generations in `sealed`, newest last.
   repeated string generation_ids = 3;
+}
+
+message CampaignRequest {}
+
+message CampaignResponse {
+  // The term the callee campaigns in.
+  uint64 term = 1;
+}
+
+message ChangeRequest {
+  // The encoding of `change`: `tenko-cluster/cbor-1`.
+  string wire = 1;
+  // The change and the context of the request that asked for it, CBOR.
+  bytes change = 2;
+}
+
+message ChangeResponse {
+  // The encoding of `result`: `tenko-cluster/cbor-1`.
+  string wire = 1;
+  // The result of the change (the members afterwards, or the new leader), CBOR.
+  bytes result = 2;
 }

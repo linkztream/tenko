@@ -533,9 +533,9 @@ async fn snapshot_install_swaps_the_index_without_empty_reads() {
     leader.shutdown().await.expect("shutdown");
 }
 
-/// Cluster readiness: three voters replicate, a follower refuses proposals (no forwarding
-/// before Slice 3), and when the leader is cut off the other two elect a new leader that
-/// accepts writes; the old leader catches up after it reconnects.
+/// Three voters replicate, a follower forwards its writes to the leader, and when the leader
+/// is cut off the other two elect a new leader that accepts writes; the old leader catches
+/// up after it reconnects.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn three_voters_replicate_and_fail_over() {
     let dir = TestDir::new("cluster");
@@ -568,11 +568,16 @@ async fn three_voters_replicate_and_fail_over() {
     for node in &nodes {
         wait_for_revision(node, last).await;
     }
+    // A follower forwards the write to the leader and has applied it when it returns.
+    let forwarded = put(&nodes[1], 500, "through a follower").await;
+    assert!(forwarded > last);
+    let local = nodes[1].read(ReadConsistency::Local).await.expect("view");
     assert_eq!(
-        nodes[1].propose(batch()).await,
-        Err(StoreError::NoQuorum),
-        "a follower does not accept writes"
+        rows(local.as_ref()).get(&key(500)),
+        Some(&Bytes::from_static(b"through a follower")),
     );
+    drop(local);
+    last = forwarded;
 
     // Cut the leader off; the other two elect a new leader.
     network.set_isolated(1, true);

@@ -4,8 +4,8 @@
 // The service Commands carries work a controller wants a node to do (run a scan, stop,
 // resume) and the node's progress back. Every controller streams the pending commands of
 // the nodes connected to it, so a node reached through a follower gets them too. A caller
-// needs a node record; each method states the role it requires. It is filled in by work
-// package WP3.10; until then every method answers UNIMPLEMENTED.
+// needs a node record; any enrolled node may call both methods, and a node gets only its
+// own commands. docs/node-sync.md describes the kinds and their payloads.
 syntax = "proto3";
 
 package tenko.cluster.v1;
@@ -31,8 +31,8 @@ message SubscribeRequest {
 message Command {
   // The id of the command, unique within the installation and ordered by issue time.
   string id = 1;
-  // What to do: `scan.run`, `scan.stop`, `scan.resume`. A node reports a kind it does not
-  // know as failed.
+  // What to do: `scan.run`, `scan.cancel`, `scan.stop`, `scan.resume`. A node reports a
+  // kind it does not know as failed.
   string kind = 2;
   // When the controller issued it.
   google.protobuf.Timestamp issued_at = 3;
@@ -53,6 +53,10 @@ message CommandEvent {
   string detail = 4;
   // The node's clock when the state was reached.
   google.protobuf.Timestamp at = 5;
+  // The observation batches the node queued for the command, tagged with its id (`run`
+  // of `IngestRequest`); set with `done`, so the controller knows when every result has
+  // arrived.
+  uint32 batches = 6;
 }
 
 message ReportResponse {}

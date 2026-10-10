@@ -3,11 +3,13 @@
 //
 // The service Config gives a node its configuration and the secrets it needs. Any
 // controller serves it from its own copy of the replicated state. A caller needs a node
-// record; each method states the role it requires. It is filled in by work package
-// WP3.10; until then every method answers UNIMPLEMENTED.
+// record; each method states the role it requires. docs/node-sync.md describes the
+// payloads, the bandwidth cap and how a node applies what it receives.
 syntax = "proto3";
 
 package tenko.cluster.v1;
+
+import "google/protobuf/timestamp.proto";
 
 // A node's configuration and secrets, served by the controllers.
 service Config {
@@ -21,6 +23,16 @@ service Config {
   // decides per call and audits it; the node keeps the values in memory only. Refused
   // with PERMISSION_DENIED when the node's roles do not use the purpose.
   rpc Secrets(SecretsRequest) returns (SecretsResponse);
+  // Offers the node's own configuration of one kind as the initial one, at the first
+  // connection: the controller keeps it only when it holds no configuration of that kind
+  // for the node, and checks it as it checks an edit through the API. Passwords never
+  // travel this way: a probe offers its SNMP devices without credentials. Any enrolled
+  // node may call it for the kinds its roles use.
+  rpc Offer(OfferRequest) returns (OfferResponse);
+  // Reports what the node applies: the configuration revision, where it came from, an
+  // error that kept a newer one from applying, and the effective scope of a probe. The
+  // controllers keep the last report of each node. Any enrolled node may call it.
+  rpc Report(ConfigReport) returns (ConfigReportResponse);
 }
 
 message WatchRequest {
@@ -34,11 +46,15 @@ message ConfigDelta {
   // True when `payload` is a complete snapshot of the node's subset that replaces what
   // the node holds, false when it is a delta to apply on top.
   bool snapshot = 2;
-  // The encoding of `payload`, for example `cbor+zstd/1`; the node refuses one it does not
-  // know and keeps its configuration.
+  // The encoding of `payload`, for example `cbor+deflate/1`; the node refuses one it does
+  // not know and keeps its configuration.
   string encoding = 3;
   // The delta or the snapshot, in `encoding`.
   bytes payload = 4;
+  // More messages of the same revision follow, and their payloads continue this one; the
+  // node joins them before it decodes. A controller splits a large payload this way to
+  // pace it under the bandwidth cap.
+  bool partial = 5;
 }
 
 message SecretsRequest {
@@ -61,3 +77,55 @@ message SecretsResponse {
   // The secrets of the requested purposes that the node may have.
   repeated NodeSecret secrets = 1;
 }
+
+message OfferRequest {
+  // The table the configuration belongs to, for example `scan.probe_config`.
+  string table = 1;
+  // The encoding of `payload`, for example `cbor/1`.
+  string encoding = 2;
+  // The configuration, in `encoding`.
+  bytes payload = 3;
+}
+
+message OfferResponse {
+  // Whether the controller kept the offer; false when it holds a configuration of that
+  // kind for the node already.
+  bool accepted = 1;
+  // English detail for the node's log.
+  string detail = 2;
+}
+
+message ConfigReport {
+  // The configuration revision the node applies; 0 when it runs on its own file.
+  uint64 revision = 1;
+  // Where the applied configuration came from: `synced` (the controllers) or `local` (the
+  // node's own file, before the first sync).
+  string source = 2;
+  // Why the newest configuration the node received does not apply, in English; empty
+  // when it applies.
+  string error = 3;
+  // The effective scope of a probe; absent on nodes without the role `probe`.
+  optional ProbeScopeReport probe = 4;
+  // The node's clock when it applied the configuration.
+  google.protobuf.Timestamp at = 5;
+}
+
+// What a probe scans after applying its configuration.
+message ProbeScopeReport {
+  // The prefixes it covers (`192.0.2.0/24`).
+  repeated string prefixes = 1;
+  // Prefixes and addresses inside them it never probes.
+  repeated string exclude = 2;
+  // The methods that run on schedule, by name (`arp`, `snmp`).
+  repeated string methods = 3;
+  // The VRF its batches name (a UUID), when the configuration names one.
+  optional string vrf = 4;
+  // Whether active probing is on (TGL-18).
+  bool active = 5;
+  // Whether the kill switch is on.
+  bool stopped = 6;
+  // Why, as recorded with the kill switch; empty when it is off.
+  string stop_reason = 7;
+}
+
+message ConfigReportResponse {}

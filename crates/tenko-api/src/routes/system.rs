@@ -316,6 +316,7 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
             journal_len: store.journal_len,
             data_bytes: store.data_bytes,
             disk_bytes: store.disk_bytes,
+            quorum: store.quorum.into(),
         },
         tls,
         ui,

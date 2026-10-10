@@ -708,3 +708,8 @@ table.grid { width: 100%; border-collapse: separate; border-spacing: 0; table-la
 .acct a.item, .acct button.item { display: flex; align-items: center; gap: var(--sp-4); width: 100%; padding: var(--sp-3) var(--sp-5); border: 0; background: transparent; color: var(--ink); text-align: start; text-decoration: none; }
 .acct a.item:hover, .acct button.item:hover { background: var(--surface-3); text-decoration: none; }
 .acct .item .kbd { margin-inline-start: auto; }
+
+/* Glyphs that point along the inline axis mirror under a right-to-left direction. */
+.i.inline-dir {
+  transform: scaleX(var(--inline-sign, 1));
+}

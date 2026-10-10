@@ -300,6 +300,48 @@ fn copy_tables(source: &ReadTransaction, target: &WriteTransaction) -> Result<()
     Ok(())
 }
 
+/// The SHA-256 over every non-empty store table of a read transaction, in table name order
+/// and key order: per table `0x01 | u16 BE name length | name`, per row
+/// `0x02 | u32 BE key length | key | u32 BE value length | stored value` (the revision that
+/// wrote it, then the value). Empty tables are left out, because a replica that applied the
+/// log keeps a table that was emptied while one that installed a snapshot may not.
+fn digest_tables(source: &ReadTransaction) -> Result<([u8; 32], u64, u64), StoreError> {
+    use sha2::{Digest as _, Sha256};
+
+    let mut names: Vec<String> = source
+        .list_tables()
+        .map_err(storage)?
+        .map(|handle| handle.name().to_owned())
+        .filter(|name| is_store_table(name))
+        .collect();
+    names.sort();
+    let mut hasher = Sha256::new();
+    let (mut tables, mut entries) = (0_u64, 0_u64);
+    for name in &names {
+        let definition = TableDefinition::<&[u8], &[u8]>::new(name);
+        let table = source.open_table(definition).map_err(storage)?;
+        let mut rows = table.iter().map_err(storage)?.peekable();
+        if rows.peek().is_none() {
+            continue;
+        }
+        tables += 1;
+        hasher.update([0x01]);
+        hasher.update(u16::try_from(name.len()).unwrap_or(u16::MAX).to_be_bytes());
+        hasher.update(name.as_bytes());
+        for item in rows {
+            let (key, value) = item.map_err(storage)?;
+            let (key, value) = (key.value(), value.value());
+            hasher.update([0x02]);
+            hasher.update(u32::try_from(key.len()).unwrap_or(u32::MAX).to_be_bytes());
+            hasher.update(key);
+            hasher.update(u32::try_from(value.len()).unwrap_or(u32::MAX).to_be_bytes());
+            hasher.update(value);
+            entries += 1;
+        }
+    }
+    Ok((hasher.finalize().into(), tables, entries))
+}
+
 /// Writes every record of a snapshot file into `target`.
 fn copy_snapshot(reader: &mut SnapshotReader, target: &WriteTransaction) -> Result<(), StoreError> {
     let mut table = None;
@@ -389,6 +431,18 @@ impl StateMachine {
     /// A read view at the committed state.
     pub(crate) fn view(&self) -> Result<RedbView, StoreError> {
         RedbView::open(&self.db())
+    }
+
+    /// The digest of the committed state ([`super::RaftStore::digest`]); blocking.
+    pub(crate) fn digest(&self) -> Result<super::StateDigest, StoreError> {
+        let view = self.view()?;
+        let (sha256, tables, entries) = digest_tables(view.txn())?;
+        Ok(super::StateDigest {
+            revision: view.meta().revision,
+            sha256,
+            tables,
+            entries,
+        })
     }
 
     /// Notifications of the applied revision.

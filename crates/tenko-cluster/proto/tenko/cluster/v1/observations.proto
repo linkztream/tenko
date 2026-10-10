@@ -10,9 +10,11 @@ import "google/protobuf/timestamp.proto";
 service Observations {
   // Hands one batch of a probe's buffer to the reconciler. The node sends its batches in
   // buffer order, one at a time, and removes a batch only after this call succeeded; a
-  // batch sent again after a lost answer is recognised by its epoch and sequence and
-  // answered with `duplicate` set. Refused with PERMISSION_DENIED (`cluster.node.role`)
-  // when the node does not have the role `probe`.
+  // batch sent again after a lost answer is recognised by its epoch and sequence on every
+  // controller and answered with `duplicate` set. Refused with PERMISSION_DENIED
+  // (`cluster.node.role`) when the node does not have the role `probe`, and with
+  // UNAVAILABLE (`cluster.no_quorum`) while the controller cannot write; the node keeps
+  // the batch and tries the next controller.
   rpc Ingest(IngestRequest) returns (IngestResponse);
 }
 
@@ -50,6 +52,9 @@ message IngestRequest {
   google.protobuf.Timestamp collected_at = 6;
   // What the probe saw.
   repeated Sighting sightings = 7;
+  // The command this batch answers (the id of a `Commands` command, a UUID) when it is the
+  // result of a scan run on demand; the controller counts the batches per command.
+  optional string run = 8;
 }
 
 message Sighting {
