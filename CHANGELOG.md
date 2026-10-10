@@ -71,6 +71,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - `tenko setup token` prints the one-time setup token of a first start from the data directory.
 - New settings in `tenko.toml`, checked by `tenko config check`, for features of later releases: in `[cluster]` the isolation timeout, the catch-up timeout, the automatic promotion of new controllers and its lag limit, and a bandwidth cap for node configuration; `[telemetry]` with an OTLP endpoint for traces (off by default); `[metrics]` with an optional metrics listener on a loopback address; `[backup]` with the directory for backup files.
 - Right-to-left layout: the interface mirrors itself for languages written right to left, ready for the language packs of a later release.
+- The key-encryption key can be handed to another controller sealed to a one-time key of the receiver, so every controller of a cluster opens the same envelopes; the cluster join that uses it arrives with the controller cluster.
 
 ### Changed
 

@@ -19,6 +19,7 @@ tenko-connect-proxmox = { path = "../crates/tenko-connect-proxmox" }
 tenko-connect-unifi = { path = "../crates/tenko-connect-unifi" }
 tenko-core = { path = "../crates/tenko-core" }
 tenko-scan = { path = "../crates/tenko-scan" }
+tenko-vault = { path = "../crates/tenko-vault" }
 
 [[bin]]
 name = "scan_dns_message"
@@ -65,6 +66,13 @@ bench = false
 [[bin]]
 name = "connect_unifi_answers"
 path = "fuzz_targets/connect_unifi_answers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "kek_transfer"
+path = "fuzz_targets/kek_transfer.rs"
 test = false
 doc = false
 bench = false

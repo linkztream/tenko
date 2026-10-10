@@ -498,3 +498,158 @@ async fn a_secret_that_is_deleted_leaves_no_row_and_no_plaintext_behind() {
         assert!(!contains(&cbor(&batch), marker.as_bytes()));
     }
 }
+
+/// The KEK material of the transfer test: 32 ASCII bytes, so a copy is easy to find.
+const KEK_MARKER: &[u8; 32] = b"TENKO-KEK-MATERIAL-MARKER-000001";
+const RETIRED_MARKER: &[u8; 32] = b"TENKO-KEK-MATERIAL-MARKER-000002";
+
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
+}
+
+/// Every file under `dir`, recursively.
+fn files_under(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(files_under(&path));
+        } else {
+            found.push(path);
+        }
+    }
+    found
+}
+
+/// Seals received generations with a `file` provider under `root` and checks that no
+/// generation file holds any of `needles` in clear.
+fn import_and_scan(
+    root: &std::path::Path,
+    received: &[tenko_vault::transfer::TransferredKek],
+    needles: &[Vec<u8>],
+) -> KekRing {
+    use tenko_vault::{KekConfig, KekInit, KekOptions};
+    let config = KekConfig::File {
+        path: root.join("key").join("kek.key"),
+        retired: Vec::new(),
+    };
+    let options = KekOptions {
+        allow_plain: false,
+        file_dir: Some(root.join("kek")),
+    };
+    config
+        .load_with(KekInit::CreateIfMissing, &options)
+        .expect("own key");
+    let imported = config.import_with(received, &options).expect("import");
+    let generation_files: Vec<_> = files_under(&root.join("kek"));
+    assert_eq!(generation_files.len(), 2, "{generation_files:?}");
+    for file in &generation_files {
+        let bytes = std::fs::read(file).expect("read");
+        for needle in needles {
+            assert!(
+                !contains(&bytes, needle),
+                "{} holds key material",
+                file.display()
+            );
+        }
+    }
+    imported
+}
+
+#[tokio::test]
+async fn a_kek_transfer_carries_no_material_in_clear_anywhere() {
+    use tenko_core::NodeId;
+    use tenko_vault::transfer::{self, TransferKey};
+    use zeroize::Zeroizing;
+
+    let mem = MemStore::default();
+    let spy = Arc::new(SpyStore::new(mem.clone()));
+    let active: Arc<dyn tenko_vault::KekProvider> =
+        Arc::new(MemKek::from_bytes("mem-2", &Zeroizing::new(*KEK_MARKER)));
+    let retired: Arc<dyn tenko_vault::KekProvider> = Arc::new(MemKek::from_bytes(
+        "mem-1",
+        &Zeroizing::new(*RETIRED_MARKER),
+    ));
+    let ring = KekRing::new(active).with_retired(retired);
+    let vault = StoreVault::open(Arc::clone(&spy) as Arc<dyn Store>, ring.clone())
+        .await
+        .expect("open");
+    let marker = unique_marker();
+    let secret = vault
+        .put_operator(
+            &ctx(),
+            spec("vault.test_transfer"),
+            SecretBytes::from(marker.clone()),
+        )
+        .await
+        .expect("put");
+
+    // The member's side: the sealed frame and what is sent with it.
+    let joiner = TransferKey::generate().expect("key");
+    let context = transfer::join_context(NodeId(1001), [9; 16]);
+    let sealed = transfer::seal_ring(&ring, &joiner.public_key(), &context).expect("seal");
+    let needles: Vec<Vec<u8>> = [KEK_MARKER, RETIRED_MARKER]
+        .into_iter()
+        .flat_map(|material| [material.to_vec(), hex(material).into_bytes()])
+        .chain([b"TENKO-KEK-MATERIAL".to_vec()])
+        .collect();
+    let sent = format!("{sealed:?}");
+    for needle in &needles {
+        assert!(
+            !contains(&sealed.sealed, needle),
+            "the frame holds key material"
+        );
+        assert!(
+            !contains(sent.as_bytes(), needle),
+            "Debug of the answer holds it"
+        );
+        for id in &sealed.generation_ids {
+            assert!(!contains(id.as_bytes(), needle));
+        }
+    }
+
+    // The joiner's side: what it opened prints no material, and what it writes to disk
+    // holds none in clear.
+    let received = joiner
+        .open(transfer::FORMAT, &sealed.sealed, &context)
+        .expect("open");
+    let printed = format!("{received:?}");
+    for needle in &needles {
+        assert!(
+            !contains(printed.as_bytes(), needle),
+            "Debug of a received generation"
+        );
+    }
+    let root = common::scratch_dir("scan-transfer");
+    let imported = import_and_scan(&root, &received, &needles);
+    drop(received);
+
+    // The imported vault reads the secret; the store never held KEK material, nor did any
+    // batch.
+    let joined_vault = StoreVault::open(Arc::clone(&spy) as Arc<dyn Store>, imported)
+        .await
+        .expect("imported vault");
+    let value = joined_vault.get_system(&ctx(), secret).await.expect("get");
+    assert_eq!(value.expose(), marker.as_bytes());
+    let view = mem.read(ReadConsistency::Local).await.expect("view");
+    for needle in &needles {
+        assert_none(
+            &tables_containing(view.as_ref(), needle),
+            "tables with KEK material",
+        );
+        for batch in spy.proposed() {
+            assert!(
+                !contains(&cbor(&batch), needle),
+                "a batch holds KEK material"
+            );
+        }
+    }
+    common::cleanup(&root);
+}

@@ -1020,17 +1020,28 @@ esac
             assert!(reason.contains("sealed with systemd-creds"), "{reason}");
             assert!(reason.contains("not usable now"), "{reason}");
         }
-        // Numbering continues above the sealed file, and nothing is overwritten.
-        broken.create_next().expect("next generation");
+        // No plain generation is created beside the sealed one (R15)...
+        assert!(matches!(
+            broken.create_next(),
+            Err(VaultError::PlainRefused { .. })
+        ));
+        // ...unless allowed; numbering continues above the sealed file, nothing is
+        // overwritten.
+        broken
+            .clone()
+            .allowing_plain(true)
+            .create_next()
+            .expect("next generation");
         assert!(kek.join("kek-000002.plain").exists());
         assert_eq!(fs::read(kek.join("kek-000001.cred")).expect("kept"), sealed);
         assert!(broken.load(KekInit::Require).is_err());
-        // A working tool reads the sealed file again.
-        assert!(
-            kek_dir(&kek, CredsKey::Auto, Some(&tool))
-                .load(KekInit::Require)
-                .is_ok()
-        );
+        // A working tool reads the sealed file again and refuses the newer plain one.
+        let ring = kek_dir(&kek, CredsKey::Auto, Some(&tool))
+            .load(KekInit::Require)
+            .expect("load");
+        assert!(ring.active().id().starts_with("cred-1-"));
+        assert_eq!(ring.refused().len(), 1);
+        assert_eq!(ring.refused()[0].generation, 2);
     }
 
     #[test]

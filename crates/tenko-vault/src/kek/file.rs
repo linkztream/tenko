@@ -1,15 +1,60 @@
 //! The file KEK provider: an explicit key file for containers and CI.
 
-use std::{fs, path::Path};
+use std::{fs, path::Path, sync::Arc};
 
 use aws_lc_rs::digest;
 use zeroize::Zeroizing;
 
 use super::{
-    DataKey, KekProtection, KekProvider, LocalKek,
+    DataKey, KekInit, KekOptions, KekProtection, KekProvider, LocalKek, Rooted,
     dir::{create_private_dir, write_private},
 };
 use crate::VaultError;
+
+/// The `file` provider: the key file, its retired predecessors, and the generations of
+/// [`KekOptions::file_dir`] wrapped under them.
+pub(crate) fn rooted(
+    path: &Path,
+    retired: &[std::path::PathBuf],
+    init: KekInit,
+    options: &KekOptions,
+) -> Result<Rooted, VaultError> {
+    let mut roots: Vec<Arc<dyn KekProvider>> = Vec::with_capacity(retired.len() + 1);
+    for path in retired {
+        roots.push(Arc::new(FileKek::open(path)?));
+    }
+    let active = match init {
+        KekInit::Require => FileKek::open(path)?,
+        KekInit::CreateIfMissing => FileKek::open_or_create(path)?,
+    };
+    roots.push(Arc::new(active));
+    Rooted::new(
+        roots,
+        options.file_dir.as_deref(),
+        KekProtection::PlainFile,
+        options,
+    )
+}
+
+/// Reads a 256-bit key from a file (32 raw bytes, 64 hexadecimal digits or base64).
+pub(crate) fn read_key(path: &Path) -> Result<Zeroizing<[u8; DataKey::LEN]>, VaultError> {
+    let raw = Zeroizing::new(fs::read(path).map_err(|e| {
+        VaultError::kek_unavailable(format!("cannot read KEK file {}: {e}", path.display()))
+    })?);
+    parse_key(&raw).ok_or_else(|| {
+        VaultError::kek_unavailable(format!(
+            "{} is not a 256-bit key (32 raw bytes, 64 hex digits or base64)",
+            path.display()
+        ))
+    })
+}
+
+/// The identifier of a key held in a file: `file-` and the first eight hexadecimal digits
+/// of the key's SHA-256.
+pub(crate) fn file_id(key: &Zeroizing<[u8; DataKey::LEN]>) -> String {
+    let hash = digest::digest(&digest::SHA256, key.as_ref());
+    format!("file-{}", super::hex(&hash.as_ref()[..4]))
+}
 
 /// A KEK read from an explicit file: 32 raw bytes, 64 hexadecimal digits, or 44 characters
 /// of standard base64 (surrounding whitespace ignored), for example a container secret
@@ -27,15 +72,7 @@ impl FileKek {
     ///
     /// [`VaultError::KekUnavailable`] if the file is missing, unreadable or not a key.
     pub fn open(path: &Path) -> Result<Self, VaultError> {
-        let raw = Zeroizing::new(fs::read(path).map_err(|e| {
-            VaultError::kek_unavailable(format!("cannot read KEK file {}: {e}", path.display()))
-        })?);
-        let key = parse_key(&raw).ok_or_else(|| {
-            VaultError::kek_unavailable(format!(
-                "{} is not a 256-bit key (32 raw bytes, 64 hex digits or base64)",
-                path.display()
-            ))
-        })?;
+        let key = read_key(path)?;
         let kek = Self::from_key(&key)?;
         tracing::warn!(
             kek = %kek.0.id(),
@@ -76,9 +113,11 @@ impl FileKek {
     }
 
     fn from_key(key: &Zeroizing<[u8; DataKey::LEN]>) -> Result<Self, VaultError> {
-        let hash = digest::digest(&digest::SHA256, key.as_ref());
-        let id = format!("file-{}", super::hex(&hash.as_ref()[..4]));
-        Ok(Self(LocalKek::new(id, KekProtection::PlainFile, key)?))
+        Ok(Self(LocalKek::new(
+            file_id(key),
+            KekProtection::PlainFile,
+            key,
+        )?))
     }
 }
 
@@ -97,6 +136,10 @@ impl KekProvider for FileKek {
 
     fn unwrap(&self, wrapped: &[u8], aad: &[u8]) -> Result<DataKey, VaultError> {
         self.0.unwrap(wrapped, aad)
+    }
+
+    fn export_material(&self) -> Option<Zeroizing<[u8; DataKey::LEN]>> {
+        self.0.export_material()
     }
 }
 

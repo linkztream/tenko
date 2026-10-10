@@ -54,11 +54,15 @@ mod secret;
 mod store_vault;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+pub mod transfer;
 
-pub use error::VaultError;
+pub use error::{TransferFailure, VaultError};
 #[cfg(any(test, feature = "testing"))]
 pub use kek::MemKek;
-pub use kek::{DataKey, KekConfig, KekInit, KekProtection, KekProvider, KekRing, KekSealer};
+pub use kek::{
+    DataKey, KekConfig, KekInit, KekOptions, KekProtection, KekProvider, KekRing, KekSealer,
+    RefusedKek,
+};
 pub use secret::{RevealAudit, SecretBytes, SecretMeta, SecretPurpose, SecretSpec};
 pub use store_vault::{KEK_EPOCH, KekRotation, StoreVault, actions, tables};
 pub use tenko_core::secret::{SecretClass, SecretRef, VaultEnvelope};

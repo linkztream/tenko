@@ -81,12 +81,70 @@ pub enum VaultError {
         /// What is not supported.
         what: String,
     },
+    /// A plain KEK generation would be created or imported beside a sealed one (R15), and
+    /// `[kek] allow_plain` is off.
+    #[error("a plain key generation was refused: {reason}")]
+    PlainRefused {
+        /// Why, without key material.
+        reason: String,
+    },
+    /// A sealed KEK transfer between controllers failed (ADR 0014).
+    #[error("key transfer failed: {failure}")]
+    Transfer {
+        /// What failed.
+        failure: TransferFailure,
+    },
     /// The store failed.
     #[error(transparent)]
     Store(#[from] StoreError),
 }
 
+/// Why a KEK transfer between controllers failed. Never carries key material.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum TransferFailure {
+    /// Another format name or version than this build reads.
+    #[error("unsupported format")]
+    Format,
+    /// The frame or the payload does not parse.
+    #[error("malformed transfer")]
+    Malformed,
+    /// Sealed to another key, under another context, or altered.
+    #[error("the transfer does not open with this key and context")]
+    Integrity,
+    /// The recipient's key is not a usable X25519 public key.
+    #[error("unusable recipient key")]
+    PublicKey,
+    /// A generation cannot leave its provider.
+    #[error("a key generation cannot be exported")]
+    NotExportable,
+    /// This host holds a different key under a transferred identifier.
+    #[error("a different key is held under {id}")]
+    Conflict {
+        /// The identifier.
+        id: String,
+    },
+}
+
+impl TransferFailure {
+    /// The stable code (`vault.kek.transfer.*`).
+    pub fn code(&self) -> &'static str {
+        match self {
+            TransferFailure::Format => "vault.kek.transfer.format",
+            TransferFailure::Malformed => "vault.kek.transfer.malformed",
+            TransferFailure::Integrity => "vault.kek.transfer.integrity",
+            TransferFailure::PublicKey => "vault.kek.transfer.public_key",
+            TransferFailure::NotExportable => "vault.kek.transfer.not_exportable",
+            TransferFailure::Conflict { .. } => "vault.kek.transfer.conflict",
+        }
+    }
+}
+
 impl VaultError {
+    pub(crate) fn transfer(failure: TransferFailure) -> Self {
+        VaultError::Transfer { failure }
+    }
+
     pub(crate) fn kek_unavailable(reason: impl Into<String>) -> Self {
         VaultError::KekUnavailable {
             reason: reason.into(),
@@ -122,6 +180,8 @@ impl Coded for VaultError {
             VaultError::Provider { .. } => "vault.kek.provider",
             VaultError::RotationInProgress => "vault.kek.rotation_in_progress",
             VaultError::Unsupported { .. } => "vault.unsupported",
+            VaultError::PlainRefused { .. } => "vault.kek.plain_refused",
+            VaultError::Transfer { failure } => failure.code(),
             VaultError::Store(error) => error.code(),
         }
     }
@@ -131,7 +191,12 @@ impl Coded for VaultError {
             VaultError::NotFound { .. } => 404,
             VaultError::NotRevealable { .. } => 403,
             VaultError::TooLarge { .. } => 413,
-            VaultError::RotationInProgress => 409,
+            VaultError::RotationInProgress | VaultError::PlainRefused { .. } => 409,
+            VaultError::Transfer { failure } => match failure {
+                TransferFailure::Conflict { .. } => 409,
+                TransferFailure::NotExportable => 501,
+                _ => 400,
+            },
             VaultError::Unsupported { .. } => 501,
             VaultError::Store(error) => error.http_status(),
             _ => 500,
@@ -149,6 +214,9 @@ impl Coded for VaultError {
                 [("size", size.to_string()), ("limit", limit.to_string())].into()
             }
             VaultError::Provider { provider, .. } => [("provider", (*provider).to_owned())].into(),
+            VaultError::Transfer {
+                failure: TransferFailure::Conflict { id },
+            } => [("key_id", id.clone())].into(),
             VaultError::Store(error) => error.params(),
             _ => BTreeMap::new(),
         }
@@ -169,6 +237,16 @@ mod tests {
         assert_eq!(VaultError::NotFound { secret }.http_status(), 404);
         assert_eq!(VaultError::NotRevealable { secret }.http_status(), 403);
         assert_eq!(VaultError::Integrity.http_status(), 500);
+        let conflict = VaultError::transfer(TransferFailure::Conflict {
+            id: "dpapi-1-00".to_owned(),
+        });
+        assert_eq!(conflict.code(), "vault.kek.transfer.conflict");
+        assert_eq!(conflict.http_status(), 409);
+        assert_eq!(conflict.params()["key_id"], "dpapi-1-00");
+        assert_eq!(
+            VaultError::transfer(TransferFailure::Integrity).code(),
+            "vault.kek.transfer.integrity"
+        );
         let store = VaultError::from(StoreError::NoQuorum);
         assert_eq!(store.code(), "sys.store.no_quorum");
         assert_eq!(store.http_status(), 503);

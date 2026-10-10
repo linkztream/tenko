@@ -19,6 +19,8 @@ pub struct LocalKek {
     id: String,
     protection: KekProtection,
     key: LessSafeKey,
+    /// The key bytes, kept for the sealed transfer to another controller only.
+    material: Zeroizing<[u8; DataKey::LEN]>,
 }
 
 impl LocalKek {
@@ -40,6 +42,7 @@ impl LocalKek {
             id: id.into(),
             protection,
             key: LessSafeKey::new(unbound),
+            material: key.clone(),
         })
     }
 }
@@ -84,6 +87,10 @@ impl KekProvider for LocalKek {
         out.extend_from_slice(&nonce);
         out.extend_from_slice(&body);
         Ok(out)
+    }
+
+    fn export_material(&self) -> Option<Zeroizing<[u8; DataKey::LEN]>> {
+        Some(self.material.clone())
     }
 
     fn unwrap(&self, wrapped: &[u8], aad: &[u8]) -> Result<DataKey, VaultError> {
@@ -156,6 +163,10 @@ impl KekProvider for MemKek {
 
     fn unwrap(&self, wrapped: &[u8], aad: &[u8]) -> Result<DataKey, VaultError> {
         self.0.unwrap(wrapped, aad)
+    }
+
+    fn export_material(&self) -> Option<Zeroizing<[u8; DataKey::LEN]>> {
+        self.0.export_material()
     }
 }
 
