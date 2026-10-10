@@ -6,7 +6,16 @@ import type { BreachMode, LockoutMode, MfaRequirement, PasswordPolicy, SessionLi
 import { Switch as SwitchControl } from "../components/Switch";
 import { t } from "../i18n";
 import { FieldHelp, SelectField } from "./fields";
-import { UPDATES_DEFAULT, UPDATES_INSTALL, type UpdatesInstall, type UpdatesPolicy } from "./toggles";
+import {
+  REVEAL_DEFAULT,
+  REVEAL_STEP_UP,
+  UPDATES_DEFAULT,
+  UPDATES_INSTALL,
+  type RevealPolicy,
+  type RevealStepUp,
+  type UpdatesInstall,
+  type UpdatesPolicy,
+} from "./toggles";
 import { customPolicy, DURATION_UNITS, splitDuration, toDays, toSeconds, type DurationUnit } from "./toggleEdit";
 
 export interface EditorProps<T> {
@@ -387,6 +396,59 @@ export function UpdatesEditor(props: EditorProps<UpdatesPolicy>) {
           </For>
         </div>
       </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------------
+// TGL-24: what revealing an operator secret takes
+
+export function RevealEditor(props: EditorProps<RevealPolicy>) {
+  const init = untrack(() => props.initial) ?? REVEAL_DEFAULT.home;
+  const [stepUp, setStepUp] = createSignal<RevealStepUp>(init.step_up);
+  const [bound, setBound] = createSignal(init.bound_host_only);
+  createEffect(() => props.onDraft({ step_up: stepUp(), bound_host_only: bound() }));
+
+  return (
+    <>
+      <div class="field">
+        <span class="label" id="tg-secret-reveal-step-up-label">
+          {t("settings.security.secret_reveal.step_up")}
+        </span>
+        <div class="choices" role="radiogroup" aria-labelledby="tg-secret-reveal-step-up-label">
+          <For each={REVEAL_STEP_UP}>
+            {(mode) => (
+              <label class="choice">
+                <input
+                  type="radio"
+                  name="tg-secret-reveal-step-up"
+                  value={mode}
+                  data-testid="field-secret-reveal-step-up"
+                  data-key={mode}
+                  checked={stepUp() === mode}
+                  onChange={() => setStepUp(mode)}
+                />
+                <span>
+                  {t(`settings.security.secret_reveal.step_up_${mode}`)}
+                  <small class="muted">{t(`settings.security.secret_reveal.step_up_${mode}_help`)}</small>
+                </span>
+              </label>
+            )}
+          </For>
+        </div>
+      </div>
+      <div class="field" data-testid="field-secret-reveal-bound-host">
+        <SwitchControl
+          id="tg-secret-reveal-bound"
+          checked={bound()}
+          onChange={setBound}
+          label={t("settings.security.secret_reveal.bound_host")}
+          hint={t("settings.security.secret_reveal.bound_host_hint")}
+        />
+      </div>
+      <p class="muted" id="tg-secret-reveal-pin-rule">
+        {t("settings.security.secret_reveal.pin_rule")}
+      </p>
     </>
   );
 }

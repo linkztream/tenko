@@ -1072,7 +1072,7 @@ describe("settings", () => {
     const view = await get<SecuritySettingsView>("/api/v1/settings/security");
     expect(view.status).toBe(200);
     expect(view.body.settings).toEqual(PROFILE_MATRIX.standard);
-    expect(view.body.toggles.map((t) => t.id)).toEqual(["TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-23"]);
+    expect(view.body.toggles.map((t) => t.id)).toEqual(["TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-23", "TGL-24"]);
     expect(view.body.toggles.every((t) => !t.deviates && !t.weaker_than_home)).toBe(true);
     expect(view.body.banner).toEqual({ lab: false, weaker_than_home: false, deviations: [] });
     expect(view.body.vault_has_operator_secrets).toBe(false);

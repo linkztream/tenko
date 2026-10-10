@@ -21,7 +21,7 @@ use tenko_store::{
 };
 
 use crate::{
-    SecretBytes, SecretMeta, SecretSpec, Vault, VaultError,
+    RevealAudit, SecretBytes, SecretMeta, SecretSpec, Vault, VaultError,
     envelope::{self, RowBinding},
     kek::{KekProvider, KekRing},
 };
@@ -555,12 +555,19 @@ impl StoreVault {
 
     /// Records a reveal that failed before a value was produced (IAM-16). Best effort:
     /// the caller gets the original error either way.
-    async fn audit_failed_reveal(&self, ctx: &RequestCtx, id: SecretId, error: &VaultError) {
+    async fn audit_failed_reveal(
+        &self,
+        ctx: &RequestCtx,
+        id: SecretId,
+        error: &VaultError,
+        audit: &RevealAudit,
+    ) {
         let mut batch = Self::batch(ctx);
-        batch.audit(
-            AuditDraft::failed(actions::REVEAL, vec![ObjectRef::from(id)], error)
-                .with_source_ip(ctx.source_ip),
-        );
+        batch.audit(reveal_draft(
+            AuditDraft::failed(actions::REVEAL, reveal_objects(id, audit), error),
+            ctx,
+            audit,
+        ));
         if let Err(audit_error) = self.store.propose(batch).await {
             tracing::warn!(%audit_error, secret = %id, "could not audit a failed reveal");
         }
@@ -573,6 +580,22 @@ fn lost_to_rotation(failures: &[FailedPrecondition]) -> bool {
         && failures.iter().all(|failure| {
             matches!(failure, FailedPrecondition::Counter { counter, .. } if *counter == KEK_EPOCH)
         })
+}
+
+/// The objects of a reveal's audit record: the secret, then the caller's.
+fn reveal_objects(id: SecretId, audit: &RevealAudit) -> Vec<ObjectRef> {
+    let mut objects = vec![ObjectRef::from(id)];
+    objects.extend(audit.objects.iter().copied());
+    objects
+}
+
+/// Adds the source address and the caller's context to a reveal's audit draft.
+fn reveal_draft(mut draft: AuditDraft, ctx: &RequestCtx, audit: &RevealAudit) -> AuditDraft {
+    draft = draft.with_source_ip(ctx.source_ip);
+    for (key, value) in &audit.context {
+        draft = draft.with_context(key.clone(), value.clone());
+    }
+    draft
 }
 
 fn class_name(class: SecretClass) -> &'static str {
@@ -634,6 +657,17 @@ impl Vault for StoreVault {
     }
 
     async fn reveal(&self, ctx: &RequestCtx, secret: SecretRef) -> Result<SecretBytes, VaultError> {
+        self.reveal_with(ctx, secret, Self::batch(ctx), RevealAudit::default())
+            .await
+    }
+
+    async fn reveal_with(
+        &self,
+        ctx: &RequestCtx,
+        secret: SecretRef,
+        mut batch: WriteBatch,
+        audit: RevealAudit,
+    ) -> Result<SecretBytes, VaultError> {
         let id = secret.secret;
         let opened = match self.read_envelope(id).await {
             Ok((_, envelope, _)) => self.decrypt(id, &envelope),
@@ -642,27 +676,41 @@ impl Vault for StoreVault {
         let opened = match opened {
             Ok(opened) => opened,
             Err(error) => {
-                self.audit_failed_reveal(ctx, id, &error).await;
+                self.audit_failed_reveal(ctx, id, &error, &audit).await;
                 return Err(error);
             }
         };
-        let mut batch = Self::batch(ctx);
         if opened.class == SecretClass::System {
             drop(opened);
-            batch.audit(
-                AuditDraft::denied(actions::REVEAL, vec![ObjectRef::from(id)])
-                    .with_source_ip(ctx.source_ip)
-                    .with_context("class", "system"),
+            let mut refusal = Self::batch(ctx);
+            refusal.audit(
+                reveal_draft(
+                    AuditDraft::denied(actions::REVEAL, reveal_objects(id, &audit)),
+                    ctx,
+                    &audit,
+                )
+                .with_context("class", "system"),
             );
-            self.store.propose(batch).await?;
+            self.store.propose(refusal).await?;
             return Err(VaultError::NotRevealable { secret: id });
         }
+        // The reveal never takes the request's idempotency key: a replay must not return
+        // the value without a new audit record.
+        batch.idempotency = None;
         batch.audit(
-            AuditDraft::success(actions::REVEAL, vec![ObjectRef::from(id)])
-                .with_source_ip(ctx.source_ip)
-                .with_context("class", "operator"),
+            reveal_draft(
+                AuditDraft::success(actions::REVEAL, reveal_objects(id, &audit)),
+                ctx,
+                &audit,
+            )
+            .with_context("class", "operator"),
         );
-        self.store.propose(batch).await?;
+        if let Err(error) = self.store.propose(batch).await {
+            drop(opened);
+            let error = VaultError::from(error);
+            self.audit_failed_reveal(ctx, id, &error, &audit).await;
+            return Err(error);
+        }
         Ok(opened.value)
     }
 
@@ -762,5 +810,49 @@ impl Vault for StoreVault {
             AuditDraft::success(actions::DELETE, vec![ObjectRef::from(id)])
                 .with_source_ip(ctx.source_ip),
         );
+    }
+
+    async fn stage_replace(
+        &self,
+        batch: &mut WriteBatch,
+        ctx: &RequestCtx,
+        secret: SecretRef,
+        value: &SecretBytes,
+    ) -> Result<(), VaultError> {
+        if value.len() > crate::MAX_SECRET_LEN {
+            return Err(VaultError::TooLarge {
+                size: value.len(),
+                limit: crate::MAX_SECRET_LEN,
+            });
+        }
+        let id = secret.secret;
+        let (view, envelope, revision) = self.read_envelope(id).await?;
+        let opened = self.decrypt(id, &envelope)?;
+        let generation = opened
+            .dek_generation
+            .checked_add(1)
+            .ok_or(VaultError::Malformed {
+                what: "DEK generation",
+            })?;
+        let class = opened.class;
+        drop(opened);
+        let keys = self.keys();
+        let bytes = Self::encrypt_into(&keys, batch, id, class, generation, value.expose())?;
+        let key = encode_key(&id);
+        batch.expect_version(tables::SECRETS.clone(), key.clone(), Some(revision));
+        batch.put(tables::SECRETS.clone(), key, bytes);
+        let mut objects = vec![ObjectRef::from(id)];
+        if let Some((mut meta, _)) = view.get_typed(&tables::META, &id)? {
+            meta.updated_at = ctx.now;
+            objects.extend(meta.owner);
+            batch.put_typed(&tables::META, &id, &meta)?;
+        }
+        batch.audit(
+            AuditDraft::success(actions::REPLACE, objects)
+                .with_source_ip(ctx.source_ip)
+                .with_context("class", class_name(class))
+                .with_context("kek", keys.ring.active().id()),
+        );
+        Ok(())
     }
 }

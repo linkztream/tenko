@@ -34,7 +34,21 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - Observations: what connectors report about devices (MAC and IP addresses, names, operating system, platform, hypervisor node, the switch port or wireless network a client uses) is kept per source, apart from the intended state, with first and last sighting, and can be viewed per device across all sources. Observations not seen for 30 days are removed.
 - Proposals: Tenko compares the intended state with what it observes, every five minutes and shortly after every change, and proposes discovered hosts, the deprecation of addresses no source has seen for seven days, a host's address when the device is seen elsewhere, networks for addresses outside every known prefix, and conflicts (two devices on one address, one device in several networks, an address used by another device). A proposal shows its evidence and the changes it would make, and can be previewed, approved or rejected; a rejected proposal stays closed until its evidence changes. A locked host never gets a proposal that would change it, and an unmanaged host gets none.
 - Adoption policies per prefix, inherited by the prefixes inside it, that approve discovered hosts without a person: optionally only inside DHCP pools, only for listed vendor prefixes of the MAC address, or only after a number of sightings.
+- Operator secrets: passwords, API keys, SSH keys and tokens with a name, purpose tags, a user name and notes, kept encrypted in the vault, each under a key of its own. Administrators create, change, replace and delete them; operators see them and may reveal them. A secret that a host or a connector still uses cannot be deleted, and its references are listed.
+- Revealing a secret shows it once and copies it to the clipboard, which is cleared again after 30 seconds; every reveal, and every refused one, is written to the audit log with the person, the host and the reason, never the value.
+- Credentials of a host: secrets bound to a host as its administration, remote desktop, SSH or web login, with "Copy password" on the host page.
+- Remote access from the host page: a Remote Desktop file or an SSH link for each address of a host, with the user name of its credential and no password in either.
+- The security profile toggle TGL-24 decides what a reveal takes: the signed-in session (Home, Lab), a sign-in within the last five minutes (Standard), or a passkey sign-in within the last five minutes and only from the page of a host the secret is bound to (Hardened).
 
 ### Changed
 
+- Credentials taken over by an import are operator secrets bound to their host; the login becomes the user name of the secret. Credentials imported earlier are taken over at the first start of this version.
+- Operators may reveal operator secrets, so the PIN rule applies to operator accounts too: once the vault holds a secret, an operator signs in with a password, a second factor or a passkey.
 - A move completes its observation step by itself when the device is seen at its new address from its own MAC address; a person can still confirm the step by hand.
+
+### Security
+
+- A PIN session never reveals a secret, and personal API tokens never do. The vault takes no operator secret while an account that may reveal secrets signs in with a PIN alone.
+- Reveals are limited to ten a minute per person.
+- Connectors can be given a secret only by people who may change secrets, so the reveal policy cannot be bypassed through a connector.
+- Repeated requests with an idempotency key are recognised by a fingerprint keyed with a random secret that exists only in memory and changes at every start, so the stored fingerprints reveal nothing about the requests; sign-in, setup and password requests are never fingerprinted. A retry after a restart of a request sent before it is answered as already performed instead of being run again.

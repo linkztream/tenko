@@ -2,7 +2,7 @@
 
 Tenko DDI ships four security profiles: Home, Standard, Hardened and Lab. The operator selects one in the first-run wizard (API-10). Each profile maps to a persona defined in [REQUIREMENTS.md](REQUIREMENTS.md): PER-01 (home user), PER-02 (business administrator), PER-03 (hardened or regulated environment) and PER-04 (lab or pentest).
 
-This document owns the toggle IDs TGL-01 to TGL-22 and the never-off IDs NEVER-01 to NEVER-03. Requirement IDs (IAM-, DNS-, DHCP-, SCAN-, CONN-, OPS-, API-) and design constraints (CON-) are defined in REQUIREMENTS.md. Role and node structure is described in [ARCHITECTURE.md](ARCHITECTURE.md).
+This document owns the toggle IDs TGL-01 to TGL-24 and the never-off IDs NEVER-01 to NEVER-03. Requirement IDs (IAM-, DNS-, DHCP-, SCAN-, CONN-, OPS-, API-) and design constraints (CON-) are defined in REQUIREMENTS.md. Role and node structure is described in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Principles
 
@@ -56,11 +56,13 @@ Reading the matrix:
 | TGL-21 | Audit export | Local only | Local, syslog optional | Export required (syslog, CEF or JSON), alert on export failure | Local only | 1 | IAM-18 |
 | TGL-22 | Recursion and forwarding ACL | Prefixes known to IPAM | Prefixes known to IPAM | Explicit allow-list per view | Any (open resolver allowed) | 2 | DNS-02, DNS-20 |
 | TGL-23 | In-app update check and install (OPS-24) | Check daily, install from the UI | Check daily, install from the UI with step-up authentication | Check daily (version string only), install only from an uploaded and verified release file | Check daily, install from the UI | 1 (Slice 2) | OPS-24, API-19 |
+| TGL-24 | Secret reveal (IAM-16, API-11) | A signed-in session of password strength or stronger | Step-up: a sign-in within the last five minutes | Step-up with a passkey or hardware security key within the last five minutes; reveal only secrets bound to the host in view | A signed-in session of password strength or stronger | 1 (Slice 2) | IAM-07, IAM-16, API-11 |
 
 Notes:
 
 - **TGL-12 before Phase 5.** Until the own resolver ships, Tenko forwards and caches, so DNSSEC validation is the upstream resolver's job (DNS-03, DNS-13).
 - **TGL-09 scope.** The toggle concerns dynamic updates from external clients. The DDNS path from Tenko DHCP to Tenko DNS is internal and is not governed by it (DHCP-13).
+- **TGL-24 and the PIN rule.** The PIN coupling rule applies on top of every value: a PIN-strength session never reveals, and personal API tokens never reveal. No value is weaker than Home, so the toggle never raises the banner. Operators may reveal (administrators create, change, bind and delete), so they count as accounts that can reach the vault.
 - **TGL-19 values.** The packet rates are starting points. The slower profiles exist because IDS/EDR products (for example Defender for Identity) flag port scans (SCAN-07).
 
 ## Never-off list

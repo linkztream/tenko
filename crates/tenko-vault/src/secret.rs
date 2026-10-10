@@ -122,6 +122,17 @@ impl SecretSpec {
     }
 }
 
+/// What a caller adds to the audit record of a reveal
+/// ([`Vault::reveal_with`](crate::Vault::reveal_with)): objects besides the secret and
+/// context entries. Never a value.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RevealAudit {
+    /// Objects besides the secret, such as the host the person looks at.
+    pub objects: Vec<ObjectRef>,
+    /// Context entries, such as `host` and `reason`.
+    pub context: Vec<(String, String)>,
+}
+
 /// Non-secret metadata of a secret, stored in `vault.secret_meta`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SecretMeta {

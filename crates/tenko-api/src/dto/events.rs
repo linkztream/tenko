@@ -35,11 +35,13 @@ pub enum Topic {
     Connectors,
     /// Observations of connectors and probes: per-source facts and last sightings.
     Discovery,
+    /// Operator secrets: metadata, reveals and host credential bindings (never values).
+    Secrets,
 }
 
 impl Topic {
     /// Every topic, in declaration order.
-    pub const ALL: [Topic; 8] = [
+    pub const ALL: [Topic; 9] = [
         Topic::Ipam,
         Topic::Jobs,
         Topic::Audit,
@@ -48,6 +50,7 @@ impl Topic {
         Topic::Admin,
         Topic::Connectors,
         Topic::Discovery,
+        Topic::Secrets,
     ];
 
     /// The stable lower-case name, also the SSE `event` field.
@@ -61,12 +64,13 @@ impl Topic {
             Topic::Admin => "admin",
             Topic::Connectors => "connectors",
             Topic::Discovery => "discovery",
+            Topic::Secrets => "secrets",
         }
     }
 
     /// The topic's bit in a [`TopicSet`].
-    pub const fn bit(self) -> u8 {
-        1 << (self as u8)
+    pub const fn bit(self) -> u16 {
+        1 << (self as u16)
     }
 }
 
@@ -89,11 +93,11 @@ impl FromStr for Topic {
 
 /// A set of topics, as a bit mask.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct TopicSet(u8);
+pub struct TopicSet(u16);
 
 impl TopicSet {
     /// Every topic.
-    pub const ALL: TopicSet = TopicSet(0b1111_1111);
+    pub const ALL: TopicSet = TopicSet(0b1_1111_1111);
     /// No topic.
     pub const EMPTY: TopicSet = TopicSet(0);
 

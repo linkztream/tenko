@@ -28,7 +28,8 @@
 //! [`Action::Delete`]; running and checking [`Action::Execute`] on the instance.
 //!
 //! A secret reference lets a plugin use the secret against a target the settings name, so
-//! setting references requires [`Action::Reveal`] on every referenced secret, and so does
+//! setting references requires [`Action::Reveal`] and [`Action::Update`] on every
+//! referenced secret (operators may reveal secrets but not manage them), and so does
 //! changing the settings of an instance that holds references. An operator can therefore
 //! manage connectors without secrets; secret-bearing ones need an administrator.
 
@@ -172,19 +173,19 @@ fn authorize(
 }
 
 /// Every referenced secret needs [`Action::Reveal`]: a plugin can use it against the
-/// target the settings name.
+/// target the settings name. It also needs [`Action::Update`] on the secret (WP2.1):
+/// operators may reveal secrets under the reveal policy (TGL-24), but pointing a plugin at
+/// a target with a secret bypasses that policy, so it stays with the people who manage
+/// secrets.
 fn authorize_secrets<'a>(
     app: &AppState,
     principal: &Principal,
     secrets: impl IntoIterator<Item = &'a SecretRef>,
 ) -> Result<(), ApiError> {
     for reference in secrets {
-        authorize(
-            app,
-            principal,
-            Action::Reveal,
-            &ObjectRef::from(reference.secret),
-        )?;
+        let object = ObjectRef::from(reference.secret);
+        authorize(app, principal, Action::Reveal, &object)?;
+        authorize(app, principal, Action::Update, &object)?;
     }
     Ok(())
 }

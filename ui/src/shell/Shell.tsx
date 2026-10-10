@@ -2,8 +2,9 @@ import { useLocation, useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, lazy, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { DENSITIES, setDensity, setEmphasizeHost, setTheme, cycleTheme, emphasizeHost, THEMES } from "../app/prefs";
 import { paths } from "../app/paths";
-import { isAdmin, signOut } from "../auth/session";
+import { hasRole, isAdmin, signOut } from "../auth/session";
 import { t, withPacks } from "../i18n";
+import { SECRETS_PATH } from "../secrets/paths";
 import { ModuleGate } from "../updates/ModuleGate";
 import { areaEnabled, loadModules, moduleRunning, resetModules, RESTART_WARNING } from "../updates/modules";
 import { UPDATES_PATH } from "../updates/paths";
@@ -122,6 +123,14 @@ export function Shell(props: { children?: JSX.Element }) {
       label: () => t("shell.command.updates"),
       when: isAdmin,
       run: () => navigate(UPDATES_PATH),
+    },
+    {
+      id: "shell.goto.secrets",
+      group: "goto",
+      icon: "key",
+      label: () => t("shell.command.secrets"),
+      when: () => isAdmin() || hasRole("operator"),
+      run: () => navigate(SECRETS_PATH),
     },
     {
       id: "shell.whats_new",

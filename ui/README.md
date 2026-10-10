@@ -54,6 +54,10 @@ ui/
     updates/            update notice, release notes, what is new, install from the UI
                         (OPS-24, TGL-23), and the module switch of OPS-25 (modules.ts,
                         ModuleGate); api.ts is its only API module
+    secrets/            operator secrets (WP2.1): the secrets page, the reveal dialog with the
+                        step-up in place and the clipboard path (clipboard.ts); api.ts is its
+                        only API module, also used by the credentials and the remote hand-off
+                        of the host page (hosts/credentials.tsx, hosts/Connect.tsx)
 ```
 
 Every area folder owns a `routes.ts` that exports `routes: AppRoute[]`; `src/app/router.ts`
@@ -123,6 +127,7 @@ other key stays in the core table that the first load carries.
 | `settings` | `settings.` |
 | `account` | `account.` |
 | `updates` | `updates.`, `errors.update.`, `errors.upgrade.` |
+| `secrets` | `secrets.`, `errors.vault.`, `errors.remote.` (also loaded by the host views) |
 
 The Vite plugin (`scripts/vite-plugin-i18n.mjs`) builds one module per pack and language
 (`virtual:tenko-i18n/<language>/<pack>`). A route loads its packs together with its chunk:
@@ -202,6 +207,7 @@ Page roots in this version:
 | `/ipam/import` | `page-import` |
 | `/jobs`, `/jobs/:id` | `page-jobs`, `page-job` |
 | `/audit`, `/audit/:seq` | `page-audit`, `page-audit-record` |
+| `/secrets`, `/secrets/:id` | `page-secrets` |
 
 A new view follows the same pattern: a page root id, `grid-<id>` for each grid, the generic
 row and cell hooks from `DataGrid`, and `<area>-<action>` for its actions.

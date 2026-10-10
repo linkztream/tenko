@@ -1,14 +1,17 @@
-import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
+import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
+import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ANY_REVISION } from "../api/client";
 import { HOST_IDS, INTERFACE_IDS, IPAM_IDS, ipamState } from "../api/mock/ipam/api";
-import type { Host, HostInput } from "../api/types";
+import { server } from "../api/mock/node";
+import { SEED_SECRET_VALUES } from "../api/mock/secrets-store";
+import type { Address, Host, HostInput } from "../api/types";
 import { paths } from "../app/paths";
 import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
 import { signInAlex } from "../auth/account/testkit";
 import { applied, confirmPlan, recordWrites } from "../ipam/testkit";
-import { CredentialSlot } from "./credentials";
+import { connectTargets } from "./Connect";
 import HostView from "./HostView";
 
 beforeEach(async () => {
@@ -286,12 +289,18 @@ describe("the lock", () => {
 
 describe("remote access hand-off", () => {
   const OBJECT_URL = "blob:https://tenko.example.test/0001";
+  const REMOTE_PATH = /^\/api\/v1\/hosts\/([^/]+)\/remote$/;
   let blobs: Blob[];
   let downloads: { name: string; href: string }[];
+  let clicked: HTMLAnchorElement[];
+  /** The requests for a connection file or link that reached the API, as the server saw them. */
+  let remote: { host: string; query: Record<string, string> }[];
 
   beforeEach(() => {
     blobs = [];
     downloads = [];
+    clicked = [];
+    remote = [];
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
       writable: true,
@@ -302,128 +311,490 @@ describe("remote access hand-off", () => {
     });
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, writable: true, value: () => undefined });
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push(this);
       downloads.push({ name: this.download, href: this.getAttribute("href") ?? "" });
+    });
+    server.events.on("request:start", ({ request }) => {
+      const url = new URL(request.url);
+      const match = REMOTE_PATH.exec(url.pathname);
+      if (match) remote.push({ host: match[1] as string, query: Object.fromEntries(url.searchParams) });
     });
   });
 
   afterEach(() => {
+    server.events.removeAllListeners();
     Reflect.deleteProperty(URL, "createObjectURL");
     Reflect.deleteProperty(URL, "revokeObjectURL");
   });
 
-  const textOf = (blob: Blob) => blob.text();
-
   const connect = () => screen.getByTestId("host-connect");
-  const field = (label: string) => within(connect()).getByLabelText(label) as HTMLInputElement | HTMLSelectElement;
+  const rows = () => within(connect()).getAllByTestId("remote-target");
+  const keys = () => rows().map((row) => row.dataset.key);
+  const buttons = (kind: "rdp" | "ssh") => within(connect()).getAllByTestId(`host-${kind}`) as HTMLButtonElement[];
+  const button = (kind: "rdp" | "ssh", index = 0) => buttons(kind)[index] as HTMLButtonElement;
+  const field = (label: string) => within(connect()).getByLabelText(label) as HTMLInputElement;
 
   function setField(label: string, value: string): void {
-    const input = field(label);
-    if (input instanceof HTMLSelectElement) fireEvent.change(input, { target: { value } });
-    else fireEvent.input(input, { target: { value } });
+    fireEvent.input(field(label), { target: { value } });
   }
 
-  it("offers RDP and SSH for a host with an address, with the usual ports", async () => {
-    await openHost("pve1");
-    const targets = [...(field("Connect to") as HTMLSelectElement).options].map((o) => o.value);
-    // The DNS name comes first, then the addresses, then the host name.
-    expect(targets).toEqual(["pve1.example.test", "192.0.2.10", "pve1"]);
-    expect((field("RDP port") as HTMLInputElement).value).toBe("3389");
-    expect((field("SSH port") as HTMLInputElement).value).toBe("22");
-    const rdp = screen.getByTestId("host-rdp") as HTMLButtonElement;
-    expect(rdp.disabled).toBe(false);
-    expect(rdp.textContent).toContain("Remote desktop (.rdp)");
-    expect(screen.getByTestId("host-ssh").getAttribute("href")).toBe("ssh://pve1.example.test");
-  });
+  /** Presses a button and waits for the file or the link to be handed over; returns the lines of a file. */
+  async function hand(kind: "rdp" | "ssh", index = 0): Promise<string[]> {
+    const before = downloads.length;
+    fireEvent.click(button(kind, index));
+    await waitFor(() => expect(downloads).toHaveLength(before + 1));
+    // The buttons are enabled again once the hand-off is done.
+    await waitFor(() => expect(button(kind, index).disabled).toBe(false));
+    return kind === "rdp" ? (await (blobs.at(-1) as Blob).text()).split("\r\n") : [];
+  }
 
-  it("hands over an .rdp file with the chosen address, port and user", async () => {
-    await openHost("pve1");
-    setField("Connect to", "192.0.2.10");
-    setField("User", "admin");
-    setField("RDP port", "3390");
-    fireEvent.click(screen.getByTestId("host-rdp"));
+  /** The id of a host of the mock, for the path of the request. */
+  const idOf = (name: string) => HOST_IDS[name] as string;
 
-    expect(downloads).toEqual([{ name: "pve1.rdp", href: OBJECT_URL }]);
-    expect(blobs).toHaveLength(1);
-    expect(blobs[0]?.type).toBe("application/x-rdp");
-    const lines = (await textOf(blobs[0] as Blob)).split("\r\n");
-    expect(lines[0]).toBe("full address:s:192.0.2.10:3390");
-    expect(lines[1]).toBe("username:s:admin");
-    expect(lines.at(-1)).toBe("");
-  });
+  /** A host with one interface and the given addresses, none of them with a DNS name. */
+  async function hostWith(name: string, ips: string[]): Promise<Host> {
+    const host = await createHost({ name, mode: "static", interfaces: [{ name: "eth0" }] });
+    const iface = await interfaceIdOf(host);
+    for (const ip of ips) await addAddress(ip, iface);
+    return host;
+  }
 
-  it("brackets an IPv6 address in the .rdp file and the ssh link", async () => {
-    await openHost("gw");
-    setField("Connect to", "2001:db8:0:10::1");
-    fireEvent.click(screen.getByTestId("host-rdp"));
-    expect((await textOf(blobs[0] as Blob)).split("\r\n")[0]).toBe("full address:s:[2001:db8:0:10::1]:3389");
-    expect(screen.getByTestId("host-ssh").getAttribute("href")).toBe("ssh://[2001:db8:0:10::1]");
-  });
+  /** Answers the connection requests with a problem. */
+  function refuseRemote(): void {
+    server.use(
+      http.get("/api/v1/hosts/:id/remote", () =>
+        HttpResponse.json(
+          { type: "about:blank", title: "Unknown address", status: 400, code: "remote.address_unknown", detail: "", params: {} },
+          { status: 400, headers: { "content-type": "application/problem+json" } },
+        ),
+      ),
+    );
+  }
 
-  it("builds the ssh link from the chosen address, port and user", async () => {
-    await openHost("pve1");
-    setField("Connect to", "192.0.2.10");
-    expect(screen.getByTestId("host-ssh").getAttribute("href")).toBe("ssh://192.0.2.10");
-    setField("SSH port", "2222");
-    expect(screen.getByTestId("host-ssh").getAttribute("href")).toBe("ssh://192.0.2.10:2222");
-    setField("User", "root");
-    expect(screen.getByTestId("host-ssh").getAttribute("href")).toBe("ssh://root@192.0.2.10:2222");
-    // Following the link downloads nothing: the operating system opens it.
-    expect(downloads).toEqual([]);
-  });
-
-  it("refuses an invalid port: no .rdp button, no ssh link", async () => {
-    await openHost("pve1");
-    setField("RDP port", "70000");
-    setField("SSH port", "0");
-    expect(field("RDP port").getAttribute("aria-invalid")).toBe("true");
-    expect(field("SSH port").getAttribute("aria-invalid")).toBe("true");
-    expect((screen.getByTestId("host-rdp") as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.queryByTestId("host-ssh")).toBeNull();
-    fireEvent.click(screen.getByTestId("host-rdp"));
-    expect(blobs).toEqual([]);
-  });
-
-  it("remembers the choice for the host in this browser", async () => {
-    const first = await openHost("pve1");
-    setField("Connect to", "192.0.2.10");
-    setField("User", "admin");
-    setField("RDP port", "3390");
-    fireEvent.click(screen.getByTestId("host-rdp"));
-    expect(JSON.parse(localStorage.getItem(`tenko-connect:${HOST_IDS.pve1}`) ?? "{}")).toEqual({
-      rdpPort: 3390,
-      sshPort: 22,
-      user: "admin",
-      target: "192.0.2.10",
+  describe("the rows", () => {
+    it("has a row with the DNS name for a host with one address, and the usual ports", async () => {
+      await openHost("pve1");
+      expect(keys()).toEqual(["pve1.example.test"]);
+      const [row] = rows() as [HTMLElement];
+      expect(row.textContent).toContain("pve1.example.test");
+      expect(row.textContent).toContain("192.0.2.10");
+      expect(button("rdp").dataset.key).toBe("pve1.example.test");
+      expect(button("ssh").dataset.key).toBe("pve1.example.test");
+      expect(button("rdp").disabled).toBe(false);
+      expect(button("ssh").disabled).toBe(false);
+      expect(field("User").value).toBe("");
+      expect(field("RDP port").value).toBe("3389");
+      expect(field("SSH port").value).toBe("22");
+      // Nothing is asked of the server until a button is pressed.
+      expect(remote).toEqual([]);
     });
-    first.unmount();
 
-    const second = await openHost("pve1");
-    expect((field("Connect to") as HTMLSelectElement).value).toBe("192.0.2.10");
-    expect((field("User") as HTMLInputElement).value).toBe("admin");
-    expect((field("RDP port") as HTMLInputElement).value).toBe("3390");
-    second.unmount();
+    it("has a row for each address of the host, IPv4 first, each with its IP address", async () => {
+      await openHost("gw");
+      // Both addresses of gw have the DNS name gw.example.test, which is what the server gets for either.
+      expect(keys()).toEqual(["gw.example.test", "gw.example.test"]);
+      const [v4, v6] = rows() as [HTMLElement, HTMLElement];
+      expect(v4.textContent).toContain("192.0.2.1");
+      expect(v6.textContent).toContain("2001:db8:0:10::1");
+      expect(v6.textContent).not.toContain("192.0.2.1");
+      expect(buttons("rdp")).toHaveLength(2);
+      expect(buttons("ssh")).toHaveLength(2);
+    });
 
-    // Another host has its own choice.
-    await openHost("gw");
-    expect((field("Connect to") as HTMLSelectElement).value).toBe("gw.example.test");
-    expect((field("User") as HTMLInputElement).value).toBe("");
-    expect((field("RDP port") as HTMLInputElement).value).toBe("3389");
+    it("lists an IPv4 address before an IPv6 address whatever the order they were made in, by IP address when there is no DNS name", async () => {
+      await hostWith("dual.example.test", ["2001:db8:0:10::71", "192.0.2.71"]);
+      await openHost("dual.example.test");
+      await waitFor(() => expect(keys()).toEqual(["192.0.2.71", "2001:db8:0:10::71"]));
+      expect(buttons("rdp").map((b) => b.dataset.key)).toEqual(["192.0.2.71", "2001:db8:0:10::71"]);
+      expect(buttons("ssh").map((b) => b.dataset.key)).toEqual(["192.0.2.71", "2001:db8:0:10::71"]);
+    });
+
+    it("has one row with the host name for a host without addresses, and asks for no address", async () => {
+      const host = await createHost({ name: "kiosk.example.test", mode: "static", interfaces: [{ name: "eth0" }] });
+      await openHost("kiosk.example.test");
+      expect(keys()).toEqual(["kiosk.example.test"]);
+      expect(button("rdp").dataset.key).toBe("kiosk.example.test");
+      expect(button("ssh").dataset.key).toBe("kiosk.example.test");
+
+      const lines = await hand("rdp");
+      expect(remote).toEqual([{ host: host.id, query: { protocol: "rdp" } }]);
+      expect(lines[0]).toBe("full address:s:kiosk.example.test:3389");
+    });
+
+    it("leaves out a deleted address, and a host whose addresses are all deleted falls back to its name", () => {
+      const gw = stored("gw") as Host;
+      const [v4, v6] = [...ipamState().data.address.values()].filter((a) => a.interface === INTERFACE_IDS.gw) as [Address, Address];
+      const gone = (a: Address): Address => ({ ...a, meta: { ...a.meta, deleted: a.meta.updated } });
+      expect(connectTargets(gw, [v6, v4]).map((target) => target.ip)).toEqual([v4.ip, v6.ip]);
+      expect(connectTargets(gw, [v4, gone(v6)]).map((target) => target.ip)).toEqual([v4.ip]);
+      expect(connectTargets(gw, [gone(v4), gone(v6)])).toEqual([{ label: "gw" }]);
+    });
+  });
+
+  describe("the .rdp file", () => {
+    it("is the file the server makes, with the user name of the bound credential, saved as <host>.rdp", async () => {
+      await openHost("nas");
+      expect(keys()).toEqual(["nas.example.test"]);
+      const lines = await hand("rdp");
+
+      expect(remote).toEqual([{ host: idOf("nas"), query: { protocol: "rdp", address: "nas.example.test" } }]);
+      expect(downloads).toEqual([{ name: "nas.rdp", href: OBJECT_URL }]);
+      expect(blobs).toHaveLength(1);
+      expect(blobs[0]?.type).toBe("application/x-rdp");
+      expect(lines[0]).toBe("full address:s:nas.example.test:3389");
+      expect(lines[1]).toBe("username:s:admin");
+      expect(lines.at(-1)).toBe("");
+      // The file holds no password.
+      expect(lines.join("\r\n")).not.toContain(SEED_SECRET_VALUES.nasAdmin);
+    });
+
+    it("saves the text of the answer as it is", async () => {
+      server.use(
+        http.get(
+          "/api/v1/hosts/:id/remote",
+          () =>
+            new HttpResponse("full address:s:other.example.test:4000\r\nusername:s:kept\r\n", {
+              headers: { "content-type": "application/x-rdp" },
+            }),
+        ),
+      );
+      await openHost("nas");
+      const lines = await hand("rdp");
+      expect(lines).toEqual(["full address:s:other.example.test:4000", "username:s:kept", ""]);
+    });
+
+    it("has no user name when the host has no credential", async () => {
+      await openHost("pve1");
+      const lines = await hand("rdp");
+      expect(lines[0]).toBe("full address:s:pve1.example.test:3389");
+      expect(lines.some((line) => line.startsWith("username:"))).toBe(false);
+      expect(downloads).toEqual([{ name: "pve1.rdp", href: OBJECT_URL }]);
+    });
+
+    it("sends the user and a changed RDP port with the request, and the file follows them", async () => {
+      await openHost("nas");
+      setField("User", "ops");
+      setField("RDP port", "3390");
+      const lines = await hand("rdp");
+
+      expect(remote).toEqual([
+        { host: idOf("nas"), query: { protocol: "rdp", address: "nas.example.test", port: "3390", user: "ops" } },
+      ]);
+      expect(lines[0]).toBe("full address:s:nas.example.test:3390");
+      expect(lines[1]).toBe("username:s:ops");
+    });
+
+    it("sends the user without the spaces around it, and sends no user for a blank field and no port for the default", async () => {
+      await openHost("nas");
+      setField("User", "  ops  ");
+      setField("RDP port", "3390");
+      await hand("rdp");
+      expect(remote.at(-1)?.query).toEqual({ protocol: "rdp", address: "nas.example.test", port: "3390", user: "ops" });
+
+      setField("User", "   ");
+      setField("RDP port", "3389");
+      const lines = await hand("rdp");
+      expect(remote.at(-1)?.query).toEqual({ protocol: "rdp", address: "nas.example.test" });
+      // The bound credential speaks again when the field is blank.
+      expect(lines[1]).toBe("username:s:admin");
+    });
+
+    it("connects to the address of the row that was pressed, an IPv6 address in brackets", async () => {
+      await hostWith("dual.example.test", ["192.0.2.71", "2001:db8:0:10::71"]);
+      await openHost("dual.example.test");
+      await waitFor(() => expect(rows()).toHaveLength(2));
+
+      const v6 = await hand("rdp", 1);
+      expect(remote.at(-1)?.query).toEqual({ protocol: "rdp", address: "2001:db8:0:10::71" });
+      expect(v6[0]).toBe("full address:s:[2001:db8:0:10::71]:3389");
+
+      const v4 = await hand("rdp", 0);
+      expect(remote.at(-1)?.query).toEqual({ protocol: "rdp", address: "192.0.2.71" });
+      expect(v4[0]).toBe("full address:s:192.0.2.71:3389");
+      expect(downloads.map((d) => d.name)).toEqual(["dual.example.test.rdp", "dual.example.test.rdp"]);
+    });
+
+    it("lets a viewer have the file, but without a user name from the vault", async () => {
+      await signInAlex({
+        prepare: (u) => {
+          u.roles = ["viewer"];
+        },
+      });
+      await openHost("nas");
+      const lines = await hand("rdp");
+      expect(lines[0]).toBe("full address:s:nas.example.test:3389");
+      expect(lines.some((line) => line.startsWith("username:"))).toBe(false);
+
+      setField("User", "ops");
+      expect((await hand("rdp"))[1]).toBe("username:s:ops");
+    });
+  });
+
+  describe("the ssh link", () => {
+    it("is opened through a temporary link whose address is the URI of the server", async () => {
+      await openHost("nas");
+      await hand("ssh");
+
+      expect(remote).toEqual([{ host: idOf("nas"), query: { protocol: "ssh", address: "nas.example.test" } }]);
+      // An anchor without a download attribute: the operating system opens the link.
+      expect(downloads).toEqual([{ name: "", href: "ssh://admin@nas.example.test" }]);
+      expect(clicked[0]?.rel).toBe("noopener");
+      expect(clicked[0]?.hasAttribute("download")).toBe(false);
+      expect(blobs).toEqual([]);
+      // The anchor is gone again, and the page has no ssh link of its own.
+      expect(document.querySelector("a[href^='ssh:']")).toBeNull();
+    });
+
+    it("sends the user and a changed SSH port, and opens what the server builds from them", async () => {
+      await openHost("nas");
+      setField("User", "root");
+      setField("SSH port", "2222");
+      await hand("ssh");
+
+      expect(remote).toEqual([
+        { host: idOf("nas"), query: { protocol: "ssh", address: "nas.example.test", port: "2222", user: "root" } },
+      ]);
+      expect(downloads).toEqual([{ name: "", href: "ssh://root@nas.example.test:2222" }]);
+    });
+
+    it("leaves the port out at 22 and has no user name for a host without a credential", async () => {
+      await openHost("pve1");
+      setField("SSH port", "22");
+      await hand("ssh");
+      expect(remote).toEqual([{ host: idOf("pve1"), query: { protocol: "ssh", address: "pve1.example.test" } }]);
+      expect(downloads).toEqual([{ name: "", href: "ssh://pve1.example.test" }]);
+    });
+
+    it("connects to the address of the row that was pressed, an IPv6 address in brackets", async () => {
+      await hostWith("dual.example.test", ["192.0.2.71", "2001:db8:0:10::71"]);
+      await openHost("dual.example.test");
+      await waitFor(() => expect(rows()).toHaveLength(2));
+
+      await hand("ssh", 1);
+      expect(remote.at(-1)?.query).toEqual({ protocol: "ssh", address: "2001:db8:0:10::71" });
+      await hand("ssh", 0);
+      expect(remote.at(-1)?.query).toEqual({ protocol: "ssh", address: "192.0.2.71" });
+      expect(downloads.map((d) => d.href)).toEqual(["ssh://[2001:db8:0:10::71]", "ssh://192.0.2.71"]);
+    });
+
+    it("keeps the ports of the two protocols apart", async () => {
+      await openHost("nas");
+      setField("RDP port", "3390");
+      await hand("ssh");
+      expect(remote.at(-1)?.query).toEqual({ protocol: "ssh", address: "nas.example.test" });
+      setField("SSH port", "2222");
+      await hand("rdp");
+      expect(remote.at(-1)?.query).toEqual({ protocol: "rdp", address: "nas.example.test", port: "3390" });
+    });
+  });
+
+  describe("invalid ports", () => {
+    it("disable the buttons of that protocol in every row, and only those", async () => {
+      await openHost("gw");
+      setField("RDP port", "70000");
+      expect(field("RDP port").getAttribute("aria-invalid")).toBe("true");
+      expect(field("SSH port").getAttribute("aria-invalid")).toBeNull();
+      expect(buttons("rdp").map((b) => b.disabled)).toEqual([true, true]);
+      expect(buttons("ssh").map((b) => b.disabled)).toEqual([false, false]);
+
+      setField("SSH port", "0");
+      expect(field("SSH port").getAttribute("aria-invalid")).toBe("true");
+      expect(buttons("rdp").map((b) => b.disabled)).toEqual([true, true]);
+      expect(buttons("ssh").map((b) => b.disabled)).toEqual([true, true]);
+
+      // A valid port enables them again.
+      setField("RDP port", "3389");
+      setField("SSH port", "22");
+      expect(field("RDP port").getAttribute("aria-invalid")).toBeNull();
+      expect(field("SSH port").getAttribute("aria-invalid")).toBeNull();
+      expect(buttons("rdp").map((b) => b.disabled)).toEqual([false, false]);
+      expect(buttons("ssh").map((b) => b.disabled)).toEqual([false, false]);
+    });
+
+    it("are an empty field, a number below 1 or above 65535, and a number with a fraction; 1 and 65535 are valid", async () => {
+      await openHost("pve1");
+      for (const bad of ["", "-1", "0", "65536", "22.5"]) {
+        setField("SSH port", bad);
+        expect(button("ssh").disabled, `port "${bad}"`).toBe(true);
+        expect(field("SSH port").getAttribute("aria-invalid"), `port "${bad}"`).toBe("true");
+      }
+      for (const good of ["1", "65535"]) {
+        setField("SSH port", good);
+        expect(button("ssh").disabled, `port "${good}"`).toBe(false);
+        expect(field("SSH port").getAttribute("aria-invalid"), `port "${good}"`).toBeNull();
+      }
+    });
+
+    it("send no request when a disabled button is pressed", async () => {
+      await openHost("pve1");
+      setField("RDP port", "70000");
+      setField("SSH port", "0");
+      fireEvent.click(button("rdp"));
+      fireEvent.click(button("ssh"));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(remote).toEqual([]);
+      expect(downloads).toEqual([]);
+      expect(blobs).toEqual([]);
+    });
+  });
+
+  describe("what is remembered", () => {
+    const kept = (name: string) => JSON.parse(localStorage.getItem(`tenko-connect:${idOf(name)}`) ?? "{}") as unknown;
+
+    it("is the user and the two ports, per host, in this browser", async () => {
+      const first = await openHost("pve1");
+      setField("User", "admin");
+      setField("RDP port", "3390");
+      setField("SSH port", "2222");
+      await hand("rdp");
+      expect(kept("pve1")).toEqual({ rdpPort: 3390, sshPort: 2222, user: "admin" });
+      first.unmount();
+
+      const second = await openHost("pve1");
+      expect(field("User").value).toBe("admin");
+      expect(field("RDP port").value).toBe("3390");
+      expect(field("SSH port").value).toBe("2222");
+      // What was remembered goes into the next request.
+      await hand("ssh");
+      expect(remote.at(-1)?.query).toEqual({ protocol: "ssh", address: "pve1.example.test", port: "2222", user: "admin" });
+      second.unmount();
+
+      // Another host has its own choice, and nothing is stored for it.
+      await openHost("gw");
+      expect(field("User").value).toBe("");
+      expect(field("RDP port").value).toBe("3389");
+      expect(field("SSH port").value).toBe("22");
+      expect(localStorage.getItem(`tenko-connect:${idOf("gw")}`)).toBeNull();
+    });
+
+    it("is stored when a button is pressed, whether or not the request succeeds", async () => {
+      refuseRemote();
+      await openHost("nas");
+      setField("User", "ops");
+      setField("SSH port", "2222");
+      fireEvent.click(button("ssh"));
+      await screen.findByText("The connection file could not be made");
+      expect(kept("nas")).toEqual({ rdpPort: 3389, sshPort: 2222, user: "ops" });
+    });
+
+    it("starts from what an earlier visit stored, and from the defaults when that is not JSON", async () => {
+      localStorage.setItem(`tenko-connect:${idOf("pve1")}`, JSON.stringify({ rdpPort: 3390, sshPort: 2222, user: "ops" }));
+      localStorage.setItem(`tenko-connect:${idOf("gw")}`, "{not json");
+      const view = await openHost("pve1");
+      expect(field("User").value).toBe("ops");
+      expect(field("RDP port").value).toBe("3390");
+      expect(field("SSH port").value).toBe("2222");
+      view.unmount();
+
+      await openHost("gw");
+      expect(field("User").value).toBe("");
+      expect(field("RDP port").value).toBe("3389");
+      expect(field("SSH port").value).toBe("22");
+    });
+
+    it("starts from the defaults when the stored value is the JSON text null", async () => {
+      localStorage.setItem(`tenko-connect:${idOf("gw")}`, "null");
+      await openHost("gw");
+      expect(field("RDP port").value).toBe("3389");
+      expect(field("SSH port").value).toBe("22");
+    });
+  });
+
+  describe("a failing request", () => {
+    it.each(["rdp", "ssh"] as const)("shows a toast with the reason for %s and hands nothing over", async (kind) => {
+      refuseRemote();
+      await openHost("nas");
+      fireEvent.click(button(kind));
+
+      const title = await screen.findByText("The connection file could not be made");
+      const toast = title.closest(".toast") as HTMLElement;
+      expect(toast.dataset.key).toBe("bad");
+      expect(within(toast).getByText("The address does not belong to this host.")).toBeTruthy();
+      expect(remote).toHaveLength(1);
+      expect(downloads).toEqual([]);
+      expect(blobs).toEqual([]);
+      // The buttons work again, so the person can try once more.
+      await waitFor(() => expect(button(kind).disabled).toBe(false));
+    });
+
+    it("shows the generic message when the server fails without a reason", async () => {
+      server.use(
+        http.get("/api/v1/hosts/:id/remote", () =>
+          HttpResponse.json(
+            { type: "about:blank", title: "", status: 500, code: "remote.no_translation", detail: "", params: {} },
+            { status: 500, headers: { "content-type": "application/problem+json" } },
+          ),
+        ),
+      );
+      await openHost("nas");
+      fireEvent.click(button("rdp"));
+      const title = await screen.findByText("The connection file could not be made");
+      expect(within(title.closest(".toast") as HTMLElement).getByText(/could not complete the request/)).toBeTruthy();
+      expect(downloads).toEqual([]);
+    });
+  });
+
+  describe("while a request is under way", () => {
+    it("disables every button of every row, and enables them when the answer is in", async () => {
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      server.use(
+        http.get("/api/v1/hosts/:id/remote", async () => {
+          await gate;
+          return new HttpResponse("full address:s:gw.example.test:3389\r\n", { headers: { "content-type": "application/x-rdp" } });
+        }),
+      );
+      await openHost("gw");
+      fireEvent.click(button("rdp", 0));
+      await waitFor(() => expect(buttons("rdp").every((b) => b.disabled)).toBe(true));
+      expect(buttons("ssh").every((b) => b.disabled)).toBe(true);
+      // A second press while the first is under way asks for nothing more.
+      fireEvent.click(button("rdp", 1));
+      fireEvent.click(button("ssh", 0));
+      await waitFor(() => expect(remote).toHaveLength(1));
+
+      release();
+      await waitFor(() => expect(downloads).toHaveLength(1));
+      await waitFor(() => expect(buttons("rdp").some((b) => b.disabled)).toBe(false));
+      expect(buttons("ssh").some((b) => b.disabled)).toBe(false);
+      expect(remote).toHaveLength(1);
+    });
   });
 });
 
-describe("the credential slot", () => {
-  it("renders nothing on its own", () => {
-    const host = stored("gw") as Host;
-    const { container } = render(() => <CredentialSlot host={host} />);
-    expect(container.innerHTML).toBe("");
+describe("the connect section", () => {
+  const section = () => document.querySelector("[aria-labelledby='host-connect-title']") as HTMLElement;
+
+  it("holds the remote access rows and then the credentials of the host", async () => {
+    await openHost("nas");
+    const credentials = await screen.findByTestId("host-credentials");
+    expect([...section().children].map((el) => el.tagName)).toEqual(["H2", "DIV", "DIV"]);
+    expect(section().children[1]).toBe(screen.getByTestId("host-connect"));
+    expect(section().lastElementChild).toBe(credentials);
+    await within(credentials).findByTestId("credential");
+    expect(within(credentials).getAllByTestId("credential").map((row) => row.dataset.key)).toEqual(["nas admin"]);
+    expect(within(screen.getByTestId("host-connect")).getAllByTestId("remote-target")).toHaveLength(1);
   });
 
-  it("adds nothing to the connect section of the page", async () => {
-    await openHost("gw");
-    const section = document.querySelector("[aria-labelledby='host-connect-title']") as HTMLElement;
-    expect(section).not.toBeNull();
-    expect([...section.children].map((el) => el.tagName)).toEqual(["H2", "DIV"]);
-    expect(section.lastElementChild).toBe(screen.getByTestId("host-connect"));
+  it("holds the remote access rows alone for a viewer, who gets no credentials section", async () => {
+    await signInAlex({
+      prepare: (u) => {
+        u.roles = ["viewer"];
+      },
+    });
+    await openHost("nas");
+    await waitFor(() => expect(screen.queryByTestId("host-credentials")).toBeNull());
+    expect([...section().children].map((el) => el.tagName)).toEqual(["H2", "DIV"]);
+    expect(section().lastElementChild).toBe(screen.getByTestId("host-connect"));
+    expect(within(screen.getByTestId("host-connect")).getAllByTestId("remote-target")).toHaveLength(1);
+  });
+
+  it("has no accessibility violations with the rows and the credentials", async () => {
+    await openHost("nas");
+    await within(screen.getByTestId("host-credentials")).findByTestId("credential");
+    expect(await axeViolations(section())).toEqual([]);
   });
 });
 

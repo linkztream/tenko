@@ -1,5 +1,5 @@
-//! Security profiles, the authentication toggles TGL-01 to TGL-07 and the in-app update
-//! toggle TGL-23 (SECURITY-PROFILES.md).
+//! Security profiles, the authentication toggles TGL-01 to TGL-07, the in-app update
+//! toggle TGL-23 and the secret reveal toggle TGL-24 (SECURITY-PROFILES.md).
 //!
 //! A profile is a bundle of toggle values, not a code path: [`Profile::defaults`] gives the
 //! values, every toggle can then be changed on its own, and [`SecuritySettings::toggles`]
@@ -67,6 +67,7 @@ impl Profile {
                 breach_check: BreachMode::Online,
                 lockout: LockoutMode::ProgressiveDelay,
                 updates: Some(UpdatePolicy::new(UpdateInstall::Ui)),
+                secret_reveal: Some(RevealPolicy::new(RevealStepUp::Session, false)),
             },
             Self::Standard => SecuritySettings {
                 profile: self,
@@ -81,6 +82,7 @@ impl Profile {
                 breach_check: BreachMode::Online,
                 lockout: LockoutMode::DelayThenTemporaryLock,
                 updates: Some(UpdatePolicy::new(UpdateInstall::UiStepUp)),
+                secret_reveal: Some(RevealPolicy::new(RevealStepUp::Fresh, false)),
             },
             Self::Hardened => SecuritySettings {
                 profile: self,
@@ -95,6 +97,7 @@ impl Profile {
                 breach_check: BreachMode::OfflinePreferred,
                 lockout: LockoutMode::LockUntilUnlock,
                 updates: Some(UpdatePolicy::new(UpdateInstall::UploadOnly)),
+                secret_reveal: Some(RevealPolicy::new(RevealStepUp::Passkey, true)),
             },
             Self::Lab => SecuritySettings {
                 profile: self,
@@ -109,6 +112,7 @@ impl Profile {
                 breach_check: BreachMode::Off,
                 lockout: LockoutMode::Off,
                 updates: Some(UpdatePolicy::new(UpdateInstall::Ui)),
+                secret_reveal: Some(RevealPolicy::new(RevealStepUp::Session, false)),
             },
         }
     }
@@ -156,6 +160,44 @@ impl UpdatePolicy {
         Self {
             check: true,
             install,
+        }
+    }
+}
+
+/// The authentication a reveal of an operator secret needs (TGL-24). The variants are
+/// ordered from the weakest to the strongest.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum RevealStepUp {
+    /// The signed-in session, of password strength or stronger (Home, Lab).
+    Session,
+    /// A sign-in within the last five minutes (Standard).
+    Fresh,
+    /// A sign-in with a passkey or a hardware security key within the last five minutes
+    /// (Hardened).
+    Passkey,
+}
+
+/// TGL-24: what revealing an operator secret takes (IAM-16, API-11). The PIN coupling rule
+/// (IAM-07) holds in every profile on top of it: a PIN-strength session never reveals, and
+/// personal API tokens never reveal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+pub struct RevealPolicy {
+    /// The authentication a reveal needs.
+    pub step_up: RevealStepUp,
+    /// Reveal only a secret that is bound to the host the request names: the host the
+    /// person is looking at (Hardened). The secrets page cannot reveal then.
+    pub bound_host_only: bool,
+}
+
+impl RevealPolicy {
+    /// A policy.
+    pub const fn new(step_up: RevealStepUp, bound_host_only: bool) -> Self {
+        Self {
+            step_up,
+            bound_host_only,
         }
     }
 }
@@ -220,6 +262,10 @@ pub struct SecuritySettings {
     /// toggle existed: the profile's value applies ([`SecuritySettings::updates`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updates: Option<UpdatePolicy>,
+    /// TGL-24: what revealing an operator secret takes. `None` in settings stored before the
+    /// toggle existed: the profile's value applies ([`SecuritySettings::secret_reveal`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_reveal: Option<RevealPolicy>,
 }
 
 impl Default for SecuritySettings {
@@ -255,7 +301,14 @@ impl SecuritySettings {
             .unwrap_or(UpdatePolicy::new(UpdateInstall::UiStepUp))
     }
 
-    /// The toggles TGL-01 to TGL-07 and TGL-23 with deviation and weakness markers.
+    /// The effective TGL-24 value: the stored one, else the profile's.
+    pub fn secret_reveal(&self) -> RevealPolicy {
+        self.secret_reveal
+            .or_else(|| self.profile.defaults().secret_reveal)
+            .unwrap_or(RevealPolicy::new(RevealStepUp::Fresh, false))
+    }
+
+    /// The toggles TGL-01 to TGL-07, TGL-23 and TGL-24 with deviation and weakness markers.
     pub fn toggles(&self) -> Vec<ToggleState> {
         let profile = self.profile.defaults();
         let home = Profile::Home.defaults();
@@ -332,6 +385,17 @@ impl SecuritySettings {
                 json(serde_json::to_value(self.updates())),
                 json(serde_json::to_value(profile.updates())),
                 !self.updates().check && home.updates().check,
+            ),
+            // A weaker step-up than Home's, or dropping a host binding Home asks for, is
+            // weaker; Home asks for neither, so no value is weaker today.
+            entry(
+                "TGL-24",
+                "secret_reveal",
+                json(serde_json::to_value(self.secret_reveal())),
+                json(serde_json::to_value(profile.secret_reveal())),
+                self.secret_reveal().step_up < home.secret_reveal().step_up
+                    || (!self.secret_reveal().bound_host_only
+                        && home.secret_reveal().bound_host_only),
             ),
         ]
     }
@@ -423,6 +487,9 @@ pub struct SettingsPatch {
     /// TGL-23.
     #[serde(default)]
     pub updates: Option<UpdatePolicy>,
+    /// TGL-24.
+    #[serde(default)]
+    pub secret_reveal: Option<RevealPolicy>,
 }
 
 /// The TGL-05 value in a patch.
@@ -467,6 +534,9 @@ impl SettingsPatch {
         }
         if let Some(updates) = self.updates {
             next.updates = Some(updates);
+        }
+        if let Some(reveal) = self.secret_reveal {
+            next.secret_reveal = Some(reveal);
         }
         next
     }
@@ -613,6 +683,76 @@ mod tests {
         let audit = changes(&Profile::Standard.defaults(), &next);
         assert_eq!(audit.len(), 1);
         assert_eq!(audit[0].field, "TGL-23");
+    }
+
+    #[test]
+    fn secret_reveal_follows_the_matrix() {
+        assert_eq!(
+            Profile::Home.defaults().secret_reveal(),
+            RevealPolicy::new(RevealStepUp::Session, false)
+        );
+        assert_eq!(
+            Profile::Standard.defaults().secret_reveal(),
+            RevealPolicy::new(RevealStepUp::Fresh, false)
+        );
+        assert_eq!(
+            Profile::Hardened.defaults().secret_reveal(),
+            RevealPolicy::new(RevealStepUp::Passkey, true)
+        );
+        assert_eq!(
+            Profile::Lab.defaults().secret_reveal(),
+            RevealPolicy::new(RevealStepUp::Session, false)
+        );
+        assert!(RevealStepUp::Session < RevealStepUp::Fresh);
+        assert!(RevealStepUp::Fresh < RevealStepUp::Passkey);
+        let json =
+            serde_json::to_value(RevealPolicy::new(RevealStepUp::Passkey, true)).expect("json");
+        assert_eq!(
+            json,
+            serde_json::json!({ "step_up": "passkey", "bound_host_only": true })
+        );
+    }
+
+    #[test]
+    fn stored_settings_without_tgl_24_take_the_profile_value() {
+        let mut stored = serde_json::to_value(Profile::Standard.defaults()).expect("json");
+        stored
+            .as_object_mut()
+            .expect("an object")
+            .remove("secret_reveal");
+        let settings: SecuritySettings = serde_json::from_value(stored).expect("old settings");
+        assert_eq!(settings.secret_reveal, None);
+        assert_eq!(settings.secret_reveal().step_up, RevealStepUp::Fresh);
+        assert_eq!(settings.banner().deviations, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_changed_reveal_policy_is_a_deviation_and_audited() {
+        let patch = SettingsPatch {
+            secret_reveal: Some(RevealPolicy::new(RevealStepUp::Session, false)),
+            ..SettingsPatch::default()
+        };
+        let next = patch.apply(&Profile::Standard.defaults());
+        let banner = next.banner();
+        assert_eq!(banner.deviations, vec!["TGL-24".to_owned()]);
+        assert!(!banner.weaker_than_home);
+        let audit = changes(&Profile::Standard.defaults(), &next);
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].field, "TGL-24");
+        let toggles = next.toggles();
+        let toggle = toggles.iter().find(|t| t.id == "TGL-24").expect("TGL-24");
+        assert_eq!(toggle.setting, "secret_reveal");
+        assert!(toggle.deviates);
+        // A new profile resets the toggle to the profile's value.
+        let reset = SettingsPatch {
+            profile: Some(Profile::Hardened),
+            ..SettingsPatch::default()
+        }
+        .apply(&next);
+        assert_eq!(
+            reset.secret_reveal(),
+            RevealPolicy::new(RevealStepUp::Passkey, true)
+        );
     }
 
     #[test]

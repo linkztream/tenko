@@ -35,7 +35,7 @@ import { JobStateChip } from "../jobs/StateChip";
 import { jobTitle } from "../jobs/words";
 import { isTyping } from "../shell/keyboard";
 import { Connect } from "./Connect";
-import { CredentialSlot } from "./credentials";
+import { HostCredentialsSection } from "./credentials";
 import { HostForm, InterfaceForm } from "./HostForm";
 import "../ipam/ipam.css";
 import "./hosts.css";
@@ -370,7 +370,7 @@ export default function HostView() {
               <section class="page-section" aria-labelledby="host-connect-title">
                 <h2 id="host-connect-title">{t("hosts.connect.title")}</h2>
                 <Connect host={h()} addresses={addresses()} />
-                <CredentialSlot host={h()} />
+                <HostCredentialsSection host={h()} />
               </section>
 
               <section class="page-section" aria-labelledby="host-facts-title">

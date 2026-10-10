@@ -12,9 +12,12 @@
 // cannot set the Last-Event-ID header on a new connection; the server treats both alike).
 import { createSignal, type Accessor } from "solid-js";
 
-/** Topics of GET /events; `admin` covers users, sessions, tokens and security settings. */
-export type Topic = "ipam" | "jobs" | "audit" | "import" | "system" | "admin";
-export const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin"];
+/**
+ * Topics of GET /events; `admin` covers users, sessions, tokens and security settings,
+ * `secrets` the metadata, reveal stamps and host bindings of operator secrets (never values).
+ */
+export type Topic = "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "secrets";
+export const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin", "secrets"];
 
 export interface ObjectRef {
   kind: string;

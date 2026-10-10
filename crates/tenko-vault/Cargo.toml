@@ -16,6 +16,7 @@ async-trait = { workspace = true }
 aws-lc-rs = { workspace = true }
 bytes = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tenko-core = { workspace = true }
 tenko-store = { workspace = true }
 thiserror = { workspace = true }

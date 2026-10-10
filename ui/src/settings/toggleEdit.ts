@@ -23,6 +23,8 @@ export function patchFor(setting: ToggleSetting, value: unknown): SettingsPatch 
       return { lockout: value as NonNullable<SettingsPatch["lockout"]> };
     case "updates":
       return { updates: value as NonNullable<SettingsPatch["updates"]> };
+    case "secret_reveal":
+      return { secret_reveal: value as NonNullable<SettingsPatch["secret_reveal"]> };
   }
 }
 

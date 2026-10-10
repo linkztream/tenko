@@ -22,8 +22,11 @@
 mod account;
 mod admin;
 mod login;
+pub mod reveal;
 mod setup;
 pub mod types;
+
+pub use reveal::{RevealGrant, STEP_UP_FRESH, STEP_UP_PASSKEY, check_step_up};
 
 use std::{
     net::IpAddr,

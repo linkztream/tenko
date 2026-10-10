@@ -495,6 +495,8 @@ export type MessageKey =
   | "errors.modules.pinned"
   | "errors.modules.store"
   | "errors.modules.unavailable"
+  | "errors.remote.address_unknown"
+  | "errors.remote.interface_unknown"
   | "errors.settings.pin_coupling"
   | "errors.sys.csrf_rejected"
   | "errors.sys.internal"
@@ -550,6 +552,19 @@ export type MessageKey =
   | "errors.users.last_administrator"
   | "errors.users.name_taken"
   | "errors.users.not_found"
+  | "errors.vault.host_credentials.conflict"
+  | "errors.vault.host_credentials.secret_missing"
+  | "errors.vault.pin_coupling"
+  | "errors.vault.reveal.host_required"
+  | "errors.vault.reveal.not_bound"
+  | "errors.vault.reveal.rate_limited"
+  | "errors.vault.secret.conflict"
+  | "errors.vault.secret.in_use"
+  | "errors.vault.secret.invalid"
+  | "errors.vault.secret.not_found"
+  | "errors.vault.secret.not_revealable"
+  | "errors.vault.secret.not_text"
+  | "errors.vault.secret.too_large"
   | "grid.actionbar.label"
   | "grid.actionbar.selected"
   | "grid.actions"
@@ -588,6 +603,7 @@ export type MessageKey =
   | "hosts.col.client_id"
   | "hosts.col.duid"
   | "hosts.col.interface"
+  | "hosts.connect.failed"
   | "hosts.connect.hint"
   | "hosts.connect.rdp"
   | "hosts.connect.rdp_port"
@@ -596,6 +612,37 @@ export type MessageKey =
   | "hosts.connect.target"
   | "hosts.connect.title"
   | "hosts.connect.user"
+  | "hosts.connect.user_placeholder"
+  | "hosts.credentials.audit_hint"
+  | "hosts.credentials.bind"
+  | "hosts.credentials.bind_title"
+  | "hosts.credentials.bound"
+  | "hosts.credentials.col.actions"
+  | "hosts.credentials.col.name"
+  | "hosts.credentials.col.revealed"
+  | "hosts.credentials.col.role"
+  | "hosts.credentials.col.user"
+  | "hosts.credentials.copy"
+  | "hosts.credentials.empty"
+  | "hosts.credentials.field.role"
+  | "hosts.credentials.field.secret"
+  | "hosts.credentials.manage"
+  | "hosts.credentials.never_revealed"
+  | "hosts.credentials.none_free"
+  | "hosts.credentials.option"
+  | "hosts.credentials.revealed_by"
+  | "hosts.credentials.role.admin"
+  | "hosts.credentials.role.other"
+  | "hosts.credentials.role.rdp"
+  | "hosts.credentials.role.ssh"
+  | "hosts.credentials.role.web"
+  | "hosts.credentials.title"
+  | "hosts.credentials.unbind"
+  | "hosts.credentials.unbind_body"
+  | "hosts.credentials.unbind_failed"
+  | "hosts.credentials.unbind_label"
+  | "hosts.credentials.unbind_title"
+  | "hosts.credentials.unbound"
   | "hosts.crumbs"
   | "hosts.do.create"
   | "hosts.do.lock"
@@ -1473,7 +1520,125 @@ export type MessageKey =
   | "role.operator.name"
   | "role.viewer.description"
   | "role.viewer.name"
+  | "secrets.action.create"
+  | "secrets.action.delete"
+  | "secrets.action.delete_named"
+  | "secrets.action.edit"
+  | "secrets.action.edit_named"
+  | "secrets.action.replace"
+  | "secrets.action.replace_named"
+  | "secrets.action.reveal"
+  | "secrets.action.reveal_named"
+  | "secrets.col.actions"
+  | "secrets.col.hosts"
+  | "secrets.col.kind"
+  | "secrets.col.name"
+  | "secrets.col.revealed"
+  | "secrets.col.tags"
+  | "secrets.col.updated"
+  | "secrets.col.user"
+  | "secrets.count"
+  | "secrets.count_filtered"
+  | "secrets.created"
+  | "secrets.delete.body"
+  | "secrets.delete.check_failed"
+  | "secrets.delete.confirm"
+  | "secrets.delete.in_use_hint"
+  | "secrets.delete.in_use_lead"
+  | "secrets.delete.in_use_title"
+  | "secrets.delete.title"
+  | "secrets.deleted"
+  | "secrets.detail.back"
+  | "secrets.detail.close"
+  | "secrets.detail.label"
+  | "secrets.empty"
+  | "secrets.empty_admin"
+  | "secrets.field.created"
+  | "secrets.field.notes"
+  | "secrets.field.origin"
+  | "secrets.field.value_updated"
+  | "secrets.filter.kind"
+  | "secrets.filter.kind_all"
+  | "secrets.filter.label"
+  | "secrets.filter.placeholder"
+  | "secrets.form.create_submit"
+  | "secrets.form.create_title"
+  | "secrets.form.edit_submit"
+  | "secrets.form.edit_title"
+  | "secrets.form.error.name_required"
+  | "secrets.form.error.value_required"
+  | "secrets.form.kind"
+  | "secrets.form.name"
+  | "secrets.form.name_help"
+  | "secrets.form.notes"
+  | "secrets.form.notes_help"
+  | "secrets.form.pin_title"
+  | "secrets.form.reload"
+  | "secrets.form.reloaded"
+  | "secrets.form.tags"
+  | "secrets.form.tags_help"
+  | "secrets.form.username"
+  | "secrets.form.username_help"
+  | "secrets.form.value"
+  | "secrets.form.value_cleared"
+  | "secrets.form.value_help"
+  | "secrets.form.value_key_help"
+  | "secrets.kind.api_key"
+  | "secrets.kind.other"
+  | "secrets.kind.password"
+  | "secrets.kind.ssh_key"
+  | "secrets.kind.token"
+  | "secrets.no_access.body"
+  | "secrets.no_access.title"
+  | "secrets.no_match"
+  | "secrets.no_user"
+  | "secrets.origin.import"
+  | "secrets.origin.manual"
+  | "secrets.refs.connector"
+  | "secrets.refs.connectors"
+  | "secrets.refs.deleted"
+  | "secrets.refs.hosts"
+  | "secrets.refs.none"
+  | "secrets.refs.role"
+  | "secrets.refs.title"
+  | "secrets.refs.unknown_host"
+  | "secrets.replace.field"
+  | "secrets.replace.lead"
+  | "secrets.replace.submit"
+  | "secrets.replace.title"
+  | "secrets.replaced"
+  | "secrets.reveal.audit"
+  | "secrets.reveal.clear_failed"
+  | "secrets.reveal.cleared"
+  | "secrets.reveal.copied"
+  | "secrets.reveal.copy"
+  | "secrets.reveal.copy_blocked"
+  | "secrets.reveal.hidden"
+  | "secrets.reveal.hide"
+  | "secrets.reveal.left"
+  | "secrets.reveal.show"
+  | "secrets.reveal.stepup.code_label"
+  | "secrets.reveal.stepup.continue"
+  | "secrets.reveal.stepup.fresh"
+  | "secrets.reveal.stepup.passkey"
+  | "secrets.reveal.stepup.password"
+  | "secrets.reveal.stepup.password_label"
+  | "secrets.reveal.stepup.title"
+  | "secrets.reveal.stepup.with_passkey"
+  | "secrets.reveal.title"
+  | "secrets.reveal.username"
+  | "secrets.reveal.value"
+  | "secrets.reveal.working"
+  | "secrets.revealed_by"
+  | "secrets.role.admin"
+  | "secrets.role.other"
+  | "secrets.role.rdp"
+  | "secrets.role.ssh"
+  | "secrets.role.web"
+  | "secrets.saved"
+  | "secrets.title"
   | "settings.nav.label"
+  | "settings.nav.secrets"
   | "settings.nav.security"
   | "settings.nav.updates"
   | "settings.nav.users"
@@ -1538,6 +1703,16 @@ export type MessageKey =
   | "settings.security.reset_row"
   | "settings.security.save"
   | "settings.security.saved"
+  | "settings.security.secret_reveal.bound_host"
+  | "settings.security.secret_reveal.bound_host_hint"
+  | "settings.security.secret_reveal.pin_rule"
+  | "settings.security.secret_reveal.step_up"
+  | "settings.security.secret_reveal.step_up_fresh"
+  | "settings.security.secret_reveal.step_up_fresh_help"
+  | "settings.security.secret_reveal.step_up_passkey"
+  | "settings.security.secret_reveal.step_up_passkey_help"
+  | "settings.security.secret_reveal.step_up_session"
+  | "settings.security.secret_reveal.step_up_session_help"
   | "settings.security.session.absolute"
   | "settings.security.session.absolute_help"
   | "settings.security.session.idle"
@@ -2006,6 +2181,7 @@ export type MessageKey =
   | "shell.command.emphasis_on"
   | "shell.command.hosts"
   | "shell.command.import"
+  | "shell.command.secrets"
   | "shell.command.shortcuts"
   | "shell.command.theme_dark"
   | "shell.command.theme_light"
@@ -2154,6 +2330,11 @@ export type MessageKey =
   | "toggles.password_policy.name"
   | "toggles.password_policy.pin"
   | "toggles.password_policy.standard"
+  | "toggles.secret_reveal.name"
+  | "toggles.secret_reveal.step_up.fresh"
+  | "toggles.secret_reveal.step_up.passkey"
+  | "toggles.secret_reveal.step_up.session"
+  | "toggles.secret_reveal.value"
   | "toggles.session.name"
   | "toggles.session.value"
   | "toggles.token_max_days.days"
@@ -2362,6 +2543,10 @@ export interface MessageArgs {
   "errors.ipam.revision_mismatch": { kind: string | number };
   "errors.ipam.status.transition": { from: string | number; to: string | number };
   "errors.ipam.vlan.duplicate": { vid: string | number };
+  "errors.vault.pin_coupling": { accounts: string | number };
+  "errors.vault.reveal.rate_limited": { retry_after: string | number };
+  "errors.vault.secret.in_use": { connectors: number; hosts: number };
+  "errors.vault.secret.invalid": { field: string | number };
   "grid.actionbar.selected": { count: number };
   "grid.columns.move_down": { column: string | number };
   "grid.columns.move_up": { column: string | number };
@@ -2373,6 +2558,13 @@ export interface MessageArgs {
   "hosts.bulk.lock_title": { count: number };
   "hosts.bulk.mode_title": { count: number; mode: string | number };
   "hosts.bulk.unlock_title": { count: number };
+  "hosts.credentials.bind_title": { host: string | number };
+  "hosts.credentials.option": { name: string | number; user: string | number };
+  "hosts.credentials.revealed_by": { user: string | number; when: string | number };
+  "hosts.credentials.unbind_body": { host: string | number; name: string | number };
+  "hosts.credentials.unbind_label": { name: string | number };
+  "hosts.credentials.unbind_title": { name: string | number };
+  "hosts.credentials.unbound": { name: string | number };
   "hosts.form.created": { name: string | number };
   "hosts.form.edit_title": { name: string | number };
   "hosts.form.iface_create_title": { host: string | number };
@@ -2579,6 +2771,29 @@ export interface MessageArgs {
   "principal.token": { id: string | number };
   "principal.user": { id: string | number };
   "principal.you": { name: string | number };
+  "secrets.action.delete_named": { name: string | number };
+  "secrets.action.edit_named": { name: string | number };
+  "secrets.action.replace_named": { name: string | number };
+  "secrets.action.reveal_named": { name: string | number };
+  "secrets.count": { count: number };
+  "secrets.count_filtered": { shown: string | number; total: number };
+  "secrets.created": { name: string | number };
+  "secrets.delete.body": { name: string | number };
+  "secrets.delete.in_use_title": { name: string | number };
+  "secrets.delete.title": { name: string | number };
+  "secrets.deleted": { name: string | number };
+  "secrets.detail.label": { name: string | number };
+  "secrets.form.edit_title": { name: string | number };
+  "secrets.refs.connector": { plugin: string | number; purpose: string | number };
+  "secrets.refs.role": { role: string | number };
+  "secrets.replace.title": { name: string | number };
+  "secrets.replaced": { name: string | number };
+  "secrets.reveal.audit": { time: string | number; user: string | number };
+  "secrets.reveal.copied": { seconds: number };
+  "secrets.reveal.stepup.password_label": { user: string | number };
+  "secrets.reveal.title": { name: string | number };
+  "secrets.revealed_by": { user: string | number; when: string | number };
+  "secrets.saved": { name: string | number };
   "settings.security.consequence.differs": { profile: string | number };
   "settings.security.consequence.matches": { profile: string | number };
   "settings.security.edit_row": { name: string | number };
@@ -2689,6 +2904,7 @@ export interface MessageArgs {
   "shell.top.profile": { profile: string | number };
   "shell.top.profile_title": { profile: string | number };
   "toggles.password_policy.custom": { min: string | number };
+  "toggles.secret_reveal.value": { bound: string; step_up: string | number };
   "toggles.session.value": { absolute: string | number; idle: string | number };
   "toggles.token_max_days.days": { days: number };
   "toggles.updates.value": { check: string | number; install: string | number };
@@ -3225,6 +3441,8 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.modules.pinned",
   "errors.modules.store",
   "errors.modules.unavailable",
+  "errors.remote.address_unknown",
+  "errors.remote.interface_unknown",
   "errors.settings.pin_coupling",
   "errors.sys.csrf_rejected",
   "errors.sys.internal",
@@ -3280,6 +3498,19 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.users.last_administrator",
   "errors.users.name_taken",
   "errors.users.not_found",
+  "errors.vault.host_credentials.conflict",
+  "errors.vault.host_credentials.secret_missing",
+  "errors.vault.pin_coupling",
+  "errors.vault.reveal.host_required",
+  "errors.vault.reveal.not_bound",
+  "errors.vault.reveal.rate_limited",
+  "errors.vault.secret.conflict",
+  "errors.vault.secret.in_use",
+  "errors.vault.secret.invalid",
+  "errors.vault.secret.not_found",
+  "errors.vault.secret.not_revealable",
+  "errors.vault.secret.not_text",
+  "errors.vault.secret.too_large",
   "grid.actionbar.label",
   "grid.actionbar.selected",
   "grid.actions",
@@ -3318,6 +3549,7 @@ export const messageKeys: readonly MessageKey[] = [
   "hosts.col.client_id",
   "hosts.col.duid",
   "hosts.col.interface",
+  "hosts.connect.failed",
   "hosts.connect.hint",
   "hosts.connect.rdp",
   "hosts.connect.rdp_port",
@@ -3326,6 +3558,37 @@ export const messageKeys: readonly MessageKey[] = [
   "hosts.connect.target",
   "hosts.connect.title",
   "hosts.connect.user",
+  "hosts.connect.user_placeholder",
+  "hosts.credentials.audit_hint",
+  "hosts.credentials.bind",
+  "hosts.credentials.bind_title",
+  "hosts.credentials.bound",
+  "hosts.credentials.col.actions",
+  "hosts.credentials.col.name",
+  "hosts.credentials.col.revealed",
+  "hosts.credentials.col.role",
+  "hosts.credentials.col.user",
+  "hosts.credentials.copy",
+  "hosts.credentials.empty",
+  "hosts.credentials.field.role",
+  "hosts.credentials.field.secret",
+  "hosts.credentials.manage",
+  "hosts.credentials.never_revealed",
+  "hosts.credentials.none_free",
+  "hosts.credentials.option",
+  "hosts.credentials.revealed_by",
+  "hosts.credentials.role.admin",
+  "hosts.credentials.role.other",
+  "hosts.credentials.role.rdp",
+  "hosts.credentials.role.ssh",
+  "hosts.credentials.role.web",
+  "hosts.credentials.title",
+  "hosts.credentials.unbind",
+  "hosts.credentials.unbind_body",
+  "hosts.credentials.unbind_failed",
+  "hosts.credentials.unbind_label",
+  "hosts.credentials.unbind_title",
+  "hosts.credentials.unbound",
   "hosts.crumbs",
   "hosts.do.create",
   "hosts.do.lock",
@@ -4203,7 +4466,125 @@ export const messageKeys: readonly MessageKey[] = [
   "role.operator.name",
   "role.viewer.description",
   "role.viewer.name",
+  "secrets.action.create",
+  "secrets.action.delete",
+  "secrets.action.delete_named",
+  "secrets.action.edit",
+  "secrets.action.edit_named",
+  "secrets.action.replace",
+  "secrets.action.replace_named",
+  "secrets.action.reveal",
+  "secrets.action.reveal_named",
+  "secrets.col.actions",
+  "secrets.col.hosts",
+  "secrets.col.kind",
+  "secrets.col.name",
+  "secrets.col.revealed",
+  "secrets.col.tags",
+  "secrets.col.updated",
+  "secrets.col.user",
+  "secrets.count",
+  "secrets.count_filtered",
+  "secrets.created",
+  "secrets.delete.body",
+  "secrets.delete.check_failed",
+  "secrets.delete.confirm",
+  "secrets.delete.in_use_hint",
+  "secrets.delete.in_use_lead",
+  "secrets.delete.in_use_title",
+  "secrets.delete.title",
+  "secrets.deleted",
+  "secrets.detail.back",
+  "secrets.detail.close",
+  "secrets.detail.label",
+  "secrets.empty",
+  "secrets.empty_admin",
+  "secrets.field.created",
+  "secrets.field.notes",
+  "secrets.field.origin",
+  "secrets.field.value_updated",
+  "secrets.filter.kind",
+  "secrets.filter.kind_all",
+  "secrets.filter.label",
+  "secrets.filter.placeholder",
+  "secrets.form.create_submit",
+  "secrets.form.create_title",
+  "secrets.form.edit_submit",
+  "secrets.form.edit_title",
+  "secrets.form.error.name_required",
+  "secrets.form.error.value_required",
+  "secrets.form.kind",
+  "secrets.form.name",
+  "secrets.form.name_help",
+  "secrets.form.notes",
+  "secrets.form.notes_help",
+  "secrets.form.pin_title",
+  "secrets.form.reload",
+  "secrets.form.reloaded",
+  "secrets.form.tags",
+  "secrets.form.tags_help",
+  "secrets.form.username",
+  "secrets.form.username_help",
+  "secrets.form.value",
+  "secrets.form.value_cleared",
+  "secrets.form.value_help",
+  "secrets.form.value_key_help",
+  "secrets.kind.api_key",
+  "secrets.kind.other",
+  "secrets.kind.password",
+  "secrets.kind.ssh_key",
+  "secrets.kind.token",
+  "secrets.no_access.body",
+  "secrets.no_access.title",
+  "secrets.no_match",
+  "secrets.no_user",
+  "secrets.origin.import",
+  "secrets.origin.manual",
+  "secrets.refs.connector",
+  "secrets.refs.connectors",
+  "secrets.refs.deleted",
+  "secrets.refs.hosts",
+  "secrets.refs.none",
+  "secrets.refs.role",
+  "secrets.refs.title",
+  "secrets.refs.unknown_host",
+  "secrets.replace.field",
+  "secrets.replace.lead",
+  "secrets.replace.submit",
+  "secrets.replace.title",
+  "secrets.replaced",
+  "secrets.reveal.audit",
+  "secrets.reveal.clear_failed",
+  "secrets.reveal.cleared",
+  "secrets.reveal.copied",
+  "secrets.reveal.copy",
+  "secrets.reveal.copy_blocked",
+  "secrets.reveal.hidden",
+  "secrets.reveal.hide",
+  "secrets.reveal.left",
+  "secrets.reveal.show",
+  "secrets.reveal.stepup.code_label",
+  "secrets.reveal.stepup.continue",
+  "secrets.reveal.stepup.fresh",
+  "secrets.reveal.stepup.passkey",
+  "secrets.reveal.stepup.password",
+  "secrets.reveal.stepup.password_label",
+  "secrets.reveal.stepup.title",
+  "secrets.reveal.stepup.with_passkey",
+  "secrets.reveal.title",
+  "secrets.reveal.username",
+  "secrets.reveal.value",
+  "secrets.reveal.working",
+  "secrets.revealed_by",
+  "secrets.role.admin",
+  "secrets.role.other",
+  "secrets.role.rdp",
+  "secrets.role.ssh",
+  "secrets.role.web",
+  "secrets.saved",
+  "secrets.title",
   "settings.nav.label",
+  "settings.nav.secrets",
   "settings.nav.security",
   "settings.nav.updates",
   "settings.nav.users",
@@ -4268,6 +4649,16 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.security.reset_row",
   "settings.security.save",
   "settings.security.saved",
+  "settings.security.secret_reveal.bound_host",
+  "settings.security.secret_reveal.bound_host_hint",
+  "settings.security.secret_reveal.pin_rule",
+  "settings.security.secret_reveal.step_up",
+  "settings.security.secret_reveal.step_up_fresh",
+  "settings.security.secret_reveal.step_up_fresh_help",
+  "settings.security.secret_reveal.step_up_passkey",
+  "settings.security.secret_reveal.step_up_passkey_help",
+  "settings.security.secret_reveal.step_up_session",
+  "settings.security.secret_reveal.step_up_session_help",
   "settings.security.session.absolute",
   "settings.security.session.absolute_help",
   "settings.security.session.idle",
@@ -4736,6 +5127,7 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.command.emphasis_on",
   "shell.command.hosts",
   "shell.command.import",
+  "shell.command.secrets",
   "shell.command.shortcuts",
   "shell.command.theme_dark",
   "shell.command.theme_light",
@@ -4884,6 +5276,11 @@ export const messageKeys: readonly MessageKey[] = [
   "toggles.password_policy.name",
   "toggles.password_policy.pin",
   "toggles.password_policy.standard",
+  "toggles.secret_reveal.name",
+  "toggles.secret_reveal.step_up.fresh",
+  "toggles.secret_reveal.step_up.passkey",
+  "toggles.secret_reveal.step_up.session",
+  "toggles.secret_reveal.value",
   "toggles.session.name",
   "toggles.session.value",
   "toggles.token_max_days.days",

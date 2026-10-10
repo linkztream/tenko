@@ -23,11 +23,12 @@ import {
   MfaEditor,
   PasskeyEditor,
   PolicyEditor,
+  RevealEditor,
   SessionEditor,
   TokenEditor,
   UpdatesEditor,
 } from "./ToggleEditors";
-import { formatToggle, weakerThan, type ToggleDef, type UpdatesPolicy } from "./toggles";
+import { formatToggle, weakerThan, type RevealPolicy, type ToggleDef, type UpdatesPolicy } from "./toggles";
 
 export function ToggleDialog(props: {
   view: SecuritySettingsView;
@@ -127,6 +128,9 @@ export function ToggleDialog(props: {
             </Match>
             <Match when={setting === "updates"}>
               <UpdatesEditor initial={initial as UpdatesPolicy} onDraft={onDraft} />
+            </Match>
+            <Match when={setting === "secret_reveal"}>
+              <RevealEditor initial={initial as RevealPolicy} onDraft={onDraft} />
             </Match>
           </Switch>
 

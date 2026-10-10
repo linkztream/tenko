@@ -25,7 +25,7 @@ import { advanceMockJobs } from "./job-store";
 import { fail } from "./reply";
 import { route } from "./route";
 
-const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin"];
+const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin", "secrets"];
 
 interface OpenStream {
   controller: ReadableStreamDefaultController<Uint8Array>;

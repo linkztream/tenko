@@ -1,25 +1,35 @@
-// Remote access hand-off (API-11): an `.rdp` file for Windows hosts and an `ssh://` link,
-// both handed to the operating system. The port and the user are remembered per host in
-// this browser. Passwords are not handled here in Slice 1 (see credentials.tsx).
-import { createSignal, For, Show, untrack } from "solid-js";
+// Remote access hand-off (API-11): an RDP and an SSH button next to each address of the host.
+// The server builds the `.rdp` file and the `ssh://` URI (`GET /hosts/{id}/remote`) with the
+// target, the port and the user name of the bound credential; neither carries a secret. The
+// password reaches the clipboard only through the audited reveal of the credentials section
+// (credentials.tsx). A user name and ports typed here override the server's choice and are
+// remembered per host in this browser.
+import { createSignal, For, untrack } from "solid-js";
+import { errorMessage } from "../api/problem";
 import type { Address, Host } from "../api/types";
+import { Addr } from "../components/Addr";
 import { Icon } from "../components/Icon";
+import { toast } from "../components/toast";
 import { t } from "../i18n";
 import { parseIp } from "../ipam/ip";
-import { isValidPort, RDP_MIME, rdpFile, rdpFileName, saveTextFile, sshUri } from "./handoff";
+import { remoteRdp, remoteSsh } from "../secrets/api";
+import { isValidPort, RDP_MIME, rdpFileName, saveTextFile } from "./handoff";
 
 interface Remembered {
   rdpPort: number;
   sshPort: number;
   user: string;
-  target: string;
 }
 
 const KEY = "tenko-connect:";
+const RDP_PORT = 3389;
+const SSH_PORT = 22;
 
 function read(hostId: string): Partial<Remembered> {
   try {
-    return JSON.parse(localStorage.getItem(KEY + hostId) ?? "{}") as Partial<Remembered>;
+    const value: unknown = JSON.parse(localStorage.getItem(KEY + hostId) ?? "{}");
+    // Anything but an object (a damaged entry, the JSON text null) starts from the defaults.
+    return typeof value === "object" && value !== null ? (value as Partial<Remembered>) : {};
   } catch {
     return {};
   }
@@ -33,43 +43,134 @@ function remember(hostId: string, value: Remembered): void {
   }
 }
 
-/** Where to connect to: the DNS names and addresses of the host, IPv4 first. */
-export function connectTargets(host: Host, addresses: readonly Address[]): string[] {
+/** One place to connect to: an address of the host (by its DNS name when it has one), or the host name. */
+export interface ConnectTarget {
+  /** What the server gets as `address`; absent for the host name. */
+  address?: string | undefined;
+  /** The IP address shown. */
+  ip?: string | undefined;
+  /** What the row shows as the name. */
+  label: string;
+}
+
+/** The targets of a host: its live addresses, IPv4 first, or the host name when it has none. */
+export function connectTargets(host: Host, addresses: readonly Address[]): ConnectTarget[] {
   const live = addresses.filter((a) => !a.meta.deleted);
   const v4 = live.filter((a) => parseIp(a.ip)?.version === 4);
   const v6 = live.filter((a) => parseIp(a.ip)?.version === 6);
-  const names = live.map((a) => a.dns_name).filter((n): n is string => !!n);
-  return [...new Set([...names, ...v4.map((a) => a.ip), ...v6.map((a) => a.ip), host.name])];
+  const rows = [...v4, ...v6].map((a) => ({ address: a.dns_name ?? a.ip, ip: a.ip, label: a.dns_name ?? a.ip }));
+  return rows.length > 0 ? rows : [{ label: host.name }];
+}
+
+/** Opens a URI with the operating system's handler through a temporary link. */
+function openUri(uri: string): void {
+  const a = document.createElement("a");
+  a.href = uri;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  try {
+    a.click();
+  } finally {
+    a.remove();
+  }
 }
 
 export function Connect(props: { host: Host; addresses: readonly Address[] }) {
   const saved = untrack(() => read(props.host.id));
-  const targets = () => connectTargets(props.host, props.addresses);
-  const [target, setTarget] = createSignal(saved.target ?? "");
-  const [rdpPort, setRdpPort] = createSignal(saved.rdpPort ?? 3389);
-  const [sshPort, setSshPort] = createSignal(saved.sshPort ?? 22);
+  const [rdpPort, setRdpPort] = createSignal(saved.rdpPort ?? RDP_PORT);
+  const [sshPort, setSshPort] = createSignal(saved.sshPort ?? SSH_PORT);
   const [user, setUser] = createSignal(saved.user ?? "");
-  const current = () => (target() && targets().includes(target()) ? target() : (targets()[0] ?? props.host.name));
-  const store = () => remember(props.host.id, { rdpPort: rdpPort(), sshPort: sshPort(), user: user(), target: current() });
+  const [busy, setBusy] = createSignal<string | null>(null);
+  const store = () => remember(props.host.id, { rdpPort: rdpPort(), sshPort: sshPort(), user: user() });
 
-  const downloadRdp = () => {
+  const query = (target: ConnectTarget, port: number, fallback: number) => ({
+    ...(target.address ? { address: target.address } : {}),
+    ...(port !== fallback ? { port } : {}),
+    ...(user().trim() ? { user: user().trim() } : {}),
+  });
+
+  const run = async (key: string, work: () => Promise<void>) => {
     store();
-    saveTextFile(rdpFileName(props.host.name), rdpFile({ address: current(), port: rdpPort(), username: user() || null }), RDP_MIME);
+    setBusy(key);
+    try {
+      await work();
+    } catch (err) {
+      toast({ kind: "bad", title: t("hosts.connect.failed"), body: errorMessage(err) });
+    } finally {
+      setBusy(null);
+    }
   };
-  const ssh = () => (isValidPort(sshPort()) ? sshUri({ host: current(), port: sshPort(), user: user() || null }) : undefined);
+
+  const rdp = (target: ConnectTarget) => {
+    const host = props.host;
+    const args = query(target, rdpPort(), RDP_PORT);
+    void run(`rdp:${target.label}`, async () => {
+      const text = await remoteRdp(host.id, args);
+      saveTextFile(rdpFileName(host.name), text, RDP_MIME);
+    });
+  };
+
+  const ssh = (target: ConnectTarget) => {
+    const host = props.host;
+    const args = query(target, sshPort(), SSH_PORT);
+    void run(`ssh:${target.label}`, async () => {
+      const answer = await remoteSsh(host.id, args);
+      openUri(answer.uri);
+    });
+  };
 
   return (
     <div class="connect" data-testid="host-connect">
+      <ul class="plain-list connect-targets" aria-label={t("hosts.connect.target")}>
+        <For each={connectTargets(props.host, props.addresses)}>
+          {(target) => (
+            <li class="connect-row" data-testid="remote-target" data-key={target.address ?? props.host.name}>
+              <span class="connect-name">
+                <span class="mono">{target.label}</span>
+                {target.ip && target.ip !== target.label ? (
+                  <span class="muted">
+                    {" "}
+                    <Addr value={target.ip} />
+                  </span>
+                ) : null}
+              </span>
+              <button
+                type="button"
+                class="btn sm"
+                data-testid="host-rdp"
+                data-key={target.address ?? props.host.name}
+                disabled={!isValidPort(rdpPort()) || busy() !== null}
+                onClick={() => rdp(target)}
+              >
+                <Icon name="rdp" />
+                {t("hosts.connect.rdp")}
+              </button>
+              <button
+                type="button"
+                class="btn sm"
+                data-testid="host-ssh"
+                data-key={target.address ?? props.host.name}
+                disabled={!isValidPort(sshPort()) || busy() !== null}
+                onClick={() => ssh(target)}
+              >
+                <Icon name="terminal" />
+                {t("hosts.connect.ssh")}
+              </button>
+            </li>
+          )}
+        </For>
+      </ul>
       <div class="form-row">
         <div class="field">
-          <label for="connect-target">{t("hosts.connect.target")}</label>
-          <select id="connect-target" class="select mono" value={current()} onChange={(e) => setTarget(e.currentTarget.value)}>
-            <For each={targets()}>{(x) => <option value={x}>{x}</option>}</For>
-          </select>
-        </div>
-        <div class="field">
           <label for="connect-user">{t("hosts.connect.user")}</label>
-          <input id="connect-user" class="input mono" value={user()} spellcheck={false} onInput={(e) => setUser(e.currentTarget.value)} />
+          <input
+            id="connect-user"
+            class="input mono"
+            value={user()}
+            spellcheck={false}
+            placeholder={t("hosts.connect.user_placeholder")}
+            onInput={(e) => setUser(e.currentTarget.value)}
+          />
         </div>
         <div class="field">
           <label for="connect-rdp-port">{t("hosts.connect.rdp_port")}</label>
@@ -98,29 +199,7 @@ export function Connect(props: { host: Host; addresses: readonly Address[] }) {
           />
         </div>
       </div>
-      <div class="form-row">
-        <button type="button" class="btn" data-testid="host-rdp" disabled={!isValidPort(rdpPort())} onClick={downloadRdp}>
-          <Icon name="rdp" />
-          {t("hosts.connect.rdp")}
-        </button>
-        <Show
-          when={ssh()}
-          fallback={
-            <button type="button" class="btn" disabled>
-              <Icon name="terminal" />
-              {t("hosts.connect.ssh")}
-            </button>
-          }
-        >
-          {(uri) => (
-            <a class="btn" href={uri()} data-testid="host-ssh" onClick={store}>
-              <Icon name="terminal" />
-              {t("hosts.connect.ssh")}
-            </a>
-          )}
-        </Show>
-        <span class="muted">{t("hosts.connect.hint")}</span>
-      </div>
+      <p class="muted">{t("hosts.connect.hint")}</p>
     </div>
   );
 }

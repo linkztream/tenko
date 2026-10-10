@@ -332,7 +332,7 @@ Access is object-scoped, and authentication strength follows the security profil
 | IAM-13 | Kerberos SPNEGO, which is expected in AD environments. | 5 | Should |
 | IAM-14 | SCIM provisioning. | 5 | Could |
 | IAM-15 | Vault with envelope encryption: a DEK per secret, with the KEK taken from the OS key store (DPAPI on Windows, TPM or keyring on Linux). | 1 | Must |
-| IAM-16 | Vault handling: rotation, zeroization in memory and audit on every reveal. The vault holds TSIG keys, failover secrets, SNMPv3 credentials, DDNS credentials and connector credentials. | 1 | Must |
+| IAM-16 | Vault handling: rotation, zeroization in memory and audit on every reveal. The vault holds TSIG keys, failover secrets, SNMPv3 credentials, DDNS credentials, connector credentials and host credentials. Operator secrets are first-class objects (name, kind, purpose tags, optional user name, notes) bound to hosts by role and referenced by connectors by purpose; a reveal returns the value once to a person with an interactive session of password strength or stronger under the reveal policy (TGL-24), is rate limited, and is audited with the principal, the secret, the host and the reason, never the value. | 1 | Must |
 | IAM-17 | External KEK providers: PKCS#11, cloud KMS and an external secrets manager (for example HashiCorp Vault). | 5 | Should |
 | IAM-18 | Audit log: immutable and hash-chained, with export to syslog, CEF and JSON. | 1 | Must |
 | IAM-19 | Admin action attribution: every change is attributable to an authenticated principal. | 1 | Must |
@@ -388,7 +388,7 @@ The REST API is the only interface the UI uses. This section also holds product-
 | API-08 | UI: keyboard-driven bulk grids, live updates via SSE, dark mode and WCAG accessibility. Localized: Swedish and English are built in; the UI language follows the browser Accept-Language header, falls back to English, can be fixed per user account, and an administrator can set the installation default. Logs, CLI output and API error texts stay in English; API errors carry stable codes that the UI translates. | 1 | Must |
 | API-09 | Change UI: multiselect and drag and drop, a preview before every apply, a job panel with per-item status, and undo where possible. | 1 | Must |
 | API-10 | First-run wizard with security profile selection (Home, Standard, Hardened, Lab). Insecure settings are loudly visible in the UI. | 1 | Must |
-| API-11 | RDP/SSH handoff: the host view produces an `.rdp` file or an `ssh://` URI with host, port and user, and the password is copied to the clipboard from the vault, with audit. | 1 | Must |
+| API-11 | RDP/SSH handoff: the host view produces an `.rdp` file or an `ssh://` URI with host, port and user, and the password is copied to the clipboard from the vault, with audit. Neither the `.rdp` file nor the URI carries a secret; the host view offers both next to each interface address. | 1 | Must |
 | API-12 | HTML5 RDP/SSH gateway as an opt-in module: credential injection, session recording and just-in-time access. | 5 | Could |
 | API-13 | Code, comments and documentation are in English, and the repository is written as if public: no secrets in the repository (`.env.example` instead), test data from documentation ranges only (RFC 5737, RFC 3849, the RFC 7042 MAC range and RFC 2606 names; see CONFORMANCE.md), license headers empty until the license decision (API-20). | 0 | Must |
 | API-14 | CI gates: clippy (pedantic), tests, cargo-deny (licenses, advisories, duplicates), cargo-audit (failing) and fuzz smoke. | 0 | Must |

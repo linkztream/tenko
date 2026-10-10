@@ -20,8 +20,10 @@
 //!   with an audit draft; plaintext never enters a batch (ADR 0011 decision 10).
 //! - Classes (Q3, accepted): [`SecretClass::System`] secrets (TOTP seeds, CA and TLS keys)
 //!   are used by Tenko and never revealed; [`SecretClass::Operator`] secrets (connector
-//!   credentials, Slice 2) are revealable with an audit record. Only operator secrets
-//!   count for the PIN coupling rule (IAM-07): see [`Vault::has_operator_secrets`].
+//!   credentials, host credentials, imported logins) are revealable with an audit record.
+//!   Only operator secrets count for the PIN coupling rule (IAM-07): see
+//!   [`Vault::has_operator_secrets`]. Their metadata, host bindings and reveal stamps are
+//!   the model of [`operator`] (WP2.1).
 //! - Plaintext is held in [`SecretBytes`], which zeroizes on drop and never prints.
 //!
 //! # Use
@@ -47,6 +49,7 @@
 pub mod envelope;
 pub mod error;
 pub mod kek;
+pub mod operator;
 mod secret;
 mod store_vault;
 #[cfg(any(test, feature = "testing"))]
@@ -56,7 +59,7 @@ pub use error::VaultError;
 #[cfg(any(test, feature = "testing"))]
 pub use kek::MemKek;
 pub use kek::{DataKey, KekConfig, KekInit, KekProtection, KekProvider, KekRing, KekSealer};
-pub use secret::{SecretBytes, SecretMeta, SecretPurpose, SecretSpec};
+pub use secret::{RevealAudit, SecretBytes, SecretMeta, SecretPurpose, SecretSpec};
 pub use store_vault::{KEK_EPOCH, KekRotation, StoreVault, actions, tables};
 pub use tenko_core::secret::{SecretClass, SecretRef, VaultEnvelope};
 #[cfg(any(test, feature = "testing"))]
@@ -81,8 +84,9 @@ pub const MAX_SECRET_LEN: usize = 64 * 1024;
 /// Writes produce one write batch each, with an audit draft that names the secret but
 /// never its value. Reads decrypt on every call; nothing is cached in plaintext.
 ///
-/// Authorization is the caller's job: the API checks [`Action::Reveal`] before calling
-/// [`reveal`](Vault::reveal), and Slice 2 adds the IAM-07 gate (WP2.1).
+/// Authorization is the caller's job: the API checks [`Action::Reveal`], the PIN coupling
+/// rule (IAM-07) and the reveal policy (TGL-24) before calling
+/// [`reveal_with`](Vault::reveal_with) through [`operator::OperatorSecrets`].
 ///
 /// [`Action::Reveal`]: tenko_core::Action::Reveal
 #[async_trait::async_trait]
@@ -135,6 +139,23 @@ pub trait Vault: Send + Sync + 'static {
     /// [`VaultError::NotRevealable`], [`VaultError::NotFound`], a decryption failure, or
     /// the store's error (no value is returned when the audit record cannot be written).
     async fn reveal(&self, ctx: &RequestCtx, secret: SecretRef) -> Result<SecretBytes, VaultError>;
+
+    /// Reveals an operator secret as [`reveal`](Vault::reveal) does, and commits `batch`
+    /// (the caller's own rows, such as a last-revealed stamp) in the same write as the
+    /// audit record of the reveal, which also names `audit.objects` and carries
+    /// `audit.context` (the host, the reason). The value is returned only after that write
+    /// committed; a failed or refused reveal is audited with the same context.
+    ///
+    /// # Errors
+    ///
+    /// As [`reveal`](Vault::reveal), plus the store's precondition failure of `batch`.
+    async fn reveal_with(
+        &self,
+        ctx: &RequestCtx,
+        secret: SecretRef,
+        batch: WriteBatch,
+        audit: RevealAudit,
+    ) -> Result<SecretBytes, VaultError>;
 
     /// Re-encrypts a secret under a fresh DEK wrapped by the active KEK.
     ///
@@ -204,6 +225,25 @@ pub trait Vault: Send + Sync + 'static {
 
     /// Adds the deletion of a secret and an audit draft to the caller's batch.
     fn stage_delete(&self, batch: &mut WriteBatch, ctx: &RequestCtx, secret: SecretRef);
+
+    /// Encrypts a new value of an existing secret under a fresh DEK and adds the write, a
+    /// version precondition on the current envelope, the new `updated_at` of its metadata
+    /// and an audit draft (`vault.secret.replace`) to the caller's batch, so the value
+    /// changes atomically with the caller's own rows. Reads (and opens) the current
+    /// envelope for its class and DEK generation; the batch expects the current
+    /// [`KEK_EPOCH`] as [`stage_put`](Vault::stage_put) does.
+    ///
+    /// # Errors
+    ///
+    /// [`VaultError::NotFound`], [`VaultError::TooLarge`], a decryption or KEK failure, or
+    /// the store's error.
+    async fn stage_replace(
+        &self,
+        batch: &mut WriteBatch,
+        ctx: &RequestCtx,
+        secret: SecretRef,
+        value: &SecretBytes,
+    ) -> Result<(), VaultError>;
 }
 
 #[cfg(test)]

@@ -34,6 +34,9 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   // The updates page, the release notes dialog and the page of a module that is switched off
   // (OPS-24, OPS-25), and the error texts of the update endpoints.
   updates: ["updates.", "errors.update.", "errors.upgrade."],
+  // Operator secrets: the secrets page, the reveal dialog (also on the host page) and the
+  // error texts of the vault and remote hand-off endpoints (WP2.1).
+  secrets: ["secrets.", "errors.vault.", "errors.remote."],
 };
 
 export default defineConfig(({ command, mode }) => {

@@ -1628,7 +1628,7 @@
         <segment><source>Security settings</source></segment>
       </unit>
       <unit id="settings.security.toggles.range">
-        <segment><source>TGL-01 to TGL-07 and TGL-23</source></segment>
+        <segment><source>TGL-01 to TGL-07, TGL-23 and TGL-24</source></segment>
       </unit>
       <unit id="settings.security.toggles.table">
         <segment><source>Security settings and their values</source></segment>
@@ -7097,6 +7097,584 @@
       </unit>
       <unit id="errors.upgrade.marker_invalid">
         <segment><source>The upgrade marker in the data directory is not valid.</source></segment>
+      </unit>
+    </group>
+    <group id="secrets-reveal">
+      <unit id="secrets.reveal.title">
+        <notes><note category="description">Title of the reveal dialog. Argument: name is the name of the secret.</note></notes>
+        <segment><source>Reveal {name}</source></segment>
+      </unit>
+      <unit id="secrets.reveal.working">
+        <segment><source>Revealing the secret and writing the audit record.</source></segment>
+      </unit>
+      <unit id="secrets.reveal.copied">
+        <notes><note category="description">Shown after the value was copied. Argument: seconds until the clipboard is cleared.</note></notes>
+        <segment><source>{seconds, plural, one {Copied to the clipboard. The clipboard is cleared in # second.} other {Copied to the clipboard. The clipboard is cleared in # seconds.}}</source></segment>
+      </unit>
+      <unit id="secrets.reveal.cleared">
+        <segment><source>The clipboard was cleared. The reveal stays in the audit log.</source></segment>
+      </unit>
+      <unit id="secrets.reveal.left">
+        <segment><source>The clipboard holds something else now, so it was left as it is.</source></segment>
+      </unit>
+      <unit id="secrets.reveal.clear_failed">
+        <segment><source>The browser did not allow clearing the clipboard. Copy something else to remove the value.</source></segment>
+      </unit>
+      <unit id="secrets.reveal.copy_blocked">
+        <segment><source>The browser did not allow copying. Press Copy to try again, or show the value.</source></segment>
+      </unit>
+      <unit id="secrets.reveal.copy">
+        <segment><source>Copy</source></segment>
+      </unit>
+      <unit id="secrets.reveal.username">
+        <segment><source>User name</source></segment>
+      </unit>
+      <unit id="secrets.reveal.value">
+        <segment><source>Value</source></segment>
+      </unit>
+      <unit id="secrets.reveal.hidden">
+        <segment><source>Hidden</source></segment>
+      </unit>
+      <unit id="secrets.reveal.show">
+        <segment><source>Show value</source></segment>
+      </unit>
+      <unit id="secrets.reveal.hide">
+        <segment><source>Hide value</source></segment>
+      </unit>
+      <unit id="secrets.reveal.audit">
+        <notes><note category="description">Arguments: user is the login name, time the date and time of the reveal.</note></notes>
+        <segment><source>This reveal is in the audit log as {user}, {time}.</source></segment>
+      </unit>
+      <unit id="secrets.reveal.stepup.title">
+        <segment><source>Sign in again</source></segment>
+      </unit>
+      <unit id="secrets.reveal.stepup.fresh">
+        <segment><source>Revealing a secret needs a sign-in within the last five minutes.</source></segment>
+      </unit>
+      <unit id="secrets.reveal.stepup.passkey">
+        <segment><source>Revealing a secret needs a sign-in with a passkey or security key within the last five minutes.</source></segment>
+      </unit>
+      <unit id="secrets.reveal.stepup.password">
+        <segment><source>This session was signed in with a PIN. Revealing a secret needs a password, a second factor or a passkey.</source></segment>
+      </unit>
+      <unit id="secrets.reveal.stepup.password_label">
+        <notes><note category="description">Argument: user is the login name of the signed-in person.</note></notes>
+        <segment><source>Password of {user}</source></segment>
+      </unit>
+      <unit id="secrets.reveal.stepup.code_label">
+        <segment><source>Code from the authenticator app</source></segment>
+      </unit>
+      <unit id="secrets.reveal.stepup.continue">
+        <segment><source>Sign in and reveal</source></segment>
+      </unit>
+      <unit id="secrets.reveal.stepup.with_passkey">
+        <segment><source>Sign in with a passkey</source></segment>
+      </unit>
+      <unit id="errors.vault.secret.not_found">
+        <segment><source>The secret does not exist (any more).</source></segment>
+      </unit>
+      <unit id="errors.vault.secret.invalid">
+        <notes><note category="description">Argument: field is the name of the field.</note></notes>
+        <segment><source>A value is not valid: {field}.</source></segment>
+      </unit>
+      <unit id="errors.vault.secret.conflict">
+        <segment><source>The secret was changed by someone else. Reload and try again.</source></segment>
+      </unit>
+      <unit id="errors.vault.secret.in_use">
+        <segment><source>The secret is still used by {hosts, plural, one {# host} other {# hosts}} and {connectors, plural, one {# connector} other {# connectors}}. Remove those uses first.</source></segment>
+      </unit>
+      <unit id="errors.vault.secret.too_large">
+        <segment><source>The value is larger than 64 KiB.</source></segment>
+      </unit>
+      <unit id="errors.vault.secret.not_text">
+        <segment><source>The stored value is not text and cannot be shown.</source></segment>
+      </unit>
+      <unit id="errors.vault.secret.not_revealable">
+        <segment><source>This secret is used by Tenko itself and is never shown.</source></segment>
+      </unit>
+      <unit id="errors.vault.pin_coupling">
+        <notes><note category="description">Argument: accounts is a comma-separated list of login names.</note></notes>
+        <segment><source>The vault takes secrets only when every account that may reveal them has more than a PIN. Accounts with a PIN alone: {accounts}.</source></segment>
+      </unit>
+      <unit id="errors.vault.reveal.host_required">
+        <segment><source>The security profile reveals secrets only on the page of a host they are bound to.</source></segment>
+      </unit>
+      <unit id="errors.vault.reveal.not_bound">
+        <segment><source>The secret is not bound to this host.</source></segment>
+      </unit>
+      <unit id="errors.vault.reveal.rate_limited">
+        <notes><note category="description">Argument: retry_after is a number of seconds.</note></notes>
+        <segment><source>Too many reveals. Try again in {retry_after} seconds.</source></segment>
+      </unit>
+      <unit id="errors.vault.host_credentials.conflict">
+        <segment><source>The credentials of the host were changed by someone else. Reload and try again.</source></segment>
+      </unit>
+      <unit id="errors.vault.host_credentials.secret_missing">
+        <segment><source>One of the secrets does not exist (any more).</source></segment>
+      </unit>
+      <unit id="errors.remote.address_unknown">
+        <segment><source>The address does not belong to this host.</source></segment>
+      </unit>
+      <unit id="errors.remote.interface_unknown">
+        <segment><source>The interface does not belong to this host.</source></segment>
+      </unit>
+    </group>
+    <group id="toggles-secret-reveal">
+      <unit id="toggles.secret_reveal.name">
+        <notes><note category="description">Name of the toggle TGL-24: what revealing an operator secret takes.</note></notes>
+        <segment><source>Secret reveal</source></segment>
+      </unit>
+      <unit id="toggles.secret_reveal.value">
+        <notes><note category="description">How the value of TGL-24 reads. Arguments: step_up is the words about the sign-in a reveal needs, bound is yes when only secrets bound to the host in view can be revealed and no otherwise.</note></notes>
+        <segment><source>{bound, select, yes {{step_up}, only secrets bound to the host in view} other {{step_up}}}</source></segment>
+      </unit>
+      <unit id="toggles.secret_reveal.step_up.session">
+        <segment><source>Signed-in session</source></segment>
+      </unit>
+      <unit id="toggles.secret_reveal.step_up.fresh">
+        <segment><source>Sign-in within 5 minutes</source></segment>
+      </unit>
+      <unit id="toggles.secret_reveal.step_up.passkey">
+        <segment><source>Passkey sign-in within 5 minutes</source></segment>
+      </unit>
+      <unit id="settings.security.secret_reveal.step_up">
+        <notes><note category="description">Label of the choice of sign-in that revealing an operator secret needs (TGL-24).</note></notes>
+        <segment><source>Sign-in needed to reveal a secret</source></segment>
+      </unit>
+      <unit id="settings.security.secret_reveal.step_up_session">
+        <segment><source>The signed-in session</source></segment>
+      </unit>
+      <unit id="settings.security.secret_reveal.step_up_session_help">
+        <segment><source>A session that is signed in with a password or something stronger is enough.</source></segment>
+      </unit>
+      <unit id="settings.security.secret_reveal.step_up_fresh">
+        <segment><source>A recent sign-in</source></segment>
+      </unit>
+      <unit id="settings.security.secret_reveal.step_up_fresh_help">
+        <segment><source>The person must have signed in within the last five minutes.</source></segment>
+      </unit>
+      <unit id="settings.security.secret_reveal.step_up_passkey">
+        <segment><source>A recent sign-in with a passkey or security key</source></segment>
+      </unit>
+      <unit id="settings.security.secret_reveal.step_up_passkey_help">
+        <segment><source>The person must have signed in with a passkey or security key within the last five minutes.</source></segment>
+      </unit>
+      <unit id="settings.security.secret_reveal.bound_host">
+        <segment><source>Only for the host in view</source></segment>
+      </unit>
+      <unit id="settings.security.secret_reveal.bound_host_hint">
+        <segment><source>A secret can be revealed only on the page of the host it is bound to. The secrets page cannot reveal it.</source></segment>
+      </unit>
+      <unit id="settings.security.secret_reveal.pin_rule">
+        <segment><source>Whatever you choose here, a session of PIN strength never reveals a secret, and personal API tokens never do.</source></segment>
+      </unit>
+    </group>
+    <group id="hosts-credentials">
+      <unit id="hosts.connect.failed">
+        <segment><source>The connection file could not be made</source></segment>
+      </unit>
+      <unit id="hosts.connect.user_placeholder">
+        <notes><note category="description">Placeholder of the user name field: empty means the user name of the credential bound to the host.</note></notes>
+        <segment><source>From the bound credential</source></segment>
+      </unit>
+      <unit id="hosts.credentials.title">
+        <segment><source>Credentials</source></segment>
+      </unit>
+      <unit id="hosts.credentials.bind">
+        <segment><source>Bind credential</source></segment>
+      </unit>
+      <unit id="hosts.credentials.bind_title">
+        <notes><note category="description">Argument: host is the host name.</note></notes>
+        <segment><source>Bind a credential to {host}</source></segment>
+      </unit>
+      <unit id="hosts.credentials.bound">
+        <segment><source>Credential bound</source></segment>
+      </unit>
+      <unit id="hosts.credentials.unbind">
+        <segment><source>Unbind</source></segment>
+      </unit>
+      <unit id="hosts.credentials.unbind_label">
+        <notes><note category="description">Accessible name of the unbind button. Argument: name of the secret.</note></notes>
+        <segment><source>Unbind {name}</source></segment>
+      </unit>
+      <unit id="hosts.credentials.unbind_title">
+        <segment><source>Unbind {name}?</source></segment>
+      </unit>
+      <unit id="hosts.credentials.unbind_body">
+        <segment><source>The secret {name} stays in the vault; only its binding to {host} goes.</source></segment>
+      </unit>
+      <unit id="hosts.credentials.unbound">
+        <segment><source>{name} is no longer bound to this host</source></segment>
+      </unit>
+      <unit id="hosts.credentials.unbind_failed">
+        <segment><source>The credential could not be unbound</source></segment>
+      </unit>
+      <unit id="hosts.credentials.empty">
+        <segment><source>No credentials are bound to this host.</source></segment>
+      </unit>
+      <unit id="hosts.credentials.col.name">
+        <segment><source>Secret</source></segment>
+      </unit>
+      <unit id="hosts.credentials.col.role">
+        <segment><source>Role</source></segment>
+      </unit>
+      <unit id="hosts.credentials.col.user">
+        <segment><source>User name</source></segment>
+      </unit>
+      <unit id="hosts.credentials.col.revealed">
+        <segment><source>Last revealed</source></segment>
+      </unit>
+      <unit id="hosts.credentials.col.actions">
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="hosts.credentials.revealed_by">
+        <notes><note category="description">Who revealed the secret last and when. Arguments: user is the login name, when a relative time.</note></notes>
+        <segment><source>{user}, {when}</source></segment>
+      </unit>
+      <unit id="hosts.credentials.never_revealed">
+        <segment><source>Never</source></segment>
+      </unit>
+      <unit id="hosts.credentials.copy">
+        <segment><source>Copy password</source></segment>
+      </unit>
+      <unit id="hosts.credentials.audit_hint">
+        <segment><source>Reveals are audited: your name and the time go to the audit log.</source></segment>
+      </unit>
+      <unit id="hosts.credentials.none_free">
+        <segment><source>Every operator secret is bound to this host already, or there are none.</source></segment>
+      </unit>
+      <unit id="hosts.credentials.manage">
+        <segment><source>Manage secrets</source></segment>
+      </unit>
+      <unit id="hosts.credentials.field.secret">
+        <segment><source>Secret</source></segment>
+      </unit>
+      <unit id="hosts.credentials.field.role">
+        <segment><source>Role on this host</source></segment>
+      </unit>
+      <unit id="hosts.credentials.option">
+        <notes><note category="description">A secret in the list. Arguments: name of the secret, user its user name.</note></notes>
+        <segment><source>{name} ({user})</source></segment>
+      </unit>
+      <unit id="hosts.credentials.role.admin">
+        <segment><source>Administration</source></segment>
+      </unit>
+      <unit id="hosts.credentials.role.rdp">
+        <segment><source>Remote desktop</source></segment>
+      </unit>
+      <unit id="hosts.credentials.role.ssh">
+        <segment><source>SSH</source></segment>
+      </unit>
+      <unit id="hosts.credentials.role.web">
+        <segment><source>Web interface</source></segment>
+      </unit>
+      <unit id="hosts.credentials.role.other">
+        <segment><source>Other</source></segment>
+      </unit>
+    </group>
+    <group id="settings-secrets">
+      <unit id="settings.nav.secrets">
+        <notes><note category="description">Link in the settings navigation to the operator secrets page.</note></notes>
+        <segment><source>Secrets</source></segment>
+      </unit>
+    </group>
+    <group id="secrets">
+      <unit id="secrets.title">
+        <notes><note category="description">Title of the operator secrets page.</note></notes>
+        <segment><source>Secrets</source></segment>
+      </unit>
+      <unit id="secrets.count">
+        <notes><note category="description">Count next to the page title. Argument: count is the number of secrets.</note></notes>
+        <segment><source>{count, plural, one {# secret} other {# secrets}}</source></segment>
+      </unit>
+      <unit id="secrets.count_filtered">
+        <notes><note category="description">Count while a filter is active. Arguments: shown is the number of matches, total the number of secrets.</note></notes>
+        <segment><source>{shown} of {total, plural, one {# secret} other {# secrets}}</source></segment>
+      </unit>
+      <unit id="shell.command.secrets">
+        <notes><note category="description">Command palette entry that opens the operator secrets page.</note></notes>
+        <segment><source>Secrets</source></segment>
+      </unit>
+      <unit id="secrets.no_access.title">
+        <segment><source>No secrets for your role</source></segment>
+      </unit>
+      <unit id="secrets.no_access.body">
+        <segment><source>Your role shows no secrets. Operators and administrators can see and reveal them.</source></segment>
+      </unit>
+      <unit id="secrets.filter.label">
+        <segment><source>Filter secrets</source></segment>
+      </unit>
+      <unit id="secrets.filter.placeholder">
+        <segment><source>Name, user name or tag</source></segment>
+      </unit>
+      <unit id="secrets.filter.kind">
+        <segment><source>Kind</source></segment>
+      </unit>
+      <unit id="secrets.filter.kind_all">
+        <segment><source>All kinds</source></segment>
+      </unit>
+      <unit id="secrets.empty">
+        <segment><source>There are no secrets yet.</source></segment>
+      </unit>
+      <unit id="secrets.empty_admin">
+        <segment><source>There are no secrets yet. Use New secret to store the first one.</source></segment>
+      </unit>
+      <unit id="secrets.no_match">
+        <segment><source>No secret matches the filter.</source></segment>
+      </unit>
+      <unit id="secrets.col.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="secrets.col.kind">
+        <segment><source>Kind</source></segment>
+      </unit>
+      <unit id="secrets.col.user">
+        <segment><source>User name</source></segment>
+      </unit>
+      <unit id="secrets.col.tags">
+        <segment><source>Tags</source></segment>
+      </unit>
+      <unit id="secrets.col.hosts">
+        <segment><source>Hosts</source></segment>
+      </unit>
+      <unit id="secrets.col.revealed">
+        <segment><source>Last reveal</source></segment>
+      </unit>
+      <unit id="secrets.col.updated">
+        <segment><source>Updated</source></segment>
+      </unit>
+      <unit id="secrets.col.actions">
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="secrets.kind.password">
+        <segment><source>Password</source></segment>
+      </unit>
+      <unit id="secrets.kind.api_key">
+        <segment><source>API key</source></segment>
+      </unit>
+      <unit id="secrets.kind.ssh_key">
+        <segment><source>SSH key</source></segment>
+      </unit>
+      <unit id="secrets.kind.token">
+        <segment><source>Token</source></segment>
+      </unit>
+      <unit id="secrets.kind.other">
+        <segment><source>Other</source></segment>
+      </unit>
+      <unit id="secrets.origin.manual">
+        <segment><source>Entered by hand</source></segment>
+      </unit>
+      <unit id="secrets.origin.import">
+        <segment><source>Import</source></segment>
+      </unit>
+      <unit id="secrets.role.admin">
+        <segment><source>Administration</source></segment>
+      </unit>
+      <unit id="secrets.role.rdp">
+        <segment><source>Remote desktop</source></segment>
+      </unit>
+      <unit id="secrets.role.ssh">
+        <segment><source>SSH</source></segment>
+      </unit>
+      <unit id="secrets.role.web">
+        <segment><source>Web interface</source></segment>
+      </unit>
+      <unit id="secrets.role.other">
+        <segment><source>Other</source></segment>
+      </unit>
+      <unit id="secrets.revealed_by">
+        <notes><note category="description">Last reveal in the list. Arguments: user is the login name, when is a relative time such as 5 minutes ago.</note></notes>
+        <segment><source>{user}, {when}</source></segment>
+      </unit>
+      <unit id="secrets.no_user">
+        <notes><note category="description">Accessible text of the dash shown when a secret has no user name.</note></notes>
+        <segment><source>No user name</source></segment>
+      </unit>
+      <unit id="secrets.action.create">
+        <segment><source>New secret</source></segment>
+      </unit>
+      <unit id="secrets.action.reveal">
+        <segment><source>Reveal</source></segment>
+      </unit>
+      <unit id="secrets.action.edit">
+        <segment><source>Edit</source></segment>
+      </unit>
+      <unit id="secrets.action.replace">
+        <segment><source>Replace value</source></segment>
+      </unit>
+      <unit id="secrets.action.delete">
+        <segment><source>Delete</source></segment>
+      </unit>
+      <unit id="secrets.action.reveal_named">
+        <notes><note category="description">Accessible name of the Reveal button of a row. Argument: name is the name of the secret.</note></notes>
+        <segment><source>Reveal {name}</source></segment>
+      </unit>
+      <unit id="secrets.action.edit_named">
+        <segment><source>Edit {name}</source></segment>
+      </unit>
+      <unit id="secrets.action.replace_named">
+        <segment><source>Replace the value of {name}</source></segment>
+      </unit>
+      <unit id="secrets.action.delete_named">
+        <segment><source>Delete {name}</source></segment>
+      </unit>
+      <unit id="secrets.detail.label">
+        <segment><source>Details of {name}</source></segment>
+      </unit>
+      <unit id="secrets.detail.close">
+        <segment><source>Close details</source></segment>
+      </unit>
+      <unit id="secrets.detail.back">
+        <segment><source>Back to the list</source></segment>
+      </unit>
+      <unit id="secrets.field.notes">
+        <segment><source>Notes</source></segment>
+      </unit>
+      <unit id="secrets.field.origin">
+        <segment><source>Origin</source></segment>
+      </unit>
+      <unit id="secrets.field.created">
+        <segment><source>Created</source></segment>
+      </unit>
+      <unit id="secrets.field.value_updated">
+        <segment><source>Value updated</source></segment>
+      </unit>
+      <unit id="secrets.refs.title">
+        <segment><source>Where it is used</source></segment>
+      </unit>
+      <unit id="secrets.refs.hosts">
+        <segment><source>Hosts</source></segment>
+      </unit>
+      <unit id="secrets.refs.connectors">
+        <segment><source>Connector instances</source></segment>
+      </unit>
+      <unit id="secrets.refs.none">
+        <segment><source>No host and no connector uses this secret.</source></segment>
+      </unit>
+      <unit id="secrets.refs.deleted">
+        <segment><source>Deleted</source></segment>
+      </unit>
+      <unit id="secrets.refs.unknown_host">
+        <segment><source>Unknown host</source></segment>
+      </unit>
+      <unit id="secrets.refs.role">
+        <notes><note category="description">Argument: role is the role of the credential on the host, for example Administration.</note></notes>
+        <segment><source>Role: {role}</source></segment>
+      </unit>
+      <unit id="secrets.refs.connector">
+        <notes><note category="description">A connector instance that uses the secret. Arguments: plugin is the plugin, purpose is the purpose the secret serves.</note></notes>
+        <segment><source>{plugin}, purpose {purpose}</source></segment>
+      </unit>
+      <unit id="secrets.form.create_title">
+        <segment><source>New secret</source></segment>
+      </unit>
+      <unit id="secrets.form.edit_title">
+        <segment><source>Edit {name}</source></segment>
+      </unit>
+      <unit id="secrets.form.create_submit">
+        <segment><source>Create secret</source></segment>
+      </unit>
+      <unit id="secrets.form.edit_submit">
+        <segment><source>Save changes</source></segment>
+      </unit>
+      <unit id="secrets.form.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="secrets.form.name_help">
+        <segment><source>1 to 128 characters. Names do not have to be unique.</source></segment>
+      </unit>
+      <unit id="secrets.form.kind">
+        <segment><source>Kind</source></segment>
+      </unit>
+      <unit id="secrets.form.username">
+        <segment><source>User name</source></segment>
+      </unit>
+      <unit id="secrets.form.username_help">
+        <segment><source>The account the secret belongs to. Optional.</source></segment>
+      </unit>
+      <unit id="secrets.form.tags">
+        <segment><source>Tags</source></segment>
+      </unit>
+      <unit id="secrets.form.tags_help">
+        <segment><source>Separate tags with commas. Use lower case letters, digits, dots, underscores and hyphens. A connector offers the secrets whose tags match its purpose.</source></segment>
+      </unit>
+      <unit id="secrets.form.notes">
+        <segment><source>Notes</source></segment>
+      </unit>
+      <unit id="secrets.form.notes_help">
+        <segment><source>Notes are not secret. Everyone who can see this secret can read them, so never put a value here.</source></segment>
+      </unit>
+      <unit id="secrets.form.value">
+        <segment><source>Value</source></segment>
+      </unit>
+      <unit id="secrets.form.value_help">
+        <segment><source>Stored encrypted. It can be read again only through Reveal, and every reveal is audited.</source></segment>
+      </unit>
+      <unit id="secrets.form.value_cleared">
+        <segment><source>The value was cleared after the request. Enter it again to try again.</source></segment>
+      </unit>
+      <unit id="secrets.form.error.name_required">
+        <segment><source>Enter a name.</source></segment>
+      </unit>
+      <unit id="secrets.form.error.value_required">
+        <segment><source>Enter a value.</source></segment>
+      </unit>
+      <unit id="secrets.form.pin_title">
+        <segment><source>Secrets cannot be stored yet</source></segment>
+      </unit>
+      <unit id="secrets.form.reload">
+        <segment><source>Reload</source></segment>
+      </unit>
+      <unit id="secrets.form.reloaded">
+        <segment><source>The latest version has been loaded. Check it and try again.</source></segment>
+      </unit>
+      <unit id="secrets.replace.title">
+        <segment><source>Replace the value of {name}</source></segment>
+      </unit>
+      <unit id="secrets.replace.lead">
+        <segment><source>The new value replaces the stored one, and the old value cannot be recovered. Hosts and connectors that use the secret keep using it.</source></segment>
+      </unit>
+      <unit id="secrets.replace.field">
+        <segment><source>New value</source></segment>
+      </unit>
+      <unit id="secrets.replace.submit">
+        <segment><source>Replace value</source></segment>
+      </unit>
+      <unit id="secrets.delete.title">
+        <segment><source>Delete {name}</source></segment>
+      </unit>
+      <unit id="secrets.delete.body">
+        <segment><source>The secret {name} and its stored value are deleted for good. This cannot be undone.</source></segment>
+      </unit>
+      <unit id="secrets.delete.confirm">
+        <segment><source>Delete secret</source></segment>
+      </unit>
+      <unit id="secrets.delete.in_use_title">
+        <segment><source>{name} is in use</source></segment>
+      </unit>
+      <unit id="secrets.delete.in_use_lead">
+        <segment><source>A secret that is in use cannot be deleted. Unbind it from the following first, then delete it.</source></segment>
+      </unit>
+      <unit id="secrets.delete.in_use_hint">
+        <segment><source>Unbind a host on the page of that host. For a connector, choose another secret in the settings of the instance.</source></segment>
+      </unit>
+      <unit id="secrets.delete.check_failed">
+        <segment><source>Could not check what uses the secret</source></segment>
+      </unit>
+      <unit id="secrets.created">
+        <segment><source>Created {name}</source></segment>
+      </unit>
+      <unit id="secrets.saved">
+        <segment><source>Saved {name}</source></segment>
+      </unit>
+      <unit id="secrets.replaced">
+        <segment><source>Replaced the value of {name}</source></segment>
+      </unit>
+      <unit id="secrets.deleted">
+        <segment><source>Deleted {name}</source></segment>
+      </unit>
+      <unit id="secrets.form.value_key_help">
+        <segment><source>A key is shown while you type, so that its line breaks are kept. It is cleared from the form after saving.</source></segment>
       </unit>
     </group>
   </file>

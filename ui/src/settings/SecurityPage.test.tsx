@@ -1,12 +1,19 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
+import { api } from "../api/client";
 import { db } from "../api/mock/db";
+import { server } from "../api/mock/node";
+import { REVEAL_DEFAULT as MOCK_REVEAL_DEFAULT } from "../api/mock/reveal-policy";
+import { isApiError } from "../api/problem";
+import type { SettingsPatch } from "../api/types";
 import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
 import { session, setSessionForTest } from "../auth/session";
+import { PROFILE_DEFAULTS, valueOf } from "./profileMatrix";
 import SecurityPage from "./SecurityPage";
 import { SETTINGS_PATH, signInAs } from "./testkit";
-import { TOGGLES } from "./toggles";
+import { patchFor } from "./toggleEdit";
+import { formatToggle, REVEAL_DEFAULT, TOGGLES, weakerThan } from "./toggles";
 
 afterEach(() => setSessionForTest(null));
 
@@ -28,12 +35,12 @@ async function openEditor(name: string) {
 }
 
 describe("the security page", () => {
-  it("lists TGL-01 to TGL-07 and TGL-23 in order with the current and the profile value", async () => {
+  it("lists TGL-01 to TGL-07, TGL-23 and TGL-24 in order with the current and the profile value", async () => {
     await signInAs();
     await openPage();
     const ids = Array.from(document.querySelectorAll("tbody tr[data-toggle]")).map((r) => r.getAttribute("data-toggle"));
     expect(ids).toEqual(TOGGLES.map((d) => d.id));
-    expect(ids).toHaveLength(8);
+    expect(ids).toHaveLength(9);
     // The Standard profile: administrators need MFA, passwords are at least 12 characters.
     expect(within(row("TGL-02")).getAllByText("Required for administrators")).toHaveLength(2);
     expect(within(row("TGL-01")).getAllByText("Standard: at least 12 characters")).toHaveLength(2);
@@ -41,7 +48,7 @@ describe("the security page", () => {
     // Everything follows the profile: no deviation, no reset button, no banner.
     expect(screen.getByText("Every setting follows the profile.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Reset to profile/ })).toBeNull();
-    expect(screen.getByText(/of 23 settings are available/)).toBeTruthy();
+    expect(screen.getByText(/of 24 settings are available/)).toBeTruthy();
   });
 
   it("shows the profile with its description and how many settings differ", async () => {
@@ -208,11 +215,12 @@ describe("the security page", () => {
     expect(
       await within(dialog).findByText("Switching to Hardened resets every setting to the Hardened values."),
     ).toBeTruthy();
-    expect(within(dialog).getByText("8 settings change:")).toBeTruthy();
+    expect(within(dialog).getByText("9 settings change:")).toBeTruthy();
     const table = within(dialog).getByRole("table", { name: "Settings that change" });
     expect(within(table).getByText("Password policy preset")).toBeTruthy();
     expect(within(table).getByText("Lockout")).toBeTruthy();
     expect(within(table).getByText("Updates")).toBeTruthy();
+    expect(within(table).getByText("Secret reveal")).toBeTruthy();
     // The database has not changed before the confirmation.
     expect(db.settings.profile).toBe("standard");
 
@@ -450,6 +458,213 @@ describe("TGL-23: the update check and who may install", () => {
     await signInAs();
     await openPage();
     const dialog = await openEditor("Updates");
+    expect(await axeViolations(dialog)).toEqual([]);
+  });
+});
+
+describe("TGL-24: what revealing an operator secret takes", () => {
+  const STANDARD = "Sign-in within 5 minutes";
+  const HOME = "Signed-in session";
+  const HARDENED = "Passkey sign-in within 5 minutes, only secrets bound to the host in view";
+
+  afterEach(() => server.events.removeAllListeners());
+
+  /** The bodies of the PATCH requests of the settings, as they were sent. */
+  function recordPatches(): unknown[] {
+    const bodies: unknown[] = [];
+    server.events.on("request:start", ({ request }) => {
+      if (request.method === "PATCH" && new URL(request.url).pathname === "/api/v1/settings/security") {
+        void request
+          .clone()
+          .json()
+          .then((body: unknown) => bodies.push(body));
+      }
+    });
+    return bodies;
+  }
+
+  it("lists the toggle with the value of the profile and no deviation", async () => {
+    await signInAs();
+    await openPage();
+    const reveal = row("TGL-24");
+    expect(within(reveal).getByText("Secret reveal")).toBeTruthy();
+    expect(within(reveal).getAllByText(STANDARD)).toHaveLength(2);
+    expect(within(reveal).getByText("Follows the profile")).toBeTruthy();
+    expect(within(reveal).queryByRole("button", { name: /Reset to profile/ })).toBeNull();
+    expect(screen.getByText("TGL-01 to TGL-07, TGL-23 and TGL-24")).toBeTruthy();
+    expect(session()?.banner.deviations).toEqual([]);
+  });
+
+  it("has the four profile values of SECURITY-PROFILES.md in the matrix, in step with the mock", () => {
+    const matrix = Object.fromEntries(
+      (["home", "standard", "hardened", "lab"] as const).map((p) => [p, valueOf(PROFILE_DEFAULTS[p], "secret_reveal")]),
+    );
+    expect(matrix).toEqual({
+      home: { step_up: "session", bound_host_only: false },
+      standard: { step_up: "fresh", bound_host_only: false },
+      hardened: { step_up: "passkey", bound_host_only: true },
+      lab: { step_up: "session", bound_host_only: false },
+    });
+    expect(REVEAL_DEFAULT).toEqual(MOCK_REVEAL_DEFAULT);
+    expect(formatToggle("secret_reveal", matrix.home)).toBe(HOME);
+    expect(formatToggle("secret_reveal", matrix.standard)).toBe(STANDARD);
+    expect(formatToggle("secret_reveal", matrix.hardened)).toBe(HARDENED);
+    // No value is weaker than Home: the toggle never raises the banner.
+    for (const value of Object.values(matrix)) {
+      expect(weakerThan("secret_reveal", value, matrix.home)).toBe(false);
+    }
+    expect(weakerThan("secret_reveal", { step_up: "session", bound_host_only: false }, matrix.hardened)).toBe(false);
+  });
+
+  it("previews the value of the target profile in the profile dialog", async () => {
+    await signInAs("lab");
+    await openPage();
+    expect(within(row("TGL-24")).getAllByText(HOME)).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Change profile" }));
+    const dialog = await screen.findByRole("dialog", { name: "Change security profile" });
+
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Standard/ }));
+    let table = await within(dialog).findByRole("table", { name: "Settings that change" });
+    let changed = within(table).getByText("Secret reveal").closest("tr") as HTMLElement;
+    expect(within(changed).getByText(HOME)).toBeTruthy();
+    expect(within(changed).getByText(STANDARD)).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Hardened/ }));
+    table = await within(dialog).findByRole("table", { name: "Settings that change" });
+    changed = within(table).getByText("Secret reveal").closest("tr") as HTMLElement;
+    expect(within(changed).getByText(HOME)).toBeTruthy();
+    expect(within(changed).getByText(HARDENED)).toBeTruthy();
+    // None of the values is weaker than Home.
+    expect(within(changed).queryByText("Weaker than Home")).toBeNull();
+
+    // Home has the value that Lab has: nothing to change for this toggle.
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Home/ }));
+    table = await within(dialog).findByRole("table", { name: "Settings that change" });
+    expect(within(table).queryByText("Secret reveal")).toBeNull();
+  });
+
+  it("edits the step-up and the host binding, explains each option and sends the policy", async () => {
+    await signInAs();
+    await openPage();
+    const bodies = recordPatches();
+    const dialog = await openEditor("Secret reveal");
+    const modes = within(dialog).getAllByTestId("field-secret-reveal-step-up");
+    expect(modes.map((m) => m.getAttribute("data-key"))).toEqual(["session", "fresh", "passkey"]);
+    expect(modes.map((m) => (m as HTMLInputElement).checked)).toEqual([false, true, false]);
+    const bound = within(dialog).getByRole("switch", { name: /Only for the host in view/ }) as HTMLInputElement;
+    expect(bound.checked).toBe(false);
+    // Each option says what it means.
+    expect(within(dialog).getByText("A session that is signed in with a password or something stronger is enough.")).toBeTruthy();
+    expect(within(dialog).getByText("The person must have signed in within the last five minutes.")).toBeTruthy();
+    expect(
+      within(dialog).getByText("The person must have signed in with a passkey or security key within the last five minutes."),
+    ).toBeTruthy();
+    expect(within(dialog).getByText(/The secrets page cannot reveal it/)).toBeTruthy();
+    expect(within(dialog).getByText(/a session of PIN strength never reveals a secret/)).toBeTruthy();
+    expect((within(dialog).getByRole("button", { name: "Save setting" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(modes[2] as HTMLElement);
+    fireEvent.click(bound);
+    expect(await within(dialog).findByText(/Differs from the Standard profile/)).toBeTruthy();
+    // A stronger value is not weaker than Home: no warning.
+    expect(within(dialog).queryByText("Weaker than Home")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save setting" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(bodies).toEqual([{ secret_reveal: { step_up: "passkey", bound_host_only: true } }]);
+    expect(db.settings.secret_reveal).toEqual({ step_up: "passkey", bound_host_only: true });
+    const reveal = row("TGL-24");
+    expect(within(reveal).getByText(HARDENED)).toBeTruthy();
+    expect(within(reveal).getByText("Differs from the profile")).toBeTruthy();
+    expect(within(reveal).queryByText("Weaker than Home")).toBeNull();
+    expect(session()?.banner.deviations).toEqual(["TGL-24"]);
+    expect(session()?.banner.weaker_than_home).toBe(false);
+    expect(await screen.findByText("Saved Secret reveal")).toBeTruthy();
+  });
+
+  it("does not call the weakest value weaker than Home", async () => {
+    await signInAs();
+    await openPage();
+    const dialog = await openEditor("Secret reveal");
+    const modes = within(dialog).getAllByTestId("field-secret-reveal-step-up");
+    fireEvent.click(modes[0] as HTMLElement);
+    expect(await within(dialog).findByText(/Differs from the Standard profile/)).toBeTruthy();
+    expect(within(dialog).queryByText(/Weaker than Home/)).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save setting" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(db.settings.secret_reveal).toEqual({ step_up: "session", bound_host_only: false });
+    expect(within(row("TGL-24")).queryByText("Weaker than Home")).toBeNull();
+    expect(within(row("TGL-24")).getByText("Differs from the profile")).toBeTruthy();
+    expect(session()?.banner.weaker_than_home).toBe(false);
+  });
+
+  it("shows a deviation set on the server and resets it to the profile", async () => {
+    await signInAs();
+    db.settings.secret_reveal = { step_up: "passkey", bound_host_only: false };
+    await openPage();
+    const reveal = row("TGL-24");
+    expect(within(reveal).getByText("Passkey sign-in within 5 minutes")).toBeTruthy();
+    expect(within(reveal).getByText(STANDARD)).toBeTruthy();
+    expect(within(reveal).getByText("Differs from the profile")).toBeTruthy();
+    expect(screen.getByTestId("deviation-count").textContent).toContain("1");
+
+    const bodies = recordPatches();
+    fireEvent.click(within(reveal).getByRole("button", { name: "Reset to profile: Secret reveal" }));
+    await waitFor(() => expect(within(row("TGL-24")).queryByText("Differs from the profile")).toBeNull());
+    expect(within(row("TGL-24")).getByText("Follows the profile")).toBeTruthy();
+    expect(bodies).toEqual([{ secret_reveal: { step_up: "fresh", bound_host_only: false } }]);
+    expect(db.settings.secret_reveal).toEqual({ step_up: "fresh", bound_host_only: false });
+    expect(session()?.banner.deviations).toEqual([]);
+  });
+
+  it("keeps the reveal policy when another toggle changes", async () => {
+    await signInAs();
+    db.settings.secret_reveal = { step_up: "passkey", bound_host_only: true };
+    await openPage();
+    const dialog = await openEditor("Lockout");
+    fireEvent.change(within(dialog).getByLabelText("Lockout"), { target: { value: "lock_until_unlock" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save setting" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(db.settings.lockout).toBe("lock_until_unlock");
+    expect(db.settings.secret_reveal).toEqual({ step_up: "passkey", bound_host_only: true });
+    expect(within(row("TGL-24")).getByText(HARDENED)).toBeTruthy();
+    expect(session()?.banner.deviations).toEqual(["TGL-07", "TGL-24"]);
+  });
+
+  it("puts the default of the profile back when the profile is switched", async () => {
+    await signInAs();
+    db.settings.secret_reveal = { step_up: "session", bound_host_only: false };
+    await openPage();
+    fireEvent.click(screen.getByRole("button", { name: "Change profile" }));
+    const dialog = await screen.findByRole("dialog", { name: "Change security profile" });
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Hardened/ }));
+    await within(dialog).findByRole("button", { name: "Switch to Hardened" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Switch to Hardened" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(db.settings.profile).toBe("hardened");
+    expect(db.settings.secret_reveal).toBeUndefined();
+    expect(within(row("TGL-24")).getAllByText(HARDENED)).toHaveLength(2);
+    expect(within(row("TGL-24")).getByText("Follows the profile")).toBeTruthy();
+  });
+
+  it("builds the request body of the toggle and refuses a value the server does not know", async () => {
+    expect(patchFor("secret_reveal", { step_up: "fresh", bound_host_only: true })).toEqual({
+      secret_reveal: { step_up: "fresh", bound_host_only: true },
+    });
+    await signInAs();
+    const bad = { secret_reveal: { step_up: "never", bound_host_only: false } } as unknown as SettingsPatch;
+    const error = await api.patch("/api/v1/settings/security", { body: bad }).catch((e: unknown) => e);
+    expect(isApiError(error, "sys.invalid_value")).toBe(true);
+    const missing = { secret_reveal: { step_up: "fresh" } } as unknown as SettingsPatch;
+    const second = await api.patch("/api/v1/settings/security", { body: missing }).catch((e: unknown) => e);
+    expect(isApiError(second, "sys.invalid_value")).toBe(true);
+    expect(db.settings.secret_reveal).toBeUndefined();
+  });
+
+  it("is accessible", async () => {
+    await signInAs();
+    await openPage();
+    const dialog = await openEditor("Secret reveal");
     expect(await axeViolations(dialog)).toEqual([]);
   });
 });

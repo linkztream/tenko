@@ -110,6 +110,60 @@ const CATALOG = {
     "PIN coupling rule",
     "a PIN may be the only factor only while the vault holds no operator secrets",
   ],
+  "auth.step_up_required": [
+    403,
+    "Fresh authentication required",
+    "a stronger or more recent sign-in is needed",
+  ],
+  "vault.pin_coupling": [
+    409,
+    "PIN coupling rule",
+    "the vault takes operator secrets only when every account that may reveal them has more than a PIN",
+  ],
+  "vault.secret.not_found": [404, "Not Found", "operator secret not found"],
+  "vault.secret.invalid": [422, "Unprocessable Content", "a value of the secret is not valid"],
+  "vault.secret.too_large": [413, "Content Too Large", "the value exceeds 64 KiB"],
+  "vault.secret.conflict": [
+    409,
+    "Conflict",
+    "the secret changed since it was read; reload and retry",
+  ],
+  "vault.secret.in_use": [
+    409,
+    "Secret in use",
+    "the secret is bound to a host or used by a connector",
+  ],
+  "vault.host_credentials.conflict": [
+    409,
+    "Conflict",
+    "the credentials of the host changed since they were read; reload and retry",
+  ],
+  "vault.host_credentials.secret_missing": [
+    422,
+    "Unprocessable Content",
+    "a secret of the request is not an operator secret",
+  ],
+  "vault.reveal.host_required": [
+    403,
+    "Reveal not allowed here",
+    "the reveal policy reveals only secrets bound to the host in view; name the host",
+  ],
+  "vault.reveal.not_bound": [
+    403,
+    "Reveal not allowed here",
+    "the secret is not bound to the host named",
+  ],
+  "vault.reveal.rate_limited": [429, "Too many reveals", "too many reveals; retry later"],
+  "remote.interface_unknown": [
+    422,
+    "Unprocessable Content",
+    "the interface is not a live interface of this host",
+  ],
+  "remote.address_unknown": [
+    422,
+    "Unprocessable Content",
+    "the address is not a live address or DNS name of this host or interface",
+  ],
 } as const satisfies Record<string, readonly [number, string, string]>;
 
 export type ProblemCode = keyof typeof CATALOG;

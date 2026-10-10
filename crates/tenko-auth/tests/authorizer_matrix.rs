@@ -41,7 +41,7 @@ const STRENGTHS: [AuthStrength; 5] = [
 
 /// One object kind in the permission table. Administrators may do everything; viewers read
 /// the kinds marked `viewer_reads`; operators may do the actions in `operator`: `R` read,
-/// `C` create, `U` update, `D` delete, `X` execute, `A` approve.
+/// `C` create, `U` update, `D` delete, `X` execute, `A` approve, `V` reveal.
 struct Row {
     kind: ObjectKind,
     viewer_reads: bool,
@@ -75,13 +75,14 @@ const TABLE: [Row; 22] = [
     row(ObjectKind::Proposal, true, "RA"),
     row(ObjectKind::Import, true, "RCUDX"),
     row(ObjectKind::Connector, true, "RCUDX"),
-    row(ObjectKind::Secret, false, ""),
+    // Operators read the metadata of operator secrets and reveal them (WP2.1).
+    row(ObjectKind::Secret, false, "RV"),
     row(ObjectKind::Node, true, "R"),
     row(ObjectKind::Settings, false, "R"),
     row(ObjectKind::System, true, "R"),
 ];
 
-/// The table letter of an action; administration and reveal belong to administrators only.
+/// The table letter of an action; administration belongs to administrators only.
 const fn letter(action: Action) -> Option<char> {
     match action {
         Action::Read => Some('R'),
@@ -90,7 +91,8 @@ const fn letter(action: Action) -> Option<char> {
         Action::Delete => Some('D'),
         Action::Execute => Some('X'),
         Action::Approve => Some('A'),
-        Action::Reveal | Action::Administer => None,
+        Action::Reveal => Some('V'),
+        Action::Administer => None,
     }
 }
 
@@ -313,7 +315,7 @@ fn the_permission_table_covers_every_object_kind_once() {
     }
     for row in &TABLE {
         assert!(
-            row.operator.chars().all(|c| "RCUDXA".contains(c)),
+            row.operator.chars().all(|c| "RCUDXAV".contains(c)),
             "{}",
             row.kind
         );
@@ -347,14 +349,28 @@ async fn roles_follow_the_permission_table() {
 }
 
 #[tokio::test]
-async fn nobody_but_administrators_administers_or_reveals() {
+async fn nobody_but_administrators_administers_and_only_operators_also_reveal_secrets() {
     let f = fixture(Profile::Home).await;
     for strength in STRENGTHS {
         for &kind in ObjectKind::ALL {
             for action in [Action::Administer, Action::Reveal] {
                 for (who, base) in [("operator", &f.operator), ("viewer", &f.viewer)] {
                     let principal = with_strength(base, strength);
-                    assert_decision(&f, who, &principal, action, kind, false);
+                    let reveals =
+                        who == "operator" && action == Action::Reveal && kind == ObjectKind::Secret;
+                    if !reveals {
+                        assert_decision(&f, who, &principal, action, kind, false);
+                    } else if strength >= AuthStrength::Password {
+                        assert_decision(&f, who, &principal, action, kind, true);
+                    } else {
+                        // A PIN never reveals (IAM-07).
+                        assert_eq!(
+                            reason(decide(&f, &principal, action, kind)),
+                            Some(DenyReason::StepUpRequired {
+                                required: AuthStrength::Password
+                            })
+                        );
+                    }
                 }
             }
         }
@@ -532,8 +548,21 @@ async fn an_operator_secret_ends_pin_only_administration_in_home_and_lab() {
             }),
             "{profile:?}"
         );
-        // The accounts that cannot reach the vault are unaffected.
-        assert!(decide(&f, &f.operator, Action::Update, ObjectKind::Prefix).is_ok());
+        // Operators reveal operator secrets, so a PIN no longer serves them either; the
+        // accounts that cannot reach the vault are unaffected.
+        let pin_operator = with_strength(&f.operator, AuthStrength::Pin);
+        assert_eq!(
+            reason(decide(
+                &f,
+                &pin_operator,
+                Action::Update,
+                ObjectKind::Prefix
+            )),
+            Some(DenyReason::StepUpRequired {
+                required: AuthStrength::Password
+            }),
+            "{profile:?}"
+        );
         assert!(decide(&f, &f.viewer, Action::Read, ObjectKind::Prefix).is_ok());
         // A password (not a PIN) is enough for the administrator.
         let password_admin = with_strength(&f.admin, AuthStrength::Password);
@@ -564,13 +593,17 @@ async fn the_real_service_refuses_a_pin_administrator_once_the_vault_holds_a_sec
         ),
         other => panic!("expected a step-up refusal, got {other:?}"),
     }
-    // Operators keep reading users.
+    // Operators may reveal operator secrets, so their PIN sessions end the same way.
     let operator = f.env.session_ctx(&f.operator_session).await.expect("ctx");
-    f.env
-        .service
-        .list_users(&operator)
-        .await
-        .expect("operators still read");
+    match f.env.service.list_users(&operator).await {
+        Err(AuthError::Denied(denied)) => assert_eq!(
+            denied.reason,
+            DenyReason::StepUpRequired {
+                required: AuthStrength::Password
+            }
+        ),
+        other => panic!("expected a step-up refusal for the operator, got {other:?}"),
+    }
 }
 
 #[tokio::test]

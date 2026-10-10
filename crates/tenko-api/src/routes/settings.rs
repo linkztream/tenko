@@ -40,8 +40,8 @@ fn view_response(view: SecuritySettingsView) -> Response {
     }
 }
 
-/// Reads the security profile, the values of the toggles TGL-01 to TGL-07 and TGL-23 with
-/// their profile defaults and deviations, and the warning banner state.
+/// Reads the security profile, the values of the toggles TGL-01 to TGL-07, TGL-23 and
+/// TGL-24 with their profile defaults and deviations, and the warning banner state.
 #[utoipa::path(
     get,
     path = "/settings/security",
@@ -166,7 +166,8 @@ mod tests {
         assert_eq!(
             ids,
             [
-                "TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-23"
+                "TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-23",
+                "TGL-24"
             ]
         );
         for toggle in toggles {

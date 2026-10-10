@@ -26,14 +26,38 @@
 //! default `Cache-Control: no-store` only after this check, so the rule sees what the
 //! handler set.
 //!
+//! **The fingerprint is keyed.** It is HMAC-SHA-256 under a random key that each process
+//! draws at start and holds only in memory ([`InFlight`]), never a plain hash. A plain
+//! hash of a body is a password oracle: whoever reads the store could hash candidate
+//! passwords and compare them offline. Under a key that never leaves the process, a stored
+//! fingerprint means nothing outside it. Each record carries the random, public id of the
+//! key that made it. Within one process the rules above hold unchanged (same key, other
+//! body: 422). A record made by another process (an earlier start, another controller)
+//! cannot be compared, so a retry against it is answered 409
+//! `sys.idempotency_not_replayable`: the request was performed and is neither run again nor
+//! replayed.
+//!
+//! **Credential routes take no part.** Requests whose body carries a password, a setup
+//! token, a one-time code or a sign-in assertion (`/setup`, `/auth/login/*`,
+//! `/auth/webauthn/login/*`, `/auth/password`, `/auth/password/check`,
+//! `/auth/totp/enroll/finish`, and `POST /users` with its optional initial password) go
+//! straight to the handler: no fingerprint and no record, whatever the key. These
+//! ceremonies are safe to repeat, and their bodies never meet a hash.
+//!
 //! The record is a separate store write after the handler's own batch. If the node fails
 //! between the two, a retry runs the handler again and the store's own idempotency decides
 //! (a replay of the same batch, or 422 when the batch differs).
 
 use std::{
     collections::HashSet,
+    fmt,
     sync::{Mutex, PoisonError},
     time::Duration,
+};
+
+use aws_lc_rs::{
+    hmac,
+    rand::{SecureRandom, SystemRandom},
 };
 
 use axum::{
@@ -51,7 +75,10 @@ use tenko_core::{
 };
 use tenko_store::{KeyRange, ReadConsistency, Store, WriteBatch};
 
-use crate::problem::{ApiError, codes};
+use crate::{
+    API_BASE,
+    problem::{ApiError, codes},
+};
 
 /// The store table of stored responses.
 pub(crate) const TABLE: TableName = TableName::from_static("sys.api_idempotency");
@@ -95,12 +122,50 @@ struct StoredResponse {
     /// was not stored and cannot be replayed.
     #[serde(default)]
     replay_unavailable: bool,
+    /// Public id of the process key that made `fingerprint`; empty in records written
+    /// before fingerprints were keyed.
+    #[serde(default)]
+    key_id: Bytes,
 }
 
-/// Keys of requests being processed on this node.
-#[derive(Debug, Default)]
+/// Per-process state of the middleware: the random fingerprint key and the keys of requests
+/// being processed.
 pub(crate) struct InFlight {
     keys: Mutex<HashSet<[u8; 32]>>,
+    /// HMAC-SHA-256 key of the fingerprints, drawn at start, never stored or logged.
+    fingerprint_key: hmac::Key,
+    /// Random public id of `fingerprint_key`, stored with each record.
+    key_id: [u8; 8],
+}
+
+impl Default for InFlight {
+    /// Draws a new fingerprint key from the operating system's random source.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the random source fails, which leaves no way to key the fingerprints.
+    fn default() -> Self {
+        let random = SystemRandom::new();
+        let fingerprint_key = hmac::Key::generate(hmac::HMAC_SHA256, &random)
+            .expect("the operating system's random source works");
+        let mut key_id = [0_u8; 8];
+        random
+            .fill(&mut key_id)
+            .expect("the operating system's random source works");
+        Self {
+            keys: Mutex::new(HashSet::new()),
+            fingerprint_key,
+            key_id,
+        }
+    }
+}
+
+impl fmt::Debug for InFlight {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InFlight")
+            .field("key_id", &self.key_id)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Removes a key from [`InFlight`] when dropped.
@@ -153,6 +218,9 @@ where
     let (Some(key), Some(principal)) = (keyed_post(&request), principal) else {
         return next(request).await;
     };
+    if carries_credentials(request.method(), request.uri().path()) {
+        return next(request).await;
+    }
     let record_key = record_key(principal, &key);
 
     let (parts, body) = request.into_parts();
@@ -167,10 +235,19 @@ where
         )
         .into_response();
     };
-    let fingerprint = fingerprint(&parts.method, &parts.uri, &parts.headers, &body);
+    let fingerprint = in_flight.fingerprint(&parts.method, &parts.uri, &parts.headers, &body);
     let now = Timestamp::now();
 
-    let expected = match lookup(store, &record_key, &fingerprint, now, config.ttl).await {
+    let expected = match lookup(
+        store,
+        &record_key,
+        &fingerprint,
+        &in_flight.key_id,
+        now,
+        config.ttl,
+    )
+    .await
+    {
         Ok(expected) => expected,
         Err(response) => return *response,
     };
@@ -192,10 +269,38 @@ where
         principal,
         key: &record_key,
         fingerprint: &fingerprint,
+        key_id: &in_flight.key_id,
         created: now,
         expected,
     };
     remember(store, config, &record, response).await
+}
+
+/// Routes (relative to [`API_BASE`]) whose request bodies carry credentials: exact paths,
+/// then path prefixes. The middleware never fingerprints or records them.
+const CREDENTIAL_PATHS: [&str; 5] = [
+    "/setup",
+    "/auth/password",
+    "/auth/password/check",
+    "/auth/totp/enroll/finish",
+    "/users",
+];
+const CREDENTIAL_PREFIXES: [&str; 2] = ["/auth/login/", "/auth/webauthn/login/"];
+
+/// Whether a request's body carries a password, a setup token, a one-time code or a
+/// sign-in assertion (see the module docs).
+fn carries_credentials(method: &Method, path: &str) -> bool {
+    if *method != Method::POST {
+        return false;
+    }
+    let Some(path) = path.strip_prefix(API_BASE) else {
+        return false;
+    };
+    let path = path.strip_suffix('/').unwrap_or(path);
+    CREDENTIAL_PATHS.contains(&path)
+        || CREDENTIAL_PREFIXES
+            .iter()
+            .any(|prefix| path.starts_with(prefix))
 }
 
 /// The key of a `POST` that carries a valid `Idempotency-Key`.
@@ -214,6 +319,7 @@ async fn lookup(
     store: &dyn Store,
     record_key: &[u8; 32],
     fingerprint: &[u8; 32],
+    key_id: &[u8; 8],
     now: Timestamp,
     ttl: Duration,
 ) -> Result<Option<tenko_core::Revision>, Box<Response>> {
@@ -235,6 +341,11 @@ async fn lookup(
     };
     if now.saturating_since(stored.created) >= ttl {
         return Ok(Some(revision));
+    }
+    if stored.key_id.as_ref() != key_id.as_slice() {
+        // Fingerprinted under another process's key: the request cannot be compared, so it
+        // is neither run again nor replayed.
+        return Err(Box::new(not_replayable().into_response()));
     }
     if stored.fingerprint.as_ref() != fingerprint.as_slice() {
         return Err(Box::new(
@@ -282,6 +393,7 @@ struct Record<'a> {
     principal: &'a Principal,
     key: &'a [u8; 32],
     fingerprint: &'a [u8; 32],
+    key_id: &'a [u8; 8],
     created: Timestamp,
     expected: Option<tenko_core::Revision>,
 }
@@ -304,6 +416,7 @@ async fn remember(
             body: Bytes::new(),
             created: record.created,
             replay_unavailable: true,
+            key_id: Bytes::copy_from_slice(record.key_id),
         };
         if let Err(error) = save(store, record, &marker).await {
             tracing::warn!(%error, "could not store the marker of an idempotent request");
@@ -333,6 +446,7 @@ async fn remember(
         body: body.clone(),
         created: record.created,
         replay_unavailable: false,
+        key_id: Bytes::copy_from_slice(record.key_id),
     };
     if let Err(error) = save(store, record, &stored).await {
         tracing::warn!(%error, "could not store the response of an idempotent request");
@@ -349,28 +463,34 @@ fn record_key(principal: &Principal, key: &IdempotencyKey) -> [u8; 32] {
     hash.finalize().into()
 }
 
-/// SHA-256 of what makes two requests the same.
-fn fingerprint(
-    method: &Method,
-    uri: &axum::http::Uri,
-    headers: &HeaderMap,
-    body: &[u8],
-) -> [u8; 32] {
-    let mut hash = Sha256::new();
-    hash.update(method.as_str().as_bytes());
-    hash.update([0]);
-    hash.update(
-        uri.path_and_query()
-            .map_or(uri.path(), axum::http::uri::PathAndQuery::as_str)
-            .as_bytes(),
-    );
-    hash.update([0]);
-    if let Some(content_type) = headers.get(header::CONTENT_TYPE) {
-        hash.update(content_type.as_bytes());
+impl InFlight {
+    /// HMAC-SHA-256 under the process key of what makes two requests the same: method,
+    /// path and query, content type and body.
+    fn fingerprint(
+        &self,
+        method: &Method,
+        uri: &axum::http::Uri,
+        headers: &HeaderMap,
+        body: &[u8],
+    ) -> [u8; 32] {
+        let mut mac = hmac::Context::with_key(&self.fingerprint_key);
+        mac.update(method.as_str().as_bytes());
+        mac.update(&[0]);
+        mac.update(
+            uri.path_and_query()
+                .map_or(uri.path(), axum::http::uri::PathAndQuery::as_str)
+                .as_bytes(),
+        );
+        mac.update(&[0]);
+        if let Some(content_type) = headers.get(header::CONTENT_TYPE) {
+            mac.update(content_type.as_bytes());
+        }
+        mac.update(&[0]);
+        mac.update(body);
+        let mut out = [0_u8; 32];
+        out.copy_from_slice(mac.sign().as_ref());
+        out
     }
-    hash.update([0]);
-    hash.update(body);
-    hash.finalize().into()
 }
 
 fn replay(stored: &StoredResponse) -> Response {
@@ -759,6 +879,153 @@ mod tests {
             1
         );
         assert!(!secret_bearing(&HeaderMap::new()));
+    }
+
+    #[test]
+    fn fingerprints_are_keyed_per_process() {
+        let uri: axum::http::Uri = "/api/v1/prefixes".parse().expect("uri");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        let body = b"{\"cidr\":\"192.0.2.0/24\"}";
+        let first = InFlight::default();
+        let second = InFlight::default();
+        let a = first.fingerprint(&Method::POST, &uri, &headers, body);
+        assert_eq!(a, first.fingerprint(&Method::POST, &uri, &headers, body));
+        assert_ne!(a, second.fingerprint(&Method::POST, &uri, &headers, body));
+        assert_ne!(first.key_id, second.key_id);
+        assert_ne!(a, first.fingerprint(&Method::POST, &uri, &headers, b"{}"));
+        // Not the plain SHA-256 of the same input.
+        let mut plain = Sha256::new();
+        plain.update(b"POST\0/api/v1/prefixes\0application/json\0");
+        plain.update(body);
+        let plain: [u8; 32] = plain.finalize().into();
+        assert_ne!(a, plain);
+        assert!(!format!("{first:?}").contains("fingerprint_key"));
+    }
+
+    #[test]
+    fn credential_routes_are_recognised() {
+        for path in [
+            "/api/v1/setup",
+            "/api/v1/auth/login/password",
+            "/api/v1/auth/login/totp",
+            "/api/v1/auth/login/recovery",
+            "/api/v1/auth/webauthn/login/finish",
+            "/api/v1/auth/password",
+            "/api/v1/auth/password/check",
+            "/api/v1/auth/totp/enroll/finish",
+            "/api/v1/users",
+            "/api/v1/users/",
+        ] {
+            assert!(carries_credentials(&Method::POST, path), "{path}");
+        }
+        for (method, path) in [
+            (Method::GET, "/api/v1/setup"),
+            (Method::POST, "/api/v1/prefixes"),
+            (Method::POST, "/api/v1/auth/tokens"),
+            (
+                Method::POST,
+                "/api/v1/users/0190d1c2-0000-7000-8000-000000000001/unlock",
+            ),
+            (Method::POST, "/setup"),
+            (Method::POST, "/api/v1/auth/login"),
+        ] {
+            assert!(!carries_credentials(&method, path), "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_sign_in_body_leaves_no_fingerprint() {
+        let store = MemStore::default();
+        let in_flight = InFlight::default();
+        let calls = Arc::new(AtomicUsize::new(0));
+        for (path, body) in [
+            (
+                "/api/v1/auth/login/password",
+                "{\"username\":\"ada\",\"password\":\"correct horse\"}",
+            ),
+            (
+                "/api/v1/setup",
+                "{\"setup_token\":\"st-1\",\"admin\":{\"password\":\"7391\"}}",
+            ),
+            (
+                "/api/v1/users",
+                "{\"username\":\"bob\",\"password\":\"initial-pass\"}",
+            ),
+        ] {
+            for _ in 0..2 {
+                let request = HttpRequest::builder()
+                    .method(Method::POST)
+                    .uri(path)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("idempotency-key", "sign-in-1")
+                    .body(Body::from(body))
+                    .expect("request");
+                let calls = Arc::clone(&calls);
+                let response = handle(
+                    &store,
+                    &in_flight,
+                    IdempotencyConfig::default(),
+                    Some(&principal()),
+                    request,
+                    move |_request| async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        StatusCode::OK.into_response()
+                    },
+                )
+                .await;
+                assert_eq!(response.status(), StatusCode::OK, "{path}");
+                assert!(response.headers().get(REPLAYED_HEADER).is_none());
+            }
+        }
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            6,
+            "every request reached its handler"
+        );
+        assert!(
+            stored_records(&store).await.is_empty(),
+            "no record, no fingerprint"
+        );
+    }
+
+    #[tokio::test]
+    async fn records_of_another_process_are_not_replayed() {
+        let store = MemStore::default();
+        let earlier = InFlight::default();
+        let calls = Arc::new(AtomicUsize::new(0));
+        run(
+            &store,
+            &earlier,
+            post("k-restart", "{}"),
+            &calls,
+            StatusCode::CREATED,
+        )
+        .await;
+        let stored = stored_records(&store).await;
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].0.key_id.as_ref(), earlier.key_id.as_slice());
+
+        // After a restart the record cannot be compared: 409, and the handler does not run.
+        let restarted = InFlight::default();
+        let retry = run(
+            &store,
+            &restarted,
+            post("k-restart", "{}"),
+            &calls,
+            StatusCode::CREATED,
+        )
+        .await;
+        assert_eq!(retry.status(), StatusCode::CONFLICT);
+        assert!(
+            body(retry)
+                .await
+                .contains(codes::IDEMPOTENCY_NOT_REPLAYABLE)
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

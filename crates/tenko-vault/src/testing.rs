@@ -7,7 +7,7 @@ use tenko_core::{RequestCtx, secret::SecretClass, secret::SecretRef};
 use tenko_store::{Store, WriteBatch, mem::MemStore};
 
 use crate::{
-    SecretBytes, SecretMeta, SecretSpec, StoreVault, Vault, VaultError,
+    RevealAudit, SecretBytes, SecretMeta, SecretSpec, StoreVault, Vault, VaultError,
     kek::{KekProvider, KekRing, MemKek},
 };
 
@@ -92,6 +92,16 @@ impl Vault for MemVault {
         self.vault.reveal(ctx, secret).await
     }
 
+    async fn reveal_with(
+        &self,
+        ctx: &RequestCtx,
+        secret: SecretRef,
+        batch: WriteBatch,
+        audit: RevealAudit,
+    ) -> Result<SecretBytes, VaultError> {
+        self.vault.reveal_with(ctx, secret, batch, audit).await
+    }
+
     async fn rotate_dek(&self, ctx: &RequestCtx, secret: SecretRef) -> Result<(), VaultError> {
         self.vault.rotate_dek(ctx, secret).await
     }
@@ -130,5 +140,15 @@ impl Vault for MemVault {
 
     fn stage_delete(&self, batch: &mut WriteBatch, ctx: &RequestCtx, secret: SecretRef) {
         self.vault.stage_delete(batch, ctx, secret);
+    }
+
+    async fn stage_replace(
+        &self,
+        batch: &mut WriteBatch,
+        ctx: &RequestCtx,
+        secret: SecretRef,
+        value: &SecretBytes,
+    ) -> Result<(), VaultError> {
+        self.vault.stage_replace(batch, ctx, secret, value).await
     }
 }

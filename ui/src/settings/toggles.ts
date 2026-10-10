@@ -1,4 +1,4 @@
-// The security toggles of Slice 1 (TGL-01 to TGL-07 and TGL-23, docs/SECURITY-PROFILES.md): their
+// The security toggles of Slice 1 (TGL-01 to TGL-07, TGL-23 and TGL-24, docs/SECURITY-PROFILES.md): their
 // names, how a value reads in the UI, and whether a value is weaker than the Home profile.
 // Shared by the first-run wizard (profile preview) and the security settings page.
 import type {
@@ -20,7 +20,8 @@ export type ToggleSetting =
   | "token_max_days"
   | "breach_check"
   | "lockout"
-  | "updates";
+  | "updates"
+  | "secret_reveal";
 
 export interface ToggleDef {
   id: string;
@@ -37,10 +38,11 @@ export const TOGGLES: readonly ToggleDef[] = [
   { id: "TGL-06", setting: "breach_check", name: "toggles.breach_check.name" },
   { id: "TGL-07", setting: "lockout", name: "toggles.lockout.name" },
   { id: "TGL-23", setting: "updates", name: "toggles.updates.name" },
+  { id: "TGL-24", setting: "secret_reveal", name: "toggles.secret_reveal.name" },
 ];
 
 /** The total number of toggles in the profile matrix; later ones arrive with their features. */
-export const TOGGLE_TOTAL = 23;
+export const TOGGLE_TOTAL = 24;
 
 export function toggleById(id: string): ToggleDef | undefined {
   return TOGGLES.find((x) => x.id === id);
@@ -73,6 +75,37 @@ export function formatUpdates(value: unknown): string {
   return t("toggles.updates.value", {
     check: t(policy.check ? "toggles.updates.check_on" : "toggles.updates.check_off"),
     install: t(`toggles.updates.install.${policy.install}`),
+  });
+}
+
+/** TGL-24 (IAM-16, API-11): what revealing an operator secret takes. */
+export type RevealPolicy = NonNullable<SecuritySettings["secret_reveal"]>;
+export type RevealStepUp = RevealPolicy["step_up"];
+/** The step-up values from the weakest to the strongest. */
+export const REVEAL_STEP_UP: readonly RevealStepUp[] = ["session", "fresh", "passkey"];
+
+/**
+ * The value of TGL-24 in each profile (docs/SECURITY-PROFILES.md). No value is weaker than Home.
+ * The PIN coupling rule holds on top of every value: a PIN-strength session never reveals, and
+ * personal API tokens never reveal.
+ */
+export const REVEAL_DEFAULT: Readonly<Record<Profile, RevealPolicy>> = {
+  home: { step_up: "session", bound_host_only: false },
+  standard: { step_up: "fresh", bound_host_only: false },
+  hardened: { step_up: "passkey", bound_host_only: true },
+  lab: { step_up: "session", bound_host_only: false },
+};
+
+/** The reveal policy of a settings object; one without it (an older answer) follows its profile. */
+export function revealOf(settings: SecuritySettings): RevealPolicy {
+  return settings.secret_reveal ?? REVEAL_DEFAULT[settings.profile];
+}
+
+export function formatReveal(value: unknown): string {
+  const policy = (value ?? REVEAL_DEFAULT.home) as RevealPolicy;
+  return t("toggles.secret_reveal.value", {
+    step_up: t(`toggles.secret_reveal.step_up.${policy.step_up}`),
+    bound: policy.bound_host_only ? "yes" : "no",
   });
 }
 
@@ -114,6 +147,8 @@ export function formatToggle(setting: string, value: unknown): string {
       return t(`toggles.lockout.${value as LockoutMode}`);
     case "updates":
       return formatUpdates(value);
+    case "secret_reveal":
+      return formatReveal(value);
     default:
       return typeof value === "string" ? value : JSON.stringify(value);
   }
@@ -164,6 +199,9 @@ export function weakerThan(setting: string, value: unknown, home: unknown): bool
     case "updates":
       // Not looking for new versions is weaker than Home; who installs them is a matter of taste.
       return (value as UpdatesPolicy).check === false && (home as UpdatesPolicy).check === true;
+    case "secret_reveal":
+      // Home asks for the least that TGL-24 allows (a signed-in session), so no value is weaker.
+      return false;
     default:
       return false;
   }
@@ -171,5 +209,6 @@ export function weakerThan(setting: string, value: unknown, home: unknown): bool
 
 /** The value of a toggle in a settings object. */
 export function settingValue(settings: SecuritySettings, setting: ToggleSetting): unknown {
-  return setting === "updates" ? updatesOf(settings) : settings[setting];
+  if (setting === "updates") return updatesOf(settings);
+  return setting === "secret_reveal" ? revealOf(settings) : settings[setting];
 }

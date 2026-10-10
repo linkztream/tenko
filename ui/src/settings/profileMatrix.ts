@@ -5,7 +5,16 @@
 // The server stays the authority: the preview is a preview, and the saved result always
 // comes from the server's answer.
 import type { PasswordPolicy, Profile, SecuritySettings, SecuritySettingsView } from "../api/types";
-import { TOGGLES, UPDATES_DEFAULT, updatesOf, weakerThan, type ToggleDef, type ToggleSetting } from "./toggles";
+import {
+  REVEAL_DEFAULT,
+  revealOf,
+  TOGGLES,
+  UPDATES_DEFAULT,
+  updatesOf,
+  weakerThan,
+  type ToggleDef,
+  type ToggleSetting,
+} from "./toggles";
 
 const HOUR = 3_600;
 const DAY = 86_400;
@@ -21,6 +30,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     breach_check: "online",
     lockout: "progressive_delay",
     updates: UPDATES_DEFAULT.home,
+    secret_reveal: REVEAL_DEFAULT.home,
   },
   standard: {
     profile: "standard",
@@ -32,6 +42,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     breach_check: "online",
     lockout: "delay_then_temporary_lock",
     updates: UPDATES_DEFAULT.standard,
+    secret_reveal: REVEAL_DEFAULT.standard,
   },
   hardened: {
     profile: "hardened",
@@ -43,6 +54,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     breach_check: "offline_preferred",
     lockout: "lock_until_unlock",
     updates: UPDATES_DEFAULT.hardened,
+    secret_reveal: REVEAL_DEFAULT.hardened,
   },
   lab: {
     profile: "lab",
@@ -54,12 +66,14 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     breach_check: "off",
     lockout: "off",
     updates: UPDATES_DEFAULT.lab,
+    secret_reveal: REVEAL_DEFAULT.lab,
   },
 };
 
 /** The value of one setting the way a toggle reports it (`null` for no token maximum). */
 export function valueOf(settings: SecuritySettings, setting: ToggleSetting): unknown {
   if (setting === "updates") return updatesOf(settings);
+  if (setting === "secret_reveal") return revealOf(settings);
   return setting === "token_max_days" ? (settings.token_max_days ?? null) : settings[setting];
 }
 

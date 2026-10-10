@@ -44,7 +44,7 @@ impl RoleName {
         match self {
             Self::Admin => "Full access, including users, security settings and the system",
             Self::Operator => {
-                "Reads and changes the IPAM inventory, runs imports and jobs; no administration"
+                "Reads and changes the IPAM inventory, runs imports and jobs, reveals operator secrets; no administration"
             }
             Self::Viewer => "Reads the IPAM inventory, jobs and imports",
         }
@@ -103,8 +103,13 @@ fn is_inventory(kind: ObjectKind) -> bool {
 
 fn operator_allows(action: Action, kind: ObjectKind) -> bool {
     match action {
+        // Operator secrets: the metadata and the host bindings (WP2.1), never the values.
         Action::Read => {
-            is_inventory(kind) || matches!(kind, ObjectKind::User | ObjectKind::Settings)
+            is_inventory(kind)
+                || matches!(
+                    kind,
+                    ObjectKind::User | ObjectKind::Settings | ObjectKind::Secret
+                )
         }
         Action::Create | Action::Update | Action::Delete => matches!(
             kind,
@@ -130,7 +135,11 @@ fn operator_allows(action: Action, kind: ObjectKind) -> bool {
                 | ObjectKind::Connector
         ),
         Action::Approve => kind == ObjectKind::Proposal,
-        Action::Reveal | Action::Administer => false,
+        // An operator may reveal an operator secret under the reveal policy (TGL-24) and the
+        // PIN coupling rule (IAM-07), which therefore counts operators as accounts that can
+        // reach the vault; creating, changing and binding secrets stays with administrators.
+        Action::Reveal => kind == ObjectKind::Secret,
+        Action::Administer => false,
     }
 }
 
@@ -209,8 +218,27 @@ mod tests {
         assert!(RoleName::Operator.allows(Action::Approve, ObjectKind::Proposal));
         assert!(!RoleName::Operator.allows(Action::Administer, ObjectKind::User));
         assert!(!RoleName::Operator.allows(Action::Update, ObjectKind::Settings));
-        assert!(!RoleName::Operator.allows(Action::Reveal, ObjectKind::Secret));
         assert!(!RoleName::Operator.allows(Action::Create, ObjectKind::CustomField));
+    }
+
+    #[test]
+    fn operators_read_and_reveal_secrets_but_do_not_manage_them() {
+        assert!(RoleName::Operator.allows(Action::Read, ObjectKind::Secret));
+        assert!(RoleName::Operator.allows(Action::Reveal, ObjectKind::Secret));
+        assert!(!RoleName::Operator.allows(Action::Reveal, ObjectKind::User));
+        for action in [Action::Create, Action::Update, Action::Delete] {
+            assert!(!RoleName::Operator.allows(action, ObjectKind::Secret));
+        }
+        // Revealing makes an operator an account that can reach the vault (IAM-07).
+        let home = Profile::Home.defaults();
+        assert_eq!(
+            required_strength(&[RoleName::Operator], &home, Action::Read, true),
+            AuthStrength::Password
+        );
+        assert_eq!(
+            required_strength(&[RoleName::Operator], &home, Action::Read, false),
+            AuthStrength::Pin
+        );
     }
 
     #[test]

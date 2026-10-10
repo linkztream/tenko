@@ -1002,6 +1002,26 @@ async fn start(
         }
         None => Arc::new(tenko_connect::host::normalize::DiscardSink),
     };
+    // Operator secrets (IAM-16): the metadata layer over the vault, and the one-time adoption
+    // of credentials imported before the metadata existed.
+    let operator_secrets = Arc::new(tenko_vault::operator::OperatorSecrets::new(
+        Arc::clone(&store_dyn),
+        Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>,
+    ));
+    match operator_secrets
+        .adopt_unmanaged(&tenko_core::RequestCtx::system(
+            tenko_core::SystemComponent::Vault,
+        ))
+        .await
+    {
+        Ok(adopted) if adopted > 0 => {
+            tracing::info!(adopted, "imported credentials adopted as operator secrets");
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::warn!(%error, "imported credentials could not be adopted as operator secrets");
+        }
+    }
 
     // In-app updates (OPS-24): the service and the steps of its install job, registered
     // before the runner starts.
@@ -1140,6 +1160,7 @@ async fn start(
             if let Some(reconciler) = &reconciler {
                 server.extensions.insert(Arc::clone(reconciler));
             }
+            server.extensions.insert(Arc::clone(&operator_secrets));
             let running = tenko_api::start(server, state).await.map_err(|error| {
                 let code = match &error {
                     tenko_api::ServeError::Bind { .. } => "start.api.bind",

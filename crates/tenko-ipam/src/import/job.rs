@@ -40,7 +40,10 @@ use tenko_jobs::{
     StepOutcome, StepPreview, StepSpec,
 };
 use tenko_store::{KeyRange, ReadConsistency, ReadView, ReadViewExt, WriteBatch};
-use tenko_vault::{SecretBytes, SecretPurpose, SecretSpec};
+use tenko_vault::{
+    SecretBytes, SecretPurpose, SecretSpec,
+    operator::{self, CredentialRole},
+};
 
 use super::{
     codes,
@@ -396,11 +399,24 @@ impl StepHandler for ChunkStep {
         if let Some(vault) = service.vault() {
             for stored in output.credentials.iter().rev() {
                 vault.stage_delete(&mut batch, &cx.request, stored.secret);
+                // The secrets model (WP2.1): the new secret's record and binding go, the
+                // previous credential is bound to the host again.
+                operator::stage_unbind(&mut batch, stored.host, stored.secret.secret);
+                operator::stage_forget(&mut batch, stored.secret.secret);
                 match &stored.previous {
-                    Some(previous) => batch
-                        .put_typed(&HOST_CREDENTIALS, &stored.host, previous)
-                        .map(|_| ())
-                        .map_err(StepError::Store)?,
+                    Some(previous) => {
+                        batch
+                            .put_typed(&HOST_CREDENTIALS, &stored.host, previous)
+                            .map_err(StepError::Store)?;
+                        operator::stage_bind(
+                            &mut batch,
+                            stored.host,
+                            previous.secret.secret,
+                            CredentialRole::Admin,
+                            cx.request.now,
+                        )
+                        .map_err(StepError::Store)?;
+                    }
                     None => {
                         batch.delete_typed(&HOST_CREDENTIALS, &stored.host);
                     }
@@ -467,6 +483,27 @@ async fn stage_credentials(
         batch
             .put_typed(&HOST_CREDENTIALS, &op.host_id, &row)
             .map_err(StepError::Store)?;
+        // The shared model of operator secrets (WP2.1): a record (the login becomes the
+        // user name, the value keeps this layout) and an `admin` binding to the host, in
+        // place of the binding of the credential it replaces.
+        let record = operator::imported_record(
+            secret.secret,
+            op.host.as_str(),
+            value.login.as_deref().map(String::as_str),
+            cx.request.now,
+        );
+        operator::stage_record(batch, &record).map_err(StepError::Store)?;
+        if let Some(existing) = &op.existing {
+            operator::stage_unbind(batch, op.host_id, existing.secret.secret);
+        }
+        operator::stage_bind(
+            batch,
+            op.host_id,
+            secret.secret,
+            CredentialRole::Admin,
+            cx.request.now,
+        )
+        .map_err(StepError::Store)?;
         stored.push(StoredCredential {
             host: op.host_id,
             secret,
@@ -705,7 +742,15 @@ impl StepHandler for FinishStep {
                     .iter()
                     .filter_map(|c| c.previous.as_ref().map(|p| p.secret))
                 {
+                    // A replaced credential that a person bound to another host stays.
+                    if !operator::hosts_of(view.as_ref(), secret.secret)
+                        .map_err(StepError::Store)?
+                        .is_empty()
+                    {
+                        continue;
+                    }
                     vault.stage_delete(&mut batch, &cx.request, secret);
+                    operator::stage_forget(&mut batch, secret.secret);
                 }
             }
             batch.delete_typed(&CHUNK_CHANGES, &key);

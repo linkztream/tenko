@@ -23,6 +23,8 @@
 //! | [`jobs`] | jobs and manual steps | WP1.6 |
 //! | [`moves`] | preview and start moves to another network (IPAM-19) | WP1.4b |
 //! | [`connectors`] | connector plugins and instances | WP2.0 |
+//! | [`secrets`] | operator secrets, reveal, host credentials | WP2.1 |
+//! | [`remote`] | RDP file and SSH URI of a host (API-11) | WP2.1 |
 //! | [`observations`] | observations of connectors and probes, per source and across sources | WP2.4 |
 //! | [`proposals`] | proposals, decisions, reconcile runs, adoption policies | WP2.4 |
 //! | [`audit`] | audit log and chain verification | WP1.7 |
@@ -59,6 +61,8 @@ pub mod moves;
 pub mod observations;
 pub mod prefixes;
 pub mod proposals;
+pub mod remote;
+pub mod secrets;
 pub mod settings;
 pub mod setup;
 pub mod system;
@@ -90,6 +94,7 @@ pub mod users;
         (name = "events", description = "Server-sent events"),
         (name = "system", description = "Health, status, the OpenAPI document and metrics"),
         (name = "connectors", description = "Connector plugins and connector instances"),
+        (name = "secrets", description = "Operator secrets, their reveal, host credentials and the remote access hand-off"),
         (name = "observations", description = "Observations of connectors and probes, per source and across sources"),
         (name = "proposals", description = "Proposals of the reconciler, their decisions and adoption policies"),
     ),
@@ -153,7 +158,8 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
         .merge(audit::routes())
         .merge(events::routes())
         .merge(system::routes())
-        .merge(connectors::routes());
+        .merge(connectors::routes())
+        .merge(secrets::routes());
     if modules.contains(Module::Ipam) {
         router = router
             .merge(tenancy::routes())
@@ -165,7 +171,9 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
             .merge(export::routes())
             .merge(moves::routes())
             .merge(observations::routes())
-            .merge(proposals::routes());
+            .merge(proposals::routes())
+            .merge(secrets::host_routes())
+            .merge(remote::routes());
     }
     router
 }

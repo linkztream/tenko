@@ -8,8 +8,10 @@ import { auditRoutes } from "./routes-audit";
 import { authRoutes } from "./routes-auth";
 import { importRoutes } from "./routes-import";
 import { jobRoutes } from "./routes-jobs";
-import { reconcileRoutes } from "./routes-reconcile";
 import { moveRoutes } from "./routes-move";
+import { reconcileRoutes } from "./routes-reconcile";
+import { revealPolicyRoutes } from "./routes-reveal-policy";
+import { secretsRoutes } from "./routes-secrets";
 import { systemRoutes } from "./routes-system";
 import { updatesRoutes } from "./routes-updates";
 import { eventRoutes } from "./sse";
@@ -27,6 +29,10 @@ export const happyPaths: HttpHandler[] = [
   ...jobRoutes,
   ...auditRoutes,
   ...authRoutes,
+  // Operator secrets (WP2.1), and TGL-24, which decorates the security settings that the
+  // updates routes decorate with TGL-23, so it comes first.
+  ...secretsRoutes,
+  ...revealPolicyRoutes,
   // Updates and modules come before the admin and system routes: they decorate the security
   // settings with TGL-23 and answer the health probe with the version that runs.
   ...updatesRoutes,
