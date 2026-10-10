@@ -6,6 +6,7 @@ import { NODE_ROLES, PROFILES } from "../types";
 import { passwordStrength, requireSession, sessionInfo, startSession } from "./auth";
 import { commit, db, isAdmin, type MockUser } from "./db";
 import { MOCK_CA_FINGERPRINT, MOCK_VERSION } from "./fixtures";
+import { clusterStatus, clusterWarnings } from "./nodes-store";
 import { checkPassword } from "./policy";
 import { banner, profileSettings } from "./profiles";
 import { Problem, fail, ok } from "./reply";
@@ -153,6 +154,8 @@ const systemStatus = route("get", "/api/v1/system/status", () => {
   // The modules this installation runs, and a pending change of them, are for administrators.
   const admin = isAdmin(user);
   if (admin) warnings.push(...modulesWarnings());
+  // Nodes that share no protocol major with this controller (docs/cluster.md, section 5).
+  warnings.push(...clusterWarnings());
   return ok<SystemStatus>({
     ...(admin ? { modules: statusModules() } : {}),
     version: MOCK_VERSION,
@@ -179,6 +182,7 @@ const systemStatus = route("get", "/api/v1/system/status", () => {
       certificate: null,
     },
     ui: { stub: false, from_directory: false },
+    cluster: clusterStatus(),
     warnings,
   });
 });

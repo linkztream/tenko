@@ -1428,8 +1428,10 @@ describe("system", () => {
       store: { role: "leader", revision: db.revision, lag: 0 },
       tls: { mode: "internal_ca", trusted_proxies: [], hsts: false },
       ui: { stub: false, from_directory: false },
-      warnings: [],
+      cluster: { nodes: 2, connected: 1, mismatched: 1 },
     });
+    // The only warning of the seed: the enrolled probe that shares no protocol major (WP2.9).
+    expect(status.body.warnings.map((w) => w.code)).toEqual(["cluster.protocol.mismatch"]);
     expect(status.body.uptime_seconds).toBeGreaterThan(0);
     expect(Date.parse(status.body.started_at)).toBeLessThan(Date.now());
   });
@@ -1438,8 +1440,7 @@ describe("system", () => {
     resetMockDb("lab");
     const status = await get<SystemStatus>("/api/v1/system/status");
     expect(status.body.tls?.mode).toBe("plain");
-    expect(status.body.warnings).toHaveLength(1);
-    expect(status.body.warnings[0]?.code).toBe("sys.tls.plain_http");
+    expect(status.body.warnings.map((w) => w.code)).toEqual(["sys.tls.plain_http", "cluster.protocol.mismatch"]);
   });
 
   it("lists the seed jobs with their derived summary", async () => {

@@ -16,6 +16,7 @@ import { systemRoutes } from "./routes-system";
 import { updatesRoutes } from "./routes-updates";
 import { eventRoutes } from "./sse";
 import { stubs } from "./stubs";
+import { nodeRoutes } from "./routes-nodes";
 
 export { route, mswPath, paginate, wholePage, type MockContext, type OperationPath } from "./route";
 export { ok, created, noContent, fail, Problem, Reply } from "./reply";
@@ -40,6 +41,8 @@ export const happyPaths: HttpHandler[] = [
   ...systemRoutes,
   ...eventRoutes,
   ...reconcileRoutes,
+  // Cluster nodes and enrolment tokens (WP2.2 routes, WP2.9 mock).
+  ...nodeRoutes,
 ];
 
 export const handlers: HttpHandler[] = [...happyPaths, ...stubs];
