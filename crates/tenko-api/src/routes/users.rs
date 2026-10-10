@@ -516,9 +516,10 @@ mod tests {
         .await;
         spaced.assert_problem(400, "auth.invalid_request");
         assert_eq!(spaced.body["params"]["field"], "name");
-        create(&harness, &admin, json!({ "name": "bob", "roles": [] }))
-            .await
-            .assert_problem(400, "auth.invalid_request");
+        // An account without global roles is valid: it acts through scoped grants only.
+        let scoped_only = create(&harness, &admin, json!({ "name": "nora", "roles": [] })).await;
+        assert_eq!(scoped_only.status.as_u16(), 201, "{}", scoped_only.body);
+        assert_eq!(scoped_only.body["roles"], json!([]));
         create(
             &harness,
             &admin,
@@ -794,15 +795,6 @@ mod tests {
             )
             .await
             .assert_problem(400, "sys.invalid_value");
-        harness
-            .call(
-                "PUT",
-                &ada_path,
-                Cookie(&admin),
-                Some(&json!({ "roles": [] })),
-            )
-            .await
-            .assert_problem(400, "auth.invalid_request");
         harness
             .call(
                 "PUT",

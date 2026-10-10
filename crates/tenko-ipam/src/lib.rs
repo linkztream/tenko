@@ -57,6 +57,7 @@
 //! | [`topology`] | the computed topology graph (IPAM-20) |
 //! | [`history`] | history entries (IPAM-09) |
 //! | [`query`] | reads for the API: lists, filters, pagination, search |
+//! | [`scope`] | anchors of IPAM objects for scoped authorization (IAM-01) and the plan check of scoped writes |
 //! | [`custom`] | custom field validation (IPAM-08) |
 //! | [`tables`] | the `ipam.*` tables and counters |
 //! | [`error`] | [`IpamError`] and the `ipam.*` codes |
@@ -81,6 +82,7 @@ pub mod plan;
 pub mod proposals;
 pub mod query;
 pub mod reconcile;
+pub mod scope;
 pub mod service;
 pub mod tables;
 pub mod topology;

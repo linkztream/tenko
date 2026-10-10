@@ -287,8 +287,9 @@ impl AuthService {
         let found = Self::find_user_versioned(view.as_ref(), &request.user_name)?;
         let normalized = normalize(request.password.expose());
         let strength = hash_strength(&settings);
-        let usable = found
-            .filter(|(user, _)| !user.disabled && !user.break_glass && user.password.is_some());
+        let usable = found.filter(|(user, _)| {
+            !user.disabled && !user.break_glass && !user.is_service() && user.password.is_some()
+        });
         let Some((user, revision)) = usable else {
             let dummy = normalized.clone();
             blocking(move || dummy_verify(&dummy, strength)).await?;

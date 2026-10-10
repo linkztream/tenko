@@ -19,6 +19,7 @@
 //! throttled in memory first ([`crate::lockout`]) and only then written as audit records,
 //! so a flood of attempts cannot flood the log.
 
+mod access;
 mod account;
 mod admin;
 mod login;
@@ -29,10 +30,13 @@ pub mod types;
 pub use reveal::{RevealGrant, STEP_UP_FRESH, STEP_UP_PASSKEY, check_step_up};
 
 use std::{
+    collections::HashMap,
     net::IpAddr,
     sync::{Arc, Mutex, PoisonError},
     time::Duration,
 };
+
+use futures::StreamExt;
 
 use arc_swap::ArcSwapOption;
 use tenko_core::{
@@ -42,21 +46,23 @@ use tenko_core::{
     auth::{AuthFuture, SESSION_COOKIE},
 };
 use tenko_store::{
-    KeyRange, ReadConsistency, ReadView, ReadViewExt, Store, StoreError, WriteBatch,
+    AnchorResolver, KeyRange, ReadConsistency, ReadView, ReadViewExt, Store, StoreError,
+    WatchFilter, WriteBatch,
 };
 use tenko_vault::Vault;
 
 use crate::{
-    authz::{AuthIndex, RbacAuthorizer},
+    authz::{AuthIndex, RbacAuthorizer, ScopeSupport},
     challenge::Ceremonies,
     error::AuthError,
     hibp::{BreachChecker, HibpFilter, HibpRangeSource},
-    lockout::Throttle,
+    lockout::{Throttle, ThrottleKey},
     model::{
-        CREDENTIALS, CredentialRecord, INSTALLATION, Installation, LAST_LOGINS, SESSIONS, SETTINGS,
-        SessionRecord, TOKENS, USER_SESSIONS, USERS, UserRecord,
+        CREDENTIALS, CredentialRecord, INSTALLATION, Installation, LAST_LOGINS, SCOPED_TOKENS,
+        SESSIONS, SETTINGS, ScopedTokenRecord, SessionRecord, TOKENS, TokenRecord, USER_SESSIONS,
+        USERS, UserRecord,
     },
-    roles::{RoleName, required_strength},
+    roles::RoleName,
     secret::{BearerSecret, SetupTokenVerifier, hash_secret, looks_like_session_secret},
     settings::SecuritySettings,
     webauthn::{RelyingParty, RpConfig},
@@ -119,6 +125,18 @@ pub mod actions {
     pub const SETTINGS_UPDATE: AuditAction = AuditAction::from_static("auth.settings.update");
     /// Authorization refused an administrative action.
     pub const ACCESS_DENIED: AuditAction = AuditAction::from_static("auth.access.denied");
+    /// A scoped grant created (IAM-01).
+    pub const GRANT_CREATE: AuditAction = AuditAction::from_static("auth.grant.create");
+    /// A scoped grant revoked, with the grants issued under it.
+    pub const GRANT_REVOKE: AuditAction = AuditAction::from_static("auth.grant.revoke");
+    /// A service account created (IAM-10).
+    pub const SERVICE_ACCOUNT_CREATE: AuditAction =
+        AuditAction::from_static("auth.service_account.create");
+    /// The default UI language of the installation changed (API-21).
+    pub const INSTALLATION_LANGUAGE: AuditAction =
+        AuditAction::from_static("auth.installation.language");
+    /// The MFA policy of a role set or cleared (IAM-06).
+    pub const ROLE_POLICY_UPDATE: AuditAction = AuditAction::from_static("auth.role_policy.update");
 }
 
 /// Configuration of the service, set by the server at start.
@@ -181,7 +199,8 @@ pub struct AuthService {
     vault: Arc<dyn Vault>,
     config: AuthConfig,
     index: Arc<AuthIndex>,
-    throttle: Throttle,
+    scope: Arc<ScopeSupport>,
+    throttle: Arc<Throttle>,
     ceremonies: Ceremonies,
     setup_token: Mutex<Option<SetupTokenVerifier>>,
     relying_party: ArcSwapOption<RelyingParty>,
@@ -274,7 +293,8 @@ impl AuthService {
         let index = Arc::new(AuthIndex::new());
         store.register_index(index.clone())?;
         let service = Arc::new(Self {
-            throttle: Throttle::new(config.throttle_capacity),
+            throttle: Arc::new(Throttle::new(config.throttle_capacity)),
+            scope: Arc::new(ScopeSupport::default()),
             ceremonies: Ceremonies::new(config.ceremony_capacity),
             store,
             vault,
@@ -285,12 +305,31 @@ impl AuthService {
         });
         let installation = service.view().await?.get_typed(&INSTALLATION, &())?;
         service.configure_relying_party(installation.as_ref().map(|(i, _)| i))?;
+        service.spawn_unlock_watch();
         Ok(service)
     }
 
-    /// The [`Authorizer`] for every package (roles, TGL-02, TGL-03, IAM-07).
+    /// The [`Authorizer`] for every package (roles, scoped grants and tokens, TGL-02,
+    /// TGL-03, MFA per role, IAM-07).
     pub fn authorizer(&self) -> Arc<dyn Authorizer> {
-        Arc::new(RbacAuthorizer::new(self.index.clone()))
+        Arc::new(self.rbac())
+    }
+
+    /// The concrete authorizer, for callers that need its reach.
+    pub fn rbac(&self) -> RbacAuthorizer {
+        RbacAuthorizer::with_scope(self.index.clone(), self.scope.clone())
+    }
+
+    /// Wires the resolver of anchors (`tenko_ipam::scope::ScopeIndex`) that scoped
+    /// authorization needs (IAM-01). Until it is set, scoped principals are refused on every
+    /// object, and grants over a scope cannot be created.
+    pub fn set_anchor_resolver(&self, resolver: Arc<dyn AnchorResolver>) {
+        self.scope.set(resolver, Arc::clone(&self.store));
+    }
+
+    /// The authorization index (roles, grants, tokens, policies and settings).
+    pub fn index(&self) -> &Arc<AuthIndex> {
+        &self.index
     }
 
     /// The current security settings (from the index: no store read).
@@ -407,7 +446,7 @@ impl AuthService {
         action: tenko_core::Action,
         object: ObjectRef,
     ) -> Result<(), AuthError> {
-        RbacAuthorizer::new(self.index.clone())
+        self.rbac()
             .check(&ctx.principal, action, &object)
             .map_err(AuthError::from)
     }
@@ -436,14 +475,12 @@ impl AuthService {
         Err(error)
     }
 
+    /// The strength the account must sign in with: the profile, the PIN coupling rule and
+    /// the MFA policy of every role it holds at any scope (IAM-06).
     fn required_for(&self, user: &UserRecord) -> AuthStrength {
-        let image = self.index.image();
-        required_strength(
-            &user.roles,
-            image.settings(),
-            tenko_core::Action::Read,
-            image.operator_secrets(),
-        )
+        self.index
+            .image()
+            .required_strength(user.id, tenko_core::Action::Read)
     }
 
     /// Adds a new session for `user` to `batch` and returns its secret and record.
@@ -477,13 +514,7 @@ impl AuthService {
             source_ip,
             user_agent: user_agent.map(|agent| agent.chars().take(200).collect()),
             break_glass,
-            mfa_enrolment_required: strength
-                < required_strength(
-                    &user.roles,
-                    settings,
-                    tenko_core::Action::Read,
-                    self.index.image().operator_secrets(),
-                ),
+            mfa_enrolment_required: strength < self.required_for(user),
         };
         let hash = secret.hash();
         batch.put_typed(&SESSIONS, &hash, &record)?;
@@ -522,6 +553,13 @@ impl AuthService {
             profile: settings.profile,
             banner: settings.banner(),
             default_language: installation.map(|(installation, _)| installation.language),
+            grants: self
+                .index
+                .image()
+                .grants_of(user.id)
+                .iter()
+                .map(SessionGrant::from)
+                .collect(),
         })
     }
 
@@ -579,8 +617,17 @@ impl AuthService {
             return Err(AuthError::Unauthenticated);
         }
         let hash = hash_secret(secret);
-        let view = self.view().await?;
-        let Some((mut session, revision)) = view.get_typed(&SESSIONS, &hash)? else {
+        let mut view = self.view().await?;
+        let mut found = view.get_typed(&SESSIONS, &hash)?;
+        if found.is_none() {
+            // A session created on another controller may not have reached this one's copy
+            // yet: read once more at the leader's commit index before refusing it.
+            if let Some(confirmed) = self.confirmed_view().await {
+                found = confirmed.get_typed(&SESSIONS, &hash)?;
+                view = confirmed;
+            }
+        }
+        let Some((mut session, revision)) = found else {
             return Err(AuthError::Unauthenticated);
         };
         let settings = self.settings();
@@ -597,7 +644,7 @@ impl AuthService {
         let user = view
             .get_typed(&USERS, &session.user)?
             .map(|(user, _)| user)
-            .filter(|user| !user.disabled)
+            .filter(|user| !user.disabled && !user.is_service())
             .ok_or(AuthError::Unauthenticated)?;
         if session.break_glass && !user.break_glass {
             return Err(AuthError::Unauthenticated);
@@ -654,43 +701,136 @@ impl AuthService {
         }
         let hash = hash_secret(token);
         let view = self.view().await?;
-        let Some((mut record, revision)) = view.get_typed(&TOKENS, &hash)? else {
-            return Err(AuthError::Unauthenticated);
-        };
-        if record.expires_at.is_some_and(|expires| now >= expires) {
-            return Err(AuthError::SessionExpired);
-        }
-        let user = view
-            .get_typed(&USERS, &record.owner)?
-            .map(|(user, _)| user)
-            .filter(|user| !user.disabled && !user.break_glass)
-            .ok_or(AuthError::Unauthenticated)?;
-        let principal = Principal::Token {
-            id: record.id,
-            owner: user.id,
-        };
-        if record
-            .last_used_at
-            .is_none_or(|last| now.saturating_since(last) >= Duration::from_secs(3_600))
+        let mut found = Self::find_token(view.as_ref(), &hash)?;
+        let mut view = view;
+        if found.is_none()
+            && let Some(confirmed) = self.confirmed_view().await
         {
-            record.last_used_at = Some(now);
-            let mut batch = WriteBatch::new(principal.clone(), now);
-            batch.expect_typed(&TOKENS, &hash, Some(revision));
-            batch.put_typed(&TOKENS, &hash, &record)?;
-            if let Err(error) = self.store.propose(batch).await
-                && !matches!(error, StoreError::PreconditionFailed(_))
-            {
-                tracing::warn!(%error, "could not record token use");
+            // A token created on another controller: read at the leader's commit index.
+            found = Self::find_token(confirmed.as_ref(), &hash)?;
+            view = confirmed;
+        }
+        let settings = self.settings();
+        match found {
+            None => Err(AuthError::Unauthenticated),
+            Some(FoundToken::Personal(mut record, revision)) => {
+                if token_expired(record.created_at, record.expires_at, &settings, now) {
+                    return Err(AuthError::SessionExpired);
+                }
+                let user = view
+                    .get_typed(&USERS, &record.owner)?
+                    .map(|(user, _)| user)
+                    .filter(|user| !user.disabled && !user.break_glass && !user.is_service())
+                    .ok_or(AuthError::Unauthenticated)?;
+                let principal = Principal::Token {
+                    id: record.id,
+                    owner: user.id,
+                };
+                if record
+                    .last_used_at
+                    .is_none_or(|last| now.saturating_since(last) >= Duration::from_secs(3_600))
+                {
+                    record.last_used_at = Some(now);
+                    let mut batch = WriteBatch::new(principal.clone(), now);
+                    batch.expect_typed(&TOKENS, &hash, Some(revision));
+                    batch.put_typed(&TOKENS, &hash, &record)?;
+                    self.record_token_use(batch).await;
+                }
+                Ok(Authenticated {
+                    principal,
+                    user: Some(user.id),
+                    roles: role_names(&user.roles),
+                    strength: record.issued_with,
+                    expires_at: effective_token_expiry(
+                        record.created_at,
+                        record.expires_at,
+                        &settings,
+                    ),
+                    flags: AuthFlags::default(),
+                })
+            }
+            Some(FoundToken::Scoped(mut record, revision)) => {
+                if token_expired(record.created_at, record.expires_at, &settings, now) {
+                    return Err(AuthError::SessionExpired);
+                }
+                let user = view
+                    .get_typed(&USERS, &record.owner)?
+                    .map(|(user, _)| user)
+                    .filter(|user| !user.disabled && !user.break_glass)
+                    .ok_or(AuthError::Unauthenticated)?;
+                let principal = Principal::Token {
+                    id: record.id,
+                    owner: user.id,
+                };
+                if record
+                    .last_used_at
+                    .is_none_or(|last| now.saturating_since(last) >= Duration::from_secs(3_600))
+                {
+                    record.last_used_at = Some(now);
+                    let mut batch = WriteBatch::new(principal.clone(), now);
+                    batch.expect_typed(&SCOPED_TOKENS, &hash, Some(revision));
+                    batch.put_typed(&SCOPED_TOKENS, &hash, &record)?;
+                    self.record_token_use(batch).await;
+                }
+                // The global roles the token acts with: its global grants the owner covers.
+                let roles: Vec<RoleName> = record
+                    .grants
+                    .iter()
+                    .filter(|grant| grant.scope.is_none())
+                    .map(|grant| grant.role)
+                    .filter(|role| user.roles.iter().any(|held| held.covers(*role)))
+                    .collect();
+                Ok(Authenticated {
+                    principal,
+                    user: Some(user.id),
+                    roles: role_names(&roles),
+                    strength: record.issued_with,
+                    expires_at: effective_token_expiry(
+                        record.created_at,
+                        record.expires_at,
+                        &settings,
+                    ),
+                    flags: AuthFlags::default(),
+                })
             }
         }
-        Ok(Authenticated {
-            principal,
-            user: Some(user.id),
-            roles: role_names(&user.roles),
-            strength: record.issued_with,
-            expires_at: record.expires_at,
-            flags: AuthFlags::default(),
-        })
+    }
+
+    /// The personal or scoped token stored under `hash`.
+    fn find_token(view: &dyn ReadView, hash: &Vec<u8>) -> Result<Option<FoundToken>, AuthError> {
+        if let Some((record, revision)) = view.get_typed(&TOKENS, hash)? {
+            return Ok(Some(FoundToken::Personal(record, revision)));
+        }
+        Ok(view
+            .get_typed(&SCOPED_TOKENS, hash)?
+            .map(|(record, revision)| FoundToken::Scoped(Box::new(record), revision)))
+    }
+
+    /// Records the hourly use of a token; a concurrent request may have done it already.
+    async fn record_token_use(&self, batch: WriteBatch) {
+        if let Err(error) = self.store.propose(batch).await
+            && !matches!(error, StoreError::PreconditionFailed(_))
+        {
+            tracing::warn!(%error, "could not record token use");
+        }
+    }
+
+    /// A view at the commit index of the leader (a read index on a follower), or `None`
+    /// when the cluster cannot confirm one now.
+    async fn confirmed_view(&self) -> Option<Arc<dyn ReadView>> {
+        self.store.read(ReadConsistency::Linearizable).await.ok()
+    }
+
+    /// Follows the user records so that an unlock by an administrator on any controller
+    /// clears this controller's login throttle for the account (WP3.1b section 7): the
+    /// throttle lives in memory per controller, the unlock is a write of the user record.
+    fn spawn_unlock_watch(&self) {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let store = Arc::clone(&self.store);
+        let throttle = Arc::clone(&self.throttle);
+        handle.spawn(unlock_watch(store, throttle));
     }
 
     /// Loads a session of `user` by id.
@@ -828,6 +968,103 @@ fn effective_expiry(
             .unwrap_or(session.idle_expires_at),
     );
     (absolute_end.min(idle_end), absolute_end)
+}
+
+/// A token found by its hash.
+enum FoundToken {
+    Personal(TokenRecord, tenko_core::Revision),
+    Scoped(Box<ScopedTokenRecord>, tenko_core::Revision),
+}
+
+/// The end of a token under the current TGL-05 cap: a tightened cap shortens existing
+/// tokens (IAM-10).
+pub(crate) fn effective_token_expiry(
+    created_at: Timestamp,
+    expires_at: Option<Timestamp>,
+    settings: &SecuritySettings,
+) -> Option<Timestamp> {
+    let cap = settings
+        .token_max_days
+        .and_then(|days| created_at.checked_add(Duration::from_secs(u64::from(days) * 86_400)));
+    match (expires_at, cap) {
+        (Some(expires), Some(cap)) => Some(expires.min(cap)),
+        (expires, None) => expires,
+        (None, cap) => cap,
+    }
+}
+
+fn token_expired(
+    created_at: Timestamp,
+    expires_at: Option<Timestamp>,
+    settings: &SecuritySettings,
+    now: Timestamp,
+) -> bool {
+    effective_token_expiry(created_at, expires_at, settings).is_some_and(|end| now >= end)
+}
+
+/// The loop of [`AuthService::spawn_unlock_watch`]: ends when the store shuts down.
+async fn unlock_watch(store: Arc<dyn Store>, throttle: Arc<Throttle>) {
+    let filter = WatchFilter::tables([USERS.name().clone()]);
+    // Names by id, so that the throttle of a deleted account is cleared too.
+    let mut names: HashMap<UserId, String> = HashMap::new();
+    let mut unlocked: HashMap<UserId, Timestamp> = HashMap::new();
+    loop {
+        let Ok(mut changes) = store.watch(None, filter.clone()) else {
+            return;
+        };
+        // What this controller knows now; unlocks before this point find nothing to clear.
+        if let Ok(view) = store.read(ReadConsistency::Local).await
+            && let Ok(users) = view.scan_typed(&USERS, KeyRange::all(), usize::MAX, false)
+        {
+            for (id, user, _) in users {
+                if let Some(at) = user.unlocked_at {
+                    unlocked.insert(id, at);
+                }
+                names.insert(id, user.name);
+            }
+        }
+        while let Some(item) = changes.next().await {
+            let Ok(change_set) = item else {
+                break;
+            };
+            let Ok(view) = store
+                .read(ReadConsistency::AtLeast(change_set.revision))
+                .await
+            else {
+                break;
+            };
+            for change in &change_set.changes {
+                let Ok(id) = USERS.decode_key(&change.key) else {
+                    continue;
+                };
+                match view.get_typed(&USERS, &id) {
+                    Ok(Some((user, _))) => {
+                        if let Some(at) = user.unlocked_at
+                            && unlocked.get(&id) != Some(&at)
+                        {
+                            throttle.unlock(&ThrottleKey::account(&user.name));
+                            unlocked.insert(id, at);
+                        }
+                        if let Some(old) = names.insert(id, user.name.clone())
+                            && old != user.name
+                        {
+                            throttle.unlock(&ThrottleKey::account(&old));
+                        }
+                    }
+                    Ok(None) => {
+                        if let Some(name) = names.remove(&id) {
+                            throttle.unlock(&ThrottleKey::account(&name));
+                        }
+                        unlocked.remove(&id);
+                    }
+                    Err(error) => tracing::debug!(%error, "unlock watch could not read a user"),
+                }
+            }
+        }
+        if store.read(ReadConsistency::Local).await.is_err() {
+            return;
+        }
+    }
 }
 
 fn role_names(roles: &[RoleName]) -> std::collections::BTreeSet<String> {

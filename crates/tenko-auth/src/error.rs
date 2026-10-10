@@ -1,8 +1,17 @@
 //! Errors of the authentication service and their stable codes (API-08).
 //!
 //! Codes live in the namespaces this package owns: `auth.*` (login, sessions, factors,
-//! tokens, setup), `users.*` (user administration) and `settings.*` (security settings).
-//! Login failures never tell an unauthenticated caller whether an account exists.
+//! tokens, setup, grants, service accounts, scopes), `users.*` (user administration) and
+//! `settings.*` (security settings). Login failures never tell an unauthenticated caller
+//! whether an account exists.
+//!
+//! Codes of scoped authorization (WP3.2, `docs/access.md`): `auth.out_of_scope` (403, an
+//! object outside the principal's grants), `auth.password_change_required` (403, every
+//! route but the password change, sign-out and the session answers it while the account
+//! must change its password), `auth.grant.not_found` (404), `auth.grant.invalid_scope`
+//! (422), `auth.grant.invalid_role` (422), `auth.grant.exceeds_own` (403),
+//! `auth.grant.duplicate` (409), `auth.service_account.not_found` (404),
+//! `auth.service_account.no_login` (409) and `auth.scope.unavailable` (503).
 
 use std::{borrow::Cow, collections::BTreeMap};
 
@@ -111,6 +120,30 @@ pub enum AuthError {
     /// A setting change would break the PIN coupling rule (IAM-07, CON-07).
     #[error("a PIN may be the only factor only while the vault holds no operator secrets")]
     PinCoupling,
+    /// The account must change its password before it does anything else.
+    #[error("the password must be changed first")]
+    PasswordChangeRequired,
+    /// A grant names a rule that cannot be granted or an object that does not exist.
+    #[error("invalid grant scope: {0}")]
+    GrantInvalidScope(Cow<'static, str>),
+    /// A grant names a role that is global only.
+    #[error("the role `{role}` cannot be granted over a scope")]
+    GrantInvalidRole {
+        /// The role.
+        role: &'static str,
+    },
+    /// A delegated grant or a token grant goes beyond the caller's own grants.
+    #[error("the grant goes beyond the grants of its issuer")]
+    GrantExceedsOwn,
+    /// The subject already holds the same role over the same scope.
+    #[error("the subject already holds this grant")]
+    GrantDuplicate,
+    /// A service account has no password, passkey, second factor or session.
+    #[error("a service account cannot sign in")]
+    ServiceAccountNoLogin,
+    /// Scope checks need the anchors of IPAM, which this server does not provide.
+    #[error("scoped authorization is not available")]
+    ScopeUnavailable,
     /// The service is not configured (no relying party, no host name yet).
     #[error("authentication is not available: {0}")]
     Unavailable(&'static str),
@@ -177,6 +210,8 @@ impl Coded for AuthError {
                 "session" => "auth.session.not_found",
                 "token" => "auth.token.not_found",
                 "credential" => "auth.webauthn.credential_not_found",
+                "grant" => "auth.grant.not_found",
+                "service_account" => "auth.service_account.not_found",
                 _ => "auth.not_found",
             },
             Self::UserNameTaken => "users.name_taken",
@@ -188,6 +223,13 @@ impl Coded for AuthError {
             Self::InvalidHostName(_) => "auth.setup.invalid_host_name",
             Self::Invalid { .. } => "auth.invalid_request",
             Self::PinCoupling => "settings.pin_coupling",
+            Self::PasswordChangeRequired => "auth.password_change_required",
+            Self::GrantInvalidScope(_) => "auth.grant.invalid_scope",
+            Self::GrantInvalidRole { .. } => "auth.grant.invalid_role",
+            Self::GrantExceedsOwn => "auth.grant.exceeds_own",
+            Self::GrantDuplicate => "auth.grant.duplicate",
+            Self::ServiceAccountNoLogin => "auth.service_account.no_login",
+            Self::ScopeUnavailable => "auth.scope.unavailable",
             Self::Unavailable(_) => "auth.unavailable",
             Self::Store(error) => error.code(),
             Self::Internal(_) => "auth.internal",
@@ -204,9 +246,15 @@ impl Coded for AuthError {
             Self::ChallengeInvalid | Self::Invalid { .. } | Self::InvalidHostName(_) => 400,
             Self::StepUpRequired { .. }
             | Self::PasswordIncorrect
-            | Self::BreakGlassHardwareKeyOnly => 403,
+            | Self::BreakGlassHardwareKeyOnly
+            | Self::PasswordChangeRequired
+            | Self::GrantExceedsOwn => 403,
             Self::Denied(denied) => denied.http_status(),
-            Self::PasswordPolicy(_) | Self::TotpCodeMismatch | Self::TokenLifetime { .. } => 422,
+            Self::PasswordPolicy(_)
+            | Self::TotpCodeMismatch
+            | Self::TokenLifetime { .. }
+            | Self::GrantInvalidScope(_)
+            | Self::GrantInvalidRole { .. } => 422,
             Self::WebAuthn(error) => error.http_status(),
             Self::NotFound { .. } => 404,
             Self::TotpAlreadyEnrolled
@@ -216,8 +264,10 @@ impl Coded for AuthError {
             | Self::LastFactor
             | Self::Conflict
             | Self::SetupClosed
-            | Self::PinCoupling => 409,
-            Self::BreachCheckUnavailable | Self::Unavailable(_) => 503,
+            | Self::PinCoupling
+            | Self::GrantDuplicate
+            | Self::ServiceAccountNoLogin => 409,
+            Self::BreachCheckUnavailable | Self::Unavailable(_) | Self::ScopeUnavailable => 503,
             Self::Store(error) => error.http_status(),
             Self::Internal(_) => 500,
         }
@@ -239,6 +289,10 @@ impl Coded for AuthError {
             }
             Self::NotFound { kind } => BTreeMap::from([("kind", (*kind).to_owned())]),
             Self::InvalidHostName(name) => BTreeMap::from([("host_name", name.clone())]),
+            Self::GrantInvalidScope(reason) => {
+                BTreeMap::from([("reason", reason.clone().into_owned())])
+            }
+            Self::GrantInvalidRole { role } => BTreeMap::from([("role", (*role).to_owned())]),
             Self::Invalid { field, reason } => BTreeMap::from([
                 ("field", (*field).to_owned()),
                 ("reason", reason.clone().into_owned()),
@@ -256,6 +310,7 @@ impl Coded for AuthError {
             Self::StepUpRequired { .. } => "Fresh authentication required",
             Self::SetupClosed => "Setup is closed",
             Self::PinCoupling => "PIN coupling rule",
+            Self::PasswordChangeRequired => "Password change required",
             _ => tenko_core::error::status_title(self.http_status()),
         }
     }
@@ -312,6 +367,17 @@ mod tests {
             AuthError::NotFound { kind: "token" },
             AuthError::TokenLifetime { max_days: 90 },
             AuthError::internal("x"),
+            AuthError::PasswordChangeRequired,
+            AuthError::GrantInvalidScope("x".into()),
+            AuthError::GrantInvalidRole { role: "admin" },
+            AuthError::GrantExceedsOwn,
+            AuthError::GrantDuplicate,
+            AuthError::NotFound { kind: "grant" },
+            AuthError::NotFound {
+                kind: "service_account",
+            },
+            AuthError::ServiceAccountNoLogin,
+            AuthError::ScopeUnavailable,
         ] {
             let code = error.code();
             assert!(

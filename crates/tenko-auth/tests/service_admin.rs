@@ -482,11 +482,6 @@ async fn invalid_names_and_values_are_refused() {
     )
     .await;
 
-    let no_roles = new_user("nora", &[], None);
-    assert!(matches!(
-        env.service.create_user(&admin, &no_roles).await,
-        Err(AuthError::Invalid { field: "roles", .. })
-    ));
     let mut bad_language = new_user("nora", &[RoleName::Viewer], None);
     bad_language.language = Some("de".to_owned());
     assert!(matches!(
@@ -776,10 +771,6 @@ async fn role_changes_are_audited_and_validated() {
         .await
         .expect("roles");
     assert_eq!(updated.roles, [RoleName::Operator]);
-    assert!(matches!(
-        env.service.set_user_roles(&admin, user.id, &[], None).await,
-        Err(AuthError::Invalid { field: "roles", .. })
-    ));
     assert_eq!(
         env.service
             .set_user_roles(&admin, UserId::generate(), &[RoleName::Viewer], None)
@@ -1145,7 +1136,7 @@ async fn unlocking_clears_a_persisted_lock() {
         audit_of(&env, "auth.user.unlock").await.len(),
     ];
     assert_eq!(counts, [1, 1]);
-    // Unlocking an unlocked account changes nothing and writes nothing.
+    // Unlocking an unlocked account records nothing in the audit log.
     env.service
         .unlock_user(&admin, user.id)
         .await
@@ -2757,7 +2748,8 @@ async fn administrative_changes_are_audited_with_the_acting_administrator() {
     .await
     .expect("delete");
 
-    // Unlocking an account that is not locked changes nothing and records nothing.
+    // Unlocking an account that is not locked records nothing in the audit log (the user
+    // record carries the unlock time for the throttles of the other controllers).
     let before = audit_records(&env).await.len();
     env.service
         .unlock_user(&admin, admin.principal.user().expect("a user"))
@@ -3045,4 +3037,25 @@ async fn expired_sessions_are_neither_listed_nor_counted() {
             .expect("revoke"),
         1
     );
+}
+
+#[tokio::test]
+async fn an_account_without_global_roles_is_accepted() {
+    // Scoped grants (IAM-01) are the only rights of such an account.
+    let (env, session) = TestEnv::installed(Profile::Home).await;
+    let admin = ctx(&env, &session).await;
+    let nora = create(&env, &admin, &new_user("nora", &[], None)).await;
+    assert_eq!(nora.roles, Vec::<RoleName>::new());
+    let back = env
+        .service
+        .set_user_roles(&admin, nora.id, &[RoleName::Viewer], None)
+        .await
+        .expect("roles");
+    assert_eq!(back.roles, [RoleName::Viewer]);
+    let none = env
+        .service
+        .set_user_roles(&admin, nora.id, &[], None)
+        .await
+        .expect("no roles");
+    assert_eq!(none.roles, Vec::<RoleName>::new());
 }

@@ -4,7 +4,10 @@
 use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use tenko_core::{ApiTokenId, AuthStrength, Revision, SessionId, Timestamp, UserId};
+use tenko_core::{
+    ApiTokenId, AuthStrength, ObjectRef, PrefixId, Revision, ScopeRule, SessionId, SiteId,
+    TenantId, Timestamp, UserId, VrfId,
+};
 use utoipa::{
     PartialSchema, ToSchema,
     openapi::{ObjectBuilder, RefOr, Schema, Type},
@@ -12,7 +15,7 @@ use utoipa::{
 use zeroize::Zeroizing;
 
 use crate::{
-    model::AccountLock,
+    model::{AccountLock, GrantId, GrantRecord, RoleMfa, TokenGrant, TokenScope, UserKind},
     password::{PolicyViolation, policy::PasswordPolicy},
     roles::RoleName,
     settings::{Banner, Profile, SecuritySettings, ToggleState},
@@ -112,6 +115,7 @@ pub enum SecondFactorMethod {
 /// The answer of a login step.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)] // Built once per login step, never stored.
 pub enum LoginResponse {
     /// The login is complete; the session cookie is set.
     Authenticated {
@@ -241,6 +245,34 @@ pub struct SessionInfo {
     /// The default UI language of the installation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_language: Option<String>,
+    /// The scoped grants of the account (IAM-01), for display gating; the server decides.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub grants: Vec<SessionGrant>,
+}
+
+/// One scoped grant as a session shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct SessionGrant {
+    /// The grant.
+    pub id: GrantId,
+    /// The role.
+    pub role: RoleName,
+    /// Where it applies.
+    #[schema(value_type = ScopeRuleSchema)]
+    pub scope: ScopeRule,
+    /// Whether the holder may delegate it.
+    pub delegable: bool,
+}
+
+impl From<&GrantRecord> for SessionGrant {
+    fn from(grant: &GrantRecord) -> Self {
+        Self {
+            id: grant.id,
+            role: grant.role,
+            scope: grant.scope.clone(),
+            delegable: grant.delegable,
+        }
+    }
 }
 
 /// One session in `GET /auth/sessions`.
@@ -395,14 +427,53 @@ pub struct RecoveryCodes {
     pub codes: Vec<SecretString>,
 }
 
-/// `POST /auth/tokens`.
-#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+/// A personal token request (the command line client's form of `POST /auth/tokens`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TokenCreate {
     /// A name for the token.
     pub name: String,
     /// Lifetime in days; defaults to the TGL-05 maximum (or no expiry where it allows).
     #[serde(default)]
     pub expires_in_days: Option<u32>,
+}
+
+/// `POST /auth/tokens` and `POST /access/service-accounts/{id}/tokens`. With `grants` or
+/// `scopes` the token is a scoped token (IAM-10): it acts with the intersection of its
+/// grants and the owner's, never more. Without them, `POST /auth/tokens` creates a
+/// personal token that acts with the owner's roles and grants.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[schema(as = TokenCreate)]
+pub struct TokenRequest {
+    /// A name for the token.
+    pub name: String,
+    /// Lifetime in days; defaults to the TGL-05 maximum (or no expiry where it allows).
+    #[serde(default)]
+    pub expires_in_days: Option<u32>,
+    /// The grants of a scoped token: each a role no higher than one the owner holds, over
+    /// the whole installation or a scope inside one of the owner's grants.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grants: Option<Vec<TokenGrant>>,
+    /// The special scopes of a scoped token: `metrics`, `audit:read`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<TokenScope>,
+}
+
+impl TokenRequest {
+    /// Whether the request asks for a scoped token.
+    pub fn is_scoped(&self) -> bool {
+        self.grants.is_some() || !self.scopes.is_empty()
+    }
+}
+
+impl From<&TokenCreate> for TokenRequest {
+    fn from(request: &TokenCreate) -> Self {
+        Self {
+            name: request.name.clone(),
+            expires_in_days: request.expires_in_days,
+            grants: None,
+            scopes: Vec::new(),
+        }
+    }
 }
 
 /// A personal token without its secret.
@@ -422,6 +493,15 @@ pub struct TokenInfo {
     /// The last use (recorded at most hourly).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_used_at: Option<Timestamp>,
+    /// A scoped token (IAM-10); absent for a personal token.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scoped: bool,
+    /// The grants of a scoped token.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub grants: Vec<TokenGrant>,
+    /// The special scopes of a scoped token.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<TokenScope>,
 }
 
 /// A new token: the secret is shown once.
@@ -480,6 +560,12 @@ pub struct UserInfo {
     pub last_login_at: Option<Timestamp>,
     /// The revision for `If-Match`.
     pub revision: Revision,
+    /// A service account (IAM-10); absent for a person.
+    #[serde(default, skip_serializing_if = "UserKind::is_person")]
+    pub kind: UserKind,
+    /// The administrator who owns a service account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<UserId>,
 }
 
 /// `POST /users`.
@@ -493,7 +579,7 @@ pub struct UserCreate {
     /// An initial password; the user must change it at first login.
     #[serde(default)]
     pub password: Option<SecretString>,
-    /// Global roles.
+    /// Global roles; may be empty for an account that acts through scoped grants only.
     pub roles: Vec<RoleName>,
     /// A fixed UI language.
     #[serde(default)]
@@ -558,6 +644,13 @@ pub struct SecuritySettingsView {
     pub revision: Option<Revision>,
 }
 
+/// `PUT /settings/default-language` and its answer (API-21).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+pub struct DefaultLanguage {
+    /// The language tag: a built-in language or an active language pack.
+    pub language: String,
+}
+
 /// A profile offered by the first-run wizard.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ProfileInfo {
@@ -609,4 +702,127 @@ pub struct SetupRequest {
 
 fn default_language() -> String {
     "en".to_owned()
+}
+
+/// A scope rule in the API (IAM-01): `{"kind": "prefix", "value": {"id": "...",
+/// "subtree": true}}`. Grants use `vrf`, `site` and `prefix`; `tenant` and `object` are
+/// part of the model and not granted in Phase 1.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[schema(as = ScopeRule)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum ScopeRuleSchema {
+    /// Objects of a tenant.
+    Tenant(TenantId),
+    /// Objects of a VRF.
+    Vrf(VrfId),
+    /// Objects of a site, and with `subtree` those of its child sites.
+    Site {
+        /// The site.
+        id: SiteId,
+        /// Whether child sites are included.
+        subtree: bool,
+    },
+    /// A prefix and the objects directly in it, and with `subtree` everything inside it.
+    Prefix {
+        /// The prefix.
+        id: PrefixId,
+        /// Whether child prefixes are included.
+        subtree: bool,
+    },
+    /// One object.
+    Object(ObjectRef),
+}
+
+/// The holder of a grant or the owner of a token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct SubjectSummary {
+    /// The user id.
+    pub id: UserId,
+    /// The login name.
+    pub name: String,
+    /// The display name.
+    pub display_name: String,
+    /// A person or a service account.
+    pub kind: UserKind,
+}
+
+/// A scoped grant (IAM-01).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct GrantView {
+    /// The grant.
+    pub id: GrantId,
+    /// Who holds it.
+    pub subject: SubjectSummary,
+    /// The role: `operator` or `viewer`.
+    pub role: RoleName,
+    /// Where it applies.
+    #[schema(value_type = ScopeRuleSchema)]
+    pub scope: ScopeRule,
+    /// Whether the holder may grant a role no higher over a scope inside this one.
+    pub delegable: bool,
+    /// Who created it; absent for the system.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub granted_by: Option<UserId>,
+    /// When it was created.
+    pub granted_at: Timestamp,
+    /// The delegable grant it was issued under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<GrantId>,
+}
+
+/// `POST /access/grants`.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct GrantCreate {
+    /// The person or service account that receives the grant.
+    pub subject: UserId,
+    /// The role: `operator` or `viewer`.
+    pub role: RoleName,
+    /// A VRF, a site or a prefix, with or without its subtree.
+    #[schema(value_type = ScopeRuleSchema)]
+    pub scope: ScopeRule,
+    /// Whether the holder may delegate it.
+    #[serde(default)]
+    pub delegable: bool,
+}
+
+/// The answer of `DELETE /access/grants/{id}`: the grant and the grants issued under it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct GrantsRevoked {
+    /// Every revoked grant, the requested one first.
+    pub revoked: Vec<GrantId>,
+}
+
+/// `POST /access/service-accounts`.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct ServiceAccountCreate {
+    /// The account name: 1 to 64 characters, no spaces or control characters; shares the
+    /// name space of users.
+    pub name: String,
+    /// The display name; defaults to the name.
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// Global roles; empty for an account that acts through scoped grants only.
+    #[serde(default)]
+    pub roles: Vec<RoleName>,
+}
+
+/// The MFA policy of one role (IAM-06).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RolePolicyView {
+    /// The role.
+    pub role: RoleName,
+    /// The requirement in force: the stricter of the stored policy and the profile's.
+    pub mfa: RoleMfa,
+    /// The requirement of the profile (TGL-02, TGL-03), the floor and the default.
+    pub profile_default: RoleMfa,
+    /// The stored policy, absent when the role follows the profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stored: Option<RoleMfa>,
+}
+
+/// `PUT /access/role-policies/{role}`.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct RolePolicyUpdate {
+    /// The requirement; one weaker than the profile's has no effect beyond it.
+    pub mfa: RoleMfa,
 }

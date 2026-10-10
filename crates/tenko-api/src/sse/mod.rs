@@ -31,6 +31,7 @@
 //! second from the metrics collector, not from the journal ([`metrics`]). RBAC scopes
 //! install their [`EventFilter`] with [`EventHub::set_filter`].
 
+pub mod filter;
 mod hub;
 pub mod metrics;
 

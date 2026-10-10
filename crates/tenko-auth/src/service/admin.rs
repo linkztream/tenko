@@ -61,17 +61,16 @@ pub(super) fn valid_language(language: &str, image: &AuthImage) -> Result<String
     }
 }
 
-fn valid_roles(roles: &[RoleName]) -> Result<Vec<RoleName>, AuthError> {
+/// Sorts and deduplicates global roles. An empty list is valid: the account then acts
+/// through scoped grants only (IAM-01).
+pub(super) fn valid_roles(roles: &[RoleName]) -> Vec<RoleName> {
     let mut roles = roles.to_vec();
     roles.sort();
     roles.dedup();
-    if roles.is_empty() {
-        return Err(AuthError::invalid("roles", "at least one role"));
-    }
-    Ok(roles)
+    roles
 }
 
-fn display_name(input: Option<&str>, name: &str) -> Result<String, AuthError> {
+pub(super) fn display_name(input: Option<&str>, name: &str) -> Result<String, AuthError> {
     let text = input.map_or(name, str::trim);
     if text.is_empty() || text.chars().count() > 128 || text.chars().any(char::is_control) {
         return Err(AuthError::invalid(
@@ -109,6 +108,8 @@ fn user_info(
         created_at: user.created_at,
         last_login_at,
         revision,
+        kind: user.kind,
+        owner: user.owner,
     }
 }
 
@@ -251,7 +252,7 @@ impl AuthService {
         .await?;
         let name = valid_user_name(&request.name)?;
         let display_name = display_name(request.display_name.as_deref(), &name)?;
-        let roles = valid_roles(&request.roles)?;
+        let roles = valid_roles(&request.roles);
         let language = request
             .language
             .as_deref()
@@ -374,6 +375,9 @@ impl AuthService {
             if user.break_glass {
                 return Err(AuthError::BreakGlassHardwareKeyOnly);
             }
+            if user.is_service() {
+                return Err(AuthError::ServiceAccountNoLogin);
+            }
             updated.password = Some(
                 self.reset_password(ctx, view.as_ref(), &user, password)
                     .await?,
@@ -400,8 +404,9 @@ impl AuthService {
             Self::stage_revoke(&mut batch, &Self::user_sessions(view.as_ref(), id)?);
         }
         if updated.disabled && !user.disabled {
-            // The personal tokens of a disabled account end with it, as its sessions do.
+            // The tokens of a disabled account end with it, as its sessions do.
             Self::stage_token_removal(view.as_ref(), &mut batch, id)?;
+            Self::stage_scoped_token_removal(view.as_ref(), &mut batch, id)?;
         }
         let mut draft = Self::audit(actions::USER_UPDATE, vec![Self::user_object(id)], ctx);
         draft.details.changes = fields;
@@ -440,6 +445,8 @@ impl AuthService {
         batch.delete_typed(&USER_NAMES, &UserRecord::name_key(&user.name));
         Self::stage_revoke(&mut batch, &Self::user_sessions(view.as_ref(), id)?);
         Self::stage_token_removal(view.as_ref(), &mut batch, id)?;
+        Self::stage_scoped_token_removal(view.as_ref(), &mut batch, id)?;
+        let grants = Self::stage_grant_removal(view.as_ref(), &mut batch, id)?;
         batch.delete_typed(&LAST_LOGINS, &id);
         for credential in Self::user_credentials(view.as_ref(), id)? {
             batch.delete_typed(&CREDENTIAL_IDS, &credential.credential_id);
@@ -448,10 +455,12 @@ impl AuthService {
         if let Some(totp) = &user.totp {
             self.vault.stage_delete(&mut batch, ctx, totp.secret);
         }
-        batch.audit(
-            Self::audit(actions::USER_DELETE, vec![Self::user_object(id)], ctx)
-                .with_context("name", user.name.clone()),
-        );
+        let mut draft = Self::audit(actions::USER_DELETE, vec![Self::user_object(id)], ctx)
+            .with_context("name", user.name.clone());
+        if grants > 0 {
+            draft = draft.with_context("grants_revoked", grants.to_string());
+        }
+        batch.audit(draft);
         self.commit(batch).await?;
         self.throttle.unlock(&ThrottleKey::account(&user.name));
         Ok(())
@@ -468,17 +477,23 @@ impl AuthService {
         let view = self.view().await?;
         let (user, revision) = Self::load_user(view.as_ref(), id)?;
         self.throttle.unlock(&ThrottleKey::account(&user.name));
-        if user.lock.is_some() {
+        // The record is written even without a persisted lock: the other controllers clear
+        // their in-memory throttle when they see `unlocked_at` change (WP3.2). Only lifting
+        // a persisted lock is an audited change of the account.
+        {
             let mut updated = user.clone();
             updated.lock = None;
+            updated.unlocked_at = Some(ctx.now);
             let mut batch = WriteBatch::for_request(ctx);
             batch.expect_typed(&USERS, &id, Some(revision));
             batch.put_typed(&USERS, &id, &updated)?;
-            batch.audit(Self::audit(
-                actions::USER_UNLOCK,
-                vec![Self::user_object(id)],
-                ctx,
-            ));
+            if user.lock.is_some() {
+                batch.audit(Self::audit(
+                    actions::USER_UNLOCK,
+                    vec![Self::user_object(id)],
+                    ctx,
+                ));
+            }
             self.commit(batch).await?;
         }
         Self::info(self.view().await?.as_ref(), id, ctx.now)
@@ -529,7 +544,7 @@ impl AuthService {
     ) -> Result<UserInfo, AuthError> {
         self.authorize(ctx, Action::Administer, Self::user_object(id))
             .await?;
-        let roles = valid_roles(roles)?;
+        let roles = valid_roles(roles);
         let view = self.view().await?;
         let (user, revision) = Self::load_user(view.as_ref(), id)?;
         if expect.is_some_and(|expected| expected != revision) {
@@ -656,6 +671,50 @@ impl AuthService {
         );
         self.commit(batch).await?;
         Self::info(self.view().await?.as_ref(), id, ctx.now)
+    }
+
+    /// `PUT /settings/default-language` (API-21): the default UI language of the
+    /// installation, a built-in language or an active language pack. Audited with the old
+    /// and the new tag.
+    ///
+    /// # Errors
+    ///
+    /// [`AuthError::Denied`] without the update permission on settings,
+    /// [`AuthError::Invalid`] (field `language`) for a tag that is not active,
+    /// [`AuthError::Unavailable`] before setup, [`AuthError::Conflict`] on a concurrent
+    /// change.
+    pub async fn set_default_language(
+        &self,
+        ctx: &RequestCtx,
+        language: &str,
+    ) -> Result<String, AuthError> {
+        self.authorize(
+            ctx,
+            Action::Update,
+            ObjectRef::singleton(ObjectKind::Settings),
+        )
+        .await?;
+        let language = valid_language(language.trim(), &self.index.image())?;
+        let view = self.view().await?;
+        let (mut installation, revision) = view
+            .get_typed(&INSTALLATION, &())?
+            .ok_or(AuthError::Unavailable("setup has not completed"))?;
+        if installation.language != language {
+            let old = std::mem::replace(&mut installation.language, language.clone());
+            let mut batch = WriteBatch::for_request(ctx);
+            batch.expect_typed(&INSTALLATION, &(), Some(revision));
+            batch.put_typed(&INSTALLATION, &(), &installation)?;
+            batch.audit(
+                Self::audit(
+                    actions::INSTALLATION_LANGUAGE,
+                    vec![ObjectRef::singleton(ObjectKind::Settings)],
+                    ctx,
+                )
+                .with_change(change("language", &old, &language)),
+            );
+            self.commit(batch).await?;
+        }
+        Ok(language)
     }
 
     async fn settings_view(&self) -> Result<SecuritySettingsView, AuthError> {
@@ -806,9 +865,9 @@ mod tests {
         let image = AuthImage::default();
         assert!(valid_language("sv", &image).is_ok());
         assert!(valid_language("de", &image).is_err());
-        assert!(valid_roles(&[]).is_err());
+        assert_eq!(valid_roles(&[]), Vec::<RoleName>::new());
         assert_eq!(
-            valid_roles(&[RoleName::Viewer, RoleName::Admin, RoleName::Viewer]).expect("roles"),
+            valid_roles(&[RoleName::Viewer, RoleName::Admin, RoleName::Viewer]),
             vec![RoleName::Admin, RoleName::Viewer]
         );
     }

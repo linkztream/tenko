@@ -86,7 +86,7 @@ use tenko_auth::{
     service::{
         CodeLogin, CreatedToken, CredentialInfo, FactorEnrolled, LoginResponse, PasswordChange,
         PasswordChanged, PasswordCheck, PasswordCheckResult, PasswordLogin, RecoveryCodes,
-        SessionInfo, SessionSummary, TokenCreate, TokenInfo, TotpEnrolFinish, TotpEnrolment,
+        SessionInfo, SessionSummary, TokenInfo, TokenRequest, TotpEnrolFinish, TotpEnrolment,
         WebAuthnLoginFinish, WebAuthnLoginOptions, WebAuthnLoginStart, WebAuthnRegisterFinish,
         WebAuthnRegisterOptions, WebAuthnRegisterStart,
     },
@@ -1049,21 +1049,22 @@ async fn list_tokens(
     Ok(page(&app, service.list_tokens(&ctx).await?))
 }
 
-/// Creates a personal token for scripts and the command line. The secret is shown once;
-/// its expiry is capped by TGL-05. Only an interactive session that meets the profile can
-/// create one.
+/// Creates a personal token for scripts and the command line, or with `grants` or
+/// `scopes` a scoped token (IAM-10) that acts with the intersection of its grants and the
+/// owner's. The secret is shown once; its expiry is capped by TGL-05. Only an interactive
+/// session that meets the profile can create one.
 #[utoipa::path(
     post,
     path = "/auth/tokens",
     tag = "auth",
     operation_id = "create_token",
-    summary = "Create a personal API token, shown once",
-    request_body = TokenCreate,
+    summary = "Create a personal or scoped API token, shown once",
+    request_body = TokenRequest,
     responses(
         (status = 201, description = "The token: its secret (`tnk_...`, shown once) and its metadata", body = CreatedToken),
         (status = 400, description = "The body is malformed (`sys.invalid_request`) or the name or lifetime is invalid (`auth.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The session is not strong enough (`auth.step_up_required`) or is the break-glass session (`auth.break_glass.hardware_key_only`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 422, description = "The lifetime exceeds the maximum of the profile (`auth.token.lifetime_exceeded`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The session is not strong enough (`auth.step_up_required`) is the break-glass session (`auth.break_glass.hardware_key_only`), or a grant of a scoped token goes beyond the owner's (`auth.grant.exceeds_own`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "The lifetime exceeds the maximum of the profile (`auth.token.lifetime_exceeded`), a grant names a global-only role (`auth.grant.invalid_role`) or a scope that cannot be granted or does not exist (`auth.grant.invalid_scope`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
         Unavailable
     ),
@@ -1072,12 +1073,12 @@ async fn list_tokens(
 async fn create_token(
     Svc(service): Svc,
     Ctx(ctx): Ctx,
-    ApiJson(request): ApiJson<TokenCreate>,
+    ApiJson(request): ApiJson<TokenRequest>,
 ) -> Result<Response, RouteError> {
     secret_json(
         StatusCode::CREATED,
         None,
-        &service.create_token(&ctx, &request).await?,
+        &service.create_token_with(&ctx, &request).await?,
     )
 }
 
@@ -1647,7 +1648,7 @@ mod tests {
                 checked += 1;
             }
         }
-        assert_eq!(checked, 36, "every endpoint of the four areas");
+        assert_eq!(checked, 37, "every endpoint of the four areas");
     }
 
     #[tokio::test]
@@ -2702,6 +2703,7 @@ mod tests {
             "set_user_roles",
             "set_break_glass",
             "update_security_settings",
+            "set_default_language",
         ];
         let schemas = document["components"]["schemas"]
             .as_object()
@@ -2770,7 +2772,7 @@ mod tests {
                 schema_refs(operation, &mut refs);
             }
         }
-        assert_eq!(operations, 36);
+        assert_eq!(operations, 37);
         // Every schema the operations name exists, and so does everything those name.
         let mut pending: Vec<String> = refs.iter().cloned().collect();
         while let Some(name) = pending.pop() {

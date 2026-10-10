@@ -22,6 +22,8 @@ async-trait = { workspace = true }
 aws-lc-rs = { workspace = true }
 bytes = { workspace = true }
 ciborium = { workspace = true }
+# The change stream of the store (the unlock watch).
+futures = { workspace = true }
 # Unicode classes (`\p{L}`) in Custom presets, whatever other crates enable.
 regex = { workspace = true, features = ["unicode"] }
 reqwest = { workspace = true, optional = true }

@@ -1,8 +1,6 @@
 //! Self-service: the current session and the user's other sessions, password, TOTP,
 //! WebAuthn credentials, recovery codes and personal tokens.
 
-use std::time::Duration;
-
 use tenko_core::{
     Action, ApiTokenId, AuthStrength, ObjectKind, ObjectRef, Principal, RequestCtx, Revision,
     SessionId, UserId, secret::SecretClass,
@@ -17,8 +15,8 @@ use super::{
     types::{
         BreachStatus, CreatedToken, CredentialInfo, FactorEnrolled, PasswordChange,
         PasswordChanged, PasswordCheck, PasswordCheckResult, RecoveryCodes, SecretString,
-        SessionInfo, SessionSummary, TokenCreate, TokenInfo, TotpEnrolFinish, TotpEnrolment,
-        WebAuthnRegisterFinish, WebAuthnRegisterOptions, WebAuthnRegisterStart,
+        SessionInfo, SessionSummary, TokenCreate, TokenInfo, TokenRequest, TotpEnrolFinish,
+        TotpEnrolment, WebAuthnRegisterFinish, WebAuthnRegisterOptions, WebAuthnRegisterStart,
     },
 };
 use crate::{
@@ -113,6 +111,9 @@ fn token_info(record: &TokenRecord) -> TokenInfo {
         created_at: record.created_at,
         expires_at: record.expires_at,
         last_used_at: record.last_used_at,
+        scoped: false,
+        grants: Vec::new(),
+        scopes: Vec::new(),
     }
 }
 
@@ -862,6 +863,7 @@ impl AuthService {
                 tokens.push(token_info(&record));
             }
         }
+        tokens.extend(Self::scoped_tokens_of(view.as_ref(), user)?);
         Ok(tokens)
     }
 
@@ -876,9 +878,39 @@ impl AuthService {
         ctx: &RequestCtx,
         request: &TokenCreate,
     ) -> Result<CreatedToken, AuthError> {
+        self.create_token_with(ctx, &TokenRequest::from(request))
+            .await
+    }
+
+    /// `POST /auth/tokens` with grants or scopes (IAM-10): a scoped token of the caller,
+    /// whose grants lie inside the caller's roles and grants; without them, a personal
+    /// token as [`AuthService::create_token`] creates it.
+    ///
+    /// # Errors
+    ///
+    /// As [`AuthService::create_token`], and [`AuthError::GrantExceedsOwn`],
+    /// [`AuthError::GrantInvalidRole`], [`AuthError::GrantInvalidScope`] for the grants.
+    pub async fn create_token_with(
+        &self,
+        ctx: &RequestCtx,
+        request: &TokenRequest,
+    ) -> Result<CreatedToken, AuthError> {
         let (user, _, _, session) = self.current(ctx).await?;
         if session.break_glass {
             return Err(AuthError::BreakGlassHardwareKeyOnly);
+        }
+        if request.is_scoped() {
+            let view = self.view().await?;
+            return self
+                .issue_scoped_token(
+                    ctx,
+                    view.as_ref(),
+                    &user,
+                    user.id,
+                    session.strength,
+                    request,
+                )
+                .await;
         }
         let required = self.required_for(&user);
         if !satisfies(session.strength, required) {
@@ -887,29 +919,8 @@ impl AuthService {
             });
         }
         let name = label("name", Some(&request.name), "")?;
-        let settings = self.settings();
-        let days = match (settings.token_max_days, request.expires_in_days) {
-            (_, Some(0)) => {
-                return Err(AuthError::invalid("expires_in_days", "at least one day"));
-            }
-            (Some(max), Some(days)) if days > max => {
-                return Err(AuthError::TokenLifetime {
-                    max_days: u64::from(max),
-                });
-            }
-            (Some(max), None) => Some(max),
-            (_, requested) => requested,
-        };
-        let expires_at = match days {
-            None => None,
-            Some(days) => Some(
-                ctx.now
-                    .checked_add(Duration::from_secs(u64::from(days) * 86_400))
-                    .ok_or_else(|| {
-                        AuthError::invalid("expires_in_days", "too far in the future")
-                    })?,
-            ),
-        };
+        let expires_at =
+            super::access::token_expiry(&self.settings(), request.expires_in_days, ctx.now)?;
         let token = new_api_token()?;
         let record = TokenRecord {
             id: ApiTokenId::generate(),
@@ -956,6 +967,19 @@ impl AuthService {
             return Err(AuthError::NotFound { kind: "token" });
         }
         let view = self.view().await?;
+        // A scoped token of the caller's own.
+        if let Some(hash) = Self::scoped_token_hash(view.as_ref(), caller, id)? {
+            let mut batch = WriteBatch::for_request(ctx);
+            batch.delete_typed(&crate::model::SCOPED_TOKENS, &hash);
+            batch.delete_typed(&crate::model::USER_SCOPED_TOKENS, &(caller, id));
+            batch.audit(Self::audit(
+                actions::TOKEN_REVOKE,
+                vec![ObjectRef::from(caller), ObjectRef::from(id)],
+                ctx,
+            ));
+            self.commit(batch).await?;
+            return Ok(());
+        }
         // The owner's own token, or, for an administrator, anybody's.
         let mut found = view
             .get_typed(&USER_TOKENS, &(caller, id))?

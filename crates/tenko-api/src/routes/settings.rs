@@ -8,6 +8,7 @@
 //! |---|---|---|
 //! | `GET /settings/security` | 200 `SecuritySettingsView` with `ETag: "<revision>"` | 401, 403, 503 |
 //! | `PATCH /settings/security` | 200 `SecuritySettingsView` with the new `ETag` | 400, 401, 403, 409 `auth.conflict` or `settings.pin_coupling`, 503 |
+//! | `PUT /settings/default-language` | 200 `DefaultLanguage` | 400 `auth.invalid_request` (field `language`), 401, 403, 409, 503 |
 //!
 //! `PATCH` takes a `SettingsPatch`: a new profile resets every toggle first, explicit
 //! toggles apply on top. `If-Match: "<revision>"` makes the change conditional on the
@@ -18,7 +19,10 @@ use axum::{
     http::HeaderMap,
     response::{IntoResponse, Response},
 };
-use tenko_auth::{service::SecuritySettingsView, settings::SettingsPatch};
+use tenko_auth::{
+    service::{DefaultLanguage, SecuritySettingsView},
+    settings::SettingsPatch,
+};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use super::auth::{
@@ -27,7 +31,9 @@ use super::auth::{
 use crate::{extract::Ctx, problem::ProblemDetails, state::AppState};
 
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(get_security_settings, update_security_settings))
+    OpenApiRouter::new()
+        .routes(routes!(get_security_settings, update_security_settings))
+        .routes(routes!(set_default_language))
 }
 
 /// The view as a response, with its revision as `ETag` once setup has stored settings.
@@ -94,6 +100,36 @@ async fn update_security_settings(
             .update_security_settings(&ctx, &patch, expect)
             .await?,
     ))
+}
+
+/// Sets the default UI language of the installation (API-21): a built-in language or an
+/// active language pack. Users without a fixed language and the sign-in page use it.
+#[utoipa::path(
+    put,
+    path = "/settings/default-language",
+    tag = "settings",
+    operation_id = "set_default_language",
+    summary = "Set the default language of the installation",
+    request_body = DefaultLanguage,
+    responses(
+        (status = 200, description = "The default language now in force", body = DefaultLanguage),
+        (status = 400, description = "The body is malformed (`sys.invalid_request`) or the tag is not an active language (`auth.invalid_request`, field `language`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "A concurrent change (`auth.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
+        Unauthenticated,
+        Forbidden,
+        Unavailable
+    ),
+    security(("session" = []))
+)]
+async fn set_default_language(
+    Svc(service): Svc,
+    Ctx(ctx): Ctx,
+    ApiJson(request): ApiJson<DefaultLanguage>,
+) -> Result<Json<DefaultLanguage>, RouteError> {
+    let language = service
+        .set_default_language(&ctx, &request.language)
+        .await?;
+    Ok(Json(DefaultLanguage { language }))
 }
 
 #[cfg(test)]

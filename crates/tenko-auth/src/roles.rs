@@ -1,9 +1,10 @@
-//! Global roles (`admin`, `operator`, `viewer`, and `auditor` since Slice 3) and their
-//! permissions.
+//! Roles (`admin`, `operator`, `viewer`, and `auditor` since Slice 3), their permissions,
+//! their order for delegation and the strength rules.
 //!
-//! Object scopes and delegation (IAM-01) come in Slice 3; until then every grant covers
-//! all objects of a kind, so [`Authorizer::scope`](tenko_core::Authorizer::scope) answers
-//! `All` or `Nothing`.
+//! A role held globally (`UserRecord::roles`) covers every object of the kinds it allows; a
+//! role held through a scoped grant (`auth.grants`, IAM-01) covers the objects its rule
+//! reaches ([`crate::authz`]). The MFA requirement of a role (IAM-06) defaults to the
+//! profile's TGL-02 and TGL-03 ([`default_policy`]) and can be raised per role.
 
 use std::{fmt, str::FromStr};
 
@@ -11,7 +12,10 @@ use serde::{Deserialize, Serialize};
 use tenko_core::{Action, AuthStrength, ObjectKind};
 use utoipa::ToSchema;
 
-use crate::settings::{MfaRequirement, SecuritySettings};
+use crate::{
+    model::RoleMfa,
+    settings::{MfaRequirement, SecuritySettings},
+};
 
 /// A global role.
 #[derive(
@@ -65,10 +69,23 @@ impl RoleName {
             Self::Operator => operator_allows(action, kind),
             Self::Viewer => action == Action::Read && is_inventory(kind),
             // The audit log, the export status and the system status are reads of the
-            // system object; the route guards that keep the auditor out of the rest of the
-            // system area arrive with scoped authorization (WP3.2).
+            // system object; every other kind (inventory, users, settings, secrets, nodes)
+            // stays closed, and scoped grants never carry the role.
             Self::Auditor => action == Action::Read && kind == ObjectKind::System,
         }
+    }
+
+    /// Whether a holder of this role may hand out `other` (delegation, the grants of a
+    /// scoped token): a role no higher. The administrator covers every role, the operator
+    /// covers the viewer, and the auditor covers only itself.
+    pub const fn covers(self, other: RoleName) -> bool {
+        matches!(
+            (self, other),
+            (Self::Admin, _)
+                | (Self::Operator, Self::Operator | Self::Viewer)
+                | (Self::Viewer, Self::Viewer)
+                | (Self::Auditor, Self::Auditor)
+        )
     }
 }
 
@@ -203,6 +220,20 @@ pub fn required_strength(
     required
 }
 
+/// The MFA policy a role has when none is stored (IAM-06): the profile's TGL-03 and TGL-02
+/// for the administrator, TGL-02 alone for the other roles.
+pub fn default_policy(role: RoleName, settings: &SecuritySettings) -> RoleMfa {
+    let admin = role == RoleName::Admin;
+    if admin && settings.passkey_for_admins {
+        return RoleMfa::Passkey;
+    }
+    match settings.mfa {
+        MfaRequirement::Everyone => RoleMfa::TotpOrStronger,
+        MfaRequirement::Administrators if admin => RoleMfa::TotpOrStronger,
+        MfaRequirement::Administrators | MfaRequirement::Optional => RoleMfa::Optional,
+    }
+}
+
 /// Whether a session of `strength` satisfies `required`. A passkey satisfies a two-factor
 /// requirement: it combines possession with user verification.
 pub fn satisfies(strength: AuthStrength, required: AuthStrength) -> bool {
@@ -332,6 +363,50 @@ mod tests {
             AuthStrength::Password,
             AuthStrength::PasswordTotp
         ));
+    }
+
+    #[test]
+    fn roles_cover_themselves_and_lower_roles_only() {
+        for role in RoleName::ALL {
+            assert!(role.covers(role), "{role}");
+            assert!(RoleName::Admin.covers(role), "{role}");
+        }
+        assert!(RoleName::Operator.covers(RoleName::Viewer));
+        assert!(!RoleName::Viewer.covers(RoleName::Operator));
+        assert!(!RoleName::Operator.covers(RoleName::Admin));
+        assert!(!RoleName::Operator.covers(RoleName::Auditor));
+        assert!(!RoleName::Auditor.covers(RoleName::Viewer));
+    }
+
+    #[test]
+    fn default_policies_follow_the_profile() {
+        let policy = |profile: Profile, role| default_policy(role, &profile.defaults());
+        assert_eq!(policy(Profile::Home, RoleName::Admin), RoleMfa::Optional);
+        assert_eq!(
+            policy(Profile::Standard, RoleName::Admin),
+            RoleMfa::TotpOrStronger
+        );
+        assert_eq!(
+            policy(Profile::Standard, RoleName::Operator),
+            RoleMfa::Optional
+        );
+        assert_eq!(policy(Profile::Hardened, RoleName::Admin), RoleMfa::Passkey);
+        assert_eq!(
+            policy(Profile::Hardened, RoleName::Viewer),
+            RoleMfa::TotpOrStronger
+        );
+        assert_eq!(policy(Profile::Lab, RoleName::Auditor), RoleMfa::Optional);
+        // The default of every role is what the profile already requires of it.
+        for profile in Profile::ALL {
+            let settings = profile.defaults();
+            for role in RoleName::ALL {
+                assert_eq!(
+                    default_policy(role, &settings).strength(),
+                    required_strength(&[role], &settings, Action::Read, false),
+                    "{profile:?} {role}"
+                );
+            }
+        }
     }
 
     #[test]
