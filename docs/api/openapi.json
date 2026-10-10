@@ -5127,6 +5127,226 @@
         }
       }
     },
+    "/api/v1/hosts/{id}/credentials": {
+      "get": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "List the credentials of a host",
+        "operationId": "get_host_credentials",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Host identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The credentials of the host, with `ETag` (the version of the set)",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The version of the set, for `If-Match`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostCredentialsView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is not a UUID (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such host (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Bind and unbind the credentials of a host",
+        "operationId": "update_host_credentials",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Host identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The version of the set the client read, as in the `ETag`; a stale version is refused with 409",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostCredentialsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The credentials of the host after the change, with `ETag`",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The new version of the set"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostCredentialsView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or `If-Match` is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`, `auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such host (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`If-Match` is stale or the set changed meanwhile (`vault.host_credentials.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Too many bindings or a secret twice (`vault.secret.invalid`), or a secret that is not an operator secret (`vault.host_credentials.secret_missing`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/hosts/{id}/history": {
       "get": {
         "tags": [
@@ -5488,6 +5708,155 @@
           },
           "423": {
             "description": "The host is locked against automation (`ipam.host.locked`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/hosts/{id}/remote": {
+      "get": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Get the RDP file or SSH URI of a host",
+        "operationId": "get_host_remote",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Host identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "protocol",
+            "in": "query",
+            "description": "`rdp` or `ssh`.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The protocol of a hand-off.",
+              "enum": [
+                "rdp",
+                "ssh"
+              ]
+            }
+          },
+          {
+            "name": "interface",
+            "in": "query",
+            "description": "An interface of the host to connect through.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/InterfaceId"
+            }
+          },
+          {
+            "name": "address",
+            "in": "query",
+            "description": "An IP address of the host, or the DNS name of one of its addresses, used as given.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "port",
+            "in": "query",
+            "description": "The TCP port, 1 to 65535 (default 3389 for RDP, 22 for SSH).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "user",
+            "in": "query",
+            "description": "The user name; by default the one of the credential bound to the host.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "For `rdp` an `.rdp` file as an attachment (CRLF line ends, it prompts for the password); for `ssh` the URI",
+            "content": {
+              "application/x-rdp": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SshHandoff"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter is missing, unknown or malformed (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such host (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The interface or address does not belong to the host (`remote.interface_unknown`, `remote.address_unknown`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11300,6 +11669,702 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/secrets": {
+      "get": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "List operator secrets",
+        "operationId": "list_secrets",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1,000 (default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page's `next_cursor`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least this store revision (read-your-writes after a write).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Case-insensitive text search over the name, the user name and the tags.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Only secrets of this kind.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SecretKind"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "description": "Only secrets that carry this purpose tag.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "host",
+            "in": "query",
+            "description": "Only secrets bound to this host.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/HostId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of operator secrets by name; empty without permission to read secrets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_OperatorSecretView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter is unknown or malformed (`sys.invalid_query`) or the cursor is bad (`sys.invalid_cursor`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Create an operator secret",
+        "operationId": "create_secret",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Makes a retried request safe; a replay answers the first response",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewOperatorSecret"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The new secret (metadata only), with `ETag`",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The revision of the metadata"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorSecretView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed, or the session is weaker than a password (`auth.forbidden`, `auth.step_up_required` with `required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An account that may reveal secrets signs in with a PIN alone (`vault.pin_coupling`, parameter `accounts`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The value exceeds 64 KiB (`vault.secret.too_large`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A value is invalid (`vault.secret.invalid`, parameter `field`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/secrets/{id}": {
+      "get": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Get an operator secret",
+        "operationId": "get_secret",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Secret identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The secret (metadata only), with `ETag`",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The revision of the metadata"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorSecretView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is not a UUID (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such operator secret (`vault.secret.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Delete an operator secret",
+        "operationId": "delete_secret",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Secret identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as in the `ETag`; a stale revision is refused with 409",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "400": {
+            "description": "The identifier or `If-Match` is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`, `auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such operator secret (`vault.secret.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Still referenced (`vault.secret.in_use`, parameters `hosts` and `connectors` with the counts), or `If-Match` is stale (`vault.secret.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Update an operator secret",
+        "operationId": "update_secret",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Secret identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as in the `ETag`; a stale revision is refused with 409",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorSecretPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The secret after the change, with `ETag`",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The new revision of the metadata"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorSecretView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or `If-Match` is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`, `auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such operator secret (`vault.secret.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`If-Match` is stale or the secret changed meanwhile (`vault.secret.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The value exceeds 64 KiB (`vault.secret.too_large`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A value is invalid (`vault.secret.invalid`, parameter `field`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/secrets/{id}/references": {
+      "get": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "List the references of an operator secret",
+        "operationId": "list_secret_references",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Secret identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The hosts and connector instances that reference the secret",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretReferences"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is not a UUID (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such operator secret (`vault.secret.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/secrets/{id}/reveal": {
+      "post": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Reveal an operator secret",
+        "operationId": "reveal_secret",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Secret identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The host in view and the reason; the body may be empty",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevealRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The value, sent once with `Cache-Control: no-store`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevealedSecret"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`, also for personal tokens), a step-up is needed (`auth.step_up_required`, parameter `required`: `password`, `fresh` or `passkey`), the policy reveals only secrets bound to the host in view (`vault.reveal.host_required`), or the secret is not bound to the host named (`vault.reveal.not_bound`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such operator secret (`vault.secret.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The reason is invalid (`vault.secret.invalid`) or the stored value is not text (`vault.secret.not_text`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many reveals (`vault.reveal.rate_limited`), with `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/settings/security": {
@@ -18796,6 +19861,17 @@
           "skip"
         ]
       },
+      "CredentialRole": {
+        "type": "string",
+        "description": "The role of a credential on a host.",
+        "enum": [
+          "admin",
+          "rdp",
+          "ssh",
+          "web",
+          "other"
+        ]
+      },
       "CustomFieldDef": {
         "type": "object",
         "description": "Definition of a custom field (IPAM-08).",
@@ -19957,6 +21033,93 @@
           "tenant": {
             "$ref": "#/components/schemas/TenantId",
             "description": "Owning tenant."
+          }
+        }
+      },
+      "HostCredentialBinding": {
+        "type": "object",
+        "description": "One binding of a change of a host's credentials.",
+        "required": [
+          "secret",
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/CredentialRole",
+            "description": "Its role on the host."
+          },
+          "secret": {
+            "$ref": "#/components/schemas/SecretId",
+            "description": "The operator secret."
+          }
+        },
+        "additionalProperties": false
+      },
+      "HostCredentialItem": {
+        "type": "object",
+        "description": "One credential of a host.",
+        "required": [
+          "role",
+          "bound_at",
+          "secret"
+        ],
+        "properties": {
+          "bound_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it was bound."
+          },
+          "role": {
+            "$ref": "#/components/schemas/CredentialRole",
+            "description": "The role of the credential on the host."
+          },
+          "secret": {
+            "$ref": "#/components/schemas/OperatorSecretView",
+            "description": "The secret (metadata only)."
+          }
+        }
+      },
+      "HostCredentialsUpdate": {
+        "type": "object",
+        "description": "The new set of credentials of a host: every binding not listed is removed.",
+        "required": [
+          "credentials"
+        ],
+        "properties": {
+          "credentials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HostCredentialBinding"
+            },
+            "description": "The bindings: one per secret, at most 32."
+          }
+        },
+        "additionalProperties": false
+      },
+      "HostCredentialsView": {
+        "type": "object",
+        "description": "The credentials bound to a host.",
+        "required": [
+          "host",
+          "items",
+          "version"
+        ],
+        "properties": {
+          "host": {
+            "$ref": "#/components/schemas/HostId",
+            "description": "The host."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HostCredentialItem"
+            },
+            "description": "The credentials, by role and name."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The version of the set, as in the `ETag`; send it as `If-Match` with a change.",
+            "minimum": 0
           }
         }
       },
@@ -22465,6 +23628,48 @@
           }
         }
       },
+      "LastReveal": {
+        "type": "object",
+        "description": "The last reveal of a secret: who and when, never the value or the reason.",
+        "required": [
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When."
+          },
+          "host": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HostId",
+                "description": "The host they were looking at."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "user": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UserId",
+                "description": "The person."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "user_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Their login name at the time."
+          }
+        }
+      },
       "LastRun": {
         "type": "object",
         "description": "The last run of an instance.",
@@ -23764,6 +24969,51 @@
         },
         "additionalProperties": false
       },
+      "NewOperatorSecret": {
+        "type": "object",
+        "description": "A new operator secret.",
+        "required": [
+          "name",
+          "kind",
+          "value"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/SecretKind",
+            "description": "What it is."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name: 1 to 128 visible characters."
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Notes (at most 2,000 characters). Notes are not secret: never put a value here."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Purpose tags: up to 16, each 1 to 64 characters of `a-z`, `0-9`, `.`, `_` and `-`\n(upper case is folded)."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The user name that goes with it (at most 256 characters)."
+          },
+          "value": {
+            "$ref": "#/components/schemas/SecretString",
+            "description": "The value, as text (1 byte to 64 KiB). Stored encrypted; never returned except by\nthe reveal."
+          }
+        },
+        "additionalProperties": false
+      },
       "NewRange": {
         "type": "object",
         "description": "The body of `POST /prefixes/{id}/ranges`; the prefix comes from the path.",
@@ -24786,6 +26036,161 @@
         ],
         "description": "One acceptable observation.\n\nAdjacently tagged because variants carry IP addresses."
       },
+      "OperatorSecretPatch": {
+        "type": "object",
+        "description": "A change of an operator secret. Absent members stay; `null` clears `username` and\n`notes`.",
+        "properties": {
+          "kind": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SecretKind",
+                "description": "A new kind."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new name."
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New notes; `null` clears them."
+          },
+          "tags": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "New purpose tags (the whole list)."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new user name; `null` clears it."
+          },
+          "value": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SecretString",
+                "description": "A new value (replaces the stored one under a fresh data key)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "OperatorSecretView": {
+        "type": "object",
+        "description": "An operator secret: metadata only, never the value.",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "tags",
+          "origin",
+          "created_at",
+          "updated_at",
+          "value_updated_at",
+          "hosts"
+        ],
+        "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it was created."
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SecretHostRef"
+            },
+            "description": "The hosts it is bound to, with the role."
+          },
+          "id": {
+            "$ref": "#/components/schemas/SecretId",
+            "description": "The secret."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SecretKind",
+            "description": "What it is."
+          },
+          "last_revealed": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LastReveal",
+                "description": "The last reveal."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "The name (not unique)."
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Notes."
+          },
+          "origin": {
+            "$ref": "#/components/schemas/SecretOrigin",
+            "description": "Where it came from."
+          },
+          "revision": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Revision",
+                "description": "The revision of the metadata, as in the `ETag`; absent for a secret stored before\nthe secrets model whose record is not written yet."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Purpose tags (lower case, sorted), for example `api_key` or `unifi`; a connector form\noffers the secrets whose tags include the purpose it needs."
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When its metadata or value last changed."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The user name that goes with it."
+          },
+          "value_updated_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When its value was last written (creation, replacement, key rotation)."
+          }
+        }
+      },
       "Page_AddressRow": {
         "type": "object",
         "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
@@ -25772,6 +27177,126 @@
                 "subject_key": {
                   "type": "string",
                   "description": "The canonical text of the subject ([`FactSubject::key`])."
+                }
+              }
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
+      "Page_OperatorSecretView": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "An operator secret: metadata only, never the value.",
+              "required": [
+                "id",
+                "name",
+                "kind",
+                "tags",
+                "origin",
+                "created_at",
+                "updated_at",
+                "value_updated_at",
+                "hosts"
+              ],
+              "properties": {
+                "created_at": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When it was created."
+                },
+                "hosts": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SecretHostRef"
+                  },
+                  "description": "The hosts it is bound to, with the role."
+                },
+                "id": {
+                  "$ref": "#/components/schemas/SecretId",
+                  "description": "The secret."
+                },
+                "kind": {
+                  "$ref": "#/components/schemas/SecretKind",
+                  "description": "What it is."
+                },
+                "last_revealed": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/LastReveal",
+                      "description": "The last reveal."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "name": {
+                  "type": "string",
+                  "description": "The name (not unique)."
+                },
+                "notes": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Notes."
+                },
+                "origin": {
+                  "$ref": "#/components/schemas/SecretOrigin",
+                  "description": "Where it came from."
+                },
+                "revision": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Revision",
+                      "description": "The revision of the metadata, as in the `ETag`; absent for a secret stored before\nthe secrets model whose record is not written yet."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Purpose tags (lower case, sorted), for example `api_key` or `unifi`; a connector form\noffers the secrets whose tags include the purpose it needs."
+                },
+                "updated_at": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When its metadata or value last changed."
+                },
+                "username": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The user name that goes with it."
+                },
+                "value_updated_at": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When its value was last written (creation, replacement, key rotation)."
                 }
               }
             },
@@ -28989,6 +30514,100 @@
           "journal"
         ]
       },
+      "RevealPolicy": {
+        "type": "object",
+        "description": "TGL-24: what revealing an operator secret takes (IAM-16, API-11). The PIN coupling rule\n(IAM-07) holds in every profile on top of it: a PIN-strength session never reveals, and\npersonal API tokens never reveal.",
+        "required": [
+          "step_up",
+          "bound_host_only"
+        ],
+        "properties": {
+          "bound_host_only": {
+            "type": "boolean",
+            "description": "Reveal only a secret that is bound to the host the request names: the host the\nperson is looking at (Hardened). The secrets page cannot reveal then."
+          },
+          "step_up": {
+            "$ref": "#/components/schemas/RevealStepUp",
+            "description": "The authentication a reveal needs."
+          }
+        }
+      },
+      "RevealRequest": {
+        "type": "object",
+        "description": "A reveal request.",
+        "properties": {
+          "host": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HostId",
+                "description": "The host the person is looking at; the secret must be bound to it. Required when\nthe reveal policy (TGL-24) reveals only secrets bound to the host in view."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why, in the person's words (at most 200 characters); written to the audit record."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RevealStepUp": {
+        "type": "string",
+        "description": "The authentication a reveal of an operator secret needs (TGL-24). The variants are\nordered from the weakest to the strongest.",
+        "enum": [
+          "session",
+          "fresh",
+          "passkey"
+        ]
+      },
+      "RevealedSecret": {
+        "type": "object",
+        "description": "A revealed value. Sent once with `Cache-Control: no-store`, never stored for an\nidempotent replay; the reveal is in the audit log.",
+        "required": [
+          "id",
+          "value",
+          "kind",
+          "revealed_at",
+          "clear_after_secs"
+        ],
+        "properties": {
+          "clear_after_secs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds after which the UI clears the value from the clipboard.",
+            "minimum": 0
+          },
+          "id": {
+            "$ref": "#/components/schemas/SecretId",
+            "description": "The secret."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SecretKind",
+            "description": "What it is."
+          },
+          "revealed_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the reveal was recorded in the audit log."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The user name that goes with it."
+          },
+          "value": {
+            "$ref": "#/components/schemas/SecretString",
+            "description": "The value (the password of an imported login)."
+          }
+        }
+      },
       "Revision": {
         "type": "integer",
         "format": "int64",
@@ -29199,6 +30818,34 @@
           "webauthn"
         ]
       },
+      "SecretConnectorReference": {
+        "type": "object",
+        "description": "A connector instance that references a secret.",
+        "required": [
+          "connector",
+          "name",
+          "plugin",
+          "purpose"
+        ],
+        "properties": {
+          "connector": {
+            "$ref": "#/components/schemas/ConnectorId",
+            "description": "The connector instance."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "plugin": {
+            "type": "string",
+            "description": "Its plugin."
+          },
+          "purpose": {
+            "type": "string",
+            "description": "The purpose the secret serves for the plugin."
+          }
+        }
+      },
       "SecretDecl": {
         "type": "object",
         "description": "A secret a plugin may receive.",
@@ -29222,9 +30869,75 @@
         },
         "additionalProperties": false
       },
+      "SecretHostRef": {
+        "type": "object",
+        "description": "A host a secret is bound to.",
+        "required": [
+          "host",
+          "role"
+        ],
+        "properties": {
+          "host": {
+            "$ref": "#/components/schemas/HostId",
+            "description": "The host."
+          },
+          "role": {
+            "$ref": "#/components/schemas/CredentialRole",
+            "description": "The role of the credential on it."
+          }
+        }
+      },
+      "SecretHostReference": {
+        "type": "object",
+        "description": "A host that binds a secret.",
+        "required": [
+          "host",
+          "role"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "description": "Whether the host is deleted."
+          },
+          "host": {
+            "$ref": "#/components/schemas/HostId",
+            "description": "The host."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its name, when the host still exists."
+          },
+          "role": {
+            "$ref": "#/components/schemas/CredentialRole",
+            "description": "The role of the credential on it."
+          }
+        }
+      },
       "SecretId": {
         "type": "string",
         "format": "uuid"
+      },
+      "SecretKind": {
+        "type": "string",
+        "description": "What an operator secret is.",
+        "enum": [
+          "password",
+          "api_key",
+          "ssh_key",
+          "token",
+          "other"
+        ]
+      },
+      "SecretOrigin": {
+        "type": "string",
+        "description": "Where an operator secret came from.",
+        "enum": [
+          "manual",
+          "import"
+        ]
       },
       "SecretRef": {
         "type": "object",
@@ -29234,6 +30947,35 @@
         ],
         "properties": {
           "secret": {
+            "$ref": "#/components/schemas/SecretId",
+            "description": "The secret."
+          }
+        }
+      },
+      "SecretReferences": {
+        "type": "object",
+        "description": "What references a secret. A secret with any reference cannot be deleted.",
+        "required": [
+          "id",
+          "hosts",
+          "connectors"
+        ],
+        "properties": {
+          "connectors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SecretConnectorReference"
+            },
+            "description": "The connector instances that use it."
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SecretHostReference"
+            },
+            "description": "The hosts that bind it as a credential."
+          },
+          "id": {
             "$ref": "#/components/schemas/SecretId",
             "description": "The secret."
           }
@@ -29279,6 +31021,17 @@
           "profile": {
             "$ref": "#/components/schemas/Profile",
             "description": "The selected profile."
+          },
+          "secret_reveal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RevealPolicy",
+                "description": "TGL-24: what revealing an operator secret takes. `None` in settings stored before the\ntoggle existed: the profile's value applies ([`SecuritySettings::secret_reveal`])."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "session": {
             "$ref": "#/components/schemas/SessionLifetime",
@@ -29582,6 +31335,17 @@
               {
                 "$ref": "#/components/schemas/Profile",
                 "description": "Switch to this profile."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secret_reveal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RevealPolicy",
+                "description": "TGL-24."
               },
               {
                 "type": "null"
@@ -30200,6 +31964,38 @@
               "null"
             ],
             "description": "Sheet, file or object collection."
+          }
+        }
+      },
+      "SshHandoff": {
+        "type": "object",
+        "description": "The SSH hand-off: the URI for the operating system's SSH handler, without a secret.",
+        "required": [
+          "uri",
+          "host",
+          "port"
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "The target: a DNS name, an IP address or the host name."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The port.",
+            "minimum": 0
+          },
+          "uri": {
+            "type": "string",
+            "description": "`ssh://[user@]host[:port]`; the port only when it is not 22."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The user name, when one is known."
           }
         }
       },
@@ -31461,7 +33257,8 @@
           "system",
           "admin",
           "connectors",
-          "discovery"
+          "discovery",
+          "secrets"
         ]
       },
       "TotpAlgorithm": {
@@ -34304,6 +36101,10 @@
     {
       "name": "connectors",
       "description": "Connector plugins and connector instances"
+    },
+    {
+      "name": "secrets",
+      "description": "Operator secrets, their reveal, host credentials and the remote access hand-off"
     },
     {
       "name": "observations",
