@@ -9,10 +9,10 @@
 .move-page .tools { display: flex; align-items: center; gap: var(--sp-5); padding: var(--sp-3) var(--sp-6); margin-top: var(--sp-4); background: var(--surface); border-bottom: 1px solid var(--line); border-top: 1px solid var(--line); flex: none; }
 .move-page .tools h2 { font-size: var(--fs-14); }
 .move-page .tools .count { color: var(--ink-3); font-size: var(--fs-12); }
-.move-page .tools .right { margin-left: auto; display: flex; align-items: center; gap: var(--sp-6); flex-wrap: wrap; }
+.move-page .tools .right { margin-inline-start: auto; display: flex; align-items: center; gap: var(--sp-6); flex-wrap: wrap; }
 .move-page .tools .keys { color: var(--ink-3); font-size: var(--fs-12); display: inline-flex; align-items: center; gap: var(--sp-2); }
 .legend2 { display: inline-flex; gap: var(--sp-5); color: var(--ink-3); font-size: var(--fs-12); }
-.legend2 span::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 50%; }
+.legend2 span::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-inline-end: 4px; border-radius: 50%; }
 .legend2 .auto::before { background: var(--accent); }
 .legend2 .manual::before { border: 1.5px dashed var(--ink-2); }
 
@@ -36,14 +36,14 @@
 .pvt tr.note > td { height: auto; padding-top: 0; padding-bottom: var(--sp-3); white-space: normal; font-size: var(--fs-12); color: var(--ink-2); line-height: var(--lh-text); }
 .pvt tr.note.warn .nt { color: var(--warn-ink); }
 .pvt tr.sd > td { height: auto; padding: 0; white-space: normal; background: var(--surface-2); }
-ol.steps { list-style: none; margin: 0; padding: var(--sp-2) var(--sp-6) var(--sp-4) 0; font-size: var(--fs-12); line-height: var(--lh-text); }
+ol.steps { list-style: none; margin: 0; padding-block: var(--sp-2) var(--sp-4); padding-inline: 0 var(--sp-6); font-size: var(--fs-12); line-height: var(--lh-text); }
 ol.steps > li { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: var(--sp-4); padding: 4px 0; border-top: 1px solid var(--line); counter-increment: step; }
 ol.steps > li .who { color: var(--ink-3); }
 ol.steps > li.auto .who { color: var(--accent); }
 
 details.pv-manual { margin: var(--sp-5) var(--sp-6) var(--sp-6); border: 1px solid var(--line); border-radius: var(--r-3); background: var(--surface); }
 details.pv-manual > summary { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); cursor: pointer; }
-details.pv-manual > summary .tk-aff { margin-left: auto; }
+details.pv-manual > summary .tk-aff { margin-inline-start: auto; }
 .tgroup { padding: 0 var(--sp-5) var(--sp-4); }
 .tgroup h3 { font-size: var(--fs-12); font-weight: var(--fw-semibold); color: var(--ink-2); margin: var(--sp-3) 0; }
 .tgroup ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: var(--fs-12); }
@@ -54,7 +54,7 @@ details.pv-manual > summary .tk-aff { margin-left: auto; }
 .cf-row { display: flex; align-items: flex-end; gap: var(--sp-8); flex-wrap: wrap; }
 .cf-inline { display: flex; align-items: center; gap: var(--sp-4); }
 .cf-inline .help { color: var(--ink-3); font-size: var(--fs-12); max-width: 380px; }
-.cf-act { margin-left: auto; display: flex; align-items: center; gap: var(--sp-4); }
+.cf-act { margin-inline-start: auto; display: flex; align-items: center; gap: var(--sp-4); }
 .cf-rb { color: var(--ink-3); font-size: var(--fs-12); max-width: 300px; }
 
 /* The controllers that were read for the network step, one line above the table. */
@@ -69,11 +69,11 @@ details.pv-manual > summary .tk-aff { margin-left: auto; }
 .l2s { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--ink-3); overflow-wrap: anywhere; }
 
 /* The details of the network change in the expanded row: diff, notes, SSID alternative. */
-.l2d { display: grid; gap: var(--sp-3); padding: var(--sp-3) var(--sp-6) var(--sp-4) 0; border-top: 1px solid var(--line); color: var(--ink-2); font-size: var(--fs-12); line-height: var(--lh-text); }
+.l2d { display: grid; gap: var(--sp-3); padding-block: var(--sp-3) var(--sp-4); padding-inline: 0 var(--sp-6); border-top: 1px solid var(--line); color: var(--ink-2); font-size: var(--fs-12); line-height: var(--lh-text); }
 .l2d p, .l2d ul { margin: 0; }
 .l2notes { list-style: none; padding: 0; display: grid; gap: 2px; }
-.l2notes li::before { content: "•"; margin-right: var(--sp-3); color: var(--ink-3); }
+.l2notes li::before { content: "•"; margin-inline-end: var(--sp-3); color: var(--ink-3); }
 table.l2diff { justify-self: start; width: auto; max-width: 100%; table-layout: auto; border-collapse: collapse; }
-table.l2diff th, table.l2diff td { height: auto; padding: 2px var(--sp-6) 2px 0; border: 0; background: transparent; font-size: var(--fs-12); font-weight: var(--fw-regular); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+table.l2diff th, table.l2diff td { height: auto; padding-block: 2px; padding-inline: 0 var(--sp-6); border: 0; background: transparent; font-size: var(--fs-12); font-weight: var(--fw-regular); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 table.l2diff th { color: var(--ink-3); }
 .grid tbody .l2diff tr:hover td { background: transparent; }

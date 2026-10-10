@@ -1,0 +1,18 @@
+/* Writing direction. The document's dir follows the UI language (src/i18n/direction.ts) and the
+   style sheets use logical properties (scripts/css-logical.mjs), so a right-to-left language
+   mirrors the layout without rules of its own. Loaded with the i18n runtime. */
+
+/* The sign of a horizontal distance that follows the direction: the offset of an inset shadow
+   or a translation, written calc(3px * var(--inline-sign, 1)); unset means left to right. */
+[dir="rtl"] { --inline-sign: -1; }
+[dir="ltr"] { --inline-sign: 1; }
+
+/* Identifiers (addresses, MAC addresses, names, codes, keys) read left to right in every
+   language. In a right-to-left document they are isolated left-to-right runs, so 2001:db8::/32
+   does not turn into db8::/32:2001; a block keeps the alignment of its parent. The selector has
+   no specificity, so every rule of a view wins. */
+:where([dir="rtl"] .mono, [dir="rtl"] .addr, [dir="rtl"] .mac, [dir="rtl"] code, [dir="rtl"] kbd, [dir="rtl"] pre) {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: match-parent;
+}

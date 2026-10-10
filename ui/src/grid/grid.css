@@ -46,12 +46,12 @@ table.grid:focus { outline: none; }
   display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4);
   width: 100%; padding: 6px 8px;
   border: 0; border-radius: var(--r-2); background: transparent;
-  color: var(--ink); text-align: left; font-size: var(--fs-13);
+  color: var(--ink); text-align: start; font-size: var(--fs-13);
 }
 .menu-pop button:hover, .menu-pop button:focus-visible { background: var(--accent-wash); outline: none; }
 .menu-pop button.danger { color: var(--danger-ink); }
 .menu-pop button[aria-disabled="true"] { color: var(--ink-4); cursor: not-allowed; }
-.menu-pop button[aria-checked="true"] > span:first-child::before { content: ""; display: inline-block; width: 8px; height: 4px; margin: 0 6px 3px 0; border-left: 2px solid var(--accent); border-bottom: 2px solid var(--accent); transform: rotate(-45deg); }
+.menu-pop button[aria-checked="true"] > span:first-child::before { content: ""; display: inline-block; width: 8px; height: 4px; margin-block: 0 3px; margin-inline: 0 6px; border-left: 2px solid var(--accent); /* physical: a check mark drawn by two borders */ border-bottom: 2px solid var(--accent); transform: rotate(-45deg); }
 .menu-pop .hint { color: var(--ink-3); font-size: var(--fs-12); }
 
 /* Column chooser. */
@@ -63,7 +63,7 @@ table.grid:focus { outline: none; }
 }
 .colchooser h3 { font-size: var(--fs-12); color: var(--ink-3); font-weight: var(--fw-medium); padding: var(--sp-2) var(--sp-5) var(--sp-3); }
 .colchooser ul { list-style: none; margin: 0; padding: 0; }
-.colchooser li { display: flex; align-items: center; gap: var(--sp-3); padding: 2px var(--sp-3) 2px var(--sp-5); }
+.colchooser li { display: flex; align-items: center; gap: var(--sp-3); padding-block: 2px; padding-inline: var(--sp-5) var(--sp-3); }
 .colchooser li label { flex: 1; display: flex; align-items: center; gap: var(--sp-4); min-width: 0; }
 .colchooser li .icon-btn { width: 24px; height: 24px; }
 .colchooser .foot { padding: var(--sp-3) var(--sp-5) 0; border-top: 1px solid var(--line); margin-top: var(--sp-3); }
@@ -74,7 +74,7 @@ table.grid:focus { outline: none; }
 
 /* Drag ghost: the selection lifted off the grid, drawn by the browser from this element. */
 .drag-ghost {
-  position: fixed; top: -1000px; left: -1000px; z-index: var(--z-drag);
+  position: fixed; top: -1000px; inset-inline-start: -1000px; z-index: var(--z-drag);
   width: 268px; display: grid; padding: 4px;
   border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--line-strong));
   border-radius: var(--r-3);

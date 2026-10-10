@@ -17,7 +17,7 @@
 .md { display: grid; gap: var(--sp-3); color: var(--ink-2); line-height: var(--lh-text); max-width: 80ch; min-width: 0; overflow-wrap: anywhere; }
 .md > * { margin: 0; }
 .md h4, .md h5, .md h6 { font-size: var(--fs-13); color: var(--ink); margin-top: var(--sp-3); }
-.md ul, .md ol { padding-left: var(--sp-8); display: grid; gap: var(--sp-1); }
+.md ul, .md ol { padding-inline-start: var(--sp-8); display: grid; gap: var(--sp-1); }
 .md ul ul, .md ul ol, .md ol ul, .md ol ol { margin-top: var(--sp-1); }
 .md code { font-family: var(--font-data); font-size: 0.96em; background: var(--surface-3); padding: 0 var(--sp-2); border-radius: var(--r-1); }
 .md pre { background: var(--surface-3); border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--sp-4) var(--sp-5); overflow: auto; }
@@ -35,7 +35,7 @@
 .upd-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
 .upd-steps li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); }
 .upd-steps li > span:last-child { color: var(--ink-2); }
-.note ul { margin: var(--sp-3) 0 0; padding-left: var(--sp-8); }
+.note ul { margin: var(--sp-3) 0 0; padding-inline-start: var(--sp-8); }
 
 /* The what-is-new dialog. */
 .dialog.upd-whatsnew { width: min(640px, calc(100vw - 32px)); max-height: 84vh; overflow: auto; }

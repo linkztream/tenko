@@ -23,7 +23,7 @@
 .provision-diff del { color: var(--ink-3); text-decoration: line-through; }
 .provision-diff ins { text-decoration: none; color: var(--ink); }
 .provision-notes { display: grid; gap: var(--sp-2); }
-.provision-notes ul { margin: 0; padding-left: var(--sp-6); font-size: var(--fs-12); }
+.provision-notes ul { margin: 0; padding-inline-start: var(--sp-6); font-size: var(--fs-12); }
 .provision-read { margin: 0; font-size: var(--fs-12); }
 .provision-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
 .provision-steps li { display: grid; grid-template-columns: 6.5em minmax(0, 1fr); gap: var(--sp-4); align-items: baseline; }

@@ -1,6 +1,11 @@
-// The runtime half of the language packs (API-21). Messages come from ui/i18n/*.xlf,
-// compiled at build time into tables of plain strings and pre-parsed ICU syntax trees
-// (scripts/vite-plugin-i18n.mjs), so the browser never parses message syntax.
+// The runtime half of the language packs (API-21). The built-in languages come from
+// ui/i18n/*.xlf, compiled at build time into tables of plain strings and pre-parsed ICU
+// syntax trees (scripts/vite-plugin-i18n.mjs), so the browser parses no message syntax for
+// them. A language that is not built in (an uploaded pack, or a test locale) is registered at
+// run time with registerLanguage(); its messages are looked up before the built-in ones of the
+// same language, and a key it lacks falls back to the built-in language, then to English.
+//
+// The document's `lang` and `dir` follow the UI language (direction.ts).
 //
 // Use `t(key, args)` for text and attributes, `tx(key, values)` when a placeholder must
 // be an element, and the `format*` helpers for numbers, dates and lists. All of them read
@@ -13,8 +18,11 @@ import { IntlMessageFormat } from "intl-messageformat";
 import { createSignal, type JSX } from "solid-js";
 import en from "virtual:tenko-i18n/en";
 import { loaders, locales, packs, sourceLocale } from "virtual:tenko-i18n/meta";
+import { textDirection, type TextDirection } from "./direction";
 import type { MessageArgs, MessageKey } from "./generated/keys";
+import "./bidi.css";
 
+export { textDirection, type TextDirection } from "./direction";
 export type { MessageArgs, MessageKey } from "./generated/keys";
 export type MessageTable = Readonly<Record<string, string | readonly unknown[]>>;
 
@@ -40,23 +48,87 @@ const [packRevision, setPackRevision] = createSignal(0);
 /** The current UI language (BCP 47). */
 export { locale };
 
-/** The built-in languages, source language first. */
-export function availableLocales() {
-  return locales;
+/** The writing direction of the current UI language. */
+export function direction(): TextDirection {
+  return textDirection(locale());
+}
+
+/** A language the UI offers: built in, or registered at run time. */
+export interface Language {
+  /** BCP 47 tag. */
+  readonly code: string;
+  /** The language's own name. */
+  readonly name: string;
+}
+
+/** Parses ICU message text into the syntax tree that intl-messageformat formats. */
+export type IcuParse = (message: string) => readonly unknown[];
+
+/**
+ * The messages of a language registered at run time. A `compiled` table holds what the build
+ * produces for the built-in languages (literal text, or an ICU syntax tree); a `source` table
+ * holds ICU message text, parsed on first use with `parse` (whoever registers the language
+ * loads the parser lazily, so the first page load does not carry it).
+ */
+export type RuntimeTable =
+  | { readonly kind: "compiled"; readonly messages: MessageTable }
+  | { readonly kind: "source"; readonly messages: Readonly<Record<string, string>>; readonly parse: IcuParse };
+
+/** A language registered at run time, with the loader of its messages. */
+export interface RuntimeLanguage extends Language {
+  readonly load: () => Promise<RuntimeTable>;
+}
+
+/** Languages registered at run time, in registration order. */
+const [registered, setRegistered] = createSignal<readonly RuntimeLanguage[]>([]);
+/** The loaded messages of registered languages, by code. */
+const runtime = new Map<string, { kind: "compiled" | "source"; messages: MutableTable; parse?: IcuParse }>();
+
+/**
+ * Registers a language that is not compiled in, or replaces the registration of the same code
+ * (a new version of a pack). A registration with the code of a built-in language overrides its
+ * messages key by key. When the language is the current one, its messages are loaded again.
+ */
+export async function registerLanguage(language: RuntimeLanguage): Promise<void> {
+  setRegistered((list) => [...list.filter((l) => l.code !== language.code), language]);
+  runtime.delete(language.code);
+  forget(language.code);
+  if (locale() === language.code) await setLocale(language.code);
+}
+
+/** Removes a registered language; the UI falls back to the built-in one or to English. */
+export async function unregisterLanguage(code: string): Promise<void> {
+  if (!registered().some((l) => l.code === code)) return;
+  setRegistered((list) => list.filter((l) => l.code !== code));
+  runtime.delete(code);
+  forget(code);
+  if (locale() === code) await setLocale(code);
+}
+
+/** The built-in languages, source language first, then the registered ones. */
+export function availableLocales(): readonly Language[] {
+  const more = registered().filter((l) => !isBuiltIn(l.code));
+  return more.length === 0 ? locales : [...locales, ...more.map(({ code, name }) => ({ code, name }))];
 }
 
 export function isBuiltIn(code: string | null | undefined): code is string {
   return !!code && locales.some((l) => l.code === code);
 }
 
-/** Matches a language tag against the built-in languages: exact tag, then primary subtag. */
+/** Whether a language is built in or registered. */
+export function isAvailable(code: string | null | undefined): code is string {
+  return !!code && availableLocales().some((l) => l.code === code);
+}
+
+/** Matches a language tag against the available languages: exact tag, then primary subtag. */
 export function matchLocale(tag: string | null | undefined): string | undefined {
   if (!tag) return undefined;
   const lower = tag.toLowerCase();
-  const exact = locales.find((l) => l.code.toLowerCase() === lower);
+  const all = availableLocales();
+  const exact = all.find((l) => l.code.toLowerCase() === lower);
   if (exact) return exact.code;
   const primary = lower.split("-")[0];
-  return locales.find((l) => l.code.toLowerCase().split("-")[0] === primary)?.code;
+  return all.find((l) => l.code.toLowerCase().split("-")[0] === primary)?.code;
 }
 
 export interface LocaleInputs {
@@ -70,7 +142,7 @@ export interface LocaleInputs {
   installation?: string | null | undefined;
 }
 
-/** Applies the resolution order of API-08 and returns a built-in language. */
+/** Applies the resolution order of API-08 and returns an available language. */
 export function resolveLocale(inputs: LocaleInputs): string {
   const first = matchLocale(inputs.user) ?? matchLocale(inputs.stored);
   if (first) return first;
@@ -105,10 +177,31 @@ export function browserLocales(): readonly string[] {
   return navigator.languages?.length ? navigator.languages : [navigator.language];
 }
 
-/** Loads a language if needed and switches the UI to it. Unknown codes fall back to English. */
+/**
+ * Loads a language if needed and switches the UI to it. Unknown codes fall back to English,
+ * and so does a registered language whose messages cannot be loaded (a registered override of
+ * a built-in language falls back to the built-in messages).
+ */
 export async function setLocale(code: string): Promise<void> {
-  const target = isBuiltIn(code) ? code : sourceLocale;
-  if (!tables.has(target)) {
+  let target = isAvailable(code) ? code : sourceLocale;
+  const extra = registered().find((l) => l.code === target);
+  if (extra && !runtime.has(target)) {
+    try {
+      const table = await extra.load();
+      // A registration replaced while this one loaded wins; its own call loads it.
+      if (registered().includes(extra)) {
+        const messages: MutableTable = { ...table.messages };
+        runtime.set(
+          target,
+          table.kind === "source" ? { kind: "source", messages, parse: table.parse } : { kind: "compiled", messages },
+        );
+      }
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn(`i18n: cannot load the language ${target}`, err);
+      if (!isBuiltIn(target)) target = sourceLocale;
+    }
+  }
+  if (isBuiltIn(target) && !tables.has(target)) {
     const load = loaders[target];
     if (!load) return;
     const mod = await load();
@@ -119,7 +212,12 @@ export async function setLocale(code: string): Promise<void> {
     tables.set(target, table);
   }
   setLocaleSignal(target);
-  if (typeof document !== "undefined") document.documentElement.lang = target;
+  // Texts of the same language whose messages were replaced are read again.
+  setPackRevision((n) => n + 1);
+  if (typeof document !== "undefined") {
+    document.documentElement.lang = target;
+    document.documentElement.dir = textDirection(target);
+  }
 }
 
 async function mergePack(table: MutableTable, name: string, code: string): Promise<void> {
@@ -163,11 +261,44 @@ export function withPacks<T>(names: readonly string[], load: () => Promise<T>): 
 
 const formatters = new Map<string, IntlMessageFormat>();
 
+/** Drops the formatters of a language whose messages changed. */
+function forget(code: string): void {
+  const prefix = `${code}\u0000`;
+  for (const id of formatters.keys()) if (id.startsWith(prefix)) formatters.delete(id);
+}
+
+/** ICU text without arguments or quoting: the text is the message. */
+const PLAIN = /^[^{}']*$/;
+
 function lookup(code: string, key: string): { loc: string; msg: string | readonly unknown[] } | undefined {
-  const own = tables.get(code)?.[key];
-  if (own !== undefined) return { loc: code, msg: own };
+  const extra = runtime.get(code);
+  const own = extra?.messages[key];
+  if (extra && own !== undefined) {
+    if (extra.kind === "compiled" || typeof own !== "string" || PLAIN.test(own)) return { loc: code, msg: own };
+    try {
+      // Parsed once: the syntax tree replaces the text in the table.
+      const ast = extra.parse?.(own);
+      if (ast) {
+        extra.messages[key] = ast;
+        return { loc: code, msg: ast };
+      }
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn(`i18n: cannot parse ${key} in ${code}`, err);
+    }
+    // A message that cannot be parsed falls back like a missing one.
+  }
+  const builtIn = tables.get(code)?.[key];
+  if (builtIn !== undefined) return { loc: code, msg: builtIn };
   const fallback = source[key];
   return fallback === undefined ? undefined : { loc: sourceLocale, msg: fallback };
+}
+
+/**
+ * The English messages loaded so far (the core table and the message packs), for tools that
+ * derive a language from them, such as the pseudo-locales of the tests (pseudo.ts).
+ */
+export function sourceMessages(): MessageTable {
+  return source;
 }
 
 function compiled(loc: string, key: string, ast: readonly unknown[]): IntlMessageFormat {

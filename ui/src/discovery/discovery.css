@@ -8,13 +8,13 @@
 .discovery-page { overflow: hidden; display: flex; flex-direction: column; }
 .discovery-split { position: relative; display: flex; flex: 1; min-height: 320px; }
 .discovery-grid { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; }
-.discovery-split.with-panel .discovery-grid { margin-right: min(var(--panel-w), 100%); }
+.discovery-split.with-panel .discovery-grid { margin-inline-end: min(var(--panel-w), 100%); }
 @media (max-width: 960px) {
-  .discovery-split.with-panel .discovery-grid { margin-right: 0; }
+  .discovery-split.with-panel .discovery-grid { margin-inline-end: 0; }
 }
 .proposal-summary { overflow: hidden; text-overflow: ellipsis; }
 .subject-cell { display: inline-flex; align-items: center; gap: var(--sp-3); min-width: 0; }
-.grid tr.differs td:first-child { box-shadow: inset 3px 0 0 var(--discrepancy-mark); }
+.grid tr.differs td:first-child { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--discrepancy-mark); }
 .grid tr.current td { background: var(--accent-wash); }
 
 /* Severity, glyph and word. */
@@ -26,7 +26,7 @@
 .proposal-state.accepted { background: var(--ok-wash); color: var(--ok-ink); }
 
 /* A filter that comes from the URL, with its remove button. */
-.discovery-page .chip.applied, .observations-page .chip.applied { padding-right: var(--sp-2); gap: var(--sp-3); }
+.discovery-page .chip.applied, .observations-page .chip.applied { padding-inline-end: var(--sp-2); gap: var(--sp-3); }
 .discovery-page .chip-x, .observations-page .chip-x {
   display: inline-grid; place-items: center;
   width: 18px; height: 18px; padding: 0;
@@ -50,7 +50,7 @@
 .discovery-form { display: grid; gap: var(--sp-4); }
 .discovery-form textarea.input { resize: vertical; }
 .report-kv { grid-template-columns: minmax(0, 1fr) auto; }
-.report-kv dd { text-align: right; }
+.report-kv dd { text-align: end; }
 
 /* ---------- Observations ---------- */
 .observations-page { overflow: hidden; display: flex; flex-direction: column; }
@@ -65,7 +65,7 @@
 .subject-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--sp-6); align-items: start; }
 .subject-card { padding: var(--sp-5) var(--sp-6); display: grid; gap: var(--sp-4); }
 .subject-card h2 { font-size: var(--fs-14); display: flex; align-items: center; gap: var(--sp-4); }
-.subject-card h2 .aside { margin-left: auto; font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); }
+.subject-card h2 .aside { margin-inline-start: auto; font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); }
 .value-list { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
 .proposal-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
 .proposal-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }

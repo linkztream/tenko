@@ -13,7 +13,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.e2e.json",
-    "lint": "node --import ./scripts/ts6.mjs ./node_modules/eslint/bin/eslint.js --max-warnings=0 . && node scripts/i18n.mjs --check && node scripts/api-types.mjs --check",
+    "lint": "node --import ./scripts/ts6.mjs ./node_modules/eslint/bin/eslint.js --max-warnings=0 . && node scripts/i18n.mjs --check && node scripts/api-types.mjs --check && node scripts/css-logical.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",

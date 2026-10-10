@@ -1,8 +1,8 @@
 /* The host views. Token roles only. */
 .host-body { max-width: 1200px; }
 .host-grid { position: relative; display: flex; flex-direction: column; height: 220px; border: 1px solid var(--line); border-radius: var(--r-3); overflow: hidden; }
-.host-grid .addr-link + .addr-link { margin-left: var(--sp-4); }
-.page-section > h2 .aside-btn { margin-left: auto; }
+.host-grid .addr-link + .addr-link { margin-inline-start: var(--sp-4); }
+.page-section > h2 .aside-btn { margin-inline-start: auto; }
 .mode-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
 .mode-list li { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: var(--sp-4); align-items: baseline; padding: 4px var(--sp-4); border-radius: var(--r-2); color: var(--ink-2); }
 .mode-list li.current { background: var(--accent-wash); color: var(--ink); }
@@ -18,5 +18,5 @@
 .connect-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .host-credentials { display: grid; gap: var(--sp-3); margin-top: var(--sp-5); }
 .credentials-title { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-13); margin: 0; }
-.credentials-title .aside-btn { margin-left: auto; }
-.host-credentials td.actions { text-align: right; white-space: nowrap; }
+.credentials-title .aside-btn { margin-inline-start: auto; }
+.host-credentials td.actions { text-align: end; white-space: nowrap; }

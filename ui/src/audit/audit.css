@@ -41,7 +41,7 @@
 .outcome.success { color: var(--ink-2); }
 .outcome.denied { color: var(--warn-ink); }
 .outcome.failed { color: var(--danger-ink); }
-.outcome-code { margin-left: var(--sp-2); color: var(--ink-3); font-size: var(--fs-11); font-weight: var(--fw-regular); }
+.outcome-code { margin-inline-start: var(--sp-2); color: var(--ink-3); font-size: var(--fs-11); font-weight: var(--fw-regular); }
 
 /* Objects of a record. */
 .objects { display: inline-flex; align-items: baseline; gap: var(--sp-5); }

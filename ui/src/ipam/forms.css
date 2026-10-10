@@ -10,7 +10,7 @@
 @media (max-width: 560px) {
   .field-row, .field-row.three { grid-template-columns: minmax(0, 1fr); }
 }
-.field > label.required::after { content: "*"; content: "*" / ""; margin-left: 2px; color: var(--danger-ink); }
+.field > label.required::after { content: "*"; content: "*" / ""; margin-inline-start: 2px; color: var(--danger-ink); }
 .field-note { display: inline-flex; align-items: flex-start; gap: var(--sp-2); }
 .field-note svg.i { margin-top: 2px; flex: none; }
 .field-actions { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
@@ -24,7 +24,7 @@ fieldset.field-group > legend { padding: 0; font-size: var(--fs-12); font-weight
 .tags-input { display: grid; gap: var(--sp-3); }
 .tags-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-3); }
 .tags-chips:empty { display: none; }
-.tags-chips .tag { height: 22px; padding-right: 2px; }
+.tags-chips .tag { height: 22px; padding-inline-end: 2px; }
 .tag-remove { display: inline-grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: var(--r-1); background: transparent; color: var(--ink-3); cursor: pointer; }
 .tag-remove:hover { background: var(--surface-2); color: var(--ink); }
 .tag-remove:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }

@@ -32,7 +32,7 @@
 .tag.deleted { border: 1px dashed var(--ink-3); background: transparent; color: var(--ink-3); }
 
 /* The hint that follows a mode word when it is spelled out. */
-.mode-hint { margin-left: var(--sp-4); }
+.mode-hint { margin-inline-start: var(--sp-4); }
 
 /* Utilization meter additions: the alert icon beside a warning or critical value, and a
    narrower bar for tight places such as tree nodes. */

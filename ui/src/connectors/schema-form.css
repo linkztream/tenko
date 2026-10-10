@@ -8,7 +8,7 @@
 .sf .field > label.sf-check:has(input:disabled) { color: var(--ink-3); cursor: not-allowed; }
 
 /* The required marker: a star after the label, not read out (the control says it is required). */
-.sf label.required::after, .sf legend.required::after { content: "*"; content: "*" / ""; margin-left: 2px; color: var(--danger-ink); }
+.sf label.required::after, .sf legend.required::after { content: "*"; content: "*" / ""; margin-inline-start: 2px; color: var(--danger-ink); }
 
 /* The line under a control: the error carries a glyph, never color alone. */
 .sf-note { display: inline-flex; align-items: flex-start; gap: var(--sp-2); }
@@ -19,7 +19,7 @@
 .sf-set > legend { padding: 0; margin-bottom: var(--sp-3); font-size: var(--fs-12); font-weight: var(--fw-medium); color: var(--ink-2); }
 .sf-set .help { font-size: var(--fs-12); color: var(--ink-3); }
 .sf-set .help.bad { color: var(--danger-ink); }
-.sf-fields { display: grid; gap: var(--sp-5); min-width: 0; padding-left: var(--sp-5); border-left: 2px solid var(--line); }
+.sf-fields { display: grid; gap: var(--sp-5); min-width: 0; padding-inline-start: var(--sp-5); border-inline-start: 2px solid var(--line); }
 .sf-items { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
 .sf-item { display: grid; gap: var(--sp-2); min-width: 0; }
 .sf-item-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-3); align-items: center; }

@@ -136,6 +136,33 @@ shows the result with a link to the job when the write started one. Deletes offe
 - Numbers use `si()` or `<Si>`, `<Count>` for exact counts, `formatDuration`,
   `formatRelative` and the other formatters of `src/i18n`.
 
+### Writing direction (right to left)
+
+The document's `lang` and `dir` follow the UI language: `setLocale` sets `dir="rtl"` for a
+language written right to left (Arabic, Hebrew, Persian, Urdu and the like, see
+`src/i18n/direction.ts`), and `direction()` tells a component the current direction. The layout
+mirrors through the style sheets alone:
+
+- Write every side of the inline axis in its logical form: `margin-inline-start`,
+  `padding-inline-end`, `border-inline-start`, `inset-inline-end`, `border-start-end-radius`,
+  `text-align: start` or `end`, and `margin-block`/`margin-inline` for a shorthand whose left
+  and right values differ. The block axis (`margin-top`, `top`) and `width` and `height` stay as
+  they are.
+- A horizontal distance in an inset shadow or a translation is multiplied by
+  `var(--inline-sign, 1)`, which is -1 right to left (`src/i18n/bidi.css`):
+  `box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--accent)`. A box centred with
+  `left: 50%` and `translateX(-50%)` is direction-neutral.
+- A declaration that must stay physical (a check mark drawn by two borders) carries the comment
+  `/* physical: <reason> */` on its line.
+- `node scripts/css-logical.mjs` refuses physical declarations in `src/**/*.css` and
+  `--fix` rewrites those with an exact logical form; a test in `scripts/css-logical.test.mjs` runs
+  the same check over the style sheets in `npm run test`.
+- Identifiers (`.mono`, `.addr`, `.mac`, `code`, `kbd`, `pre`) are isolated left-to-right runs in
+  a right-to-left document, so `2001:db8::/32` keeps its order; mark an identifier with `.mono`.
+- Tests switch to a pseudo-locale with `usePseudoLocale("ar-XB")` (right to left, every text
+  wrapped in a right-to-left override) or `usePseudoLocale("en-XA")` (accented letters in
+  brackets) from `src/i18n/pseudo.ts`; tests that assert Swedish texts keep doing so.
+
 ### Message packs
 
 The English table of the whole UI would make the first page load too large, so the keys of

@@ -9,7 +9,7 @@
 .import-body { display: grid; gap: var(--sp-5); padding: var(--sp-6); max-width: 1200px; }
 .import-card { display: grid; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); border: 1px solid var(--line); border-radius: var(--r-3); background: var(--surface); }
 .import-card > h2, .import-card > h3 { font-size: var(--fs-14); display: flex; align-items: baseline; gap: var(--sp-4); }
-.import-card > h2 .aside { margin-left: auto; font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); }
+.import-card > h2 .aside { margin-inline-start: auto; font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); }
 .import-card > h3 .muted { font-weight: var(--fw-regular); font-size: var(--fs-12); }
 .dropzone { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-8); border: 1.5px dashed var(--control-line); border-radius: var(--r-3); color: var(--ink-2); justify-content: center; }
 .dropzone.over { border-color: var(--accent); background: var(--accent-wash); }
@@ -37,9 +37,9 @@
 .sev.info { color: var(--ink-3); }
 .import-links { columns: 3 220px; list-style: none; margin: 0; padding: 0; }
 .import-result .progress .bar { width: 320px; height: 6px; }
-table.plain caption { text-align: left; font-weight: var(--fw-semibold); padding: var(--sp-3) var(--cell-px); }
+table.plain caption { text-align: start; font-weight: var(--fw-semibold); padding: var(--sp-3) var(--cell-px); }
 
 /* Outcome per sheet and the paged list of source rows */
-.import-outcomes th[scope="row"] { font-weight: var(--fw-medium); text-align: left; }
+.import-outcomes th[scope="row"] { font-weight: var(--fw-medium); text-align: start; }
 .import-rows-grid { display: flex; flex-direction: column; height: min(420px, 60vh); min-height: 240px; }
-.import-row-item { display: inline-flex; align-items: baseline; gap: var(--sp-2); margin-right: var(--sp-5); }
+.import-row-item { display: inline-flex; align-items: baseline; gap: var(--sp-2); margin-inline-end: var(--sp-5); }

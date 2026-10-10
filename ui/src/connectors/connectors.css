@@ -14,8 +14,8 @@
 .conn-health.degraded { color: var(--discrepancy); }
 .conn-health.failing { color: var(--conflict); }
 .conn-health.off { color: var(--ink-3); }
-.grid tr.health-failing td:first-child { box-shadow: inset 3px 0 0 var(--conflict); }
-.grid tr.health-degraded td:first-child { box-shadow: inset 3px 0 0 var(--discrepancy-mark); }
+.grid tr.health-failing td:first-child { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--conflict); }
+.grid tr.health-degraded td:first-child { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--discrepancy-mark); }
 .conn-run { display: inline-flex; align-items: center; gap: 4px; }
 .conn-run.failed { color: var(--discrepancy); }
 
@@ -23,8 +23,8 @@
 .plugin-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-5); }
 .plugin-card { padding: var(--sp-5) var(--sp-6); display: grid; gap: var(--sp-4); align-content: start; }
 .plugin-card header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
-.plugin-card h3 { font-size: var(--fs-14); margin-right: auto; }
-.plugin-problems { margin: 0; padding-left: var(--sp-6); color: var(--discrepancy); }
+.plugin-card h3 { font-size: var(--fs-14); margin-inline-end: auto; }
+.plugin-problems { margin: 0; padding-inline-start: var(--sp-6); color: var(--discrepancy); }
 
 /* One instance. */
 .connector-body { gap: var(--sp-6); }

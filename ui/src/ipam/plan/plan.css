@@ -2,7 +2,7 @@
 .dialog.plan-dialog { width: min(760px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; top: 10vh; }
 .plan-dialog-body { display: grid; gap: var(--sp-5); }
 .plan { display: grid; gap: var(--sp-4); }
-.plan-summary { margin: 0; padding-left: var(--sp-6); color: var(--ink-2); }
+.plan-summary { margin: 0; padding-inline-start: var(--sp-6); color: var(--ink-2); }
 .plan-warnings { display: grid; gap: var(--sp-3); }
 .plan-warnings .ackrow { margin-top: var(--sp-3); }
 .plan-changes { max-height: 40vh; }

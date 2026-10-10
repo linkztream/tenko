@@ -8,9 +8,9 @@
 .topology-page { overflow: hidden; display: flex; flex-direction: column; }
 .topology-split { position: relative; display: flex; flex: 1; min-height: 320px; }
 .topology-main { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; }
-.topology-split.with-panel .topology-main { margin-right: min(var(--panel-w), 100%); }
+.topology-split.with-panel .topology-main { margin-inline-end: min(var(--panel-w), 100%); }
 @media (max-width: 960px) {
-  .topology-split.with-panel .topology-main { margin-right: 0; }
+  .topology-split.with-panel .topology-main { margin-inline-end: 0; }
 }
 .topology-state { padding: var(--sp-8); display: grid; justify-items: start; gap: var(--sp-4); }
 .topology-main .empty h2 { font-size: var(--fs-16); color: var(--ink); }
@@ -66,7 +66,7 @@
 
 /* Zoom buttons. */
 .topology-zoom {
-  position: absolute; right: var(--sp-5); bottom: var(--sp-5);
+  position: absolute; inset-inline-end: var(--sp-5); bottom: var(--sp-5);
   display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-1);
   border: 1px solid var(--line-strong); border-radius: var(--r-3); background: var(--surface);
 }
@@ -98,12 +98,12 @@
 .port-list, .neighbour-list, .intent-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
 .topology-port { border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--sp-3) var(--sp-4); display: grid; gap: var(--sp-3); }
 .port-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
-.port-head .btn { margin-left: auto; }
+.port-head .btn { margin-inline-start: auto; }
 .port-name { font-weight: var(--fw-medium); }
 .port-state[data-state="down"] { color: var(--warn-ink); }
 .neighbour {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px var(--sp-4);
-  width: 100%; padding: var(--sp-3) var(--sp-4); text-align: left;
+  width: 100%; padding: var(--sp-3) var(--sp-4); text-align: start;
   border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface); color: var(--ink);
 }
 .neighbour:hover { background: var(--surface-3); }

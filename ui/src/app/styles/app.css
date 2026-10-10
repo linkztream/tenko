@@ -11,7 +11,7 @@
 
 /* Skip link: first in the tab order, visible only when focused. */
 .skip-link {
-  position: absolute; left: var(--sp-4); top: -100px; z-index: var(--z-toast);
+  position: absolute; inset-inline-start: var(--sp-4); top: -100px; z-index: var(--z-toast);
   padding: var(--sp-3) var(--sp-5); border-radius: var(--r-2);
   background: var(--accent); color: var(--accent-ink);
 }
@@ -21,8 +21,8 @@
 /* The rail highlights the area of the current page, not only its exact path. */
 .rail a.active { background: var(--accent-wash); color: var(--accent); }
 .rail a.active::before {
-  content: ""; position: absolute; left: -4px; top: 8px; bottom: 8px; width: 3px;
-  border-radius: 0 3px 3px 0; background: var(--accent);
+  content: ""; position: absolute; inset-inline-start: -4px; top: 8px; bottom: 8px; width: 3px;
+  border-start-start-radius: 0; border-start-end-radius: 3px; border-end-end-radius: 3px; border-end-start-radius: 0; background: var(--accent);
 }
 .rail a.bottom { margin-top: auto; }
 
@@ -49,7 +49,7 @@
 
 /* Dialogs (confirmations); the palette and the sheet use their own classes. */
 .dialog {
-  position: absolute; left: 50%; top: 16vh; transform: translateX(-50%);
+  position: absolute; left: 50%; /* physical: centred with translateX(-50%) */ top: 16vh; transform: translateX(-50%);
   width: min(480px, calc(100vw - 32px));
   display: grid; gap: var(--sp-5);
   padding: var(--sp-7) var(--sp-8);
@@ -71,7 +71,7 @@
 .page-body.wide { max-width: none; }
 .page-section { display: grid; gap: var(--sp-4); }
 .page-section > h2 { font-size: var(--fs-14); display: flex; align-items: center; gap: var(--sp-4); }
-.page-section > h2 .aside { margin-left: auto; font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); }
+.page-section > h2 .aside { margin-inline-start: auto; font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); }
 .page-section > p { color: var(--ink-2); line-height: var(--lh-text); max-width: 72ch; }
 
 /* Sub-navigation of settings and account pages (tabs as links). */
@@ -79,7 +79,7 @@
 .subnav a { position: relative; display: inline-flex; align-items: center; height: 36px; color: var(--ink-3); font-weight: var(--fw-medium); text-decoration: none; }
 .subnav a:hover { color: var(--ink); }
 .subnav a.active { color: var(--ink); }
-.subnav a.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--accent); border-radius: 2px 2px 0 0; }
+.subnav a.active::after { content: ""; position: absolute; inset-inline: 0; bottom: -1px; height: 2px; background: var(--accent); border-radius: 2px 2px 0 0; }
 
 /* Dashboard tiles. */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-5); }
@@ -91,9 +91,9 @@
 /* Simple lists and tables outside the data grid. */
 .list { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--sp-3); }
 table.plain { width: 100%; border-collapse: collapse; font-size: var(--fs-13); background: var(--surface); }
-table.plain th { padding: 0 var(--cell-px); height: 30px; text-align: left; color: var(--ink-3); font-size: var(--fs-12); font-weight: var(--fw-medium); background: var(--surface-2); border-bottom: 1px solid var(--line-strong); white-space: nowrap; }
+table.plain th { padding: 0 var(--cell-px); height: 30px; text-align: start; color: var(--ink-3); font-size: var(--fs-12); font-weight: var(--fw-medium); background: var(--surface-2); border-bottom: 1px solid var(--line-strong); white-space: nowrap; }
 table.plain td { padding: 0 var(--cell-px); height: var(--row-h); border-bottom: 1px solid var(--line); vertical-align: middle; }
-table.plain td.r, table.plain th.r { text-align: right; }
+table.plain td.r, table.plain th.r { text-align: end; }
 table.plain tr:hover td { background: var(--surface-2); }
 .table-wrap { border: 1px solid var(--line); border-radius: var(--r-3); overflow: auto; }
 
@@ -121,7 +121,7 @@ textarea.input { height: auto; padding: var(--sp-3) var(--sp-4); line-height: va
 .secret { font-family: var(--font-data); font-variant-ligatures: none; user-select: all; overflow-wrap: anywhere; padding: var(--sp-4) var(--sp-5); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface-2); }
 .codes { list-style: none; counter-reset: c; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3) var(--sp-5); max-width: 440px; }
 .codes li { counter-increment: c; display: flex; align-items: baseline; gap: var(--sp-4); padding: 6px var(--sp-5); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface-2); font-family: var(--font-data); font-size: var(--fs-14); font-variant-ligatures: none; }
-.codes li::before { content: counter(c); min-width: 14px; text-align: right; color: var(--ink-3); font: var(--fw-regular) var(--fs-11) / 1 var(--font-ui); }
+.codes li::before { content: counter(c); min-width: 14px; text-align: end; color: var(--ink-3); font: var(--fw-regular) var(--fs-11) / 1 var(--font-ui); }
 
 /* Deviation markers on settings (SECURITY-PROFILES.md: the UI shows every deviation). */
 .deviation { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-11); font-weight: var(--fw-medium); color: var(--warn-ink); }
@@ -135,7 +135,7 @@ textarea.input { height: auto; padding: var(--sp-3) var(--sp-4); line-height: va
 @media print {
   body * { visibility: hidden; }
   .print-area, .print-area * { visibility: visible; }
-  .print-area { position: absolute; left: 0; top: 0; }
+  .print-area { position: absolute; inset-inline-start: 0; top: 0; }
 }
 
 /* Action banner: the account must add a factor or change its password. */
