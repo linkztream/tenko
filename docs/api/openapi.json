@@ -7926,7 +7926,7 @@
             }
           },
           "409": {
-            "description": "A warning needs an acknowledgement (`ipam.plan.unacknowledged`), the target is full (`ipam.address.full`) or an object is deleted (`ipam.object_deleted`)",
+            "description": "A warning needs an acknowledgement (`ipam.plan.unacknowledged`), the plan differs from the confirmed preview (`ipam.move.plan_changed`), the target is full (`ipam.address.full`) or an object is deleted (`ipam.object_deleted`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -19476,6 +19476,115 @@
           "unmanaged"
         ]
       },
+      "AttachmentChange": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Give a switch port a port profile.",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "Give a switch port a port profile.",
+                "required": [
+                  "device",
+                  "port",
+                  "profile"
+                ],
+                "properties": {
+                  "device": {
+                    "type": "string",
+                    "description": "The switch, by controller reference."
+                  },
+                  "port": {
+                    "type": "integer",
+                    "format": "int32",
+                    "description": "The port index.",
+                    "minimum": 0
+                  },
+                  "profile": {
+                    "type": "string",
+                    "description": "The profile, by controller reference."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "set_port_profile"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Put a client into a network with the per-client VLAN override.",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "Put a client into a network with the per-client VLAN override.",
+                "required": [
+                  "mac",
+                  "network"
+                ],
+                "properties": {
+                  "mac": {
+                    "$ref": "#/components/schemas/MacAddr",
+                    "description": "The client."
+                  },
+                  "network": {
+                    "type": "string",
+                    "description": "The network, by controller reference (for UniFi the network `_id`)."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "set_client_vlan"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Remove a client's per-client VLAN override.",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "Remove a client's per-client VLAN override.",
+                "required": [
+                  "mac"
+                ],
+                "properties": {
+                  "mac": {
+                    "$ref": "#/components/schemas/MacAddr",
+                    "description": "The client."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clear_client_vlan"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "A change of how a client is attached, the L2 step of a move (CONN-06): the port profile\nof a switch port, or the per-client VLAN override of a client.\n\nAdjacently tagged because variants carry MAC addresses (see `tenko_core::codec`)."
+      },
       "AttachmentView": {
         "type": "object",
         "description": "Where a client is attached, as one source reports it.",
@@ -26164,6 +26273,89 @@
           }
         }
       },
+      "MoveAttachment": {
+        "type": "object",
+        "description": "Where the network controller sees a device now.",
+        "required": [
+          "medium",
+          "device",
+          "device_name"
+        ],
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "The switch or access point, by controller reference."
+          },
+          "device_name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "medium": {
+            "$ref": "#/components/schemas/MoveMedium",
+            "description": "Wired or wireless."
+          },
+          "network": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The network the device is in now, by controller reference."
+          },
+          "network_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its name."
+          },
+          "port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The switch port.",
+            "minimum": 0
+          },
+          "port_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The port's name."
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The port's profile now, by controller reference."
+          },
+          "profile_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its name."
+          },
+          "ssid": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The wireless network."
+          },
+          "vlan": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The VLAN the device is in now.",
+            "minimum": 0
+          }
+        }
+      },
       "MoveDns": {
         "type": "object",
         "description": "The DNS change of an item.",
@@ -26243,6 +26435,10 @@
                 "type": "null"
               }
             ]
+          },
+          "l2": {
+            "$ref": "#/components/schemas/MoveL2",
+            "description": "The L2 step: how the device gets into the target VLAN."
           },
           "mac": {
             "oneOf": [
@@ -26333,6 +26529,173 @@
           }
         }
       },
+      "MoveL2": {
+        "type": "object",
+        "description": "The L2 step of a device, as previewed (IPAM-19 step 4).",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/MoveL2Action",
+            "description": "What happens."
+          },
+          "attachment": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MoveAttachment",
+                "description": "Where the controller sees the device now."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "change": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AttachmentChange",
+                "description": "The change on the controller; also shown when a person makes it (writes off)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "connector": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ControllerInfo",
+                "description": "The network controller that sees the device."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "diff": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiffEntry"
+            },
+            "description": "What changes on the controller, from its state as read for the preview; the job\nrecords the controller's own read-back diff when it writes."
+          },
+          "network_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name of the controller's network for the target VLAN."
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Notes about the change (`ipam.move.l2.note.*`)."
+          },
+          "others_on_port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "How many other devices are on the switch port.",
+            "minimum": 0
+          },
+          "problem": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MoveL2Problem",
+                "description": "The guardrail refusal or controller error behind a manual step."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "profile_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name of the port profile the port gets."
+          },
+          "read_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the controller was read."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why a person moves the device, or why there is no step (`ipam.move.l2.*`)."
+          },
+          "ssids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The SSIDs that carry the target VLAN: joining one is a change on the device itself\n(CONN-18)."
+          },
+          "with": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AddressId",
+                "description": "The address whose L2 step moves this device too."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "MoveL2Action": {
+        "type": "string",
+        "description": "How a device gets into the target VLAN (IPAM-19 step 4).",
+        "enum": [
+          "port_profile",
+          "client_vlan",
+          "manual",
+          "unchanged",
+          "shared"
+        ]
+      },
+      "MoveL2Problem": {
+        "type": "object",
+        "description": "The refusal or controller error behind a manual L2 step.",
+        "required": [
+          "code",
+          "detail"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The code, such as `connect.guardrail.uplink` or `connect.unreachable`."
+          },
+          "detail": {
+            "type": "string",
+            "description": "English detail."
+          }
+        }
+      },
+      "MoveMedium": {
+        "type": "string",
+        "description": "How a device is attached.",
+        "enum": [
+          "wired",
+          "wireless"
+        ]
+      },
       "MovePreview": {
         "type": "object",
         "description": "The preview of a move (the dry run).",
@@ -26350,6 +26713,17 @@
             "format": "int64",
             "description": "The store revision the preview was computed at.",
             "minimum": 0
+          },
+          "controllers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ControllerInfo"
+            },
+            "description": "The network controllers that were read for the L2 steps."
+          },
+          "fingerprint": {
+            "type": "string",
+            "description": "Fingerprint of what would run: the addresses, the steps and the L2 changes. A\nsubmit with it as `expect_fingerprint` runs this plan or nothing."
           },
           "items": {
             "type": "array",
@@ -26408,6 +26782,13 @@
               "type": "string"
             },
             "description": "Warning codes the caller acknowledges."
+          },
+          "expect_fingerprint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `fingerprint` of the preview the caller confirms: a submit whose plan differs\nanswers 409 `ipam.move.plan_changed` and starts nothing."
           },
           "objects": {
             "type": "array",

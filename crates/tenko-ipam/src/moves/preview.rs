@@ -10,12 +10,13 @@ use std::{
 use sha2::{Digest as _, Sha256};
 use tenko_core::{
     AddressId, ObjectKind, ObjectRef, RequestCtx,
-    codec::encode_key,
+    codec::{canonical_sha256, encode_key},
     ipam::{
         Address, AssignmentMode, Host, Interface, Prefix, PrefixRole, Range, RangeRole, Status,
         Tag, Vlan,
     },
     net::Fqdn,
+    serde_util::to_hex,
 };
 use tenko_jobs::ManualTask;
 use tenko_store::{KeyRange, ReadView, ReadViewExt};
@@ -23,8 +24,10 @@ use uuid::Uuid;
 
 use super::{
     DEFAULT_TIMEOUT_SECS, MAX_OBJECTS, MAX_TIMEOUT_SECS, MIN_TIMEOUT_SECS, MOVE_FAILED_TAG,
-    MoveDns, MoveItem, MovePreview, MoveRequest, MoveStepPreview, MoveTarget, MoveTimeoutSource,
-    codes,
+    MoveDns, MoveItem, MoveL2, MoveL2Action, MovePreview, MoveRequest, MoveStepPreview, MoveTarget,
+    MoveTimeoutSource, codes,
+    l2::{self, L2Plans},
+    steps::L2StepPlan,
 };
 use crate::{
     alloc::first_free,
@@ -52,8 +55,10 @@ pub(super) struct StepPlan {
     pub params: BTreeMap<String, String>,
     /// The task of a manual step.
     pub task: Option<ManualTask>,
-    /// The step's own timeout (the observation timeout).
+    /// The step's own timeout (the observation timeout, the controller step's limit).
     pub timeout: Option<Duration>,
+    /// The change of an automatic L2 step.
+    pub l2: Option<L2StepPlan>,
 }
 
 impl StepPlan {
@@ -100,7 +105,9 @@ pub fn preview(
     config: &IpamConfig,
     request: &MoveRequest,
 ) -> IpamResult<MovePreview> {
-    Ok(compute(view, cx, config, request)?.preview)
+    let base = compute(view, cx, config, request)?;
+    let l2 = super::l2::offline(&base.items, &base.target);
+    Ok(finish(base, l2, request)?.preview)
 }
 
 /// What one candidate address brings along.
@@ -117,7 +124,7 @@ pub(super) fn compute(
     cx: &RequestCtx,
     config: &IpamConfig,
     request: &MoveRequest,
-) -> IpamResult<Computed> {
+) -> IpamResult<Base> {
     if request.objects.is_empty() {
         return Err(invalid("a move needs at least one object"));
     }
@@ -215,6 +222,7 @@ pub(super) fn compute(
                 old: Some(candidate.address.ip),
                 new: Some(new_ip),
             }),
+            l2: MoveL2::default(),
             steps: Vec::new(),
             warnings: Vec::new(),
         });
@@ -237,31 +245,79 @@ pub(super) fn compute(
         });
     }
     warnings.extend(dns_collisions(view, &target, &candidates, &items)?);
+
+    Ok(Base {
+        target: MoveTarget {
+            prefix: target.id,
+            cidr: target.cidr,
+            vrf: target.vrf,
+            vlan: target.vlan,
+            vid: vlan.as_ref().map(|v| v.vid),
+            lease_secs: lease,
+        },
+        timeout_secs,
+        timeout_source,
+        parallelism,
+        revision: view.revision().0,
+        hosts: candidates
+            .iter()
+            .map(|c| c.host.as_ref().map(|h| ObjectRef::from(h.id)))
+            .collect(),
+        items,
+        warnings,
+    })
+}
+
+/// The part of a move computed from the store, before the L2 steps.
+#[derive(Debug, Clone)]
+pub(super) struct Base {
+    pub target: MoveTarget,
+    pub timeout_secs: u32,
+    pub timeout_source: MoveTimeoutSource,
+    pub parallelism: u32,
+    pub revision: u64,
+    /// The items, without their L2 step and steps.
+    pub items: Vec<MoveItem>,
+    /// The host of each item.
+    pub hosts: Vec<Option<ObjectRef>>,
+    /// The warnings of the plan, the target and the DNS names.
+    pub warnings: Vec<PlanWarning>,
+}
+
+/// Completes a move with the L2 steps: the steps of every item, the warnings with their
+/// acknowledgements and the fingerprint.
+///
+/// # Errors
+///
+/// `sys.internal` when the fingerprint does not encode.
+pub(super) fn finish(base: Base, l2: L2Plans, request: &MoveRequest) -> IpamResult<Computed> {
+    let Base {
+        target,
+        timeout_secs,
+        timeout_source,
+        parallelism,
+        revision,
+        mut items,
+        hosts,
+        mut warnings,
+    } = base;
+    warnings.extend(l2.warnings);
     for warning in &mut warnings {
         warning.acknowledged = warning.requires_ack && request.acknowledge.contains(&warning.code);
     }
-
-    let target_view = MoveTarget {
-        prefix: target.id,
-        cidr: target.cidr,
-        vrf: target.vrf,
-        vlan: target.vlan,
-        vid: vlan.as_ref().map(|v| v.vid),
-        lease_secs: lease,
-    };
     let mut all_steps = Vec::with_capacity(items.len());
-    for (item, candidate) in items.iter_mut().zip(&candidates) {
-        let host_ref = candidate.host.as_ref().map(|h| ObjectRef::from(h.id));
+    for ((item, host_ref), l2) in items.iter_mut().zip(&hosts).zip(l2.items) {
+        item.l2 = l2;
         item.warnings = warnings
             .iter()
             .filter(|w| {
                 w.object == Some(item.new_address.into())
                     || w.object == Some(item.object)
-                    || (w.object.is_some() && w.object == host_ref)
+                    || (w.object.is_some() && w.object == *host_ref)
             })
             .cloned()
             .collect();
-        let steps = step_plans(item, &target_view, timeout_secs);
+        let steps = step_plans(item, &target, timeout_secs);
         item.steps = steps.iter().map(StepPlan::preview).collect();
         all_steps.push(steps);
     }
@@ -270,19 +326,65 @@ pub(super) fn compute(
         .filter(|w| w.requires_ack && !w.acknowledged)
         .map(|w| w.code.clone())
         .collect();
+    let fingerprint = fingerprint(&target, &items)?;
     Ok(Computed {
         preview: MovePreview {
-            target: target_view,
+            target,
             timeout_secs,
             timeout_source,
             parallelism,
-            base_revision: view.revision().0,
+            base_revision: revision,
             items,
             warnings,
             unacknowledged: unacknowledged.into_iter().collect(),
+            controllers: l2.controllers,
+            fingerprint,
         },
         steps: all_steps,
     })
+}
+
+/// What the fingerprint of a move covers: per item the address, the new address, the
+/// step kinds and the L2 decision with its change and diff. The identifiers of the new
+/// addresses and the times of the reads are left out, so two computations of the same
+/// plan agree.
+#[derive(serde::Serialize)]
+struct Fingerprinted<'a> {
+    target: tenko_core::PrefixId,
+    items: Vec<FingerprintedItem<'a>>,
+}
+
+#[derive(serde::Serialize)]
+struct FingerprintedItem<'a> {
+    object: ObjectRef,
+    new_ip: IpAddr,
+    steps: Vec<&'a str>,
+    action: super::MoveL2Action,
+    reason: Option<&'a str>,
+    connector: Option<tenko_core::ConnectorId>,
+    change: Option<&'a crate::vlan::controllers::AttachmentChange>,
+    diff: &'a [crate::vlan::controllers::DiffEntry],
+}
+
+fn fingerprint(target: &MoveTarget, items: &[MoveItem]) -> IpamResult<String> {
+    let value = Fingerprinted {
+        target: target.prefix,
+        items: items
+            .iter()
+            .map(|item| FingerprintedItem {
+                object: item.object,
+                new_ip: item.new_ip,
+                steps: item.steps.iter().map(|s| s.step_kind.as_str()).collect(),
+                action: item.l2.action,
+                reason: item.l2.reason.as_deref(),
+                connector: item.l2.connector_id(),
+                change: item.l2.change.as_ref(),
+                diff: &item.l2.diff,
+            })
+            .collect(),
+    };
+    let digest = canonical_sha256(&value)?;
+    Ok(to_hex(&digest[..16]))
 }
 
 /// The DHCP lease of a pool in seconds.
@@ -651,10 +753,6 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
         .host_name
         .as_ref()
         .map_or_else(|| item.old_ip.to_string(), ToString::to_string);
-    let network = match target.vid {
-        Some(vid) => format!("VLAN {vid} / network {}", target.cidr),
-        None => format!("network {}", target.cidr),
-    };
     let mut steps = vec![StepPlan {
         kind: "ipam.intent",
         step_kind: super::steps::INTENT,
@@ -671,6 +769,7 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
         params: base.clone(),
         task: None,
         timeout: None,
+        l2: None,
     }];
     if item.mode == Some(AssignmentMode::Reserved) {
         let mac = item.mac.map_or_else(
@@ -688,6 +787,7 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
             params: base.clone(),
             task: Some(manual("ipam.move.task.dhcp", &base)),
             timeout: None,
+            l2: None,
         });
     }
     if let Some(dns) = &item.dns {
@@ -704,6 +804,7 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
             params: args.clone(),
             task: Some(manual("ipam.move.task.dns", &args)),
             timeout: None,
+            l2: None,
         });
     }
     if item.mode == Some(AssignmentMode::Static) {
@@ -719,17 +820,12 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
             params: base.clone(),
             task: Some(manual("ipam.move.task.device", &base)),
             timeout: None,
+            l2: None,
         });
     }
-    steps.push(StepPlan {
-        kind: "l2.move",
-        step_kind: super::steps::L2,
-        automatic: false,
-        text: format!("Move {who} to {network}"),
-        params: base.clone(),
-        task: Some(manual("ipam.move.task.l2", &base)),
-        timeout: None,
-    });
+    if let Some(step) = l2_step(item, target, &base, &who) {
+        steps.push(step);
+    }
     let mut observe = base.clone();
     observe.insert("timeout_secs".to_owned(), timeout_secs.to_string());
     steps.push(StepPlan {
@@ -743,6 +839,7 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
         params: observe.clone(),
         task: Some(manual("ipam.move.task.observe", &observe)),
         timeout: Some(Duration::from_secs(u64::from(timeout_secs))),
+        l2: None,
     });
     steps.push(StepPlan {
         kind: "cleanup",
@@ -752,8 +849,61 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
         params: base,
         task: None,
         timeout: None,
+        l2: None,
     });
     steps
+}
+
+/// The L2 step of an item: through the network controller, by a person, or none when
+/// the device is in the target VLAN already or moves with another address.
+fn l2_step(
+    item: &MoveItem,
+    target: &MoveTarget,
+    base: &BTreeMap<String, String>,
+    who: &str,
+) -> Option<StepPlan> {
+    let l2 = &item.l2;
+    if !l2.has_step() {
+        return None;
+    }
+    let args = l2::args(l2, base);
+    let text = l2::text(l2, who, &target.cidr.to_string(), target.vid);
+    if l2.automatic() {
+        let (Some(connector), Some(change), Some(attachment), Some(mac)) =
+            (&l2.connector, &l2.change, &l2.attachment, item.mac)
+        else {
+            return None;
+        };
+        return Some(StepPlan {
+            kind: "l2.controller",
+            step_kind: super::steps::CONTROLLER,
+            automatic: true,
+            text,
+            params: args,
+            task: None,
+            timeout: Some(Duration::from_secs(super::steps::CONTROLLER_TIMEOUT_SECS)),
+            l2: Some(L2StepPlan {
+                connector: connector.id,
+                connector_name: connector.name.clone(),
+                mac,
+                change: change.clone(),
+                attachment: attachment.clone(),
+                action: l2.action,
+                diff: l2.diff.clone(),
+            }),
+        });
+    }
+    debug_assert_eq!(l2.action, MoveL2Action::Manual);
+    Some(StepPlan {
+        kind: "l2.move",
+        step_kind: super::steps::L2,
+        automatic: false,
+        text,
+        params: args.clone(),
+        task: Some(manual(l2::instruction(l2), &args)),
+        timeout: None,
+        l2: None,
+    })
 }
 
 /// The tag that marks a failed move.

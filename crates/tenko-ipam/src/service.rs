@@ -59,7 +59,7 @@ impl Default for IpamConfig {
         Self {
             max_attempts: 16,
             max_commands: 10_000,
-            move_parallelism: 2,
+            move_parallelism: 4,
         }
     }
 }

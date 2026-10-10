@@ -6,9 +6,17 @@
 // is confirmed: then one job per device starts, all in one group with the chosen
 // parallelism, and the page hands over to the jobs list of that group. The observation
 // timeout defaults to half the DHCP lease of the target and rolls a device back on expiry.
+//
+// The network (L2) column says per device what happens: a port profile or a per-client VLAN
+// through the network controller, nothing (in the VLAN already, or moving with another
+// address of the interface), or by hand with the reason; the expanded row has the diff, the
+// notes and the SSID alternative. A line above the table names the controllers that were
+// read. Start confirms the fingerprint of the preview: when the plan changed meanwhile
+// (409), the page previews again at once and says so.
 import { A, useNavigate, useSearchParams } from "@solidjs/router";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { newIdempotencyKey } from "../../api/client";
+import { isApiError } from "../../api/problem";
 import { previewMove, submitMove, type MoveItem, type MovePreview as Preview } from "../../api/moves";
 import type { ObjectRef } from "../../api/types";
 import { paths } from "../../app/paths";
@@ -22,7 +30,22 @@ import { DnsName, ModeBadge } from "../../grid/cells";
 import { formatDuration, t } from "../../i18n";
 import { IpamNav } from "../IpamNav";
 import { warningText } from "../plan/describe";
-import { deviceName, groupTitle, reasonText, STEP_ORDER, stepText, timeoutText } from "./moveText";
+import {
+  deviceName,
+  groupTitle,
+  L2_REASON,
+  L2_REFUSED_WARNING,
+  l2Detail,
+  l2DiffText,
+  l2Headline,
+  l2NoteText,
+  l2SsidsText,
+  PLAN_CHANGED,
+  reasonText,
+  STEP_ORDER,
+  stepText,
+  timeoutText,
+} from "./moveText";
 import "./move.css";
 
 const PARALLELISM = ["1", "2", "4", "8"] as const;
@@ -44,6 +67,83 @@ export function parseObjects(text: string | undefined): ObjectRef[] {
 
 const sameRef = (a: ObjectRef, b: ObjectRef) => a.kind === b.kind && a.id === b.id;
 
+/**
+ * The network change of one device, compact: what happens in the first line, why or through
+ * which controller in a muted second line. The cell carries the decision for tests and
+ * scripts (`data-action`, `data-reason`). A server without L2 decisions shows the step text.
+ */
+function L2Cell(props: { item: MoveItem; preview: Preview; legacy: string }) {
+  const l2 = () => props.item.l2;
+  // "Moves with {ip}": the old address of the item whose address this one shares the device with.
+  const withIp = () => {
+    const other = l2()?.with;
+    return other ? props.preview.items.find((i) => i.object.id === other)?.old_ip : undefined;
+  };
+  return (
+    <td data-col="l2" data-testid="move-l2" data-action={l2()?.action} data-reason={l2()?.reason ?? undefined}>
+      <Show when={l2()} fallback={<span class="l2m">{props.legacy}</span>}>
+        {(x) => (
+          <div class="l2c">
+            <span class="l2m">
+              <span class="l2h">{l2Headline(x(), props.preview, withIp())}</span>
+              <Show when={x().reason === L2_REASON.refused}>
+                <span class="tag discrepancy">{t("move.l2.action.refused")}</span>
+              </Show>
+            </span>
+            <Show when={l2Detail(x(), props.preview)}>
+              {(detail) => (
+                <span class="l2s" title={detail()}>
+                  {detail()}
+                </span>
+              )}
+            </Show>
+          </div>
+        )}
+      </Show>
+    </td>
+  );
+}
+
+/** The details of the network change in the expanded row: the diff, the notes and the SSID alternative. */
+function L2Details(props: { item: MoveItem; preview: Preview }) {
+  const l2 = () => props.item.l2;
+  const diff = () => l2()?.diff ?? [];
+  const notes = () => l2()?.notes ?? [];
+  const ssids = () => {
+    const x = l2();
+    return x ? l2SsidsText(x, props.preview) : undefined;
+  };
+  return (
+    <Show when={diff().length > 0 || notes().length > 0 || ssids()}>
+      <div class="l2d" role="group" aria-label={t("move.col.l2")} data-testid="move-l2-details">
+        <Show when={diff().length > 0}>
+          <table class="l2diff" data-testid="move-l2-diff">
+            <caption class="sr-only">{t("jobs.l2.diff")}</caption>
+            <tbody>
+              <For each={diff()}>
+                {(line) => (
+                  <tr>
+                    <th scope="row">
+                      <code class="mono">{line.path}</code>
+                    </th>
+                    <td>{l2DiffText(line.before, line.after)}</td>
+                  </tr>
+                )}
+              </For>
+            </tbody>
+          </table>
+        </Show>
+        <Show when={notes().length > 0}>
+          <ul class="l2notes" data-testid="move-l2-notes">
+            <For each={notes()}>{(code) => <li data-note={code}>{l2NoteText(code, props.preview)}</li>}</For>
+          </ul>
+        </Show>
+        <Show when={ssids()}>{(text) => <p class="l2ssids">{text()}</p>}</Show>
+      </div>
+    </Show>
+  );
+}
+
 export default function MovePreview() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -60,8 +160,13 @@ export default function MovePreview() {
   const [starting, setStarting] = createSignal(false);
   const [open, setOpen] = createSignal<ReadonlySet<string>>(new Set());
   const [allOpen, setAllOpen] = createSignal(false);
+  // The plan changed between the preview and Start (409): the page has previewed again.
+  const [planChanged, setPlanChanged] = createSignal(false);
+  // Counts the previews asked for without a change of the inputs.
+  const [again, setAgain] = createSignal(0);
   let key = newIdempotencyKey();
   let controller: AbortController | undefined;
+  let lastInputs = "";
 
   const included = createMemo(() => requested().filter((o) => !excluded().some((x) => sameRef(x, o))));
 
@@ -76,8 +181,13 @@ export default function MovePreview() {
   // Every change of the inputs previews again; a new preview means a new confirmation.
   createEffect(
     on(
-      () => JSON.stringify(request()),
-      async () => {
+      () => [JSON.stringify(request()), again()] as const,
+      async ([inputs]) => {
+        // The notice about a changed plan stays until the person changes something or starts.
+        if (inputs !== lastInputs) {
+          lastInputs = inputs;
+          setPlanChanged(false);
+        }
         key = newIdempotencyKey();
         controller?.abort();
         if (!target() || included().length === 0) {
@@ -135,16 +245,20 @@ export default function MovePreview() {
     })).filter((g) => g.tasks.length > 0);
   });
   const manualCount = (item: MoveItem) => item.steps.filter((s) => !s.automatic).length;
-  const l2Step = (item: MoveItem) => item.steps.find((s) => s.kind === "l2.move");
+  const l2Step = (item: MoveItem) => item.steps.find((s) => s.kind === "l2.move" || s.kind === "l2.controller");
   const blocking = () => (preview()?.unacknowledged ?? []).filter((c) => !acked().has(c));
   const canStart = () => !!preview() && !loading() && !starting() && blocking().length === 0 && included().length > 0;
 
   const start = async () => {
     if (!canStart()) return;
+    const fingerprint = preview()?.fingerprint;
     setStarting(true);
     setError(null);
+    setPlanChanged(false);
     try {
-      const result = await submitMove(request(), key);
+      // The server runs the confirmed plan or nothing: it compares this fingerprint with its own plan.
+      const body = fingerprint ? { ...request(), expect_fingerprint: fingerprint } : request();
+      const result = await submitMove(body, key);
       const count = result.jobs.length;
       toast({
         kind: "ok",
@@ -153,8 +267,14 @@ export default function MovePreview() {
       });
       navigate(paths.jobs({ group: result.group }), { replace: true });
     } catch (err) {
-      setError(err);
       setStarting(false);
+      if (isApiError(err, PLAN_CHANGED)) {
+        // Nothing started: show the plan as it is now and ask for a new confirmation.
+        setPlanChanged(true);
+        setAgain(again() + 1);
+      } else {
+        setError(err);
+      }
     }
   };
 
@@ -229,6 +349,11 @@ export default function MovePreview() {
           </Notice>
         </Show>
         <ErrorNotice error={error()} />
+        <Show when={planChanged()}>
+          <Notice kind="warn" role="status" testid="move-plan-changed">
+            {t("move.plan_changed")}
+          </Notice>
+        </Show>
         <Show when={(preview()?.warnings?.length ?? 0) > 0}>
           <div class="move-warnings" data-testid="move-warnings">
             <For each={preview()?.warnings ?? []}>
@@ -281,7 +406,33 @@ export default function MovePreview() {
           </div>
         </div>
 
+        <Show when={preview()}>
+          {(p) => (
+            <p class="l2sum" data-testid="move-controllers">
+              <Icon name="router" size="xs" />
+              <Show when={(p().controllers ?? []).length > 0} fallback={<span class="ctl off">{t("move.l2.no_controller")}</span>}>
+                <For each={p().controllers ?? []}>
+                  {(c) => (
+                    <span class="ctl" classList={{ off: !c.writes_enabled }} data-writes={c.writes_enabled ? "on" : "off"}>
+                      {c.writes_enabled ? t("move.l2.controller", { name: c.name }) : t("move.l2.controller_read_only", { name: c.name })}
+                    </span>
+                  )}
+                </For>
+              </Show>
+            </p>
+          )}
+        </Show>
+
         <table class="grid grouped pvt" aria-label={t("move.devices")} aria-busy={loading() ? "true" : undefined} data-testid="move-devices">
+          <colgroup>
+            <col class="c-check" />
+            <col class="c-device" />
+            <col class="c-mode" />
+            <col class="c-ip" />
+            <col class="c-dns" />
+            <col class="c-l2" />
+            <col class="c-manual" />
+          </colgroup>
           <thead>
             <tr>
               <th class="check" scope="col">
@@ -352,7 +503,9 @@ export default function MovePreview() {
                       )}
                     </Show>
                   </td>
-                  <td data-col="l2">{l2Step(item) && preview() ? stepText(l2Step(item)!, item, preview()!) : ""}</td>
+                  <Show when={preview()}>
+                    {(p) => <L2Cell item={item} preview={p()} legacy={l2Step(item) ? stepText(l2Step(item)!, item, p()) : ""} />}
+                  </Show>
                   <td data-col="manual">
                     <span class="mt">{t("move.tasks", { count: manualCount(item) })}</span>
                   </td>
@@ -365,7 +518,8 @@ export default function MovePreview() {
                     </td>
                   </tr>
                 </Show>
-                <For each={item.warnings ?? []}>
+                {/* A refusal of a guardrail is in the network column of its row and in the warnings above. */}
+                <For each={(item.warnings ?? []).filter((w) => w.code !== L2_REFUSED_WARNING)}>
                   {(w) => (
                     <tr class="note warn">
                       <td />
@@ -396,6 +550,7 @@ export default function MovePreview() {
                           )}
                         </For>
                       </ol>
+                      <Show when={preview()}>{(p) => <L2Details item={item} preview={p()} />}</Show>
                     </td>
                   </tr>
                 </Show>

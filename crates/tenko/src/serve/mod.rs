@@ -940,6 +940,7 @@ async fn start(
             }
             tenko_ipam::jobs::register_steps(&mut engine);
             tenko_ipam::vlan::register_steps(&mut engine, &vlan_controllers);
+            tenko_ipam::moves::register_steps(&mut engine, &vlan_controllers);
             let ipam = IpamService::new(
                 Arc::clone(&store_dyn),
                 Arc::new(engine.clone()),

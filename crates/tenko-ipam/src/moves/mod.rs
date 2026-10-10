@@ -33,46 +33,101 @@
 //! | `ipam.move.dhcp` | `dhcp.manual` | no (Tenko DHCP from Phase 3): the reservation | `reserved` hosts |
 //! | `ipam.move.dns` | `dns.manual` | no (Tenko DNS from Phase 2): A or AAAA and PTR | a DNS name |
 //! | `ipam.move.device` | `device.manual` | no: reconfigure the device | `static` hosts |
-//! | `ipam.move.l2` | `l2.move` | no in Slice 1 (the network controller from Slice 2) | always |
-//! | `ipam.move.observe` | `observe` | no in Slice 1 (observations later); the timeout runs from its start | always |
+//! | `ipam.move.controller` | `l2.controller` | yes: the port profile or the per-client VLAN through the network controller | the controller can make the change |
+//! | `ipam.move.l2` | `l2.move` | no: a person moves the device, with the exact action | the controller cannot (see below) |
+//! | `ipam.move.observe` | `observe` | completed by the reconciler on a sighting of the device at its new address (WP2.4), or by a person; the timeout runs from its start | always |
 //! | `ipam.move.cleanup` | `cleanup` | yes: remove the old address, activate the new one | always |
 //!
 //! The manual tasks come before the L2 change: a device waits for its ticked tasks before
 //! it moves (IPAM-19, design decision 7). `dynamic` hosts get neither DHCP nor device tasks.
+//! A device that is in the target VLAN already, or whose interface another address of the
+//! same move moves, has no L2 step.
+//!
+//! # The L2 step
+//!
+//! The preview reads every enabled network controller once ([`MoveL2`],
+//! `NetworkControllers::attachments`) and finds the device by the MAC address of its
+//! interface:
+//!
+//! - **Wired**, on a switch port: the port gets a port profile whose untagged network is
+//!   the target VLAN's network (one without tagged networks first, then by name). Uplinks,
+//!   the port through which Tenko or the controller is reached and the controller's own
+//!   client are refused (CONN-09), and a port that serves other devices too is left to a
+//!   person, because a profile change would move them all.
+//! - **Wireless**: the device's per-client VLAN override is set to the target network while
+//!   it stays on its SSID. When its access point does not carry the VLAN (its uplink port's
+//!   profile lacks the network and no SSID of the AP carries it), a person joins it to an
+//!   SSID that carries the VLAN (CONN-18).
+//! - **Not controllable**: no VLAN on the target, no MAC address, no controller, not seen
+//!   by any controller (or by several), no network for the VLAN on the controller, no
+//!   profile that carries it, writes off for the controller (TGL-20), or a guardrail
+//!   refusal: a manual step says exactly what a person has to do. A refusal is a warning to
+//!   acknowledge (`ipam.move.l2_refused`), and so is a controller that cannot be read
+//!   (`ipam.move.controller_unavailable`).
+//!
+//! The job's `ipam.move.controller` step reads the controller again when it runs and
+//! refuses with 409 `ipam.move.l2_changed` when the device or its port is no longer as the
+//! submit found it; then it plans the change (read back and diff), runs a dry run, writes,
+//! and the connector host verifies the write by planning again. The step's output, JSON
+//! of [`MoveL2Output`], keeps the diff and the receipt.
+//!
+//! # Preview and submit
+//!
+//! A preview and a submit compute the same plan; the preview's `fingerprint` covers what
+//! would run (addresses, steps and L2 changes, not the identifiers of the new addresses).
+//! A submit that names `expect_fingerprint` refuses with 409 `ipam.move.plan_changed`
+//! when its plan differs from the confirmed preview.
 //!
 //! # Timeout and rollback
 //!
 //! The observation timeout defaults to half the longest DHCP lease of the target's pools
 //! (the renewal point), else 3,600 s, never below 300 s; a request may set it from 300 s
 //! to 604,800 s. When the observe step passes its deadline, or any step fails, the engine
-//! compensates in reverse: the intent step's compensation removes the new address,
-//! restores the old one if needed and tags the requested object `move-failed`; the job
-//! ends `rolled_back` with the reason in its error. The tag goes away with the next
-//! successful move of the object. Manual steps carry no undo task, so a rollback never
-//! waits for a person; the failure tells what may need putting back.
+//! compensates in reverse: the L2 step is undone with the undo steps of its receipt (a
+//! person is asked when that fails or the receipt has none), the intent step's
+//! compensation removes the new address, restores the old one if needed and tags the
+//! requested object `move-failed`; the job ends `rolled_back` with the reason in its
+//! error. The tag goes away with the next successful move of the object. Manual steps
+//! carry no undo task, so a rollback never waits for a person for them; the failure tells
+//! what may need putting back. Every address has its own job, so a failure rolls back
+//! that address only; a bulk move runs as one job group of at most `parallelism` jobs
+//! between "moved" and "confirmed" (CONN-09).
 
+mod l2;
 mod preview;
 mod steps;
 mod submit;
 
-use std::{collections::BTreeMap, net::IpAddr};
+use std::{collections::BTreeMap, net::IpAddr, sync::Arc};
 
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    AddressId, HostId, InterfaceId, JobId, MacAddr, ObjectRef, PrefixId, VlanId, VrfId,
+    AddressId, ConnectorId, HostId, InterfaceId, JobId, MacAddr, ObjectRef, PrefixId, Timestamp,
+    VlanId, VrfId,
     ipam::AssignmentMode,
     net::{Fqdn, HostName},
 };
+use tenko_jobs::JobEngine;
 use utoipa::ToSchema;
 
 pub use preview::preview;
 pub use steps::{
-    MoveCleanupStep, MoveIntentStep, MoveManualStep, MoveStepParams, move_step_handlers,
+    L2StepPlan, MoveCleanupStep, MoveControllerStep, MoveIntentStep, MoveL2Output, MoveManualStep,
+    MoveStepParams, move_step_handlers,
 };
-pub use submit::MoveReceipt;
+pub use submit::{MoveReceipt, preview_move, submit_move};
 
-use crate::plan::PlanWarning;
+use crate::{
+    plan::PlanWarning,
+    vlan::controllers::{AttachmentChange, ControllerInfo, Controllers, DiffEntry},
+};
+
+/// Registers the step that needs the network controllers, `ipam.move.controller`, with
+/// the engine; the other steps of a move come with [`crate::jobs::register_steps`].
+pub fn register_steps(engine: &mut JobEngine, controllers: &Arc<Controllers>) {
+    engine.register(Arc::new(MoveControllerStep::new(Arc::clone(controllers))));
+}
 
 /// Job kind of a move.
 pub const MOVE_JOB: &str = "ipam.move";
@@ -115,6 +170,60 @@ pub mod codes {
     pub const HOST_PART_TAKEN: &str = "ipam.move.host_part_taken";
     /// Warning (needs acknowledgement): another object in the target VRF has the DNS name.
     pub const DNS_COLLISION: &str = "ipam.move.dns_collision";
+    /// The plan differs from the confirmed preview (`expect_fingerprint`) (409).
+    pub const PLAN_CHANGED: &str = "ipam.move.plan_changed";
+    /// The L2 step found the device or its port changed since the submit (409).
+    pub const L2_CHANGED: &str = "ipam.move.l2_changed";
+    /// Warning (needs acknowledgement): a guardrail refuses the L2 change of a device, so a
+    /// person moves it.
+    pub const L2_REFUSED: &str = "ipam.move.l2_refused";
+    /// Warning: a network controller could not be read; it needs an acknowledgement when
+    /// a device's L2 step is left to a person because of it.
+    pub const CONTROLLER_UNAVAILABLE: &str = "ipam.move.controller_unavailable";
+
+    /// Reason of a manual L2 step: the target network has no VLAN.
+    pub const L2_NO_VLAN: &str = "ipam.move.l2.no_vlan";
+    /// Reason: no network controller is configured.
+    pub const L2_NO_CONTROLLER: &str = "ipam.move.l2.no_controller";
+    /// Reason: a network controller could not be read (see `problem`).
+    pub const L2_UNAVAILABLE: &str = "ipam.move.l2.controller_unavailable";
+    /// Reason: several network controllers see the device.
+    pub const L2_AMBIGUOUS: &str = "ipam.move.l2.controller_ambiguous";
+    /// Reason: the interface has no MAC address to find the device by.
+    pub const L2_NO_MAC: &str = "ipam.move.l2.no_mac";
+    /// Reason: no network controller sees the device.
+    pub const L2_NOT_SEEN: &str = "ipam.move.l2.not_seen";
+    /// Reason: the controller has no network for the target VLAN.
+    pub const L2_NO_NETWORK: &str = "ipam.move.l2.no_network";
+    /// Reason: no port profile carries the target VLAN untagged.
+    pub const L2_NO_PROFILE: &str = "ipam.move.l2.no_profile";
+    /// Reason: other devices are on the switch port.
+    pub const L2_SHARED_PORT: &str = "ipam.move.l2.shared_port";
+    /// Reason: the controller reports the wired device without its switch port.
+    pub const L2_NO_PORT: &str = "ipam.move.l2.no_port";
+    /// Reason: the access point does not carry the VLAN; the device joins an SSID that does.
+    pub const L2_JOIN_SSID: &str = "ipam.move.l2.join_ssid";
+    /// Reason: the access point does not carry the VLAN and no SSID carries it.
+    pub const L2_NO_SSID: &str = "ipam.move.l2.no_ssid";
+    /// Reason: writes through the controller are off (TGL-20).
+    pub const L2_READ_ONLY: &str = "ipam.move.l2.read_only";
+    /// Reason: a guardrail refuses the change (see `problem`).
+    pub const L2_REFUSED_REASON: &str = "ipam.move.l2.refused";
+    /// Reason of no L2 step: the device is in the target VLAN already.
+    pub const L2_ALREADY_THERE: &str = "ipam.move.l2.already_there";
+    /// Reason of no L2 step: another address of the same interface moves the device.
+    pub const L2_SAME_INTERFACE: &str = "ipam.move.l2.same_interface";
+
+    /// Note: the device loses its link for a moment while the switch applies the profile.
+    pub const NOTE_LINK_FLAP: &str = "ipam.move.l2.note.link_flap";
+    /// Note: the port has no profile on record, so a rollback asks a person to put it back.
+    pub const NOTE_NO_UNDO: &str = "ipam.move.l2.note.no_undo";
+    /// Note: the profile also carries tagged networks.
+    pub const NOTE_TAGGED: &str = "ipam.move.l2.note.tagged";
+    /// Note: the client moves when it reconnects.
+    pub const NOTE_RECONNECT: &str = "ipam.move.l2.note.reconnect";
+    /// Note: Tenko cannot tell whether the access point carries the VLAN.
+    pub const NOTE_CARRY_UNKNOWN: &str = "ipam.move.l2.note.carry_unknown";
 }
 
 /// A move request.
@@ -135,6 +244,153 @@ pub struct MoveRequest {
     /// How many of the move's jobs run at once; the configured parallelism when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parallelism: Option<u32>,
+    /// The `fingerprint` of the preview the caller confirms: a submit whose plan differs
+    /// answers 409 `ipam.move.plan_changed` and starts nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expect_fingerprint: Option<String>,
+}
+
+/// How a device gets into the target VLAN (IPAM-19 step 4).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize, ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MoveL2Action {
+    /// The network controller gives the device's switch port a port profile whose
+    /// untagged network is the target VLAN.
+    PortProfile,
+    /// The network controller sets the device's per-client VLAN override to the target
+    /// network.
+    ClientVlan,
+    /// A person moves the device; `reason` says why and the manual step what to do.
+    #[default]
+    Manual,
+    /// The device is in the target VLAN already: no L2 step.
+    Unchanged,
+    /// Another address of the same interface moves the device (`with`): no L2 step.
+    Shared,
+}
+
+/// How a device is attached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MoveMedium {
+    /// On a switch port.
+    Wired,
+    /// On an access point.
+    Wireless,
+}
+
+/// Where the network controller sees a device now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct MoveAttachment {
+    /// Wired or wireless.
+    pub medium: MoveMedium,
+    /// The switch or access point, by controller reference.
+    pub device: String,
+    /// Its name.
+    pub device_name: String,
+    /// The switch port.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    /// The port's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port_name: Option<String>,
+    /// The port's profile now, by controller reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// Its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_name: Option<String>,
+    /// The wireless network.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssid: Option<String>,
+    /// The network the device is in now, by controller reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<String>,
+    /// Its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_name: Option<String>,
+    /// The VLAN the device is in now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vlan: Option<u16>,
+}
+
+/// The refusal or controller error behind a manual L2 step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct MoveL2Problem {
+    /// The code, such as `connect.guardrail.uplink` or `connect.unreachable`.
+    pub code: String,
+    /// English detail.
+    pub detail: String,
+}
+
+/// The L2 step of a device, as previewed (IPAM-19 step 4).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+pub struct MoveL2 {
+    /// What happens.
+    pub action: MoveL2Action,
+    /// Why a person moves the device, or why there is no step (`ipam.move.l2.*`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The guardrail refusal or controller error behind a manual step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<MoveL2Problem>,
+    /// The network controller that sees the device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector: Option<ControllerInfo>,
+    /// Where the controller sees the device now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachment: Option<MoveAttachment>,
+    /// The change on the controller; also shown when a person makes it (writes off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<AttachmentChange>,
+    /// The name of the port profile the port gets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_name: Option<String>,
+    /// The name of the controller's network for the target VLAN.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_name: Option<String>,
+    /// What changes on the controller, from its state as read for the preview; the job
+    /// records the controller's own read-back diff when it writes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diff: Vec<DiffEntry>,
+    /// Notes about the change (`ipam.move.l2.note.*`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+    /// How many other devices are on the switch port.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub others_on_port: Option<u32>,
+    /// The SSIDs that carry the target VLAN: joining one is a change on the device itself
+    /// (CONN-18).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ssids: Vec<String>,
+    /// The address whose L2 step moves this device too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub with: Option<AddressId>,
+    /// When the controller was read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_at: Option<Timestamp>,
+}
+
+impl MoveL2 {
+    /// Whether the job has an L2 step for the device.
+    pub fn has_step(&self) -> bool {
+        !matches!(self.action, MoveL2Action::Unchanged | MoveL2Action::Shared)
+    }
+
+    /// Whether the network controller makes the change.
+    pub fn automatic(&self) -> bool {
+        matches!(
+            self.action,
+            MoveL2Action::PortProfile | MoveL2Action::ClientVlan
+        )
+    }
+
+    /// The controller of an automatic change.
+    pub fn connector_id(&self) -> Option<ConnectorId> {
+        self.connector.as_ref().map(|c| c.id)
+    }
 }
 
 /// The target of a move.
@@ -230,6 +486,9 @@ pub struct MoveItem {
     /// The DNS change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dns: Option<MoveDns>,
+    /// The L2 step: how the device gets into the target VLAN.
+    #[serde(default)]
+    pub l2: MoveL2,
     /// The steps of the item's job, in order.
     pub steps: Vec<MoveStepPreview>,
     /// Warnings of this item.
@@ -270,6 +529,13 @@ pub struct MovePreview {
     /// Warning codes that need an acknowledgement before a submit.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unacknowledged: Vec<String>,
+    /// The network controllers that were read for the L2 steps.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub controllers: Vec<ControllerInfo>,
+    /// Fingerprint of what would run: the addresses, the steps and the L2 changes. A
+    /// submit with it as `expect_fingerprint` runs this plan or nothing.
+    #[serde(default)]
+    pub fingerprint: String,
 }
 
 /// The job of one item.

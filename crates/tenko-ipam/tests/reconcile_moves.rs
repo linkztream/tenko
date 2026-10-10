@@ -83,6 +83,7 @@ impl Moving {
             timeout_secs: None,
             acknowledge: Vec::new(),
             parallelism: None,
+            expect_fingerprint: None,
         };
         let submitted = self
             .world

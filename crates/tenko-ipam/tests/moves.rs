@@ -114,6 +114,7 @@ impl World {
             timeout_secs: None,
             acknowledge: Vec::new(),
             parallelism: None,
+            expect_fingerprint: None,
         }
     }
 
@@ -199,7 +200,7 @@ async fn the_preview_keeps_the_host_part_and_lists_the_steps_by_mode() {
     assert_eq!(preview.target.vid, Some(30));
     assert_eq!(preview.target.lease_secs, Some(86_400));
     assert_eq!(preview.timeout_secs, 43_200, "half the lease");
-    assert_eq!(preview.parallelism, 2);
+    assert_eq!(preview.parallelism, 4);
     assert_eq!(preview.items.len(), 3);
 
     let nas_item = &preview.items[0];
@@ -421,7 +422,7 @@ async fn a_move_runs_its_steps_with_manual_completion_and_cleans_up() {
         job.spec.group.as_ref().map(ToString::to_string),
         Some(submitted.group.clone())
     );
-    assert_eq!(job.spec.group_limit, Some(2));
+    assert_eq!(job.spec.group_limit, Some(4));
     let new = world.address_at("198.51.100.10").await.expect("new intent");
     assert_eq!(new.status, Status::Planned);
     assert!(

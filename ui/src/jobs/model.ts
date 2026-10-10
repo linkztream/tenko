@@ -110,20 +110,26 @@ export const STEP_ORDER: readonly string[] = [
   "ipam.move.cleanup",
 ];
 
-/** The kinds earlier versions of the mock used, in their place in the order above. */
-const OLD_KINDS: Readonly<Record<string, string>> = {
+/**
+ * Step kinds that stand in a place of the order above: the kinds earlier versions of the mock used,
+ * and the layer 2 change through the network controller (`ipam.move.controller`, preview kind
+ * `l2.controller`), which takes the place of the manual layer 2 step when the controller can do it.
+ */
+const KIND_ALIASES: Readonly<Record<string, string>> = {
   "ipam.intent": "ipam.move.intent",
   "dhcp.manual": "ipam.move.dhcp",
   "dns.manual": "ipam.move.dns",
   "device.manual": "ipam.move.device",
   "l2.move": "ipam.move.l2",
+  "l2.controller": "ipam.move.l2",
+  "ipam.move.controller": "ipam.move.l2",
   observe: "ipam.move.observe",
   cleanup: "ipam.move.cleanup",
 };
 
 /** Position of a step kind in the checklist; kinds this UI does not know come last. */
 export function kindRank(kind: string): number {
-  const i = STEP_ORDER.indexOf(OLD_KINDS[kind] ?? kind);
+  const i = STEP_ORDER.indexOf(KIND_ALIASES[kind] ?? kind);
   return i < 0 ? STEP_ORDER.length : i;
 }
 

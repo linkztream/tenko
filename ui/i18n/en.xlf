@@ -4639,7 +4639,7 @@
         <segment><source>What happens:</source></segment>
       </unit>
       <unit id="move.phase1_body">
-        <segment><source>Tenko changes the IPAM intent of each device first. The DHCP reservation, the DNS records, the network change and the confirmation that the device is seen in the new network are tasks you tick off in this version; a device waits for its ticked tasks before its network change.</source></segment>
+        <segment><source>Tenko changes the IPAM intent of each device first. The DHCP reservation and the DNS records are tasks you tick off in this version. The network change runs through the network controller where it can, otherwise it is a task with the exact action; a device waits for its ticked tasks before its network change, and its move completes when the device is seen at its new address.</source></segment>
       </unit>
       <unit id="move.nothing">
         <segment><source>Nothing to move: the link names no target network or no objects. Choose them in the IPAM view.</source></segment>
@@ -9972,6 +9972,229 @@
       </unit>
       <unit id="topology.path.start_here">
         <segment><source>This device is the start of the path.</source></segment>
+      </unit>
+    </group>
+    <group id="moves-l2">
+      <unit id="errors.ipam.move.plan_changed">
+        <segment><source>The move would now do something else than the preview you confirmed. Check the new preview and start again.</source></segment>
+      </unit>
+      <unit id="errors.ipam.move.l2_changed">
+        <segment><source>The device or its switch port changed on the network controller after the move was started, so nothing was written. Preview the move again.</source></segment>
+      </unit>
+      <unit id="errors.ipam.move.l2_refused">
+        <notes><note category="description">Warning of a move preview. rule is a guardrail code such as connect.guardrail.uplink.</note></notes>
+        <segment><source>A guardrail stops Tenko from changing the network of {host} ({rule}); a person moves it, if that is intended.</source></segment>
+      </unit>
+      <unit id="errors.ipam.move.controller_unavailable">
+        <notes><note category="description">Warning of a move preview. error is an error code.</note></notes>
+        <segment><source>The network controller {connector} could not be read ({error}); the devices it may see are moved by a person.</source></segment>
+      </unit>
+      <unit id="errors.connect.guardrail.uplink">
+        <segment><source>This switch port is an uplink; Tenko never changes it.</source></segment>
+      </unit>
+      <unit id="errors.connect.guardrail.management_port">
+        <segment><source>Tenko or the network controller is reached through this switch port; Tenko never changes it.</source></segment>
+      </unit>
+      <unit id="errors.connect.guardrail.management_client">
+        <segment><source>This device is the network controller or Tenko's host; Tenko never moves it.</source></segment>
+      </unit>
+      <unit id="errors.connect.guardrail.protected_network">
+        <segment><source>The target is a management network; Tenko never puts devices into it.</source></segment>
+      </unit>
+      <unit id="errors.connect.guardrail.protected_port">
+        <segment><source>This switch port is protected; Tenko never changes it.</source></segment>
+      </unit>
+      <unit id="errors.connect.guardrail.protected_client">
+        <segment><source>This device is protected; Tenko never moves it.</source></segment>
+      </unit>
+      <unit id="ipam.move.task.l2_vlan">
+        <notes><note category="description">Manual task of a move when the network controller cannot make the change.</note></notes>
+        <segment><source>Move the device to VLAN {vid}: set its switch port to VLAN {vid} untagged, or join it to a wireless network that carries VLAN {vid}.</source></segment>
+      </unit>
+      <unit id="ipam.move.task.l2_port">
+        <segment><source>On {connector}, give port {port} of {device} the port profile {profile} (VLAN {vid} untagged); writes through this connector are off.</source></segment>
+      </unit>
+      <unit id="ipam.move.task.l2_client">
+        <segment><source>On {connector}, set the VLAN override of {mac} to the network {network} (VLAN {vid}); writes through this connector are off.</source></segment>
+      </unit>
+      <unit id="ipam.move.task.l2_port_vlan">
+        <segment><source>Set port {port} of {device} to VLAN {vid} untagged; no port profile on {connector} carries that VLAN untagged.</source></segment>
+      </unit>
+      <unit id="ipam.move.task.l2_shared_port">
+        <segment><source>Move the device to VLAN {vid} by hand: port {port} of {device} also serves {count, plural, one {# other device} other {# other devices}}, and a profile change would move them too.</source></segment>
+      </unit>
+      <unit id="ipam.move.task.l2_ssid">
+        <segment><source>Join the device to the wireless network {ssid}, which carries VLAN {vid}; its access point {device} does not carry that VLAN.</source></segment>
+      </unit>
+      <unit id="ipam.move.task.l2_network">
+        <segment><source>Create the network for VLAN {vid} on {connector} (create the VLAN with its network in Tenko), then move the device to it.</source></segment>
+      </unit>
+      <unit id="ipam.move.task.l2_refused">
+        <segment><source>Move the device to VLAN {vid} by hand, if that is intended: Tenko never changes this path ({rule}).</source></segment>
+      </unit>
+      <unit id="ipam.move.step.controller_port">
+        <notes><note category="description">Summary of the automatic L2 step of a move: a port profile through the network controller.</note></notes>
+        <segment><source>Give port {port} of {device} the port profile {after} through {connector}.</source></segment>
+      </unit>
+      <unit id="ipam.move.step.controller_client">
+        <notes><note category="description">Summary of the automatic L2 step of a move: a per-client VLAN through the network controller.</note></notes>
+        <segment><source>Set the VLAN override of {mac} to the network {after} through {connector}.</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_move_controller">
+        <segment><source>Move on the network controller</source></segment>
+      </unit>
+      <unit id="jobs.l2.title">
+        <segment><source>On the network controller</source></segment>
+      </unit>
+      <unit id="jobs.l2.planned">
+        <segment><source>Planned change</source></segment>
+      </unit>
+      <unit id="jobs.l2.diff">
+        <segment><source>What changed</source></segment>
+      </unit>
+      <unit id="jobs.l2.col.path">
+        <segment><source>Setting</source></segment>
+      </unit>
+      <unit id="jobs.l2.col.before">
+        <segment><source>Before</source></segment>
+      </unit>
+      <unit id="jobs.l2.col.after">
+        <segment><source>After</source></segment>
+      </unit>
+      <unit id="jobs.l2.absent">
+        <segment><source>none</source></segment>
+      </unit>
+      <unit id="jobs.l2.receipt">
+        <notes><note category="description">when is a relative time such as 5 minutes ago.</note></notes>
+        <segment><source>Written {when}, read back and verified; {count, plural, =0 {no undo step} one {# undo step} other {# undo steps}} kept for the rollback.</source></segment>
+      </unit>
+      <unit id="jobs.l2.no_undo">
+        <segment><source>The receipt has no undo step (the port had no profile on record): a rollback asks a person to put the port back.</source></segment>
+      </unit>
+      <unit id="jobs.l2.unchanged">
+        <segment><source>The network controller had this change already; nothing was written.</source></segment>
+      </unit>
+      <unit id="jobs.l2.unknown_write">
+        <segment><source>An interrupted attempt may have written this change without keeping its receipt; a rollback asks a person.</source></segment>
+      </unit>
+      <unit id="jobs.l2.warnings">
+        <segment><source>The network controller warned</source></segment>
+      </unit>
+      <unit id="jobs.l2.reverted">
+        <segment><source>Rolled back: the network controller has the previous setting again.</source></segment>
+      </unit>
+      <unit id="jobs.l2.undo_hint">
+        <segment><source>Put the previous setting back on the network controller: {path} to {before}.</source></segment>
+      </unit>
+      <unit id="move.l2.action.port_profile">
+        <segment><source>Port profile {profile} on {device} port {port}</source></segment>
+      </unit>
+      <unit id="move.l2.action.client_vlan">
+        <segment><source>VLAN override on {device}</source></segment>
+      </unit>
+      <unit id="move.l2.action.client_vlan_ssid">
+        <segment><source>VLAN override on {device} (SSID {ssid})</source></segment>
+      </unit>
+      <unit id="move.l2.action.unchanged">
+        <segment><source>In VLAN {vid} already</source></segment>
+      </unit>
+      <unit id="move.l2.action.shared">
+        <segment><source>Moves with {ip}</source></segment>
+      </unit>
+      <unit id="move.l2.action.manual">
+        <segment><source>By hand</source></segment>
+      </unit>
+      <unit id="move.l2.action.refused">
+        <segment><source>Refused</source></segment>
+      </unit>
+      <unit id="move.l2.through">
+        <segment><source>through {connector}</source></segment>
+      </unit>
+      <unit id="move.l2.reason.no_vlan">
+        <segment><source>The target network has no VLAN.</source></segment>
+      </unit>
+      <unit id="move.l2.reason.no_controller">
+        <segment><source>No network controller is configured.</source></segment>
+      </unit>
+      <unit id="move.l2.reason.controller_unavailable">
+        <segment><source>The network controller could not be read.</source></segment>
+      </unit>
+      <unit id="move.l2.reason.controller_ambiguous">
+        <segment><source>Several network controllers see the device.</source></segment>
+      </unit>
+      <unit id="move.l2.reason.no_mac">
+        <segment><source>The device has no MAC address in IPAM.</source></segment>
+      </unit>
+      <unit id="move.l2.reason.not_seen">
+        <segment><source>The network controller does not see the device.</source></segment>
+      </unit>
+      <unit id="move.l2.reason.no_network">
+        <segment><source>The network controller has no network for VLAN {vid}.</source></segment>
+      </unit>
+      <unit id="move.l2.reason.no_profile">
+        <segment><source>No port profile carries VLAN {vid} untagged.</source></segment>
+      </unit>
+      <unit id="move.l2.reason.shared_port">
+        <segment><source>{count, plural, one {# other device is} other {# other devices are}} on the same switch port.</source></segment>
+      </unit>
+      <unit id="move.l2.reason.no_port">
+        <segment><source>The network controller reports the device without its switch port.</source></segment>
+      </unit>
+      <unit id="move.l2.reason.join_ssid">
+        <segment><source>Its access point does not carry VLAN {vid}: the device must join {ssid}.</source></segment>
+      </unit>
+      <unit id="move.l2.reason.no_ssid">
+        <segment><source>Its access point does not carry VLAN {vid}, and no wireless network carries it.</source></segment>
+      </unit>
+      <unit id="move.l2.reason.read_only">
+        <segment><source>Writes through {connector} are off (TGL-20).</source></segment>
+      </unit>
+      <unit id="move.l2.reason.refused">
+        <notes><note category="description">rule is the translated text of the guardrail.</note></notes>
+        <segment><source>Refused by a guardrail: {rule}</source></segment>
+      </unit>
+      <unit id="move.l2.reason.already_there">
+        <segment><source>The device is in the target VLAN already.</source></segment>
+      </unit>
+      <unit id="move.l2.reason.same_interface">
+        <segment><source>Another address of the same interface moves the device.</source></segment>
+      </unit>
+      <unit id="move.l2.note.link_flap">
+        <segment><source>The device loses its link for a moment while the switch applies the profile.</source></segment>
+      </unit>
+      <unit id="move.l2.note.no_undo">
+        <segment><source>The port has no profile on record, so a rollback asks a person to put it back.</source></segment>
+      </unit>
+      <unit id="move.l2.note.tagged">
+        <segment><source>The profile also carries tagged networks.</source></segment>
+      </unit>
+      <unit id="move.l2.note.reconnect">
+        <segment><source>The device moves when it reconnects.</source></segment>
+      </unit>
+      <unit id="move.l2.note.carry_unknown">
+        <segment><source>Tenko cannot tell whether the access point carries VLAN {vid}.</source></segment>
+      </unit>
+      <unit id="move.l2.ssids">
+        <notes><note category="description">CONN-18: moving to another SSID is a change on the device itself.</note></notes>
+        <segment><source>Or join a wireless network that carries VLAN {vid}: {ssids}.</source></segment>
+      </unit>
+      <unit id="move.l2.controller">
+        <segment><source>Network controller: {name}</source></segment>
+      </unit>
+      <unit id="move.l2.controller_read_only">
+        <segment><source>Network controller: {name} (writes off)</source></segment>
+      </unit>
+      <unit id="move.l2.no_controller">
+        <segment><source>No network controller: every network change is a task for a person.</source></segment>
+      </unit>
+      <unit id="move.l2.diff">
+        <segment><source>{before} → {after}</source></segment>
+      </unit>
+      <unit id="move.step.l2_controller">
+        <segment><source>Move {host} to VLAN {vid} through {connector}: dry run, write, read back and compare.</source></segment>
+      </unit>
+      <unit id="move.plan_changed">
+        <segment><source>The plan changed since this preview. Here is the new one: check it and start again.</source></segment>
       </unit>
     </group>
   </file>

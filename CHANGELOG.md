@@ -20,7 +20,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - History of every IPAM object, with restore of an earlier revision.
 - Bulk changes with a preview before anything is applied.
 - Import of spreadsheets and CSV files with column mapping and a preview, and export of prefixes, addresses and hosts as CSV.
-- Moving hosts to another network: a dry-run preview, then a job with manual steps for DHCP, DNS and the switch port, observation of the old address, and rollback.
+- Moving hosts to another network: a dry-run preview, then a job per device with manual steps for DHCP and DNS, the network change, the observation of the device at its new address, and rollback.
 - The audit log, protected by a hash chain that `tenko audit verify` and the UI check.
 - Server-sent events, so the UI follows changes made elsewhere without reloading.
 - The web UI, embedded in the binary, in English and Swedish, with a first-run setup wizard.
@@ -63,6 +63,9 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - The UniFi Network connector (plugin `unifi`, bundled): it reads a self-hosted Network Application or a UniFi OS console through the classic API with a local account: switches, access points and gateways with their ports, port profiles, uplinks and LLDP neighbours, the connected clients with their switch port or access point, wireless network and VLAN, the networks with their VLANs and DHCP mode, the port profiles, and the wireless networks with their VLANs and the access points that broadcast them. Devices and clients also arrive as inventory hosts with names and vendors, so they appear on the topology map and as discovered hosts. Without a local account, a local Integration API key gives a reduced read-only view of devices, uplinks and clients. The controller's certificate is checked against the system's certificate authorities, a pinned CA or a pinned fingerprint (the health check shows the fingerprint a self-signed controller presents).
 - UniFi writes through the connector, each read back and diffed first, previewed as a dry run, verified by reading back afterwards and off unless the connector's writes are switched on (TGL-20): a VLAN-only network for a VLAN, or a new name or DHCP mode for the network that has it; a port profile on a switch port; a per-client VLAN override. Each write carries the steps that undo it. Uplinks, the switch port and the client through which Tenko or the controller is reached, and the management networks are never written.
 - The observation views of the web UI filter and show the name and vendor facts, and the picture of a device lists its vendors and the TCP ports that answered with TLS.
+- Moves change the network of each device through the network controller: the switch port of a wired device gets a port profile that carries the target VLAN untagged, and a wireless device gets a per-client VLAN override. Each change is read from the controller again when the job reaches it, refused when the device or its port changed since the move started, written after a dry run and verified by reading back. When the device is not seen at its new address in time, the change is undone with the controller's undo steps. A device the controller cannot move gets a manual step that says exactly what to do and why: no controller, not seen by it, writes off (TGL-20), a port shared with other devices, no port profile for the VLAN, an access point that does not carry the VLAN (join the named wireless network instead), or a guardrail.
+- The move preview shows the network change of every device: the port profile on which switch port, the VLAN override on which access point, or the manual step and its reason, with the change on the controller, its side effects and the wireless networks that carry the target VLAN. A device on an uplink, on the port through which Tenko or the controller is reached, or that is the controller itself is refused by a guardrail, shown with the rule and left to a person after an acknowledgement; the other devices of the move are not held up. A move starts only the plan that was previewed, and asks for a new look at the preview when the network changed in between.
+- The jobs view shows the network step of a move with the change the controller read back, when it was written and verified, the undo steps kept for a rollback, and the rollback itself.
 
 ### Changed
 
@@ -71,6 +74,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - Operators may reveal operator secrets, so the PIN rule applies to operator accounts too: once the vault holds a secret, an operator signs in with a password, a second factor or a passkey.
 - A move completes its observation step by itself when the device is seen at its new address from its own MAC address; a person can still confirm the step by hand.
 - The operator secrets page moved under Settings, to `/settings/secrets`, as a tab beside Security, Users and Updates; the former `/secrets` address and the links to one secret keep working and redirect there.
+- A bulk move runs four devices at a time by default, instead of two; the preview still offers 1, 2, 4 and 8.
 
 ### Fixed
 
@@ -87,3 +91,4 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - Reveals are limited to ten a minute per person.
 - Connectors can be given a secret only by people who may change secrets, so the reveal policy cannot be bypassed through a connector.
 - Repeated requests with an idempotency key are recognised by a fingerprint keyed with a random secret that exists only in memory and changes at every start, so the stored fingerprints reveal nothing about the requests; sign-in, setup and password requests are never fingerprinted. A retry after a restart of a request sent before it is answered as already performed instead of being run again.
+- Before a rollback undoes a write through a network controller (a VLAN network or the network change of a move), the undo steps are checked against the guardrails on a fresh read of the controller, so an undo never changes an uplink or the path through which Tenko or the controller is reached.

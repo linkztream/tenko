@@ -102,6 +102,19 @@ const SUMMARY_ARGS: Readonly<Record<string, readonly string[]>> = {
   "ipam.move.task.dns": ["name", "new_ip"],
   "ipam.move.task.device": ["new_ip", "cidr"],
   "ipam.move.task.l2": ["cidr"],
+  // The layer 2 change through the network controller (`ipam.move.controller`) and the tasks of a
+  // person when the controller cannot make it (`ipam.move.l2`): the arguments the server always
+  // sends for that case, on top of the address and network arguments every move step carries.
+  "ipam.move.step.controller_port": ["port", "device", "after", "connector"],
+  "ipam.move.step.controller_client": ["mac", "after", "connector"],
+  "ipam.move.task.l2_vlan": ["vid"],
+  "ipam.move.task.l2_port": ["connector", "port", "device", "profile", "vid"],
+  "ipam.move.task.l2_client": ["connector", "mac", "network", "vid"],
+  "ipam.move.task.l2_port_vlan": ["connector", "port", "device", "vid"],
+  "ipam.move.task.l2_shared_port": ["port", "device", "vid", "count"],
+  "ipam.move.task.l2_ssid": ["ssid", "device", "vid"],
+  "ipam.move.task.l2_network": ["connector", "vid"],
+  "ipam.move.task.l2_refused": ["rule", "vid"],
   "ipam.move.task.observe": ["new_ip", "cidr", "timeout_secs"],
   "ipam.move.task.generic": ["old_ip", "new_ip", "cidr"],
   // The steps of a VLAN provision job (WP2.7): automatic steps by summary, the manual one by task.

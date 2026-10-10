@@ -816,7 +816,13 @@ export type MessageKey =
   | "errors.cluster.node.name"
   | "errors.cluster.node.name_taken"
   | "errors.cluster.node.not_found"
+  | "errors.connect.guardrail.management_client"
+  | "errors.connect.guardrail.management_port"
+  | "errors.connect.guardrail.protected_client"
+  | "errors.connect.guardrail.protected_network"
+  | "errors.connect.guardrail.protected_port"
   | "errors.connect.guardrail.protected_vlan"
+  | "errors.connect.guardrail.uplink"
   | "errors.connect.instance.call_timeout"
   | "errors.connect.instance.conflict"
   | "errors.connect.instance.disabled"
@@ -882,7 +888,11 @@ export type MessageKey =
   | "errors.ipam.invalid_cursor"
   | "errors.ipam.invalid_filter"
   | "errors.ipam.job.failed"
+  | "errors.ipam.move.controller_unavailable"
   | "errors.ipam.move.host_part_taken"
+  | "errors.ipam.move.l2_changed"
+  | "errors.ipam.move.l2_refused"
+  | "errors.ipam.move.plan_changed"
   | "errors.ipam.move.unmanaged"
   | "errors.ipam.name_taken"
   | "errors.ipam.not_deleted"
@@ -1554,12 +1564,22 @@ export type MessageKey =
   | "ipam.move.dragging"
   | "ipam.move.no_target"
   | "ipam.move.step.cleanup"
+  | "ipam.move.step.controller_client"
+  | "ipam.move.step.controller_port"
   | "ipam.move.step.intent"
   | "ipam.move.task.device"
   | "ipam.move.task.dhcp"
   | "ipam.move.task.dns"
   | "ipam.move.task.generic"
   | "ipam.move.task.l2"
+  | "ipam.move.task.l2_client"
+  | "ipam.move.task.l2_network"
+  | "ipam.move.task.l2_port"
+  | "ipam.move.task.l2_port_vlan"
+  | "ipam.move.task.l2_refused"
+  | "ipam.move.task.l2_shared_port"
+  | "ipam.move.task.l2_ssid"
+  | "ipam.move.task.l2_vlan"
   | "ipam.move.task.observe"
   | "ipam.move.title"
   | "ipam.nav.addresses"
@@ -1874,6 +1894,20 @@ export type MessageKey =
   | "jobs.kind.tenant"
   | "jobs.kind.vlan"
   | "jobs.kind.vrf"
+  | "jobs.l2.absent"
+  | "jobs.l2.col.after"
+  | "jobs.l2.col.before"
+  | "jobs.l2.col.path"
+  | "jobs.l2.diff"
+  | "jobs.l2.no_undo"
+  | "jobs.l2.planned"
+  | "jobs.l2.receipt"
+  | "jobs.l2.reverted"
+  | "jobs.l2.title"
+  | "jobs.l2.unchanged"
+  | "jobs.l2.undo_hint"
+  | "jobs.l2.unknown_write"
+  | "jobs.l2.warnings"
   | "jobs.log.change"
   | "jobs.log.col.by"
   | "jobs.log.col.change"
@@ -1940,6 +1974,7 @@ export type MessageKey =
   | "jobs.stepname.dns_manual"
   | "jobs.stepname.ipam_intent"
   | "jobs.stepname.ipam_move_cleanup"
+  | "jobs.stepname.ipam_move_controller"
   | "jobs.stepname.ipam_move_device"
   | "jobs.stepname.ipam_move_dhcp"
   | "jobs.stepname.ipam_move_dns"
@@ -2000,6 +2035,40 @@ export type MessageKey =
   | "move.keys.include"
   | "move.keys.move"
   | "move.keys.steps"
+  | "move.l2.action.client_vlan"
+  | "move.l2.action.client_vlan_ssid"
+  | "move.l2.action.manual"
+  | "move.l2.action.port_profile"
+  | "move.l2.action.refused"
+  | "move.l2.action.shared"
+  | "move.l2.action.unchanged"
+  | "move.l2.controller"
+  | "move.l2.controller_read_only"
+  | "move.l2.diff"
+  | "move.l2.no_controller"
+  | "move.l2.note.carry_unknown"
+  | "move.l2.note.link_flap"
+  | "move.l2.note.no_undo"
+  | "move.l2.note.reconnect"
+  | "move.l2.note.tagged"
+  | "move.l2.reason.already_there"
+  | "move.l2.reason.controller_ambiguous"
+  | "move.l2.reason.controller_unavailable"
+  | "move.l2.reason.join_ssid"
+  | "move.l2.reason.no_controller"
+  | "move.l2.reason.no_mac"
+  | "move.l2.reason.no_network"
+  | "move.l2.reason.no_port"
+  | "move.l2.reason.no_profile"
+  | "move.l2.reason.no_ssid"
+  | "move.l2.reason.no_vlan"
+  | "move.l2.reason.not_seen"
+  | "move.l2.reason.read_only"
+  | "move.l2.reason.refused"
+  | "move.l2.reason.same_interface"
+  | "move.l2.reason.shared_port"
+  | "move.l2.ssids"
+  | "move.l2.through"
   | "move.legend.auto"
   | "move.legend.manual"
   | "move.nothing"
@@ -2009,6 +2078,7 @@ export type MessageKey =
   | "move.parallelism_help"
   | "move.phase1_body"
   | "move.phase1_title"
+  | "move.plan_changed"
   | "move.preview_only"
   | "move.reason.host_part_outside"
   | "move.reason.host_part_reserved"
@@ -2024,6 +2094,7 @@ export type MessageKey =
   | "move.step.dhcp_manual_no_mac"
   | "move.step.dns_manual"
   | "move.step.ipam_intent"
+  | "move.step.l2_controller"
   | "move.step.l2_move"
   | "move.step.l2_move_novlan"
   | "move.step.observe"
@@ -3375,6 +3446,8 @@ export interface MessageArgs {
   "errors.ipam.immutable": { field: string | number };
   "errors.ipam.in_use": { count: number; kind: string | number };
   "errors.ipam.invalid_filter": { name: string | number };
+  "errors.ipam.move.controller_unavailable": { connector: string | number; error: string | number };
+  "errors.ipam.move.l2_refused": { host: string | number; rule: string | number };
   "errors.ipam.name_taken": { name: string | number };
   "errors.ipam.not_deleted": { kind: string | number };
   "errors.ipam.not_found": { kind: string | number };
@@ -3511,12 +3584,22 @@ export interface MessageArgs {
   "ipam.move.choose_title": { count: number };
   "ipam.move.dragging": { count: number };
   "ipam.move.step.cleanup": { new_ip: string | number; old_ip: string | number };
+  "ipam.move.step.controller_client": { after: string | number; connector: string | number; mac: string | number };
+  "ipam.move.step.controller_port": { after: string | number; connector: string | number; device: string | number; port: string | number };
   "ipam.move.step.intent": { new_ip: string | number; old_ip: string | number };
   "ipam.move.task.device": { cidr: string | number; new_ip: string | number };
   "ipam.move.task.dhcp": { cidr: string | number; new_ip: string | number };
   "ipam.move.task.dns": { name: string | number; new_ip: string | number };
   "ipam.move.task.generic": { cidr: string | number; new_ip: string | number; old_ip: string | number };
   "ipam.move.task.l2": { cidr: string | number };
+  "ipam.move.task.l2_client": { connector: string | number; mac: string | number; network: string | number; vid: string | number };
+  "ipam.move.task.l2_network": { connector: string | number; vid: string | number };
+  "ipam.move.task.l2_port": { connector: string | number; device: string | number; port: string | number; profile: string | number; vid: string | number };
+  "ipam.move.task.l2_port_vlan": { connector: string | number; device: string | number; port: string | number; vid: string | number };
+  "ipam.move.task.l2_refused": { rule: string | number; vid: string | number };
+  "ipam.move.task.l2_shared_port": { count: number; device: string | number; port: string | number; vid: string | number };
+  "ipam.move.task.l2_ssid": { device: string | number; ssid: string | number; vid: string | number };
+  "ipam.move.task.l2_vlan": { vid: string | number };
   "ipam.move.task.observe": { cidr: string | number; new_ip: string | number; timeout_secs: string | number };
   "ipam.next_free.address": { ip: string | number };
   "ipam.next_free.address_title": { cidr: string | number };
@@ -3586,6 +3669,8 @@ export interface MessageArgs {
   "jobs.group.heading": { group: string | number };
   "jobs.group.limit": { limit: number };
   "jobs.group.summary": { count: number };
+  "jobs.l2.receipt": { count: number; when: string | number };
+  "jobs.l2.undo_hint": { before: string | number; path: string | number };
   "jobs.log.change": { from: string | number; to: string | number };
   "jobs.note.counter": { max: number; used: number };
   "jobs.note.over": { over: number };
@@ -3624,6 +3709,24 @@ export interface MessageArgs {
   "move.heading_vlan": { vid: string | number };
   "move.include": { name: string | number };
   "move.included": { count: number; total: number };
+  "move.l2.action.client_vlan": { device: string | number };
+  "move.l2.action.client_vlan_ssid": { device: string | number; ssid: string | number };
+  "move.l2.action.port_profile": { device: string | number; port: string | number; profile: string | number };
+  "move.l2.action.shared": { ip: string | number };
+  "move.l2.action.unchanged": { vid: string | number };
+  "move.l2.controller": { name: string | number };
+  "move.l2.controller_read_only": { name: string | number };
+  "move.l2.diff": { after: string | number; before: string | number };
+  "move.l2.note.carry_unknown": { vid: string | number };
+  "move.l2.reason.join_ssid": { ssid: string | number; vid: string | number };
+  "move.l2.reason.no_network": { vid: string | number };
+  "move.l2.reason.no_profile": { vid: string | number };
+  "move.l2.reason.no_ssid": { vid: string | number };
+  "move.l2.reason.read_only": { connector: string | number };
+  "move.l2.reason.refused": { rule: string | number };
+  "move.l2.reason.shared_port": { count: number };
+  "move.l2.ssids": { ssids: string | number; vid: string | number };
+  "move.l2.through": { connector: string | number };
   "move.reason.host_part_outside": { ip: string | number };
   "move.reason.host_part_reserved": { ip: string | number };
   "move.reason.host_part_taken": { ip: string | number };
@@ -3636,6 +3739,7 @@ export interface MessageArgs {
   "move.step.dhcp_manual_no_mac": { cidr: string | number; host: string | number; ip: string | number };
   "move.step.dns_manual": { ip: string | number; name: string | number };
   "move.step.ipam_intent": { new_ip: string | number; old_ip: string | number };
+  "move.step.l2_controller": { connector: string | number; host: string | number; vid: string | number };
   "move.step.l2_move": { host: string | number; vid: string | number };
   "move.step.l2_move_novlan": { cidr: string | number; host: string | number };
   "move.step.observe": { host: string | number; ip: string | number };
@@ -4674,7 +4778,13 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.cluster.node.name",
   "errors.cluster.node.name_taken",
   "errors.cluster.node.not_found",
+  "errors.connect.guardrail.management_client",
+  "errors.connect.guardrail.management_port",
+  "errors.connect.guardrail.protected_client",
+  "errors.connect.guardrail.protected_network",
+  "errors.connect.guardrail.protected_port",
   "errors.connect.guardrail.protected_vlan",
+  "errors.connect.guardrail.uplink",
   "errors.connect.instance.call_timeout",
   "errors.connect.instance.conflict",
   "errors.connect.instance.disabled",
@@ -4740,7 +4850,11 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.ipam.invalid_cursor",
   "errors.ipam.invalid_filter",
   "errors.ipam.job.failed",
+  "errors.ipam.move.controller_unavailable",
   "errors.ipam.move.host_part_taken",
+  "errors.ipam.move.l2_changed",
+  "errors.ipam.move.l2_refused",
+  "errors.ipam.move.plan_changed",
   "errors.ipam.move.unmanaged",
   "errors.ipam.name_taken",
   "errors.ipam.not_deleted",
@@ -5412,12 +5526,22 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.move.dragging",
   "ipam.move.no_target",
   "ipam.move.step.cleanup",
+  "ipam.move.step.controller_client",
+  "ipam.move.step.controller_port",
   "ipam.move.step.intent",
   "ipam.move.task.device",
   "ipam.move.task.dhcp",
   "ipam.move.task.dns",
   "ipam.move.task.generic",
   "ipam.move.task.l2",
+  "ipam.move.task.l2_client",
+  "ipam.move.task.l2_network",
+  "ipam.move.task.l2_port",
+  "ipam.move.task.l2_port_vlan",
+  "ipam.move.task.l2_refused",
+  "ipam.move.task.l2_shared_port",
+  "ipam.move.task.l2_ssid",
+  "ipam.move.task.l2_vlan",
   "ipam.move.task.observe",
   "ipam.move.title",
   "ipam.nav.addresses",
@@ -5732,6 +5856,20 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.kind.tenant",
   "jobs.kind.vlan",
   "jobs.kind.vrf",
+  "jobs.l2.absent",
+  "jobs.l2.col.after",
+  "jobs.l2.col.before",
+  "jobs.l2.col.path",
+  "jobs.l2.diff",
+  "jobs.l2.no_undo",
+  "jobs.l2.planned",
+  "jobs.l2.receipt",
+  "jobs.l2.reverted",
+  "jobs.l2.title",
+  "jobs.l2.unchanged",
+  "jobs.l2.undo_hint",
+  "jobs.l2.unknown_write",
+  "jobs.l2.warnings",
   "jobs.log.change",
   "jobs.log.col.by",
   "jobs.log.col.change",
@@ -5798,6 +5936,7 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.stepname.dns_manual",
   "jobs.stepname.ipam_intent",
   "jobs.stepname.ipam_move_cleanup",
+  "jobs.stepname.ipam_move_controller",
   "jobs.stepname.ipam_move_device",
   "jobs.stepname.ipam_move_dhcp",
   "jobs.stepname.ipam_move_dns",
@@ -5858,6 +5997,40 @@ export const messageKeys: readonly MessageKey[] = [
   "move.keys.include",
   "move.keys.move",
   "move.keys.steps",
+  "move.l2.action.client_vlan",
+  "move.l2.action.client_vlan_ssid",
+  "move.l2.action.manual",
+  "move.l2.action.port_profile",
+  "move.l2.action.refused",
+  "move.l2.action.shared",
+  "move.l2.action.unchanged",
+  "move.l2.controller",
+  "move.l2.controller_read_only",
+  "move.l2.diff",
+  "move.l2.no_controller",
+  "move.l2.note.carry_unknown",
+  "move.l2.note.link_flap",
+  "move.l2.note.no_undo",
+  "move.l2.note.reconnect",
+  "move.l2.note.tagged",
+  "move.l2.reason.already_there",
+  "move.l2.reason.controller_ambiguous",
+  "move.l2.reason.controller_unavailable",
+  "move.l2.reason.join_ssid",
+  "move.l2.reason.no_controller",
+  "move.l2.reason.no_mac",
+  "move.l2.reason.no_network",
+  "move.l2.reason.no_port",
+  "move.l2.reason.no_profile",
+  "move.l2.reason.no_ssid",
+  "move.l2.reason.no_vlan",
+  "move.l2.reason.not_seen",
+  "move.l2.reason.read_only",
+  "move.l2.reason.refused",
+  "move.l2.reason.same_interface",
+  "move.l2.reason.shared_port",
+  "move.l2.ssids",
+  "move.l2.through",
   "move.legend.auto",
   "move.legend.manual",
   "move.nothing",
@@ -5867,6 +6040,7 @@ export const messageKeys: readonly MessageKey[] = [
   "move.parallelism_help",
   "move.phase1_body",
   "move.phase1_title",
+  "move.plan_changed",
   "move.preview_only",
   "move.reason.host_part_outside",
   "move.reason.host_part_reserved",
@@ -5882,6 +6056,7 @@ export const messageKeys: readonly MessageKey[] = [
   "move.step.dhcp_manual_no_mac",
   "move.step.dns_manual",
   "move.step.ipam_intent",
+  "move.step.l2_controller",
   "move.step.l2_move",
   "move.step.l2_move_novlan",
   "move.step.observe",

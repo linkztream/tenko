@@ -24,6 +24,8 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   // the three prefixes the job uses: ipam.move.dragging and the rest are texts of the IPAM views.
   // The titles of connector and cluster jobs come from the server as keys too (WP2.9).
   // The title, manual task and step texts of the VLAN provision job come as keys too (WP2.7).
+  // The guardrail refusals of network-controller writes show on the steps of those jobs and in
+  // the move preview (WP2.8), so they come with the jobs pack rather than the connectors pack.
   jobs: [
     "jobs.",
     "ipam.move.task.",
@@ -34,6 +36,7 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
     "ipam.vlan.job.",
     "ipam.vlan.task.",
     "ipam.vlan.step.",
+    "errors.connect.guardrail.",
   ],
   // The adoption policy of a prefix is part of the prefix pane, with its error texts.
   ipam: ["ipam.", "hosts.", "move.", "errors.ipam.adoption."],

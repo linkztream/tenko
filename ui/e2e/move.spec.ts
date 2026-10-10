@@ -11,7 +11,10 @@
 //
 // What stays manual for E8: the real device, DHCP server, DNS server and switch the tasks
 // are about, and the observation of the device at the new address (all manual steps here
-// are ticked off by a person, as in this release).
+// are ticked off by a person). The test server has no network controller and the target
+// network has no VLAN, so the preview leaves the network change to a person and says why;
+// the change through a controller is proven against the in-memory controller in the Rust
+// and component tests.
 
 import { ADMIN, type Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
@@ -62,6 +65,10 @@ test("an address dragged onto another network moves its host, and the manual ste
   expect(plannedItem.new_ip).toBe(NEW_IP);
   const plannedKinds = plannedItem.steps.map((step) => step.kind);
   expect(plannedKinds).toEqual(["ipam.intent", "dhcp.manual", "dns.manual", "l2.move", "observe", "cleanup"]);
+  // The network change is a task for a person: the target has no VLAN, so no controller could make it.
+  expect(plannedItem.l2).toMatchObject({ action: "manual", reason: "ipam.move.l2.no_vlan" });
+  expect(planned.controllers ?? []).toEqual([]);
+  expect(planned.fingerprint).toMatch(/^[0-9a-f]{32}$/);
 
   // The address list of the source network offers the address as a drag source.
   await page.goto(`/ipam/prefixes/${SOURCE_CIDR}`);
@@ -86,6 +93,11 @@ test("an address dragged onto another network moves its host, and the manual ste
   // cell holds the two addresses and nothing else; the DNS cell the name, then both.
   await expect(cell(item, "ip")).toHaveText(inOrder(OLD_IP, NEW_IP));
   await expect(cell(item, "dns")).toHaveText(inOrder(DNS_NAME, OLD_IP, NEW_IP));
+  // The network change: by hand, because the target network has no VLAN.
+  const l2 = cell(item, "l2");
+  await expect(l2).toHaveAttribute("data-testid", "move-l2");
+  await expect(l2).toHaveAttribute("data-action", "manual");
+  await expect(l2).toHaveAttribute("data-reason", "ipam.move.l2.no_vlan");
 
   // The steps of the device in job order, automatic and manual ones.
   await item.getByTestId("move-steps-toggle").click();

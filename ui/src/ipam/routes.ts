@@ -11,8 +11,9 @@ export const routes: AppRoute[] = [
   { path: "/ipam/prefixes/:network/:length", component: lazy(view()), title: "shell.nav.ipam" },
   { path: "/ipam/addresses", component: lazy(withPacks(PACKS, () => import("./address/AddressesView"))), title: "ipam.nav.addresses" },
   { path: "/ipam/addresses/:ip", component: lazy(withPacks(PACKS, () => import("./address/AddressView"))), title: "ipam.nav.addresses" },
-  // The VLAN page also shows the error texts of the network controller (errors.connect.*).
-  { path: "/ipam/vlans", component: lazy(withPacks([...PACKS, "connectors"], () => import("./tenancy/VlansView"))), title: "ipam.nav.vlans" },
+  // The VLAN page also shows the error texts of the network controller (errors.connect.*; the
+  // guardrail refusals are in the jobs pack).
+  { path: "/ipam/vlans", component: lazy(withPacks([...PACKS, "connectors", "jobs"], () => import("./tenancy/VlansView"))), title: "ipam.nav.vlans" },
   { path: "/ipam/sites", component: lazy(withPacks(PACKS, () => import("./tenancy/SitesView"))), title: "ipam.nav.sites" },
   { path: "/ipam/tenants", component: lazy(withPacks(PACKS, () => import("./tenancy/TenancyView"))), title: "ipam.nav.tenancy" },
   { path: "/ipam/tags", component: lazy(withPacks(PACKS, () => import("./tenancy/TagsView"))), title: "ipam.nav.tags" },

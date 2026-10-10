@@ -16,7 +16,13 @@
 .legend2 .auto::before { background: var(--accent); }
 .legend2 .manual::before { border: 1.5px dashed var(--ink-2); }
 
-.pvt { min-width: 1100px; }
+.pvt { min-width: 1240px; }
+.pvt col.c-check { width: 34px; }
+.pvt col.c-device { width: 152px; }
+.pvt col.c-mode { width: 88px; }
+.pvt col.c-ip { width: 228px; }
+.pvt col.c-dns { width: 300px; }
+.pvt col.c-manual { width: 104px; }
 .pvt tbody tr.move-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 2px; }
 .twisty { display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--r-1); background: transparent; color: var(--ink-3); flex: none; }
 .twisty:hover { background: var(--surface-3); color: var(--ink); }
@@ -25,6 +31,8 @@
 .chg, .pvt .dnschg { display: inline-flex; align-items: center; gap: var(--sp-3); vertical-align: middle; }
 .chg > svg.i, .pvt .dnschg > svg.i { color: var(--ink-3); }
 .mt { color: var(--ink-2); font-size: var(--fs-12); }
+/* The rows of notes are table rows, not the notices of app.css that share the class name. */
+.pvt tr.note, .pvt tr.note.warn { display: table-row; padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; }
 .pvt tr.note > td { height: auto; padding-top: 0; padding-bottom: var(--sp-3); white-space: normal; font-size: var(--fs-12); color: var(--ink-2); line-height: var(--lh-text); }
 .pvt tr.note.warn .nt { color: var(--warn-ink); }
 .pvt tr.sd > td { height: auto; padding: 0; white-space: normal; background: var(--surface-2); }
@@ -48,3 +56,24 @@ details.pv-manual > summary .tk-aff { margin-left: auto; }
 .cf-inline .help { color: var(--ink-3); font-size: var(--fs-12); max-width: 380px; }
 .cf-act { margin-left: auto; display: flex; align-items: center; gap: var(--sp-4); }
 .cf-rb { color: var(--ink-3); font-size: var(--fs-12); max-width: 300px; }
+
+/* The controllers that were read for the network step, one line above the table. */
+.l2sum { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-5); margin: 0; padding: var(--sp-3) var(--sp-6); border-bottom: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2); font-size: var(--fs-12); }
+.l2sum > svg.i { color: var(--ink-3); }
+.l2sum .ctl.off { color: var(--warn-ink); }
+
+/* The network column: what happens in the first line, the controller or the reason below it. */
+.pvt td[data-col="l2"] { height: auto; padding-top: var(--sp-2); padding-bottom: var(--sp-2); white-space: normal; line-height: var(--lh-text); }
+.l2c { display: grid; gap: 1px; min-width: 0; font-size: var(--fs-12); }
+.l2m { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); min-width: 0; color: var(--ink); font-size: var(--fs-12); overflow-wrap: anywhere; }
+.l2s { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--ink-3); overflow-wrap: anywhere; }
+
+/* The details of the network change in the expanded row: diff, notes, SSID alternative. */
+.l2d { display: grid; gap: var(--sp-3); padding: var(--sp-3) var(--sp-6) var(--sp-4) 0; border-top: 1px solid var(--line); color: var(--ink-2); font-size: var(--fs-12); line-height: var(--lh-text); }
+.l2d p, .l2d ul { margin: 0; }
+.l2notes { list-style: none; padding: 0; display: grid; gap: 2px; }
+.l2notes li::before { content: "•"; margin-right: var(--sp-3); color: var(--ink-3); }
+table.l2diff { justify-self: start; width: auto; max-width: 100%; table-layout: auto; border-collapse: collapse; }
+table.l2diff th, table.l2diff td { height: auto; padding: 2px var(--sp-6) 2px 0; border: 0; background: transparent; font-size: var(--fs-12); font-weight: var(--fw-regular); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+table.l2diff th { color: var(--ink-3); }
+.grid tbody .l2diff tr:hover td { background: transparent; }

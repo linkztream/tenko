@@ -96,3 +96,25 @@
 .job-log td.log-step { max-width: 280px; }
 .job-log td { height: auto; min-height: var(--row-h); padding-top: var(--sp-2); padding-bottom: var(--sp-2); vertical-align: top; }
 .check-host { font-weight: var(--fw-semibold); }
+
+/* ---------- The L2 step of a move: diff, receipt, warnings ---------- */
+.step-l2 { display: grid; gap: var(--sp-3); margin-top: var(--sp-3); max-width: 640px; }
+.l2-label { margin: 0; color: var(--ink-2); font-size: var(--fs-12); font-weight: var(--fw-semibold); text-align: left; }
+.l2-diff-wrap { border: 1px solid var(--line); border-radius: var(--r-3); overflow: hidden; }
+/* table.plain has a nowrap header and a fixed row height: the diff wraps long paths instead. */
+table.plain.l2-diff { table-layout: fixed; }
+table.plain.l2-diff caption { padding: var(--sp-3) var(--cell-px); background: var(--surface-2); border-bottom: 1px solid var(--line); }
+table.plain.l2-diff th, table.plain.l2-diff td { height: auto; padding-top: var(--sp-2); padding-bottom: var(--sp-2); vertical-align: top; white-space: normal; overflow-wrap: anywhere; }
+table.plain.l2-diff thead th:first-child { width: 46%; }
+table.plain.l2-diff tbody th[scope="row"] { background: transparent; color: var(--ink); font-weight: var(--fw-regular); font-size: var(--fs-13); border-bottom: 1px solid var(--line); }
+table.plain.l2-diff tbody tr:last-child th, table.plain.l2-diff tbody tr:last-child td { border-bottom: 0; }
+table.plain.l2-diff tbody tr:hover th, table.plain.l2-diff tbody tr:hover td { background: transparent; }
+.l2-before { color: var(--ink-3); }
+.l2-after { color: var(--ink); font-weight: var(--fw-medium); }
+.l2-line { display: flex; align-items: flex-start; gap: var(--sp-3); margin: 0; line-height: var(--lh-text); overflow-wrap: anywhere; }
+.l2-line svg.i { margin-top: 2px; flex: none; }
+.l2-line.ok svg.i { color: var(--ok-ink); }
+.l2-line.warn svg.i { color: var(--warn-ink); }
+.l2-hint { margin: 0; padding: var(--sp-3) var(--sp-5); border-left: 3px solid var(--accent); background: var(--accent-wash); line-height: var(--lh-text); overflow-wrap: anywhere; }
+.l2-warnings { display: grid; gap: var(--sp-2); }
+.l2-warnings ul { margin: 0; padding-left: var(--sp-7); line-height: var(--lh-text); overflow-wrap: anywhere; }

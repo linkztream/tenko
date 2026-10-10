@@ -1,10 +1,13 @@
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createJob, findJob, MOCK_HOST_IDS, MOCK_JOB_IDS, MOCK_MOVE_GROUP } from "../api/mock/job-store";
+import { createJob, findJob, MOCK_HOST_IDS, MOCK_JOB_IDS, MOCK_MOVE_GROUP, moveJobInput } from "../api/mock/job-store";
+import { encodeMoveL2Output, type MoveL2Output } from "../api/moves";
+import type { CodedError } from "../api/types";
 import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
 import { alex, signInAlex } from "../auth/account/testkit";
 import { setSessionForTest } from "../auth/session";
+import { setLocale } from "../i18n";
 import { cancelJob, resetJobDetails } from "./data";
 import JobDetail from "./JobDetail";
 import JobsView from "./JobsView";
@@ -374,5 +377,279 @@ describe("a job that is not there", () => {
     const problem = await screen.findByTestId("job-load-error");
     expect(problem.textContent).toBe("This job does not exist. It may have been removed.");
     expect(screen.getByRole("link", { name: "Jobs" }).getAttribute("href")).toBe("/jobs");
+  });
+});
+
+describe("a move whose L2 step goes through the network controller", () => {
+  const CONNECTOR = "0190d1c2-0000-7000-8000-0000000d0001";
+  const SWITCH = "00:00:5e:00:53:03";
+  const PATH = `devices/${SWITCH}/ports/7/profile`;
+  const HEAD = "Give port 7 of sw-desk the port profile IoT through unifi-lab.";
+  const WARNING = "the device on port 7 loses its link for a moment while the switch applies the profile";
+
+  afterEach(async () => {
+    await setLocale("en");
+  });
+
+  function output(extra: Partial<MoveL2Output> = {}): MoveL2Output {
+    return {
+      connector: CONNECTOR,
+      change: { type: "set_port_profile", data: { device: SWITCH, port: 7, profile: "prof-iot" } },
+      diff: [{ path: PATH, before: "LAN", after: "IoT" }],
+      warnings: [WARNING],
+      read_at: new Date(Date.now() - 6 * 60_000).toISOString(),
+      unchanged: false,
+      unknown_write: false,
+      receipt: {
+        connector: CONNECTOR,
+        dry_run: false,
+        applied_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+        verified: true,
+        undo_steps: 1,
+        token: "00",
+      },
+      ...extra,
+    };
+  }
+
+  const l2Args = {
+    connector: "unifi-lab",
+    device: "sw-desk",
+    port: "7",
+    profile: "IoT",
+    network: "IoT",
+    mac: "00:00:5e:00:53:2b",
+    path: PATH,
+    before: "LAN",
+    after: "IoT",
+  };
+
+  /**
+   * The move of cam-door. A dynamic host with no DNS name has no manual task before the L2 step:
+   * the steps are the intent (0), the controller (1), the observation (2) and the cleanup (3).
+   * A reserved host adds the DHCP step in front of the controller, which then has not run.
+   */
+  function controllerInput(options: { reserved?: boolean; undoFails?: boolean; out?: MoveL2Output | null } = {}) {
+    const out = options.out === undefined ? output() : options.out;
+    return moveJobInput({
+      host: { kind: "host", id: MOCK_HOST_IDS.camDoor },
+      name: "cam-door",
+      mac: "00:00:5e:00:53:2b",
+      ip: "198.51.100.43",
+      oldIp: "192.0.2.43",
+      mode: options.reserved ? "reserved" : "dynamic",
+      l2: {
+        action: "port_profile",
+        args: l2Args,
+        changes: [{ kind: "connector", id: CONNECTOR }],
+        ...(out ? { output: encodeMoveL2Output(out) } : {}),
+        ...(options.undoFails ? { undoFails: true } : {}),
+      },
+    });
+  }
+
+  function controllerJob(options: Parameters<typeof controllerInput>[0] = {}): string {
+    return createJob(controllerInput(options));
+  }
+
+  const UNDO = "Undo step 1 (ipam.move.controller) by hand, then mark this done.";
+
+  it("shows the planned change of a step that has not run", async () => {
+    await openJob(controllerJob({ reserved: true }));
+    expect(steps().map((s) => s.dataset.state)).toEqual(["done", "waiting_for_manual", "pending", "pending", "pending"]);
+    const controller = within(step(2));
+    expect(controller.getByText(HEAD)).toBeTruthy();
+    expect(controller.getByText("Not started")).toBeTruthy();
+    const planned = controller.getByTestId("job-l2-planned");
+    expect(within(planned).getByText("Planned change")).toBeTruthy();
+    const row = within(planned).getByTestId("job-l2-diff-line");
+    expect(within(row).getByRole("rowheader").textContent).toBe(PATH);
+    expect(within(row).getAllByRole("cell").map((c) => c.textContent)).toEqual(["LAN", "IoT"]);
+    expect(controller.queryByTestId("job-l2-diff")).toBeNull();
+    expect(controller.queryByTestId("job-l2-receipt")).toBeNull();
+    // The other steps have no such block.
+    expect(within(step(0)).queryByTestId("job-l2")).toBeNull();
+    expect(within(step(1)).queryByTestId("job-l2")).toBeNull();
+  });
+
+  it("shows the diff, the receipt and the warnings of a step that is done", async () => {
+    await openJob(controllerJob());
+    expect(steps().map((s) => s.dataset.state)).toEqual(["done", "done", "waiting_for_manual", "pending"]);
+    const controller = within(step(1));
+    expect(controller.getByText(HEAD)).toBeTruthy();
+    expect(controller.getByText("Done")).toBeTruthy();
+    expect(controller.queryByTestId("job-l2-planned")).toBeNull();
+
+    const diff = controller.getByTestId("job-l2-diff");
+    expect(within(diff).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Setting", "Before", "After"]);
+    const row = within(diff).getByTestId("job-l2-diff-line");
+    expect(within(row).getByRole("rowheader").textContent).toBe(PATH);
+    expect(within(row).getAllByRole("cell").map((c) => c.textContent)).toEqual(["LAN", "IoT"]);
+
+    const receipt = controller.getByTestId("job-l2-receipt");
+    expect(receipt.textContent).toBe("Written 5 minutes ago, read back and verified; 1 undo step kept for the rollback.");
+    expect(controller.queryByTestId("job-l2-no-undo")).toBeNull();
+    expect(controller.queryByTestId("job-l2-reverted")).toBeNull();
+    const warnings = controller.getByTestId("job-l2-warnings");
+    expect(within(warnings).getByText("The network controller warned")).toBeTruthy();
+    expect(within(warnings).getByText(WARNING)).toBeTruthy();
+  });
+
+  it("shows no diff for output that cannot be read", async () => {
+    const input = controllerInput();
+    const controller = input.steps.find((s) => s.kind === "ipam.move.controller");
+    if (!controller) throw new Error("the job has a controller step");
+    controller.output = "not hex";
+    await openJob(createJob(input));
+    expect(step(1).dataset.state).toBe("done");
+    expect(within(step(1)).getByText(HEAD)).toBeTruthy();
+    expect(within(step(1)).queryByTestId("job-l2")).toBeNull();
+  });
+
+  it("says that a cancelled job put the previous setting back", async () => {
+    const id = controllerJob();
+    await cancelJob(id);
+    await openJob(id);
+    expect(within(screen.getByRole("heading", { level: 1 })).getByText("Cancelled")).toBeTruthy();
+    expect(steps().map((s) => s.dataset.state)).toEqual(["compensated", "compensated", "compensated", "pending"]);
+    const controller = within(step(1));
+    expect(controller.getByText("Undone")).toBeTruthy();
+    expect(controller.getByTestId("job-l2-reverted").textContent).toBe("Rolled back: the network controller has the previous setting again.");
+    // What the step had done stays on the page.
+    expect(controller.getByTestId("job-l2-diff")).toBeTruthy();
+    expect(controller.getByTestId("job-l2-receipt")).toBeTruthy();
+    expect(controller.queryByTestId("job-l2-undo-hint")).toBeNull();
+    expect(screen.queryByTestId("job-step-complete")).toBeNull();
+  });
+
+  it("asks a person to put the setting back when the revert fails, and ends the cancel when it is done", async () => {
+    const id = controllerJob({ undoFails: true });
+    await cancelJob(id);
+    await openJob(id);
+    expect(within(screen.getByRole("heading", { level: 1 })).getByText("Rolling back")).toBeTruthy();
+    expect(steps().map((s) => s.dataset.state)).toEqual(["compensated", "waiting_for_manual", "compensated", "pending"]);
+
+    const controller = within(step(1));
+    const hint = controller.getByTestId("job-l2-undo-hint");
+    expect(hint.textContent).toBe(`Put the previous setting back on the network controller: ${PATH} to LAN.`);
+    // What was changed is above the hint, and the task with its form below it.
+    expect(controller.getByTestId("job-l2-diff")).toBeTruthy();
+    const task = controller.getByTestId("job-step-task");
+    expect(task.textContent).toContain("Undo");
+    expect(task.textContent).toContain(UNDO);
+    expect(hint.compareDocumentPosition(task) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(controller.queryByTestId("job-l2-reverted")).toBeNull();
+
+    type(note(1), "Set port 7 of sw-desk back to the profile LAN.");
+    fireEvent.click(within(step(1)).getByTestId("job-step-complete"));
+    await waitFor(() => expect(within(screen.getByRole("heading", { level: 1 })).getByText("Cancelled")).toBeTruthy());
+    expect(step(1).dataset.state).toBe("compensated");
+    expect(within(step(1)).getByTestId("job-l2-reverted")).toBeTruthy();
+    expect(within(step(1)).queryByTestId("job-l2-undo-hint")).toBeNull();
+    expect(screen.getByText("Set port 7 of sw-desk back to the profile LAN.")).toBeTruthy();
+  });
+
+  it("warns about a write without an undo step: a rollback asks a person", async () => {
+    const out = output();
+    const id = controllerJob({ out: { ...out, receipt: out.receipt && { ...out.receipt, undo_steps: 0 } }, undoFails: true });
+    await openJob(id);
+    const controller = within(step(1));
+    expect(controller.getByTestId("job-l2-receipt").textContent).toContain("no undo step kept for the rollback.");
+    expect(controller.getByTestId("job-l2-no-undo").textContent).toContain("a rollback asks a person to put the port back");
+    expect(controller.queryByTestId("job-l2-undo-hint")).toBeNull();
+    await cancelJob(id);
+    resetJobDetails();
+    screen.getByTestId("page-job").remove();
+    await openJob(id);
+    expect(step(1).dataset.state).toBe("waiting_for_manual");
+    expect(within(step(1)).getByTestId("job-l2-undo-hint")).toBeTruthy();
+  });
+
+  it("shows the exact task of an L2 step that a person does", async () => {
+    const id = createJob(
+      moveJobInput({
+        host: { kind: "host", id: MOCK_HOST_IDS.camDoor },
+        name: "cam-door",
+        mac: "00:00:5e:00:53:2b",
+        ip: "198.51.100.43",
+        oldIp: "192.0.2.43",
+        mode: "dynamic",
+        l2: { action: "manual", key: "ipam.move.task.l2_port", args: { connector: "unifi-lab", device: "sw-desk", port: "7", profile: "IoT" } },
+      }),
+    );
+    await openJob(id);
+    expect(steps().map((s) => s.dataset.state)).toEqual(["done", "waiting_for_manual", "pending", "pending"]);
+    const manual = within(step(1));
+    expect(manual.getByText("Move to the new network")).toBeTruthy();
+    expect(manual.getByTestId("job-step-task").textContent).toContain(
+      "On unifi-lab, give port 7 of sw-desk the port profile IoT (VLAN 30 untagged); writes through this connector are off.",
+    );
+    expect(manual.queryByTestId("job-l2")).toBeNull();
+    expect(manual.getByTestId("job-step-complete")).toBeTruthy();
+  });
+
+  it("explains in words why the step failed and nothing was written", async () => {
+    const failures: [CodedError, string][] = [
+      [
+        {
+          code: "ipam.move.l2_changed",
+          status: 409,
+          title: "The network changed",
+          detail: "the network changed since the move was submitted: port 7 of sw-desk has another port profile; nothing was written, preview the move again",
+          params: { mac: "00:00:5e:00:53:2b", what: "port 7 of sw-desk has another port profile" },
+        },
+        "The device or its switch port changed on the network controller after the move was started, so nothing was written. Preview the move again.",
+      ],
+      [
+        { code: "connect.guardrail.uplink", status: 422, title: "Guardrail", detail: "port 7 of sw-desk is an uplink" },
+        "This switch port is an uplink; Tenko never changes it.",
+      ],
+    ];
+    for (const [error, text] of failures) {
+      const input = controllerInput({ out: null });
+      const controller = input.steps.find((s) => s.kind === "ipam.move.controller");
+      if (!controller) throw new Error("the job has a controller step");
+      controller.failsWith = error;
+      const view = await openJob(createJob(input));
+      expect(step(1).dataset.state).toBe("failed");
+      const failure = within(step(1)).getByTestId("job-step-failure");
+      expect(failure.textContent).toContain(text);
+      expect(failure.textContent).toContain(`Detail from the server: ${error.detail}`);
+      // The step wrote nothing: no plan next to the error, no receipt.
+      expect(within(step(1)).queryByTestId("job-l2")).toBeNull();
+      expect(within(step(1)).getByText(HEAD)).toBeTruthy();
+      expect(screen.getByTestId("job-error").textContent).toContain(text);
+      view.unmount();
+    }
+  });
+
+  it("speaks Swedish", async () => {
+    await setLocale("sv");
+    const id = controllerJob();
+    await cancelJob(id);
+    await openJob(id);
+    const controller = within(step(1));
+    expect(controller.getByText("Ge port 7 på sw-desk portprofilen IoT via unifi-lab.")).toBeTruthy();
+    expect(within(controller.getByTestId("job-l2-diff")).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Inställning", "Före", "Efter"]);
+    expect(controller.getByTestId("job-l2-receipt").textContent).toMatch(/^Skrevs .*, lästes tillbaka och verifierades; 1 ångrasteg sparat för återställningen\.$/);
+    expect(controller.getByTestId("job-l2-reverted").textContent).toBe("Återställd: nätverkskontrollern har den tidigare inställningen igen.");
+  });
+
+  it("has no accessibility violations: planned, done, and waiting for a person to undo it", async () => {
+    const planned = await openJob(controllerJob({ reserved: true }));
+    expect(within(step(2)).getByTestId("job-l2-planned")).toBeTruthy();
+    expect(await axeViolations(planned.container)).toEqual([]);
+    planned.unmount();
+
+    const done = await openJob(controllerJob());
+    expect(within(step(1)).getByTestId("job-l2-diff")).toBeTruthy();
+    expect(await axeViolations(done.container)).toEqual([]);
+    done.unmount();
+
+    const id = controllerJob({ undoFails: true });
+    await cancelJob(id);
+    const undo = await openJob(id);
+    expect(within(step(1)).getByTestId("job-l2-undo-hint")).toBeTruthy();
+    expect(await axeViolations(undo.container)).toEqual([]);
   });
 });

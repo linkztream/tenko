@@ -90,6 +90,10 @@ export interface StepPlan {
   slow: boolean;
   /** An engine step that fails with this error when it runs (a scripted failure). */
   failsWith: CodedError | null;
+  /** The output an engine step keeps when it finishes (hex), as the server stores it. */
+  output: string | null;
+  /** An engine step whose undo fails: the rollback asks a person (`jobs.undo.step`). */
+  undoFails: boolean;
 }
 
 export interface MockJobRecord {
@@ -123,6 +127,10 @@ export interface MockStepInput {
   slow?: boolean;
   /** An automatic step that fails with this error when it runs. */
   failsWith?: CodedError | null;
+  /** The output an automatic step keeps when it finishes (hex). */
+  output?: string | null;
+  /** An automatic step whose undo fails, so the rollback asks a person. */
+  undoFails?: boolean;
 }
 
 export interface MockJobInput {
@@ -337,6 +345,7 @@ function advance(rec: MockJobRecord, ctx: Ctx): void {
       return;
     }
     if (plan.slow) return;
+    if (plan.output) step.output = plan.output;
     setStep(rec, ctx, index, { state: "done" });
   }
 }
@@ -370,6 +379,11 @@ function rollback(rec: MockJobRecord, ctx: Ctx): void {
     const task = plan.manual;
     if (task?.undo) {
       const undo: ManualTask = { instruction: task.undo, args: { ...task.args } };
+      setStep(rec, ctx, index, { state: "waiting_for_manual", data: { task: undo, deadline: null } });
+    } else if (plan.undoFails) {
+      // The handler answered "not compensable": a generic undo task names the step.
+      const undo: ManualTask = { instruction: "jobs.undo.step", args: { step: String(index), kind: step.kind } };
+      setStep(rec, ctx, index, { state: "compensating" });
       setStep(rec, ctx, index, { state: "waiting_for_manual", data: { task: undo, deadline: null } });
     } else {
       setStep(rec, ctx, index, { state: "compensating" });
@@ -538,12 +552,20 @@ function previewOf(input: MockJobInput, plan: StepPlan[]): JobPreview {
 function submit(input: MockJobInput, ctx: Ctx, options: CreateJobOptions & { id?: string } = {}): MockJobRecord {
   const forced = Math.max(0, options.startedSteps ?? 0);
   const plan = input.steps.map((step, index): StepPlan => {
-    if (index < forced) return { manual: null, slow: false, failsWith: null };
+    const output = step.output ?? null;
+    const undoFails = !!step.undoFails;
+    if (index < forced) return { manual: null, slow: false, failsWith: null, output, undoFails };
     const manual = step.manual ?? null;
     if (!manual && !step.automatic) {
       throw new Error(`step ${index} (${step.kind}) is neither automatic nor a manual task`);
     }
-    return { manual, slow: !manual && !!step.slow, failsWith: manual ? null : (step.failsWith ?? null) };
+    return {
+      manual,
+      slow: !manual && !!step.slow,
+      failsWith: manual ? null : (step.failsWith ?? null),
+      output: manual ? null : output,
+      undoFails: manual ? false : undoFails,
+    };
   });
   const spec: Job["spec"] = {
     kind: input.kind,
@@ -652,6 +674,7 @@ export const MOVE_STEP = {
   dns: "ipam.move.dns",
   device: "ipam.move.device",
   l2: "ipam.move.l2",
+  controller: "ipam.move.controller",
   observe: "ipam.move.observe",
   cleanup: "ipam.move.cleanup",
 } as const;
@@ -704,6 +727,24 @@ export interface MoveArgs {
   mode?: AssignmentMode | null;
   /** The observation timeout in seconds. */
   timeoutSecs: number;
+  /** The L2 step as the preview decided it; without it the L2 step is the generic manual task. */
+  l2?: MockMoveL2 | null;
+}
+
+/** The L2 step of a mock move (crates/tenko-ipam/src/moves/l2.rs). */
+export interface MockMoveL2 {
+  /** `port_profile` and `client_vlan` run through the controller; `unchanged` and `shared` have no step. */
+  action: "port_profile" | "client_vlan" | "manual" | "unchanged" | "shared";
+  /** The message key of the manual task (`ipam.move.task.l2_*`), or of the controller step's summary. */
+  key?: string;
+  /** The message arguments of the L2 step (device, port, profile, network, connector, ...). */
+  args?: Record<string, string>;
+  /** The output of the controller step (hex-encoded JSON, see `encodeMoveL2Output`). */
+  output?: string;
+  /** The controller step's undo fails, so a rollback asks a person. */
+  undoFails?: boolean;
+  /** Changes of the step besides the moved objects (the connector). */
+  changes?: ObjectRef[];
 }
 
 export interface MoveStepOptions {
@@ -745,6 +786,7 @@ export function moveSteps(move: MoveArgs, options: MoveStepOptions = {}): MockSt
   if (move.mode === "reserved") steps.push(manual(MOVE_STEP.dhcp, base));
   if (move.dnsName) steps.push(manual(MOVE_STEP.dns, { ...base, name: move.dnsName }));
   if (move.mode === "static") steps.push(manual(MOVE_STEP.device, base));
+  const l2 = move.l2;
   if (options.l2FailsWith) {
     steps.push({
       kind: MOVE_STEP.l2,
@@ -754,8 +796,26 @@ export function moveSteps(move: MoveArgs, options: MoveStepOptions = {}): MockSt
       changes,
       failsWith: options.l2FailsWith,
     });
-  } else {
+  } else if (!l2) {
     steps.push(manual(MOVE_STEP.l2, base));
+  } else if (l2.action === "port_profile" || l2.action === "client_vlan") {
+    const step: MockStepInput = {
+      kind: MOVE_STEP.controller,
+      automatic: true,
+      summary: l2.key ?? (l2.action === "port_profile" ? "ipam.move.step.controller_port" : "ipam.move.step.controller_client"),
+      args: { ...plain, ...(l2.args ?? {}) },
+      changes: [...changes, ...(l2.changes ?? [])],
+    };
+    if (l2.output) step.output = l2.output;
+    if (l2.undoFails) step.undoFails = true;
+    steps.push(step);
+  } else if (l2.action === "manual") {
+    steps.push({
+      kind: MOVE_STEP.l2,
+      automatic: false,
+      manual: { instruction: l2.key ?? "ipam.move.task.l2", args: { ...base, ...(l2.args ?? {}) } },
+      changes,
+    });
   }
   steps.push(
     manual(MOVE_STEP.observe, { ...base, timeout_secs: String(move.timeoutSecs) }),
@@ -786,6 +846,8 @@ export interface MoveJobInput {
   timeoutSecs?: number;
   /** The layer 2 step runs by itself (a connector moves the port) and fails with this error. */
   l2FailsWith?: CodedError;
+  /** The L2 step as the preview decided it (see `MockMoveL2`); without it a generic manual task. */
+  l2?: MockMoveL2;
 }
 
 /** The job input of a move, as the server builds it: kind `ipam.move`, title `ipam.move.title`. */
@@ -807,6 +869,7 @@ export function moveJobInput(move: MoveJobInput): MockJobInput {
     dnsName: move.fqdn ?? null,
     mode: move.mode ?? "reserved",
     timeoutSecs: move.timeoutSecs ?? 43200,
+    l2: move.l2 ?? null,
   };
   const stepOptions: MoveStepOptions = { changes: [move.host] };
   if (move.l2FailsWith) stepOptions.l2FailsWith = move.l2FailsWith;

@@ -2847,6 +2847,46 @@ export interface components {
          * @enum {string}
          */
         AssignmentMode: "static" | "reserved" | "dynamic" | "unmanaged";
+        /**
+         * @description A change of how a client is attached, the L2 step of a move (CONN-06): the port profile
+         *     of a switch port, or the per-client VLAN override of a client.
+         *
+         *     Adjacently tagged because variants carry MAC addresses (see `tenko_core::codec`).
+         */
+        AttachmentChange: {
+            /** @description Give a switch port a port profile. */
+            data: {
+                /** @description The switch, by controller reference. */
+                device: string;
+                /**
+                 * Format: int32
+                 * @description The port index.
+                 */
+                port: number;
+                /** @description The profile, by controller reference. */
+                profile: string;
+            };
+            /** @enum {string} */
+            type: "set_port_profile";
+        } | {
+            /** @description Put a client into a network with the per-client VLAN override. */
+            data: {
+                /** @description The client. */
+                mac: components["schemas"]["MacAddr"];
+                /** @description The network, by controller reference (for UniFi the network `_id`). */
+                network: string;
+            };
+            /** @enum {string} */
+            type: "set_client_vlan";
+        } | {
+            /** @description Remove a client's per-client VLAN override. */
+            data: {
+                /** @description The client. */
+                mac: components["schemas"]["MacAddr"];
+            };
+            /** @enum {string} */
+            type: "clear_client_vlan";
+        };
         /** @description Where a client is attached, as one source reports it. */
         AttachmentView: {
             /** @description The switch or access point. */
@@ -5188,6 +5228,37 @@ export interface components {
             /** @description The modules to run. */
             modules: components["schemas"]["ModuleSet"];
         };
+        /** @description Where the network controller sees a device now. */
+        MoveAttachment: {
+            /** @description The switch or access point, by controller reference. */
+            device: string;
+            /** @description Its name. */
+            device_name: string;
+            /** @description Wired or wireless. */
+            medium: components["schemas"]["MoveMedium"];
+            /** @description The network the device is in now, by controller reference. */
+            network?: string | null;
+            /** @description Its name. */
+            network_name?: string | null;
+            /**
+             * Format: int32
+             * @description The switch port.
+             */
+            port?: number | null;
+            /** @description The port's name. */
+            port_name?: string | null;
+            /** @description The port's profile now, by controller reference. */
+            profile?: string | null;
+            /** @description Its name. */
+            profile_name?: string | null;
+            /** @description The wireless network. */
+            ssid?: string | null;
+            /**
+             * Format: int32
+             * @description The VLAN the device is in now.
+             */
+            vlan?: number | null;
+        };
         /** @description The DNS change of an item. */
         MoveDns: {
             /** @description The name. */
@@ -5204,6 +5275,8 @@ export interface components {
             /** @description The host's name. */
             host_name?: string | null;
             interface?: components["schemas"]["InterfaceId"] | null;
+            /** @description The L2 step: how the device gets into the target VLAN. */
+            l2?: components["schemas"]["MoveL2"];
             mac?: components["schemas"]["MacAddr"] | null;
             mode?: components["schemas"]["AssignmentMode"] | null;
             /** @description The identifier the new address will have. */
@@ -5238,6 +5311,57 @@ export interface components {
             /** @description The address that moves. */
             object: components["schemas"]["ObjectRef"];
         };
+        /** @description The L2 step of a device, as previewed (IPAM-19 step 4). */
+        MoveL2: {
+            /** @description What happens. */
+            action: components["schemas"]["MoveL2Action"];
+            attachment?: components["schemas"]["MoveAttachment"] | null;
+            change?: components["schemas"]["AttachmentChange"] | null;
+            connector?: components["schemas"]["ControllerInfo"] | null;
+            /**
+             * @description What changes on the controller, from its state as read for the preview; the job
+             *     records the controller's own read-back diff when it writes.
+             */
+            diff?: components["schemas"]["DiffEntry"][];
+            /** @description The name of the controller's network for the target VLAN. */
+            network_name?: string | null;
+            /** @description Notes about the change (`ipam.move.l2.note.*`). */
+            notes?: string[];
+            /**
+             * Format: int32
+             * @description How many other devices are on the switch port.
+             */
+            others_on_port?: number | null;
+            problem?: components["schemas"]["MoveL2Problem"] | null;
+            /** @description The name of the port profile the port gets. */
+            profile_name?: string | null;
+            read_at?: components["schemas"]["Timestamp"] | null;
+            /** @description Why a person moves the device, or why there is no step (`ipam.move.l2.*`). */
+            reason?: string | null;
+            /**
+             * @description The SSIDs that carry the target VLAN: joining one is a change on the device itself
+             *     (CONN-18).
+             */
+            ssids?: string[];
+            with?: components["schemas"]["AddressId"] | null;
+        };
+        /**
+         * @description How a device gets into the target VLAN (IPAM-19 step 4).
+         * @enum {string}
+         */
+        MoveL2Action: "port_profile" | "client_vlan" | "manual" | "unchanged" | "shared";
+        /** @description The refusal or controller error behind a manual L2 step. */
+        MoveL2Problem: {
+            /** @description The code, such as `connect.guardrail.uplink` or `connect.unreachable`. */
+            code: string;
+            /** @description English detail. */
+            detail: string;
+        };
+        /**
+         * @description How a device is attached.
+         * @enum {string}
+         */
+        MoveMedium: "wired" | "wireless";
         /** @description The preview of a move (the dry run). */
         MovePreview: {
             /**
@@ -5245,6 +5369,13 @@ export interface components {
              * @description The store revision the preview was computed at.
              */
             base_revision: number;
+            /** @description The network controllers that were read for the L2 steps. */
+            controllers?: components["schemas"]["ControllerInfo"][];
+            /**
+             * @description Fingerprint of what would run: the addresses, the steps and the L2 changes. A
+             *     submit with it as `expect_fingerprint` runs this plan or nothing.
+             */
+            fingerprint?: string;
             /** @description One item per moved address. */
             items: components["schemas"]["MoveItem"][];
             /**
@@ -5270,6 +5401,11 @@ export interface components {
         MoveRequest: {
             /** @description Warning codes the caller acknowledges. */
             acknowledge?: string[];
+            /**
+             * @description The `fingerprint` of the preview the caller confirms: a submit whose plan differs
+             *     answers 409 `ipam.move.plan_changed` and starts nothing.
+             */
+            expect_fingerprint?: string | null;
             /** @description Hosts or addresses to move. */
             objects: components["schemas"]["ObjectRef"][];
             /**
@@ -15665,7 +15801,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description A warning needs an acknowledgement (`ipam.plan.unacknowledged`), the target is full (`ipam.address.full`) or an object is deleted (`ipam.object_deleted`) */
+            /** @description A warning needs an acknowledgement (`ipam.plan.unacknowledged`), the plan differs from the confirmed preview (`ipam.move.plan_changed`), the target is full (`ipam.address.full`) or an object is deleted (`ipam.object_deleted`) */
             409: {
                 headers: {
                     [name: string]: unknown;

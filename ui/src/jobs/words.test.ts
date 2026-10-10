@@ -125,6 +125,16 @@ describe("titles, step summaries and tasks", () => {
       "ipam.move.task.dns",
       "ipam.move.task.device",
       "ipam.move.task.l2",
+      "ipam.move.step.controller_port",
+      "ipam.move.step.controller_client",
+      "ipam.move.task.l2_vlan",
+      "ipam.move.task.l2_port",
+      "ipam.move.task.l2_client",
+      "ipam.move.task.l2_port_vlan",
+      "ipam.move.task.l2_shared_port",
+      "ipam.move.task.l2_ssid",
+      "ipam.move.task.l2_network",
+      "ipam.move.task.l2_refused",
       "ipam.move.task.observe",
       "ipam.move.task.generic",
       "jobs.step.ipam_intent",
@@ -142,10 +152,12 @@ describe("titles, step summaries and tasks", () => {
     for (const key of keys) {
       const names = summaryArgs(key);
       expect(names.length, key).toBeGreaterThan(0);
-      const text = tDynamic(key, Object.fromEntries(names.map((name) => [name, `<${name}>`])));
+      // A count is a number for a plural; every other argument is text.
+      const sample = (name: string) => (name === "count" ? "2" : `<${name}>`);
+      const text = tDynamic(key, Object.fromEntries(names.map((name) => [name, sample(name)])));
       expect(text, key).toBeDefined();
       expect(text, key).not.toBe(key);
-      for (const name of names) expect(text, `${key} ${name}`).toContain(`<${name}>`);
+      for (const name of names) expect(text, `${key} ${name}`).toContain(sample(name));
     }
   });
 
@@ -199,6 +211,74 @@ describe("titles, step summaries and tasks", () => {
       "Remove 192.0.2.41 and make 198.51.100.41 active.",
     );
     expect(jobTitle({ title: "ipam.move.title" })).toBe("Move");
+  });
+
+  it("names and summarizes the L2 step through the network controller", async () => {
+    expect(stepName("ipam.move.controller")).toBe("Move on the network controller");
+    const port = { connector: "unifi-lab", device: "sw-desk", port: "7", after: "IoT", mac: "00:00:5e:00:53:2b" };
+    const step: StepRecord = { index: 1, kind: "ipam.move.controller", state: { state: "pending" }, attempts: 0 };
+    expect(describeStep(step, { summary: "ipam.move.step.controller_port", args: port })).toBe(
+      "Give port 7 of sw-desk the port profile IoT through unifi-lab.",
+    );
+    expect(describeStep(step, { summary: "ipam.move.step.controller_client", args: port })).toBe(
+      "Set the VLAN override of 00:00:5e:00:53:2b to the network IoT through unifi-lab.",
+    );
+    // The preview has no diff line when the controller had nothing to change: the name stands in, never a key.
+    const { after: _after, ...noAfter } = port;
+    expect(describeStep(step, { summary: "ipam.move.step.controller_port", args: noAfter })).toBe("Move on the network controller");
+    const { port: _port, ...noPort } = port;
+    expect(describeStep(step, { summary: "ipam.move.step.controller_port", args: noPort })).toBe("Move on the network controller");
+    expect(describeStep(step, { summary: "ipam.move.step.controller_client", args: { connector: "unifi-lab", after: "IoT" } })).toBe(
+      "Move on the network controller",
+    );
+    expect(describeStep(step)).toBe("Move on the network controller");
+
+    await setLocale("sv");
+    expect(stepName("ipam.move.controller")).toBe("Flytta via nätverkskontrollern");
+    expect(describeStep(step, { summary: "ipam.move.step.controller_port", args: port })).toBe("Ge port 7 på sw-desk portprofilen IoT via unifi-lab.");
+    expect(describeStep(step, { summary: "ipam.move.step.controller_client", args: port })).toBe(
+      "Sätt VLAN-överstyrningen för 00:00:5e:00:53:2b till nätet IoT via unifi-lab.",
+    );
+  });
+
+  it("writes the manual L2 tasks of a move exactly, with the arguments the server sends", async () => {
+    // The base arguments of every task come first; the L2 ones follow (crates/tenko-ipam/src/moves/l2.rs, args).
+    const base = { cidr: "198.51.100.0/24", old_ip: "192.0.2.41", new_ip: "198.51.100.41", vid: "30" };
+    const l2 = { connector: "unifi-lab", device: "sw-desk", port: "7", profile: "IoT", network: "IoT", mac: "00:00:5e:00:53:2b", ssid: "iot.example.test", count: "1", rule: "connect.guardrail.uplink" };
+    const texts: Record<string, string> = {
+      "ipam.move.task.l2_vlan": "Move the device to VLAN 30: set its switch port to VLAN 30 untagged, or join it to a wireless network that carries VLAN 30.",
+      "ipam.move.task.l2_port": "On unifi-lab, give port 7 of sw-desk the port profile IoT (VLAN 30 untagged); writes through this connector are off.",
+      "ipam.move.task.l2_client": "On unifi-lab, set the VLAN override of 00:00:5e:00:53:2b to the network IoT (VLAN 30); writes through this connector are off.",
+      "ipam.move.task.l2_port_vlan": "Set port 7 of sw-desk to VLAN 30 untagged; no port profile on unifi-lab carries that VLAN untagged.",
+      "ipam.move.task.l2_shared_port": "Move the device to VLAN 30 by hand: port 7 of sw-desk also serves 1 other device, and a profile change would move them too.",
+      "ipam.move.task.l2_ssid": "Join the device to the wireless network iot.example.test, which carries VLAN 30; its access point sw-desk does not carry that VLAN.",
+      "ipam.move.task.l2_network": "Create the network for VLAN 30 on unifi-lab (create the VLAN with its network in Tenko), then move the device to it.",
+      "ipam.move.task.l2_refused": "Move the device to VLAN 30 by hand, if that is intended: Tenko never changes this path (connect.guardrail.uplink).",
+    };
+    for (const [instruction, text] of Object.entries(texts)) {
+      expect(taskText({ instruction, args: { ...base, ...l2 } }), instruction).toBe(text);
+      // As the step of a job: the head names the step and the task below says the rest.
+      const step: StepRecord = {
+        index: 1,
+        kind: "ipam.move.l2",
+        state: { state: "waiting_for_manual", data: { task: { instruction, args: { ...base, ...l2 } }, deadline: null } },
+        attempts: 1,
+      };
+      expect(describeStep(step, { summary: instruction, args: { ...base, ...l2 } }), instruction).toBe(text);
+      // A step that has not started carries no task: without the arguments the server always sends,
+      // the name of the step stands in, never a key.
+      const pending: StepRecord = { index: 1, kind: "ipam.move.l2", state: { state: "pending" }, attempts: 0 };
+      expect(describeStep(pending, { summary: instruction, args: {} }), instruction).toBe("Move to the new network");
+    }
+    expect(taskText({ instruction: "ipam.move.task.l2_shared_port", args: { ...base, ...l2, count: "3" } })).toBe(
+      "Move the device to VLAN 30 by hand: port 7 of sw-desk also serves 3 other devices, and a profile change would move them too.",
+    );
+
+    await setLocale("sv");
+    expect(taskText({ instruction: "ipam.move.task.l2_port", args: { ...base, ...l2 } })).toBe(
+      "I unifi-lab, ge port 7 på sw-desk portprofilen IoT (VLAN 30 otaggat); skrivningar via anslutningen är avstängda.",
+    );
+    expect(taskText({ instruction: "ipam.move.task.l2_shared_port", args: { ...base, ...l2, count: "3" } })).toContain("3 andra enheter");
   });
 
   it("names the steps of a move without a preview, and never shows a key", () => {
@@ -362,6 +442,11 @@ describe("rules of the views", () => {
     expect(kindRank("vendor.step")).toBe(STEP_ORDER.length);
     // The kinds of earlier versions keep their place.
     expect(["ipam.intent", "dhcp.manual", "dns.manual", "device.manual", "l2.move", "observe", "cleanup"].map(kindRank)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    // The L2 change through the network controller takes the place of the manual L2 step.
+    expect(kindRank("ipam.move.controller")).toBe(kindRank("ipam.move.l2"));
+    expect(kindRank("l2.controller")).toBe(kindRank("ipam.move.l2"));
+    expect(kindRank("ipam.move.controller")).toBeGreaterThan(kindRank("ipam.move.device"));
+    expect(kindRank("ipam.move.controller")).toBeLessThan(kindRank("ipam.move.observe"));
   });
 
   it("keeps the progress between 0 and 100", () => {

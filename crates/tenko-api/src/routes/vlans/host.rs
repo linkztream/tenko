@@ -1,6 +1,10 @@
 //! The network controllers of `tenko-ipam` over the connector host: [`HostControllers`]
 //! implements [`NetworkControllers`] with the host's typed calls, so the host keeps its
 //! policy for every write (guardrails, TGL-20, plan age, verification by planning again).
+//! The VLAN provision job writes networks through it, and the move job port profiles and
+//! per-client VLANs ([`attachment_change_of`]); the guardrails of an attachment change are
+//! also checked against the read the move job planned from ([`guardrail_view_of`]), and the
+//! undo steps of every receipt are checked against a fresh topology before a revert.
 //!
 //! The server wires it once the connector service runs:
 //!
@@ -14,8 +18,9 @@
 use std::{net::IpAddr, sync::Arc};
 
 use tenko_connect::{
-    Capability, ControllerDhcp, DeviceKind, Guardrails, L2Change, L2Plan, L2Receipt,
-    TopologySnapshot, WriteMode,
+    Capability, ClientAttachment, ControllerDhcp, DeviceKind, DevicePort, DeviceRef, Guardrails,
+    L2Change, L2Plan, L2Receipt, NetworkDevice, NetworkRef, ProfileRef, TopologySnapshot,
+    WriteMode,
     host::{ConnectorHost, HostError},
 };
 use tenko_core::{
@@ -24,9 +29,10 @@ use tenko_core::{
     serde_util::HexBytes,
 };
 use tenko_ipam::vlan::controllers::{
-    ControllerDevice, ControllerDeviceKind, ControllerInfo, ControllerNetwork, ControllerPort,
-    ControllerTopology, ControllerWlan, DiffEntry, NetworkControllers, NetworkPlan, NetworkReceipt,
-    NetworkSpec, PortFuture,
+    AttachmentChange, AttachmentPlan, ControllerAttachments, ControllerClient, ControllerDevice,
+    ControllerDeviceKind, ControllerInfo, ControllerLink, ControllerNetwork, ControllerPort,
+    ControllerPortState, ControllerProfile, ControllerTopology, ControllerWlan, DiffEntry,
+    NetworkControllers, NetworkPlan, NetworkReceipt, NetworkSpec, PortFuture,
 };
 
 /// [`NetworkControllers`] over the connector host.
@@ -178,6 +184,187 @@ pub fn topology_of(connector: ConnectorId, snapshot: &TopologySnapshot) -> Contr
     }
 }
 
+/// The change of the host for an attachment change of the move job.
+pub fn attachment_change_of(change: &AttachmentChange) -> L2Change {
+    match change {
+        AttachmentChange::SetPortProfile {
+            device,
+            port,
+            profile,
+        } => L2Change::SetPortProfile {
+            device: DeviceRef(device.clone()),
+            port: *port,
+            profile: ProfileRef(profile.clone()),
+        },
+        AttachmentChange::SetClientVlan { mac, network } => L2Change::SetClientVlan {
+            mac: *mac,
+            network: NetworkRef(network.clone()),
+        },
+        AttachmentChange::ClearClientVlan { mac } => L2Change::ClearClientVlan { mac: *mac },
+    }
+}
+
+/// The attachment plan IPAM sees, with the host's plan as its token.
+///
+/// # Errors
+///
+/// `sys.internal` when the plan does not encode.
+pub fn attachment_plan_of(
+    connector: ConnectorId,
+    change: &AttachmentChange,
+    plan: &L2Plan,
+) -> Result<AttachmentPlan, CodedError> {
+    Ok(AttachmentPlan {
+        connector,
+        change: change.clone(),
+        read_at: plan.read_at,
+        fingerprint: plan.fingerprint.clone(),
+        diff: plan
+            .diff
+            .iter()
+            .map(|line| DiffEntry {
+                path: line.path.clone(),
+                before: line.before.clone(),
+                after: line.after.clone(),
+            })
+            .collect(),
+        warnings: plan.warnings.clone(),
+        token: HexBytes(to_cbor(plan).map_err(|e| codec(&e))?.to_vec()),
+    })
+}
+
+/// Where the clients of a controller's topology are attached, for the move job.
+pub fn attachments_of(
+    connector: ConnectorId,
+    snapshot: &TopologySnapshot,
+) -> ControllerAttachments {
+    let topology = topology_of(connector, snapshot);
+    ControllerAttachments {
+        connector,
+        observed_at: snapshot.observed_at,
+        ports: snapshot
+            .devices
+            .iter()
+            .flat_map(|device| {
+                device.ports.iter().map(|port| ControllerPortState {
+                    device: device.id.0.clone(),
+                    index: port.index,
+                    name: port.name.clone(),
+                    profile: port.profile.as_ref().map(|p| p.0.clone()),
+                    native_vlan: port.native_vlan,
+                    uplink: port.uplink,
+                    management: port.management,
+                    up: port.up,
+                })
+            })
+            .collect(),
+        clients: snapshot
+            .clients
+            .iter()
+            .map(|client| ControllerClient {
+                mac: client.mac,
+                ip: client.ip,
+                device: client.device.0.clone(),
+                port: client.port,
+                ssid: client.ssid.clone(),
+                network: client.network.as_ref().map(|n| n.0.clone()),
+                vlan: client.vlan,
+                name: client.name.clone(),
+                management: client.management,
+            })
+            .collect(),
+        profiles: snapshot
+            .profiles
+            .iter()
+            .map(|profile| ControllerProfile {
+                id: profile.id.0.clone(),
+                name: profile.name.clone(),
+                native_network: profile.native_network.as_ref().map(|n| n.0.clone()),
+                tagged: profile.tagged.iter().map(|n| n.0.clone()).collect(),
+            })
+            .collect(),
+        links: snapshot
+            .links
+            .iter()
+            .map(|link| ControllerLink {
+                a: link.a.clone(),
+                b: link.b.clone(),
+            })
+            .collect(),
+        devices: topology.devices,
+        networks: topology.networks,
+        wlans: topology.wlans,
+    }
+}
+
+/// The part of a topology the host's guardrails look at, rebuilt from what
+/// [`attachments_of`] reported: ports with their flags, clients, networks.
+pub fn guardrail_view_of(state: &ControllerAttachments) -> TopologySnapshot {
+    let mut devices: Vec<NetworkDevice> = Vec::new();
+    for port in &state.ports {
+        let index = if let Some(index) = devices.iter().position(|d| d.id.0 == port.device) {
+            index
+        } else {
+            let known = state.device(&port.device);
+            devices.push(NetworkDevice {
+                id: DeviceRef(port.device.clone()),
+                name: known.map_or_else(|| port.device.clone(), |d| d.name.clone()),
+                model: None,
+                mac: known.and_then(|d| d.mac),
+                ip: known.and_then(|d| d.ip),
+                kind: DeviceKind::Switch,
+                ports: Vec::new(),
+            });
+            devices.len() - 1
+        };
+        devices[index].ports.push(DevicePort {
+            index: port.index,
+            name: port.name.clone(),
+            profile: port.profile.clone().map(ProfileRef),
+            native_vlan: port.native_vlan,
+            uplink: port.uplink,
+            up: port.up,
+            management: port.management,
+        });
+    }
+    TopologySnapshot {
+        observed_at: state.observed_at,
+        devices,
+        links: Vec::new(),
+        clients: state
+            .clients
+            .iter()
+            .map(|client| ClientAttachment {
+                mac: client.mac,
+                ip: client.ip,
+                device: DeviceRef(client.device.clone()),
+                port: client.port,
+                ssid: client.ssid.clone(),
+                network: client.network.clone().map(NetworkRef),
+                vlan: client.vlan,
+                name: client.name.clone(),
+                vendor: None,
+                management: client.management,
+            })
+            .collect(),
+        networks: state
+            .networks
+            .iter()
+            .map(|network| tenko_connect::ControllerNetwork {
+                id: NetworkRef(network.id.clone()),
+                name: network.name.clone(),
+                vlan: network.vlan,
+                subnet: network.subnet,
+                // The guardrails do not look at DHCP.
+                dhcp: ControllerDhcp::Disabled,
+                management: network.management,
+            })
+            .collect(),
+        profiles: Vec::new(),
+        wlans: Vec::new(),
+    }
+}
+
 /// The relay targets of a controller's DHCP setting (empty when it is off or the controller
 /// serves DHCP itself).
 pub fn relays_of(dhcp: &ControllerDhcp) -> Vec<IpAddr> {
@@ -250,6 +437,20 @@ impl NetworkControllers for HostControllers {
     ) -> PortFuture<'a, ()> {
         Box::pin(async move {
             let l2: L2Receipt = from_cbor(&receipt.token.0).map_err(|e| codec(&e))?;
+            // The host does not check the guardrails for an undo; the undo steps are writes
+            // like any other, so they are checked here against a fresh topology (CONN-09).
+            if l2.mode == WriteMode::Apply && !l2.undo.is_empty() {
+                let snapshot = self
+                    .host
+                    .topology(receipt.connector, on_behalf_of)
+                    .await
+                    .map_err(coded)?;
+                for step in &l2.undo {
+                    self.guardrails
+                        .check(step, &snapshot)
+                        .map_err(|error| coded(error.into()))?;
+                }
+            }
             self.host
                 .revert_l2(receipt.connector, &l2, on_behalf_of)
                 .await
@@ -271,6 +472,74 @@ impl NetworkControllers for HostControllers {
             Ok(topology_of(connector, &snapshot))
         })
     }
+
+    fn attachments(
+        &self,
+        connector: ConnectorId,
+        on_behalf_of: Option<UserId>,
+    ) -> PortFuture<'_, ControllerAttachments> {
+        Box::pin(async move {
+            let snapshot = self
+                .host
+                .topology(connector, on_behalf_of)
+                .await
+                .map_err(coded)?;
+            Ok(attachments_of(connector, &snapshot))
+        })
+    }
+
+    fn check_attachment(
+        &self,
+        state: &ControllerAttachments,
+        change: &AttachmentChange,
+    ) -> Result<(), CodedError> {
+        self.guardrails
+            .check(&attachment_change_of(change), &guardrail_view_of(state))
+            .map_err(|error| coded(error.into()))
+    }
+
+    fn plan_attachment<'a>(
+        &'a self,
+        connector: ConnectorId,
+        change: &'a AttachmentChange,
+        on_behalf_of: Option<UserId>,
+    ) -> PortFuture<'a, AttachmentPlan> {
+        Box::pin(async move {
+            let plan = self
+                .host
+                .plan_l2(
+                    connector,
+                    &attachment_change_of(change),
+                    &self.guardrails,
+                    on_behalf_of,
+                )
+                .await
+                .map_err(coded)?;
+            attachment_plan_of(connector, change, &plan)
+        })
+    }
+
+    fn apply_attachment<'a>(
+        &'a self,
+        plan: &'a AttachmentPlan,
+        dry_run: bool,
+        on_behalf_of: Option<UserId>,
+    ) -> PortFuture<'a, NetworkReceipt> {
+        Box::pin(async move {
+            let l2: L2Plan = from_cbor(&plan.token.0).map_err(|e| codec(&e))?;
+            let mode = if dry_run {
+                WriteMode::DryRun
+            } else {
+                WriteMode::Apply
+            };
+            let receipt = self
+                .host
+                .apply_l2(plan.connector, &l2, mode, &self.guardrails, on_behalf_of)
+                .await
+                .map_err(coded)?;
+            receipt_of(plan.connector, &receipt)
+        })
+    }
 }
 
 #[cfg(test)]
@@ -278,7 +547,8 @@ mod tests {
     use std::{ffi::OsString, time::Duration};
 
     use tenko_connect::{
-        DevicePort, DeviceRef, DiffLine, NetworkDevice, NetworkRef, WirelessNetwork,
+        ConnectorError, DevicePort, DeviceRef, DiffLine, NetworkDevice, NetworkRef, PortProfile,
+        ProtectedPath, TopologyLink, WirelessNetwork,
         host::{
             HostConfig,
             launch::LaunchSpec,
@@ -288,7 +558,11 @@ mod tests {
         },
         sample,
     };
-    use tenko_core::Timestamp;
+    use tenko_core::{
+        MacAddr, Timestamp,
+        observe::{Endpoint, LinkKind},
+    };
+    use tenko_ipam::vlan::controllers::derived_guardrails;
     use tenko_store::{MemStore, Store};
 
     use super::*;
@@ -448,5 +722,593 @@ mod tests {
             .await
             .expect_err("no such instance on this node");
         assert_eq!(error.code, "connect.instance.disabled");
+    }
+
+    // The attachments of the move job.
+
+    fn mac(n: u8) -> MacAddr {
+        MacAddr::new([0x00, 0x00, 0x5e, 0x00, 0x53, n])
+    }
+
+    fn at() -> Timestamp {
+        "2026-10-10T12:00:00Z".parse().expect("time")
+    }
+
+    fn set_profile(port: u16) -> AttachmentChange {
+        AttachmentChange::SetPortProfile {
+            device: "sw-1".to_owned(),
+            port,
+            profile: "prof-iot".to_owned(),
+        }
+    }
+
+    fn set_vlan(n: u8, network: &str) -> AttachmentChange {
+        AttachmentChange::SetClientVlan {
+            mac: mac(n),
+            network: network.to_owned(),
+        }
+    }
+
+    fn clear_vlan(n: u8) -> AttachmentChange {
+        AttachmentChange::ClearClientVlan { mac: mac(n) }
+    }
+
+    fn device_ports() -> Vec<DevicePort> {
+        vec![
+            DevicePort {
+                index: 1,
+                name: Some("Port 1".to_owned()),
+                profile: Some(ProfileRef("prof-home".to_owned())),
+                native_vlan: Some(20),
+                uplink: false,
+                management: false,
+                up: true,
+            },
+            DevicePort {
+                index: 2,
+                name: Some("Port 2".to_owned()),
+                profile: None,
+                native_vlan: None,
+                uplink: false,
+                management: false,
+                up: false,
+            },
+            DevicePort {
+                index: 3,
+                name: Some("Uplink".to_owned()),
+                profile: None,
+                native_vlan: Some(1),
+                uplink: true,
+                management: false,
+                up: true,
+            },
+            DevicePort {
+                index: 4,
+                name: Some("Controller".to_owned()),
+                profile: None,
+                native_vlan: Some(10),
+                uplink: false,
+                management: true,
+                up: true,
+            },
+        ]
+    }
+
+    fn attachment(
+        n: u8,
+        device: &str,
+        port: Option<u16>,
+        ssid: Option<&str>,
+        network: &str,
+        vlan: u16,
+    ) -> ClientAttachment {
+        ClientAttachment {
+            mac: mac(n),
+            ip: None,
+            device: DeviceRef(device.to_owned()),
+            port,
+            ssid: ssid.map(str::to_owned),
+            network: Some(NetworkRef(network.to_owned())),
+            vlan: Some(vlan),
+            name: None,
+            vendor: Some("Example Corp".to_owned()),
+            management: false,
+        }
+    }
+
+    fn host_network(
+        id: &str,
+        name: &str,
+        vlan: u16,
+        management: bool,
+    ) -> tenko_connect::ControllerNetwork {
+        tenko_connect::ControllerNetwork {
+            id: NetworkRef(id.to_owned()),
+            name: name.to_owned(),
+            vlan: Some(vlan),
+            subnet: None,
+            dhcp: ControllerDhcp::Disabled,
+            management,
+        }
+    }
+
+    /// A switch with four ports (1 on the home profile, 2 down without a profile, 3 the
+    /// uplink, 4 the management port), an access point linked to port 3, three clients (a
+    /// wired one on port 1, a wireless one and the controller on port 4), three networks
+    /// (the last one is the management network) and two profiles.
+    fn attachment_snapshot() -> TopologySnapshot {
+        TopologySnapshot {
+            observed_at: at(),
+            devices: vec![
+                NetworkDevice {
+                    id: DeviceRef("sw-1".to_owned()),
+                    name: "USW-24".to_owned(),
+                    model: Some("US24".to_owned()),
+                    mac: Some(mac(0xa2)),
+                    ip: Some("192.0.2.2".parse().expect("ip")),
+                    kind: DeviceKind::Switch,
+                    ports: device_ports(),
+                },
+                NetworkDevice {
+                    id: DeviceRef("ap-1".to_owned()),
+                    name: "AP-1".to_owned(),
+                    model: None,
+                    mac: None,
+                    ip: None,
+                    kind: DeviceKind::AccessPoint,
+                    ports: Vec::new(),
+                },
+            ],
+            links: vec![TopologyLink {
+                a: Endpoint {
+                    device: "ap-1".to_owned(),
+                    port: None,
+                },
+                b: Endpoint {
+                    device: "sw-1".to_owned(),
+                    port: Some("3".to_owned()),
+                },
+                kind: LinkKind::Uplink,
+            }],
+            clients: vec![
+                ClientAttachment {
+                    ip: Some("198.51.100.20".parse().expect("ip")),
+                    name: Some("nas.example.test".to_owned()),
+                    ..attachment(1, "sw-1", Some(1), None, "net-home", 20)
+                },
+                attachment(2, "ap-1", None, Some("home.example.test"), "net-home", 20),
+                ClientAttachment {
+                    ip: Some("192.0.2.3".parse().expect("ip")),
+                    name: Some("controller.example.test".to_owned()),
+                    management: true,
+                    ..attachment(3, "sw-1", Some(4), None, "net-mgmt", 10)
+                },
+            ],
+            networks: vec![
+                host_network("net-home", "Home", 20, false),
+                host_network("net-iot", "IoT", 30, false),
+                host_network("net-mgmt", "Management", 10, true),
+            ],
+            profiles: vec![
+                PortProfile {
+                    id: ProfileRef("prof-home".to_owned()),
+                    name: "Home".to_owned(),
+                    native_network: Some(NetworkRef("net-home".to_owned())),
+                    tagged: Vec::new(),
+                },
+                PortProfile {
+                    id: ProfileRef("prof-trunk".to_owned()),
+                    name: "Trunk".to_owned(),
+                    native_network: Some(NetworkRef("net-iot".to_owned())),
+                    tagged: vec![
+                        NetworkRef("net-home".to_owned()),
+                        NetworkRef("net-mgmt".to_owned()),
+                    ],
+                },
+            ],
+            wlans: vec![WirelessNetwork {
+                id: "wlan-1".to_owned(),
+                ssid: "iot.example.test".to_owned(),
+                network: Some(NetworkRef("net-iot".to_owned())),
+                vlan: Some(30),
+                enabled: true,
+                access_points: vec![DeviceRef("ap-1".to_owned())],
+            }],
+        }
+    }
+
+    fn state_of_snapshot() -> ControllerAttachments {
+        attachments_of(ConnectorId::generate(), &attachment_snapshot())
+    }
+
+    #[test]
+    fn an_attachment_change_becomes_the_hosts_change() {
+        assert_eq!(
+            attachment_change_of(&set_profile(7)),
+            L2Change::SetPortProfile {
+                device: DeviceRef("sw-1".to_owned()),
+                port: 7,
+                profile: ProfileRef("prof-iot".to_owned()),
+            }
+        );
+        assert_eq!(
+            attachment_change_of(&set_vlan(3, "net-iot")),
+            L2Change::SetClientVlan {
+                mac: mac(3),
+                network: NetworkRef("net-iot".to_owned()),
+            }
+        );
+        assert_eq!(
+            attachment_change_of(&clear_vlan(3)),
+            L2Change::ClearClientVlan { mac: mac(3) }
+        );
+    }
+
+    #[test]
+    fn the_attachments_keep_the_ports_with_profile_uplink_and_management_flags() {
+        let connector = ConnectorId::generate();
+        let state = attachments_of(connector, &attachment_snapshot());
+        assert_eq!(state.connector, connector);
+        assert_eq!(state.observed_at, at());
+        let port =
+            |index, name: &str, profile: Option<&str>, native_vlan, flags: (bool, bool, bool)| {
+                ControllerPortState {
+                    device: "sw-1".to_owned(),
+                    index,
+                    name: Some(name.to_owned()),
+                    profile: profile.map(str::to_owned),
+                    native_vlan,
+                    uplink: flags.0,
+                    management: flags.1,
+                    up: flags.2,
+                }
+            };
+        assert_eq!(
+            state.ports,
+            vec![
+                port(
+                    1,
+                    "Port 1",
+                    Some("prof-home"),
+                    Some(20),
+                    (false, false, true)
+                ),
+                port(2, "Port 2", None, None, (false, false, false)),
+                port(3, "Uplink", None, Some(1), (true, false, true)),
+                port(4, "Controller", None, Some(10), (false, true, true)),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_attachments_keep_the_clients_with_port_ssid_network_vlan_and_management() {
+        let state = state_of_snapshot();
+        let client =
+            |n, ip: Option<&str>, device: &str, port, ssid: Option<&str>| ControllerClient {
+                mac: mac(n),
+                ip: ip.map(|ip| ip.parse().expect("ip")),
+                device: device.to_owned(),
+                port,
+                ssid: ssid.map(str::to_owned),
+                network: None,
+                vlan: None,
+                name: None,
+                management: false,
+            };
+        assert_eq!(
+            state.clients,
+            vec![
+                ControllerClient {
+                    network: Some("net-home".to_owned()),
+                    vlan: Some(20),
+                    name: Some("nas.example.test".to_owned()),
+                    ..client(1, Some("198.51.100.20"), "sw-1", Some(1), None)
+                },
+                ControllerClient {
+                    network: Some("net-home".to_owned()),
+                    vlan: Some(20),
+                    ..client(2, None, "ap-1", None, Some("home.example.test"))
+                },
+                ControllerClient {
+                    network: Some("net-mgmt".to_owned()),
+                    vlan: Some(10),
+                    name: Some("controller.example.test".to_owned()),
+                    management: true,
+                    ..client(3, Some("192.0.2.3"), "sw-1", Some(4), None)
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn the_attachments_keep_the_profiles_the_links_and_the_topology() {
+        let connector = ConnectorId::generate();
+        let snapshot = attachment_snapshot();
+        let state = attachments_of(connector, &snapshot);
+        assert_eq!(
+            state.profiles,
+            vec![
+                ControllerProfile {
+                    id: "prof-home".to_owned(),
+                    name: "Home".to_owned(),
+                    native_network: Some("net-home".to_owned()),
+                    tagged: Vec::new(),
+                },
+                ControllerProfile {
+                    id: "prof-trunk".to_owned(),
+                    name: "Trunk".to_owned(),
+                    native_network: Some("net-iot".to_owned()),
+                    tagged: vec!["net-home".to_owned(), "net-mgmt".to_owned()],
+                },
+            ]
+        );
+        assert_eq!(
+            state.links,
+            vec![ControllerLink {
+                a: Endpoint {
+                    device: "ap-1".to_owned(),
+                    port: None,
+                },
+                b: Endpoint {
+                    device: "sw-1".to_owned(),
+                    port: Some("3".to_owned()),
+                },
+            }]
+        );
+        // Devices, networks and wireless networks are those of the topology.
+        let topology = topology_of(connector, &snapshot);
+        assert_eq!(state.devices, topology.devices);
+        assert_eq!(state.networks, topology.networks);
+        assert_eq!(state.wlans, topology.wlans);
+        assert_eq!(state.device("ap-1").map(|d| d.name.as_str()), Some("AP-1"));
+        assert_eq!(
+            state.device("ap-1").map(|d| d.kind),
+            Some(ControllerDeviceKind::AccessPoint)
+        );
+        let networks: Vec<(&str, Option<u16>, bool)> = state
+            .networks
+            .iter()
+            .map(|n| (n.id.as_str(), n.vlan, n.management))
+            .collect();
+        assert_eq!(
+            networks,
+            [
+                ("net-home", Some(20), false),
+                ("net-iot", Some(30), false),
+                ("net-mgmt", Some(10), true)
+            ]
+        );
+        assert_eq!(state.wlans[0].access_points, ["ap-1"]);
+    }
+
+    #[test]
+    fn the_guardrail_view_keeps_the_ports_clients_and_networks_the_rules_look_at() {
+        let snapshot = attachment_snapshot();
+        let view = guardrail_view_of(&attachments_of(ConnectorId::generate(), &snapshot));
+        assert_eq!(view.observed_at, at());
+        // Only the switch has ports to protect.
+        assert_eq!(view.devices.len(), 1);
+        let switch = &view.devices[0];
+        assert_eq!(switch.id, DeviceRef("sw-1".to_owned()));
+        assert_eq!(switch.name, "USW-24");
+        assert_eq!(switch.mac, Some(mac(0xa2)));
+        assert_eq!(switch.ip, Some("192.0.2.2".parse().expect("ip")));
+        assert_eq!(switch.ports, device_ports());
+        let clients: Vec<_> = view
+            .clients
+            .iter()
+            .map(|c| (c.mac, c.device.0.as_str(), c.port, c.management))
+            .collect();
+        assert_eq!(
+            clients,
+            [
+                (mac(1), "sw-1", Some(1), false),
+                (mac(2), "ap-1", None, false),
+                (mac(3), "sw-1", Some(4), true)
+            ]
+        );
+        let networks: Vec<_> = view
+            .networks
+            .iter()
+            .map(|n| (n.id.0.as_str(), n.management))
+            .collect();
+        assert_eq!(
+            networks,
+            [("net-home", false), ("net-iot", false), ("net-mgmt", true)]
+        );
+        assert_eq!(view.links, Vec::new());
+        assert_eq!(view.profiles, Vec::new());
+        assert_eq!(view.wlans, Vec::new());
+    }
+
+    /// The rule through which the host's guardrails refuse `change`, if one does.
+    fn host_rule(
+        guardrails: &Guardrails,
+        state: &ControllerAttachments,
+        change: &AttachmentChange,
+    ) -> Option<&'static str> {
+        match guardrails.check(&attachment_change_of(change), &guardrail_view_of(state)) {
+            Ok(()) => None,
+            Err(ConnectorError::GuardrailRefused { rule }) => Some(rule),
+            Err(other) => panic!("a guardrail refusal was expected, not {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_hosts_guardrails_refuse_the_same_cases_as_the_derived_rules() {
+        let state = state_of_snapshot();
+        let guardrails = Guardrails::default();
+        for (change, rule) in [
+            (set_profile(3), "connect.guardrail.uplink"),
+            (set_profile(4), "connect.guardrail.management_port"),
+            (
+                set_vlan(3, "net-iot"),
+                "connect.guardrail.management_client",
+            ),
+            (clear_vlan(3), "connect.guardrail.management_client"),
+            (
+                set_vlan(1, "net-mgmt"),
+                "connect.guardrail.protected_network",
+            ),
+        ] {
+            assert_eq!(
+                host_rule(&guardrails, &state, &change),
+                Some(rule),
+                "{change:?}"
+            );
+            let derived = derived_guardrails(&state, &change).expect_err("refused as well");
+            assert_eq!(derived.code, rule, "{change:?}");
+        }
+        for change in [
+            set_profile(1),
+            set_profile(2),
+            set_vlan(2, "net-iot"),
+            clear_vlan(2),
+        ] {
+            assert_eq!(host_rule(&guardrails, &state, &change), None, "{change:?}");
+            assert_eq!(derived_guardrails(&state, &change), Ok(()), "{change:?}");
+        }
+    }
+
+    #[test]
+    fn configured_protected_paths_refuse_what_the_derived_rules_allow() {
+        let state = state_of_snapshot();
+        let guardrails = Guardrails {
+            protected: vec![
+                ProtectedPath::Port {
+                    device: DeviceRef("sw-1".to_owned()),
+                    port: 1,
+                },
+                ProtectedPath::Client { mac: mac(2) },
+                ProtectedPath::Network {
+                    network: NetworkRef("net-iot".to_owned()),
+                },
+            ],
+            max_parallel: 10,
+        };
+        for (change, rule) in [
+            (set_profile(1), "connect.guardrail.protected_port"),
+            (
+                set_vlan(2, "net-home"),
+                "connect.guardrail.protected_client",
+            ),
+            (clear_vlan(2), "connect.guardrail.protected_client"),
+            (
+                set_vlan(1, "net-iot"),
+                "connect.guardrail.protected_network",
+            ),
+        ] {
+            assert_eq!(
+                host_rule(&guardrails, &state, &change),
+                Some(rule),
+                "{change:?}"
+            );
+            assert_eq!(derived_guardrails(&state, &change), Ok(()), "{change:?}");
+        }
+        // The derived rules still hold, and what is not protected passes.
+        assert_eq!(
+            host_rule(&guardrails, &state, &set_profile(3)),
+            Some("connect.guardrail.uplink")
+        );
+        assert_eq!(host_rule(&guardrails, &state, &set_profile(2)), None);
+        assert_eq!(
+            host_rule(&guardrails, &state, &set_vlan(1, "net-home")),
+            None
+        );
+    }
+
+    #[test]
+    fn check_attachment_answers_with_the_coded_error_of_the_rule() {
+        let state = state_of_snapshot();
+        let protected = HostControllers::with_guardrails(
+            host(),
+            Guardrails {
+                protected: vec![
+                    ProtectedPath::Port {
+                        device: DeviceRef("sw-1".to_owned()),
+                        port: 1,
+                    },
+                    ProtectedPath::Client { mac: mac(2) },
+                ],
+                max_parallel: 10,
+            },
+        );
+        let error = protected
+            .check_attachment(&state, &set_profile(1))
+            .expect_err("protected port");
+        assert_eq!(error.code, "connect.guardrail.protected_port");
+        assert_eq!(error.status, 409);
+        let error = protected
+            .check_attachment(&state, &set_vlan(2, "net-iot"))
+            .expect_err("protected client");
+        assert_eq!(error.code, "connect.guardrail.protected_client");
+        assert_eq!(protected.check_attachment(&state, &set_profile(2)), Ok(()));
+
+        // Without configured paths only the derived rules hold.
+        let plain = HostControllers::new(host());
+        assert_eq!(plain.check_attachment(&state, &set_profile(1)), Ok(()));
+        let error = plain
+            .check_attachment(&state, &set_profile(3))
+            .expect_err("uplink");
+        assert_eq!(error.code, "connect.guardrail.uplink");
+        assert_eq!(error.status, 409);
+    }
+
+    #[test]
+    fn an_attachment_plan_keeps_the_diff_and_the_hosts_plan_as_its_token() {
+        let connector = ConnectorId::generate();
+        let change = set_profile(1);
+        let l2 = L2Plan {
+            change: attachment_change_of(&change),
+            read_at: at(),
+            fingerprint: "abc".to_owned(),
+            diff: vec![DiffLine {
+                path: "devices/sw-1/ports/1/profile".to_owned(),
+                before: Some("Home".to_owned()),
+                after: Some("IoT".to_owned()),
+            }],
+            warnings: vec!["the link drops for a moment".to_owned()],
+        };
+        let plan = attachment_plan_of(connector, &change, &l2).expect("plan");
+        assert_eq!(plan.connector, connector);
+        assert_eq!(plan.change, change);
+        assert_eq!(plan.read_at, at());
+        assert_eq!(plan.fingerprint, "abc");
+        assert_eq!(
+            plan.diff,
+            vec![DiffEntry {
+                path: "devices/sw-1/ports/1/profile".to_owned(),
+                before: Some("Home".to_owned()),
+                after: Some("IoT".to_owned()),
+            }]
+        );
+        assert_eq!(plan.warnings, ["the link drops for a moment"]);
+        assert_eq!(from_cbor::<L2Plan>(&plan.token.0).expect("token"), l2);
+    }
+
+    #[test]
+    fn a_client_plan_without_a_diff_round_trips_through_its_token() {
+        let connector = ConnectorId::generate();
+        let change = set_vlan(2, "net-iot");
+        let l2 = L2Plan {
+            change: attachment_change_of(&change),
+            read_at: at(),
+            fingerprint: "def".to_owned(),
+            diff: Vec::new(),
+            warnings: Vec::new(),
+        };
+        let plan = attachment_plan_of(connector, &change, &l2).expect("plan");
+        assert_eq!(plan.diff, Vec::new());
+        assert_eq!(plan.warnings, Vec::<String>::new());
+        assert_eq!(plan.change, change);
+        let back: L2Plan = from_cbor(&plan.token.0).expect("token");
+        assert_eq!(back, l2);
+        assert_eq!(
+            back.change,
+            L2Change::SetClientVlan {
+                mac: mac(2),
+                network: NetworkRef("net-iot".to_owned()),
+            }
+        );
     }
 }
