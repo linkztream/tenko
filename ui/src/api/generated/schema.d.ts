@@ -3821,7 +3821,7 @@ export interface components {
             /** @description English detail for the operator. */
             detail?: string | null;
             /** @description Overall health. */
-            health: components["schemas"]["Health"];
+            health: components["schemas"]["RemoteHealth"];
             /**
              * Format: int64
              * @description Round-trip time of the check in milliseconds.
@@ -7319,6 +7319,11 @@ export interface components {
          * @example 1.2.0-rc.1
          */
         ReleaseVersion: string;
+        /**
+         * @description Health of a remote system.
+         * @enum {string}
+         */
+        RemoteHealth: "healthy" | "degraded" | "unreachable";
         /** Format: uuid */
         RequestId: string;
         /**

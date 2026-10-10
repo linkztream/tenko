@@ -21783,7 +21783,7 @@
             "description": "English detail for the operator."
           },
           "health": {
-            "$ref": "#/components/schemas/Health",
+            "$ref": "#/components/schemas/RemoteHealth",
             "description": "Overall health."
           },
           "latency_ms": {
@@ -31690,6 +31690,15 @@
         "examples": [
           "1.2.0",
           "1.2.0-rc.1"
+        ]
+      },
+      "RemoteHealth": {
+        "type": "string",
+        "description": "Health of a remote system.",
+        "enum": [
+          "healthy",
+          "degraded",
+          "unreachable"
         ]
       },
       "RequestId": {
