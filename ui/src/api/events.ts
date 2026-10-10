@@ -15,10 +15,22 @@ import { createSignal, type Accessor } from "solid-js";
 /**
  * Topics of GET /events; `admin` covers users, sessions, tokens and security settings,
  * `secrets` the metadata, reveal stamps and host bindings of operator secrets (never values),
- * `cluster` the enrolled nodes and enrolment tokens (never a token's text).
+ * `cluster` the enrolled nodes and enrolment tokens (never a token's text), `connectors` the
+ * connector instances and plugins, `discovery` the observed facts and last sightings (table-level
+ * events that name no object).
  */
-export type Topic = "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "secrets" | "cluster";
-export const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin", "secrets", "cluster"];
+export type Topic =
+  | "ipam"
+  | "jobs"
+  | "audit"
+  | "import"
+  | "system"
+  | "admin"
+  | "connectors"
+  | "discovery"
+  | "secrets"
+  | "cluster";
+export const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin", "connectors", "discovery", "secrets", "cluster"];
 
 export interface ObjectRef {
   kind: string;

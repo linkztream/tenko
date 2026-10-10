@@ -1,7 +1,8 @@
 // One host (/ipam/hosts/<name>): its assignment mode with what it means (IPAM-14), the lock
 // (IPAM-16), its interfaces with MAC, DUID and addresses, the warning for a reserved host
 // without MAC or DUID (IPAM-18), remote access hand-off (API-11), its jobs and its history.
-// Observations (leases, DNS records, scans) arrive with Slice 2: the section is there, empty.
+// Observations: what connectors and probes report about its MACs, addresses and name, with the
+// open ports and the operating system (SCAN-08) and the open proposals about it (WP2.9).
 import { A, useNavigate, useParams } from "@solidjs/router";
 import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { ANY_REVISION, api } from "../api/client";
@@ -31,6 +32,7 @@ import { PlanDialog, useWriteToast } from "../ipam/plan/PlanDialog";
 import { useScope } from "../ipam/scope";
 import { useTree } from "../ipam/tree/PrefixTree";
 import { modeHint, modeWord } from "../ipam/words";
+import { HostObservations } from "../discovery/HostObservations";
 import { JobStateChip } from "../jobs/StateChip";
 import { jobTitle } from "../jobs/words";
 import { isTyping } from "../shell/keyboard";
@@ -396,7 +398,9 @@ export default function HostView() {
 
               <section class="page-section" aria-labelledby="host-obs-title" data-testid="host-observations">
                 <h2 id="host-obs-title">{t("hosts.observations.title")}</h2>
-                <p class="muted">{t("hosts.observations.empty")}</p>
+                <Show when={data()} fallback={<p class="muted">{t("common.loading")}</p>}>
+                  {(d) => <HostObservations host={h()} interfaces={d().interfaces} addresses={d().addresses} />}
+                </Show>
               </section>
 
               <section class="page-section" aria-labelledby="host-jobs-title">

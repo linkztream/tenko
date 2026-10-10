@@ -47,7 +47,7 @@ describe("shell", () => {
     const labels = within(rail)
       .getAllByRole("link")
       .map((a) => a.textContent?.trim());
-    expect(labels).toEqual(["Dashboard", "IPAM", "DNS", "DHCP", "Topology", "Jobs", "Audit", "Settings"]);
+    expect(labels).toEqual(["Dashboard", "IPAM", "DNS", "DHCP", "Discovery", "Topology", "Jobs", "Audit", "Connectors", "Nodes", "Settings"]);
     expect(within(rail).getByRole("link", { name: /DNS/ }).classList.contains("active")).toBe(true);
     expect(await screen.findByText("DNS arrives in a later build")).toBeTruthy();
     expect(app.location()).toBe("/dns/zones/example.test");

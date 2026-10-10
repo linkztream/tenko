@@ -6383,7 +6383,7 @@
         <segment><source>Observations</source></segment>
       </unit>
       <unit id="hosts.observations.empty">
-        <segment><source>DHCP leases, DNS records and scan results appear here when the DHCP, DNS and scanner roles arrive.</source></segment>
+        <segment><source>No source has reported this host yet.</source></segment>
       </unit>
       <unit id="hosts.jobs.title">
         <segment><source>Jobs</source></segment>
@@ -7675,6 +7675,1718 @@
       </unit>
       <unit id="secrets.form.value_key_help">
         <segment><source>A key is shown while you type, so that its line breaks are kept. It is cleared from the form after saving.</source></segment>
+      </unit>
+    </group>
+    <group id="discovery">
+      <unit id="discovery.kind.discovered_host">
+        <segment><source>Discovered host</source></segment>
+      </unit>
+      <unit id="discovery.kind.address_mismatch">
+        <segment><source>Address differs</source></segment>
+      </unit>
+      <unit id="discovery.kind.conflict">
+        <segment><source>Conflict</source></segment>
+      </unit>
+      <unit id="discovery.kind.outside_prefixes">
+        <segment><source>Outside known networks</source></segment>
+      </unit>
+      <unit id="discovery.kind.orphaned_intent">
+        <segment><source>Not seen any more</source></segment>
+      </unit>
+      <unit id="discovery.severity.info">
+        <segment><source>Info</source></segment>
+      </unit>
+      <unit id="discovery.severity.warning">
+        <segment><source>Warning</source></segment>
+      </unit>
+      <unit id="discovery.severity.critical">
+        <segment><source>Critical</source></segment>
+      </unit>
+      <unit id="discovery.state.open">
+        <segment><source>Open</source></segment>
+      </unit>
+      <unit id="discovery.state.accepted">
+        <segment><source>Accepted</source></segment>
+      </unit>
+      <unit id="discovery.state.rejected">
+        <segment><source>Rejected</source></segment>
+      </unit>
+      <unit id="discovery.state.expired">
+        <segment><source>Expired</source></segment>
+      </unit>
+      <unit id="discovery.state.superseded">
+        <segment><source>Superseded</source></segment>
+      </unit>
+      <unit id="discovery.rule.discovered_mac">
+        <segment><source>{mac, select, none {Unknown device} other {Unknown device {mac}}} ({name}) seen {ips, select, none {} other {at {ips} }}by {sources, plural, one {one source} other {# sources}}; adopt it as host {name}</source></segment>
+      </unit>
+      <unit id="discovery.rule.discovered_address">
+        <segment><source>{mac, select, none {Unknown device} other {Unknown device {mac}}} ({name}) seen {ips, select, none {} other {at {ips} }}by {sources, plural, one {one source} other {# sources}}; adopt it as host {name}</source></segment>
+      </unit>
+      <unit id="discovery.rule.address_unrecorded">
+        <segment><source>{host} is seen at {ip}, which its intent does not list; record it</source></segment>
+      </unit>
+      <unit id="discovery.rule.address_mismatch">
+        <segment><source>{host} is seen at {ip}, not at its intended {intended}</source></segment>
+      </unit>
+      <unit id="discovery.rule.orphaned_address">
+        <segment><source>{host, select, none {{ip}} other {{ip} ({host})}} has not been seen since {last_seen}; deprecate the address</source></segment>
+      </unit>
+      <unit id="discovery.rule.conflict_shared_address">
+        <segment><source>{ip} is used by {count, plural, one {# device} other {# devices}}: {macs}</source></segment>
+      </unit>
+      <unit id="discovery.rule.conflict_networks">
+        <segment><source>{mac} is seen in {count, plural, one {# network} other {# networks}}: {networks}</source></segment>
+      </unit>
+      <unit id="discovery.rule.conflict_address_taken">
+        <segment><source>{ip} is intended for {host} ({intended_mac}) but used by {macs}</source></segment>
+      </unit>
+      <unit id="discovery.rule.outside_prefixes">
+        <segment><source>{count, plural, one {# address} other {# addresses}} seen outside every known network; create the network {cidr}</source></segment>
+      </unit>
+      <unit id="discovery.method.arp">
+        <segment><source>ARP</source></segment>
+      </unit>
+      <unit id="discovery.method.nd">
+        <segment><source>neighbour discovery</source></segment>
+      </unit>
+      <unit id="discovery.method.mdns">
+        <segment><source>mDNS</source></segment>
+      </unit>
+      <unit id="discovery.method.lldp">
+        <segment><source>LLDP</source></segment>
+      </unit>
+      <unit id="discovery.method.icmp">
+        <segment><source>ping</source></segment>
+      </unit>
+      <unit id="discovery.method.tcp_syn">
+        <segment><source>port scan</source></segment>
+      </unit>
+      <unit id="discovery.method.os_fingerprint">
+        <segment><source>OS fingerprint</source></segment>
+      </unit>
+      <unit id="discovery.method.snmp">
+        <segment><source>SNMP</source></segment>
+      </unit>
+      <unit id="discovery.source.inventory">
+        <segment><source>{name} (inventory)</source></segment>
+      </unit>
+      <unit id="discovery.source.network_controller">
+        <segment><source>{name} (network controller)</source></segment>
+      </unit>
+      <unit id="discovery.source.probe">
+        <segment><source>Probe {node}, {method}</source></segment>
+      </unit>
+      <unit id="discovery.source.dns">
+        <segment><source>DNS zone {zone}</source></segment>
+      </unit>
+      <unit id="discovery.source.dhcp">
+        <segment><source>DHCP on node {node}</source></segment>
+      </unit>
+      <unit id="discovery.fact_type.host">
+        <segment><source>Host</source></segment>
+      </unit>
+      <unit id="discovery.fact_type.address">
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="discovery.fact_type.attachment">
+        <segment><source>Attachment</source></segment>
+      </unit>
+      <unit id="discovery.fact_type.services">
+        <segment><source>Open ports</source></segment>
+      </unit>
+      <unit id="discovery.fact_type.os">
+        <segment><source>Operating system</source></segment>
+      </unit>
+      <unit id="discovery.fact_type.link">
+        <segment><source>Link</source></segment>
+      </unit>
+      <unit id="discovery.fact.parent">
+        <segment><source>on {parent}</source></segment>
+      </unit>
+      <unit id="discovery.fact.address_mac">
+        <segment><source>{ip} from {mac}</source></segment>
+      </unit>
+      <unit id="discovery.fact.ports">
+        <segment><source>{ip}: TCP {ports}</source></segment>
+      </unit>
+      <unit id="discovery.fact.no_ports">
+        <segment><source>{ip}: no open TCP port</source></segment>
+      </unit>
+      <unit id="discovery.fact.os">
+        <segment><source>{ip}: {guess}, {confidence} %</source></segment>
+      </unit>
+      <unit id="discovery.fact.port">
+        <segment><source>port {port}</source></segment>
+      </unit>
+      <unit id="discovery.fact.ssid">
+        <segment><source>wireless network {ssid}</source></segment>
+      </unit>
+      <unit id="discovery.fact.attachment">
+        <segment><source>{mac} at {where}</source></segment>
+      </unit>
+      <unit id="discovery.fact.attachment_vlan">
+        <segment><source>{mac} at {where}, VLAN {vlan}</source></segment>
+      </unit>
+      <unit id="discovery.fact.link">
+        <segment><source>{a} to {b} ({kind})</source></segment>
+      </unit>
+      <unit id="discovery.action.approve">
+        <segment><source>Approve</source></segment>
+      </unit>
+      <unit id="discovery.action.dismiss">
+        <segment><source>Dismiss</source></segment>
+      </unit>
+      <unit id="discovery.action.open">
+        <segment><source>Open</source></segment>
+      </unit>
+      <unit id="discovery.action.reconcile">
+        <segment><source>Reconcile now</source></segment>
+      </unit>
+      <unit id="discovery.action.reject">
+        <segment><source>Reject</source></segment>
+      </unit>
+      <unit id="discovery.approve.title">
+        <segment><source>Approve proposal</source></segment>
+      </unit>
+      <unit id="discovery.approve.confirm">
+        <segment><source>Approve and apply {count, plural, one {# change} other {# changes}}</source></segment>
+      </unit>
+      <unit id="discovery.col.created">
+        <segment><source>Opened</source></segment>
+      </unit>
+      <unit id="discovery.col.first_seen">
+        <segment><source>First seen</source></segment>
+      </unit>
+      <unit id="discovery.col.kind">
+        <segment><source>Kind</source></segment>
+      </unit>
+      <unit id="discovery.col.last_seen">
+        <segment><source>Last seen</source></segment>
+      </unit>
+      <unit id="discovery.col.observed">
+        <segment><source>Observed</source></segment>
+      </unit>
+      <unit id="discovery.col.prefix">
+        <segment><source>Network</source></segment>
+      </unit>
+      <unit id="discovery.col.severity">
+        <segment><source>Severity</source></segment>
+      </unit>
+      <unit id="discovery.col.sightings">
+        <segment><source>Sightings</source></segment>
+      </unit>
+      <unit id="discovery.col.source">
+        <segment><source>Source</source></segment>
+      </unit>
+      <unit id="discovery.col.sources">
+        <segment><source>Sources</source></segment>
+      </unit>
+      <unit id="discovery.col.state">
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="discovery.col.subject">
+        <segment><source>Device</source></segment>
+      </unit>
+      <unit id="discovery.col.subject_key">
+        <segment><source>Subject key</source></segment>
+      </unit>
+      <unit id="discovery.col.summary">
+        <segment><source>Proposal</source></segment>
+      </unit>
+      <unit id="discovery.col.type">
+        <segment><source>Type</source></segment>
+      </unit>
+      <unit id="discovery.col.updated">
+        <segment><source>Changed</source></segment>
+      </unit>
+      <unit id="discovery.count">
+        <segment><source>{count, plural, one {# proposal} other {# proposals}}{more, select, yes { and more} other {}}</source></segment>
+      </unit>
+      <unit id="discovery.count_open">
+        <segment><source>{count, plural, =0 {Nothing to decide} one {# open proposal} other {# open proposals}}{more, select, yes { and more} other {}}</source></segment>
+      </unit>
+      <unit id="discovery.empty.title">
+        <segment><source>Nothing to decide</source></segment>
+      </unit>
+      <unit id="discovery.empty.body">
+        <segment><source>The reconciler compares what connectors and probes see with IPAM. Differences appear here as proposals.</source></segment>
+      </unit>
+      <unit id="discovery.empty.filtered">
+        <segment><source>No proposal matches the filter</source></segment>
+      </unit>
+      <unit id="discovery.fact.current">
+        <segment><source>Current</source></segment>
+      </unit>
+      <unit id="discovery.fact.expired">
+        <segment><source>Expired</source></segment>
+      </unit>
+      <unit id="discovery.filter.all">
+        <segment><source>All</source></segment>
+      </unit>
+      <unit id="discovery.filter.label">
+        <segment><source>Filter proposals</source></segment>
+      </unit>
+      <unit id="discovery.filter.placeholder">
+        <segment><source>MAC address, IP address or name</source></segment>
+      </unit>
+      <unit id="discovery.filter.prefix">
+        <segment><source>Network {prefix}</source></segment>
+      </unit>
+      <unit id="discovery.filter.remove">
+        <segment><source>Remove the filter {filter}</source></segment>
+      </unit>
+      <unit id="discovery.filter.remove_prefix">
+        <segment><source>Remove the network filter</source></segment>
+      </unit>
+      <unit id="discovery.grid.label">
+        <segment><source>Proposals</source></segment>
+      </unit>
+      <unit id="discovery.lookup.label">
+        <segment><source>Look up a device</source></segment>
+      </unit>
+      <unit id="discovery.lookup.placeholder">
+        <segment><source>00-00-5E-00-53-01, 192.0.2.10 or a name</source></segment>
+      </unit>
+      <unit id="discovery.lookup.submit">
+        <segment><source>Look up</source></segment>
+      </unit>
+      <unit id="discovery.nav.label">
+        <segment><source>Discovery</source></segment>
+      </unit>
+      <unit id="discovery.nav.proposals">
+        <segment><source>Proposals</source></segment>
+      </unit>
+      <unit id="discovery.nav.observations">
+        <segment><source>Observations</source></segment>
+      </unit>
+      <unit id="discovery.observations.sub">
+        <segment><source>What connectors and probes report, per source</source></segment>
+      </unit>
+      <unit id="discovery.observations.current">
+        <segment><source>Current</source></segment>
+      </unit>
+      <unit id="discovery.observations.expired">
+        <segment><source>Expired</source></segment>
+      </unit>
+      <unit id="discovery.observations.all">
+        <segment><source>All</source></segment>
+      </unit>
+      <unit id="discovery.observations.empty">
+        <segment><source>No observation matches</source></segment>
+      </unit>
+      <unit id="discovery.observations.empty_body">
+        <segment><source>Connectors and probes report what they see; their facts appear here.</source></segment>
+      </unit>
+      <unit id="discovery.observations.filter_label">
+        <segment><source>Filter observations</source></segment>
+      </unit>
+      <unit id="discovery.observations.filter_placeholder">
+        <segment><source>Text of the subject, name, OS, tags or device</source></segment>
+      </unit>
+      <unit id="discovery.observations.grid_label">
+        <segment><source>Observations</source></segment>
+      </unit>
+      <unit id="discovery.panel.label">
+        <segment><source>Proposal</source></segment>
+      </unit>
+      <unit id="discovery.panel.opened">
+        <segment><source>Rule {rule}, opened</source></segment>
+      </unit>
+      <unit id="discovery.panel.conflict_hint">
+        <segment><source>A conflict suggests no change. Resolve its cause, then dismiss it.</source></segment>
+      </unit>
+      <unit id="discovery.panel.nothing_hint">
+        <segment><source>This proposal suggests no change. Resolve it by hand, then reject it.</source></segment>
+      </unit>
+      <unit id="discovery.panel.adoption_failed">
+        <segment><source>An adoption policy tried to apply it and failed: {error}. A person decides it now.</source></segment>
+      </unit>
+      <unit id="discovery.panel.subject">
+        <segment><source>What it is about</source></segment>
+      </unit>
+      <unit id="discovery.panel.mac">
+        <segment><source>MAC address</source></segment>
+      </unit>
+      <unit id="discovery.panel.ip">
+        <segment><source>IP address</source></segment>
+      </unit>
+      <unit id="discovery.panel.network">
+        <segment><source>Network</source></segment>
+      </unit>
+      <unit id="discovery.panel.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="discovery.panel.prefix">
+        <segment><source>In network</source></segment>
+      </unit>
+      <unit id="discovery.panel.intent">
+        <segment><source>Intent</source></segment>
+      </unit>
+      <unit id="discovery.panel.evidence">
+        <segment><source>Evidence</source></segment>
+      </unit>
+      <unit id="discovery.panel.evidence_count">
+        <segment><source>{count, plural, one {# observation} other {# observations}}</source></segment>
+      </unit>
+      <unit id="discovery.panel.no_evidence">
+        <segment><source>No observation: the evidence is that nobody has seen it.</source></segment>
+      </unit>
+      <unit id="discovery.panel.change">
+        <segment><source>Suggested change</source></segment>
+      </unit>
+      <unit id="discovery.panel.change_conflict">
+        <segment><source>None: a conflict is resolved at its cause.</source></segment>
+      </unit>
+      <unit id="discovery.panel.change_none">
+        <segment><source>None</source></segment>
+      </unit>
+      <unit id="discovery.panel.change_count">
+        <segment><source>{count, plural, one {# change of intent} other {# changes of intent}}</source></segment>
+      </unit>
+      <unit id="discovery.panel.decision">
+        <segment><source>Decision</source></segment>
+      </unit>
+      <unit id="discovery.panel.decided_by">
+        <segment><source>Decided by</source></segment>
+      </unit>
+      <unit id="discovery.panel.adopted_by">
+        <segment><source>Adopted by the policy of</source></segment>
+      </unit>
+      <unit id="discovery.panel.reason">
+        <segment><source>Reason</source></segment>
+      </unit>
+      <unit id="discovery.panel.superseded_by">
+        <segment><source>Replaced by</source></segment>
+      </unit>
+      <unit id="discovery.panel.newer">
+        <segment><source>The newer proposal</source></segment>
+      </unit>
+      <unit id="discovery.panel.results">
+        <segment><source>Changed</source></segment>
+      </unit>
+      <unit id="discovery.reconcile.failed">
+        <segment><source>The reconciler did not run</source></segment>
+      </unit>
+      <unit id="discovery.reject.title">
+        <segment><source>Reject proposal</source></segment>
+      </unit>
+      <unit id="discovery.reject.title_conflict">
+        <segment><source>Dismiss conflict</source></segment>
+      </unit>
+      <unit id="discovery.reject.body">
+        <segment><source>The same evidence will not open it again. When the evidence changes, a new proposal opens.</source></segment>
+      </unit>
+      <unit id="discovery.reject.body_conflict">
+        <segment><source>Dismiss it once its cause is resolved. While the conflict looks the same, it stays quiet.</source></segment>
+      </unit>
+      <unit id="discovery.reject.reason">
+        <segment><source>Reason (optional)</source></segment>
+      </unit>
+      <unit id="discovery.reject.reason_hint">
+        <segment><source>Recorded with the decision and in the audit log.</source></segment>
+      </unit>
+      <unit id="discovery.reject.reason_too_long">
+        <segment><source>At most {max, number} bytes.</source></segment>
+      </unit>
+      <unit id="discovery.reject.confirm">
+        <segment><source>Reject proposal</source></segment>
+      </unit>
+      <unit id="discovery.reject.confirm_conflict">
+        <segment><source>Dismiss conflict</source></segment>
+      </unit>
+      <unit id="discovery.report.title">
+        <segment><source>Reconciler run</source></segment>
+      </unit>
+      <unit id="discovery.report.at">
+        <segment><source>Started {at}</source></segment>
+      </unit>
+      <unit id="discovery.report.opened">
+        <segment><source>Opened</source></segment>
+      </unit>
+      <unit id="discovery.report.refreshed">
+        <segment><source>Refreshed</source></segment>
+      </unit>
+      <unit id="discovery.report.unchanged">
+        <segment><source>Unchanged</source></segment>
+      </unit>
+      <unit id="discovery.report.superseded">
+        <segment><source>Replaced by newer ones</source></segment>
+      </unit>
+      <unit id="discovery.report.expired">
+        <segment><source>No longer holding</source></segment>
+      </unit>
+      <unit id="discovery.report.suppressed">
+        <segment><source>Kept quiet after a rejection</source></segment>
+      </unit>
+      <unit id="discovery.report.adopted">
+        <segment><source>Adopted by a policy</source></segment>
+      </unit>
+      <unit id="discovery.report.adoption_failures">
+        <segment><source>Failed adoptions</source></segment>
+      </unit>
+      <unit id="discovery.report.sightings">
+        <segment><source>Sightings of intent written</source></segment>
+      </unit>
+      <unit id="discovery.report.moves_confirmed">
+        <segment><source>Moves confirmed</source></segment>
+      </unit>
+      <unit id="discovery.report.nothing">
+        <segment><source>Nothing changed.</source></segment>
+      </unit>
+      <unit id="discovery.source_short.inventory">
+        <segment><source>Inventory</source></segment>
+      </unit>
+      <unit id="discovery.source_short.network_controller">
+        <segment><source>Network</source></segment>
+      </unit>
+      <unit id="discovery.source_short.probe">
+        <segment><source>Probe</source></segment>
+      </unit>
+      <unit id="discovery.source_short.dns_record">
+        <segment><source>DNS</source></segment>
+      </unit>
+      <unit id="discovery.source_short.dhcp_lease">
+        <segment><source>DHCP</source></segment>
+      </unit>
+      <unit id="discovery.subject.kind_mac">
+        <segment><source>MAC address</source></segment>
+      </unit>
+      <unit id="discovery.subject.kind_ip">
+        <segment><source>IP address</source></segment>
+      </unit>
+      <unit id="discovery.subject.kind_name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="discovery.subject.current">
+        <segment><source>seen now</source></segment>
+      </unit>
+      <unit id="discovery.subject.not_current">
+        <segment><source>not seen recently</source></segment>
+      </unit>
+      <unit id="discovery.subject.unknown">
+        <segment><source>No source has reported {subject}.</source></segment>
+      </unit>
+      <unit id="discovery.subject.summary">
+        <segment><source>Across sources</source></segment>
+      </unit>
+      <unit id="discovery.subject.sources">
+        <segment><source>Sources</source></segment>
+      </unit>
+      <unit id="discovery.subject.macs">
+        <segment><source>MAC addresses</source></segment>
+      </unit>
+      <unit id="discovery.subject.ips">
+        <segment><source>IP addresses</source></segment>
+      </unit>
+      <unit id="discovery.subject.names">
+        <segment><source>Names</source></segment>
+      </unit>
+      <unit id="discovery.subject.os">
+        <segment><source>Operating system</source></segment>
+      </unit>
+      <unit id="discovery.subject.ports">
+        <segment><source>Open TCP ports</source></segment>
+      </unit>
+      <unit id="discovery.subject.platforms">
+        <segment><source>Platforms</source></segment>
+      </unit>
+      <unit id="discovery.subject.parents">
+        <segment><source>Runs on</source></segment>
+      </unit>
+      <unit id="discovery.subject.tags">
+        <segment><source>Tags</source></segment>
+      </unit>
+      <unit id="discovery.subject.attachments">
+        <segment><source>Attached at</source></segment>
+      </unit>
+      <unit id="discovery.subject.vlan">
+        <segment><source>VLAN {vlan}</source></segment>
+      </unit>
+      <unit id="discovery.subject.intent">
+        <segment><source>Intent</source></segment>
+      </unit>
+      <unit id="discovery.subject.no_intent">
+        <segment><source>IPAM has no host, interface or address for it.</source></segment>
+      </unit>
+      <unit id="discovery.subject.sightings">
+        <segment><source>Last sightings of intent</source></segment>
+      </unit>
+      <unit id="discovery.subject.proposals">
+        <segment><source>Proposals</source></segment>
+      </unit>
+      <unit id="discovery.subject.no_proposals">
+        <segment><source>No proposal is about it.</source></segment>
+      </unit>
+      <unit id="discovery.subject.facts">
+        <segment><source>Facts per source</source></segment>
+      </unit>
+      <unit id="discovery.subject.fact_count">
+        <segment><source>{count, plural, one {# fact} other {# facts}}</source></segment>
+      </unit>
+      <unit id="discovery.toast.approved">
+        <segment><source>Proposal approved</source></segment>
+      </unit>
+      <unit id="discovery.toast.rejected">
+        <segment><source>Proposal rejected</source></segment>
+      </unit>
+      <unit id="discovery.toast.dismissed">
+        <segment><source>Conflict dismissed</source></segment>
+      </unit>
+      <unit id="errors.ipam.proposal.not_found">
+        <segment><source>The proposal does not exist.</source></segment>
+      </unit>
+      <unit id="errors.ipam.proposal.not_open">
+        <segment><source>The proposal was decided already ({state}).</source></segment>
+      </unit>
+      <unit id="errors.ipam.proposal.nothing_to_apply">
+        <segment><source>The proposal suggests no change. Resolve its cause, then reject it.</source></segment>
+      </unit>
+      <unit id="errors.ipam.proposal.revision_mismatch">
+        <segment><source>The proposal changed meanwhile. Look at it again before you decide.</source></segment>
+      </unit>
+      <unit id="errors.ipam.reconciler.unavailable">
+        <segment><source>This server runs no reconciler.</source></segment>
+      </unit>
+      <unit id="discovery.fact.name">
+        <segment><source>{ip} is called {name}</source></segment>
+      </unit>
+      <unit id="discovery.fact.vendor">
+        <segment><source>{mac} is made by {vendor}</source></segment>
+      </unit>
+      <unit id="discovery.fact.tls">
+        <segment><source>TLS on {ports}</source></segment>
+      </unit>
+      <unit id="discovery.fact_type.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="discovery.fact_type.vendor">
+        <segment><source>Vendor</source></segment>
+      </unit>
+      <unit id="discovery.method.tcp_connect">
+        <segment><source>TCP connect</source></segment>
+      </unit>
+      <unit id="discovery.method.reverse_dns">
+        <segment><source>reverse DNS</source></segment>
+      </unit>
+      <unit id="discovery.method.llmnr">
+        <segment><source>LLMNR</source></segment>
+      </unit>
+      <unit id="discovery.method.arp_sweep">
+        <segment><source>ARP sweep</source></segment>
+      </unit>
+      <unit id="discovery.subject.vendors">
+        <segment><source>Vendors</source></segment>
+      </unit>
+      <unit id="discovery.subject.tls">
+        <segment><source>TLS answered on</source></segment>
+      </unit>
+      <unit id="discovery.filter.state">
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="discovery.panel.first_seen">
+        <segment><source>first seen</source></segment>
+      </unit>
+      <unit id="discovery.panel.last_seen">
+        <segment><source>last seen</source></segment>
+      </unit>
+      <unit id="discovery.panel.sightings">
+        <segment><source>{count, plural, one {# sighting} other {# sightings}}</source></segment>
+      </unit>
+    </group>
+    <group id="shell-wp29">
+      <unit id="shell.nav.discovery">
+        <segment><source>Discovery</source></segment>
+      </unit>
+      <unit id="shell.nav.connectors">
+        <segment><source>Connectors</source></segment>
+      </unit>
+      <unit id="shell.nav.nodes">
+        <segment><source>Nodes</source></segment>
+      </unit>
+    </group>
+    <group id="ipam-adoption">
+      <unit id="ipam.prefix.tab.adoption">
+        <segment><source>Adoption</source></segment>
+      </unit>
+      <unit id="ipam.adoption.title">
+        <segment><source>Adoption policy</source></segment>
+      </unit>
+      <unit id="ipam.adoption.mode.manual">
+        <segment><source>Manual: every proposal waits for a person</source></segment>
+      </unit>
+      <unit id="ipam.adoption.mode.adopt_hosts">
+        <segment><source>Adopt discovered hosts with a MAC address</source></segment>
+      </unit>
+      <unit id="ipam.adoption.mode.adopt_all">
+        <segment><source>Adopt discovered hosts and address changes of dynamic hosts</source></segment>
+      </unit>
+      <unit id="ipam.adoption.mode_hint.manual">
+        <segment><source>Nothing is applied without a person.</source></segment>
+      </unit>
+      <unit id="ipam.adoption.mode_hint.adopt_hosts">
+        <segment><source>Discovered hosts that carry a MAC address become hosts by themselves.</source></segment>
+      </unit>
+      <unit id="ipam.adoption.mode_hint.adopt_all">
+        <segment><source>Also hosts without a MAC address, and the address proposals of hosts that are all dynamic and not locked.</source></segment>
+      </unit>
+      <unit id="ipam.adoption.mode_label">
+        <segment><source>What is adopted</source></segment>
+      </unit>
+      <unit id="ipam.adoption.source_own">
+        <segment><source>The own policy of this prefix</source></segment>
+      </unit>
+      <unit id="ipam.adoption.source_inherited">
+        <segment><source>Inherited from</source></segment>
+      </unit>
+      <unit id="ipam.adoption.source_default">
+        <segment><source>The default: no prefix above sets a policy</source></segment>
+      </unit>
+      <unit id="ipam.adoption.updated_by">
+        <segment><source>set by</source></segment>
+      </unit>
+      <unit id="ipam.adoption.only_pools_on">
+        <segment><source>Only addresses inside a DHCP pool</source></segment>
+      </unit>
+      <unit id="ipam.adoption.vendors_on">
+        <segment><source>Only devices of {vendors}</source></segment>
+      </unit>
+      <unit id="ipam.adoption.sightings_on">
+        <segment><source>Only after {count} sightings by one source</source></segment>
+      </unit>
+      <unit id="ipam.adoption.host_mode_on">
+        <segment><source>Adopted hosts get the mode {mode}</source></segment>
+      </unit>
+      <unit id="ipam.adoption.never">
+        <segment><source>Conflicts, outside networks, addresses not seen any more and anything about static, reserved, locked or unmanaged hosts always wait for a person.</source></segment>
+      </unit>
+      <unit id="ipam.adoption.proposals">
+        <segment><source>Proposals in this network</source></segment>
+      </unit>
+      <unit id="ipam.adoption.edit">
+        <segment><source>Change policy</source></segment>
+      </unit>
+      <unit id="ipam.adoption.set">
+        <segment><source>Set a policy for this prefix</source></segment>
+      </unit>
+      <unit id="ipam.adoption.clear">
+        <segment><source>Clear and inherit</source></segment>
+      </unit>
+      <unit id="ipam.adoption.only_pools">
+        <segment><source>Only addresses inside a DHCP pool of the network</source></segment>
+      </unit>
+      <unit id="ipam.adoption.min_sightings">
+        <segment><source>Minimum sightings</source></segment>
+      </unit>
+      <unit id="ipam.adoption.min_sightings_help">
+        <segment><source>Counted at most once per 15 minutes by one source.</source></segment>
+      </unit>
+      <unit id="ipam.adoption.host_mode">
+        <segment><source>Mode of adopted hosts</source></segment>
+      </unit>
+      <unit id="ipam.adoption.host_mode_help">
+        <segment><source>Dynamic means IPAM only observes.</source></segment>
+      </unit>
+      <unit id="ipam.adoption.vendors">
+        <segment><source>Vendors</source></segment>
+      </unit>
+      <unit id="ipam.adoption.vendors_help">
+        <segment><source>One per line: an OUI such as 00-00-5E, or a vendor name a source reports. Empty: any vendor.</source></segment>
+      </unit>
+      <unit id="ipam.adoption.save">
+        <segment><source>Save policy</source></segment>
+      </unit>
+      <unit id="ipam.adoption.saved">
+        <segment><source>Saved the adoption policy of {prefix}</source></segment>
+      </unit>
+      <unit id="ipam.adoption.cleared">
+        <segment><source>{prefix} inherits its adoption policy again</source></segment>
+      </unit>
+      <unit id="ipam.adoption.stale">
+        <segment><source>Someone changed the policy meanwhile; the summary above shows it as it is now. Save again to replace it with yours.</source></segment>
+      </unit>
+      <unit id="ipam.adoption.error.vendors_count">
+        <segment><source>At most {max} vendors.</source></segment>
+      </unit>
+      <unit id="ipam.adoption.error.vendor_length">
+        <segment><source>A vendor has 1 to 64 characters.</source></segment>
+      </unit>
+      <unit id="ipam.adoption.error.sightings">
+        <segment><source>A whole number from 1 to {max}.</source></segment>
+      </unit>
+      <unit id="errors.ipam.adoption.invalid">
+        <segment><source>The value of {field} is not valid for an adoption policy.</source></segment>
+      </unit>
+    </group>
+    <group id="hosts-observations">
+      <unit id="hosts.observations.open">
+        <segment><source>Everything the sources report about</source></segment>
+      </unit>
+    </group>
+    <group id="connectors">
+      <unit id="connectors.form.no_settings">
+        <segment><source>This plugin has no settings.</source></segment>
+      </unit>
+      <unit id="connectors.form.unsupported">
+        <segment><source>The form cannot edit this setting; it keeps its value.</source></segment>
+      </unit>
+      <unit id="connectors.form.choose">
+        <segment><source>Not set</source></segment>
+      </unit>
+      <unit id="connectors.form.default">
+        <segment><source>Default: {value}</source></segment>
+      </unit>
+      <unit id="connectors.form.example">
+        <segment><source>For example {value}</source></segment>
+      </unit>
+      <unit id="connectors.form.item_add">
+        <segment><source>Add</source></segment>
+      </unit>
+      <unit id="connectors.form.item_add_to">
+        <segment><source>Add to {field}</source></segment>
+      </unit>
+      <unit id="connectors.form.item_remove">
+        <segment><source>Remove item {n} of {field}</source></segment>
+      </unit>
+      <unit id="connectors.form.item_label">
+        <segment><source>{field}, item {n}</source></segment>
+      </unit>
+      <unit id="connectors.form.items_empty">
+        <segment><source>None yet.</source></segment>
+      </unit>
+      <unit id="connectors.form.on">
+        <segment><source>On</source></segment>
+      </unit>
+      <unit id="connectors.problem.type">
+        <segment><source>Enter a value of the right kind ({type}).</source></segment>
+      </unit>
+      <unit id="connectors.problem.unknown">
+        <segment><source>The plugin does not know this setting.</source></segment>
+      </unit>
+      <unit id="connectors.problem.required">
+        <segment><source>Required.</source></segment>
+      </unit>
+      <unit id="connectors.problem.enum">
+        <segment><source>Choose one of: {values}.</source></segment>
+      </unit>
+      <unit id="connectors.problem.length">
+        <segment><source>{min} to {max, plural, one {# character} other {# characters}}.</source></segment>
+      </unit>
+      <unit id="connectors.problem.pattern">
+        <segment><source>Does not match the form the plugin expects ({pattern}).</source></segment>
+      </unit>
+      <unit id="connectors.problem.format">
+        <segment><source>Not a valid {format, select, uri {URL} hostname {host name} ipv4 {IPv4 address} ipv6 {IPv6 address} other {value}}.</source></segment>
+      </unit>
+      <unit id="connectors.problem.range">
+        <segment><source>A value from {min} to {max}.</source></segment>
+      </unit>
+      <unit id="connectors.problem.items">
+        <segment><source>{min} to {max, plural, one {# entry} other {# entries}}.</source></segment>
+      </unit>
+      <unit id="connectors.problem.unique">
+        <segment><source>Every entry once.</source></segment>
+      </unit>
+      <unit id="connectors.problem.length_max">
+        <segment><source>At most {max, plural, one {# character} other {# characters}}.</source></segment>
+      </unit>
+      <unit id="connectors.problem.length_min">
+        <segment><source>At least {min, plural, one {# character} other {# characters}}.</source></segment>
+      </unit>
+      <unit id="connectors.problem.range_max">
+        <segment><source>At most {max}.</source></segment>
+      </unit>
+      <unit id="connectors.problem.range_min">
+        <segment><source>At least {min}.</source></segment>
+      </unit>
+      <unit id="connectors.problem.items_max">
+        <segment><source>At most {max, plural, one {# entry} other {# entries}}.</source></segment>
+      </unit>
+      <unit id="connectors.problem.items_min">
+        <segment><source>At least {min, plural, one {# entry} other {# entries}}.</source></segment>
+      </unit>
+      <unit id="connectors.sub">
+        <segment><source>Plugins that read inventory and network controllers into the observations</source></segment>
+      </unit>
+      <unit id="connectors.instances">
+        <segment><source>Instances</source></segment>
+      </unit>
+      <unit id="connectors.action.check">
+        <segment><source>Check now</source></segment>
+      </unit>
+      <unit id="connectors.action.create">
+        <segment><source>New connector</source></segment>
+      </unit>
+      <unit id="connectors.action.delete">
+        <segment><source>Delete</source></segment>
+      </unit>
+      <unit id="connectors.action.disable">
+        <segment><source>Disable</source></segment>
+      </unit>
+      <unit id="connectors.action.edit">
+        <segment><source>Change</source></segment>
+      </unit>
+      <unit id="connectors.action.enable">
+        <segment><source>Enable</source></segment>
+      </unit>
+      <unit id="connectors.action.open">
+        <segment><source>Open</source></segment>
+      </unit>
+      <unit id="connectors.action.run">
+        <segment><source>Run now</source></segment>
+      </unit>
+      <unit id="connectors.action.toggle">
+        <segment><source>Enable or disable</source></segment>
+      </unit>
+      <unit id="connectors.capability.inventory">
+        <segment><source>inventory</source></segment>
+      </unit>
+      <unit id="connectors.capability.webhook">
+        <segment><source>webhook</source></segment>
+      </unit>
+      <unit id="connectors.capability.network_controller">
+        <segment><source>network controller</source></segment>
+      </unit>
+      <unit id="connectors.capability.actuator">
+        <segment><source>actuator</source></segment>
+      </unit>
+      <unit id="connectors.capability.migration">
+        <segment><source>migration source</source></segment>
+      </unit>
+      <unit id="connectors.col.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="connectors.col.plugin">
+        <segment><source>Plugin</source></segment>
+      </unit>
+      <unit id="connectors.col.health">
+        <segment><source>Health</source></segment>
+      </unit>
+      <unit id="connectors.col.process">
+        <segment><source>Process</source></segment>
+      </unit>
+      <unit id="connectors.col.last_run">
+        <segment><source>Last run</source></segment>
+      </unit>
+      <unit id="connectors.col.capabilities">
+        <segment><source>Capabilities</source></segment>
+      </unit>
+      <unit id="connectors.col.poll">
+        <segment><source>Every</source></segment>
+      </unit>
+      <unit id="connectors.col.writes">
+        <segment><source>Writes</source></segment>
+      </unit>
+      <unit id="connectors.health.healthy">
+        <segment><source>Healthy</source></segment>
+      </unit>
+      <unit id="connectors.health.degraded">
+        <segment><source>Degraded</source></segment>
+      </unit>
+      <unit id="connectors.health.failing">
+        <segment><source>Not running</source></segment>
+      </unit>
+      <unit id="connectors.health.off">
+        <segment><source>Disabled</source></segment>
+      </unit>
+      <unit id="connectors.process.stopped">
+        <segment><source>Stopped</source></segment>
+      </unit>
+      <unit id="connectors.process.starting">
+        <segment><source>Starting</source></segment>
+      </unit>
+      <unit id="connectors.process.running">
+        <segment><source>Running</source></segment>
+      </unit>
+      <unit id="connectors.process.backoff">
+        <segment><source>Restarting after a failure</source></segment>
+      </unit>
+      <unit id="connectors.process.circuit_open">
+        <segment><source>Paused after repeated failures</source></segment>
+      </unit>
+      <unit id="connectors.process.failed">
+        <segment><source>Failed; enable it again after a fix</source></segment>
+      </unit>
+      <unit id="connectors.process.until">
+        <segment><source>until {at}</source></segment>
+      </unit>
+      <unit id="connectors.remote.healthy">
+        <segment><source>Healthy</source></segment>
+      </unit>
+      <unit id="connectors.remote.degraded">
+        <segment><source>Degraded</source></segment>
+      </unit>
+      <unit id="connectors.remote.unreachable">
+        <segment><source>Unreachable</source></segment>
+      </unit>
+      <unit id="connectors.trigger.schedule">
+        <segment><source>Schedule</source></segment>
+      </unit>
+      <unit id="connectors.trigger.manual">
+        <segment><source>By hand</source></segment>
+      </unit>
+      <unit id="connectors.run.never">
+        <segment><source>Not run yet</source></segment>
+      </unit>
+      <unit id="connectors.run.succeeded">
+        <segment><source>{count, plural, one {# observation} other {# observations}}</source></segment>
+      </unit>
+      <unit id="connectors.run.failed">
+        <segment><source>Failed</source></segment>
+      </unit>
+      <unit id="connectors.seconds">
+        <segment><source>{secs} s</source></segment>
+      </unit>
+      <unit id="connectors.seconds_default">
+        <segment><source>{secs} s (default)</source></segment>
+      </unit>
+      <unit id="connectors.writes.on">
+        <segment><source>Allowed</source></segment>
+      </unit>
+      <unit id="connectors.writes.off">
+        <segment><source>Read only</source></segment>
+      </unit>
+      <unit id="connectors.empty.title">
+        <segment><source>No connector yet</source></segment>
+      </unit>
+      <unit id="connectors.empty.body">
+        <segment><source>A connector reads a hypervisor, a network controller or a home automation hub. Create one from a plugin below.</source></segment>
+      </unit>
+      <unit id="connectors.plugins.title">
+        <segment><source>Plugins</source></segment>
+      </unit>
+      <unit id="connectors.plugins.reload">
+        <segment><source>Read again</source></segment>
+      </unit>
+      <unit id="connectors.plugins.none">
+        <segment><source>No plugin is installed.</source></segment>
+      </unit>
+      <unit id="connectors.plugins.source.bundled">
+        <segment><source>Bundled</source></segment>
+      </unit>
+      <unit id="connectors.plugins.source.installed">
+        <segment><source>Installed</source></segment>
+      </unit>
+      <unit id="connectors.plugins.unusable">
+        <segment><source>Cannot run here</source></segment>
+      </unit>
+      <unit id="connectors.plugins.capabilities">
+        <segment><source>Capabilities</source></segment>
+      </unit>
+      <unit id="connectors.plugins.platforms">
+        <segment><source>Platforms</source></segment>
+      </unit>
+      <unit id="connectors.plugins.secrets">
+        <segment><source>Secrets</source></segment>
+      </unit>
+      <unit id="connectors.plugins.license">
+        <segment><source>Licence</source></segment>
+      </unit>
+      <unit id="connectors.plugins.homepage">
+        <segment><source>Homepage</source></segment>
+      </unit>
+      <unit id="connectors.delete.title">
+        <segment><source>Delete {name}?</source></segment>
+      </unit>
+      <unit id="connectors.delete.body">
+        <segment><source>The plugin stops for this instance. Its observations expire on their own; nothing in IPAM changes.</source></segment>
+      </unit>
+      <unit id="connectors.delete.confirm">
+        <segment><source>Delete connector</source></segment>
+      </unit>
+      <unit id="connectors.detail.back">
+        <segment><source>Back to the connectors</source></segment>
+      </unit>
+      <unit id="connectors.detail.disabled">
+        <segment><source>This connector is disabled: it does not run and is not polled.</source></segment>
+      </unit>
+      <unit id="connectors.detail.process">
+        <segment><source>Plugin process</source></segment>
+      </unit>
+      <unit id="connectors.detail.state">
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="connectors.detail.version">
+        <segment><source>Version</source></segment>
+      </unit>
+      <unit id="connectors.detail.changed">
+        <segment><source>Since</source></segment>
+      </unit>
+      <unit id="connectors.detail.restarts">
+        <segment><source>Restarts</source></segment>
+      </unit>
+      <unit id="connectors.detail.failures">
+        <segment><source>Failures in a row</source></segment>
+      </unit>
+      <unit id="connectors.detail.last_error">
+        <segment><source>Last error</source></segment>
+      </unit>
+      <unit id="connectors.detail.remote">
+        <segment><source>Remote system</source></segment>
+      </unit>
+      <unit id="connectors.detail.no_check">
+        <segment><source>Not checked yet.</source></segment>
+      </unit>
+      <unit id="connectors.detail.health">
+        <segment><source>Health</source></segment>
+      </unit>
+      <unit id="connectors.detail.checked">
+        <segment><source>Checked</source></segment>
+      </unit>
+      <unit id="connectors.detail.latency">
+        <segment><source>Round trip</source></segment>
+      </unit>
+      <unit id="connectors.detail.ms">
+        <segment><source>{ms} ms</source></segment>
+      </unit>
+      <unit id="connectors.detail.remote_version">
+        <segment><source>Remote version</source></segment>
+      </unit>
+      <unit id="connectors.detail.detail">
+        <segment><source>Detail</source></segment>
+      </unit>
+      <unit id="connectors.detail.check_failed">
+        <segment><source>The last check failed: {error}</source></segment>
+      </unit>
+      <unit id="connectors.detail.last_run">
+        <segment><source>Last run</source></segment>
+      </unit>
+      <unit id="connectors.detail.outcome">
+        <segment><source>Outcome</source></segment>
+      </unit>
+      <unit id="connectors.detail.trigger">
+        <segment><source>Started by</source></segment>
+      </unit>
+      <unit id="connectors.detail.started">
+        <segment><source>Started</source></segment>
+      </unit>
+      <unit id="connectors.detail.observations">
+        <segment><source>Handed on</source></segment>
+      </unit>
+      <unit id="connectors.detail.pages">
+        <segment><source>{observations, plural, one {# observation} other {# observations}} from {pages, plural, one {# page} other {# pages}}</source></segment>
+      </unit>
+      <unit id="connectors.detail.failed_runs">
+        <segment><source>Failed runs in a row</source></segment>
+      </unit>
+      <unit id="connectors.detail.last_success">
+        <segment><source>Last success</source></segment>
+      </unit>
+      <unit id="connectors.detail.error">
+        <segment><source>Error</source></segment>
+      </unit>
+      <unit id="connectors.detail.warnings">
+        <segment><source>Warnings</source></segment>
+      </unit>
+      <unit id="connectors.detail.job">
+        <segment><source>Job</source></segment>
+      </unit>
+      <unit id="connectors.detail.observations_link">
+        <segment><source>What this connector reports</source></segment>
+      </unit>
+      <unit id="connectors.detail.runs">
+        <segment><source>Recent runs</source></segment>
+      </unit>
+      <unit id="connectors.detail.all_jobs">
+        <segment><source>All jobs</source></segment>
+      </unit>
+      <unit id="connectors.detail.no_runs">
+        <segment><source>No run by hand yet; scheduled runs show under Last run.</source></segment>
+      </unit>
+      <unit id="connectors.detail.config">
+        <segment><source>Configuration</source></segment>
+      </unit>
+      <unit id="connectors.detail.created">
+        <segment><source>Created</source></segment>
+      </unit>
+      <unit id="connectors.detail.updated">
+        <segment><source>Changed</source></segment>
+      </unit>
+      <unit id="connectors.detail.yes">
+        <segment><source>Yes</source></segment>
+      </unit>
+      <unit id="connectors.detail.no">
+        <segment><source>No</source></segment>
+      </unit>
+      <unit id="connectors.form.title_create">
+        <segment><source>New connector</source></segment>
+      </unit>
+      <unit id="connectors.form.title_edit">
+        <segment><source>Change {name}</source></segment>
+      </unit>
+      <unit id="connectors.form.plugin">
+        <segment><source>Plugin</source></segment>
+      </unit>
+      <unit id="connectors.form.plugin_fixed">
+        <segment><source>Plugin {plugin} {version}</source></segment>
+      </unit>
+      <unit id="connectors.form.no_plugins">
+        <segment><source>No plugin can run on this node.</source></segment>
+      </unit>
+      <unit id="connectors.form.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="connectors.form.name_help">
+        <segment><source>Unique among the connectors.</source></segment>
+      </unit>
+      <unit id="connectors.form.name_required">
+        <segment><source>Enter a name.</source></segment>
+      </unit>
+      <unit id="connectors.form.name_long">
+        <segment><source>At most {max} characters.</source></segment>
+      </unit>
+      <unit id="connectors.form.settings">
+        <segment><source>Settings</source></segment>
+      </unit>
+      <unit id="connectors.form.secrets">
+        <segment><source>Secrets</source></segment>
+      </unit>
+      <unit id="connectors.form.secrets_help">
+        <segment><source>The plugin receives the secret for each call; settings never hold one.</source></segment>
+      </unit>
+      <unit id="connectors.form.secrets_admin">
+        <segment><source>Choosing secrets needs an administrator.</source></segment>
+      </unit>
+      <unit id="connectors.form.secret_purpose">
+        <segment><source>Secret {purpose}</source></segment>
+      </unit>
+      <unit id="connectors.form.secret_none">
+        <segment><source>None</source></segment>
+      </unit>
+      <unit id="connectors.form.secret_tagged">
+        <segment><source>Tagged {purpose}</source></segment>
+      </unit>
+      <unit id="connectors.form.secret_other">
+        <segment><source>Other secrets</source></segment>
+      </unit>
+      <unit id="connectors.form.secret_unlisted">
+        <segment><source>A secret you cannot list</source></segment>
+      </unit>
+      <unit id="connectors.form.secret_missing">
+        <segment><source>The plugin needs this secret.</source></segment>
+      </unit>
+      <unit id="connectors.form.poll">
+        <segment><source>Poll interval (seconds)</source></segment>
+      </unit>
+      <unit id="connectors.form.timeout">
+        <segment><source>Call timeout (seconds)</source></segment>
+      </unit>
+      <unit id="connectors.form.default_secs">
+        <segment><source>Empty: the plugin default, {secs} s.</source></segment>
+      </unit>
+      <unit id="connectors.form.interval_range">
+        <segment><source>A whole number from {min} to {max}.</source></segment>
+      </unit>
+      <unit id="connectors.form.guardrails">
+        <segment><source>Guardrails</source></segment>
+      </unit>
+      <unit id="connectors.form.writes">
+        <segment><source>Allow writes through this connector</source></segment>
+      </unit>
+      <unit id="connectors.form.writes_help">
+        <segment><source>Off: the connector only reads. On: Tenko may change VLANs, port profiles or records, always with a preview and a job.</source></segment>
+      </unit>
+      <unit id="connectors.form.writes_read_only">
+        <segment><source>This plugin only reads.</source></segment>
+      </unit>
+      <unit id="connectors.form.writes_warning">
+        <segment><source>Writes change a system Tenko does not own. Keep them off until you have looked at what the connector reads.</source></segment>
+      </unit>
+      <unit id="connectors.form.enabled">
+        <segment><source>Start it now</source></segment>
+      </unit>
+      <unit id="connectors.form.targets">
+        <segment><source>Contacts</source></segment>
+      </unit>
+      <unit id="connectors.form.stale">
+        <segment><source>Someone changed this connector meanwhile. Close the form and open it again.</source></segment>
+      </unit>
+      <unit id="connectors.form.create">
+        <segment><source>Create connector</source></segment>
+      </unit>
+      <unit id="connectors.form.save">
+        <segment><source>Save changes</source></segment>
+      </unit>
+      <unit id="connectors.toast.run">
+        <segment><source>Started a run of {name}</source></segment>
+      </unit>
+      <unit id="connectors.toast.run_failed">
+        <segment><source>{name} did not run</source></segment>
+      </unit>
+      <unit id="connectors.toast.open_job">
+        <segment><source>Open job</source></segment>
+      </unit>
+      <unit id="connectors.toast.checked">
+        <segment><source>{name}: {health}</source></segment>
+      </unit>
+      <unit id="connectors.toast.check_failed">
+        <segment><source>The check of {name} failed</source></segment>
+      </unit>
+      <unit id="connectors.toast.enabled">
+        <segment><source>Enabled {name}</source></segment>
+      </unit>
+      <unit id="connectors.toast.disabled">
+        <segment><source>Disabled {name}</source></segment>
+      </unit>
+      <unit id="connectors.toast.change_failed">
+        <segment><source>{name} was not changed</source></segment>
+      </unit>
+      <unit id="connectors.toast.deleted">
+        <segment><source>Deleted {name}</source></segment>
+      </unit>
+      <unit id="connectors.toast.delete_failed">
+        <segment><source>{name} was not deleted</source></segment>
+      </unit>
+      <unit id="connect.job.edit">
+        <segment><source>Change a connector</source></segment>
+      </unit>
+      <unit id="connect.job.run">
+        <segment><source>Run a connector</source></segment>
+      </unit>
+      <unit id="connect.job.write_preview">
+        <segment><source>Write the connector instance</source></segment>
+      </unit>
+      <unit id="connect.job.poll_preview">
+        <segment><source>Read the plugin and hand the observations on</source></segment>
+      </unit>
+      <unit id="errors.connect.instance.not_found">
+        <segment><source>The connector does not exist.</source></segment>
+      </unit>
+      <unit id="errors.connect.instance.name_taken">
+        <segment><source>Another connector has this name.</source></segment>
+      </unit>
+      <unit id="errors.connect.instance.name">
+        <segment><source>Enter a name of 1 to 100 characters.</source></segment>
+      </unit>
+      <unit id="errors.connect.instance.poll_interval">
+        <segment><source>The poll interval is 60 to 86,400 seconds.</source></segment>
+      </unit>
+      <unit id="errors.connect.instance.call_timeout">
+        <segment><source>The call timeout is 1 to 600 seconds.</source></segment>
+      </unit>
+      <unit id="errors.connect.instance.conflict">
+        <segment><source>The connector changed meanwhile.</source></segment>
+      </unit>
+      <unit id="errors.connect.instance.disabled">
+        <segment><source>The connector is disabled; enable it first.</source></segment>
+      </unit>
+      <unit id="errors.connect.instance.nothing_to_run">
+        <segment><source>This plugin has nothing to read.</source></segment>
+      </unit>
+      <unit id="errors.connect.plugin.unknown">
+        <segment><source>The plugin is not installed on this node.</source></segment>
+      </unit>
+      <unit id="errors.connect.plugin.unusable">
+        <segment><source>The plugin cannot run on this node.</source></segment>
+      </unit>
+      <unit id="errors.connect.plugin.unavailable">
+        <segment><source>The plugin is not running at the moment.</source></segment>
+      </unit>
+      <unit id="errors.connect.plugin.exited">
+        <segment><source>The plugin exited during its start.</source></segment>
+      </unit>
+      <unit id="errors.connect.timeout">
+        <segment><source>The plugin did not answer in time.</source></segment>
+      </unit>
+      <unit id="errors.connect.settings.invalid">
+        <segment><source>Some settings are not valid; see the fields.</source></segment>
+      </unit>
+      <unit id="errors.connect.secret.undeclared">
+        <segment><source>The plugin does not use a secret for {purpose}.</source></segment>
+      </unit>
+      <unit id="errors.connect.secret.missing">
+        <segment><source>The plugin needs a secret for {purpose}.</source></segment>
+      </unit>
+      <unit id="errors.connect.secret.not_found">
+        <segment><source>The secret for {purpose} does not exist.</source></segment>
+      </unit>
+      <unit id="errors.connect.secret.not_operator">
+        <segment><source>The secret for {purpose} is not an operator secret.</source></segment>
+      </unit>
+      <unit id="errors.connect.run.failed">
+        <segment><source>The run failed.</source></segment>
+      </unit>
+    </group>
+    <group id="nodes">
+      <unit id="nodes.summary">
+        <segment><source>{nodes, plural, =0 {No node enrolled} one {# node} other {# nodes}}, {connected} connected</source></segment>
+      </unit>
+      <unit id="nodes.action.enrol">
+        <segment><source>New enrolment token</source></segment>
+      </unit>
+      <unit id="nodes.mismatch">
+        <segment><source>{count, plural, one {# node shares} other {# nodes share}} no protocol version with this controller ({names}); this controller speaks {majors}. Upgrade the older side.</source></segment>
+      </unit>
+      <unit id="nodes.port_open">
+        <segment><source>The cluster port listens on {addresses} with protocol {majors}</source></segment>
+      </unit>
+      <unit id="nodes.port_closed">
+        <segment><source>The cluster port opens when the first enrolment token is created.</source></segment>
+      </unit>
+      <unit id="nodes.versions">
+        <segment><source>connected versions: {versions}</source></segment>
+      </unit>
+      <unit id="nodes.version_count">
+        <segment><source>{version} ({count})</source></segment>
+      </unit>
+      <unit id="nodes.grid.label">
+        <segment><source>Nodes</source></segment>
+      </unit>
+      <unit id="nodes.col.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="nodes.col.roles">
+        <segment><source>Roles</source></segment>
+      </unit>
+      <unit id="nodes.col.address">
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="nodes.col.connected">
+        <segment><source>Connection</source></segment>
+      </unit>
+      <unit id="nodes.col.version">
+        <segment><source>Version</source></segment>
+      </unit>
+      <unit id="nodes.col.major">
+        <segment><source>protocol {major}</source></segment>
+      </unit>
+      <unit id="nodes.col.certificate">
+        <segment><source>Certificate</source></segment>
+      </unit>
+      <unit id="nodes.col.last_seen">
+        <segment><source>Last seen</source></segment>
+      </unit>
+      <unit id="nodes.col.id">
+        <segment><source>Id</source></segment>
+      </unit>
+      <unit id="nodes.link.connected">
+        <segment><source>Connected</source></segment>
+      </unit>
+      <unit id="nodes.link.mismatch">
+        <segment><source>Refused: protocol</source></segment>
+      </unit>
+      <unit id="nodes.link.disconnected">
+        <segment><source>Not connected</source></segment>
+      </unit>
+      <unit id="nodes.cert.days_left">
+        <segment><source>{days, plural, one {# day left} other {# days left}}</source></segment>
+      </unit>
+      <unit id="nodes.cert.expired">
+        <segment><source>Expired</source></segment>
+      </unit>
+      <unit id="nodes.empty.title">
+        <segment><source>No node enrolled</source></segment>
+      </unit>
+      <unit id="nodes.empty.body">
+        <segment><source>A probe in another network enrols with a token and then reports what it sees. Create a token to add one.</source></segment>
+      </unit>
+      <unit id="nodes.panel.label">
+        <segment><source>Node</source></segment>
+      </unit>
+      <unit id="nodes.panel.id">
+        <segment><source>Node {id}</source></segment>
+      </unit>
+      <unit id="nodes.panel.mismatch">
+        <segment><source>Its last handshake was refused at {at}: version {version} offers protocol {theirs}, this controller speaks {ours}. Upgrade the older side.</source></segment>
+      </unit>
+      <unit id="nodes.panel.about">
+        <segment><source>Node</source></segment>
+      </unit>
+      <unit id="nodes.panel.enrolled">
+        <segment><source>Enrolled</source></segment>
+      </unit>
+      <unit id="nodes.panel.connection">
+        <segment><source>Connection</source></segment>
+      </unit>
+      <unit id="nodes.panel.not_connected">
+        <segment><source>Not connected to this controller.</source></segment>
+      </unit>
+      <unit id="nodes.panel.since">
+        <segment><source>Since</source></segment>
+      </unit>
+      <unit id="nodes.panel.peer">
+        <segment><source>Seen from</source></segment>
+      </unit>
+      <unit id="nodes.panel.major">
+        <segment><source>Protocol</source></segment>
+      </unit>
+      <unit id="nodes.panel.last_beat">
+        <segment><source>Last heartbeat</source></segment>
+      </unit>
+      <unit id="nodes.panel.buffer">
+        <segment><source>Buffered</source></segment>
+      </unit>
+      <unit id="nodes.panel.buffer_value">
+        <segment><source>{batches, plural, one {# batch} other {# batches}}, {size}</source></segment>
+      </unit>
+      <unit id="nodes.panel.dropped">
+        <segment><source>Batches dropped</source></segment>
+      </unit>
+      <unit id="nodes.panel.certificate">
+        <segment><source>Certificate</source></segment>
+      </unit>
+      <unit id="nodes.panel.valid">
+        <segment><source>Valid</source></segment>
+      </unit>
+      <unit id="nodes.panel.valid_range">
+        <segment><source>{from} to {to}</source></segment>
+      </unit>
+      <unit id="nodes.panel.serial">
+        <segment><source>Serial</source></segment>
+      </unit>
+      <unit id="nodes.panel.renewed">
+        <segment><source>Renewed</source></segment>
+      </unit>
+      <unit id="nodes.panel.renewal_due">
+        <segment><source>Renewal is due; the node renews over its connection and retries hourly.</source></segment>
+      </unit>
+      <unit id="nodes.revoke.title">
+        <segment><source>Revoke</source></segment>
+      </unit>
+      <unit id="nodes.revoke.hint">
+        <segment><source>Every certificate of the node is refused from now on and its connections close. It needs a new token to come back.</source></segment>
+      </unit>
+      <unit id="nodes.revoke.action">
+        <segment><source>Revoke node</source></segment>
+      </unit>
+      <unit id="nodes.revoke.confirm_title">
+        <segment><source>Revoke {name}?</source></segment>
+      </unit>
+      <unit id="nodes.revoke.confirm_body">
+        <segment><source>The node stops reporting at once. Enrolling it again gives it a new id.</source></segment>
+      </unit>
+      <unit id="nodes.revoke.confirm">
+        <segment><source>Revoke node</source></segment>
+      </unit>
+      <unit id="nodes.revoke.done">
+        <segment><source>Revoked {name}</source></segment>
+      </unit>
+      <unit id="nodes.revoke.failed">
+        <segment><source>{name} was not revoked</source></segment>
+      </unit>
+      <unit id="nodes.token.title">
+        <segment><source>Enrolment tokens</source></segment>
+      </unit>
+      <unit id="nodes.token.hint">
+        <segment><source>Single use; used and expired ones stay listed for seven days</source></segment>
+      </unit>
+      <unit id="nodes.token.none">
+        <segment><source>No token.</source></segment>
+      </unit>
+      <unit id="nodes.token.col.state">
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="nodes.token.col.name">
+        <segment><source>Node name</source></segment>
+      </unit>
+      <unit id="nodes.token.col.roles">
+        <segment><source>Roles</source></segment>
+      </unit>
+      <unit id="nodes.token.col.created">
+        <segment><source>Created</source></segment>
+      </unit>
+      <unit id="nodes.token.col.expires">
+        <segment><source>Expires</source></segment>
+      </unit>
+      <unit id="nodes.token.col.used">
+        <segment><source>Enrolled</source></segment>
+      </unit>
+      <unit id="nodes.token.col.actions">
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="nodes.token.any_name">
+        <segment><source>chosen by the node</source></segment>
+      </unit>
+      <unit id="nodes.token.state.pending">
+        <segment><source>Waiting</source></segment>
+      </unit>
+      <unit id="nodes.token.state.used">
+        <segment><source>Used</source></segment>
+      </unit>
+      <unit id="nodes.token.state.expired">
+        <segment><source>Expired</source></segment>
+      </unit>
+      <unit id="nodes.token.delete">
+        <segment><source>Delete</source></segment>
+      </unit>
+      <unit id="nodes.token.delete_named">
+        <segment><source>Delete the token {name}</source></segment>
+      </unit>
+      <unit id="nodes.token.delete_title">
+        <segment><source>Delete the enrolment token?</source></segment>
+      </unit>
+      <unit id="nodes.token.delete_pending">
+        <segment><source>Nobody can enrol a node with it any more.</source></segment>
+      </unit>
+      <unit id="nodes.token.delete_done">
+        <segment><source>It is used or expired; only the list entry goes.</source></segment>
+      </unit>
+      <unit id="nodes.token.deleted">
+        <segment><source>Deleted the enrolment token</source></segment>
+      </unit>
+      <unit id="nodes.token.delete_failed">
+        <segment><source>The token was not deleted</source></segment>
+      </unit>
+      <unit id="nodes.lifetime.s900">
+        <segment><source>15 minutes</source></segment>
+      </unit>
+      <unit id="nodes.lifetime.s3600">
+        <segment><source>1 hour</source></segment>
+      </unit>
+      <unit id="nodes.lifetime.s86400">
+        <segment><source>1 day</source></segment>
+      </unit>
+      <unit id="nodes.lifetime.s604800">
+        <segment><source>7 days</source></segment>
+      </unit>
+      <unit id="nodes.enrol.title">
+        <segment><source>New enrolment token</source></segment>
+      </unit>
+      <unit id="nodes.enrol.intro">
+        <segment><source>A token lets one node enrol once. The node gets its own certificate from the internal CA.</source></segment>
+      </unit>
+      <unit id="nodes.enrol.roles">
+        <segment><source>Roles the node may take</source></segment>
+      </unit>
+      <unit id="nodes.enrol.role_hint.probe">
+        <segment><source>Scans and observes its networks.</source></segment>
+      </unit>
+      <unit id="nodes.enrol.role_hint.dns">
+        <segment><source>Registered now; its process starts once the DNS engine exists.</source></segment>
+      </unit>
+      <unit id="nodes.enrol.role_hint.dhcp">
+        <segment><source>Registered now; its process starts once the DHCP engine exists.</source></segment>
+      </unit>
+      <unit id="nodes.enrol.roles_required">
+        <segment><source>Choose at least one role.</source></segment>
+      </unit>
+      <unit id="nodes.enrol.name">
+        <segment><source>Node name</source></segment>
+      </unit>
+      <unit id="nodes.enrol.name_help">
+        <segment><source>Optional; without it the node uses its host name.</source></segment>
+      </unit>
+      <unit id="nodes.enrol.name_rule">
+        <segment><source>1 to 63 letters, digits, dots, hyphens and underscores, starting with a letter or digit.</source></segment>
+      </unit>
+      <unit id="nodes.enrol.lifetime">
+        <segment><source>Valid for</source></segment>
+      </unit>
+      <unit id="nodes.enrol.lifetime_help">
+        <segment><source>Unused, it expires after this time.</source></segment>
+      </unit>
+      <unit id="nodes.enrol.vrf">
+        <segment><source>VRF of its observations</source></segment>
+      </unit>
+      <unit id="nodes.enrol.vrf_help">
+        <segment><source>Used when a batch of the node names no VRF.</source></segment>
+      </unit>
+      <unit id="nodes.enrol.vrf_default">
+        <segment><source>The default VRF</source></segment>
+      </unit>
+      <unit id="nodes.enrol.create">
+        <segment><source>Create token</source></segment>
+      </unit>
+      <unit id="nodes.enrol.created_title">
+        <segment><source>Enrol the node</source></segment>
+      </unit>
+      <unit id="nodes.enrol.once">
+        <segment><source>This is the only time the token is shown; it is not stored. It works once, until {expires}.</source></segment>
+      </unit>
+      <unit id="nodes.enrol.command">
+        <segment><source>Command to run on the node</source></segment>
+      </unit>
+      <unit id="nodes.enrol.copy_command">
+        <segment><source>Copy command</source></segment>
+      </unit>
+      <unit id="nodes.enrol.token">
+        <segment><source>Token</source></segment>
+      </unit>
+      <unit id="nodes.enrol.copy_token">
+        <segment><source>Copy token</source></segment>
+      </unit>
+      <unit id="nodes.enrol.fingerprint">
+        <segment><source>CA root fingerprint (SHA-256)</source></segment>
+      </unit>
+      <unit id="nodes.enrol.fingerprint_help">
+        <segment><source>The node compares it with the CA root it is offered; it is in the command already.</source></segment>
+      </unit>
+      <unit id="nodes.enrol.next">
+        <segment><source>Then start the node process with the roles {roles}; it appears in the list when it connects.</source></segment>
+      </unit>
+      <unit id="nodes.enrol.copy_blocked">
+        <segment><source>The browser did not allow copying; select the text and copy it.</source></segment>
+      </unit>
+      <unit id="nodes.enrol.done">
+        <segment><source>Done</source></segment>
+      </unit>
+      <unit id="errors.cluster.enrolment.roles">
+        <segment><source>A token cannot grant this role.</source></segment>
+      </unit>
+      <unit id="errors.cluster.enrolment.lifetime">
+        <segment><source>A token lives 60 seconds to 7 days.</source></segment>
+      </unit>
+      <unit id="errors.cluster.enrolment.not_found">
+        <segment><source>The enrolment token does not exist.</source></segment>
+      </unit>
+      <unit id="errors.cluster.node.not_found">
+        <segment><source>The node is not enrolled.</source></segment>
+      </unit>
+      <unit id="errors.cluster.node.name">
+        <segment><source>The node name does not follow the rule.</source></segment>
+      </unit>
+      <unit id="errors.cluster.node.name_taken">
+        <segment><source>Another node has this name.</source></segment>
+      </unit>
+      <unit id="errors.cluster.node.conflict">
+        <segment><source>The node changed at the same time; try again.</source></segment>
+      </unit>
+      <unit id="errors.cluster.enrolment.random">
+        <segment><source>The server could not draw a random token.</source></segment>
+      </unit>
+      <unit id="cluster.job.edit">
+        <segment><source>Change the cluster nodes</source></segment>
+      </unit>
+      <unit id="cluster.job.write_preview">
+        <segment><source>Write the node registry</source></segment>
+      </unit>
+      <unit id="nodes.enrol.copied_command">
+        <segment><source>Copied the command</source></segment>
+      </unit>
+      <unit id="nodes.enrol.copied_token">
+        <segment><source>Copied the token</source></segment>
+      </unit>
+    </group>
+    <group id="dashboard-wp29">
+      <unit id="dashboard.tile.proposals">
+        <segment><source>Open proposals</source></segment>
+      </unit>
+      <unit id="dashboard.tile.proposals_hint">
+        <segment><source>{conflicts, plural, =0 {no conflict} one {# conflict} other {# conflicts}}</source></segment>
+      </unit>
+      <unit id="dashboard.tile.connectors">
+        <segment><source>Healthy connectors</source></segment>
+      </unit>
+      <unit id="dashboard.tile.connectors_hint">
+        <segment><source>of {total} enabled{failing, plural, =0 {} one {, # needs a look} other {, # need a look}}</source></segment>
+      </unit>
+      <unit id="dashboard.tile.nodes">
+        <segment><source>Nodes connected</source></segment>
+      </unit>
+      <unit id="dashboard.tile.nodes_hint">
+        <segment><source>of {total} enrolled{mismatched, plural, =0 {} one {, # refused} other {, # refused}}</source></segment>
+      </unit>
+      <unit id="dashboard.tile.nodes_none">
+        <segment><source>No cluster port</source></segment>
+      </unit>
+      <unit id="dashboard.tile.proposals_link">
+        <segment><source>Open the proposal inbox</source></segment>
+      </unit>
+      <unit id="dashboard.tile.connectors_link">
+        <segment><source>Open the connectors</source></segment>
+      </unit>
+      <unit id="dashboard.tile.nodes_link">
+        <segment><source>Open the nodes</source></segment>
       </unit>
     </group>
   </file>

@@ -1,6 +1,6 @@
 // One prefix (the right side of the IPAM view): its head with the actions, the utilization
 // summary, and tabs for its addresses (with the free gaps), its ranges or child prefixes,
-// and its history. The address grid is where hosts are selected, edited in place, and
+// its adoption policy (WP2.9) and its history. The address grid is where hosts are selected, edited in place, and
 // dragged onto the tree to move them (or moved with M).
 import { useNavigate } from "@solidjs/router";
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, untrack } from "solid-js";
@@ -37,8 +37,9 @@ import { VlanRef } from "../vlan/VlanRef";
 import type { VlanStyle } from "../vlan/palette";
 import { saveTextFile } from "../../hosts/handoff";
 import { useWriteToast } from "../plan/PlanDialog";
+import { AdoptionPanel } from "./AdoptionPanel";
 
-type Tab = "addresses" | "children" | "ranges" | "history";
+type Tab = "addresses" | "children" | "ranges" | "adoption" | "history";
 
 export interface PrefixPaneProps {
   prefix: Prefix;
@@ -217,6 +218,7 @@ export function PrefixPane(props: PrefixPaneProps) {
           { id: "children" as const, label: t("ipam.prefix.tab.children") },
           { id: "addresses" as const, label: t("ipam.prefix.tab.addresses") },
         ]),
+    { id: "adoption", label: t("ipam.prefix.tab.adoption") },
     { id: "history", label: t("ipam.prefix.tab.history") },
   ];
 
@@ -523,6 +525,9 @@ export function PrefixPane(props: PrefixPaneProps) {
                 </div>
               }
             />
+          </Match>
+          <Match when={tab() === "adoption"}>
+            <AdoptionPanel prefix={props.prefix} />
           </Match>
           <Match when={tab() === "history"}>
             <HistoryPanel

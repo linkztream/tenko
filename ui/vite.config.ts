@@ -22,8 +22,10 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   // The texts of a move job come from the server as keys under ipam.move.; they belong to the
   // jobs pack, which is listed first because a key belongs to the first pack that matches. Only
   // the three prefixes the job uses: ipam.move.dragging and the rest are texts of the IPAM views.
-  jobs: ["jobs.", "ipam.move.task.", "ipam.move.step.", "ipam.move.title"],
-  ipam: ["ipam.", "hosts.", "move."],
+  // The titles of connector and cluster jobs come from the server as keys too (WP2.9).
+  jobs: ["jobs.", "ipam.move.task.", "ipam.move.step.", "ipam.move.title", "connect.job.", "cluster.job."],
+  // The adoption policy of a prefix is part of the prefix pane, with its error texts.
+  ipam: ["ipam.", "hosts.", "move.", "errors.ipam.adoption."],
   audit: ["audit."],
   dashboard: ["dashboard."],
   import: ["import."],
@@ -37,6 +39,13 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   // Operator secrets: the secrets page, the reveal dialog (also on the host page) and the
   // error texts of the vault and remote hand-off endpoints (WP2.1).
   secrets: ["secrets.", "errors.vault.", "errors.remote."],
+  // Discovery: the proposal inbox and the observations (also on the host page), with the error
+  // texts of the proposal and reconciler endpoints (WP2.9).
+  discovery: ["discovery.", "errors.ipam.proposal.", "errors.ipam.reconciler."],
+  // Connector plugins and instances, with the error texts of the connector endpoints (WP2.9).
+  connectors: ["connectors.", "errors.connect."],
+  // Cluster nodes and enrolment tokens, with the error texts of the node endpoints (WP2.9).
+  nodes: ["nodes.", "errors.cluster."],
 };
 
 export default defineConfig(({ command, mode }) => {

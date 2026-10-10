@@ -7,8 +7,9 @@
 // change, delete and bind. A session of PIN strength never stores or reveals (403
 // `auth.step_up_required`, `required` = `password`).
 //
-// What the mock simplifies: there are no connector instances (`connectors` is empty and
-// counts 0), a value is a text of 1 byte to 64 KiB, and the idempotency key is ignored.
+// What the mock simplifies: a value is a text of 1 byte to 64 KiB, and the idempotency key is
+// ignored. The connector instances of connectors-store.ts are the `connectors` of the
+// references of a secret, and an instance that references a secret keeps it from deletion.
 // Every write is committed as an event on the `secrets` topic and audited; the audit
 // records never carry a value.
 import type { HttpHandler } from "msw";
@@ -19,6 +20,7 @@ import type { Address, Host, Interface, ObjectRef } from "../types";
 import { appendAudit } from "./audit-store";
 import { STRENGTH_RANK, requireAdmin, requireSession, type Principal } from "./auth";
 import { commit, db, isAdmin, type MockSession, type MockUser } from "./db";
+import { connectorReferences } from "./connectors-store";
 import { ipamState } from "./ipam/api";
 import { badPathId, invalidQuery, notFound } from "./ipam/problems";
 import { Problem, created, fail, fieldError, noContent, ok } from "./reply";
@@ -417,10 +419,11 @@ const deleteSecret = route("delete", "/api/v1/secrets/{id}", (ctx) => {
   const secret = secretOr404(id);
   // As on the server, a secret in use is refused before the revision is compared.
   const bound = secretHosts(id);
-  if (bound.length > 0) {
+  const used = connectorReferences(id);
+  if (bound.length > 0 || used.length > 0) {
     return fail("vault.secret.in_use", {
-      detail: `the secret is bound to ${bound.length} host(s)`,
-      params: { hosts: String(bound.length), connectors: "0" },
+      detail: `the secret is bound to ${bound.length} host(s) and used by ${used.length} connector(s)`,
+      params: { hosts: String(bound.length), connectors: String(used.length) },
     });
   }
   if (typeof expect === "number" && expect !== secret.revision) {
@@ -450,7 +453,7 @@ const secretReferences = route("get", "/api/v1/secrets/{id}/references", (ctx) =
     (a, b) =>
       (a.name ?? "").localeCompare(b.name ?? "") || (a.host < b.host ? -1 : a.host > b.host ? 1 : 0),
   );
-  return ok({ id, hosts, connectors: [] });
+  return ok({ id, hosts, connectors: connectorReferences(id) });
 });
 
 // ---------------------------------------------------------------------------------

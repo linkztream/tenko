@@ -1,0 +1,81 @@
+/*
+ * Discovery: the proposal inbox with its docked panel, the observations and the picture of one
+ * subject. Token roles only (tokens.css); the exception colors follow design/README.md: magenta
+ * for proposals, red for conflicts, amber where intent and observation differ.
+ */
+
+/* ---------- The inbox ---------- */
+.discovery-page { overflow: hidden; display: flex; flex-direction: column; }
+.discovery-split { position: relative; display: flex; flex: 1; min-height: 320px; }
+.discovery-grid { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.discovery-split.with-panel .discovery-grid { margin-right: min(var(--panel-w), 100%); }
+@media (max-width: 960px) {
+  .discovery-split.with-panel .discovery-grid { margin-right: 0; }
+}
+.proposal-summary { overflow: hidden; text-overflow: ellipsis; }
+.subject-cell { display: inline-flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.grid tr.differs td:first-child { box-shadow: inset 3px 0 0 var(--discrepancy-mark); }
+.grid tr.current td { background: var(--accent-wash); }
+
+/* Severity, glyph and word. */
+.sev { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-12); font-weight: var(--fw-medium); white-space: nowrap; }
+.sev.critical { color: var(--conflict); }
+.sev.warning { color: var(--discrepancy); }
+.sev.info { color: var(--ink-2); }
+.proposal-state.open { background: var(--proposal-wash); color: var(--proposal); }
+.proposal-state.accepted { background: var(--ok-wash); color: var(--ok-ink); }
+
+/* A filter that comes from the URL, with its remove button. */
+.discovery-page .chip.applied, .observations-page .chip.applied { padding-right: var(--sp-2); gap: var(--sp-3); }
+.discovery-page .chip-x, .observations-page .chip-x {
+  display: inline-grid; place-items: center;
+  width: 18px; height: 18px; padding: 0;
+  border: 0; border-radius: 50%;
+  background: transparent; color: inherit;
+}
+.discovery-page .chip-x:hover, .observations-page .chip-x:hover { background: var(--surface-3); color: var(--ink); }
+
+/* ---------- The panel ---------- */
+.proposal-panel .panel-head h2 { font-size: var(--fs-14); line-height: var(--lh-text); overflow-wrap: anywhere; }
+.proposal-panel .grow { flex: 1; min-width: 0; }
+.proposal-badges { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.proposal-actions { display: grid; gap: var(--sp-4); }
+.row-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.obj-list { display: grid; gap: var(--sp-2); }
+.evidence-seen { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); }
+.proposal-reason { white-space: pre-wrap; }
+
+/* ---------- Dialogs ---------- */
+.dialog.discovery-dialog { width: min(560px, calc(100vw - 32px)); max-height: 84vh; overflow: auto; }
+.discovery-form { display: grid; gap: var(--sp-4); }
+.discovery-form textarea.input { resize: vertical; }
+.report-kv { grid-template-columns: minmax(0, 1fr) auto; }
+.report-kv dd { text-align: right; }
+
+/* ---------- Observations ---------- */
+.observations-page { overflow: hidden; display: flex; flex-direction: column; }
+.observations-grid { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 320px; }
+.lookup { display: flex; flex-wrap: wrap; align-items: end; gap: var(--sp-3); }
+.lookup .field { flex: 1 1 260px; max-width: 420px; }
+.fact-state.current { background: var(--ok-wash); color: var(--ok-ink); }
+.fact-observed { overflow-wrap: anywhere; }
+
+/* ---------- One subject ---------- */
+.subject-page { overflow: auto; }
+.subject-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--sp-6); align-items: start; }
+.subject-card { padding: var(--sp-5) var(--sp-6); display: grid; gap: var(--sp-4); }
+.subject-card h2 { font-size: var(--fs-14); display: flex; align-items: center; gap: var(--sp-4); }
+.subject-card h2 .aside { margin-left: auto; font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); }
+.value-list { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
+.proposal-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
+.proposal-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
+
+/* ---------- The host page section ---------- */
+.host-obs { display: grid; gap: var(--sp-4); }
+.host-obs-summary { display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-7); }
+.host-obs-summary > div { display: grid; gap: 2px; }
+.host-obs-summary .k { color: var(--ink-3); font-size: var(--fs-12); }
+.subject-card h3.sub-h { font-size: var(--fs-13); }
+.evidence-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-4); }
+.evidence-list li { display: grid; gap: 2px; }
+.evidence-times { font-size: var(--fs-12); }

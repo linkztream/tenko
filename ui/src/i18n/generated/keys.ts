@@ -317,6 +317,8 @@ export type MessageKey =
   | "auth.strength.password"
   | "auth.strength.password_totp"
   | "auth.strength.pin"
+  | "cluster.job.edit"
+  | "cluster.job.write_preview"
   | "common.action.add"
   | "common.action.back"
   | "common.action.cancel"
@@ -349,6 +351,181 @@ export type MessageKey =
   | "common.required"
   | "common.unknown"
   | "common.yes"
+  | "connect.job.edit"
+  | "connect.job.poll_preview"
+  | "connect.job.run"
+  | "connect.job.write_preview"
+  | "connectors.action.check"
+  | "connectors.action.create"
+  | "connectors.action.delete"
+  | "connectors.action.disable"
+  | "connectors.action.edit"
+  | "connectors.action.enable"
+  | "connectors.action.open"
+  | "connectors.action.run"
+  | "connectors.action.toggle"
+  | "connectors.capability.actuator"
+  | "connectors.capability.inventory"
+  | "connectors.capability.migration"
+  | "connectors.capability.network_controller"
+  | "connectors.capability.webhook"
+  | "connectors.col.capabilities"
+  | "connectors.col.health"
+  | "connectors.col.last_run"
+  | "connectors.col.name"
+  | "connectors.col.plugin"
+  | "connectors.col.poll"
+  | "connectors.col.process"
+  | "connectors.col.writes"
+  | "connectors.delete.body"
+  | "connectors.delete.confirm"
+  | "connectors.delete.title"
+  | "connectors.detail.all_jobs"
+  | "connectors.detail.back"
+  | "connectors.detail.changed"
+  | "connectors.detail.check_failed"
+  | "connectors.detail.checked"
+  | "connectors.detail.config"
+  | "connectors.detail.created"
+  | "connectors.detail.detail"
+  | "connectors.detail.disabled"
+  | "connectors.detail.error"
+  | "connectors.detail.failed_runs"
+  | "connectors.detail.failures"
+  | "connectors.detail.health"
+  | "connectors.detail.job"
+  | "connectors.detail.last_error"
+  | "connectors.detail.last_run"
+  | "connectors.detail.last_success"
+  | "connectors.detail.latency"
+  | "connectors.detail.ms"
+  | "connectors.detail.no"
+  | "connectors.detail.no_check"
+  | "connectors.detail.no_runs"
+  | "connectors.detail.observations"
+  | "connectors.detail.observations_link"
+  | "connectors.detail.outcome"
+  | "connectors.detail.pages"
+  | "connectors.detail.process"
+  | "connectors.detail.remote"
+  | "connectors.detail.remote_version"
+  | "connectors.detail.restarts"
+  | "connectors.detail.runs"
+  | "connectors.detail.started"
+  | "connectors.detail.state"
+  | "connectors.detail.trigger"
+  | "connectors.detail.updated"
+  | "connectors.detail.version"
+  | "connectors.detail.warnings"
+  | "connectors.detail.yes"
+  | "connectors.empty.body"
+  | "connectors.empty.title"
+  | "connectors.form.choose"
+  | "connectors.form.create"
+  | "connectors.form.default"
+  | "connectors.form.default_secs"
+  | "connectors.form.enabled"
+  | "connectors.form.example"
+  | "connectors.form.guardrails"
+  | "connectors.form.interval_range"
+  | "connectors.form.item_add"
+  | "connectors.form.item_add_to"
+  | "connectors.form.item_label"
+  | "connectors.form.item_remove"
+  | "connectors.form.items_empty"
+  | "connectors.form.name"
+  | "connectors.form.name_help"
+  | "connectors.form.name_long"
+  | "connectors.form.name_required"
+  | "connectors.form.no_plugins"
+  | "connectors.form.no_settings"
+  | "connectors.form.on"
+  | "connectors.form.plugin"
+  | "connectors.form.plugin_fixed"
+  | "connectors.form.poll"
+  | "connectors.form.save"
+  | "connectors.form.secret_missing"
+  | "connectors.form.secret_none"
+  | "connectors.form.secret_other"
+  | "connectors.form.secret_purpose"
+  | "connectors.form.secret_tagged"
+  | "connectors.form.secret_unlisted"
+  | "connectors.form.secrets"
+  | "connectors.form.secrets_admin"
+  | "connectors.form.secrets_help"
+  | "connectors.form.settings"
+  | "connectors.form.stale"
+  | "connectors.form.targets"
+  | "connectors.form.timeout"
+  | "connectors.form.title_create"
+  | "connectors.form.title_edit"
+  | "connectors.form.unsupported"
+  | "connectors.form.writes"
+  | "connectors.form.writes_help"
+  | "connectors.form.writes_read_only"
+  | "connectors.form.writes_warning"
+  | "connectors.health.degraded"
+  | "connectors.health.failing"
+  | "connectors.health.healthy"
+  | "connectors.health.off"
+  | "connectors.instances"
+  | "connectors.plugins.capabilities"
+  | "connectors.plugins.homepage"
+  | "connectors.plugins.license"
+  | "connectors.plugins.none"
+  | "connectors.plugins.platforms"
+  | "connectors.plugins.reload"
+  | "connectors.plugins.secrets"
+  | "connectors.plugins.source.bundled"
+  | "connectors.plugins.source.installed"
+  | "connectors.plugins.title"
+  | "connectors.plugins.unusable"
+  | "connectors.problem.enum"
+  | "connectors.problem.format"
+  | "connectors.problem.items"
+  | "connectors.problem.items_max"
+  | "connectors.problem.items_min"
+  | "connectors.problem.length"
+  | "connectors.problem.length_max"
+  | "connectors.problem.length_min"
+  | "connectors.problem.pattern"
+  | "connectors.problem.range"
+  | "connectors.problem.range_max"
+  | "connectors.problem.range_min"
+  | "connectors.problem.required"
+  | "connectors.problem.type"
+  | "connectors.problem.unique"
+  | "connectors.problem.unknown"
+  | "connectors.process.backoff"
+  | "connectors.process.circuit_open"
+  | "connectors.process.failed"
+  | "connectors.process.running"
+  | "connectors.process.starting"
+  | "connectors.process.stopped"
+  | "connectors.process.until"
+  | "connectors.remote.degraded"
+  | "connectors.remote.healthy"
+  | "connectors.remote.unreachable"
+  | "connectors.run.failed"
+  | "connectors.run.never"
+  | "connectors.run.succeeded"
+  | "connectors.seconds"
+  | "connectors.seconds_default"
+  | "connectors.sub"
+  | "connectors.toast.change_failed"
+  | "connectors.toast.check_failed"
+  | "connectors.toast.checked"
+  | "connectors.toast.delete_failed"
+  | "connectors.toast.deleted"
+  | "connectors.toast.disabled"
+  | "connectors.toast.enabled"
+  | "connectors.toast.open_job"
+  | "connectors.toast.run"
+  | "connectors.toast.run_failed"
+  | "connectors.trigger.manual"
+  | "connectors.trigger.schedule"
+  | "connectors.writes.off"
+  | "connectors.writes.on"
   | "dashboard.action.claim"
   | "dashboard.action.claim_where"
   | "dashboard.action.import"
@@ -370,6 +547,16 @@ export type MessageKey =
   | "dashboard.tile.addresses_of"
   | "dashboard.tile.alarms"
   | "dashboard.tile.alarms_hint"
+  | "dashboard.tile.connectors"
+  | "dashboard.tile.connectors_hint"
+  | "dashboard.tile.connectors_link"
+  | "dashboard.tile.nodes"
+  | "dashboard.tile.nodes_hint"
+  | "dashboard.tile.nodes_link"
+  | "dashboard.tile.nodes_none"
+  | "dashboard.tile.proposals"
+  | "dashboard.tile.proposals_hint"
+  | "dashboard.tile.proposals_link"
   | "dashboard.tile.waiting_for_you"
   | "dashboard.update.action"
   | "dashboard.update.body"
@@ -386,6 +573,206 @@ export type MessageKey =
   | "dashboard.waiting.none"
   | "dashboard.waiting.step"
   | "dashboard.waiting.title"
+  | "discovery.action.approve"
+  | "discovery.action.dismiss"
+  | "discovery.action.open"
+  | "discovery.action.reconcile"
+  | "discovery.action.reject"
+  | "discovery.approve.confirm"
+  | "discovery.approve.title"
+  | "discovery.col.created"
+  | "discovery.col.first_seen"
+  | "discovery.col.kind"
+  | "discovery.col.last_seen"
+  | "discovery.col.observed"
+  | "discovery.col.prefix"
+  | "discovery.col.severity"
+  | "discovery.col.sightings"
+  | "discovery.col.source"
+  | "discovery.col.sources"
+  | "discovery.col.state"
+  | "discovery.col.subject"
+  | "discovery.col.subject_key"
+  | "discovery.col.summary"
+  | "discovery.col.type"
+  | "discovery.col.updated"
+  | "discovery.count"
+  | "discovery.count_open"
+  | "discovery.empty.body"
+  | "discovery.empty.filtered"
+  | "discovery.empty.title"
+  | "discovery.fact.address_mac"
+  | "discovery.fact.attachment"
+  | "discovery.fact.attachment_vlan"
+  | "discovery.fact.current"
+  | "discovery.fact.expired"
+  | "discovery.fact.link"
+  | "discovery.fact.name"
+  | "discovery.fact.no_ports"
+  | "discovery.fact.os"
+  | "discovery.fact.parent"
+  | "discovery.fact.port"
+  | "discovery.fact.ports"
+  | "discovery.fact.ssid"
+  | "discovery.fact.tls"
+  | "discovery.fact.vendor"
+  | "discovery.fact_type.address"
+  | "discovery.fact_type.attachment"
+  | "discovery.fact_type.host"
+  | "discovery.fact_type.link"
+  | "discovery.fact_type.name"
+  | "discovery.fact_type.os"
+  | "discovery.fact_type.services"
+  | "discovery.fact_type.vendor"
+  | "discovery.filter.all"
+  | "discovery.filter.label"
+  | "discovery.filter.placeholder"
+  | "discovery.filter.prefix"
+  | "discovery.filter.remove"
+  | "discovery.filter.remove_prefix"
+  | "discovery.filter.state"
+  | "discovery.grid.label"
+  | "discovery.kind.address_mismatch"
+  | "discovery.kind.conflict"
+  | "discovery.kind.discovered_host"
+  | "discovery.kind.orphaned_intent"
+  | "discovery.kind.outside_prefixes"
+  | "discovery.lookup.label"
+  | "discovery.lookup.placeholder"
+  | "discovery.lookup.submit"
+  | "discovery.method.arp"
+  | "discovery.method.arp_sweep"
+  | "discovery.method.icmp"
+  | "discovery.method.lldp"
+  | "discovery.method.llmnr"
+  | "discovery.method.mdns"
+  | "discovery.method.nd"
+  | "discovery.method.os_fingerprint"
+  | "discovery.method.reverse_dns"
+  | "discovery.method.snmp"
+  | "discovery.method.tcp_connect"
+  | "discovery.method.tcp_syn"
+  | "discovery.nav.label"
+  | "discovery.nav.observations"
+  | "discovery.nav.proposals"
+  | "discovery.observations.all"
+  | "discovery.observations.current"
+  | "discovery.observations.empty"
+  | "discovery.observations.empty_body"
+  | "discovery.observations.expired"
+  | "discovery.observations.filter_label"
+  | "discovery.observations.filter_placeholder"
+  | "discovery.observations.grid_label"
+  | "discovery.observations.sub"
+  | "discovery.panel.adopted_by"
+  | "discovery.panel.adoption_failed"
+  | "discovery.panel.change"
+  | "discovery.panel.change_conflict"
+  | "discovery.panel.change_count"
+  | "discovery.panel.change_none"
+  | "discovery.panel.conflict_hint"
+  | "discovery.panel.decided_by"
+  | "discovery.panel.decision"
+  | "discovery.panel.evidence"
+  | "discovery.panel.evidence_count"
+  | "discovery.panel.first_seen"
+  | "discovery.panel.intent"
+  | "discovery.panel.ip"
+  | "discovery.panel.label"
+  | "discovery.panel.last_seen"
+  | "discovery.panel.mac"
+  | "discovery.panel.name"
+  | "discovery.panel.network"
+  | "discovery.panel.newer"
+  | "discovery.panel.no_evidence"
+  | "discovery.panel.nothing_hint"
+  | "discovery.panel.opened"
+  | "discovery.panel.prefix"
+  | "discovery.panel.reason"
+  | "discovery.panel.results"
+  | "discovery.panel.sightings"
+  | "discovery.panel.subject"
+  | "discovery.panel.superseded_by"
+  | "discovery.reconcile.failed"
+  | "discovery.reject.body"
+  | "discovery.reject.body_conflict"
+  | "discovery.reject.confirm"
+  | "discovery.reject.confirm_conflict"
+  | "discovery.reject.reason"
+  | "discovery.reject.reason_hint"
+  | "discovery.reject.reason_too_long"
+  | "discovery.reject.title"
+  | "discovery.reject.title_conflict"
+  | "discovery.report.adopted"
+  | "discovery.report.adoption_failures"
+  | "discovery.report.at"
+  | "discovery.report.expired"
+  | "discovery.report.moves_confirmed"
+  | "discovery.report.nothing"
+  | "discovery.report.opened"
+  | "discovery.report.refreshed"
+  | "discovery.report.sightings"
+  | "discovery.report.superseded"
+  | "discovery.report.suppressed"
+  | "discovery.report.title"
+  | "discovery.report.unchanged"
+  | "discovery.rule.address_mismatch"
+  | "discovery.rule.address_unrecorded"
+  | "discovery.rule.conflict_address_taken"
+  | "discovery.rule.conflict_networks"
+  | "discovery.rule.conflict_shared_address"
+  | "discovery.rule.discovered_address"
+  | "discovery.rule.discovered_mac"
+  | "discovery.rule.orphaned_address"
+  | "discovery.rule.outside_prefixes"
+  | "discovery.severity.critical"
+  | "discovery.severity.info"
+  | "discovery.severity.warning"
+  | "discovery.source.dhcp"
+  | "discovery.source.dns"
+  | "discovery.source.inventory"
+  | "discovery.source.network_controller"
+  | "discovery.source.probe"
+  | "discovery.source_short.dhcp_lease"
+  | "discovery.source_short.dns_record"
+  | "discovery.source_short.inventory"
+  | "discovery.source_short.network_controller"
+  | "discovery.source_short.probe"
+  | "discovery.state.accepted"
+  | "discovery.state.expired"
+  | "discovery.state.open"
+  | "discovery.state.rejected"
+  | "discovery.state.superseded"
+  | "discovery.subject.attachments"
+  | "discovery.subject.current"
+  | "discovery.subject.fact_count"
+  | "discovery.subject.facts"
+  | "discovery.subject.intent"
+  | "discovery.subject.ips"
+  | "discovery.subject.kind_ip"
+  | "discovery.subject.kind_mac"
+  | "discovery.subject.kind_name"
+  | "discovery.subject.macs"
+  | "discovery.subject.names"
+  | "discovery.subject.no_intent"
+  | "discovery.subject.no_proposals"
+  | "discovery.subject.not_current"
+  | "discovery.subject.os"
+  | "discovery.subject.parents"
+  | "discovery.subject.platforms"
+  | "discovery.subject.ports"
+  | "discovery.subject.proposals"
+  | "discovery.subject.sightings"
+  | "discovery.subject.sources"
+  | "discovery.subject.summary"
+  | "discovery.subject.tags"
+  | "discovery.subject.tls"
+  | "discovery.subject.unknown"
+  | "discovery.subject.vendors"
+  | "discovery.subject.vlan"
+  | "discovery.toast.approved"
+  | "discovery.toast.dismissed"
+  | "discovery.toast.rejected"
   | "errors.auth.break_glass.hardware_key_only"
   | "errors.auth.challenge_invalid"
   | "errors.auth.conflict"
@@ -421,6 +808,33 @@ export type MessageKey =
   | "errors.client.aborted"
   | "errors.client.bad_response"
   | "errors.client.network"
+  | "errors.cluster.enrolment.lifetime"
+  | "errors.cluster.enrolment.not_found"
+  | "errors.cluster.enrolment.random"
+  | "errors.cluster.enrolment.roles"
+  | "errors.cluster.node.conflict"
+  | "errors.cluster.node.name"
+  | "errors.cluster.node.name_taken"
+  | "errors.cluster.node.not_found"
+  | "errors.connect.instance.call_timeout"
+  | "errors.connect.instance.conflict"
+  | "errors.connect.instance.disabled"
+  | "errors.connect.instance.name"
+  | "errors.connect.instance.name_taken"
+  | "errors.connect.instance.not_found"
+  | "errors.connect.instance.nothing_to_run"
+  | "errors.connect.instance.poll_interval"
+  | "errors.connect.plugin.exited"
+  | "errors.connect.plugin.unavailable"
+  | "errors.connect.plugin.unknown"
+  | "errors.connect.plugin.unusable"
+  | "errors.connect.run.failed"
+  | "errors.connect.secret.missing"
+  | "errors.connect.secret.not_found"
+  | "errors.connect.secret.not_operator"
+  | "errors.connect.secret.undeclared"
+  | "errors.connect.settings.invalid"
+  | "errors.connect.timeout"
   | "errors.generic.client"
   | "errors.generic.field"
   | "errors.generic.not_implemented"
@@ -449,6 +863,7 @@ export type MessageKey =
   | "errors.ipam.address.in_supernet"
   | "errors.ipam.address.network_or_broadcast"
   | "errors.ipam.address.no_prefix"
+  | "errors.ipam.adoption.invalid"
   | "errors.ipam.bulk.too_large"
   | "errors.ipam.bulk.wrong_collection"
   | "errors.ipam.contended"
@@ -480,10 +895,15 @@ export type MessageKey =
   | "errors.ipam.prefix.overlap"
   | "errors.ipam.prefix.overlaps_range"
   | "errors.ipam.prefix.resize_orphans"
+  | "errors.ipam.proposal.not_found"
+  | "errors.ipam.proposal.not_open"
+  | "errors.ipam.proposal.nothing_to_apply"
+  | "errors.ipam.proposal.revision_mismatch"
   | "errors.ipam.range.covers_reservation"
   | "errors.ipam.range.not_in_network"
   | "errors.ipam.range.outside_prefix"
   | "errors.ipam.range.overlap"
+  | "errors.ipam.reconciler.unavailable"
   | "errors.ipam.reference_missing"
   | "errors.ipam.revision_mismatch"
   | "errors.ipam.site.cycle"
@@ -692,6 +1112,7 @@ export type MessageKey =
   | "hosts.mode.title"
   | "hosts.not_found"
   | "hosts.observations.empty"
+  | "hosts.observations.open"
   | "hosts.observations.title"
   | "hosts.undo"
   | "hosts.unlocked"
@@ -932,6 +1353,41 @@ export type MessageKey =
   | "ipam.addresses.grid"
   | "ipam.addresses.none"
   | "ipam.addresses.show_free"
+  | "ipam.adoption.clear"
+  | "ipam.adoption.cleared"
+  | "ipam.adoption.edit"
+  | "ipam.adoption.error.sightings"
+  | "ipam.adoption.error.vendor_length"
+  | "ipam.adoption.error.vendors_count"
+  | "ipam.adoption.host_mode"
+  | "ipam.adoption.host_mode_help"
+  | "ipam.adoption.host_mode_on"
+  | "ipam.adoption.min_sightings"
+  | "ipam.adoption.min_sightings_help"
+  | "ipam.adoption.mode.adopt_all"
+  | "ipam.adoption.mode.adopt_hosts"
+  | "ipam.adoption.mode.manual"
+  | "ipam.adoption.mode_hint.adopt_all"
+  | "ipam.adoption.mode_hint.adopt_hosts"
+  | "ipam.adoption.mode_hint.manual"
+  | "ipam.adoption.mode_label"
+  | "ipam.adoption.never"
+  | "ipam.adoption.only_pools"
+  | "ipam.adoption.only_pools_on"
+  | "ipam.adoption.proposals"
+  | "ipam.adoption.save"
+  | "ipam.adoption.saved"
+  | "ipam.adoption.set"
+  | "ipam.adoption.sightings_on"
+  | "ipam.adoption.source_default"
+  | "ipam.adoption.source_inherited"
+  | "ipam.adoption.source_own"
+  | "ipam.adoption.stale"
+  | "ipam.adoption.title"
+  | "ipam.adoption.updated_by"
+  | "ipam.adoption.vendors"
+  | "ipam.adoption.vendors_help"
+  | "ipam.adoption.vendors_on"
   | "ipam.alarm.critical"
   | "ipam.alarm.normal"
   | "ipam.alarm.warning"
@@ -1155,6 +1611,7 @@ export type MessageKey =
   | "ipam.prefix.not_found"
   | "ipam.prefix.ranges_grid"
   | "ipam.prefix.tab.addresses"
+  | "ipam.prefix.tab.adoption"
   | "ipam.prefix.tab.children"
   | "ipam.prefix.tab.history"
   | "ipam.prefix.tab.ranges"
@@ -1489,6 +1946,112 @@ export type MessageKey =
   | "node.role.dhcp"
   | "node.role.dns"
   | "node.role.probe"
+  | "nodes.action.enrol"
+  | "nodes.cert.days_left"
+  | "nodes.cert.expired"
+  | "nodes.col.address"
+  | "nodes.col.certificate"
+  | "nodes.col.connected"
+  | "nodes.col.id"
+  | "nodes.col.last_seen"
+  | "nodes.col.major"
+  | "nodes.col.name"
+  | "nodes.col.roles"
+  | "nodes.col.version"
+  | "nodes.empty.body"
+  | "nodes.empty.title"
+  | "nodes.enrol.command"
+  | "nodes.enrol.copied_command"
+  | "nodes.enrol.copied_token"
+  | "nodes.enrol.copy_blocked"
+  | "nodes.enrol.copy_command"
+  | "nodes.enrol.copy_token"
+  | "nodes.enrol.create"
+  | "nodes.enrol.created_title"
+  | "nodes.enrol.done"
+  | "nodes.enrol.fingerprint"
+  | "nodes.enrol.fingerprint_help"
+  | "nodes.enrol.intro"
+  | "nodes.enrol.lifetime"
+  | "nodes.enrol.lifetime_help"
+  | "nodes.enrol.name"
+  | "nodes.enrol.name_help"
+  | "nodes.enrol.name_rule"
+  | "nodes.enrol.next"
+  | "nodes.enrol.once"
+  | "nodes.enrol.role_hint.dhcp"
+  | "nodes.enrol.role_hint.dns"
+  | "nodes.enrol.role_hint.probe"
+  | "nodes.enrol.roles"
+  | "nodes.enrol.roles_required"
+  | "nodes.enrol.title"
+  | "nodes.enrol.token"
+  | "nodes.enrol.vrf"
+  | "nodes.enrol.vrf_default"
+  | "nodes.enrol.vrf_help"
+  | "nodes.grid.label"
+  | "nodes.lifetime.s3600"
+  | "nodes.lifetime.s604800"
+  | "nodes.lifetime.s86400"
+  | "nodes.lifetime.s900"
+  | "nodes.link.connected"
+  | "nodes.link.disconnected"
+  | "nodes.link.mismatch"
+  | "nodes.mismatch"
+  | "nodes.panel.about"
+  | "nodes.panel.buffer"
+  | "nodes.panel.buffer_value"
+  | "nodes.panel.certificate"
+  | "nodes.panel.connection"
+  | "nodes.panel.dropped"
+  | "nodes.panel.enrolled"
+  | "nodes.panel.id"
+  | "nodes.panel.label"
+  | "nodes.panel.last_beat"
+  | "nodes.panel.major"
+  | "nodes.panel.mismatch"
+  | "nodes.panel.not_connected"
+  | "nodes.panel.peer"
+  | "nodes.panel.renewal_due"
+  | "nodes.panel.renewed"
+  | "nodes.panel.serial"
+  | "nodes.panel.since"
+  | "nodes.panel.valid"
+  | "nodes.panel.valid_range"
+  | "nodes.port_closed"
+  | "nodes.port_open"
+  | "nodes.revoke.action"
+  | "nodes.revoke.confirm"
+  | "nodes.revoke.confirm_body"
+  | "nodes.revoke.confirm_title"
+  | "nodes.revoke.done"
+  | "nodes.revoke.failed"
+  | "nodes.revoke.hint"
+  | "nodes.revoke.title"
+  | "nodes.summary"
+  | "nodes.token.any_name"
+  | "nodes.token.col.actions"
+  | "nodes.token.col.created"
+  | "nodes.token.col.expires"
+  | "nodes.token.col.name"
+  | "nodes.token.col.roles"
+  | "nodes.token.col.state"
+  | "nodes.token.col.used"
+  | "nodes.token.delete"
+  | "nodes.token.delete_done"
+  | "nodes.token.delete_failed"
+  | "nodes.token.delete_named"
+  | "nodes.token.delete_pending"
+  | "nodes.token.delete_title"
+  | "nodes.token.deleted"
+  | "nodes.token.hint"
+  | "nodes.token.none"
+  | "nodes.token.state.expired"
+  | "nodes.token.state.pending"
+  | "nodes.token.state.used"
+  | "nodes.token.title"
+  | "nodes.version_count"
+  | "nodes.versions"
   | "prefs.density.comfortable"
   | "prefs.density.compact"
   | "prefs.density.dense"
@@ -2227,13 +2790,16 @@ export type MessageKey =
   | "shell.keys.title"
   | "shell.keys.undo"
   | "shell.nav.audit"
+  | "shell.nav.connectors"
   | "shell.nav.dashboard"
   | "shell.nav.dhcp"
+  | "shell.nav.discovery"
   | "shell.nav.dns"
   | "shell.nav.ipam"
   | "shell.nav.jobs"
   | "shell.nav.jobs_badge"
   | "shell.nav.label"
+  | "shell.nav.nodes"
   | "shell.nav.settings"
   | "shell.nav.tooltip"
   | "shell.nav.topology"
@@ -2500,24 +3066,116 @@ export interface MessageArgs {
   "auth.signin.retry_in": { seconds: number };
   "common.count.items": { count: number };
   "common.greeting": { name: string | number };
+  "connectors.delete.title": { name: string | number };
+  "connectors.detail.check_failed": { error: string | number };
+  "connectors.detail.ms": { ms: string | number };
+  "connectors.detail.pages": { observations: number; pages: number };
+  "connectors.form.default": { value: string | number };
+  "connectors.form.default_secs": { secs: string | number };
+  "connectors.form.example": { value: string | number };
+  "connectors.form.interval_range": { max: string | number; min: string | number };
+  "connectors.form.item_add_to": { field: string | number };
+  "connectors.form.item_label": { field: string | number; n: string | number };
+  "connectors.form.item_remove": { field: string | number; n: string | number };
+  "connectors.form.name_long": { max: string | number };
+  "connectors.form.plugin_fixed": { plugin: string | number; version: string | number };
+  "connectors.form.secret_purpose": { purpose: string | number };
+  "connectors.form.secret_tagged": { purpose: string | number };
+  "connectors.form.title_edit": { name: string | number };
+  "connectors.problem.enum": { values: string | number };
+  "connectors.problem.format": { format: string };
+  "connectors.problem.items": { max: number; min: string | number };
+  "connectors.problem.items_max": { max: number };
+  "connectors.problem.items_min": { min: number };
+  "connectors.problem.length": { max: number; min: string | number };
+  "connectors.problem.length_max": { max: number };
+  "connectors.problem.length_min": { min: number };
+  "connectors.problem.pattern": { pattern: string | number };
+  "connectors.problem.range": { max: string | number; min: string | number };
+  "connectors.problem.range_max": { max: string | number };
+  "connectors.problem.range_min": { min: string | number };
+  "connectors.problem.type": { type: string | number };
+  "connectors.process.until": { at: string | number };
+  "connectors.run.succeeded": { count: number };
+  "connectors.seconds": { secs: string | number };
+  "connectors.seconds_default": { secs: string | number };
+  "connectors.toast.change_failed": { name: string | number };
+  "connectors.toast.check_failed": { name: string | number };
+  "connectors.toast.checked": { health: string | number; name: string | number };
+  "connectors.toast.delete_failed": { name: string | number };
+  "connectors.toast.deleted": { name: string | number };
+  "connectors.toast.disabled": { name: string | number };
+  "connectors.toast.enabled": { name: string | number };
+  "connectors.toast.run": { name: string | number };
+  "connectors.toast.run_failed": { name: string | number };
   "dashboard.modules.restart_body": { configured: string | number; running: string | number };
   "dashboard.tile.alarms_hint": { critical: number };
+  "dashboard.tile.connectors_hint": { failing: number; total: string | number };
+  "dashboard.tile.nodes_hint": { mismatched: number; total: string | number };
+  "dashboard.tile.proposals_hint": { conflicts: number };
   "dashboard.tile.waiting_for_you": { count: number };
   "dashboard.update.body": { running: string | number; version: string | number };
   "dashboard.use.more": { count: number };
   "dashboard.use.vrf": { tenant: string | number; vrf: string | number };
   "dashboard.waiting.step": { step: number; total: number };
+  "discovery.approve.confirm": { count: number };
+  "discovery.count": { count: number; more: string };
+  "discovery.count_open": { count: number; more: string };
+  "discovery.fact.address_mac": { ip: string | number; mac: string | number };
+  "discovery.fact.attachment": { mac: string | number; where: string | number };
+  "discovery.fact.attachment_vlan": { mac: string | number; vlan: string | number; where: string | number };
+  "discovery.fact.link": { a: string | number; b: string | number; kind: string | number };
+  "discovery.fact.name": { ip: string | number; name: string | number };
+  "discovery.fact.no_ports": { ip: string | number };
+  "discovery.fact.os": { confidence: string | number; guess: string | number; ip: string | number };
+  "discovery.fact.parent": { parent: string | number };
+  "discovery.fact.port": { port: string | number };
+  "discovery.fact.ports": { ip: string | number; ports: string | number };
+  "discovery.fact.ssid": { ssid: string | number };
+  "discovery.fact.tls": { ports: string | number };
+  "discovery.fact.vendor": { mac: string | number; vendor: string | number };
+  "discovery.filter.prefix": { prefix: string | number };
+  "discovery.filter.remove": { filter: string | number };
+  "discovery.panel.adoption_failed": { error: string | number };
+  "discovery.panel.change_count": { count: number };
+  "discovery.panel.evidence_count": { count: number };
+  "discovery.panel.opened": { rule: string | number };
+  "discovery.panel.sightings": { count: number };
+  "discovery.reject.reason_too_long": { max: number };
+  "discovery.report.at": { at: string | number };
+  "discovery.rule.address_mismatch": { host: string | number; intended: string | number; ip: string | number };
+  "discovery.rule.address_unrecorded": { host: string | number; ip: string | number };
+  "discovery.rule.conflict_address_taken": { host: string | number; intended_mac: string | number; ip: string | number; macs: string | number };
+  "discovery.rule.conflict_networks": { count: number; mac: string | number; networks: string | number };
+  "discovery.rule.conflict_shared_address": { count: number; ip: string | number; macs: string | number };
+  "discovery.rule.discovered_address": { ips: string; mac: string; name: string | number; sources: number };
+  "discovery.rule.discovered_mac": { ips: string; mac: string; name: string | number; sources: number };
+  "discovery.rule.orphaned_address": { host: string; ip: string | number; last_seen: string | number };
+  "discovery.rule.outside_prefixes": { cidr: string | number; count: number };
+  "discovery.source.dhcp": { node: string | number };
+  "discovery.source.dns": { zone: string | number };
+  "discovery.source.inventory": { name: string | number };
+  "discovery.source.network_controller": { name: string | number };
+  "discovery.source.probe": { method: string | number; node: string | number };
+  "discovery.subject.fact_count": { count: number };
+  "discovery.subject.unknown": { subject: string | number };
+  "discovery.subject.vlan": { vlan: string | number };
   "errors.auth.password.too_long": { max: string | number };
   "errors.auth.password.too_short": { min: string | number };
   "errors.auth.setup.invalid_host_name": { host_name: string | number };
   "errors.auth.throttled": { retry_after: string | number };
   "errors.auth.token.lifetime_exceeded": { max_days: string | number };
   "errors.client.bad_response": { status: string | number };
+  "errors.connect.secret.missing": { purpose: string | number };
+  "errors.connect.secret.not_found": { purpose: string | number };
+  "errors.connect.secret.not_operator": { purpose: string | number };
+  "errors.connect.secret.undeclared": { purpose: string | number };
   "errors.ipam.address.duplicate": { ip: string | number };
   "errors.ipam.address.full": { cidr: string | number };
   "errors.ipam.address.in_dhcp_pool": { ip: string | number; range: string | number };
   "errors.ipam.address.network_or_broadcast": { cidr: string | number; ip: string | number };
   "errors.ipam.address.no_prefix": { ip: string | number };
+  "errors.ipam.adoption.invalid": { field: string | number };
   "errors.ipam.bulk.too_large": { count: number; limit: number };
   "errors.ipam.bulk.wrong_collection": { index: string | number };
   "errors.ipam.host.locked": { host: string | number };
@@ -2535,6 +3193,7 @@ export interface MessageArgs {
   "errors.ipam.prefix.host_bits": { cidr: string | number; network: string | number };
   "errors.ipam.prefix.overlap": { cidr: string | number; existing: string | number };
   "errors.ipam.prefix.overlaps_range": { range: string | number };
+  "errors.ipam.proposal.not_open": { state: string | number };
   "errors.ipam.range.covers_reservation": { host: string | number; ip: string | number };
   "errors.ipam.range.not_in_network": { cidr: string | number };
   "errors.ipam.range.outside_prefix": { cidr: string | number };
@@ -2619,6 +3278,13 @@ export interface MessageArgs {
   "ipam.addresses.claim": { ip: string | number };
   "ipam.addresses.free": { count: number };
   "ipam.addresses.grid": { cidr: string | number };
+  "ipam.adoption.cleared": { prefix: string | number };
+  "ipam.adoption.error.sightings": { max: string | number };
+  "ipam.adoption.error.vendors_count": { max: string | number };
+  "ipam.adoption.host_mode_on": { mode: string | number };
+  "ipam.adoption.saved": { prefix: string | number };
+  "ipam.adoption.sightings_on": { count: string | number };
+  "ipam.adoption.vendors_on": { vendors: string | number };
   "ipam.cfdef.delete_title": { key: string | number };
   "ipam.cfdef.deleted": { key: string | number };
   "ipam.cfdef.edit_title": { key: string | number };
@@ -2766,6 +3432,23 @@ export interface MessageArgs {
   "move.timeout.lease": { lease: string | number; timeout: string | number };
   "move.timeout.request": { timeout: string | number };
   "move.timeout_auto": { timeout: string | number };
+  "nodes.cert.days_left": { days: number };
+  "nodes.col.major": { major: string | number };
+  "nodes.enrol.next": { roles: string | number };
+  "nodes.enrol.once": { expires: string | number };
+  "nodes.mismatch": { count: number; majors: string | number; names: string | number };
+  "nodes.panel.buffer_value": { batches: number; size: string | number };
+  "nodes.panel.id": { id: string | number };
+  "nodes.panel.mismatch": { at: string | number; ours: string | number; theirs: string | number; version: string | number };
+  "nodes.panel.valid_range": { from: string | number; to: string | number };
+  "nodes.port_open": { addresses: string | number; majors: string | number };
+  "nodes.revoke.confirm_title": { name: string | number };
+  "nodes.revoke.done": { name: string | number };
+  "nodes.revoke.failed": { name: string | number };
+  "nodes.summary": { connected: string | number; nodes: number };
+  "nodes.token.delete_named": { name: string | number };
+  "nodes.version_count": { count: string | number; version: string | number };
+  "nodes.versions": { versions: string | number };
   "principal.node": { id: string | number };
   "principal.system": { component: string | number };
   "principal.token": { id: string | number };
@@ -3263,6 +3946,8 @@ export const messageKeys: readonly MessageKey[] = [
   "auth.strength.password",
   "auth.strength.password_totp",
   "auth.strength.pin",
+  "cluster.job.edit",
+  "cluster.job.write_preview",
   "common.action.add",
   "common.action.back",
   "common.action.cancel",
@@ -3295,6 +3980,181 @@ export const messageKeys: readonly MessageKey[] = [
   "common.required",
   "common.unknown",
   "common.yes",
+  "connect.job.edit",
+  "connect.job.poll_preview",
+  "connect.job.run",
+  "connect.job.write_preview",
+  "connectors.action.check",
+  "connectors.action.create",
+  "connectors.action.delete",
+  "connectors.action.disable",
+  "connectors.action.edit",
+  "connectors.action.enable",
+  "connectors.action.open",
+  "connectors.action.run",
+  "connectors.action.toggle",
+  "connectors.capability.actuator",
+  "connectors.capability.inventory",
+  "connectors.capability.migration",
+  "connectors.capability.network_controller",
+  "connectors.capability.webhook",
+  "connectors.col.capabilities",
+  "connectors.col.health",
+  "connectors.col.last_run",
+  "connectors.col.name",
+  "connectors.col.plugin",
+  "connectors.col.poll",
+  "connectors.col.process",
+  "connectors.col.writes",
+  "connectors.delete.body",
+  "connectors.delete.confirm",
+  "connectors.delete.title",
+  "connectors.detail.all_jobs",
+  "connectors.detail.back",
+  "connectors.detail.changed",
+  "connectors.detail.check_failed",
+  "connectors.detail.checked",
+  "connectors.detail.config",
+  "connectors.detail.created",
+  "connectors.detail.detail",
+  "connectors.detail.disabled",
+  "connectors.detail.error",
+  "connectors.detail.failed_runs",
+  "connectors.detail.failures",
+  "connectors.detail.health",
+  "connectors.detail.job",
+  "connectors.detail.last_error",
+  "connectors.detail.last_run",
+  "connectors.detail.last_success",
+  "connectors.detail.latency",
+  "connectors.detail.ms",
+  "connectors.detail.no",
+  "connectors.detail.no_check",
+  "connectors.detail.no_runs",
+  "connectors.detail.observations",
+  "connectors.detail.observations_link",
+  "connectors.detail.outcome",
+  "connectors.detail.pages",
+  "connectors.detail.process",
+  "connectors.detail.remote",
+  "connectors.detail.remote_version",
+  "connectors.detail.restarts",
+  "connectors.detail.runs",
+  "connectors.detail.started",
+  "connectors.detail.state",
+  "connectors.detail.trigger",
+  "connectors.detail.updated",
+  "connectors.detail.version",
+  "connectors.detail.warnings",
+  "connectors.detail.yes",
+  "connectors.empty.body",
+  "connectors.empty.title",
+  "connectors.form.choose",
+  "connectors.form.create",
+  "connectors.form.default",
+  "connectors.form.default_secs",
+  "connectors.form.enabled",
+  "connectors.form.example",
+  "connectors.form.guardrails",
+  "connectors.form.interval_range",
+  "connectors.form.item_add",
+  "connectors.form.item_add_to",
+  "connectors.form.item_label",
+  "connectors.form.item_remove",
+  "connectors.form.items_empty",
+  "connectors.form.name",
+  "connectors.form.name_help",
+  "connectors.form.name_long",
+  "connectors.form.name_required",
+  "connectors.form.no_plugins",
+  "connectors.form.no_settings",
+  "connectors.form.on",
+  "connectors.form.plugin",
+  "connectors.form.plugin_fixed",
+  "connectors.form.poll",
+  "connectors.form.save",
+  "connectors.form.secret_missing",
+  "connectors.form.secret_none",
+  "connectors.form.secret_other",
+  "connectors.form.secret_purpose",
+  "connectors.form.secret_tagged",
+  "connectors.form.secret_unlisted",
+  "connectors.form.secrets",
+  "connectors.form.secrets_admin",
+  "connectors.form.secrets_help",
+  "connectors.form.settings",
+  "connectors.form.stale",
+  "connectors.form.targets",
+  "connectors.form.timeout",
+  "connectors.form.title_create",
+  "connectors.form.title_edit",
+  "connectors.form.unsupported",
+  "connectors.form.writes",
+  "connectors.form.writes_help",
+  "connectors.form.writes_read_only",
+  "connectors.form.writes_warning",
+  "connectors.health.degraded",
+  "connectors.health.failing",
+  "connectors.health.healthy",
+  "connectors.health.off",
+  "connectors.instances",
+  "connectors.plugins.capabilities",
+  "connectors.plugins.homepage",
+  "connectors.plugins.license",
+  "connectors.plugins.none",
+  "connectors.plugins.platforms",
+  "connectors.plugins.reload",
+  "connectors.plugins.secrets",
+  "connectors.plugins.source.bundled",
+  "connectors.plugins.source.installed",
+  "connectors.plugins.title",
+  "connectors.plugins.unusable",
+  "connectors.problem.enum",
+  "connectors.problem.format",
+  "connectors.problem.items",
+  "connectors.problem.items_max",
+  "connectors.problem.items_min",
+  "connectors.problem.length",
+  "connectors.problem.length_max",
+  "connectors.problem.length_min",
+  "connectors.problem.pattern",
+  "connectors.problem.range",
+  "connectors.problem.range_max",
+  "connectors.problem.range_min",
+  "connectors.problem.required",
+  "connectors.problem.type",
+  "connectors.problem.unique",
+  "connectors.problem.unknown",
+  "connectors.process.backoff",
+  "connectors.process.circuit_open",
+  "connectors.process.failed",
+  "connectors.process.running",
+  "connectors.process.starting",
+  "connectors.process.stopped",
+  "connectors.process.until",
+  "connectors.remote.degraded",
+  "connectors.remote.healthy",
+  "connectors.remote.unreachable",
+  "connectors.run.failed",
+  "connectors.run.never",
+  "connectors.run.succeeded",
+  "connectors.seconds",
+  "connectors.seconds_default",
+  "connectors.sub",
+  "connectors.toast.change_failed",
+  "connectors.toast.check_failed",
+  "connectors.toast.checked",
+  "connectors.toast.delete_failed",
+  "connectors.toast.deleted",
+  "connectors.toast.disabled",
+  "connectors.toast.enabled",
+  "connectors.toast.open_job",
+  "connectors.toast.run",
+  "connectors.toast.run_failed",
+  "connectors.trigger.manual",
+  "connectors.trigger.schedule",
+  "connectors.writes.off",
+  "connectors.writes.on",
   "dashboard.action.claim",
   "dashboard.action.claim_where",
   "dashboard.action.import",
@@ -3316,6 +4176,16 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.tile.addresses_of",
   "dashboard.tile.alarms",
   "dashboard.tile.alarms_hint",
+  "dashboard.tile.connectors",
+  "dashboard.tile.connectors_hint",
+  "dashboard.tile.connectors_link",
+  "dashboard.tile.nodes",
+  "dashboard.tile.nodes_hint",
+  "dashboard.tile.nodes_link",
+  "dashboard.tile.nodes_none",
+  "dashboard.tile.proposals",
+  "dashboard.tile.proposals_hint",
+  "dashboard.tile.proposals_link",
   "dashboard.tile.waiting_for_you",
   "dashboard.update.action",
   "dashboard.update.body",
@@ -3332,6 +4202,206 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.waiting.none",
   "dashboard.waiting.step",
   "dashboard.waiting.title",
+  "discovery.action.approve",
+  "discovery.action.dismiss",
+  "discovery.action.open",
+  "discovery.action.reconcile",
+  "discovery.action.reject",
+  "discovery.approve.confirm",
+  "discovery.approve.title",
+  "discovery.col.created",
+  "discovery.col.first_seen",
+  "discovery.col.kind",
+  "discovery.col.last_seen",
+  "discovery.col.observed",
+  "discovery.col.prefix",
+  "discovery.col.severity",
+  "discovery.col.sightings",
+  "discovery.col.source",
+  "discovery.col.sources",
+  "discovery.col.state",
+  "discovery.col.subject",
+  "discovery.col.subject_key",
+  "discovery.col.summary",
+  "discovery.col.type",
+  "discovery.col.updated",
+  "discovery.count",
+  "discovery.count_open",
+  "discovery.empty.body",
+  "discovery.empty.filtered",
+  "discovery.empty.title",
+  "discovery.fact.address_mac",
+  "discovery.fact.attachment",
+  "discovery.fact.attachment_vlan",
+  "discovery.fact.current",
+  "discovery.fact.expired",
+  "discovery.fact.link",
+  "discovery.fact.name",
+  "discovery.fact.no_ports",
+  "discovery.fact.os",
+  "discovery.fact.parent",
+  "discovery.fact.port",
+  "discovery.fact.ports",
+  "discovery.fact.ssid",
+  "discovery.fact.tls",
+  "discovery.fact.vendor",
+  "discovery.fact_type.address",
+  "discovery.fact_type.attachment",
+  "discovery.fact_type.host",
+  "discovery.fact_type.link",
+  "discovery.fact_type.name",
+  "discovery.fact_type.os",
+  "discovery.fact_type.services",
+  "discovery.fact_type.vendor",
+  "discovery.filter.all",
+  "discovery.filter.label",
+  "discovery.filter.placeholder",
+  "discovery.filter.prefix",
+  "discovery.filter.remove",
+  "discovery.filter.remove_prefix",
+  "discovery.filter.state",
+  "discovery.grid.label",
+  "discovery.kind.address_mismatch",
+  "discovery.kind.conflict",
+  "discovery.kind.discovered_host",
+  "discovery.kind.orphaned_intent",
+  "discovery.kind.outside_prefixes",
+  "discovery.lookup.label",
+  "discovery.lookup.placeholder",
+  "discovery.lookup.submit",
+  "discovery.method.arp",
+  "discovery.method.arp_sweep",
+  "discovery.method.icmp",
+  "discovery.method.lldp",
+  "discovery.method.llmnr",
+  "discovery.method.mdns",
+  "discovery.method.nd",
+  "discovery.method.os_fingerprint",
+  "discovery.method.reverse_dns",
+  "discovery.method.snmp",
+  "discovery.method.tcp_connect",
+  "discovery.method.tcp_syn",
+  "discovery.nav.label",
+  "discovery.nav.observations",
+  "discovery.nav.proposals",
+  "discovery.observations.all",
+  "discovery.observations.current",
+  "discovery.observations.empty",
+  "discovery.observations.empty_body",
+  "discovery.observations.expired",
+  "discovery.observations.filter_label",
+  "discovery.observations.filter_placeholder",
+  "discovery.observations.grid_label",
+  "discovery.observations.sub",
+  "discovery.panel.adopted_by",
+  "discovery.panel.adoption_failed",
+  "discovery.panel.change",
+  "discovery.panel.change_conflict",
+  "discovery.panel.change_count",
+  "discovery.panel.change_none",
+  "discovery.panel.conflict_hint",
+  "discovery.panel.decided_by",
+  "discovery.panel.decision",
+  "discovery.panel.evidence",
+  "discovery.panel.evidence_count",
+  "discovery.panel.first_seen",
+  "discovery.panel.intent",
+  "discovery.panel.ip",
+  "discovery.panel.label",
+  "discovery.panel.last_seen",
+  "discovery.panel.mac",
+  "discovery.panel.name",
+  "discovery.panel.network",
+  "discovery.panel.newer",
+  "discovery.panel.no_evidence",
+  "discovery.panel.nothing_hint",
+  "discovery.panel.opened",
+  "discovery.panel.prefix",
+  "discovery.panel.reason",
+  "discovery.panel.results",
+  "discovery.panel.sightings",
+  "discovery.panel.subject",
+  "discovery.panel.superseded_by",
+  "discovery.reconcile.failed",
+  "discovery.reject.body",
+  "discovery.reject.body_conflict",
+  "discovery.reject.confirm",
+  "discovery.reject.confirm_conflict",
+  "discovery.reject.reason",
+  "discovery.reject.reason_hint",
+  "discovery.reject.reason_too_long",
+  "discovery.reject.title",
+  "discovery.reject.title_conflict",
+  "discovery.report.adopted",
+  "discovery.report.adoption_failures",
+  "discovery.report.at",
+  "discovery.report.expired",
+  "discovery.report.moves_confirmed",
+  "discovery.report.nothing",
+  "discovery.report.opened",
+  "discovery.report.refreshed",
+  "discovery.report.sightings",
+  "discovery.report.superseded",
+  "discovery.report.suppressed",
+  "discovery.report.title",
+  "discovery.report.unchanged",
+  "discovery.rule.address_mismatch",
+  "discovery.rule.address_unrecorded",
+  "discovery.rule.conflict_address_taken",
+  "discovery.rule.conflict_networks",
+  "discovery.rule.conflict_shared_address",
+  "discovery.rule.discovered_address",
+  "discovery.rule.discovered_mac",
+  "discovery.rule.orphaned_address",
+  "discovery.rule.outside_prefixes",
+  "discovery.severity.critical",
+  "discovery.severity.info",
+  "discovery.severity.warning",
+  "discovery.source.dhcp",
+  "discovery.source.dns",
+  "discovery.source.inventory",
+  "discovery.source.network_controller",
+  "discovery.source.probe",
+  "discovery.source_short.dhcp_lease",
+  "discovery.source_short.dns_record",
+  "discovery.source_short.inventory",
+  "discovery.source_short.network_controller",
+  "discovery.source_short.probe",
+  "discovery.state.accepted",
+  "discovery.state.expired",
+  "discovery.state.open",
+  "discovery.state.rejected",
+  "discovery.state.superseded",
+  "discovery.subject.attachments",
+  "discovery.subject.current",
+  "discovery.subject.fact_count",
+  "discovery.subject.facts",
+  "discovery.subject.intent",
+  "discovery.subject.ips",
+  "discovery.subject.kind_ip",
+  "discovery.subject.kind_mac",
+  "discovery.subject.kind_name",
+  "discovery.subject.macs",
+  "discovery.subject.names",
+  "discovery.subject.no_intent",
+  "discovery.subject.no_proposals",
+  "discovery.subject.not_current",
+  "discovery.subject.os",
+  "discovery.subject.parents",
+  "discovery.subject.platforms",
+  "discovery.subject.ports",
+  "discovery.subject.proposals",
+  "discovery.subject.sightings",
+  "discovery.subject.sources",
+  "discovery.subject.summary",
+  "discovery.subject.tags",
+  "discovery.subject.tls",
+  "discovery.subject.unknown",
+  "discovery.subject.vendors",
+  "discovery.subject.vlan",
+  "discovery.toast.approved",
+  "discovery.toast.dismissed",
+  "discovery.toast.rejected",
   "errors.auth.break_glass.hardware_key_only",
   "errors.auth.challenge_invalid",
   "errors.auth.conflict",
@@ -3367,6 +4437,33 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.client.aborted",
   "errors.client.bad_response",
   "errors.client.network",
+  "errors.cluster.enrolment.lifetime",
+  "errors.cluster.enrolment.not_found",
+  "errors.cluster.enrolment.random",
+  "errors.cluster.enrolment.roles",
+  "errors.cluster.node.conflict",
+  "errors.cluster.node.name",
+  "errors.cluster.node.name_taken",
+  "errors.cluster.node.not_found",
+  "errors.connect.instance.call_timeout",
+  "errors.connect.instance.conflict",
+  "errors.connect.instance.disabled",
+  "errors.connect.instance.name",
+  "errors.connect.instance.name_taken",
+  "errors.connect.instance.not_found",
+  "errors.connect.instance.nothing_to_run",
+  "errors.connect.instance.poll_interval",
+  "errors.connect.plugin.exited",
+  "errors.connect.plugin.unavailable",
+  "errors.connect.plugin.unknown",
+  "errors.connect.plugin.unusable",
+  "errors.connect.run.failed",
+  "errors.connect.secret.missing",
+  "errors.connect.secret.not_found",
+  "errors.connect.secret.not_operator",
+  "errors.connect.secret.undeclared",
+  "errors.connect.settings.invalid",
+  "errors.connect.timeout",
   "errors.generic.client",
   "errors.generic.field",
   "errors.generic.not_implemented",
@@ -3395,6 +4492,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.ipam.address.in_supernet",
   "errors.ipam.address.network_or_broadcast",
   "errors.ipam.address.no_prefix",
+  "errors.ipam.adoption.invalid",
   "errors.ipam.bulk.too_large",
   "errors.ipam.bulk.wrong_collection",
   "errors.ipam.contended",
@@ -3426,10 +4524,15 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.ipam.prefix.overlap",
   "errors.ipam.prefix.overlaps_range",
   "errors.ipam.prefix.resize_orphans",
+  "errors.ipam.proposal.not_found",
+  "errors.ipam.proposal.not_open",
+  "errors.ipam.proposal.nothing_to_apply",
+  "errors.ipam.proposal.revision_mismatch",
   "errors.ipam.range.covers_reservation",
   "errors.ipam.range.not_in_network",
   "errors.ipam.range.outside_prefix",
   "errors.ipam.range.overlap",
+  "errors.ipam.reconciler.unavailable",
   "errors.ipam.reference_missing",
   "errors.ipam.revision_mismatch",
   "errors.ipam.site.cycle",
@@ -3638,6 +4741,7 @@ export const messageKeys: readonly MessageKey[] = [
   "hosts.mode.title",
   "hosts.not_found",
   "hosts.observations.empty",
+  "hosts.observations.open",
   "hosts.observations.title",
   "hosts.undo",
   "hosts.unlocked",
@@ -3878,6 +4982,41 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.addresses.grid",
   "ipam.addresses.none",
   "ipam.addresses.show_free",
+  "ipam.adoption.clear",
+  "ipam.adoption.cleared",
+  "ipam.adoption.edit",
+  "ipam.adoption.error.sightings",
+  "ipam.adoption.error.vendor_length",
+  "ipam.adoption.error.vendors_count",
+  "ipam.adoption.host_mode",
+  "ipam.adoption.host_mode_help",
+  "ipam.adoption.host_mode_on",
+  "ipam.adoption.min_sightings",
+  "ipam.adoption.min_sightings_help",
+  "ipam.adoption.mode.adopt_all",
+  "ipam.adoption.mode.adopt_hosts",
+  "ipam.adoption.mode.manual",
+  "ipam.adoption.mode_hint.adopt_all",
+  "ipam.adoption.mode_hint.adopt_hosts",
+  "ipam.adoption.mode_hint.manual",
+  "ipam.adoption.mode_label",
+  "ipam.adoption.never",
+  "ipam.adoption.only_pools",
+  "ipam.adoption.only_pools_on",
+  "ipam.adoption.proposals",
+  "ipam.adoption.save",
+  "ipam.adoption.saved",
+  "ipam.adoption.set",
+  "ipam.adoption.sightings_on",
+  "ipam.adoption.source_default",
+  "ipam.adoption.source_inherited",
+  "ipam.adoption.source_own",
+  "ipam.adoption.stale",
+  "ipam.adoption.title",
+  "ipam.adoption.updated_by",
+  "ipam.adoption.vendors",
+  "ipam.adoption.vendors_help",
+  "ipam.adoption.vendors_on",
   "ipam.alarm.critical",
   "ipam.alarm.normal",
   "ipam.alarm.warning",
@@ -4101,6 +5240,7 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.prefix.not_found",
   "ipam.prefix.ranges_grid",
   "ipam.prefix.tab.addresses",
+  "ipam.prefix.tab.adoption",
   "ipam.prefix.tab.children",
   "ipam.prefix.tab.history",
   "ipam.prefix.tab.ranges",
@@ -4435,6 +5575,112 @@ export const messageKeys: readonly MessageKey[] = [
   "node.role.dhcp",
   "node.role.dns",
   "node.role.probe",
+  "nodes.action.enrol",
+  "nodes.cert.days_left",
+  "nodes.cert.expired",
+  "nodes.col.address",
+  "nodes.col.certificate",
+  "nodes.col.connected",
+  "nodes.col.id",
+  "nodes.col.last_seen",
+  "nodes.col.major",
+  "nodes.col.name",
+  "nodes.col.roles",
+  "nodes.col.version",
+  "nodes.empty.body",
+  "nodes.empty.title",
+  "nodes.enrol.command",
+  "nodes.enrol.copied_command",
+  "nodes.enrol.copied_token",
+  "nodes.enrol.copy_blocked",
+  "nodes.enrol.copy_command",
+  "nodes.enrol.copy_token",
+  "nodes.enrol.create",
+  "nodes.enrol.created_title",
+  "nodes.enrol.done",
+  "nodes.enrol.fingerprint",
+  "nodes.enrol.fingerprint_help",
+  "nodes.enrol.intro",
+  "nodes.enrol.lifetime",
+  "nodes.enrol.lifetime_help",
+  "nodes.enrol.name",
+  "nodes.enrol.name_help",
+  "nodes.enrol.name_rule",
+  "nodes.enrol.next",
+  "nodes.enrol.once",
+  "nodes.enrol.role_hint.dhcp",
+  "nodes.enrol.role_hint.dns",
+  "nodes.enrol.role_hint.probe",
+  "nodes.enrol.roles",
+  "nodes.enrol.roles_required",
+  "nodes.enrol.title",
+  "nodes.enrol.token",
+  "nodes.enrol.vrf",
+  "nodes.enrol.vrf_default",
+  "nodes.enrol.vrf_help",
+  "nodes.grid.label",
+  "nodes.lifetime.s3600",
+  "nodes.lifetime.s604800",
+  "nodes.lifetime.s86400",
+  "nodes.lifetime.s900",
+  "nodes.link.connected",
+  "nodes.link.disconnected",
+  "nodes.link.mismatch",
+  "nodes.mismatch",
+  "nodes.panel.about",
+  "nodes.panel.buffer",
+  "nodes.panel.buffer_value",
+  "nodes.panel.certificate",
+  "nodes.panel.connection",
+  "nodes.panel.dropped",
+  "nodes.panel.enrolled",
+  "nodes.panel.id",
+  "nodes.panel.label",
+  "nodes.panel.last_beat",
+  "nodes.panel.major",
+  "nodes.panel.mismatch",
+  "nodes.panel.not_connected",
+  "nodes.panel.peer",
+  "nodes.panel.renewal_due",
+  "nodes.panel.renewed",
+  "nodes.panel.serial",
+  "nodes.panel.since",
+  "nodes.panel.valid",
+  "nodes.panel.valid_range",
+  "nodes.port_closed",
+  "nodes.port_open",
+  "nodes.revoke.action",
+  "nodes.revoke.confirm",
+  "nodes.revoke.confirm_body",
+  "nodes.revoke.confirm_title",
+  "nodes.revoke.done",
+  "nodes.revoke.failed",
+  "nodes.revoke.hint",
+  "nodes.revoke.title",
+  "nodes.summary",
+  "nodes.token.any_name",
+  "nodes.token.col.actions",
+  "nodes.token.col.created",
+  "nodes.token.col.expires",
+  "nodes.token.col.name",
+  "nodes.token.col.roles",
+  "nodes.token.col.state",
+  "nodes.token.col.used",
+  "nodes.token.delete",
+  "nodes.token.delete_done",
+  "nodes.token.delete_failed",
+  "nodes.token.delete_named",
+  "nodes.token.delete_pending",
+  "nodes.token.delete_title",
+  "nodes.token.deleted",
+  "nodes.token.hint",
+  "nodes.token.none",
+  "nodes.token.state.expired",
+  "nodes.token.state.pending",
+  "nodes.token.state.used",
+  "nodes.token.title",
+  "nodes.version_count",
+  "nodes.versions",
   "prefs.density.comfortable",
   "prefs.density.compact",
   "prefs.density.dense",
@@ -5173,13 +6419,16 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.keys.title",
   "shell.keys.undo",
   "shell.nav.audit",
+  "shell.nav.connectors",
   "shell.nav.dashboard",
   "shell.nav.dhcp",
+  "shell.nav.discovery",
   "shell.nav.dns",
   "shell.nav.ipam",
   "shell.nav.jobs",
   "shell.nav.jobs_badge",
   "shell.nav.label",
+  "shell.nav.nodes",
   "shell.nav.settings",
   "shell.nav.tooltip",
   "shell.nav.topology",

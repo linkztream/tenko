@@ -58,6 +58,16 @@ ui/
                         step-up in place and the clipboard path (clipboard.ts); api.ts is its
                         only API module, also used by the credentials and the remote hand-off
                         of the host page (hosts/credentials.tsx, hosts/Connect.tsx)
+    discovery/          the proposal inbox with the docked proposal panel, the observations
+                        and the picture of one subject (WP2.9); HostObservations.tsx is the
+                        observation section of the host page; api.ts is its only API module,
+                        also used by the adoption tab of the prefix pane
+                        (ipam/prefix/AdoptionPanel.tsx) and the dashboard
+    connectors/         connector plugins and instances (WP2.9): the list, one instance, the
+                        instance form with the settings form built from the plugin's settings
+                        schema (schema.ts, SchemaForm.tsx); api.ts is its only API module
+    nodes/              cluster nodes and enrolment tokens (WP2.9): the node list with the docked
+                        node panel, revocation, the token dialog; the requests are api/nodes.ts
 ```
 
 Every area folder owns a `routes.ts` that exports `routes: AppRoute[]`; `src/app/router.ts`
@@ -128,6 +138,12 @@ other key stays in the core table that the first load carries.
 | `account` | `account.` |
 | `updates` | `updates.`, `errors.update.`, `errors.upgrade.` |
 | `secrets` | `secrets.`, `errors.vault.`, `errors.remote.` (also loaded by the host views) |
+| `discovery` | `discovery.`, `errors.ipam.proposal.`, `errors.ipam.reconciler.` (also loaded by the host views) |
+| `connectors` | `connectors.`, `errors.connect.` |
+| `nodes` | `nodes.`, `errors.cluster.` |
+
+The `jobs` pack also holds `connect.job.` and `cluster.job.`, the job titles the server sends
+for connector and node edits, and the `ipam` pack `errors.ipam.adoption.` for the adoption tab.
 
 The Vite plugin (`scripts/vite-plugin-i18n.mjs`) builds one module per pack and language
 (`virtual:tenko-i18n/<language>/<pack>`). A route loads its packs together with its chunk:
@@ -188,6 +204,8 @@ names are kebab case and stable; text and layout may change without breaking the
 | Plan dialog | `plan-summary`, `plan-blocking`, `plan-ack`, `plan-confirm` | |
 | Repeated item | one generic id, e.g. `move-item`, `tree-node` | `data-id`, `data-key` or `data-index` |
 | Status bar items | `status-<name>`, e.g. `status-alarms` | |
+| Docked panel | `<object>-panel`, e.g. `proposal-panel`, `node-panel` | `data-id` |
+| Filter of a view | `filter-<name>`, e.g. `filter-state`, `filter-kind-<kind>`, `filter-prefix` | |
 | Repeated item by position | the generic id, e.g. `toast-action` | `data-index` |
 | Confirmation dialog | `dialog-confirm`, `confirm-ok`, `confirm-cancel` | |
 | State and kind of an item | | `data-state` (job, step and chain chips), `data-status` (`status-badge`), `data-kind` and `data-action` (`plan-change`, `history-entry`), `data-code` (`plan-ack`), `data-job` (`job-group-task`) |
@@ -208,6 +226,28 @@ Page roots in this version:
 | `/jobs`, `/jobs/:id` | `page-jobs`, `page-job` |
 | `/audit`, `/audit/:seq` | `page-audit`, `page-audit-record` |
 | `/secrets`, `/secrets/:id` | `page-secrets` |
+| `/discovery`, `/discovery/:id` | `page-discovery` (with `proposal-panel`) |
+| `/discovery/observations`, `/discovery/observations/:subject` | `page-discovery-observations`, `page-discovery-subject` |
+| `/connectors`, `/connectors/:id` | `page-connectors`, `page-connector` |
+| `/nodes`, `/nodes/:id` | `page-nodes` (with `node-panel`) |
+
+The hooks of the WP2.9 views beyond the generic ones:
+
+| View | Test ids |
+|---|---|
+| Proposal inbox | `grid-proposals`, `discovery-reconcile`, `filter-state` (a select), `filter-severity-<severity>`, `filter-kind-<kind>`, `filter-prefix`, `discovery-empty`; dialogs `dialog-approve` (the plan dialog), `dialog-reject` with `field-reason`, `dialog-reconcile-report` with `report-count` (`data-key` the member) |
+| Proposal panel | `proposal-panel` (`data-id`), `proposal-summary`, `discovery-approve`, `discovery-reject`, `evidence` (`data-index`, `data-key` the source key), `proposal-change`, `proposal-decision`, `proposal-adoption-error`, `proposal-subject-link`, `proposal-superseded-by`; the kind, severity and state badges carry `data-kind`, `data-severity` and `data-state` |
+| Observations | `grid-observations`, `discovery-lookup` with `field-subject` and `form-submit`, `filter-current-<current, expired or all>`, `filter-type-<type>`, `filter-<source, mac, ip or within>`, `observations-empty` |
+| Subject | `subject-summary`, `subject-sources`, `subject-macs`, `subject-ips`, `subject-names`, `subject-os`, `subject-ports`, `subject-tls`, `subject-vendors`, `subject-attachments`, `subject-intent`, `subject-sightings`, `subject-proposals`, `subject-proposal` (`data-id`), `subject-facts`, `subject-unknown`; facts are `fact` (`data-key` the source key and the subject key, `data-state` current or expired) |
+| Host page | `host-observations` with `host-observations-body`, `host-observations-summary`, `host-open-ports`, `host-os`, `host-proposal` (`data-id`), `host-observation-link` (`data-key` the subject) |
+| Prefix pane | `prefix-tab-adoption`, `prefix-adoption`, `adoption-effective` (`data-mode`), `adoption-source` (`data-source` own, inherited or default), `adoption-edit`, `adoption-clear`, `adoption-proposals`, `dialog-adoption-form` with `field-mode-<mode>`, `field-only_dhcp_pools`, `field-min_sightings`, `field-host_mode`, `field-vendors` |
+| Connectors | `grid-connectors`, `connectors-create`, `connectors-empty`, `connectors-plugins`, `plugin` (`data-key` the name, `data-usable`), `plugin-unusable`, `connector-health` (`data-health`) |
+| Connector | `connector-run`, `connector-check`, `connector-toggle`, `connector-edit`, `connector-delete`, `connector-disabled`, `connector-process`, `connector-restarts`, `connector-failures`, `connector-last-error` (`data-code`), `connector-remote`, `connector-remote-error`, `connector-last-run`, `connector-observations`, `connector-runs`, `connector-run-job` (`data-id`), `connector-settings-view`, `connector-config`, `connector-secret` (`data-key` the purpose), `connector-writes` |
+| Connector form | `dialog-connector-form`, `field-plugin`, `field-name`, `connector-settings` with the settings form (`settings-form`, `settings-empty`, `field-settings-<name>`, `settings-item` and `settings-item-remove` with `data-field` and `data-index`, `settings-item-add`), `connector-secrets` with `field-secret-<purpose>`, `field-poll_interval`, `field-call_timeout`, `connector-guardrails` with `field-writes_enabled` and `field-enabled`, `connector-writes-warning` |
+| Nodes | `grid-nodes`, `nodes-enrol`, `nodes-version-mismatch`, `nodes-cluster`, `nodes-empty`, `node-link` (`data-state`), `nodes-tokens`, `enrolment` (`data-id`, `data-state`), `enrolment-delete` |
+| Node panel | `node-panel` (`data-id`), `node-mismatch`, `node-connection`, `node-buffer`, `node-certificate`, `node-revoke` |
+| Enrolment | `dialog-enrol` with `field-role-<role>`, `field-name`, `field-lifetime` and `field-vrf`; then `dialog-enrol-token` with `enrol-once`, `enrol-command`, `enrol-token`, `enrol-fingerprint`, `nodes-copy-command`, `nodes-copy-token` and `enrol-done` |
+| Dashboard | `dashboard-proposals`, `dashboard-proposals-link`, `dashboard-connectors`, `dashboard-connectors-link`, `dashboard-nodes`, `dashboard-nodes-link` |
 
 A new view follows the same pattern: a page root id, `grid-<id>` for each grid, the generic
 row and cell hooks from `DataGrid`, and `<area>-<action>` for its actions.

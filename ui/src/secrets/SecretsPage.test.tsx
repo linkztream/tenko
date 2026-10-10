@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CONNECTOR_IDS } from "../api/mock/connectors-store";
 import type { MockUser } from "../api/mock/db";
 import { server } from "../api/mock/node";
 import { SEED_HOST_ID, SEED_SECRET_IDS, bindSecret, mockSecrets, secretList, secretValue, seedSecret } from "../api/mock/secrets-store";
@@ -31,6 +32,12 @@ afterEach(async () => {
   Reflect.deleteProperty(navigator, "clipboard");
   setSessionForTest(null);
 });
+
+/** The seed has a connector instance that references "unifi api"; delete it, as a person would. */
+async function releaseUnifi() {
+  const answer = await fetch(`/api/v1/connectors/${CONNECTOR_IDS.controller}`, { method: "DELETE" });
+  expect(answer.status).toBe(204);
+}
 
 async function openPage(url = "/secrets") {
   const view = renderRoute(SecretsPage, { url, path: "/secrets/:id?" });
@@ -509,6 +516,7 @@ describe("delete", () => {
   });
 
   it("deletes an unused secret after a confirmation that names it", async () => {
+    await releaseUnifi();
     await openPage();
     fireEvent.click(within(rowOf("unifi api")).getByTestId("secret-delete"));
     const dialog = await screen.findByTestId("dialog-confirm");
@@ -523,6 +531,7 @@ describe("delete", () => {
   });
 
   it("keeps the secret when the confirmation is cancelled", async () => {
+    await releaseUnifi();
     await openPage();
     fireEvent.click(within(rowOf("unifi api")).getByTestId("secret-delete"));
     const dialog = await screen.findByTestId("dialog-confirm");
@@ -532,6 +541,7 @@ describe("delete", () => {
   });
 
   it("turns the confirmation into the list when a host binds the secret meanwhile", async () => {
+    await releaseUnifi();
     await openPage();
     fireEvent.click(within(rowOf("unifi api")).getByTestId("secret-delete"));
     const dialog = await screen.findByTestId("dialog-confirm");
@@ -548,6 +558,7 @@ describe("delete", () => {
   });
 
   it("offers to reload when the secret changed since the page read it", async () => {
+    await releaseUnifi();
     await openPage();
     await updateSecret(UNIFI, { notes: "changed elsewhere" });
     fireEvent.click(within(rowOf("unifi api")).getByTestId("secret-delete"));
@@ -564,6 +575,7 @@ describe("delete", () => {
   });
 
   it("leaves the detail of a deleted secret", async () => {
+    await releaseUnifi();
     const view = await openPage(`/secrets/${UNIFI}`);
     const detail = await screen.findByTestId("secret-detail");
     fireEvent.click(within(detail).getByTestId("secret-delete"));
@@ -616,6 +628,7 @@ describe("the detail", () => {
   });
 
   it("opens from the list and closes again", async () => {
+    await releaseUnifi();
     const view = await openPage();
     expect(screen.queryByTestId("secret-detail")).toBeNull();
     fireEvent.click(within(rowOf("unifi api")).getByRole("link", { name: "unifi api" }));

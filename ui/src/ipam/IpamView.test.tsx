@@ -355,7 +355,7 @@ describe("the prefix pane", () => {
 
   it("shows the address tab first for a network and the prefixes tab first for a supernet", async () => {
     await openNetwork("192.0.2.0/24");
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Addresses", "Ranges", "History"]);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Addresses", "Ranges", "Adoption", "History"]);
     expect(tab("Addresses").getAttribute("aria-selected")).toBe("true");
   });
 
@@ -493,7 +493,7 @@ describe("the prefix pane", () => {
   it("shows the prefixes inside a supernet", async () => {
     renderIpam(paths.prefix("203.0.113.0/24"));
     const pane = await paneOf("203.0.113.0/24");
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Prefixes", "Addresses", "History"]);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Prefixes", "Addresses", "Adoption", "History"]);
     expect(tab("Prefixes").getAttribute("aria-selected")).toBe("true");
     const grid = await screen.findByTestId("grid-prefix-children");
     await waitFor(() =>

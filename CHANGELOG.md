@@ -43,6 +43,12 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - The node registry: `GET /api/v1/nodes` lists the enrolled nodes with their roles, certificate, version and live connection, enrolment tokens can be listed and deleted, and revoking a node closes its connections and refuses its certificate from then on. `GET /api/v1/system/status` reports enrolled and connected nodes and their versions.
 - Controllers and nodes agree on the protocol version, so they can be upgraded one at a time; a node that shares no version with its controller is refused with a clear error and shown as a warning in the system status.
 - A `[cluster]` section in `tenko.toml`: the addresses of the cluster port, the endpoints nodes are told, the heartbeat interval, the token lifetime and the size of a node's buffer.
+- Discovery in the web UI: an inbox of the proposals, filtered by state, kind, severity, network and device and updated live, with the evidence behind each proposal and a preview of the changes it would make; approve it, reject it with a reason, dismiss a conflict once its cause is resolved, or run the reconciler at once. The observations of every source can be browsed and looked up per MAC address, IP address or name, with what each source reports, the matching hosts and addresses, and the proposals about the device.
+- The host page shows what the sources report about the host: the facts per source, its open TCP ports, its operating system, when it was last seen, and the open proposals about it.
+- The adoption policy of a prefix in the web UI, on the prefix's Adoption tab: the policy in force and the prefix it comes from, set for the prefix or cleared so that it inherits again.
+- Connectors in the web UI: the installed plugins with their capabilities and platforms, and the connector instances with their health, plugin process and last run. A form built from the plugin's own settings creates and changes an instance, with secrets chosen by purpose (never shown) and writes off unless switched on; instances can be run or checked at once, enabled, disabled and deleted.
+- Nodes in the web UI: the enrolled nodes with their roles, connection, versions and certificate expiry, revocation, and enrolment tokens that are shown once together with the command to run on the node. A node that shares no protocol version with the controller is pointed out.
+- The start page shows the open proposals, the healthy connectors and the connected nodes.
 
 ### Changed
 

@@ -6,6 +6,7 @@ import { rdpFile } from "../../hosts/handoff";
 import type { components } from "../generated/schema";
 import type { AuditRecord, LoginResponse, Page } from "../types";
 import { audit } from "./audit-store";
+import { CONNECTOR_IDS } from "./connectors-store";
 import { db, findUserByName, resetMockDb } from "./db";
 import { MOCK_PASSWORDS, MOCK_USER_IDS } from "./fixtures";
 import { HOST_IDS, INTERFACE_IDS } from "./ipam/api";
@@ -556,6 +557,8 @@ describe("delete", () => {
   });
 
   it("deletes an unbound secret, with an event and an audit record", async () => {
+    // The seeded connector instance references "unifi api"; it has to go first.
+    expect((await del(`${V}/connectors/${CONNECTOR_IDS.controller}`)).status).toBe(204);
     const stale = expectProblem(await del(secretPath(UNIFI), { headers: { "If-Match": '"1"' } }), 409, "vault.secret.conflict");
     expect(stale.params.expected).toBe("1");
     const current = (await get<SecretView>(secretPath(UNIFI))).body;
@@ -590,7 +593,7 @@ describe("references", () => {
     expect((await get<S["SecretReferences"]>(`${secretPath(UNIFI)}/references`)).body).toEqual({
       id: UNIFI,
       hosts: [],
-      connectors: [],
+      connectors: [{ connector: CONNECTOR_IDS.controller, name: "Home network", plugin: "lab-controller", purpose: "api_key" }],
     });
   });
 

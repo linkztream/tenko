@@ -1,8 +1,9 @@
 // The start page (decision 13): the node at a glance, the utilization of the networks per
-// tenant and VRF, the active utilization alarms, the jobs that wait for a person, the most
-// recent audit records, and the quick actions (claim the next free address, a new prefix,
-// an import). Every number that can grow is an SI number with the exact value as tooltip;
-// utilization is a bar, never a gauge.
+// tenant and VRF, the active utilization alarms, the jobs that wait for a person, the open
+// proposals, the connector health and the connected nodes (WP2.9), the most recent audit
+// records, and the quick actions (claim the next free address, a new prefix, an import).
+// Every number that can grow is an SI number with the exact value as tooltip; utilization is a
+// bar, never a gauge.
 import { A, useNavigate } from "@solidjs/router";
 import { createMemo, createSignal, For, lazy, Show } from "solid-js";
 import { api } from "../api/client";
@@ -28,6 +29,7 @@ import { jobTitle } from "../jobs/words";
 import { createShellStatus } from "../shell/status";
 import { storeRoleLabel } from "../shell/TopBar";
 import { moduleRunning } from "../updates/modules";
+import { OperationsTiles } from "./OperationsTiles";
 import "./dashboard.css";
 
 // The notices of the updates area: a newer release, and a module change that waits for a restart.
@@ -200,6 +202,7 @@ export default function Dashboard() {
             </div>
             <p class="muted">{t("dashboard.tile.waiting_for_you", { count: waiting.value.latest?.length ?? 0 })}</p>
           </section>
+          <OperationsTiles status={s()} />
           <section class="card tile">
             <h2>{t("shell.dashboard.uptime")}</h2>
             <div class="tile-value">{s() ? formatDuration(Math.floor((s()?.uptime_seconds ?? 0) / 60) * 60) : "–"}</div>

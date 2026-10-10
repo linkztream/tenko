@@ -1,0 +1,47 @@
+/*
+ * Connectors: the instances and plugins, one instance, and the instance form. Token roles
+ * only (tokens.css). Health carries a glyph and a word; color only marks the exceptions.
+ */
+.connectors-page, .connector-page { overflow: auto; }
+.connectors-body { display: grid; gap: var(--sp-6); padding: var(--sp-6); }
+.connectors-instances { display: grid; gap: var(--sp-4); }
+.section-title { font-size: var(--fs-14); }
+.connectors-grid { position: relative; display: flex; flex-direction: column; min-height: 200px; max-height: 60vh; }
+.conn-link { color: var(--ink); font-weight: var(--fw-medium); }
+
+.conn-health { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-12); font-weight: var(--fw-medium); white-space: nowrap; }
+.conn-health.healthy { color: var(--ok-ink); }
+.conn-health.degraded { color: var(--discrepancy); }
+.conn-health.failing { color: var(--conflict); }
+.conn-health.off { color: var(--ink-3); }
+.grid tr.health-failing td:first-child { box-shadow: inset 3px 0 0 var(--conflict); }
+.grid tr.health-degraded td:first-child { box-shadow: inset 3px 0 0 var(--discrepancy-mark); }
+.conn-run { display: inline-flex; align-items: center; gap: 4px; }
+.conn-run.failed { color: var(--discrepancy); }
+
+/* The plugins as cards. */
+.plugin-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-5); }
+.plugin-card { padding: var(--sp-5) var(--sp-6); display: grid; gap: var(--sp-4); align-content: start; }
+.plugin-card header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.plugin-card h3 { font-size: var(--fs-14); margin-right: auto; }
+.plugin-problems { margin: 0; padding-left: var(--sp-6); color: var(--discrepancy); }
+
+/* One instance. */
+.connector-body { gap: var(--sp-6); }
+.connector-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--sp-6); align-items: start; }
+.connector-card { padding: var(--sp-5) var(--sp-6); display: grid; gap: var(--sp-4); }
+.connector-card h2 { font-size: var(--fs-14); }
+.connector-card h3.sub-h { font-size: var(--fs-13); }
+.run-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
+
+/* The form. */
+.dialog.connector-dialog { width: min(680px, calc(100vw - 32px)); max-height: 88vh; overflow: auto; }
+.connector-form { display: grid; gap: var(--sp-5); }
+.connector-fieldset { margin: 0; padding: 0; border: 0; display: grid; gap: var(--sp-4); min-width: 0; }
+.connector-fieldset > legend { padding: 0; font-size: var(--fs-13); font-weight: var(--fw-semibold); margin-bottom: var(--sp-3); }
+.connector-form .check-row { display: flex; align-items: flex-start; gap: var(--sp-4); cursor: pointer; }
+.connector-form .check-row > span { display: grid; gap: 2px; }
+.connector-form .check-row .help { font-size: var(--fs-12); color: var(--ink-3); }
+.connector-targets h3 { font-size: var(--fs-13); margin-bottom: var(--sp-3); }
+.connector-targets ul { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--sp-2); }
+.connector-form-about .caps { color: var(--ink-3); }

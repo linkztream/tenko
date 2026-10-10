@@ -49,6 +49,7 @@ const AREA_MODULE: Partial<Record<Area["id"], ModuleName>> = {
   ipam: "ipam",
   dns: "dns",
   dhcp: "dhcp",
+  discovery: "discovery",
   topology: "discovery",
 };
 
@@ -64,6 +65,7 @@ const SEGMENT_MODULE: Readonly<Record<string, ModuleName>> = {
   search: "ipam",
   dns: "dns",
   dhcp: "dhcp",
+  discovery: "discovery",
   topology: "discovery",
 };
 
