@@ -1,7 +1,7 @@
 //! The [`Vault`] over the replicated store.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     sync::{
         Arc, RwLock,
         atomic::{AtomicBool, Ordering},
@@ -10,7 +10,7 @@ use std::{
 
 use bytes::Bytes;
 use tenko_core::{
-    CounterKey, ObjectRef, RequestCtx, Revision, SecretId,
+    CounterKey, NodeId, ObjectRef, RequestCtx, Revision, SecretId, SystemComponent,
     audit::{AuditAction, AuditDraft},
     codec::key::encode_key,
     secret::{SecretClass, SecretRef, VaultEnvelope},
@@ -24,6 +24,7 @@ use crate::{
     RevealAudit, SecretBytes, SecretMeta, SecretSpec, Vault, VaultError,
     envelope::{self, RowBinding},
     kek::{KekProvider, KekRing},
+    kek_state::{self, KekState, ProtectionRecord, VaultAlarm, VaultAlarmKind},
 };
 
 /// The vault's store tables.
@@ -113,6 +114,14 @@ impl std::fmt::Debug for StoreVault {
     }
 }
 
+/// What [`StoreVault::open_checked`] found besides the vault.
+struct OpenedState {
+    /// The installation's KEK state, when the store has one.
+    state: Option<KekState>,
+    /// A key the configuration introduced on a single controller, to make active.
+    adopt: Option<String>,
+}
+
 /// Clears the rotation flag when a rotation ends, also on error.
 struct RotationGuard<'a>(&'a AtomicBool);
 
@@ -122,10 +131,46 @@ impl Drop for RotationGuard<'_> {
     }
 }
 
+/// Who opens the vault at start ([`StoreVault::start`]).
+#[derive(Debug, Clone)]
+pub struct VaultStart {
+    /// This controller.
+    pub node: NodeId,
+    /// The configured provider ([`KekConfig::provider_name`](crate::KekConfig::provider_name)).
+    pub provider: String,
+}
+
+/// The result of [`StoreVault::refresh`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refresh {
+    /// The store holds no KEK state yet (a store from before Slice 3, or a test).
+    NoState,
+    /// The vault already wraps with the active generation of the installation.
+    Current,
+    /// The vault switched to the active generation of the installation.
+    Switched {
+        /// The generation now active.
+        active: String,
+        /// Its epoch.
+        epoch: u64,
+    },
+    /// The installation's active generation is not loaded on this controller; it must be
+    /// fetched from a member first.
+    Missing {
+        /// The generation.
+        id: String,
+    },
+}
+
 impl StoreVault {
     /// Opens the vault after checking that the ring opens the store: every envelope must
     /// decode in a known format and name a loaded KEK, and one data key per KEK identifier
     /// must unwrap. This is the start-up check that keeps the server down without its KEK.
+    ///
+    /// When the store holds the installation's KEK state, the generation it names becomes
+    /// active, whatever generation of the ring is the newest on this host (a controller
+    /// that received a generation during an online rotation keeps wrapping with the
+    /// previous one until the rotation activates it).
     ///
     /// # Errors
     ///
@@ -133,11 +178,119 @@ impl StoreVault {
     /// [`VaultError::UnsupportedFormat`] or [`VaultError::Malformed`] for an envelope this
     /// build cannot read, or the store's error.
     pub async fn open(store: Arc<dyn Store>, ring: KekRing) -> Result<Self, VaultError> {
+        Ok(Self::open_checked(store, ring, false).await?.0)
+    }
+
+    /// Opens the vault as [`open`](StoreVault::open) does, then records this controller's
+    /// side of the KEK state (best effort; a controller that starts isolated logs a warning
+    /// and records it at its next start):
+    ///
+    /// - the installation's KEK state, when the store has none yet;
+    /// - the protection of the active KEK in `vault.kek_protection`, with the audit record
+    ///   and alarm `vault.kek.downgrade` when it is weaker than the strongest protection
+    ///   this controller had (R15);
+    /// - an alarm and audit record for every plain generation the load refused
+    ///   ([`KekRing::refused`]).
+    ///
+    /// On a single controller a key that the configuration introduced (a new key file of
+    /// the `file` provider, with the old one listed as retired) becomes the installation's
+    /// active generation, with a new KEK epoch; in a cluster such a key is not used and a
+    /// warning says to rotate online instead.
+    ///
+    /// # Errors
+    ///
+    /// As [`open`](StoreVault::open), plus the store's error when a key introduced by the
+    /// configuration cannot be made active.
+    pub async fn start(
+        store: Arc<dyn Store>,
+        ring: KekRing,
+        start: &VaultStart,
+    ) -> Result<Self, VaultError> {
+        let single = matches!(store.status().quorum, tenko_store::QuorumState::Single);
+        let (vault, opened) = Self::open_checked(store, ring, single).await?;
+        let ctx = RequestCtx::system(SystemComponent::Vault);
+        if let Some(adopted) = &opened.adopt {
+            vault.adopt(&ctx, adopted, start.node).await?;
+        }
+        if opened.state.is_none()
+            && let Err(error) = vault.init_state(&ctx, start.node).await
+        {
+            tracing::warn!(%error, "could not record the KEK state; it is recorded at the next start");
+        }
+        if let Err(error) = vault.record_protection(&ctx, start).await {
+            tracing::warn!(
+                %error,
+                "could not record the KEK protection of this controller; it is recorded at the \
+                 next start"
+            );
+        }
+        Ok(vault)
+    }
+
+    /// The shared part of [`open`](StoreVault::open) and [`start`](StoreVault::start).
+    async fn open_checked(
+        store: Arc<dyn Store>,
+        ring: KekRing,
+        may_adopt: bool,
+    ) -> Result<(Self, OpenedState), VaultError> {
         let view = store.read(ReadConsistency::Local).await?;
         let epoch = view.counter(&KEK_EPOCH)?;
+        let state = kek_state::read_state(view.as_ref())?.map(|(state, _)| state);
+        let mut adopt = None;
+        let ring = match &state {
+            None => ring,
+            Some(state) => {
+                let natural = ring.active().id().to_owned();
+                if !state.knows(&natural) && may_adopt && !state.rotating() {
+                    tracing::warn!(
+                        kek = %natural,
+                        previous = %state.active,
+                        "the configuration introduced a new key-encryption key; it becomes \
+                         active, and existing secrets move to it with the next rotation"
+                    );
+                    adopt = Some(natural);
+                    ring
+                } else if ring.contains(&state.active) {
+                    if !state.knows(&natural) {
+                        tracing::warn!(
+                            kek = %natural,
+                            active = %state.active,
+                            "the configuration introduced a key-encryption key that the \
+                             cluster does not know; it is not used. Rotate online \
+                             (POST /system/kek/rotate) instead"
+                        );
+                    }
+                    ring.activate(&state.active)?
+                } else {
+                    return Err(VaultError::kek_unavailable(format!(
+                        "the active key-encryption key of the installation, {}, is not on \
+                         this host; a cluster member hands it over at start (cluster step) \
+                         when a member is reachable",
+                        state.active
+                    )));
+                }
+            }
+        };
+        let count = Self::check_envelopes(view.as_ref(), &ring)?;
+        let active = ring.active();
+        tracing::info!(
+            secrets = count,
+            kek = %active.id(),
+            epoch,
+            protection = active.protection().describe(),
+            "vault opened"
+        );
+        Ok((
+            Self::build(store, ring, Some(epoch)),
+            OpenedState { state, adopt },
+        ))
+    }
+
+    /// Checks that `ring` opens one envelope per KEK identifier; returns the count.
+    fn check_envelopes(view: &dyn ReadView, ring: &KekRing) -> Result<usize, VaultError> {
         let mut checked: BTreeSet<String> = BTreeSet::new();
         let mut count = 0usize;
-        for_each_envelope(view.as_ref(), |key, envelope| {
+        for_each_envelope(view, |key, envelope| {
             count += 1;
             envelope::inspect(&envelope)?;
             if checked.contains(&envelope.key_id) {
@@ -147,7 +300,7 @@ impl StoreVault {
                 table: &tables::SECRETS,
                 key,
             };
-            envelope::verify_kek(&ring, row, &envelope).map_err(|error| match error {
+            envelope::verify_kek(ring, row, &envelope).map_err(|error| match error {
                 VaultError::UnknownKek { key_id } => VaultError::kek_unavailable(format!(
                     "the store holds secrets wrapped by KEK {key_id}, which is not loaded; \
                      restore its KEK file"
@@ -161,15 +314,190 @@ impl StoreVault {
             checked.insert(envelope.key_id);
             Ok(())
         })?;
-        let active = ring.active();
-        tracing::info!(
-            secrets = count,
-            kek = %active.id(),
-            epoch,
-            protection = active.protection().describe(),
-            "vault opened"
+        Ok(count)
+    }
+
+    /// Makes a key the configuration introduced the installation's active generation (a
+    /// single controller only).
+    async fn adopt(&self, ctx: &RequestCtx, id: &str, node: NodeId) -> Result<(), VaultError> {
+        let view = self.store.read(ReadConsistency::Local).await?;
+        let epoch = view.counter(&KEK_EPOCH)?;
+        let (mut state, revision) = kek_state::read_state(view.as_ref())?
+            .ok_or_else(|| VaultError::kek_unavailable("the KEK state disappeared"))?;
+        state.list(id, ctx.now, Some(node));
+        id.clone_into(&mut state.active);
+        state.epoch = epoch + 1;
+        let mut batch = Self::batch(ctx);
+        batch
+            .expect_counter(KEK_EPOCH, epoch)
+            .bump(KEK_EPOCH)
+            .expect_typed(&kek_state::tables::STATE, &(), Some(revision));
+        batch.put_typed(&kek_state::tables::STATE, &(), &state)?;
+        batch.audit(
+            AuditDraft::success(kek_state::actions::ACTIVATE, Vec::new())
+                .with_context("kek", id)
+                .with_context("epoch", state.epoch.to_string())
+                .with_context("cause", "configuration"),
         );
-        Ok(Self::build(store, ring, Some(epoch)))
+        self.store.propose(batch).await?;
+        let ring = self.ring();
+        self.set_keys(ring.as_ref().clone(), Some(epoch + 1));
+        Ok(())
+    }
+
+    /// Writes the installation's KEK state from this ring, when the store has none.
+    async fn init_state(&self, ctx: &RequestCtx, node: NodeId) -> Result<(), VaultError> {
+        let keys = self.keys();
+        let epoch = keys.epoch.unwrap_or_default();
+        let mut state = KekState {
+            epoch,
+            active: keys.ring.active().id().to_owned(),
+            generations: Vec::new(),
+            pending: None,
+            rotation: None,
+            abandoned: Vec::new(),
+        };
+        let active = keys.ring.active().id().to_owned();
+        for id in keys.ring.ids().filter(|id| *id != active) {
+            state.list(id, ctx.now, None);
+        }
+        state.list(&active, ctx.now, Some(node));
+        let mut batch = Self::batch(ctx);
+        batch
+            .expect_counter(KEK_EPOCH, epoch)
+            .expect_typed(&kek_state::tables::STATE, &(), None);
+        batch.put_typed(&kek_state::tables::STATE, &(), &state)?;
+        match self.store.propose(batch).await {
+            Ok(_) | Err(StoreError::PreconditionFailed(_)) => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Records the protection of this controller's active KEK and raises the alarms of R15.
+    async fn record_protection(
+        &self,
+        ctx: &RequestCtx,
+        start: &VaultStart,
+    ) -> Result<(), VaultError> {
+        let ring = self.ring();
+        let active = ring.active();
+        let current = active.protection();
+        let view = self.store.read(ReadConsistency::Local).await?;
+        let previous = kek_state::read_protection(view.as_ref(), start.node)?;
+        let mut batch = Self::batch(ctx);
+        let record = if let Some((record, revision)) = &previous {
+            {
+                batch.expect_typed(&kek_state::tables::PROTECTION, &start.node, Some(*revision));
+                let strongest = if current.rank() > record.strongest.rank() {
+                    current
+                } else {
+                    record.strongest
+                };
+                // A transition into a weaker protection raises the alarm once; the status
+                // keeps the warning while it lasts.
+                if current.rank() < record.strongest.rank()
+                    && current.rank() < record.current.rank()
+                {
+                    let params = BTreeMap::from([
+                        ("from".to_owned(), record.current.code().to_owned()),
+                        ("to".to_owned(), current.code().to_owned()),
+                        ("strongest".to_owned(), record.strongest.code().to_owned()),
+                    ]);
+                    tracing::error!(
+                        from = record.current.describe(),
+                        to = current.describe(),
+                        "THE KEY-ENCRYPTION KEY PROTECTION OF THIS CONTROLLER WAS DOWNGRADED"
+                    );
+                    Self::stage_alarm(
+                        &mut batch,
+                        ctx,
+                        &view,
+                        &kek_state::downgrade_alarm_key(start.node),
+                        VaultAlarmKind::KekDowngrade,
+                        start.node,
+                        params,
+                    )?;
+                }
+                ProtectionRecord {
+                    strongest,
+                    current,
+                    provider: start.provider.clone(),
+                    kek: active.id().to_owned(),
+                    updated_at: ctx.now,
+                }
+            }
+        } else {
+            batch.expect_typed(&kek_state::tables::PROTECTION, &start.node, None);
+            ProtectionRecord {
+                strongest: current,
+                current,
+                provider: start.provider.clone(),
+                kek: active.id().to_owned(),
+                updated_at: ctx.now,
+            }
+        };
+        batch.put_typed(&kek_state::tables::PROTECTION, &start.node, &record)?;
+        for refused in ring.refused() {
+            let file = refused
+                .path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let params = BTreeMap::from([
+                ("cause".to_owned(), "plain_generation".to_owned()),
+                ("generation".to_owned(), refused.generation.to_string()),
+                ("file".to_owned(), file),
+                ("from".to_owned(), refused.sealed.code().to_owned()),
+                ("to".to_owned(), refused.protection.code().to_owned()),
+            ]);
+            Self::stage_alarm(
+                &mut batch,
+                ctx,
+                &view,
+                &kek_state::refused_alarm_key(start.node, refused.generation),
+                VaultAlarmKind::PlainRefused,
+                start.node,
+                params,
+            )?;
+        }
+        self.store.propose(batch).await?;
+        Ok(())
+    }
+
+    /// Adds an alarm (or raises an existing one again) and its audit record to `batch`.
+    fn stage_alarm(
+        batch: &mut WriteBatch,
+        ctx: &RequestCtx,
+        view: &Arc<dyn ReadView>,
+        key: &str,
+        kind: VaultAlarmKind,
+        node: NodeId,
+        params: BTreeMap<String, String>,
+    ) -> Result<(), VaultError> {
+        let key = key.to_owned();
+        let previous = view.get_typed(&kek_state::tables::ALARMS, &key)?;
+        let alarm = VaultAlarm {
+            kind,
+            code: kek_state::DOWNGRADE_CODE.to_owned(),
+            node,
+            at: ctx.now,
+            first_at: previous
+                .as_ref()
+                .map_or(ctx.now, |(alarm, _)| alarm.first_at),
+            count: previous
+                .as_ref()
+                .map_or(1, |(alarm, _)| alarm.count.saturating_add(1)),
+            params: params.clone(),
+        };
+        batch.put_typed(&kek_state::tables::ALARMS, &key, &alarm)?;
+        let mut draft =
+            AuditDraft::success(kek_state::actions::DOWNGRADE, vec![ObjectRef::node(node)])
+                .with_source_ip(ctx.source_ip);
+        for (name, value) in params {
+            draft = draft.with_context(name, value);
+        }
+        batch.audit(draft);
+        Ok(())
     }
 
     /// A vault without the start-up check (an empty store, tests). Its writes carry no
@@ -199,9 +527,27 @@ impl StoreVault {
         )
     }
 
+    /// Replaces the ring and the epoch it belongs to.
+    pub(crate) fn set_keys(&self, ring: KekRing, epoch: Option<u64>) {
+        let mut keys = self
+            .keys
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *keys = Arc::new(Keys {
+            ring: Arc::new(ring),
+            epoch,
+        });
+    }
+
     /// The loaded KEKs.
     pub fn ring(&self) -> Arc<KekRing> {
         Arc::clone(&self.keys().ring)
+    }
+
+    /// The [`KEK_EPOCH`] the active KEK belongs to (`None` for a vault built without the
+    /// start-up check).
+    pub fn epoch(&self) -> Option<u64> {
+        self.keys().epoch
     }
 
     /// The store.
@@ -209,14 +555,83 @@ impl StoreVault {
         &self.store
     }
 
-    /// Makes `kek` the active KEK and re-wraps every envelope under it, page by page.
+    /// Adds the generations of `ring` this vault does not hold yet (fetched from another
+    /// controller), keeping the active one.
+    pub fn merge(&self, ring: &KekRing) {
+        let mut keys = self
+            .keys
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut merged = keys.ring.as_ref().clone();
+        let mut added = false;
+        for kek in ring.generations() {
+            if !merged.contains(kek.id()) {
+                merged = merged.with_newer(Arc::clone(kek));
+                added = true;
+            }
+        }
+        if added {
+            *keys = Arc::new(Keys {
+                ring: Arc::new(merged),
+                epoch: keys.epoch,
+            });
+        }
+    }
+
+    /// Brings the active generation and the epoch in line with the installation's KEK
+    /// state in the store (a controller follows an online rotation, or retries a write
+    /// that lost the race against one).
     ///
-    /// The rotation first bumps [`KEK_EPOCH`] in the store and only then activates `kek`
-    /// locally, so a write that encrypted under the previous KEK and commits after the bump
-    /// fails its epoch precondition and is redone under `kek`, while every envelope
-    /// committed before the bump is visible to the re-wrap passes. A row that changes
-    /// during a pass was written under `kek` and is skipped. Ends with a
-    /// `vault.kek.rotate` audit record.
+    /// # Errors
+    ///
+    /// The store's error.
+    pub async fn refresh(&self) -> Result<Refresh, VaultError> {
+        let view = self.store.read(ReadConsistency::Local).await?;
+        let epoch = view.counter(&KEK_EPOCH)?;
+        match kek_state::read_state(view.as_ref())? {
+            Some((state, _)) => Ok(self.apply_state(&state, epoch)),
+            None => Ok(Refresh::NoState),
+        }
+    }
+
+    /// As [`refresh`](StoreVault::refresh), from a state and epoch read together.
+    pub fn apply_state(&self, state: &KekState, epoch: u64) -> Refresh {
+        let mut keys = self
+            .keys
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if keys.ring.active().id() == state.active && keys.epoch.is_none_or(|e| e >= epoch) {
+            return Refresh::Current;
+        }
+        if keys.epoch.is_some_and(|e| e > epoch) {
+            // A stale view: this vault already follows a newer epoch.
+            return Refresh::Current;
+        }
+        let Ok(ring) = keys.ring.activate(&state.active) else {
+            return Refresh::Missing {
+                id: state.active.clone(),
+            };
+        };
+        tracing::info!(kek = %state.active, epoch, "key-encryption key switched");
+        *keys = Arc::new(Keys {
+            ring: Arc::new(ring),
+            epoch: Some(epoch),
+        });
+        Refresh::Switched {
+            active: state.active.clone(),
+            epoch,
+        }
+    }
+
+    /// Makes `kek` the active KEK and re-wraps every envelope under it, page by page: the
+    /// rotation of a stopped single controller (`tenko kek rotate`).
+    ///
+    /// The rotation first bumps [`KEK_EPOCH`] in the store, together with the
+    /// installation's KEK state, and only then activates `kek` locally, so a write that
+    /// encrypted under the previous KEK and commits after the bump fails its epoch
+    /// precondition and is redone under `kek`, while every envelope committed before the
+    /// bump is visible to the re-wrap passes. A row that changes during a pass was written
+    /// under `kek` and is skipped. Ends with a `vault.kek.rotate` audit record.
     ///
     /// Crash-safe: until it returns, keep every previous KEK loaded; afterwards the KEKs in
     /// [`KekRotation::retired`] may be removed. Run it again after a failure.
@@ -243,38 +658,50 @@ impl StoreVault {
         let epoch = view.counter(&KEK_EPOCH)?;
         let mut bump = Self::batch(ctx);
         bump.expect_counter(KEK_EPOCH, epoch).bump(KEK_EPOCH);
+        let ring = Arc::new(self.ring().rotated_to(Arc::clone(&kek)));
+        let state = if let Some((mut state, revision)) = kek_state::read_state(view.as_ref())? {
+            bump.expect_typed(&kek_state::tables::STATE, &(), Some(revision));
+            if state.rotating() {
+                return Err(VaultError::RotationInProgress);
+            }
+            state.list(kek.id(), ctx.now, None);
+            kek.id().clone_into(&mut state.active);
+            state.epoch = epoch + 1;
+            state
+        } else {
+            bump.expect_typed(&kek_state::tables::STATE, &(), None);
+            let mut state = KekState {
+                epoch: epoch + 1,
+                active: kek.id().to_owned(),
+                generations: Vec::new(),
+                pending: None,
+                rotation: None,
+                abandoned: Vec::new(),
+            };
+            for id in ring.ids() {
+                state.list(id, ctx.now, None);
+            }
+            state
+        };
+        bump.put_typed(&kek_state::tables::STATE, &(), &state)?;
         self.store.propose(bump).await?;
         let epoch = epoch + 1;
-        let ring = {
-            let mut keys = self
-                .keys
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let ring = Arc::new(keys.ring.rotated_to(kek));
-            *keys = Arc::new(Keys {
-                ring: Arc::clone(&ring),
-                epoch: Some(epoch),
-            });
-            ring
-        };
+        self.set_keys(ring.as_ref().clone(), Some(epoch));
 
-        // One pass normally suffices; the next one only confirms that nothing is left.
-        let mut rewrapped = 0usize;
-        let mut passes = 0u32;
-        loop {
-            passes += 1;
-            let done = self.rewrap_pass(ctx, &ring, epoch).await?;
-            rewrapped += done;
-            if done == 0 {
-                break;
-            }
-            if passes >= 8 {
-                return Err(StoreError::Timeout.into());
-            }
-        }
+        let rewrapped = self.rewrap_all(ctx, &ring, epoch, None, |_| {}).await?;
         let active = ring.active().id().to_owned();
         let retired: Vec<String> = ring.retired_ids().map(str::to_owned).collect();
         let mut batch = Self::batch(ctx);
+        // Every envelope is under the active generation now: the state stops listing the
+        // others, so no controller fetches them.
+        let view = self.store.read(ReadConsistency::Local).await?;
+        if let Some((mut state, revision)) = kek_state::read_state(view.as_ref())?
+            && state.active == active
+        {
+            state.keep_active_only();
+            batch.expect_typed(&kek_state::tables::STATE, &(), Some(revision));
+            batch.put_typed(&kek_state::tables::STATE, &(), &state)?;
+        }
         batch.audit(
             AuditDraft::success(actions::ROTATE_KEK, Vec::new())
                 .with_source_ip(ctx.source_ip)
@@ -292,14 +719,43 @@ impl StoreVault {
         })
     }
 
-    /// One pass of [`rotate_kek`](StoreVault::rotate_kek) over a fresh view: re-wraps every
-    /// envelope not under the active KEK, in batches bounded by count and size, and
+    /// Re-wraps every envelope not under the active KEK of `ring`, pass after pass until a
+    /// pass finds nothing; every batch expects `epoch` and `fence` (the leader epoch of an
+    /// online rotation). `progress` sees the running total.
+    pub(crate) async fn rewrap_all(
+        &self,
+        ctx: &RequestCtx,
+        ring: &KekRing,
+        epoch: u64,
+        fence: Option<&Precondition>,
+        mut progress: impl FnMut(usize),
+    ) -> Result<usize, VaultError> {
+        // One pass normally suffices; the next one only confirms that nothing is left.
+        let mut rewrapped = 0usize;
+        let mut passes = 0u32;
+        loop {
+            passes += 1;
+            let done = self.rewrap_pass(ctx, ring, epoch, fence).await?;
+            rewrapped += done;
+            progress(rewrapped);
+            if done == 0 {
+                return Ok(rewrapped);
+            }
+            if passes >= 8 {
+                return Err(StoreError::Timeout.into());
+            }
+        }
+    }
+
+    /// One pass of [`rewrap_all`](StoreVault::rewrap_all) over a fresh view: re-wraps
+    /// every envelope not under the active KEK, in batches bounded by count and size, and
     /// returns how many it committed.
     async fn rewrap_pass(
         &self,
         ctx: &RequestCtx,
         ring: &KekRing,
         epoch: u64,
+        fence: Option<&Precondition>,
     ) -> Result<usize, VaultError> {
         let view = self.store.read(ReadConsistency::Local).await?;
         let mut pending: Vec<(Bytes, Revision, Bytes)> = Vec::new();
@@ -329,7 +785,7 @@ impl StoreVault {
                 }
                 if pending.len() >= PAGE || pending_bytes >= REWRAP_BATCH_BYTES {
                     committed += self
-                        .commit_rewraps(ctx, epoch, std::mem::take(&mut pending))
+                        .commit_rewraps(ctx, epoch, fence, std::mem::take(&mut pending))
                         .await?;
                     pending_bytes = 0;
                 }
@@ -338,7 +794,7 @@ impl StoreVault {
                 break;
             }
         }
-        committed += self.commit_rewraps(ctx, epoch, pending).await?;
+        committed += self.commit_rewraps(ctx, epoch, fence, pending).await?;
         Ok(committed)
     }
 
@@ -349,11 +805,15 @@ impl StoreVault {
         &self,
         ctx: &RequestCtx,
         epoch: u64,
+        fence: Option<&Precondition>,
         mut rows: Vec<(Bytes, Revision, Bytes)>,
     ) -> Result<usize, VaultError> {
         while !rows.is_empty() {
             let mut batch = Self::batch(ctx);
             batch.expect_counter(KEK_EPOCH, epoch);
+            if let Some(fence) = fence {
+                batch.preconditions.push(fence.clone());
+            }
             for (key, revision, bytes) in &rows {
                 batch.expect_version(tables::SECRETS.clone(), key.clone(), Some(*revision));
                 batch.put(tables::SECRETS.clone(), key.clone(), bytes.clone());
@@ -380,6 +840,18 @@ impl StoreVault {
             }
         }
         Ok(0)
+    }
+
+    /// After a write lost the race against a KEK rotation: switch to the generation the
+    /// installation activated, if it is loaded (best effort; the retry tells).
+    async fn follow_rotation(&self) {
+        match self.refresh().await {
+            Ok(Refresh::Missing { id }) => {
+                tracing::warn!(kek = %id, "a write waits for a key generation this controller lacks");
+            }
+            Ok(_) => {}
+            Err(error) => tracing::debug!(%error, "could not read the KEK state"),
+        }
     }
 
     /// A batch for the vault's own writes. They are parts of a caller's operation and
@@ -526,7 +998,10 @@ impl StoreVault {
             match self.store.propose(batch).await {
                 Ok(_) => return Ok(()),
                 Err(StoreError::PreconditionFailed(failures))
-                    if attempt < EPOCH_RETRIES && lost_to_rotation(&failures) => {}
+                    if attempt < EPOCH_RETRIES && lost_to_rotation(&failures) =>
+                {
+                    self.follow_rotation().await;
+                }
                 Err(error) => return Err(error.into()),
             }
         }
@@ -547,7 +1022,10 @@ impl StoreVault {
             match self.store.propose(batch).await {
                 Ok(_) => return Ok(secret),
                 Err(StoreError::PreconditionFailed(failures))
-                    if attempt < EPOCH_RETRIES && lost_to_rotation(&failures) => {}
+                    if attempt < EPOCH_RETRIES && lost_to_rotation(&failures) =>
+                {
+                    self.follow_rotation().await;
+                }
                 Err(error) => return Err(error.into()),
             }
         }

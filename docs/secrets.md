@@ -1,6 +1,6 @@
 # Operator secrets
 
-This document describes how Tenko DDI stores, protects, reveals and uses the credentials that a person gives it: the password of a NAS, an API key for a controller, an SSH key, the login of a printer that an import brought along. It covers the model and its limits, who may do what, the audit records, the reveal and the clipboard path of the UI, the remote access hand-off, the way connectors and imports use the same secrets, and the open items. It is for administrators who run Tenko, for people who write clients against the API, and for reviewers. Requirements are cited by ID and defined in [REQUIREMENTS.md](REQUIREMENTS.md) (IAM-07, IAM-15, IAM-16, API-11); the profile toggle TGL-24 and the never-off control NEVER-01 are defined in [SECURITY-PROFILES.md](SECURITY-PROFILES.md). The vault itself is described in [ARCHITECTURE.md](ARCHITECTURE.md#secrets-and-the-vault), the connector side in [plugins.md](plugins.md#7-secrets), and the endpoints in the [OpenAPI document](api/openapi.json). Where this document and the code disagree, the code is right and the document has a defect.
+This document describes how Tenko DDI stores, protects, reveals and uses the credentials that a person gives it: the password of a NAS, an API key for a controller, an SSH key, the login of a printer that an import brought along. It covers the model and its limits, who may do what, the audit records, the reveal and the clipboard path of the UI, the remote access hand-off, the way connectors and imports use the same secrets, the key-encryption key that protects them all (its providers, its distribution to the controllers of a cluster and its rotation), and the open items. It is for administrators who run Tenko, for people who write clients against the API, and for reviewers. Requirements are cited by ID and defined in [REQUIREMENTS.md](REQUIREMENTS.md) (IAM-07, IAM-15, IAM-16, API-11); the profile toggle TGL-24 and the never-off control NEVER-01 are defined in [SECURITY-PROFILES.md](SECURITY-PROFILES.md). The vault itself is described in [ARCHITECTURE.md](ARCHITECTURE.md#secrets-and-the-vault), the connector side in [plugins.md](plugins.md#7-secrets), and the endpoints in the [OpenAPI document](api/openapi.json). Where this document and the code disagree, the code is right and the document has a defect.
 
 Terms used below: a **secret** is an operator secret. A **reveal** is the one operation that returns a stored value to a person. A **binding** attaches a secret to a host as a credential. A **step-up** is a new sign-in that a request asks for because the current session is too weak or too old.
 
@@ -13,7 +13,8 @@ Contents:
 5. [Remote access hand-off](#5-remote-access-hand-off)
 6. [Connectors and imports](#6-connectors-and-imports)
 7. [Writes](#7-writes)
-8. [Open items](#8-open-items)
+8. [The key-encryption key](#8-the-key-encryption-key)
+9. [Open items](#9-open-items)
 
 ## 1. The model
 
@@ -52,8 +53,11 @@ An operator secret is a vault secret of class `operator` plus a metadata record.
 | `vault.reveals` | secret | The stamp of the last reveal. |
 | `vault.host_bindings` | host, secret | The role and the time of a binding. |
 | `vault.secret_hosts` | secret, host | The reverse index of the bindings. |
+| `vault.reveal_log` | person, sequence | One row per reveal: when and which secret. The rate limit counts them (section 2). |
 
-Two counters belong to the model. The counter of a host (`vault.host_credentials`) versions its set of bindings and is the `ETag` of `GET /hosts/{id}/credentials`. The counter of a secret (`vault.secret_bindings`) moves with every binding change and guards deletion: a delete commits only if nobody bound the secret in the meantime.
+The name `vault.reveals` predates the cluster-wide rate limit and keeps its meaning (the last reveal of each secret); the reveals the limit counts have their own table, `vault.reveal_log`.
+
+Three counters belong to the model. The counter of a host (`vault.host_credentials`) versions its set of bindings and is the `ETag` of `GET /hosts/{id}/credentials`. The counter of a secret (`vault.secret_bindings`) moves with every binding change and guards deletion: a delete commits only if nobody bound the secret in the meantime. The counter of a person (`vault.reveal_count`) numbers their reveals and makes the rate limit strict (section 2).
 
 ### Host bindings and roles
 
@@ -146,7 +150,7 @@ A refused step-up is 403 `auth.step_up_required`, and the parameter `required` s
 
 ### The rate limit
 
-One person may reveal 10 times in any 60 seconds; the eleventh answers 429 `vault.reveal.rate_limited` with `Retry-After`. The limit belongs to the person, so all their sessions share it. Only reveals that passed the role, the policy and the host checks count, so a refused reveal does not use up the allowance. The counter is kept in the memory of the node that served the request (section 8).
+One person may reveal 10 times in any 60 seconds; the eleventh answers 429 `vault.reveal.rate_limited` with `Retry-After`. The limit belongs to the person, so all their sessions and tokens share it, and it holds across every controller of a cluster: each reveal first reserves a row in the replicated table `vault.reveal_log`, in a write that expects the person's counter `vault.reveal_count` to be unchanged, so two controllers that reserve at the same moment cannot both take the last slot (the loser reads again). The reservation carries no audit record of its own; the reveal that follows is audited. Expired rows are deleted by the person's next reservation. Only reveals that passed the role, the policy and the host checks count, so a refused reveal does not use up the allowance. The window is measured with the clock of the controller that serves the request, so clock skew between controllers shifts it by the skew (R35).
 
 ## 3. Audit records
 
@@ -165,7 +169,17 @@ Every record carries the principal, the time, the source address of a request th
 | `vault.secret.adopt` | Server start found secrets without a record (section 6) | success | The adopted secrets | `count`. |
 | `connect.secret.inject` | A connector call carries secrets (section 6) | success | The connector instance and the secrets | `plugin`, `purposes`, `call`. The principal is `system:connector`. |
 
-Key rotation writes its own records (`vault.secret.rotate_dek`, `vault.kek.rotate`).
+Key rotation and the key-encryption key write their own records (section 8):
+
+| Action | Written when | Details |
+|---|---|---|
+| `vault.secret.rotate_dek` | A secret was re-encrypted under a fresh data key | `class`, `kek`. |
+| `vault.kek.rotate_request` | `POST /system/kek/rotate` | `kek` (the active one), `epoch`. |
+| `vault.kek.activate` | A new generation became active: an online rotation after the distribution, or a key the configuration introduced on a single controller | `kek`, `epoch`, `cause` (`rotation`, `configuration`), `unreachable` (members that fetch it at their next start). |
+| `vault.kek.rotate` | A rotation finished, online or with `tenko kek rotate` | `kek`, `retired`, `rewrapped`, `epoch`, `online` for an online rotation. |
+| `vault.kek.rotate_failed` | An online rotation failed | `error`. |
+| `vault.kek.downgrade` | A start found a weaker protection or refused a plain generation (R15) | Objects: the node. `cause` (`provider`, `plain_generation`), `from`, `to`, `strongest`, `generation`, `file`. |
+| `vault.kek.transfer` | A controller received the generations (join or fetch) | Written by the cluster service: `generations` (identifiers), `node`, `enrolment` or `purpose` (`fetch`). Never the material. |
 
 **The order guarantee.** The value is returned only after the audit record of the reveal has committed. The record and the last-revealed stamp go into one store write; only when that write returns does the vault hand the decrypted bytes on. If the write fails, for example without a quorum, the person gets the error and no value, and the vault tries to record a failed reveal. The reveal never takes the request's idempotency key, so a replay cannot return a value without a new record. A connector injection follows the same rule: its record is written before the secrets are resolved, and a call whose record cannot be written fails with 503 `connect.audit_unavailable` and injects nothing.
 
@@ -300,9 +314,93 @@ At every start the server adopts operator secrets that have no record, such as c
 
 **The Idempotency-Key.** The UI sends no `Idempotency-Key` with `POST /secrets`, although its client adds one to every other `POST`. For a keyed request the middleware stores a SHA-256 fingerprint of the method, path, content type and body, to recognise a retry, and the store table that holds it is replicated, snapshotted and backed up like any other. A body that holds a value should not leave even a hash behind, because the hash of a short password can be tested offline. The cost is that a create whose answer was lost, when retried, shows up as a second secret with the same name; the person sees it and deletes one. Clients of the API should do the same. The middleware handles `POST` only, so `PATCH` with a new value is not affected. The store's own deduplication is off for these writes: a new envelope holds random keys and nonces and never repeats.
 
-## 8. Open items
+## 8. The key-encryption key
+
+The KEK wraps the data key of every secret (section 1). It is the one key whose loss makes every secret unreadable and whose theft makes every secret readable, so it is never stored in the store, a snapshot, a log line, an audit record or an error, and the server does not start without it. This section covers the providers that protect it at rest, its generations, the refusal of unprotected generations (R15), how the controllers of a cluster share it (S3-Q5, R22), rotation, and the status an administrator sees. The design is recorded in ADR 0014.
+
+### Providers
+
+The provider is chosen per host in `[kek]` of `tenko.toml`; it is a property of the host, not of the installation, so the controllers of one cluster may use different providers.
+
+| `provider` | Platform | The KEK at rest | Protection reported |
+|---|---|---|---|
+| `platform` (default) | Windows, Linux | `dpapi` on Windows, `systemd_creds` on Linux | as below |
+| `dpapi` | Windows | Generation files in `kek.dir` (default `<data_dir>/kek`) sealed with DPAPI for the service account (`scope = "user"`, default) or the machine (`"machine"`); the file name is bound into the seal | `dpapi_user`, `dpapi_machine` |
+| `systemd_creds` | Linux | Generation files in `kek.dir`, sealed by running `systemd-creds encrypt` as the service account (TPM2 and host key with `with_key = "auto"` when a TPM2 is usable). Where the tool cannot seal for the account, new generations are plain files with mode 0600 and a loud warning | `systemd_creds_tpm2`, `systemd_creds_host`, `plain_file` |
+| `systemd_credential` | Linux | The credential `credential` (default `tenko_kek`) that the unit passes with `LoadCredentialEncrypted=tenko_kek:/etc/tenko/kek.cred`: the service manager decrypts it with the host key (and the TPM2, when it was encrypted for one) into `$CREDENTIALS_DIRECTORY`, readable by the service account only. Later generations live in `kek.dir`, wrapped under the credential | `systemd_creds_host`; `systemd_creds_tpm2` when `with_key = "tpm2"` declares how the credential was encrypted (Tenko cannot see it) |
+| `file` | any | An explicit key file `path` (32 raw bytes, 64 hexadecimal digits or base64), for containers with a mounted secret and for CI; earlier key files in `retired`. Later generations live in `kek.dir`, wrapped under the key file. Every start logs "THE KEY-ENCRYPTION KEY IS A PLAIN FILE" | `plain_file` |
+
+The identifier of a key file or a credential is `file-` and eight hexadecimal digits of the key's SHA-256, so an installation that passed the credential to the `file` provider (the unit of Slice 2) switches to `systemd_credential` without re-wrapping anything. Generation identifiers are `<sealer>-<number>-<8 random hexadecimal digits>` (`dpapi-2-3f9a0c2e`, `cred-1-…`, `wrap-1-…`, `plain-1-…`).
+
+A wrapped generation (`kek-NNNNNN.wrap`) is the generation file encrypted with AES-256-GCM under the root key (the key file or the credential), with the file name bound into the additional data. It has the protection of its root: whoever cannot read the root key cannot read it. The `file` and `systemd_credential` providers need it because the service account cannot seal anything with the host's own key store.
+
+### Generations and the KEK state
+
+A host holds numbered generations. The generation that wraps new data keys is the **active** one; the others stay loaded so that envelopes they wrapped still open, until a rotation has re-wrapped them. Which generation is active is not decided by the host but by the installation's KEK state in the store, which every controller reads:
+
+| Table | Key | Holds |
+|---|---|---|
+| `vault.kek_state` | `()` | The active generation, the generations envelopes may still name (identifiers and times, never material; once a rotation has re-wrapped everything, only the active one), the KEK epoch, the generation of an online rotation that is being distributed, the generations of failed rotations, and the rotation in progress or the last one |
+| `vault.kek_acks` | generation, node | A controller holds the generation of an online rotation |
+| `vault.kek_protection` | node | The protection of the controller's active KEK at its last start, and the strongest protection it ever had |
+| `vault.alarms` | alarm key | The alarms of this section (`vault.kek.downgrade`), routed to the `system` event topic |
+
+The counter `vault.kek_epoch` moves in the same write that changes the active generation. Every write that carries a new envelope expects the epoch its KEK belongs to, so an envelope wrapped by the previous KEK cannot commit once a rotation has activated the next one; the vault then switches to the active generation and writes again. The vault records the state at its first start after this change; a store from before it has none, and the host's newest generation is active.
+
+On a single controller a key that the configuration introduces (a new key file with the old one under `retired`) becomes active at the next start, with a new epoch, as before. In a cluster such a key is not used: the controller warns and keeps the installation's active generation, and the administrator rotates online.
+
+### Plain generations and downgrades (R15)
+
+Anyone who can write the key directory could drop a plain generation numbered above the sealed ones; it would become active and every new secret would be protected by a file. Three rules close that hole.
+
+- **Refusal.** A plain generation newer than the newest sealed generation of its directory is not loaded. The start goes on with the sealed generations, logs an error naming the file, and the vault raises the alarm `vault.kek.downgrade` (cause `plain_generation`, the generation number and the file name) with an audit record of the same name. A plain generation older than a sealed one still loads, because envelopes may need it until a rotation has finished; the log says to remove it. A provider never creates or imports a plain generation beside a sealed one either (409 `vault.kek.plain_refused`).
+- **`[kek] allow_plain = true`** lifts the refusal for a host where it is intended (a container that lost its TPM, for example). Every start that uses it logs a loud warning. Off by default in every profile.
+- **The downgrade alarm.** Every start records the protection of the active KEK in `vault.kek_protection`. A start whose protection is weaker than the strongest this controller ever had raises `vault.kek.downgrade` (cause `provider`, parameters `from` and `to`) once, when it becomes weaker, with an audit record. The status shows the warning for as long as the protection stays weaker. The ranking is: memory, a plain file, then DPAPI in machine scope and `systemd-creds` with the host key, then DPAPI in user scope and `systemd-creds` with a TPM2.
+
+The rules apply per controller. A cluster whose members use different providers is legitimate; the status lists the protection of every controller.
+
+### Controllers of a cluster
+
+An installation has one set of generations (S3-Q5): every controller holds every generation, each sealed with its own provider, under the same identifiers, so every controller opens every envelope. The material moves between controllers in exactly two cases, both over the cluster port (mutual TLS 1.3 between enrolled controllers):
+
+- **Join.** `tenko cluster join` enrols the host as a controller (the enrolment token needs an administrator with a sign-in within the last five minutes), then asks a member for the generations with `Cluster.TransferKek`, sending the public half of a one-time X25519 key that only the joining host holds. The member seals every generation to it (X25519, HKDF-SHA-256, AES-256-GCM, bound to the joining node and its enrolment token) and records `vault.kek.transfer` with the generation identifiers, the node and the enrolment, never the material. A second transfer for the same token is refused. The joiner seals the generations with its own provider and drops the one-time key.
+- **Fetch.** A controller that lacks a generation the state lists (it was stopped during an online rotation, or it follows a rotation now) asks a member the same way with an empty token; the transfer is bound to the asking node. At start this happens in the `cluster` step, before the vault opens; a controller that cannot reach any member while it lacks the active generation does not start (`vault.kek.unavailable`).
+
+The format of the sealed transfer is documented in the code (`tenko_vault::transfer`) and has a fuzz target (`kek_transfer`).
+
+### Rotation
+
+**Online, on a cluster or a single controller.** `POST /system/kek/rotate` (administrator, with a sign-in within the last five minutes) records the request in the KEK state and answers 202; a second request while one runs is 409 `vault.kek.rotation_in_progress`. The leader carries it out in phases, which `GET /system/kek` shows:
+
+1. `requested`: the leader creates the next generation with its own provider.
+2. `distributing`: every running controller fetches the new generation, seals it and acknowledges it. The leader waits for every member it heard from within the last ten seconds. Members it cannot reach are listed as unreachable and fetch the generation when they start. A reachable member that has not acknowledged after two minutes fails the rotation (`failed`, with the members named); nothing changed for the envelopes then, the new generation stays unused on the hosts that hold it, and a new request may follow.
+3. `rewrapping`: in one write the leader makes the new generation active with a new epoch (`vault.kek.activate`); every controller switches on the change. The leader re-wraps every envelope in paged writes (the data stays encrypted; only the wrapped data keys change).
+4. `done`: `vault.kek.rotate` records the new generation, the retired ones, the number of envelopes and the epoch.
+
+Every write of the leader carries the leader epoch, so a deposed leader cannot change the state; the next leader continues from the recorded phase.
+
+**Offline, on a stopped single controller.** `tenko kek rotate` creates the next generation, makes it active, re-wraps every envelope and removes the generations no envelope uses any more (`--keep-retired` keeps them). The `file` and `systemd_credential` providers write the new generation into `kek.dir`, wrapped under the root key; the root key itself is kept and named in the report. A member of a cluster is refused: it rotates online, so that every controller holds the new generation before anything is wrapped with it.
+
+### Status
+
+`GET /system/kek` (any signed-in role that may read the system status) returns this controller's provider, the protection, the active generation, the epoch, every generation of the installation with whether this controller holds it, the generations it lacks, the refused files, the strongest protection it had, the protection of every controller, the rotation, and the warnings. `GET /system/status` carries a short fragment of the same and the warnings:
+
+| Code | Meaning |
+|---|---|
+| `vault.kek.weak` | The active KEK of this controller has no OS protection (a plain file). |
+| `vault.kek.downgrade` | The protection is weaker than this controller had (`cause` `provider`), or a plain generation was refused (`cause` `plain_generation`). |
+| `vault.kek.missing` | This controller lacks generations of the installation. |
+| `vault.kek.rotation_failed` | The last online rotation failed; `error` says why. |
+
+Backups carry the generations wrapped under the backup key (WP3.4b, `docs/backup.md`), so a restore on a new host needs no copy of the KEK directory.
+
+<a id="8-open-items"></a>
+
+## 9. Open items
 
 - **The credential gate of an import checks only the importing account.** `POST /secrets` refuses to store the first operator secret while another account that may reveal still signs in with a PIN alone. An import with credential columns checks only that the importing account may create and reveal. After such an import the authorizer still refuses the PIN sessions of the other accounts (section 2), so they cannot act with their PIN, but they learn that at their next request and not the administrator at the import.
 - **A re-import can delete a secret that a connector uses.** `import.finish` deletes a replaced secret unless a host binds it; it cannot see connector references. If a connector instance references an imported secret and a re-import changes that host's credential, the old secret is deleted and the next call of the connector fails. `DELETE /secrets/{id}` checks connector references and refuses. Until the import checks them too, give connectors their own secrets and do not reference imported ones.
-- **The reveal rate limit is per node.** It lives in the memory of the controller that served the request and starts empty after a restart. In a cluster each controller keeps its own window, so a person who is spread over several controllers can exceed 10 per minute in total.
 - **Zeroization ends at the HTTP response body.** The decrypted bytes, the data keys and the reveal answer are wiped when they are dropped. The serialized JSON of the response, the buffers of the HTTP and TLS stack, and the request body of a create or a replacement are not wiped, and in the browser the value is a JavaScript string.
+- **Many simultaneous reveals by one person.** A reservation that loses the race against other controllers eight times in a row answers 503 (`sys.store.timeout`, retryable) instead of 429. It needs more than eight reveals of the same person within the same few milliseconds.
+- **A rotation with a stopped member.** A member that was unreachable during an online rotation cannot start until it reaches another member, because it lacks the active generation. Removing a retired generation from a host is a manual step (`tenko kek rotate` on a single controller; on a cluster member, delete the generation file after the rotation, once `GET /system/kek` lists it as retired on every controller).
+- **The protection of a systemd credential is declared.** Tenko cannot see which key encrypted the credential; the status says TPM2 only when `with_key = "tpm2"` says so.

@@ -1,27 +1,30 @@
 //! The operator secrets model (WP2.1) over `MemVault`: metadata records, value
 //! replacement, host bindings and their versions, deletion while referenced, reveals with
 //! the host check, the stamp and the audit record, the rate limit, the layout of imported
-//! credentials, and the adoption of secrets stored before the model existed.
+//! credentials, and the adoption of secrets stored before the model existed. The rate limit
+//! is also checked across the controllers of a cluster (three operator services over one
+//! replicated store).
 
 mod common;
 
 use std::sync::Arc;
 
 use common::{
-    audit_for, audit_of, ctx, mem_store, spec, tables_containing, unique_marker, value, view,
+    at, audit_for, audit_of, ctx, mem_store, spec, tables_containing, unique_marker, value, view,
 };
 use tenko_core::{
     AuthStrength, Coded, HostId, ObjectKind, ObjectRef, Principal, RequestCtx, SessionId, UserId,
     audit::AuditOutcome,
     secret::{SecretClass, SecretRef},
 };
-use tenko_store::{Store, WriteBatch};
+use tenko_store::{KeyRange, MemStore, ReadViewExt, Store, WriteBatch};
 use tenko_vault::{
-    MemVault, SecretBytes, Vault,
+    KekProvider, KekRing, MemKek, MemVault, SecretBytes, Vault,
     operator::{
         BindingRequest, CredentialRole, NewOperatorSecret, OperatorError, OperatorSecretKind,
-        OperatorSecretPatch, OperatorSecrets, REVEALS_PER_WINDOW, RevealRequest, SecretOrigin,
-        ValueFormat, imported_record, stage_record,
+        OperatorSecretPatch, OperatorSecrets, REVEAL_WINDOW, REVEALS_PER_WINDOW, RevealLogEntry,
+        RevealRequest, SecretOrigin, ValueFormat, imported_record, reveal_counter, stage_record,
+        tables::REVEAL_LOG,
     },
 };
 
@@ -38,14 +41,61 @@ fn env() -> Env {
     Env { vault, secrets }
 }
 
-/// A person with a password session.
-fn person() -> RequestCtx {
+/// The person with this id, with a password session (a new session and request each time).
+fn person_with(id: UserId) -> RequestCtx {
     RequestCtx::new(Principal::User {
-        id: UserId::generate(),
+        id,
         session: SessionId::generate(),
         strength: AuthStrength::Password,
     })
     .at(ctx().now)
+}
+
+/// A new person with a password session.
+fn person() -> RequestCtx {
+    person_with(UserId::generate())
+}
+
+/// Three controllers of one cluster: a replicated store, and for each controller its own
+/// vault and operator secrets over that store, all with the same KEK ring.
+struct Cluster {
+    store: Arc<MemStore>,
+    controllers: Vec<Arc<OperatorSecrets>>,
+}
+
+fn cluster() -> Cluster {
+    let store = mem_store();
+    let kek: Arc<dyn KekProvider> = Arc::new(MemKek::generate("mem-1"));
+    let ring = KekRing::new(kek);
+    let controllers = (0..3)
+        .map(|_| {
+            let vault = Arc::new(MemVault::with_ring(Arc::clone(&store), ring.clone()));
+            let dyn_store: Arc<dyn Store> = Arc::clone(&store) as Arc<dyn Store>;
+            Arc::new(OperatorSecrets::new(dyn_store, vault as Arc<dyn Vault>))
+        })
+        .collect();
+    Cluster { store, controllers }
+}
+
+/// The reveal log rows of one subject: sequence number and entry, in key order.
+async fn reveal_rows(store: &MemStore, subject: &str) -> Vec<(u64, RevealLogEntry)> {
+    view(store)
+        .await
+        .scan_typed(&REVEAL_LOG, KeyRange::all(), usize::MAX, false)
+        .expect("scan vault.reveal_log")
+        .into_iter()
+        .filter(|((who, _), _, _)| who == subject)
+        .map(|((_, number), entry, _)| (number, entry))
+        .collect()
+}
+
+/// Every reveal request the vault audited, with its outcome.
+async fn reveal_outcomes(store: &MemStore) -> Vec<AuditOutcome> {
+    audit_of(store, "vault.secret.reveal")
+        .await
+        .into_iter()
+        .map(|record| record.draft.outcome)
+        .collect()
 }
 
 fn new_secret(name: &str, secret: &str) -> NewOperatorSecret {
@@ -645,4 +695,177 @@ async fn secrets_stored_before_the_model_are_adopted_once() {
     let credentials = env.secrets.host_credentials(host).await.expect("host");
     assert_eq!(credentials.items.len(), 1);
     assert_eq!(ObjectKind::Secret.as_str(), "secret");
+}
+
+#[tokio::test]
+async fn the_reveal_limit_holds_across_controllers() {
+    let cluster = cluster();
+    let user = UserId::generate();
+    let cx = person_with(user);
+    let subject = cx.principal.subject();
+    let secret = cluster.controllers[0]
+        .create(&cx, new_secret("nas admin", "example-value"))
+        .await
+        .expect("created")
+        .record
+        .id;
+
+    // Ten reveals spread over the three controllers are the whole budget of the person.
+    for n in 0..REVEALS_PER_WINDOW {
+        cluster.controllers[n % 3]
+            .reveal(&cx, secret, RevealRequest::default())
+            .await
+            .expect("within the limit");
+    }
+    // The eleventh is refused by every controller, not only by the ones that revealed most.
+    for controller in &cluster.controllers {
+        match controller
+            .reveal(&cx, secret, RevealRequest::default())
+            .await
+        {
+            Err(OperatorError::RateLimited { retry_after }) => {
+                assert!((1..=60).contains(&retry_after), "retry after {retry_after}");
+            }
+            other => panic!("expected the rate limit, got {other:?}"),
+        }
+    }
+    // Another person has a budget of their own, on any controller.
+    let other = person();
+    cluster.controllers[2]
+        .reveal(&other, secret, RevealRequest::default())
+        .await
+        .expect("another person");
+
+    let rows = reveal_rows(&cluster.store, &subject).await;
+    let numbers: Vec<u64> = rows.iter().map(|(number, _)| *number).collect();
+    assert_eq!(numbers, (1..=10).collect::<Vec<u64>>());
+    assert!(
+        rows.iter()
+            .all(|(_, entry)| entry.at == cx.now && entry.secret == secret)
+    );
+    assert_eq!(
+        view(cluster.store.as_ref())
+            .await
+            .counter(&reveal_counter(&subject))
+            .expect("counter"),
+        10
+    );
+    // Refused reveals are not audited; every reveal that went through is.
+    assert_eq!(
+        reveal_outcomes(&cluster.store).await,
+        vec![AuditOutcome::Success; REVEALS_PER_WINDOW + 1]
+    );
+
+    // A minute later the window has moved on: the person reveals again, from any controller,
+    // and the rows that left the window are deleted with that reservation.
+    let later = person_with(user).at(at("2026-10-09T12:01:01Z"));
+    assert!(later.now.saturating_since(cx.now) > REVEAL_WINDOW);
+    cluster.controllers[1]
+        .reveal(&later, secret, RevealRequest::default())
+        .await
+        .expect("the window moved on");
+    let rows = reveal_rows(&cluster.store, &subject).await;
+    assert_eq!(
+        rows,
+        vec![(
+            11,
+            RevealLogEntry {
+                at: later.now,
+                secret
+            }
+        )],
+        "only the new row is left"
+    );
+    // The rows of the other person are theirs: not counted, not deleted.
+    assert_eq!(
+        reveal_rows(&cluster.store, &other.principal.subject())
+            .await
+            .len(),
+        1
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_reveals_never_exceed_the_limit() {
+    let cluster = cluster();
+    let user = UserId::generate();
+    let secret = cluster.controllers[0]
+        .create(&person_with(user), new_secret("nas admin", "example-value"))
+        .await
+        .expect("created")
+        .record
+        .id;
+
+    let mut tasks = tokio::task::JoinSet::new();
+    for n in 0..REVEALS_PER_WINDOW + 2 {
+        let controller = Arc::clone(&cluster.controllers[n % 3]);
+        let cx = person_with(user);
+        tasks.spawn(async move {
+            controller
+                .reveal(&cx, secret, RevealRequest::default())
+                .await
+                .map(drop)
+        });
+    }
+    let (mut revealed, mut limited) = (0, 0);
+    while let Some(done) = tasks.join_next().await {
+        match done.expect("the task ran") {
+            Ok(()) => revealed += 1,
+            Err(OperatorError::RateLimited { .. }) => limited += 1,
+            Err(other) => panic!("unexpected error: {other:?}"),
+        }
+    }
+    assert_eq!((revealed, limited), (REVEALS_PER_WINDOW, 2));
+    let subject = person_with(user).principal.subject();
+    assert_eq!(
+        reveal_rows(&cluster.store, &subject).await.len(),
+        REVEALS_PER_WINDOW
+    );
+    assert_eq!(
+        reveal_outcomes(&cluster.store).await,
+        vec![AuditOutcome::Success; REVEALS_PER_WINDOW]
+    );
+}
+
+#[tokio::test]
+async fn a_longer_subject_that_starts_with_a_subject_does_not_share_its_budget() {
+    let env = env();
+    let cx = person();
+    let subject = cx.principal.subject();
+    let longer = format!("{subject}0");
+    let secret = env
+        .secrets
+        .create(&cx, new_secret("nas admin", "example-value"))
+        .await
+        .expect("created")
+        .record
+        .id;
+    // Ten rows of the longer subject: five inside the window, five long expired.
+    let seeded = |when: tenko_core::Timestamp| RevealLogEntry { at: when, secret };
+    let old = at("2026-10-09T11:00:00Z");
+    let mut batch = WriteBatch::for_request(&ctx());
+    for number in 1..=10_u64 {
+        let entry = seeded(if number <= 5 { cx.now } else { old });
+        batch
+            .put_typed(&REVEAL_LOG, &(longer.clone(), number), &entry)
+            .expect("row");
+    }
+    env.vault.mem_store().propose(batch).await.expect("seeded");
+
+    // The longer subject's rows are neither counted against the person nor deleted by them.
+    for _ in 0..REVEALS_PER_WINDOW {
+        env.secrets
+            .reveal(&cx, secret, RevealRequest::default())
+            .await
+            .expect("within the limit of the person");
+    }
+    assert!(matches!(
+        env.secrets
+            .reveal(&cx, secret, RevealRequest::default())
+            .await,
+        Err(OperatorError::RateLimited { .. })
+    ));
+    let store = env.vault.mem_store();
+    assert_eq!(reveal_rows(store, &longer).await.len(), 10);
+    assert_eq!(reveal_rows(store, &subject).await.len(), REVEALS_PER_WINDOW);
 }

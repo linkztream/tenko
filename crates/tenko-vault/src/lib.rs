@@ -25,6 +25,13 @@
 //!   [`Vault::has_operator_secrets`]. Their metadata, host bindings and reveal stamps are
 //!   the model of [`operator`] (WP2.1).
 //! - Plaintext is held in [`SecretBytes`], which zeroizes on drop and never prints.
+//! - One installation, one set of KEK generations (ADR 0014): every controller of a
+//!   cluster holds every generation, sealed with its own provider. [`kek_state`] is the
+//!   replicated knowledge about them (which one is active, the KEK epoch, an online
+//!   rotation, each controller's protection), [`transfer`] the sealed hand-over of the
+//!   material to a joining or lagging controller, and [`distribution`] the online rotation
+//!   and the task that keeps a controller in step. A plain generation beside sealed ones is
+//!   refused, and a weaker protection raises the alarm `vault.kek.downgrade` (R15).
 //!
 //! # Use
 //!
@@ -46,9 +53,11 @@
 //! A package that must write a secret atomically with its own rows stages it into its
 //! batch with [`Vault::stage_put`] and proposes the batch itself.
 
+pub mod distribution;
 pub mod envelope;
 pub mod error;
 pub mod kek;
+pub mod kek_state;
 pub mod operator;
 mod secret;
 mod store_vault;
@@ -64,10 +73,10 @@ pub use kek::{
     RefusedKek,
 };
 pub use secret::{RevealAudit, SecretBytes, SecretMeta, SecretPurpose, SecretSpec};
-pub use store_vault::{KEK_EPOCH, KekRotation, StoreVault, actions, tables};
+pub use store_vault::{KEK_EPOCH, KekRotation, Refresh, StoreVault, VaultStart, actions, tables};
 pub use tenko_core::secret::{SecretClass, SecretRef, VaultEnvelope};
 #[cfg(any(test, feature = "testing"))]
-pub use testing::MemVault;
+pub use testing::{MemPeers, MemVault};
 
 use tenko_core::RequestCtx;
 use tenko_store::WriteBatch;

@@ -17,6 +17,11 @@
 //! | `vault.reveals` | [`SecretId`] | [`RevealStamp`] (the last reveal) |
 //! | `vault.host_bindings` | ([`HostId`], [`SecretId`]) | [`HostBinding`] |
 //! | `vault.secret_hosts` | ([`SecretId`], [`HostId`]) | `()` (the reverse index) |
+//! | `vault.reveal_log` | (subject, sequence) | [`RevealLogEntry`] (one reveal: when and which secret) |
+//!
+//! The reveal limit counts the replicated rows of `vault.reveal_log`, so it holds across
+//! every controller of a cluster; clock skew between controllers shifts the window by the
+//! skew.
 //!
 //! The counter [`host_counter`] of a host versions its set of bindings (the `ETag` of
 //! `GET /hosts/{id}/credentials`), and [`secret_counter`] of a secret guards its deletion
@@ -39,12 +44,14 @@
 //!
 //! Every change is one write batch with its audit records, proposed directly (like user
 //! and settings administration), not as an inline job: an inline job keeps its batch in
-//! the job record, which would keep a copy of the envelope after the secret is deleted.
+//! the job record, which would keep a copy of the envelope after the secret is deleted. The
+//! one write without an audit record is the reservation of a reveal against the rate limit
+//! (a row of `vault.reveal_log`); the reveal that follows it is audited.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
-    sync::{Arc, Mutex, PoisonError},
-    time::{Duration, Instant},
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
@@ -70,7 +77,7 @@ use crate::{
 pub mod tables {
     use tenko_core::{HostId, SecretId, table::TableDef};
 
-    use super::{HostBinding, OperatorSecretRecord, RevealStamp};
+    use super::{HostBinding, OperatorSecretRecord, RevealLogEntry, RevealStamp};
 
     /// Metadata records by secret. Not secret-bearing: a name ending in `_secrets` would be.
     pub const META: TableDef<SecretId, OperatorSecretRecord> = TableDef::new("vault.operator_meta");
@@ -81,6 +88,12 @@ pub mod tables {
         TableDef::new("vault.host_bindings");
     /// Bindings by secret (the reverse index).
     pub const SECRET_HOSTS: TableDef<(SecretId, HostId), ()> = TableDef::new("vault.secret_hosts");
+    /// The reveals of each person, keyed by their subject (`user:<id>`) and a sequence
+    /// number from [`reveal_counter`](super::reveal_counter). Replicated, so the reveal
+    /// limit counts them across every controller of a cluster; rows older than
+    /// [`REVEAL_WINDOW`](super::REVEAL_WINDOW) are deleted by later reveals.
+    pub const REVEAL_LOG: TableDef<(String, u64), RevealLogEntry> =
+        TableDef::new("vault.reveal_log");
 }
 
 /// Audit actions of the model, besides the vault's own (`vault.secret.create`,
@@ -112,6 +125,14 @@ pub fn secret_counter(secret: SecretId) -> CounterKey {
     CounterKey::with("vault.secret_bindings", &secret)
 }
 
+/// The counter that numbers the reveals of one person (`subject` as
+/// [`Principal::subject`](tenko_core::Principal::subject) returns it) across the cluster:
+/// the sequence of their [`tables::REVEAL_LOG`] rows, and the guard that makes a
+/// reservation strict across controllers.
+pub fn reveal_counter(subject: &str) -> CounterKey {
+    CounterKey::with("vault.reveal_count", &subject.to_owned())
+}
+
 /// Longest name, in characters.
 pub const MAX_NAME_CHARS: usize = 128;
 /// Longest user name, in characters.
@@ -135,6 +156,12 @@ pub const CLIPBOARD_CLEAR_SECS: u32 = 30;
 
 /// Attempts of a write that lost the race against a KEK rotation.
 const EPOCH_RETRIES: usize = 4;
+
+/// Attempts to reserve a reveal against other controllers reserving at the same time.
+const REVEAL_ATTEMPTS: usize = 8;
+
+/// Most expired reveal rows one reservation deletes (the next reveal removes the rest).
+const REVEAL_PRUNE_BATCH: usize = 64;
 
 /// Records adopted per batch.
 const ADOPT_BATCH: usize = 256;
@@ -265,6 +292,16 @@ pub struct RevealStamp {
     /// The host the person was looking at, if any.
     #[serde(default)]
     pub host: Option<HostId>,
+}
+
+/// One reveal in [`tables::REVEAL_LOG`]: the unit the reveal limit counts. Never holds the
+/// value or the reason.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RevealLogEntry {
+    /// When the reveal was reserved (the clock of the controller that took it).
+    pub at: Timestamp,
+    /// The secret that was revealed.
+    pub secret: SecretId,
 }
 
 /// A binding of a secret to a host.
@@ -870,6 +907,60 @@ fn lost_to_rotation(failures: &[FailedPrecondition]) -> bool {
         })
 }
 
+/// The keys of [`tables::REVEAL_LOG`] that belong to `subject`. A string key ends in a
+/// terminator, so this prefix matches this subject only, not a longer one that starts with
+/// it (`user:1` and `user:10`).
+fn reveal_range(subject: &str) -> KeyRange {
+    KeyRange::prefix(encode_key(&subject.to_owned()))
+}
+
+/// Whether a reservation failed only because another controller reserved a reveal of the
+/// same person meanwhile (their `counter` moved).
+fn lost_reveal_race(failures: &[FailedPrecondition], counter: &CounterKey) -> bool {
+    !failures.is_empty()
+        && failures.iter().all(|failure| {
+            matches!(failure, FailedPrecondition::Counter { counter: failed, .. } if failed == counter)
+        })
+}
+
+/// The reveal rows of one person as seen at one time.
+struct RevealWindow {
+    /// The times of the reveals inside [`REVEAL_WINDOW`], oldest first. A row dated after
+    /// the reading time (clock skew between controllers) counts as inside.
+    inside: Vec<Timestamp>,
+    /// The sequence numbers of the rows that have left the window.
+    expired: Vec<u64>,
+}
+
+impl RevealWindow {
+    /// Sorts the `(sequence, time)` rows of a person into those inside the window at `now`
+    /// and those outside it.
+    fn of(now: Timestamp, rows: impl IntoIterator<Item = (u64, Timestamp)>) -> Self {
+        let mut inside = Vec::new();
+        let mut expired = Vec::new();
+        for (number, at) in rows {
+            if now.saturating_since(at) < REVEAL_WINDOW {
+                inside.push(at);
+            } else {
+                expired.push(number);
+            }
+        }
+        inside.sort_unstable();
+        Self { inside, expired }
+    }
+
+    /// Whole seconds (rounded up, at least 1) until enough reveals have left the window for
+    /// one more to fit: the oldest one when the person is at the limit.
+    fn retry_after(&self, now: Timestamp) -> u64 {
+        let index = self.inside.len().saturating_sub(REVEALS_PER_WINDOW);
+        let remaining = self.inside.get(index).map_or(REVEAL_WINDOW, |at| {
+            at.checked_add(REVEAL_WINDOW)
+                .map_or(REVEAL_WINDOW, |leaves| leaves.saturating_since(now))
+        });
+        (remaining.as_secs() + u64::from(remaining.subsec_nanos() > 0)).max(1)
+    }
+}
+
 fn change(field: &str, old: Option<String>, new: Option<String>) -> FieldChange {
     FieldChange {
         object: None,
@@ -923,10 +1014,7 @@ fn decode_value(
 pub struct OperatorSecrets {
     store: Arc<dyn Store>,
     vault: Arc<dyn Vault>,
-    reveals: Mutex<HashMap<UserOrSubject, VecDeque<Instant>>>,
 }
-
-type UserOrSubject = String;
 
 impl std::fmt::Debug for OperatorSecrets {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -937,11 +1025,7 @@ impl std::fmt::Debug for OperatorSecrets {
 impl OperatorSecrets {
     /// The service over the store and the vault on it.
     pub fn new(store: Arc<dyn Store>, vault: Arc<dyn Vault>) -> Self {
-        Self {
-            store,
-            vault,
-            reveals: Mutex::new(HashMap::new()),
-        }
+        Self { store, vault }
     }
 
     /// The store.
@@ -1399,39 +1483,64 @@ impl OperatorSecrets {
         }
     }
 
-    /// Counts a reveal of the person behind `ctx` against [`REVEALS_PER_WINDOW`].
-    fn take_reveal(&self, ctx: &RequestCtx) -> Result<(), OperatorError> {
-        let key = ctx.principal.subject();
-        let now = Instant::now();
-        let mut reveals = self.reveals.lock().unwrap_or_else(PoisonError::into_inner);
-        // Forget idle people so the map stays small.
-        reveals.retain(|_, times| {
-            times
-                .back()
-                .is_some_and(|last| now.duration_since(*last) < REVEAL_WINDOW)
-        });
-        let times = reveals.entry(key).or_default();
-        while times
-            .front()
-            .is_some_and(|first| now.duration_since(*first) >= REVEAL_WINDOW)
-        {
-            times.pop_front();
+    /// Reserves one reveal of `id` for the person behind `ctx` against [`REVEALS_PER_WINDOW`],
+    /// counted over the replicated [`tables::REVEAL_LOG`] rows of the person, so the limit
+    /// is strict across every controller of a cluster.
+    ///
+    /// Each attempt reads the person's counter and rows, counts the reveals inside
+    /// [`REVEAL_WINDOW`] and, with room left, writes the next row, bumps the counter and
+    /// deletes expired rows (at most [`REVEAL_PRUNE_BATCH`]) in one batch guarded by the
+    /// counter value it read. A controller that reserved meanwhile moved the counter, so
+    /// this attempt fails and starts over with the new rows. The batch has no audit draft:
+    /// the vault audits the reveal itself right after.
+    async fn reserve_reveal(&self, ctx: &RequestCtx, id: SecretId) -> Result<(), OperatorError> {
+        let subject = ctx.principal.subject();
+        let counter = reveal_counter(&subject);
+        let range = reveal_range(&subject);
+        for _ in 0..REVEAL_ATTEMPTS {
+            let view = self.view().await?;
+            let seq = view.counter(&counter)?;
+            let rows = view.scan_typed(&tables::REVEAL_LOG, range.clone(), usize::MAX, false)?;
+            let window = RevealWindow::of(
+                ctx.now,
+                rows.into_iter()
+                    .map(|((_, number), entry, _)| (number, entry.at)),
+            );
+            if window.inside.len() >= REVEALS_PER_WINDOW {
+                return Err(OperatorError::RateLimited {
+                    retry_after: window.retry_after(ctx.now),
+                });
+            }
+            let mut batch = WriteBatch::for_request(ctx);
+            batch.idempotency = None;
+            batch.expect_counter(counter.clone(), seq);
+            batch.bump(counter.clone());
+            batch.put_typed(
+                &tables::REVEAL_LOG,
+                &(subject.clone(), seq + 1),
+                &RevealLogEntry {
+                    at: ctx.now,
+                    secret: id,
+                },
+            )?;
+            for number in window.expired.iter().take(REVEAL_PRUNE_BATCH) {
+                batch.delete_typed(&tables::REVEAL_LOG, &(subject.clone(), *number));
+            }
+            match self.store.propose(batch).await {
+                Ok(_) => return Ok(()),
+                // Another controller reserved a reveal of this person concurrently.
+                Err(StoreError::PreconditionFailed(failures))
+                    if lost_reveal_race(&failures, &counter) => {}
+                Err(error) => return Err(error.into()),
+            }
         }
-        if times.len() >= REVEALS_PER_WINDOW {
-            let retry_after = times.front().map_or(REVEAL_WINDOW, |first| {
-                REVEAL_WINDOW.saturating_sub(now.duration_since(*first))
-            });
-            return Err(OperatorError::RateLimited {
-                retry_after: retry_after.as_secs().max(1),
-            });
-        }
-        times.push_back(now);
-        Ok(())
+        Err(StoreError::Timeout.into())
     }
 
     /// Reveals an operator secret after the caller's authorization checks (the role, the
     /// PIN coupling rule and the step-up of TGL-24): checks the host binding the request
-    /// names (required when `bound_host_only`), the rate limit of the person, then commits
+    /// names (required when `bound_host_only`), the rate limit of the person (counted
+    /// across every controller of the cluster, see [`REVEALS_PER_WINDOW`]), then commits
     /// the audit record (`vault.secret.reveal` with the host, the reason and the kind) and
     /// the last-revealed stamp in one write, and only then returns the value. Refusals are
     /// audited too, except the rate limit.
@@ -1478,8 +1587,10 @@ impl OperatorSecrets {
                 return Err(error);
             }
         };
-        if let Err(error) = self.take_reveal(ctx) {
-            tracing::warn!(secret = %id, principal = %ctx.principal, "reveal rate limit reached");
+        if let Err(error) = self.reserve_reveal(ctx, id).await {
+            if matches!(error, OperatorError::RateLimited { .. }) {
+                tracing::warn!(secret = %id, principal = %ctx.principal, "reveal rate limit reached");
+            }
             return Err(error);
         }
         let mut batch = WriteBatch::for_request(ctx);
@@ -1714,6 +1825,94 @@ mod tests {
         let printed = format!("{revealed:?}");
         assert!(!printed.contains("example-secret-marker"));
         assert!(printed.contains("21 bytes"));
+    }
+
+    fn time(text: &str) -> Timestamp {
+        text.parse().expect("a timestamp")
+    }
+
+    #[test]
+    fn the_reveal_range_of_a_subject_excludes_longer_subjects_that_start_with_it() {
+        let range = reveal_range("user:1");
+        let key =
+            |subject: &str, number: u64| tables::REVEAL_LOG.key(&(subject.to_owned(), number));
+        assert!(range.contains(&key("user:1", 0)));
+        assert!(range.contains(&key("user:1", 7)));
+        assert!(range.contains(&key("user:1", u64::MAX)));
+        assert!(!range.contains(&key("user:10", 1)));
+        assert!(!range.contains(&key("user:1\0", 1)));
+        assert!(!range.contains(&key("user:1\u{1}", 1)));
+        assert!(!range.contains(&key("user:", 1)));
+        assert!(!range.contains(&key("user:2", 1)));
+        assert!(!range.contains(&key("token:1", 1)));
+    }
+
+    #[test]
+    fn the_reveal_window_sorts_rows_and_counts_rows_from_the_future() {
+        let now = time("2026-10-09T12:00:00Z");
+        let window = RevealWindow::of(
+            now,
+            [
+                (1, time("2026-10-09T11:58:00Z")),
+                // Exactly one window ago: outside.
+                (2, time("2026-10-09T11:59:00Z")),
+                (3, time("2026-10-09T11:59:00.5Z")),
+                // A controller whose clock runs ahead: inside.
+                (4, time("2026-10-09T12:00:30Z")),
+            ],
+        );
+        assert_eq!(window.expired, [1, 2]);
+        assert_eq!(
+            window.inside,
+            [time("2026-10-09T11:59:00.5Z"), time("2026-10-09T12:00:30Z")]
+        );
+    }
+
+    #[test]
+    fn the_wait_for_a_reveal_is_rounded_up_and_follows_the_row_that_frees_a_place() {
+        let now = time("2026-10-09T12:00:00Z");
+        let full = |oldest: &str| {
+            let mut rows = vec![(0, time(oldest))];
+            rows.extend(
+                (1..)
+                    .take(REVEALS_PER_WINDOW - 1)
+                    .map(|n| (n, time("2026-10-09T11:59:59Z"))),
+            );
+            RevealWindow::of(now, rows)
+        };
+        // At the limit the oldest row decides. It leaves 0.5 s from now: one second.
+        let window = full("2026-10-09T11:59:00.5Z");
+        assert_eq!(window.inside.len(), REVEALS_PER_WINDOW);
+        assert_eq!(window.retry_after(now), 1);
+        // 30.2 s: 31 seconds.
+        assert_eq!(full("2026-10-09T11:59:30.2Z").retry_after(now), 31);
+        // A whole number of seconds stays as it is.
+        assert_eq!(full("2026-10-09T11:59:30Z").retry_after(now), 30);
+        // Rows dated after now leave the window after it: more than one window to wait.
+        let skewed = RevealWindow::of(
+            now,
+            (0..)
+                .take(REVEALS_PER_WINDOW)
+                .map(|n| (n, time("2026-10-09T12:00:10Z")))
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(skewed.retry_after(now), 70);
+        // Two rows above the limit (skew): the third oldest decides, not the oldest.
+        let window = RevealWindow::of(
+            now,
+            (0..)
+                .take(REVEALS_PER_WINDOW + 2)
+                .map(|n| {
+                    let at = if n < 2 {
+                        "2026-10-09T11:59:01Z"
+                    } else {
+                        "2026-10-09T11:59:40Z"
+                    };
+                    (n, time(at))
+                })
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(window.retry_after(now), 40);
     }
 
     #[test]

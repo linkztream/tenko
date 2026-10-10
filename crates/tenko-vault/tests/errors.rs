@@ -283,3 +283,52 @@ async fn codes_are_distinct_per_variant_and_params_never_hold_values() {
         assert!(!rendered.contains("seed"), "{rendered}");
     }
 }
+
+#[test]
+fn kek_policy_and_transfer_errors_are_coded() {
+    let refused = VaultError::PlainRefused {
+        reason: "a plain generation beside a sealed one".to_owned(),
+    };
+    check(&refused, "vault.kek.plain_refused", 409);
+    for (failure, code, status) in [
+        (
+            tenko_vault::TransferFailure::Format,
+            "vault.kek.transfer.format",
+            400,
+        ),
+        (
+            tenko_vault::TransferFailure::Malformed,
+            "vault.kek.transfer.malformed",
+            400,
+        ),
+        (
+            tenko_vault::TransferFailure::Integrity,
+            "vault.kek.transfer.integrity",
+            400,
+        ),
+        (
+            tenko_vault::TransferFailure::PublicKey,
+            "vault.kek.transfer.public_key",
+            400,
+        ),
+        (
+            tenko_vault::TransferFailure::NotExportable,
+            "vault.kek.transfer.not_exportable",
+            501,
+        ),
+        (
+            tenko_vault::TransferFailure::Conflict {
+                id: "dpapi-1-00aa".to_owned(),
+            },
+            "vault.kek.transfer.conflict",
+            409,
+        ),
+    ] {
+        check(&VaultError::Transfer { failure }, code, status);
+    }
+    check(
+        &VaultError::RotationInProgress,
+        "vault.kek.rotation_in_progress",
+        409,
+    );
+}

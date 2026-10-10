@@ -152,3 +152,60 @@ impl Vault for MemVault {
         self.vault.stage_replace(batch, ctx, secret, value).await
     }
 }
+
+/// The peers of a controller in an in-process cluster (tests): a fetch is answered from
+/// the ring of another controller's vault, sealed under the fetch context of the asking
+/// controller, as `Cluster.TransferKek` would answer it. Without a source (a member that
+/// cannot be reached) the fetch fails.
+#[derive(Debug)]
+pub struct MemPeers {
+    asking: tenko_core::NodeId,
+    source: std::sync::RwLock<Option<Arc<StoreVault>>>,
+    fetches: std::sync::atomic::AtomicUsize,
+}
+
+impl MemPeers {
+    /// Peers of the controller `asking` that fetch from `source`.
+    pub fn new(asking: tenko_core::NodeId, source: Option<Arc<StoreVault>>) -> Self {
+        Self {
+            asking,
+            source: std::sync::RwLock::new(source),
+            fetches: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    /// Answers from another controller from now on (`None`: nobody answers).
+    pub fn set_source(&self, source: Option<Arc<StoreVault>>) {
+        *self
+            .source
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = source;
+    }
+
+    /// How many fetches were asked for.
+    pub fn fetches(&self) -> usize {
+        self.fetches.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::distribution::KekPeers for MemPeers {
+    async fn fetch(
+        &self,
+        recipient: [u8; crate::transfer::PUBLIC_KEY_LEN],
+    ) -> Result<crate::transfer::SealedKeks, VaultError> {
+        self.fetches
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let source = self
+            .source
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .ok_or_else(|| VaultError::kek_unavailable("no cluster member answers"))?;
+        crate::transfer::seal_ring(
+            &source.ring(),
+            &recipient,
+            &crate::transfer::fetch_context(self.asking),
+        )
+    }
+}
