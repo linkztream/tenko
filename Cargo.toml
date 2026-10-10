@@ -32,6 +32,7 @@ tenko-api = { path = "crates/tenko-api" }
 tenko-auth = { path = "crates/tenko-auth" }
 tenko-cluster = { path = "crates/tenko-cluster" }
 tenko-connect = { path = "crates/tenko-connect" }
+tenko-scan = { path = "crates/tenko-scan" }
 tenko-core = { path = "crates/tenko-core" }
 tenko-ipam = { path = "crates/tenko-ipam" }
 tenko-jobs = { path = "crates/tenko-jobs" }

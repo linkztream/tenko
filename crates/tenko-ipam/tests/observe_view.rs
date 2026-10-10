@@ -273,6 +273,7 @@ impl Fixture {
         let services = Observed::Services {
             ip: ip("192.0.2.10"),
             open_tcp: vec![443, 22, 443],
+            tls_tcp: vec![443],
         };
         let guess = Observed::Os {
             ip: ip("192.0.2.10"),
@@ -1016,6 +1017,7 @@ async fn an_ip_collects_services_and_os_guesses() {
     );
     let summary = &result.summary;
     assert_eq!(summary.open_tcp, [22, 443], "sorted, without duplicates");
+    assert_eq!(summary.tls_tcp, [443]);
     assert_eq!(summary.os, ["Debian 13", "Linux 6.x"]);
     assert_eq!(summary.macs, [mac(1), mac(2)]);
     assert_empty(&summary.attachments);
@@ -1470,4 +1472,84 @@ async fn an_unknown_subject_is_not_found() {
     let page = list_facts(view.as_ref(), &FactQuery::default(), time("08:12:00")).expect("list");
     assert_empty(&page.items);
     assert_eq!(page.next_cursor, None);
+}
+
+#[tokio::test]
+async fn probe_names_and_vendors_join_the_view_of_their_device() {
+    let store = mem();
+    let vrf = VrfId::generate();
+    let arp = probe(ProbeMethod::Arp);
+    let rdns = probe(ProbeMethod::ReverseDns);
+    let tcp = probe(ProbeMethod::TcpConnect);
+    let batches = [
+        (
+            arp.clone(),
+            vec![
+                Observed::Address {
+                    vrf,
+                    ip: ip("192.0.2.40"),
+                    mac: Some(mac(40)),
+                },
+                Observed::Vendor {
+                    mac: mac(40),
+                    vendor: "ICANN, IANA Department".to_owned(),
+                },
+            ],
+        ),
+        (
+            rdns,
+            vec![Observed::Name {
+                ip: ip("192.0.2.40"),
+                name: "Printer.Example.Test".to_owned(),
+            }],
+        ),
+        (
+            tcp,
+            vec![Observed::Services {
+                ip: ip("192.0.2.40"),
+                open_tcp: vec![443, 631],
+                tls_tcp: vec![443],
+            }],
+        ),
+    ];
+    for (source, subjects) in batches {
+        let observations = subjects
+            .into_iter()
+            .map(|subject| observation(&source, subject, "08:05:00"))
+            .collect();
+        push(&store, &source, observations, true, "08:05:00").await;
+    }
+    let view = read(&store).await;
+    // The name finds the device; a name fact is indexed like an inventory name.
+    let by_name = subject_view(
+        view.as_ref(),
+        &subject("printer.example.test"),
+        time("08:06:00"),
+    )
+    .expect("view by name");
+    assert_eq!(by_name.facts.len(), 1);
+    assert_eq!(by_name.facts[0].subject_key, "name:192.0.2.40");
+    let by_ip = subject_view(view.as_ref(), &subject("192.0.2.40"), time("08:06:00"))
+        .expect("view by address");
+    let summary = &by_ip.summary;
+    assert_eq!(summary.names, ["Printer.Example.Test"]);
+    assert_eq!(summary.open_tcp, [443, 631]);
+    assert_eq!(summary.tls_tcp, [443]);
+    let by_mac = subject_view(
+        view.as_ref(),
+        &subject("00:00:5e:00:53:28"),
+        time("08:06:00"),
+    )
+    .expect("view by MAC");
+    assert_eq!(by_mac.summary.vendors, ["ICANN, IANA Department"]);
+    let vendors = list_facts(
+        view.as_ref(),
+        &FactQuery {
+            subject_type: Some("vendor".to_owned()),
+            ..FactQuery::default()
+        },
+        time("08:06:00"),
+    )
+    .expect("list");
+    assert_eq!(vendors.items.len(), 1);
 }

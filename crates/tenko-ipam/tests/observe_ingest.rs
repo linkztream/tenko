@@ -206,6 +206,7 @@ async fn probe_addresses_and_services_are_facts_of_their_own() {
             subject: Observed::Services {
                 ip: "2001:db8::10".parse().expect("ip"),
                 open_tcp: vec![22, 443],
+                tls_tcp: vec![443],
             },
             observed_at: at("11:00"),
             received_at: at("11:00"),

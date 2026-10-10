@@ -27,6 +27,10 @@ enum ProbeMethod {
   PROBE_METHOD_TCP_SYN = 6;
   PROBE_METHOD_OS_FINGERPRINT = 7;
   PROBE_METHOD_SNMP = 8;
+  PROBE_METHOD_TCP_CONNECT = 9;
+  PROBE_METHOD_REVERSE_DNS = 10;
+  PROBE_METHOD_LLMNR = 11;
+  PROBE_METHOD_ARP_SWEEP = 12;
 }
 
 message IngestRequest {
@@ -59,6 +63,8 @@ message Sighting {
     OsSighting os = 12;
     LinkSighting link = 13;
     AttachmentSighting attachment = 14;
+    NameSighting name = 15;
+    VendorSighting vendor = 16;
   }
 }
 
@@ -72,6 +78,8 @@ message AddressSighting {
 message ServicesSighting {
   string ip = 1;
   repeated uint32 open_tcp = 2;
+  // The open ports that answered a TLS handshake.
+  repeated uint32 tls_tcp = 3;
 }
 
 // An operating system guess for an address.
@@ -109,6 +117,20 @@ message AttachmentSighting {
   string device = 2;
   optional string port = 3;
   optional uint32 vlan = 4;
+}
+
+// A name the probe found for an address (reverse DNS, mDNS, LLMNR, SNMP). Not a sighting
+// of the address.
+message NameSighting {
+  string ip = 1;
+  string name = 2;
+}
+
+// The vendor of a MAC address: the organisation its OUI is registered to, or the
+// manufacturer the device reports.
+message VendorSighting {
+  string mac = 1;
+  string vendor = 2;
 }
 
 message IngestResponse {

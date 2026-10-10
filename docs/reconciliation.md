@@ -36,7 +36,7 @@ An observation names its source. Tenko turns the source into a canonical text, t
 |---|---|---|
 | Inventory connector | `inventory:<connector id>` | The connector host (Phase 1) |
 | Network controller connector | `network_controller:<connector id>` | The connector host (Phase 1) |
-| Probe | `probe:<node>:<method>`, method one of `arp`, `nd`, `mdns`, `lldp`, `icmp`, `tcp_syn`, `os_fingerprint`, `snmp` | Probes (WP2.3) |
+| Probe | `probe:<node>:<method>`, method one of `arp`, `nd`, `icmp`, `tcp_connect`, `reverse_dns`, `mdns`, `llmnr`, `snmp`, and the declared raw-socket methods `arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp` | Probes (WP2.3, see [scanning.md](scanning.md)) |
 | DNS zone | `dns:<zone>` | Tenko DNS (Phase 2) |
 | DHCP node | `dhcp:<node>` | Tenko DHCP (Phase 3) |
 
@@ -50,10 +50,12 @@ A fact is stored once per source and subject, under the key (source key, subject
 |---|---|---|---|
 | `host` | `host:<external id>` | Inventory connectors | Name, MAC addresses, IP addresses, OS, platform, parent host, tags |
 | `address` | `address:<vrf>/<ip>` | Probes, later DHCP leases | The address, the MAC address behind it when known, and the VRF of the source |
-| `attachment` | `attachment:<mac>` | Network controllers | The client's switch or access point, port, SSID and VLAN |
-| `services` | `services:<ip>` | Probes | Open TCP ports (SCAN-08) |
+| `attachment` | `attachment:<mac>` | Network controllers, SNMP probes | The client's switch or access point, port, SSID and VLAN |
+| `services` | `services:<ip>` | Probes | Open TCP ports, and the ones that answered a TLS handshake (SCAN-08) |
 | `os` | `os:<ip>` | Probes | An OS guess and its confidence (SCAN-08) |
-| `link` | `link:<device>\|<port>\|<device>\|<port>\|<kind>` | Network controllers | A link between two devices (IPAM-20); the same fact whichever end the source names first |
+| `name` | `name:<ip>` | Probes | A name found for an address (reverse DNS, mDNS, LLMNR, or the `sysName` of a polled device). It is not a sighting of the address |
+| `vendor` | `vendor:<mac>` | Probes | The vendor of a MAC address: the organization its OUI is registered to |
+| `link` | `link:<device>\|<port>\|<device>\|<port>\|<kind>` | Network controllers, SNMP probes | A link between two devices (IPAM-20); the same fact whichever end the source names first |
 
 A fact carries the source and the subject (as structure and as canonical text), `observed` (the latest report with every attribute the source gave), `observation` (the observation that first reported the fact or last changed its attributes), `first_seen` and `last_seen` (the source's own times), `received_at` (when Tenko last wrote the fact), `expires_at`, `sightings` with `counted_at` (the number of counted sightings and the source time of the last one), and the store `revision`. A fact is **current** while `expires_at` is empty or in the future. Expired facts stay readable until retention removes them (section 2.4); the reconciler's rules use current facts only.
 
@@ -76,10 +78,10 @@ Facts whose last sighting is older than the retention (30 days) are deleted toge
 
 ### 2.5 The computed view
 
-`GET /api/v1/observations/{subject}` computes the picture of one subject across all sources. The subject is a MAC address (`00:00:5e:00:53:01` or `00-00-5E-00-53-01`), an IP address or a name; a name is compared as a whole and without case, and only inventory hosts have names. The answer has four parts:
+`GET /api/v1/observations/{subject}` computes the picture of one subject across all sources. The subject is a MAC address (`00:00:5e:00:53:01` or `00-00-5E-00-53-01`), an IP address or a name; a name is compared as a whole and without case, and inventory hosts and the `name` facts of probes have names. The answer has four parts:
 
 - **`facts`**: every fact that names the subject, found through the index tables, current facts first and then by last sighting, newest first.
-- **`summary`**: whether any fact is current, the sources with a current fact, the first and last sighting, and the sorted, de-duplicated MAC addresses, IP addresses, names, operating systems, platforms, parent hosts, open TCP ports, attachments (one per source and MAC address) and tags. It draws on the current facts, or on all facts when none is current.
+- **`summary`**: whether any fact is current, the sources with a current fact, the first and last sighting, and the sorted, de-duplicated MAC addresses, IP addresses, names, operating systems, platforms, parent hosts, open TCP ports, the open TCP ports that answered a TLS handshake (`tls_tcp`), vendors, attachments (one per source and MAC address) and tags. It draws on the current facts, or on all facts when none is current.
 - **`intent`**: the live hosts, interfaces, addresses and VRFs that match. Interfaces match by MAC address, addresses by IP address in any VRF, hosts by name and through their interfaces.
 - **`sightings`**: the last sightings of the matching addresses and interfaces (section 2.6).
 
@@ -367,7 +369,7 @@ Independently of moves, `Reconciler::ingest` hands the addresses of the ingested
 
 | Source | Phase | What it adds |
 |---|---|---|
-| Probes (WP2.3) | 1 | `address` facts from ARP, ND, mDNS and ICMP (SCAN-02, SCAN-04), each with the VRF of the probe, so the placement of section 3.3 needs no guess. `services` and `os` facts from port scans and fingerprinting (SCAN-04, SCAN-08), which fill the open ports and OS of the computed view. `attachment` and `link` facts from SNMP polling (SCAN-05). The scan scope, the networks a probe covers, so that the orphan rule can tell "gone" from "not scanned". On-demand scans (SCAN-09) ingest like scheduled ones |
+| Probes (WP2.3) | 1 | Delivered, see [scanning.md](scanning.md). `address` facts from the neighbor tables, ICMP, mDNS, LLMNR and SNMP (SCAN-02 to SCAN-05), each with the VRF of the probe, so the placement of section 3.3 needs no guess. `services` facts from the TCP connect scan and mDNS, and `os` facts from mDNS and SNMP (SCAN-04, SCAN-08), which fill the open ports and OS of the computed view. `name` facts from reverse DNS, mDNS, LLMNR and SNMP, `vendor` facts from the OUI table of the probe, and `attachment` and `link` facts from SNMP polling (SCAN-05). A `name` or `vendor` fact is never a sighting of an address: it neither wakes a waiting job nor confirms a move, at ingest or in a run, does not refresh the last sighting of section 2.6, and does not by itself make a discovered host, a suggested network or a conflict. A discovered host takes the name a probe found for one of its addresses when no inventory source names it. The `vendors` constraint of adoption policies does not use probe `vendor` facts yet. On-demand scans (SCAN-09) ingest like scheduled ones. Open: the scan scope, the networks a probe covers, is not used by the orphan rule yet, so the rule cannot tell "gone" from "not scanned". The raw-socket methods (`arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp`) are declared and do not run yet |
 | DNS records | 2 | `dns:<zone>` facts, and orphaned-record proposals: a record without a host (IPAM-15) |
 | DHCP leases | 3 | `dhcp:<node>` lease facts without polling (DHCP-16), `LeaseInPrefix` wake-ups for move steps, and reservations as intent |
 | Vendor names | When a source reports them | A vendor or manufacturer name from a source, such as the device registry of Home Assistant (CONN-04), lets the text entries of `vendors` match |

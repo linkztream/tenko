@@ -1,0 +1,9 @@
+# Multicast DNS query for service types with the unicast-response (QU) bit set in the question class.
+# The answer section holds a known answer (RFC 6762 section 7.1); this is a query, not a response.
+# question: _services._dns-sd._udp.local PTR, class IN with the top bit
+# answer:   _services._dns-sd._udp.local PTR _ipp._tcp.local (known answer)
+00 00 00 00 00 01 00 01 00 00 00 00 09 5f 73 65
+72 76 69 63 65 73 07 5f 64 6e 73 2d 73 64 04 5f
+75 64 70 05 6c 6f 63 61 6c 00 00 0c 80 01 c0 0c
+00 0c 00 01 00 00 0f a0 00 0c 04 5f 69 70 70 04
+5f 74 63 70 c0 23

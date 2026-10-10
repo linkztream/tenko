@@ -500,3 +500,65 @@ async fn an_unmanaged_host_seen_outside_known_networks_suggests_nothing() {
         Vec::<tenko_ipam::proposals::IntentProposal>::new()
     );
 }
+
+#[tokio::test]
+async fn a_name_from_a_probe_names_a_discovered_host_but_is_no_sighting() {
+    use tenko_store::ReadViewExt as _;
+    let world = lab().await;
+    let vrf = world.default_vrf().await;
+    let nas = intended(
+        &world,
+        "nas01",
+        AssignmentMode::Static,
+        "00:00:5e:00:53:10",
+        "192.0.2.10",
+    )
+    .await;
+    // A name alone: not a sighting of the address, so nothing is discovered, no network is
+    // suggested and the intended address gets no last sighting.
+    world
+        .names(
+            &[
+                ("192.0.2.10", "nas01.example.test"),
+                ("192.0.2.77", "ghost.example.test"),
+                ("203.0.113.9", "elsewhere.example.test"),
+            ],
+            at("09:00"),
+        )
+        .await;
+    let report = world.reconcile(at("09:01")).await;
+    assert_eq!(report.sightings, 0, "{report:?}");
+    assert_eq!(report.opened, 0, "{report:?}");
+    let view = world.service.view(None).await.expect("view");
+    let last = view
+        .get_typed(
+            &tenko_ipam::observe::tables::LAST_SEEN,
+            &tenko_core::ObjectRef::from(nas.id),
+        )
+        .expect("read");
+    assert!(last.is_none(), "a name never refreshes the last sighting");
+    drop(view);
+
+    // A device seen at an address without intent takes its name from the probe.
+    world
+        .probe(
+            vrf,
+            &[("192.0.2.40", Some("00:00:5e:00:53:40"))],
+            at("09:02"),
+        )
+        .await;
+    world
+        .names(&[("192.0.2.40", "printer.example.test")], at("09:02"))
+        .await;
+    world.reconcile(at("09:03")).await;
+    let open = world.open(IntentProposalKind::DiscoveredHost).await;
+    assert_eq!(open.len(), 1, "{open:#?}");
+    let IpamCommand::CreateHost(host) = &open[0].commands[0] else {
+        panic!("not a host: {:?}", open[0].commands[0]);
+    };
+    assert_eq!(host.name.to_string(), "printer.example.test");
+    assert_eq!(
+        open[0].subject.name.as_deref(),
+        Some("printer.example.test")
+    );
+}

@@ -7,5 +7,33 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[dependencies]
+async-trait = { workspace = true }
+# SNMPv3 user-based security: HMAC-SHA-1 and HMAC-SHA-2, AES-128-CFB (RFC 3414, RFC 3826,
+# RFC 7860).
+aws-lc-rs = { workspace = true }
+# DNS wire format for mDNS, LLMNR and reverse DNS (ADR 0009); BSD-3-Clause.
+domain = { version = "0.12.3", default-features = false, features = ["std"] }
+futures = { workspace = true }
+ipnet = { workspace = true }
+# Blackout windows in a named time zone with daylight saving time; Unlicense OR MIT.
+jiff = "0.2.38"
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Unprivileged ICMP datagram sockets on Linux and multicast listeners with address reuse;
+# MIT OR Apache-2.0.
+socket2 = { version = "0.6.5", features = ["all"] }
+tenko-cluster = { workspace = true }
+tenko-core = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+
 [lints]
 workspace = true

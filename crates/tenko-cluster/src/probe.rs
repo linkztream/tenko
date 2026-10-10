@@ -72,6 +72,9 @@ pub enum SightingSubject {
         ip: IpAddr,
         /// The open ports.
         open_tcp: Vec<u16>,
+        /// The open ports that answered a TLS handshake.
+        #[serde(default)]
+        tls_tcp: Vec<u16>,
     },
     /// An operating system guess.
     Os {
@@ -103,6 +106,20 @@ pub enum SightingSubject {
         /// The VLAN.
         #[serde(default)]
         vlan: Option<u16>,
+    },
+    /// A name found for an address; not a sighting of the address.
+    Name {
+        /// The address.
+        ip: IpAddr,
+        /// The name.
+        name: String,
+    },
+    /// The vendor of a MAC address.
+    Vendor {
+        /// The MAC address.
+        mac: MacAddr,
+        /// The vendor.
+        vendor: String,
     },
 }
 
@@ -175,6 +192,10 @@ fn method_to_proto(method: ProbeMethod) -> v1::ProbeMethod {
         ProbeMethod::TcpSyn => v1::ProbeMethod::TcpSyn,
         ProbeMethod::OsFingerprint => v1::ProbeMethod::OsFingerprint,
         ProbeMethod::Snmp => v1::ProbeMethod::Snmp,
+        ProbeMethod::TcpConnect => v1::ProbeMethod::TcpConnect,
+        ProbeMethod::ReverseDns => v1::ProbeMethod::ReverseDns,
+        ProbeMethod::Llmnr => v1::ProbeMethod::Llmnr,
+        ProbeMethod::ArpSweep => v1::ProbeMethod::ArpSweep,
     }
 }
 
@@ -188,6 +209,10 @@ fn method_from_proto(value: i32) -> Result<ProbeMethod, ClusterError> {
         Ok(v1::ProbeMethod::TcpSyn) => ProbeMethod::TcpSyn,
         Ok(v1::ProbeMethod::OsFingerprint) => ProbeMethod::OsFingerprint,
         Ok(v1::ProbeMethod::Snmp) => ProbeMethod::Snmp,
+        Ok(v1::ProbeMethod::TcpConnect) => ProbeMethod::TcpConnect,
+        Ok(v1::ProbeMethod::ReverseDns) => ProbeMethod::ReverseDns,
+        Ok(v1::ProbeMethod::Llmnr) => ProbeMethod::Llmnr,
+        Ok(v1::ProbeMethod::ArpSweep) => ProbeMethod::ArpSweep,
         Ok(v1::ProbeMethod::Unspecified) | Err(_) => {
             return Err(invalid("the batch names no probe method it knows"));
         }
@@ -252,9 +277,14 @@ impl Sighting {
                 ip: ip.to_string(),
                 mac: mac.map(|mac| mac.to_string()),
             }),
-            SightingSubject::Services { ip, open_tcp } => Subject::Services(v1::ServicesSighting {
+            SightingSubject::Services {
+                ip,
+                open_tcp,
+                tls_tcp,
+            } => Subject::Services(v1::ServicesSighting {
                 ip: ip.to_string(),
                 open_tcp: open_tcp.iter().copied().map(u32::from).collect(),
+                tls_tcp: tls_tcp.iter().copied().map(u32::from).collect(),
             }),
             SightingSubject::Os {
                 ip,
@@ -281,6 +311,14 @@ impl Sighting {
                 port: port.clone(),
                 vlan: vlan.map(u32::from),
             }),
+            SightingSubject::Name { ip, name } => Subject::Name(v1::NameSighting {
+                ip: ip.to_string(),
+                name: name.clone(),
+            }),
+            SightingSubject::Vendor { mac, vendor } => Subject::Vendor(v1::VendorSighting {
+                mac: mac.to_string(),
+                vendor: vendor.clone(),
+            }),
         };
         v1::Sighting {
             observed_at: Some(timestamp_to_proto(self.observed_at)),
@@ -294,6 +332,13 @@ impl Sighting {
     fn from_proto(message: v1::Sighting) -> Option<Self> {
         use v1::sighting::Subject;
         let ip = |text: &str| text.parse::<IpAddr>().ok();
+        let ports = |values: Vec<u32>| {
+            values
+                .into_iter()
+                .map(u16::try_from)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()
+        };
         let subject = match message.subject? {
             Subject::Address(address) => SightingSubject::Address {
                 ip: ip(&address.ip)?,
@@ -304,12 +349,8 @@ impl Sighting {
             },
             Subject::Services(services) => SightingSubject::Services {
                 ip: ip(&services.ip)?,
-                open_tcp: services
-                    .open_tcp
-                    .into_iter()
-                    .map(u16::try_from)
-                    .collect::<Result<_, _>>()
-                    .ok()?,
+                open_tcp: ports(services.open_tcp)?,
+                tls_tcp: ports(services.tls_tcp)?,
             },
             Subject::Os(os) => SightingSubject::Os {
                 ip: ip(&os.ip)?,
@@ -330,6 +371,26 @@ impl Sighting {
                     None => None,
                 },
             },
+            Subject::Name(name) => {
+                let text = name.name.trim();
+                if text.is_empty() {
+                    return None;
+                }
+                SightingSubject::Name {
+                    ip: ip(&name.ip)?,
+                    name: text.to_owned(),
+                }
+            }
+            Subject::Vendor(vendor) => {
+                let text = vendor.vendor.trim();
+                if text.is_empty() {
+                    return None;
+                }
+                SightingSubject::Vendor {
+                    mac: vendor.mac.parse().ok()?,
+                    vendor: text.to_owned(),
+                }
+            }
         };
         Some(Self {
             observed_at: timestamp_from_proto(&message.observed_at?)?,
@@ -443,9 +504,17 @@ impl ProbeBatch {
                 });
                 let subject = match sighting.subject {
                     SightingSubject::Address { ip, mac } => Observed::Address { vrf, ip, mac },
-                    SightingSubject::Services { ip, open_tcp } => {
-                        Observed::Services { ip, open_tcp }
-                    }
+                    SightingSubject::Services {
+                        ip,
+                        open_tcp,
+                        tls_tcp,
+                    } => Observed::Services {
+                        ip,
+                        open_tcp,
+                        tls_tcp,
+                    },
+                    SightingSubject::Name { ip, name } => Observed::Name { ip, name },
+                    SightingSubject::Vendor { mac, vendor } => Observed::Vendor { mac, vendor },
                     SightingSubject::Os {
                         ip,
                         guess,
@@ -520,6 +589,23 @@ mod tests {
                     subject: SightingSubject::Services {
                         ip: "192.0.2.10".parse().expect("ip"),
                         open_tcp: vec![22, 443],
+                        tls_tcp: vec![443],
+                    },
+                },
+                Sighting {
+                    observed_at: at("2026-10-10T08:00:03Z"),
+                    ttl_secs: Some(3600),
+                    subject: SightingSubject::Name {
+                        ip: "192.0.2.10".parse().expect("ip"),
+                        name: "printer.example.net".to_owned(),
+                    },
+                },
+                Sighting {
+                    observed_at: at("2026-10-10T08:00:03Z"),
+                    ttl_secs: None,
+                    subject: SightingSubject::Vendor {
+                        mac: "00:00:5e:00:53:10".parse().expect("mac"),
+                        vendor: "ICANN, IANA Department".to_owned(),
                     },
                 },
                 Sighting {
@@ -562,7 +648,51 @@ mod tests {
         });
         let (back, skipped) = ProbeBatch::from_request(request).expect("batch");
         assert_eq!(skipped, 1);
-        assert_eq!(back.sightings.len(), 4);
+        assert_eq!(back.sightings.len(), 6);
+    }
+
+    #[test]
+    fn every_probe_method_crosses_the_wire() {
+        for method in [
+            ProbeMethod::Arp,
+            ProbeMethod::Nd,
+            ProbeMethod::Mdns,
+            ProbeMethod::Lldp,
+            ProbeMethod::Icmp,
+            ProbeMethod::TcpSyn,
+            ProbeMethod::OsFingerprint,
+            ProbeMethod::Snmp,
+            ProbeMethod::TcpConnect,
+            ProbeMethod::ReverseDns,
+            ProbeMethod::Llmnr,
+            ProbeMethod::ArpSweep,
+        ] {
+            let wire: i32 = method_to_proto(method).into();
+            assert_eq!(method_from_proto(wire).expect("method"), method);
+        }
+    }
+
+    #[test]
+    fn blank_names_and_vendors_are_skipped() {
+        let mut request = batch().to_request();
+        request.sightings.push(v1::Sighting {
+            observed_at: Some(timestamp_to_proto(at("2026-10-10T08:00:00Z"))),
+            ttl_secs: 0,
+            subject: Some(v1::sighting::Subject::Name(v1::NameSighting {
+                ip: "192.0.2.11".to_owned(),
+                name: "  ".to_owned(),
+            })),
+        });
+        request.sightings.push(v1::Sighting {
+            observed_at: Some(timestamp_to_proto(at("2026-10-10T08:00:00Z"))),
+            ttl_secs: 0,
+            subject: Some(v1::sighting::Subject::Vendor(v1::VendorSighting {
+                mac: "00:00:5e:00:53:11".to_owned(),
+                vendor: String::new(),
+            })),
+        });
+        let (_, skipped) = ProbeBatch::from_request(request).expect("batch");
+        assert_eq!(skipped, 2);
     }
 
     #[test]
@@ -591,7 +721,7 @@ mod tests {
                 method: ProbeMethod::Arp
             }
         );
-        assert_eq!(observations.len(), 4);
+        assert_eq!(observations.len(), 6);
         assert!(observations.iter().all(|o| o.source == source));
         match &observations[0].subject {
             Observed::Address { vrf: got, .. } => assert_eq!(*got, vrf),

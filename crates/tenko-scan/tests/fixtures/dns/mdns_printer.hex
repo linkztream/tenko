@@ -1,0 +1,25 @@
+# Multicast DNS response of a network printer, sent to 224.0.0.251:5353.
+# Flags: response, authoritative. Names are compressed; unique records carry the cache-flush bit.
+# answer:     _ipp._tcp.local PTR "Office Printer._ipp._tcp.local"
+# answer:     "Office Printer._ipp._tcp.local" SRV port 631 target printer.local, cache-flush
+# answer:     "Office Printer._ipp._tcp.local" TXT txtvers, qtotal, rp, ty, product, adminurl, pdl
+# answer:     printer.local A 192.0.2.40, cache-flush
+# additional: printer.local NSEC (A, AAAA), a type the parser keeps as "other"
+00 00 84 00 00 00 00 04 00 00 00 01 04 5f 69 70
+70 04 5f 74 63 70 05 6c 6f 63 61 6c 00 00 0c 00
+01 00 00 11 94 00 11 0e 4f 66 66 69 63 65 20 50
+72 69 6e 74 65 72 c0 0c c0 27 00 21 80 01 00 00
+00 78 00 10 00 00 00 00 02 77 07 70 72 69 6e 74
+65 72 c0 16 c0 27 00 10 80 01 00 00 11 94 00 8f
+09 74 78 74 76 65 72 73 3d 31 08 71 74 6f 74 61
+6c 3d 31 0c 72 70 3d 69 70 70 2f 70 72 69 6e 74
+17 74 79 3d 45 78 61 6d 70 6c 65 20 50 72 69 6e
+74 65 72 20 39 30 30 30 16 70 72 6f 64 75 63 74
+3d 28 45 78 61 6d 70 6c 65 20 39 30 30 30 29 21
+61 64 6d 69 6e 75 72 6c 3d 68 74 74 70 3a 2f 2f
+70 72 69 6e 74 65 72 2e 6c 6f 63 61 6c 3a 38 30
+2f 1d 70 64 6c 3d 61 70 70 6c 69 63 61 74 69 6f
+6e 2f 70 64 66 2c 69 6d 61 67 65 2f 75 72 66 c0
+4a 00 01 80 01 00 00 00 78 00 04 c0 00 02 28 c0
+4a 00 2f 80 01 00 00 00 78 00 08 c0 4a 00 04 40
+00 00 08

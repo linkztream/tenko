@@ -1,0 +1,10 @@
+# Malformed record lengths in three answers.
+# answer 1: printer.local A with a data length of 3 (an address needs 4): skipped
+# answer 2: nas.local AAAA 2001:db8::41 (valid): kept
+# answer 3: late.local A with a data length of 65535 that runs past the end of the message: reading stops
+00 02 84 00 00 00 00 03 00 00 00 00 07 70 72 69
+6e 74 65 72 05 6c 6f 63 61 6c 00 00 01 80 01 00
+00 00 78 00 03 c0 00 02 03 6e 61 73 c0 14 00 1c
+80 01 00 00 00 78 00 10 20 01 0d b8 00 00 00 00
+00 00 00 00 00 00 00 41 04 6c 61 74 65 c0 14 00
+01 80 01 00 00 00 78 ff ff c0 00 02 2d

@@ -11,6 +11,7 @@ use tenko_core::{
     AddressId, HostId, InterfaceId, MacAddr, ObjectRef, PrefixId, ProposalId, Revision, TenantId,
     Timestamp, VrfId,
     ipam::{Address, Host, Interface, Prefix, PrefixRole, Range, RangeRole, Tenant, Vrf},
+    observe::Observed,
 };
 use tenko_store::{KeyRange, ReadView, ReadViewExt};
 
@@ -311,8 +312,12 @@ pub(crate) struct Snapshot {
     pub intent: Intent,
     /// Every fact within retention, with its revision.
     pub facts: Vec<ObservedFact>,
-    /// The pairs the current facts report.
+    /// The pairs the current facts report. Name and vendor facts are not sightings and
+    /// report none.
     pub seen: Vec<Seen>,
+    /// The names current name facts of probes give addresses (reverse DNS, mDNS, LLMNR,
+    /// SNMP), for naming proposals only: a name is not a sighting of its address.
+    pub names: BTreeMap<IpAddr, BTreeSet<String>>,
     /// Open proposals by subject key, with the revision of their key row.
     pub open: BTreeMap<String, (IntentProposal, Revision)>,
     /// Remembered rejections by subject key, with their revision.
@@ -335,10 +340,19 @@ impl Snapshot {
             })
             .collect();
         let mut seen = Vec::new();
+        let mut names: BTreeMap<IpAddr, BTreeSet<String>> = BTreeMap::new();
         for (index, fact) in facts.iter().enumerate() {
-            if fact.is_current(now) {
-                seen.extend(pairs(index, fact, &intent));
+            if !fact.is_current(now) {
+                continue;
             }
+            if let Observed::Name { ip, name } = &fact.observed {
+                let name = name.trim();
+                if !name.is_empty() && trackable(*ip) {
+                    names.entry(*ip).or_default().insert(name.to_owned());
+                }
+                continue;
+            }
+            seen.extend(pairs(index, fact, &intent));
         }
         let mut open = BTreeMap::new();
         for (key, id, revision) in
@@ -375,6 +389,7 @@ impl Snapshot {
             intent,
             facts,
             seen,
+            names,
             open,
             rejections,
             policies,
@@ -398,7 +413,11 @@ fn pairs(index: usize, fact: &ObservedFact, intent: &Intent) -> Vec<Seen> {
         placement: ip.map(|ip| intent.place(ip, hint)),
         name: name.clone(),
     };
-    if matches!(fact.observed, tenko_core::observe::Observed::Link { .. }) {
+    // A link names devices, not addresses; a name or a vendor is not a sighting.
+    if matches!(
+        fact.observed,
+        Observed::Link { .. } | Observed::Name { .. } | Observed::Vendor { .. }
+    ) {
         return Vec::new();
     }
     match macs.as_slice() {

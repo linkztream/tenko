@@ -270,3 +270,119 @@ enrolment_ttl_secs = 3600
 # Data-plane node: mebibytes the observation buffer keeps on disk while no controller is
 # reachable; the oldest batches go first when it is full.
 buffer_mib = 64
+
+[scan]
+# The scanner of the probe role (SCAN-01 to SCAN-09). A probe reads this section of its own
+# tenko.toml until the controller hands out scan configuration (a later release).
+# docs/scanning.md describes the methods, what each needs and what it reports, and how to
+# allow-list the probe in IDS and EDR products.
+enabled = true
+# The prefixes this probe covers; nothing outside them is probed or reported. Empty: the
+# scanner scans nothing.
+prefixes = []
+# prefixes = ["192.0.2.0/24", "2001:db8:10::/64"]
+# Prefixes and addresses inside `prefixes` that are never probed or reported.
+exclude = []
+# The VRF of the addresses (a VRF id); not set: the VRF of the enrolment token, else the
+# default VRF.
+# vrf = "..."
+# Active probing (TGL-18): ICMP sweeps and TCP connect scans. false keeps the probe passive
+# (neighbour tables, mDNS, LLMNR, reverse DNS, SNMP).
+active = true
+# Rate profile (TGL-19): normal (100 probes/s), slow (50), slowest (10) or unlimited.
+rate = "normal"
+# packets_per_second = 100
+# Minimum milliseconds between two probes to the same address.
+per_host_interval_ms = 100
+# Most probes in flight at once.
+concurrency = 32
+# Largest IPv4 prefix, in addresses, that a sweep enumerates; larger prefixes and IPv6
+# networks are covered through the addresses the other methods saw.
+max_hosts_per_prefix = 4096
+# Blackout windows: no method that sends packets runs in them, and a run that reaches one
+# stops. Days: daily, weekdays, weekends, mon to sun, ranges and lists (mon-fri, sat,sun).
+blackout = []
+# blackout = ["mon-fri 08:00-17:00", "sun 22:00-02:00"]
+# The time zone of the blackout windows (an IANA name); not set: the system time zone.
+# timezone = "Europe/Stockholm"
+
+[scan.arp]
+# IPv4 neighbours from the operating system's ARP table; sends nothing.
+enabled = true
+interval_secs = 300
+# Seconds a sighting stays current; default three intervals, at least 15 minutes.
+# ttl_secs = 900
+
+[scan.nd]
+# IPv6 neighbours from the operating system's neighbour table; sends nothing.
+enabled = true
+interval_secs = 300
+
+[scan.icmp]
+# ICMP echo sweeps through the operating system (needs `active`).
+enabled = true
+interval_secs = 1800
+timeout_ms = 1000
+
+[scan.tcp_connect]
+# TCP connect scans with a TLS hint per open port (needs `active`).
+enabled = true
+interval_secs = 21600
+ports = [21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 389, 443, 445, 515, 548, 554, 631, 636, 1883, 3306, 3389, 5432, 5900, 6053, 8006, 8080, 8123, 8443]
+timeout_ms = 1500
+tls_hint = true
+# known: the addresses the other methods saw; all: every address of the prefixes too.
+targets = "known"
+
+[scan.reverse_dns]
+# PTR lookups of the discovered addresses.
+enabled = true
+interval_secs = 3600
+# DNS servers; empty: the resolvers of this host.
+servers = []
+timeout_ms = 2000
+
+[scan.mdns]
+enabled = true
+interval_secs = 900
+# Seconds to collect answers and announcements per run.
+listen_secs = 4
+# Also listens on port 5353 for announcements, shared with other responders on the host.
+passive = true
+group = "224.0.0.251:5353"
+unicast_port = 5353
+
+[scan.llmnr]
+enabled = true
+interval_secs = 3600
+timeout_ms = 1000
+port = 5355
+
+[scan.snmp]
+# SNMPv3 polling of switches: ARP, bridge and LLDP tables.
+enabled = true
+interval_secs = 900
+timeout_ms = 2000
+retries = 2
+# Also report clients behind ports with an LLDP neighbour (access points, other switches).
+attach_on_lldp_ports = false
+# The credentials are read from this file until the controller delivers them from the
+# vault: keep the passwords in files only tenko can read.
+# [[scan.snmp.devices]]
+# address = "192.0.2.2"
+# name = "switch-a.example.net"
+# user = "tenko"
+# auth = "sha256"          # sha1, sha224, sha256, sha384 or sha512
+# auth_password_file = "/etc/tenko/snmp-switch-a-auth"
+# privacy = "aes128"
+# privacy_password_file = "/etc/tenko/snmp-switch-a-priv"
+
+# Methods that need raw sockets; declared, not implemented yet.
+[scan.arp_sweep]
+enabled = false
+[scan.tcp_syn]
+enabled = false
+[scan.os_fingerprint]
+enabled = false
+[scan.lldp]
+enabled = false

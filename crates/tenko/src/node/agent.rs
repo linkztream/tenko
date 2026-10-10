@@ -3,9 +3,9 @@
 //! For the `probe` role it keeps the supervised connection to the controllers
 //! ([`tenko_cluster::client::Agent`]): handshake, heartbeats, renewal and the replay of the
 //! observation buffer, which batches dropped into its `incoming/` directory reach
-//! (`tenko node inject`); the scanner of WP2.3 puts its batches into the same buffer. The
-//! node needs neither the store nor the vault: its key and certificate are files of
-//! `<data_dir>/node/`, so it keeps buffering while every controller is away.
+//! (`tenko node inject`); the scanner ([`crate::node::scan`]) puts its batches into the same
+//! buffer. The node needs neither the store nor the vault: its key and certificate are files
+//! of `<data_dir>/node/`, so it keeps buffering while every controller is away.
 //!
 //! [`command`] is `tenko serve` on a console; [`serve`] is the shared part, which the
 //! Windows service calls with its own shutdown and status callbacks.
@@ -156,6 +156,21 @@ async fn run(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> u8 {
         version()
     );
     let (stop, stopped) = watch::channel(false);
+    let scanner = match crate::node::scan::start(
+        &resolved,
+        Arc::new(crate::node::scan::AgentSink::new(Arc::clone(&agent))),
+        stopped.clone(),
+    ) {
+        Ok(started) => started.map(|(_, task)| task),
+        Err(error) => {
+            tracing::error!(
+                code = error.code(),
+                "the scanner cannot start: {}",
+                error.detail()
+            );
+            return exit::CONFIG;
+        }
+    };
     let task = tokio::spawn(Arc::clone(&agent).run(stopped));
     {
         let mut out = std::io::stdout().lock();
@@ -182,6 +197,13 @@ async fn run(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> u8 {
         stopping();
     }
     let _ = stop.send(true);
+    if let Some(scanner) = scanner
+        && tokio::time::timeout(crate::node::scan::STOP_TIMEOUT, scanner)
+            .await
+            .is_err()
+    {
+        tracing::warn!("the scanner did not stop in time");
+    }
     if tokio::time::timeout(STOP_TIMEOUT, task).await.is_err() {
         tracing::warn!("the node process did not stop in time");
     }

@@ -1,0 +1,9 @@
+# Multicast DNS response to a service type browse (_services._dns-sd._udp.local).
+# answer: three PTR records: _ipp._tcp.local, _ssh._tcp.local, _http._tcp.local
+00 00 84 00 00 00 00 03 00 00 00 00 09 5f 73 65
+72 76 69 63 65 73 07 5f 64 6e 73 2d 73 64 04 5f
+75 64 70 05 6c 6f 63 61 6c 00 00 0c 00 01 00 00
+11 94 00 0c 04 5f 69 70 70 04 5f 74 63 70 c0 23
+c0 0c 00 0c 00 01 00 00 11 94 00 07 04 5f 73 73
+68 c0 39 c0 0c 00 0c 00 01 00 00 11 94 00 08 05
+5f 68 74 74 70 c0 39

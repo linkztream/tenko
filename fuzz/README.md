@@ -7,7 +7,13 @@ import formats and similar.
 Project rule: every parser of network input ships with a fuzz target here
 before it merges.
 
-There are no targets yet.
+| Target | Parser |
+|---|---|
+| `scan_dns_message` | DNS messages of the probe: mDNS, LLMNR and reverse DNS answers (`tenko_scan::dns`) |
+| `scan_snmp_message` | SNMPv3 messages and scoped PDUs (`tenko_scan::snmp::message`) |
+| `scan_neighbour_tables` | The neighbour tables the probe reads: `/proc/net/arp`, `ip neigh` and `Get-NetNeighbor` CSV (`tenko_scan::methods::neighbours`) |
+
+`fuzz/Cargo.lock` is not committed; the fuzz crate resolves its dependencies when it is built.
 
 ## Running
 

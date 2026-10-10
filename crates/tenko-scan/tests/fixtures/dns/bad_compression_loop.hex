@@ -1,0 +1,8 @@
+# Malformed: the second answer has an owner name that is a compression pointer to itself.
+# answer 1: printer.local A 192.0.2.40 (valid)
+# answer 2: owner = pointer to its own offset, A 192.0.2.44
+# The first record is kept and reading stops at the second.
+00 01 84 00 00 00 00 02 00 00 00 00 07 70 72 69
+6e 74 65 72 05 6c 6f 63 61 6c 00 00 01 80 01 00
+00 00 78 00 04 c0 00 02 28 c0 29 00 01 00 01 00
+00 00 78 00 04 c0 00 02 2c

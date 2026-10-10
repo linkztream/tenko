@@ -215,3 +215,39 @@ async fn a_sighting_from_before_the_move_does_not_count() {
     assert_eq!(report.moves_confirmed, 0, "{report:?}");
     assert_eq!(moving.state(job).await, JobState::Waiting);
 }
+
+#[tokio::test]
+async fn a_name_at_the_new_address_does_not_confirm_a_move() {
+    let moving = Moving::new().await;
+    // A host without a MAC address: any sighting of the new address would confirm it, but a
+    // name is not a sighting.
+    let (input, interface) = host("kiosk", AssignmentMode::Dynamic, None);
+    let id = input.id.expect("id");
+    let mut assigned = address(None, "192.0.2.50");
+    assigned.interface = Some(interface);
+    run(
+        &moving.world.service,
+        vec![
+            IpamCommand::CreateHost(input),
+            IpamCommand::CreateAddress(assigned),
+        ],
+    )
+    .await;
+    let job = moving.waiting(id).await;
+    let now = Timestamp::now();
+    moving
+        .world
+        .names(&[("198.51.100.50", "kiosk.example.test")], now)
+        .await;
+    assert_eq!(moving.state(job).await, JobState::Waiting, "not at ingest");
+    let report = moving.world.reconcile(now).await;
+    assert_eq!(report.moves_confirmed, 0, "nor in a run: {report:?}");
+    assert_eq!(moving.state(job).await, JobState::Waiting);
+    // An address sighting does.
+    let vrf = moving.world.default_vrf().await;
+    moving
+        .world
+        .probe(vrf, &[("198.51.100.50", None)], now)
+        .await;
+    assert_eq!(moving.state(job).await, JobState::Succeeded);
+}

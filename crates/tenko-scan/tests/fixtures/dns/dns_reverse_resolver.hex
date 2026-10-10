@@ -1,0 +1,15 @@
+# Answer of a recursive resolver (flags: response, recursion desired, recursion available, id 0xbeef)
+# to a reverse lookup of 198.51.100.7.
+# question:   7.100.51.198.in-addr.arpa PTR IN
+# answer:     7.100.51.198.in-addr.arpa PTR gw.example.net, ttl 3600
+# authority:  100.51.198.in-addr.arpa NS ns1.example.net
+# additional: ns1.example.net A 198.51.100.53
+# additional: EDNS OPT pseudo record (class field = UDP payload size 1232), skipped by the parser
+be ef 81 80 00 01 00 01 00 01 00 02 01 37 03 31
+30 30 02 35 31 03 31 39 38 07 69 6e 2d 61 64 64
+72 04 61 72 70 61 00 00 0c 00 01 c0 0c 00 0c 00
+01 00 00 0e 10 00 10 02 67 77 07 65 78 61 6d 70
+6c 65 03 6e 65 74 00 c0 0e 00 02 00 01 00 00 0e
+10 00 06 03 6e 73 31 c0 3a c0 53 00 01 00 01 00
+00 0e 10 00 04 c6 33 64 35 00 00 29 04 d0 00 00
+00 00 00 00

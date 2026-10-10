@@ -224,13 +224,13 @@ A probe hands its findings to the node transport as batches. A batch has one met
 
 | Part of a batch | Meaning |
 |---|---|
-| `method` | `arp`, `nd`, `mdns`, `lldp`, `icmp`, `tcp_syn`, `os_fingerprint` or `snmp` |
+| `method` | `arp`, `nd`, `mdns`, `lldp`, `icmp`, `tcp_syn`, `os_fingerprint`, `snmp`, `tcp_connect`, `reverse_dns`, `llmnr` or `arp_sweep` |
 | `complete` | The batch is the whole picture of the probe for this method |
 | `collected_at` | When the probe finished collecting |
 | `vrf` | The VRF of the addresses; optional |
-| `sightings` | Each has `observed_at`, an optional `ttl_secs` and one subject: `address` (IP address, optional MAC address), `services` (IP address, open TCP ports), `os` (IP address, OS guess, confidence), `link` (two ends and a kind) or `attachment` (MAC address, device, port, VLAN) |
+| `sightings` | Each has `observed_at`, an optional `ttl_secs` and one subject: `address` (IP address, optional MAC address), `services` (IP address, open TCP ports, and `tls_tcp`, the open ports that answered a TLS handshake), `os` (IP address, OS guess, confidence), `link` (two ends and a kind), `attachment` (MAC address, device, port, VLAN), `name` (IP address, name) or `vendor` (MAC address, vendor) |
 
-The controller files the sightings under the source `probe:<node>:<method>`. A complete batch therefore expires only what that method of that node reported before; the sources and the rules of expiry are in [reconciliation.md](reconciliation.md). The VRF is the one of the batch, else the one of the enrolment token of the node, else the default VRF. Until first-run setup has created the default VRF, the controller answers 503 `cluster.probe.no_vrf` and the node keeps the batch. A sighting that is malformed is counted as skipped. The answer to `Ingest` carries the sequence of the batch and the counts of new, changed, refreshed, unchanged, gone and skipped facts.
+The methods of the scanner and what each one reports are described in [scanning.md](scanning.md). The controller files the sightings under the source `probe:<node>:<method>`. A complete batch therefore expires only what that method of that node reported before; the sources and the rules of expiry are in [reconciliation.md](reconciliation.md). The VRF is the one of the batch, else the one of the enrolment token of the node, else the default VRF. Until first-run setup has created the default VRF, the controller answers 503 `cluster.probe.no_vrf` and the node keeps the batch. A sighting that is malformed is counted as skipped. The answer to `Ingest` carries the sequence of the batch and the counts of new, changed, refreshed, unchanged, gone and skipped facts.
 
 A batch that fails as a whole (no known method, no collection time, a bad VRF, or more than 250,000 sightings) is refused with `cluster.probe.invalid_batch`. The node logs it and drops it, because sending it again cannot help. Any other failure leaves the batch in the buffer.
 
@@ -249,7 +249,7 @@ When the buffer is full, the oldest batches go first and are counted as dropped.
 
 Each batch is one file with a header of the magic `TKB1`, the length and the SHA-256 of the payload, written atomically. A file that fails the check when it reaches the head of the queue is set aside as `<sequence>.corrupt` and counted.
 
-Other processes on the host hand batches to the node by dropping files into `buffer/incoming/`: the payload is the protobuf form of an `IngestRequest` with an empty epoch and sequence, written to a `.tmp` file and renamed to `.batch`. The node process adopts them within a second, in the order of their names. The scanner of WP2.3 writes into the same buffer.
+Other processes on the host hand batches to the node by dropping files into `buffer/incoming/`: the payload is the protobuf form of an `IngestRequest` with an empty epoch and sequence, written to a `.tmp` file and renamed to `.batch`. The node process adopts them within a second, in the order of their names. The scanner of the probe writes into the same buffer, and so does `tenko node scan run` (see [scanning.md](scanning.md#72-on-demand-runs)).
 
 ### 6.2 Injecting a batch
 
@@ -291,7 +291,7 @@ Nodes connect out to the controller. Allow 8444/TCP from the node networks to th
 
 ### 7.3 Docker and LXC
 
-A container publishes 8444 as well as 8443. Bridge networking is fine for the cluster port; DHCP and DNS need host or macvlan networking, see `deploy/`. A probe in a container keeps `/var/lib/tenko` on a volume, enrols once with `tenko node enrol` in that volume and then runs `tenko serve --roles probe`. LXC needs no special capability for the transport; the raw sockets of the probe come with WP2.3.
+A container publishes 8444 as well as 8443. Bridge networking is fine for the cluster port; DHCP and DNS need host or macvlan networking, see `deploy/`. A probe in a container keeps `/var/lib/tenko` on a volume, enrols once with `tenko node enrol` in that volume and then runs `tenko serve --roles probe`. LXC needs no special capability for the transport; the capabilities that the raw-socket methods of the probe need are described in [scanning.md](scanning.md#9-raw-socket-methods).
 
 ## 8. Configuration
 
@@ -391,5 +391,5 @@ These codes appear in `status.json`, in the output of `tenko node` and in the lo
 ## 12. What comes next
 
 - **Slice 3, WP3.1.** Controllers join by the same enrolment and mutual TLS, first as learner and then as voter, and Raft runs over this transport. Configuration flows from the controllers to `dns` and `dhcp` nodes as resumable deltas with a bandwidth cap (OPS-28). Revocations and the state of the nodes replicate between controllers. The scheduling of jobs becomes leader-only.
-- **WP2.3.** The scanner plugs into the observation buffer of the probe.
+- **WP2.3.** The scanner feeds the observation buffer of the probe. What comes next for the probe is in [scanning.md](scanning.md#14-what-comes-next).
 - **WP2.9.** The nodes page of the UI: enrolment tokens, node health and revocation.

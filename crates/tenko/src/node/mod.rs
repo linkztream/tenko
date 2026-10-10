@@ -8,6 +8,7 @@
 //! | [`status`] | `tenko node status` and `tenko node renew` |
 //! | [`token`] | `tenko node enrol-token`: a token from a controller, for scripts |
 //! | [`inject`] | `tenko node inject`: queue a batch of observations from a file (diagnostics) |
+//! | [`scan`] | the scanner of the probe role and `tenko node scan` |
 //!
 //! docs/cluster.md describes the ceremony, certificates, revocation and the ports.
 
@@ -19,6 +20,7 @@ pub mod agent;
 pub mod controller;
 pub mod enrol;
 pub mod inject;
+pub mod scan;
 pub mod status;
 pub mod token;
 
@@ -42,6 +44,8 @@ pub enum NodeCommand {
     /// Queue a batch of observations from a JSON file for the controller (diagnostics).
     #[command(hide = true)]
     Inject(inject::InjectArgs),
+    /// The scanner of this probe: status, a run on demand, the kill switch.
+    Scan(scan::ScanArgs),
 }
 
 impl NodeCommand {
@@ -53,6 +57,7 @@ impl NodeCommand {
             NodeCommand::Renew(_) => "node renew",
             NodeCommand::EnrolToken(_) => "node enrol-token",
             NodeCommand::Inject(_) => "node inject",
+            NodeCommand::Scan(args) => args.action.name(),
         }
     }
 
@@ -63,6 +68,7 @@ impl NodeCommand {
             NodeCommand::Renew(args) => args.node.json,
             NodeCommand::EnrolToken(args) => args.client.json,
             NodeCommand::Inject(args) => args.node.json,
+            NodeCommand::Scan(args) => args.action.json(),
         }
     }
 }
@@ -119,6 +125,7 @@ pub fn command(action: &NodeCommand, out: &mut impl Write, err: &mut impl Write)
         NodeCommand::Inject(args) => {
             client::block_on(name, json, out, err, async { inject::run(args) })
         }
+        NodeCommand::Scan(args) => client::block_on(name, json, out, err, scan::cli::run(args)),
     }
 }
 
@@ -134,7 +141,7 @@ mod tests {
 
     #[test]
     fn node_commands_parse_and_name_themselves() {
-        let cases: [(&[&str], &str); 5] = [
+        let cases: [(&[&str], &str); 9] = [
             (
                 &[
                     "node",
@@ -153,6 +160,23 @@ mod tests {
                 "node enrol-token",
             ),
             (&["node", "inject", "--file", "batch.json"], "node inject"),
+            (&["node", "scan", "status", "--json"], "node scan status"),
+            (
+                &[
+                    "node",
+                    "scan",
+                    "run",
+                    "tcp_connect",
+                    "--target",
+                    "192.0.2.10",
+                ],
+                "node scan run",
+            ),
+            (
+                &["node", "scan", "stop", "--reason", "change window"],
+                "node scan stop",
+            ),
+            (&["node", "scan", "resume"], "node scan resume"),
         ];
         for (args, name) in cases {
             let cli = parse(args).expect("valid arguments");

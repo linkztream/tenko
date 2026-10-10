@@ -1,0 +1,9 @@
+# Unicast answer of an mDNS responder to a reverse lookup sent from an ephemeral port (id 0x1234).
+# The question is echoed, as RFC 6762 section 6.7 asks for legacy unicast answers.
+# question: 40.2.0.192.in-addr.arpa PTR IN
+# answer:   40.2.0.192.in-addr.arpa PTR printer.local, cache-flush
+12 34 84 00 00 01 00 01 00 00 00 00 02 34 30 01
+32 01 30 03 31 39 32 07 69 6e 2d 61 64 64 72 04
+61 72 70 61 00 00 0c 00 01 c0 0c 00 0c 80 01 00
+00 00 78 00 0f 07 70 72 69 6e 74 65 72 05 6c 6f
+63 61 6c 00

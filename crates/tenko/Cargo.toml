@@ -40,6 +40,7 @@ tenko-connect = { workspace = true }
 tenko-core = { workspace = true }
 tenko-ipam = { workspace = true }
 tenko-jobs = { workspace = true }
+tenko-scan = { workspace = true }
 tenko-store = { workspace = true, features = ["raft"] }
 tenko-vault = { workspace = true }
 time = { workspace = true }

@@ -128,6 +128,37 @@ impl World {
             .expect("probe ingest");
     }
 
+    /// Names that probe node 7 found for addresses (reverse DNS) at `when`: `(ip, name)`.
+    pub async fn names(&self, names: &[(&str, &str)], when: Timestamp) {
+        let source = ObservationSource::Probe {
+            node: NodeId(7),
+            method: ProbeMethod::ReverseDns,
+        };
+        let observations = names
+            .iter()
+            .map(|(ip, name)| Observation {
+                id: ObservationId::generate(),
+                source: source.clone(),
+                subject: Observed::Name {
+                    ip: ip.parse().expect("ip"),
+                    name: (*name).to_owned(),
+                },
+                observed_at: when,
+                received_at: when,
+                expires_at: when.checked_add(Duration::from_secs(3600)),
+            })
+            .collect();
+        self.reconciler
+            .ingest(IngestBatch {
+                source,
+                observations,
+                complete: false,
+                received_at: when,
+            })
+            .await
+            .expect("name ingest");
+    }
+
     pub async fn reconcile(&self, when: Timestamp) -> ReconcileReport {
         self.reconciler.reconcile(when).await.expect("reconcile")
     }

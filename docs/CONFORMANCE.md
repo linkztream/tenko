@@ -41,10 +41,13 @@ Area is one of DNS, DHCP or Other. Rows are sorted by RFC number.
 | 3046 | DHCP Relay Agent Information Option | DHCP | 3 | Planned | DHCP-04 | Option 82, circuit-id and remote-id |
 | 3074 | DHC Load Balancing Algorithm | DHCP | 3 | Planned | DHCP-12 | Hash split between failover partners |
 | 3203 | DHCP reconfigure extension | DHCP | n/a | Deliberately skipped | CON-10 | FORCERENEW is not supported by clients in practice; move jobs wait for observation instead |
-| 3414 | User-based Security Model (USM) for version 3 of the Simple Network Management Protocol (SNMPv3) | Other | 1 | Planned | SCAN-05 | |
+| 3412 | Message Processing and Dispatching for the Simple Network Management Protocol (SNMP) | Other | 1 | Partial | SCAN-05 | SNMPv3 messages as a client: requests out, responses and reports in. No agent, no notification receiver. Tests in `crates/tenko-scan/src/snmp/` |
+| 3414 | User-based Security Model (USM) for version 3 of the Simple Network Management Protocol (SNMPv3) | Other | 1 | Partial | SCAN-05 | Key localization, authentication, timeliness and engine discovery as a non-authoritative engine. SHA-1 (HMAC-SHA-1-96) is the only authentication protocol from this RFC; MD5 and DES are not supported. Tests in `crates/tenko-scan/src/snmp/`, including the key derivation of appendix A.3.2 |
+| 3416 | Version 2 of the Protocol Operations for the Simple Network Management Protocol (SNMP) | Other | 1 | Partial | SCAN-05 | GetRequest and GetBulkRequest are sent; Response and Report are read. No SetRequest, no notifications. Tests in `crates/tenko-scan/src/snmp/` |
 | 3527 | Link Selection sub-option for the Relay Agent Information Option for DHCPv4 | DHCP | 3 | Planned | DHCP-04 | |
 | 3597 | Handling of Unknown DNS Resource Record (RR) Types | DNS | 2 | Planned | DNS-01 | |
 | 3645 | Generic Security Service Algorithm for Secret Key Transaction Authentication for DNS (GSS-TSIG) | DNS | 4 | Planned | DNS-28, CON-03 | AD secure dynamic updates via TKEY and Kerberos |
+| 3826 | The Advanced Encryption Standard (AES) Cipher Algorithm in the SNMP User-based Security Model | Other | 1 | Partial | SCAN-05 | AES-128 in CFB mode only; AES-192 and AES-256 are not supported. Tests in `crates/tenko-scan/src/snmp/` |
 | 4033 | DNS Security Introduction and Requirements | DNS | 2 (signing), 5 (validation) | Planned | DNS-12, DNS-13 | |
 | 4034 | Resource Records for the DNS Security Extensions | DNS | 2 | Planned | DNS-12 | |
 | 4035 | Protocol Modifications for the DNS Security Extensions | DNS | 2 (signing), 5 (validation) | Planned | DNS-12, DNS-13 | |
@@ -53,19 +56,21 @@ Area is one of DNS, DHCP or Other. Rows are sorted by RFC number.
 | 4702 | The Dynamic Host Configuration Protocol (DHCP) Client Fully Qualified Domain Name (FQDN) Option | DHCP | 3 | Planned | DHCP-13 | Option 81 |
 | 4703 | Resolution of Fully Qualified Domain Name (FQDN) Conflicts among Dynamic Host Configuration Protocol (DHCP) Clients | DHCP | 3 | Planned | DHCP-13 | Name protection |
 | 4704 | The Dynamic Host Configuration Protocol for IPv6 (DHCPv6) Client Fully Qualified Domain Name (FQDN) Option | DHCP | 3 | Planned | DHCP-13 | |
-| 4795 | Link-local Multicast Name Resolution (LLMNR) | Other | 1 | Planned | SCAN-03 | Passive listening only |
+| 4795 | Link-local Multicast Name Resolution (LLMNR) | Other | 1 | Partial | SCAN-03 | Unicast reverse queries to known addresses, answers read from recorded responses in `crates/tenko-scan/tests/`. Tenko is not a responder and does not listen |
 | 4861 | Neighbor Discovery for IP version 6 (IPv6) | Other | 1 (discovery), 3 (RA interplay) | Planned | SCAN-02, DHCP-10 | Passive ND discovery; M/O flag interplay with DHCPv6, which cannot set a default route |
 | 5011 | Automated Updates of DNS Security (DNSSEC) Trust Anchors | DNS | 5 | Planned | DNS-13 | |
 | 5107 | DHCP Server Identifier Override Suboption | DHCP | 3 | Planned | DHCP-04 | |
 | 5155 | DNS Security (DNSSEC) Hashed Authenticated Denial of Existence | DNS | 2 | Planned | DNS-12 | NSEC3 |
 | 5424 | The Syslog Protocol | Other | 1 | Planned | IAM-18 | Audit export |
 | 6238 | TOTP: Time-Based One-Time Password Algorithm | Other | 1 | Planned | IAM-06 | |
-| 6762 | Multicast DNS | Other | 1 | Planned | SCAN-02 | Passive discovery only; Tenko is not an mDNS responder |
+| 6762 | Multicast DNS | Other | 1 | Partial | SCAN-02 | Queries from an ephemeral port (legacy unicast responses), unicast reverse queries to known addresses, and optional listening on a shared port 5353 during the run window. Tenko is not an mDNS responder. Answers read from recorded responses in `crates/tenko-scan/tests/` |
+| 6763 | DNS-Based Service Discovery | Other | 1 | Partial | SCAN-02 | Browsing of service types, and reading of PTR, SRV and TXT records for TCP ports and OS hints. No service registration or announcing |
 | 6891 | Extension Mechanisms for DNS (EDNS(0)) | DNS | 2 | Planned | DNS-06 | Default UDP buffer size 1232 |
 | 6939 | Client Link-Layer Address Option in DHCPv6 | DHCP | 3 | Planned | DHCP-11 | |
 | 7344 | Automating DNSSEC Delegation Trust Maintenance | DNS | 2 | Planned | DNS-12 | CDS and CDNSKEY |
 | 7766 | DNS Transport over TCP: Implementation Requirements | DNS | 2 | Planned | DNS-05 | TCP is mandatory |
 | 7858 | Specification for DNS over Transport Layer Security (TLS) | DNS | 2 | Planned | DNS-14, DNS-15 | |
+| 7860 | HMAC-SHA-2 Authentication Protocols in User-Based Security Model (USM) for SNMPv3 | Other | 1 | Partial | SCAN-05 | HMAC-SHA-224, -256, -384 and -512 with the digest lengths of the RFC. Keys and digests checked against independent values in `crates/tenko-scan/src/snmp/` |
 | 7871 | Client Subnet in DNS Queries | DNS | 5 | Planned | DNS-03 | Scope to be decided; privacy implications (OPS-06); not used for view matching, which uses the query source |
 | 7873 | Domain Name System (DNS) Cookies | DNS | 2 | Planned | DNS-07 | |
 | 8078 | Managing DS Records from the Parent via CDS/CDNSKEY | DNS | 2 | Planned | DNS-12 | |

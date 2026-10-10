@@ -1,0 +1,9 @@
+# Vendor names for MAC addresses, by the OUI (the first three octets).
+# source: https://standards-oui.ieee.org/oui/oui.csv
+# registry: IEEE Registration Authority, MA-L (24-bit blocks)
+# generated: 2026-10-10
+# entries: 1
+# format: six upper-case hexadecimal digits, a tab, the name of the organization; sorted by OUI
+# note: this table is a seed that holds only the IANA block, which contains the documentation
+# note: addresses of RFC 7042, until the registry is imported with generate-oui.mjs
+00005E	ICANN, IANA Department

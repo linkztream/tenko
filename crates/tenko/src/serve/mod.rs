@@ -315,22 +315,25 @@ pub fn load(args: &ServeArgs) -> Result<Resolved, ConfigError> {
 }
 
 /// Reports roles this build does not run. Returns the exit status when the node has nothing
-/// to run: a node without the controller runs the probe role through `crate::node::agent`.
+/// to run: a node without the controller runs the probe role through `crate::node::agent`;
+/// a controller node runs the probe role in process when it is listed.
 pub fn check_roles(roles: RoleSet, err: &mut impl Write) -> Option<u8> {
-    let mut missing: Vec<&str> = roles
+    let missing: Vec<&str> = roles
         .roles()
         .filter(|role| !matches!(role, Role::Controller | Role::Probe))
         .map(Role::as_str)
         .collect();
     if roles.contains(Role::Controller) {
-        if roles.contains(Role::Probe) {
-            missing.push(Role::Probe.as_str());
-        }
         if !missing.is_empty() {
+            let running = if roles.contains(Role::Probe) {
+                "the controller and probe roles"
+            } else {
+                "the controller role only"
+            };
             let _ = writeln!(
                 err,
                 "tenko serve: role(s) {}: not implemented on a controller node in Phase 1; \
-                 this node runs the controller role only",
+                 this node runs {running}",
                 missing.join(", ")
             );
         }
@@ -1116,6 +1119,17 @@ async fn start(
         )
         .await?;
     running.tasks.extend(cluster.tasks());
+    if resolved.roles.contains(Role::Probe) {
+        let (task, summary) = crate::node::scan::start_on_controller(
+            resolved,
+            cluster.probe_sink(),
+            resolved.node_id,
+            running.stop.subscribe(),
+        )
+        .map_err(|error| StartError::new("cluster", error.code(), error.detail()))?;
+        tracing::info!("probe role: {summary}");
+        running.tasks.extend(task);
+    }
 
     let lab_plain_http = tls.lab_plain_http;
     let https = tls.https;
@@ -1524,11 +1538,14 @@ mod tests {
     }
 
     #[test]
-    fn roles_with_the_controller_run_it_alone() {
+    fn roles_with_the_controller_run_the_controller_and_the_probe() {
         let mut err = Vec::new();
         assert_eq!(check_roles(RoleSet::ALL, &mut err), None);
         let text = String::from_utf8(err).expect("UTF-8");
-        assert!(text.contains("runs the controller role only"), "{text}");
+        assert!(
+            text.contains("runs the controller and probe roles"),
+            "{text}"
+        );
         let mut err = Vec::new();
         assert_eq!(
             check_roles("controller".parse().expect("roles"), &mut err),

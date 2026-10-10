@@ -1,0 +1,38 @@
+[package]
+name = "tenko-fuzz"
+version = "0.0.0"
+description = "cargo-fuzz targets for the parsers of network input"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Its own workspace: the main workspace excludes `fuzz/`.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tenko-core = { path = "../crates/tenko-core" }
+tenko-scan = { path = "../crates/tenko-scan" }
+
+[[bin]]
+name = "scan_dns_message"
+path = "fuzz_targets/scan_dns_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "scan_snmp_message"
+path = "fuzz_targets/scan_snmp_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "scan_neighbour_tables"
+path = "fuzz_targets/scan_neighbour_tables.rs"
+test = false
+doc = false
+bench = false

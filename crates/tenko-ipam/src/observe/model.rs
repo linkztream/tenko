@@ -87,6 +87,17 @@ pub enum FactSubject {
         /// How the link was learned.
         kind: LinkKind,
     },
+    /// The name a source found for an address (probes).
+    Name {
+        /// The address.
+        #[schema(value_type = String)]
+        ip: IpAddr,
+    },
+    /// The vendor of a MAC address (probes).
+    Vendor {
+        /// The MAC address.
+        mac: MacAddr,
+    },
 }
 
 impl FactSubject {
@@ -100,6 +111,8 @@ impl FactSubject {
             Observed::Attachment { mac, .. } => FactSubject::Attachment { mac: *mac },
             Observed::Services { ip, .. } => FactSubject::Services { ip: *ip },
             Observed::Os { ip, .. } => FactSubject::Os { ip: *ip },
+            Observed::Name { ip, .. } => FactSubject::Name { ip: *ip },
+            Observed::Vendor { mac, .. } => FactSubject::Vendor { mac: *mac },
             Observed::Link { a, b, kind } => {
                 // A link is the same fact whichever end the source names first.
                 let (a, b) = if (&a.device, &a.port) <= (&b.device, &b.port) {
@@ -112,7 +125,8 @@ impl FactSubject {
         }
     }
 
-    /// The type name (`host`, `address`, `attachment`, `services`, `os`, `link`).
+    /// The type name (`host`, `address`, `attachment`, `services`, `os`, `link`, `name`,
+    /// `vendor`).
     pub const fn type_name(&self) -> &'static str {
         match self {
             FactSubject::Host { .. } => "host",
@@ -121,12 +135,15 @@ impl FactSubject {
             FactSubject::Services { .. } => "services",
             FactSubject::Os { .. } => "os",
             FactSubject::Link { .. } => "link",
+            FactSubject::Name { .. } => "name",
+            FactSubject::Vendor { .. } => "vendor",
         }
     }
 
     /// The canonical text of the subject, the second part of the fact key:
     /// `host:<external id>`, `address:<vrf>/<ip>`, `attachment:<mac>`, `services:<ip>`,
-    /// `os:<ip>` or `link:<device>|<port>|<device>|<port>|<kind>`.
+    /// `os:<ip>`, `link:<device>|<port>|<device>|<port>|<kind>`, `name:<ip>` or
+    /// `vendor:<mac>`.
     pub fn key(&self) -> String {
         match self {
             FactSubject::Host { external_id } => format!("host:{external_id}"),
@@ -134,6 +151,8 @@ impl FactSubject {
             FactSubject::Attachment { mac } => format!("attachment:{mac}"),
             FactSubject::Services { ip } => format!("services:{ip}"),
             FactSubject::Os { ip } => format!("os:{ip}"),
+            FactSubject::Name { ip } => format!("name:{ip}"),
+            FactSubject::Vendor { mac } => format!("vendor:{mac}"),
             FactSubject::Link { a, b, kind } => {
                 let kind = serde_json::to_value(kind)
                     .ok()
@@ -233,8 +252,11 @@ pub fn observed_macs(observed: &Observed) -> Vec<MacAddr> {
     let set: BTreeSet<MacAddr> = match observed {
         Observed::Host(host) => host.macs.iter().copied().collect(),
         Observed::Address { mac, .. } => mac.iter().copied().collect(),
-        Observed::Attachment { mac, .. } => BTreeSet::from([*mac]),
-        Observed::Services { .. } | Observed::Os { .. } | Observed::Link { .. } => BTreeSet::new(),
+        Observed::Attachment { mac, .. } | Observed::Vendor { mac, .. } => BTreeSet::from([*mac]),
+        Observed::Services { .. }
+        | Observed::Os { .. }
+        | Observed::Link { .. }
+        | Observed::Name { .. } => BTreeSet::new(),
     };
     set.into_iter().collect()
 }
@@ -243,24 +265,25 @@ pub fn observed_macs(observed: &Observed) -> Vec<MacAddr> {
 pub fn observed_ips(observed: &Observed) -> Vec<IpAddr> {
     let set: BTreeSet<IpAddr> = match observed {
         Observed::Host(host) => host.ips.iter().copied().collect(),
-        Observed::Address { ip, .. } | Observed::Services { ip, .. } | Observed::Os { ip, .. } => {
-            BTreeSet::from([*ip])
+        Observed::Address { ip, .. }
+        | Observed::Services { ip, .. }
+        | Observed::Os { ip, .. }
+        | Observed::Name { ip, .. } => BTreeSet::from([*ip]),
+        Observed::Attachment { .. } | Observed::Link { .. } | Observed::Vendor { .. } => {
+            BTreeSet::new()
         }
-        Observed::Attachment { .. } | Observed::Link { .. } => BTreeSet::new(),
     };
     set.into_iter().collect()
 }
 
-/// The name an observation gives its subject, if any (inventory hosts).
+/// The name an observation gives its subject, if any (inventory hosts, probe names).
 pub fn observed_name(observed: &Observed) -> Option<&str> {
-    match observed {
-        Observed::Host(host) => host
-            .name
-            .as_deref()
-            .map(str::trim)
-            .filter(|name| !name.is_empty()),
+    let name = match observed {
+        Observed::Host(host) => host.name.as_deref(),
+        Observed::Name { name, .. } => Some(name.as_str()),
         _ => None,
-    }
+    };
+    name.map(str::trim).filter(|name| !name.is_empty())
 }
 
 /// Observations of one run of one source, as the connector host or a probe hands them
@@ -376,6 +399,28 @@ mod tests {
         });
         assert_eq!(one, other);
         assert_eq!(one.key(), "link:ap-b||switch-a|1|lldp");
+    }
+
+    #[test]
+    fn probe_names_and_vendors_are_facts_of_their_own() {
+        let ip: IpAddr = "192.0.2.40".parse().expect("ip");
+        let name = Observed::Name {
+            ip,
+            name: " printer.example.net ".to_owned(),
+        };
+        assert_eq!(FactSubject::of(&name).key(), "name:192.0.2.40");
+        assert_eq!(FactSubject::of(&name).type_name(), "name");
+        assert_eq!(observed_name(&name), Some("printer.example.net"));
+        assert_eq!(observed_ips(&name), vec![ip]);
+        assert_eq!(observed_macs(&name), Vec::<MacAddr>::new());
+        let vendor = Observed::Vendor {
+            mac: mac("00:00:5e:00:53:40"),
+            vendor: "ICANN, IANA Department".to_owned(),
+        };
+        assert_eq!(FactSubject::of(&vendor).key(), "vendor:00:00:5e:00:53:40");
+        assert_eq!(observed_macs(&vendor), vec![mac("00:00:5e:00:53:40")]);
+        assert_eq!(observed_ips(&vendor), Vec::<IpAddr>::new());
+        assert_eq!(observed_name(&vendor), None);
     }
 
     #[test]

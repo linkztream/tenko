@@ -8508,7 +8508,7 @@
           {
             "name": "type",
             "in": "query",
-            "description": "Only facts about this kind of subject: `host`, `address`, `attachment`, `services`, `os` or `link`.",
+            "description": "Only facts about this kind of subject: `host`, `address`, `attachment`, `services`, `os`, `link`, `name` or `vendor`.",
             "required": false,
             "schema": {
               "type": "string"
@@ -21557,6 +21557,64 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "The name a source found for an address (probes).",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "The name a source found for an address (probes).",
+                "required": [
+                  "ip"
+                ],
+                "properties": {
+                  "ip": {
+                    "type": "string",
+                    "description": "The address."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "name"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The vendor of a MAC address (probes).",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "The vendor of a MAC address (probes).",
+                "required": [
+                  "mac"
+                ],
+                "properties": {
+                  "mac": {
+                    "$ref": "#/components/schemas/MacAddr",
+                    "description": "The MAC address."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vendor"
+                ]
+              }
+            }
           }
         ],
         "description": "What a fact is about, within its source: the source's own identity of the thing it\nreports. Two reports of one source about one subject are the same fact, refreshed.\n\nAdjacently tagged (`{\"type\": \"address\", \"data\": {...}}`) because variants carry IP\naddresses (see the encoding rules in `tenko_core::codec`)."
@@ -26727,6 +26785,15 @@
                       "minimum": 0
                     },
                     "description": "Open ports."
+                  },
+                  "tls_tcp": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "format": "int32",
+                      "minimum": 0
+                    },
+                    "description": "The open ports that answered a TLS handshake."
                   }
                 }
               },
@@ -26871,6 +26938,74 @@
                 "type": "string",
                 "enum": [
                   "link"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A name a source found for an address (reverse DNS, mDNS, LLMNR, SNMP). A name is\nnot a sighting of the address.",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "A name a source found for an address (reverse DNS, mDNS, LLMNR, SNMP). A name is\nnot a sighting of the address.",
+                "required": [
+                  "ip",
+                  "name"
+                ],
+                "properties": {
+                  "ip": {
+                    "type": "string",
+                    "description": "The address."
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "The name, such as `printer.example.net`."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "name"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The organisation a MAC address is registered to (its OUI), or the manufacturer a\ndevice reports.",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "The organisation a MAC address is registered to (its OUI), or the manufacturer a\ndevice reports.",
+                "required": [
+                  "mac",
+                  "vendor"
+                ],
+                "properties": {
+                  "mac": {
+                    "$ref": "#/components/schemas/MacAddr",
+                    "description": "The MAC address."
+                  },
+                  "vendor": {
+                    "type": "string",
+                    "description": "The vendor name."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vendor"
                 ]
               }
             }
@@ -30653,7 +30788,11 @@
           "icmp",
           "tcp_syn",
           "os_fingerprint",
-          "snmp"
+          "snmp",
+          "tcp_connect",
+          "reverse_dns",
+          "llmnr",
+          "arp_sweep"
         ]
       },
       "ProblemDetails": {
@@ -33849,7 +33988,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Names (inventory names), as reported."
+            "description": "Names: inventory names and the names probes found (reverse DNS, mDNS, LLMNR,\nSNMP), as reported."
           },
           "open_tcp": {
             "type": "array",
@@ -33894,6 +34033,22 @@
               "type": "string"
             },
             "description": "Tags from the sources."
+          },
+          "tls_tcp": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The open TCP ports that answered a TLS handshake."
+          },
+          "vendors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Vendors of the MAC addresses (OUI) or as devices report them."
           }
         }
       },

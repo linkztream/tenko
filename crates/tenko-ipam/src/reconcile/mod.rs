@@ -645,9 +645,13 @@ fn address_pairs(
         Observed::Address { vrf, .. } => Some(*vrf),
         _ => None,
     };
+    // A name or a vendor is not a sighting of the address.
     if matches!(
         observation.subject,
-        Observed::Link { .. } | Observed::Attachment { .. }
+        Observed::Link { .. }
+            | Observed::Attachment { .. }
+            | Observed::Name { .. }
+            | Observed::Vendor { .. }
     ) {
         return Vec::new();
     }

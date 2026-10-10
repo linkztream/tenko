@@ -1,0 +1,6 @@
+# LLMNR response (RFC 4795) to an A query for the single-label name "fileserver".
+# question: fileserver A IN
+# answer:   fileserver A 192.0.2.50, ttl 30
+5a 5a 80 00 00 01 00 01 00 00 00 00 0a 66 69 6c
+65 73 65 72 76 65 72 00 00 01 00 01 c0 0c 00 01
+00 01 00 00 00 1e 00 04 c0 00 02 32

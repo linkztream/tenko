@@ -42,7 +42,7 @@ pub struct FactQuery {
     /// matches both the inventory and the network-controller source of the connector.
     pub source: Option<String>,
     /// Facts whose subject has this type (`host`, `address`, `attachment`, `services`,
-    /// `os`, `link`).
+    /// `os`, `link`, `name`, `vendor`).
     pub subject_type: Option<String>,
     /// Facts that name this MAC address.
     pub mac: Option<MacAddr>,
@@ -79,7 +79,16 @@ pub struct FactPage {
 pub const SORTS: &[&str] = &["last_seen", "first_seen", "source", "subject"];
 
 /// The subject types a fact can have (`FactSubject::type_name`).
-const SUBJECT_TYPES: &[&str] = &["host", "address", "attachment", "services", "os", "link"];
+const SUBJECT_TYPES: &[&str] = &[
+    "host",
+    "address",
+    "attachment",
+    "services",
+    "os",
+    "link",
+    "name",
+    "vendor",
+];
 
 /// A sort field of the fact list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,7 +211,11 @@ fn search_text(fact: &ObservedFact) -> String {
             parts.extend(ssid.as_deref());
         }
         Observed::Os { guess, .. } => parts.push(guess.as_str()),
-        Observed::Address { .. } | Observed::Services { .. } | Observed::Link { .. } => {}
+        Observed::Vendor { vendor, .. } => parts.push(vendor.as_str()),
+        Observed::Address { .. }
+        | Observed::Services { .. }
+        | Observed::Link { .. }
+        | Observed::Name { .. } => {}
     }
     // A newline between the parts keeps a search text from matching across two fields.
     parts.join("\n").to_lowercase()
@@ -404,7 +417,8 @@ pub struct SubjectSummary {
     /// IP addresses.
     #[schema(value_type = Vec<String>)]
     pub ips: Vec<IpAddr>,
-    /// Names (inventory names), as reported.
+    /// Names: inventory names and the names probes found (reverse DNS, mDNS, LLMNR,
+    /// SNMP), as reported.
     pub names: Vec<String>,
     /// Operating systems: inventory OS and probe OS guesses.
     pub os: Vec<String>,
@@ -414,6 +428,12 @@ pub struct SubjectSummary {
     pub parents: Vec<String>,
     /// Open TCP ports (SCAN-08).
     pub open_tcp: Vec<u16>,
+    /// The open TCP ports that answered a TLS handshake.
+    #[serde(default)]
+    pub tls_tcp: Vec<u16>,
+    /// Vendors of the MAC addresses (OUI) or as devices report them.
+    #[serde(default)]
+    pub vendors: Vec<String>,
     /// Attachments, one per source and MAC address.
     pub attachments: Vec<AttachmentView>,
     /// Tags from the sources.
@@ -575,6 +595,8 @@ fn summarize(facts: &[ObservedFact], now: Timestamp) -> SubjectSummary {
     let mut parents = BTreeSet::new();
     let mut tags = BTreeSet::new();
     let mut open_tcp = BTreeSet::new();
+    let mut tls_tcp = BTreeSet::new();
+    let mut vendors = BTreeSet::new();
     let mut attachments = Vec::new();
     for fact in chosen {
         macs.extend(fact.macs());
@@ -591,8 +613,14 @@ fn summarize(facts: &[ObservedFact], now: Timestamp) -> SubjectSummary {
             }
             Observed::Os { guess, .. } => add_text(&mut os, Some(guess)),
             Observed::Services {
-                open_tcp: ports, ..
-            } => open_tcp.extend(ports.iter().copied()),
+                open_tcp: ports,
+                tls_tcp: tls,
+                ..
+            } => {
+                open_tcp.extend(ports.iter().copied());
+                tls_tcp.extend(tls.iter().copied());
+            }
+            Observed::Vendor { vendor, .. } => add_text(&mut vendors, Some(vendor)),
             Observed::Attachment {
                 mac,
                 device,
@@ -608,7 +636,7 @@ fn summarize(facts: &[ObservedFact], now: Timestamp) -> SubjectSummary {
                 vlan: *vlan,
                 last_seen: fact.last_seen,
             }),
-            Observed::Address { .. } | Observed::Link { .. } => {}
+            Observed::Address { .. } | Observed::Link { .. } | Observed::Name { .. } => {}
         }
     }
     attachments.sort_by(|a, b| (&a.source, a.mac).cmp(&(&b.source, b.mac)));
@@ -629,6 +657,8 @@ fn summarize(facts: &[ObservedFact], now: Timestamp) -> SubjectSummary {
         platforms: platforms.into_iter().collect(),
         parents: parents.into_iter().collect(),
         open_tcp: open_tcp.into_iter().collect(),
+        tls_tcp: tls_tcp.into_iter().collect(),
+        vendors: vendors.into_iter().collect(),
         attachments,
         tags: tags.into_iter().collect(),
     }

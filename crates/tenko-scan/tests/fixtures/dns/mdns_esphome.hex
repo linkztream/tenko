@@ -1,0 +1,19 @@
+# Multicast DNS response of an ESPHome node (ESP32).
+# answer: _esphomelib._tcp.local PTR "sensor._esphomelib._tcp.local"
+# answer: "sensor._esphomelib._tcp.local" SRV port 6053 target sensor.local
+# answer: "sensor._esphomelib._tcp.local" TXT friendly_name, version, mac, platform=ESP32, board, network
+# answer: sensor.local A 192.0.2.43
+00 00 84 00 00 00 00 04 00 00 00 00 0b 5f 65 73
+70 68 6f 6d 65 6c 69 62 04 5f 74 63 70 05 6c 6f
+63 61 6c 00 00 0c 00 01 00 00 11 94 00 09 06 73
+65 6e 73 6f 72 c0 0c c0 2e 00 21 80 01 00 00 00
+78 00 0f 00 00 00 00 17 a5 06 73 65 6e 73 6f 72
+c0 1d c0 2e 00 10 80 01 00 00 11 94 00 67 19 66
+72 69 65 6e 64 6c 79 5f 6e 61 6d 65 3d 48 61 6c
+6c 20 53 65 6e 73 6f 72 10 76 65 72 73 69 6f 6e
+3d 32 30 32 35 2e 39 2e 30 10 6d 61 63 3d 30 30
+30 30 35 65 30 30 35 33 34 33 0e 70 6c 61 74 66
+6f 72 6d 3d 45 53 50 33 32 0e 62 6f 61 72 64 3d
+65 73 70 33 32 64 65 76 0c 6e 65 74 77 6f 72 6b
+3d 77 69 66 69 c0 49 00 01 80 01 00 00 00 78 00
+04 c0 00 02 2b

@@ -1,0 +1,22 @@
+# Multicast DNS response of a Linux host with an avahi-style responder, dual stack.
+# Flags: response, authoritative. Names are compressed; unique records carry the cache-flush bit.
+# answer: nas.local A 192.0.2.41 and AAAA 2001:db8::41
+# answer: nas.local HINFO "X86_64" "LINUX"
+# answer: _ssh._tcp.local PTR "nas._ssh._tcp.local"; SRV port 22 target nas.local; empty TXT
+# answer: _workstation._tcp.local PTR "nas [00:00:5e:00:53:41]._workstation._tcp.local";
+#         SRV port 9 target nas.local (a marker, nothing listens there); empty TXT
+00 00 84 00 00 00 00 09 00 00 00 00 03 6e 61 73
+05 6c 6f 63 61 6c 00 00 01 80 01 00 00 00 78 00
+04 c0 00 02 29 c0 0c 00 1c 80 01 00 00 00 78 00
+10 20 01 0d b8 00 00 00 00 00 00 00 00 00 00 00
+41 c0 0c 00 0d 80 01 00 00 00 78 00 0d 06 58 38
+36 5f 36 34 05 4c 49 4e 55 58 04 5f 73 73 68 04
+5f 74 63 70 c0 10 00 0c 00 01 00 00 11 94 00 06
+03 6e 61 73 c0 5a c0 70 00 21 80 01 00 00 00 78
+00 08 00 00 00 00 00 16 c0 0c c0 70 00 10 80 01
+00 00 11 94 00 01 00 0c 5f 77 6f 72 6b 73 74 61
+74 69 6f 6e c0 5f 00 0c 00 01 00 00 11 94 00 1a
+17 6e 61 73 20 5b 30 30 3a 30 30 3a 35 65 3a 30
+30 3a 35 33 3a 34 31 5d c0 97 c0 b0 00 21 80 01
+00 00 00 78 00 08 00 00 00 00 00 09 c0 0c c0 b0
+00 10 80 01 00 00 11 94 00 01 00

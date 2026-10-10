@@ -3738,6 +3738,22 @@ export interface components {
             };
             /** @enum {string} */
             type: "link";
+        } | {
+            /** @description The name a source found for an address (probes). */
+            data: {
+                /** @description The address. */
+                ip: string;
+            };
+            /** @enum {string} */
+            type: "name";
+        } | {
+            /** @description The vendor of a MAC address (probes). */
+            data: {
+                /** @description The MAC address. */
+                mac: components["schemas"]["MacAddr"];
+            };
+            /** @enum {string} */
+            type: "vendor";
         };
         /**
          * @description The answer of a factor enrolment. Enrolling a factor does not raise the strength of the
@@ -5499,6 +5515,8 @@ export interface components {
                 ip: string;
                 /** @description Open ports. */
                 open_tcp: number[];
+                /** @description The open ports that answered a TLS handshake. */
+                tls_tcp?: number[];
             };
             /** @enum {string} */
             type: "services";
@@ -5548,6 +5566,32 @@ export interface components {
             };
             /** @enum {string} */
             type: "link";
+        } | {
+            /**
+             * @description A name a source found for an address (reverse DNS, mDNS, LLMNR, SNMP). A name is
+             *     not a sighting of the address.
+             */
+            data: {
+                /** @description The address. */
+                ip: string;
+                /** @description The name, such as `printer.example.net`. */
+                name: string;
+            };
+            /** @enum {string} */
+            type: "name";
+        } | {
+            /**
+             * @description The organisation a MAC address is registered to (its OUI), or the manufacturer a
+             *     device reports.
+             */
+            data: {
+                /** @description The MAC address. */
+                mac: components["schemas"]["MacAddr"];
+                /** @description The vendor name. */
+                vendor: string;
+            };
+            /** @enum {string} */
+            type: "vendor";
         };
         /**
          * @description One source's knowledge of one subject: the latest report as the source gave it, with
@@ -6890,7 +6934,7 @@ export interface components {
          * @description How a probe saw its subject.
          * @enum {string}
          */
-        ProbeMethod: "arp" | "nd" | "mdns" | "lldp" | "icmp" | "tcp_syn" | "os_fingerprint" | "snmp";
+        ProbeMethod: "arp" | "nd" | "mdns" | "lldp" | "icmp" | "tcp_syn" | "os_fingerprint" | "snmp" | "tcp_connect" | "reverse_dns" | "llmnr" | "arp_sweep";
         /**
          * @description The JSON body of every error response: RFC 9457 problem details plus the Tenko members
          *     `code`, `params` and `errors`.
@@ -8099,7 +8143,10 @@ export interface components {
             last_seen?: components["schemas"]["Timestamp"] | null;
             /** @description MAC addresses. */
             macs: components["schemas"]["MacAddr"][];
-            /** @description Names (inventory names), as reported. */
+            /**
+             * @description Names: inventory names and the names probes found (reverse DNS, mDNS, LLMNR,
+             *     SNMP), as reported.
+             */
             names: string[];
             /** @description Open TCP ports (SCAN-08). */
             open_tcp: number[];
@@ -8113,6 +8160,10 @@ export interface components {
             sources: string[];
             /** @description Tags from the sources. */
             tags: string[];
+            /** @description The open TCP ports that answered a TLS handshake. */
+            tls_tcp?: number[];
+            /** @description Vendors of the MAC addresses (OUI) or as devices report them. */
+            vendors?: string[];
         };
         /** @description The computed view of one subject. */
         SubjectView: {
@@ -15561,7 +15612,7 @@ export interface operations {
                 at_least?: number;
                 /** @description Only facts of this source: a source key such as `inventory:<connector>`, or a connector identifier (which matches the inventory and the network controller source of the connector). */
                 source?: string;
-                /** @description Only facts about this kind of subject: `host`, `address`, `attachment`, `services`, `os` or `link`. */
+                /** @description Only facts about this kind of subject: `host`, `address`, `attachment`, `services`, `os`, `link`, `name` or `vendor`. */
                 type?: string;
                 /** @description Only facts that name this MAC address (`00-00-5E-00-53-01` or `00:00:5e:00:53:01`). */
                 mac?: string;

@@ -1,7 +1,42 @@
 //! Probe role: passive and active network discovery and SNMP polling, feeding observations
-//! to the IPAM reconciler.
+//! to the IPAM reconciler (SCAN-01 to SCAN-09).
 //!
-//! Placeholder crate: the implementation lands in a later phase (see `docs/ROADMAP.md`).
+//! | Module | Contents |
+//! |---|---|
+//! | [`scanner`] | the scheduler: schedules, on-demand runs, the kill switch, one batch per run |
+//! | [`config`] | the `[scan]` section of `tenko.toml` |
+//! | [`method`] | the methods, the [`method::Method`] trait the scheduler drives |
+//! | [`scope`] | the prefixes a probe covers; scans never leave them |
+//! | [`limit`] | probes per second, spacing per address, probes in flight (TGL-19) |
+//! | [`blackout`] | blackout windows (SCAN-06) |
+//! | [`oui`] | vendor names from the OUI of a MAC address |
+//! | [`dns`] | DNS messages for mDNS, LLMNR and reverse DNS |
+//! | [`snmp`] | SNMPv3 polling of switches (SCAN-05) |
+//! | [`methods`] | the methods themselves |
+//! | [`known`] | the addresses this probe saw recently, which the deeper methods work on |
+//! | [`status`] | the status file, the known addresses and the kill switch in `<data_dir>/scan/` |
+//! | [`capability`] | raw sockets and ICMP on this host |
+//! | [`sys`] | commands and files of the operating system, replayable in tests |
+//!
+//! docs/scanning.md describes the methods, what they need and what they report.
+
+pub mod blackout;
+pub mod capability;
+pub mod config;
+pub mod dns;
+pub mod error;
+pub mod known;
+pub mod limit;
+pub mod method;
+pub mod methods;
+pub mod oui;
+pub mod scanner;
+pub mod scope;
+pub mod snmp;
+pub mod status;
+pub mod sys;
+
+pub use error::ScanError;
 
 /// Name of this crate as declared in its manifest.
 pub const CRATE_NAME: &str = "tenko-scan";

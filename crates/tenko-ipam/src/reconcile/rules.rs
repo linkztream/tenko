@@ -382,12 +382,25 @@ fn discovered_one(
     placed: &Placed,
     fallback: &str,
 ) -> Option<Candidate> {
-    let observed_names: Vec<String> = pairs
+    // The names the sightings carry (inventory hosts) first, then the names probes found
+    // for the addresses of the device.
+    let mut observed_names: Vec<String> = pairs
         .iter()
         .filter_map(|pair| pair.name.clone())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
+    let probed: BTreeSet<&String> = pairs
+        .iter()
+        .filter_map(|pair| pair.ip)
+        .filter_map(|ip| snapshot.names.get(&ip))
+        .flatten()
+        .collect();
+    for name in probed {
+        if !observed_names.contains(name) {
+            observed_names.push(name.clone());
+        }
+    }
     let name = names.take(&key, &observed_names, fallback)?;
     let host = HostId::generate();
     let interface = InterfaceId::generate();

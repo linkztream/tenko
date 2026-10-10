@@ -75,9 +75,9 @@ pub enum ObservationSource {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ProbeMethod {
-    /// ARP (passive or active).
+    /// IPv4 neighbours from the probe host's ARP table.
     Arp,
-    /// IPv6 neighbour discovery.
+    /// IPv6 neighbours from the probe host's neighbour discovery table.
     Nd,
     /// Multicast DNS.
     Mdns,
@@ -85,12 +85,20 @@ pub enum ProbeMethod {
     Lldp,
     /// ICMP echo.
     Icmp,
-    /// TCP SYN scan.
+    /// TCP SYN scan (raw sockets).
     TcpSyn,
     /// OS fingerprinting.
     OsFingerprint,
     /// SNMP polling.
     Snmp,
+    /// TCP connect scan through the operating system.
+    TcpConnect,
+    /// Reverse DNS lookups of discovered addresses.
+    ReverseDns,
+    /// Link-local multicast name resolution.
+    Llmnr,
+    /// An active ARP sweep (raw sockets).
+    ArpSweep,
 }
 
 /// What was observed.
@@ -120,6 +128,9 @@ pub enum Observed {
         ip: IpAddr,
         /// Open ports.
         open_tcp: Vec<u16>,
+        /// The open ports that answered a TLS handshake.
+        #[serde(default)]
+        tls_tcp: Vec<u16>,
     },
     /// An operating system guess (SCAN-08).
     Os {
@@ -155,6 +166,23 @@ pub enum Observed {
         b: Endpoint,
         /// How the link was learned.
         kind: LinkKind,
+    },
+    /// A name a source found for an address (reverse DNS, mDNS, LLMNR, SNMP). A name is
+    /// not a sighting of the address.
+    Name {
+        /// The address.
+        #[schema(value_type = String)]
+        ip: IpAddr,
+        /// The name, such as `printer.example.net`.
+        name: String,
+    },
+    /// The organisation a MAC address is registered to (its OUI), or the manufacturer a
+    /// device reports.
+    Vendor {
+        /// The MAC address.
+        mac: MacAddr,
+        /// The vendor name.
+        vendor: String,
     },
 }
 
@@ -346,6 +374,19 @@ mod tests {
                 },
                 kind: LinkKind::Lldp,
             },
+            Observed::Services {
+                ip: "192.0.2.10".parse().expect("ip"),
+                open_tcp: vec![22, 443],
+                tls_tcp: vec![443],
+            },
+            Observed::Name {
+                ip: "192.0.2.10".parse().expect("ip"),
+                name: "printer.example.net".to_owned(),
+            },
+            Observed::Vendor {
+                mac: "00:00:5e:00:53:10".parse().expect("mac"),
+                vendor: "ICANN, IANA Department".to_owned(),
+            },
         ] {
             let back: Observed = from_cbor(&to_cbor(&subject).expect("cbor")).expect("cbor");
             assert_eq!(back, subject);
@@ -355,6 +396,19 @@ mod tests {
                 subject
             );
         }
+    }
+
+    #[test]
+    fn services_without_tls_ports_read_as_empty() {
+        let json = r#"{"type": "services", "data": {"ip": "192.0.2.10", "open_tcp": [22]}}"#;
+        let Observed::Services { tls_tcp, .. } = serde_json::from_str(json).expect("json") else {
+            panic!("not services");
+        };
+        assert_eq!(tls_tcp, Vec::<u16>::new());
+        assert_eq!(
+            serde_json::to_value(ProbeMethod::ReverseDns).expect("json"),
+            "reverse_dns"
+        );
     }
 
     #[test]

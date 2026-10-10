@@ -53,8 +53,9 @@ pub const ENV_SEPARATOR: &str = "__";
 pub const DEFAULT_LISTEN: &str = "0.0.0.0:8443";
 
 /// The top-level keys of the file; environment variables are matched against them.
-const TOP_LEVEL_KEYS: [&str; 18] = [
+const TOP_LEVEL_KEYS: [&str; 19] = [
     "cluster",
+    "scan",
     "data_dir",
     "roles",
     "modules",
@@ -122,6 +123,9 @@ pub struct Config {
     pub updates: UpdatesSection,
     /// The node transport between controllers and data-plane nodes (OPS-04).
     pub cluster: ClusterSection,
+    /// The scanner of the probe role (SCAN-01 to SCAN-09); read by the probe itself until
+    /// the controller hands out scan configuration (WP3.1).
+    pub scan: tenko_scan::config::ScanConfig,
 }
 
 impl Default for Config {
@@ -145,6 +149,7 @@ impl Default for Config {
             modules: None,
             updates: UpdatesSection::default(),
             cluster: ClusterSection::default(),
+            scan: tenko_scan::config::ScanConfig::default(),
         }
     }
 }
@@ -1220,6 +1225,9 @@ impl Config {
         self.log.validate()?;
         self.updates.validate()?;
         self.cluster.validate()?;
+        self.scan
+            .validate()
+            .map_err(|error| ConfigError::invalid(error.detail().to_owned()))?;
         if let Some(url) = &self.hibp.range_url
             && !(url.starts_with("https://") || url.starts_with("http://"))
         {
