@@ -1,10 +1,11 @@
-// The operator secrets page (IAM-15, IAM-16): the list of the secrets with their metadata, the
-// detail of one (/secrets/:id), and the dialogs that create, change, reveal and delete. A
-// secret is never shown here; "Reveal" goes through the audited reveal dialog. Operators and
-// administrators see the list and may reveal; administrators also create, change and delete.
-// Everyone else sees only a note that their role shows no secrets. The list follows the
-// `secrets` topic, so a change by another administrator or a binding on a host page shows up
-// without a reload.
+// The operator secrets page (IAM-15, IAM-16), a sub-page of Settings at /settings/secrets: the
+// list of the secrets with their metadata, the detail of one (/settings/secrets/:id), and the
+// dialogs that create, change, reveal and delete. A secret is never shown here; "Reveal" goes
+// through the audited reveal dialog. Operators and administrators see the list and may reveal;
+// administrators also create, change and delete, and see the settings navigation above the list
+// (operators have no other settings page). Everyone else sees only a note that their role shows
+// no secrets. The list follows the `secrets` topic, so a change by another administrator or a
+// binding on a host page shows up without a reload.
 //
 // The list is read whole and filtered here (the vault holds few secrets), so the detail of
 // the secret in the URL does not depend on the filter.
@@ -18,6 +19,7 @@ import { ErrorNotice, Notice } from "../components/Notice";
 import { PageHead } from "../components/PageHead";
 import { toast } from "../components/toast";
 import { formatDateTime, formatNumber, formatRelative, t } from "../i18n";
+import { SettingsNav } from "../settings/SettingsNav";
 import {
   listSecrets,
   secretReferences,
@@ -133,6 +135,9 @@ function SecretsList() {
   return (
     <>
       <PageHead title={t("secrets.title")} sub={countText()} />
+      <Show when={isAdmin()}>
+        <SettingsNav />
+      </Show>
       <div class="filterbar" role="toolbar" aria-label={t("secrets.filter.label")} data-testid="filterbar">
         <label class="query">
           <Icon name="search" size="sm" />

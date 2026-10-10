@@ -43,7 +43,8 @@ ui/
     grid/               the data grid and its parts: filter bar, column chooser, action bar,
                         cells, selection, keyboard focus, sources, drag and drop
     shell/              rail, top bar, status bar, command palette, keyboard chords, search
-    auth/, setup/, settings/   sign-in, account, first-run wizard, settings (WP1.9)
+    auth/, setup/, settings/   sign-in, account, first-run wizard, settings (WP1.9); SettingsNav.tsx
+                        is the settings navigation (security, users, updates, secrets)
     dashboard/          the start page (decision 13)
     ipam/               networks (tree and prefix pane), addresses, tenancy collections,
                         forms, plan dialogs, history, move preview, utilization alarms
@@ -54,10 +55,12 @@ ui/
     updates/            update notice, release notes, what is new, install from the UI
                         (OPS-24, TGL-23), and the module switch of OPS-25 (modules.ts,
                         ModuleGate); api.ts is its only API module
-    secrets/            operator secrets (WP2.1): the secrets page, the reveal dialog with the
-                        step-up in place and the clipboard path (clipboard.ts); api.ts is its
-                        only API module, also used by the credentials and the remote hand-off
-                        of the host page (hosts/credentials.tsx, hosts/Connect.tsx)
+    secrets/            operator secrets (WP2.1): the secrets page, a sub-page of Settings at
+                        /settings/secrets (the old /secrets address redirects, see
+                        SecretsRedirect.tsx), the reveal dialog with the step-up in place and
+                        the clipboard path (clipboard.ts); api.ts is its only API module, also
+                        used by the credentials and the remote hand-off of the host page
+                        (hosts/credentials.tsx, hosts/Connect.tsx)
     discovery/          the proposal inbox with the docked proposal panel, the observations
                         and the picture of one subject (WP2.9); HostObservations.tsx is the
                         observation section of the host page; api.ts is its only API module,
@@ -137,7 +140,7 @@ other key stays in the core table that the first load carries.
 | `settings` | `settings.` |
 | `account` | `account.` |
 | `updates` | `updates.`, `errors.update.`, `errors.upgrade.` |
-| `secrets` | `secrets.`, `errors.vault.`, `errors.remote.` (also loaded by the host views) |
+| `secrets` | `secrets.`, `errors.vault.`, `errors.remote.` (also loaded by the host views; the secrets route loads `settings` too, for the settings navigation) |
 | `discovery` | `discovery.`, `errors.ipam.proposal.`, `errors.ipam.reconciler.` (also loaded by the host views) |
 | `connectors` | `connectors.`, `errors.connect.` |
 | `nodes` | `nodes.`, `errors.cluster.` |
@@ -227,7 +230,7 @@ Page roots in this version:
 | `/ipam/import` | `page-import` |
 | `/jobs`, `/jobs/:id` | `page-jobs`, `page-job` |
 | `/audit`, `/audit/:seq` | `page-audit`, `page-audit-record` |
-| `/secrets`, `/secrets/:id` | `page-secrets` |
+| `/settings/secrets`, `/settings/secrets/:id` (`/secrets` and everything under it redirect here) | `page-secrets` |
 | `/discovery`, `/discovery/:id` | `page-discovery` (with `proposal-panel`) |
 | `/discovery/observations`, `/discovery/observations/:subject` | `page-discovery-observations`, `page-discovery-subject` |
 | `/connectors`, `/connectors/:id` | `page-connectors`, `page-connector` |
@@ -252,6 +255,7 @@ The hooks of the WP2.9 views beyond the generic ones:
 | Dashboard | `dashboard-proposals`, `dashboard-proposals-link`, `dashboard-proposals-hint` (`data-conflicts`), `dashboard-connectors`, `dashboard-connectors-link`, `dashboard-connectors-hint` (`data-total`, `data-failing`), `dashboard-nodes`, `dashboard-nodes-link`, `dashboard-nodes-hint` (`data-total`, `data-mismatched`). The hints are translated plural messages, so their numbers are data attributes; a tile that has not read its data (or the nodes tile without a cluster summary) leaves them off |
 | Host connect panel | `host-connect` with `remote-target` (`data-key` the address, or the host name), `host-rdp` and `host-ssh` (`data-key`), `field-user`, `field-rdp_port` and `field-ssh_port` |
 | Release notes (`Markdown` of `updates/markdown.tsx`, in `update-release`, `update-action` and the install confirmation) | `md-heading` (`data-level` the level of the element, 1 to 6), `md-paragraph`, `md-list` (`data-ordered` `true` or `false`), `md-item`, `md-strong`, `md-em`, `md-code` (inline code), `md-pre` (fenced code), `md-link`; text that stays text has none |
+| Settings navigation (the tabs of the settings pages and of the secrets page, which administrators see) | `settings-nav` with `settings-nav-link` (`data-key` `security`, `users`, `updates` or `secrets`) |
 | Security settings | `toggle` (`data-key` the toggle id, e.g. `TGL-24`) with `toggle-edit` and `toggle-reset` (only while the value deviates from the profile); `dialog-toggle` with `form-submit`, `form-cancel`, `toggle-pin-coupling` (the PIN coupling rule refuses the draft) and the editor's fields: `field-password_policy`, `field-mfa`, `field-breach_check`, `field-lockout`, `field-step_up-<session, fresh or passkey>`, `field-bound_host_only`; the profile dialog shows `profile-pin-coupling` |
 
 A new view follows the same pattern: a page root id, `grid-<id>` for each grid, the generic

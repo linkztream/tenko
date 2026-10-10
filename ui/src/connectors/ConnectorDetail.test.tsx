@@ -231,7 +231,7 @@ describe("the connector in backoff", () => {
     await waitFor(() => expect(within(card).getByTestId("connector-secret").textContent).toBe("unifi api"));
     const secret = within(card).getByTestId("connector-secret");
     expect(secret.dataset.key).toBe("api_key");
-    expect(within(secret).getByRole("link").getAttribute("href")).toBe(`/secrets/${UNIFI}`);
+    expect(within(secret).getByRole("link").getAttribute("href")).toBe(`/settings/secrets/${UNIFI}`);
     expect(secret.previousElementSibling?.textContent).toBe("Secret api_key");
     expect(document.body.textContent).not.toContain("example-api-key");
     expect(fact(card, "Poll interval (seconds)")).toBe("120 s");
@@ -246,7 +246,7 @@ describe("the connector in backoff", () => {
     const { page } = await openLoaded(HOME);
     const secret = await within(page).findByTestId("connector-secret");
     await waitFor(() => expect(secret.textContent).toBe("A secret you cannot list"));
-    expect(within(secret).getByRole("link").getAttribute("href")).toBe(`/secrets/${UNIFI}`);
+    expect(within(secret).getByRole("link").getAttribute("href")).toBe(`/settings/secrets/${UNIFI}`);
   });
 });
 

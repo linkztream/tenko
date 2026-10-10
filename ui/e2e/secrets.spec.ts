@@ -1,6 +1,9 @@
 // WP2.11: operator secrets end to end (IAM-07, IAM-15, IAM-16, API-11, TGL-24; docs/secrets.md).
-// Five tests, each with its own server and its own arrangement.
+// Six tests, each with its own server and its own arrangement.
 //
+// - The location: the secrets page is a tab of Settings at /settings/secrets (and
+//   /settings/secrets/<id>), reached from the other settings pages; the former /secrets address
+//   and everything under it redirects, for bookmarks and deep links.
 // - The PIN rule: a PIN session cannot store a secret, and with a stronger session the store
 //   is still refused while an operator signs in with a PIN alone (409 `vault.pin_coupling`,
 //   section 2); disabling that account lets the same form succeed.
@@ -174,7 +177,7 @@ async function arrangeHost(api: Api): Promise<string> {
 
 test("a secret is refused for a PIN session and while an operator signs in with a PIN alone", async ({ page, api, signedIn }) => {
   expect(signedIn.session.strength).toBe("pin");
-  await page.goto("/secrets");
+  await page.goto("/settings/secrets");
   await expect(page.getByTestId("page-secrets")).toBeVisible();
   await expect(page.getByTestId("secrets-empty")).toBeVisible();
 
@@ -202,7 +205,7 @@ test("a secret is refused for a PIN session and while an operator signs in with 
     { name: "olga", roles: ["operator"], password: OPERATOR_PIN },
     { idempotencyKey: null },
   );
-  await page.goto("/secrets");
+  await page.goto("/settings/secrets");
   await expect(page.getByTestId("secrets-empty")).toBeVisible();
   await page.getByTestId("secrets-create").click();
   await fillSecretForm(form, { name: NAS.name, username: NAS.username, value: NAS.value });
@@ -224,10 +227,39 @@ test("a secret is refused for a PIN session and while an operator signs in with 
   expect(stored.status()).toBe(201);
   const secret = (await stored.json()) as Secret;
   await expect(form).toHaveCount(0);
-  await expect(page).toHaveURL(new RegExp(`/secrets/${secret.id}$`));
+  await expect(page).toHaveURL(new RegExp(`/settings/secrets/${secret.id}$`));
   await expect(page.getByTestId("secret-detail")).toHaveAttribute("data-key", NAS.name);
   const listed = await api.get<Schemas["Page_OperatorSecretView"]>("/secrets");
   expect(listed.items.map((item) => item.id)).toEqual([secret.id]);
+});
+
+test("the former /secrets address redirects to the page under Settings, which is a tab of the settings pages", async ({ page, api, signedIn }) => {
+  expect(signedIn.session.strength).toBe("pin");
+  await strongSession(api);
+  const secret = await createSecret(api, { name: NAS.name, value: NAS.value, username: NAS.username });
+
+  // The list at the old address, as a bookmark has it.
+  await page.goto("/secrets");
+  await expect(page).toHaveURL(new RegExp("/settings/secrets$"));
+  await expect(page.getByTestId("page-secrets")).toBeVisible();
+  await expect(withId(page, "secret", secret.id)).toBeVisible();
+
+  // One secret at the old address, as a link from a mail or a chat has it.
+  await page.goto(`/secrets/${secret.id}`);
+  await expect(page).toHaveURL(new RegExp(`/settings/secrets/${secret.id}$`));
+  await expect(page.getByTestId("secret-detail")).toHaveAttribute("data-id", secret.id);
+
+  // The secrets page is a tab of Settings: reached from the security page and left for it again.
+  await page.goto("/settings/security");
+  const tabs = page.getByTestId("settings-nav");
+  await expect(withKey(tabs, "settings-nav-link", "security")).toHaveAttribute("aria-current", "page");
+  await withKey(tabs, "settings-nav-link", "secrets").click();
+  await expect(page).toHaveURL(new RegExp("/settings/secrets$"));
+  await expect(page.getByTestId("page-secrets")).toBeVisible();
+  await expect(withKey(page.getByTestId("settings-nav"), "settings-nav-link", "secrets")).toHaveAttribute("aria-current", "page");
+  await withKey(page.getByTestId("settings-nav"), "settings-nav-link", "users").click();
+  await expect(page).toHaveURL(new RegExp("/settings/users$"));
+  await expect(page.getByTestId("page-secrets")).toHaveCount(0);
 });
 
 test("a secret is created and revealed: the value reaches the clipboard, and no list, API answer or audit record shows it", async ({
@@ -241,7 +273,7 @@ test("a secret is created and revealed: the value reaches the clipboard, and no 
   // The clock of the page is faked so the 30 seconds of the clipboard can be skipped.
   await page.clock.install();
   await grantClipboard(page, server);
-  await page.goto("/secrets");
+  await page.goto("/settings/secrets");
   await expect(page.getByTestId("secrets-empty")).toBeVisible();
 
   // Create it through the form.
@@ -252,7 +284,7 @@ test("a secret is created and revealed: the value reaches the clipboard, and no 
   expect(creation.status()).toBe(201);
   const secret = (await creation.json()) as Secret;
   await expect(form).toHaveCount(0);
-  await expect(page).toHaveURL(new RegExp(`/secrets/${secret.id}$`));
+  await expect(page).toHaveURL(new RegExp(`/settings/secrets/${secret.id}$`));
 
   // The list and the detail show the metadata, not the value.
   const row = withId(page, "secret", secret.id);
@@ -378,7 +410,7 @@ test("a reveal that needs a passkey asks for it in the dialog and succeeds in a 
   expect(before.strength).toBe("password_totp");
 
   // The reveal of a password-and-TOTP session asks for the step-up where it is.
-  await page.goto("/secrets");
+  await page.goto("/settings/secrets");
   const row = withId(page, "secret", secret.id);
   await expect(row).toBeVisible();
   await row.getByTestId("secret-reveal").click();
@@ -453,7 +485,7 @@ test("TGL-24 changes on the settings page while the vault holds a secret, and MF
   expect(after.settings.mfa).toBe("optional");
 
   // A reveal now needs a sign-in within five minutes: the session of this test is that fresh.
-  await page.goto("/secrets");
+  await page.goto("/settings/secrets");
   await withId(page, "secret", secret.id).getByTestId("secret-reveal").click();
   const revealed = page.getByTestId("dialog-reveal");
   await expect(revealed.getByTestId("reveal-status")).toHaveAttribute("data-state", "copied");
@@ -545,7 +577,7 @@ test("a secret is bound to a host, revealed from its page, handed off over SSH a
 
   // The secret lists the host that binds it, and the secrets page cannot reveal it: no host is in view.
   expect((await api.get<Secret>(`/secrets/${secret.id}`)).hosts).toEqual([{ host, role: "admin" }]);
-  await page.goto(`/secrets/${secret.id}`);
+  await page.goto(`/settings/secrets/${secret.id}`);
   await expect(withKey(page.getByTestId("secret-references"), "secret-host", HOST)).toBeVisible();
   const refusal = page.getByTestId("dialog-reveal");
   const [refused] = await Promise.all([
@@ -665,7 +697,7 @@ test.describe("a Swedish browser", () => {
     await grantClipboard(page, server);
 
     // The secret with its detail and the host that uses it.
-    await page.goto(`/secrets/${secret.id}`);
+    await page.goto(`/settings/secrets/${secret.id}`);
     const row = withId(page, "secret", secret.id);
     await expect(row).toBeVisible();
     await expect(page.getByTestId("secret-detail")).toBeVisible();

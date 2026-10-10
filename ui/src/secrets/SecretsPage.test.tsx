@@ -39,8 +39,8 @@ async function releaseUnifi() {
   expect(answer.status).toBe(204);
 }
 
-async function openPage(url = "/secrets") {
-  const view = renderRoute(SecretsPage, { url, path: "/secrets/:id?" });
+async function openPage(url = "/settings/secrets") {
+  const view = renderRoute(SecretsPage, { url, path: "/settings/secrets/:id?" });
   await screen.findAllByTestId("secret");
   return view;
 }
@@ -98,7 +98,7 @@ describe("the list", () => {
 
     const nas = rowOf("nas admin");
     expect(nas.dataset.id).toBe(NAS);
-    expect(within(nas).getByRole("link", { name: "nas admin" }).getAttribute("href")).toBe(`/secrets/${NAS}`);
+    expect(within(nas).getByRole("link", { name: "nas admin" }).getAttribute("href")).toBe(`/settings/secrets/${NAS}`);
     expect(nas.textContent).toContain("Password");
     expect(nas.textContent).toContain("admin");
     expect(nas.textContent).toContain("ssh");
@@ -211,7 +211,7 @@ describe("create", () => {
       value: VALUE,
     });
 
-    await waitFor(() => expect(view.location()).toBe(`/secrets/${created.id}`));
+    await waitFor(() => expect(view.location()).toBe(`/settings/secrets/${created.id}`));
     const detail = await screen.findByTestId("secret-detail");
     expect(detail.dataset.id).toBe(created.id);
     expect(await screen.findByText("Created router admin")).toBeTruthy();
@@ -576,11 +576,11 @@ describe("delete", () => {
 
   it("leaves the detail of a deleted secret", async () => {
     await releaseUnifi();
-    const view = await openPage(`/secrets/${UNIFI}`);
+    const view = await openPage(`/settings/secrets/${UNIFI}`);
     const detail = await screen.findByTestId("secret-detail");
     fireEvent.click(within(detail).getByTestId("secret-delete"));
     fireEvent.click(await screen.findByTestId("confirm-ok"));
-    await waitFor(() => expect(view.location()).toBe("/secrets"));
+    await waitFor(() => expect(view.location()).toBe("/settings/secrets"));
     await waitFor(() => expect(screen.queryByTestId("secret-detail")).toBeNull());
   });
 });
@@ -604,7 +604,7 @@ describe("reveal", () => {
 
 describe("the detail", () => {
   it("shows the facts and the host that binds the secret", async () => {
-    await openPage(`/secrets/${NAS}`);
+    await openPage(`/settings/secrets/${NAS}`);
     const detail = await screen.findByTestId("secret-detail");
     expect(detail.dataset.id).toBe(NAS);
     expect(within(detail).getByRole("heading", { level: 2, name: "nas admin" })).toBeTruthy();
@@ -632,18 +632,18 @@ describe("the detail", () => {
     const view = await openPage();
     expect(screen.queryByTestId("secret-detail")).toBeNull();
     fireEvent.click(within(rowOf("unifi api")).getByRole("link", { name: "unifi api" }));
-    await waitFor(() => expect(view.location()).toBe(`/secrets/${UNIFI}`));
+    await waitFor(() => expect(view.location()).toBe(`/settings/secrets/${UNIFI}`));
     const detail = await screen.findByTestId("secret-detail");
     expect(await within(detail).findByTestId("secret-unused")).toBeTruthy();
     fireEvent.click(within(detail).getByTestId("secret-detail-close"));
-    await waitFor(() => expect(view.location()).toBe("/secrets"));
+    await waitFor(() => expect(view.location()).toBe("/settings/secrets"));
     await waitFor(() => expect(screen.queryByTestId("secret-detail")).toBeNull());
   });
 
   it("opens a row that is clicked outside its link", async () => {
     const view = await openPage();
     fireEvent.click(within(rowOf("unifi api")).getByText("API key"));
-    await waitFor(() => expect(view.location()).toBe(`/secrets/${UNIFI}`));
+    await waitFor(() => expect(view.location()).toBe(`/settings/secrets/${UNIFI}`));
   });
 
   it("lists hosts, a deleted host and connector instances", async () => {
@@ -659,7 +659,7 @@ describe("the detail", () => {
         }),
       ),
     );
-    await openPage(`/secrets/${NAS}`);
+    await openPage(`/settings/secrets/${NAS}`);
     const detail = await screen.findByTestId("secret-detail");
     await within(detail).findAllByTestId("secret-host");
     const hosts = within(detail).getAllByTestId("secret-host");
@@ -676,7 +676,7 @@ describe("the detail", () => {
   });
 
   it("says so when the secret does not exist", async () => {
-    renderRoute(SecretsPage, { url: "/secrets/0190d1c2-0000-7000-8000-0000000dffff", path: "/secrets/:id?" });
+    renderRoute(SecretsPage, { url: "/settings/secrets/0190d1c2-0000-7000-8000-0000000dffff", path: "/settings/secrets/:id?" });
     await screen.findAllByTestId("secret");
     const missing = await screen.findByTestId("secret-missing");
     expect(missing.textContent).toContain("The secret does not exist (any more).");
@@ -684,13 +684,24 @@ describe("the detail", () => {
   });
 
   it("has no accessibility violations", async () => {
-    const view = await openPage(`/secrets/${NAS}`);
+    const view = await openPage(`/settings/secrets/${NAS}`);
     await screen.findByTestId("secret-host");
     expect(await axeViolations(view.container)).toEqual([]);
   });
 });
 
 describe("roles", () => {
+  it("shows an administrator the settings navigation with the secrets page as the current tab", async () => {
+    await openPage();
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual(["Security", "Users", "Updates", "Secrets"]);
+    const current = within(nav).getByRole("link", { name: "Secrets" });
+    expect(current.getAttribute("href")).toBe("/settings/secrets");
+    expect(current.getAttribute("aria-current")).toBe("page");
+    expect(within(nav).getByRole("link", { name: "Security" }).getAttribute("href")).toBe("/settings/security");
+    expect(await axeViolations(nav)).toEqual([]);
+  });
+
   it("lets an operator reveal but not create, change or delete", async () => {
     await signInAlex({
       prepare: (user) => {
@@ -698,7 +709,9 @@ describe("roles", () => {
       },
     });
     const clipboard = fakeClipboard();
-    await openPage(`/secrets/${NAS}`);
+    await openPage(`/settings/secrets/${NAS}`);
+    // The settings pages are for administrators, so the operator is not offered their navigation.
+    expect(screen.queryByTestId("settings-nav")).toBeNull();
     expect(screen.queryByTestId("secrets-create")).toBeNull();
     for (const root of [rowOf("nas admin"), await screen.findByTestId("secret-detail")]) {
       expect(within(root).getByTestId("secret-reveal")).toBeTruthy();
@@ -724,12 +737,13 @@ describe("roles", () => {
         return undefined;
       }),
     );
-    const view = renderRoute(SecretsPage, { url: "/secrets", path: "/secrets/:id?" });
+    const view = renderRoute(SecretsPage, { url: "/settings/secrets", path: "/settings/secrets/:id?" });
     const notice = await screen.findByTestId("secrets-no-access");
     expect(notice.textContent).toContain("Your role shows no secrets.");
     expect(screen.queryByTestId("secret")).toBeNull();
     expect(screen.queryByTestId("filterbar")).toBeNull();
     expect(screen.queryByTestId("secrets-create")).toBeNull();
+    expect(screen.queryByTestId("settings-nav")).toBeNull();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Secrets");
     expect(await axeViolations(view.container)).toEqual([]);
     expect(reads).toBe(0);
@@ -737,7 +751,7 @@ describe("roles", () => {
 
   it("tells an administrator how to store the first secret", async () => {
     server.use(http.get("/api/v1/secrets", () => HttpResponse.json({ items: [], next_cursor: null, revision: 1 })));
-    renderRoute(SecretsPage, { url: "/secrets", path: "/secrets/:id?" });
+    renderRoute(SecretsPage, { url: "/settings/secrets", path: "/settings/secrets/:id?" });
     const empty = await screen.findByTestId("secrets-empty");
     expect(empty.textContent).toBe("There are no secrets yet. Use New secret to store the first one.");
   });

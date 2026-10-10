@@ -207,7 +207,7 @@ A reveal is never replayed. The middleware that implements `Idempotency-Key` kee
 
 ### The reveal dialog
 
-The UI reveals from the secrets page and, next to a credential of a host, from the host view ("Copy password"). Both use one dialog, which sends the host in view when there is one and a reason when its caller supplies one.
+The UI reveals from the secrets page (Settings, Secrets, at `/settings/secrets`; the former `/secrets` address redirects there) and, next to a credential of a host, from the host view ("Copy password"). Both use one dialog, which sends the host in view when there is one and a reason when its caller supplies one.
 
 1. Opening the dialog is the request: the reveal starts at once, and the dialog says that it is writing the audit record.
 2. If the API answers 403 `auth.step_up_required`, the dialog asks for the step-up in place. For `required` = `passkey` it offers a passkey or security key only. Otherwise it asks for the password of the signed-in account, a TOTP code when the server asks for a second factor, or a passkey. The new sign-in creates a new session, which is what makes it fresh; the previous session ends, and the dialog repeats the reveal.
