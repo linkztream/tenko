@@ -60,8 +60,8 @@ tenko serve --config /etc/tenko/tenko.toml [--data-dir PATH] [--roles controller
 
 `tenko serve` stays in the foreground, logs to standard error (`log.format` = `text` or
 `json`; `log.file` adds a file) and prints the console notes to standard output. It starts
-eight steps in order, each logged with its duration: `kek`, `store`, `vault`, `tls`,
-`auth`, `ipam`, `jobs`, `api`. A step that fails stops the start with exit status 4 and a
+ten steps in order, each logged with its duration: `kek`, `store`, `vault`, `tls`,
+`auth`, `ipam`, `jobs`, `connectors`, `cluster`, `api`. A step that fails stops the start with exit status 4 and a
 message that names the step and its code. `GET /api/v1/health/ready` answers 200 when the
 node serves requests and 503 while it starts or shuts down; `GET /api/v1/health` is the
 liveness probe. `SIGINT` and `SIGTERM` shut the server down gracefully: open requests
