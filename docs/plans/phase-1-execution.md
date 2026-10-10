@@ -496,7 +496,7 @@ Slice 2: discovery and connectors
 | WP2.9 UI discovery | `ui/src/{discovery,proposals,connectors,topology}/` | WP2.3 to WP2.7 | Ports and OS (SCAN-08), proposals, scans, connector settings | Keyboard and axe checks | L, design coverage |
 | WP2.10 Releases and upgrades | `crates/tenko/src/upgrade/`, the store format version, `.github/workflows/release.yml`, `CHANGELOG.md`, `ui/src/updates/` | Slice 1 | OPS-23: format version and migrations, `tenko upgrade check`, compatibility test against the previous release, release workflow with checksums, changelog discipline checked in CI; OPS-24: release manifest with notes, update notice and what's new in the UI, installation from the UI for native single-node installs through a `current` link and a supervisor restart, rollback on failed health. Scheduled before WP2.6, because it fixes how the store format may change | A data directory from the previous release opens and migrates; an older binary refuses a newer directory; a tagged build publishes binaries, image and checksums; the UI shows the notice and notes against a mock manifest and installs on a single node in the acceptance run | M, R17 |
 
-Slice 3: platform hardening
+Slice 3: platform hardening (detailed in [slice-3-plan.md](slice-3-plan.md), written 2026-10-10 after Slice 2)
 
 | WP | Owns | Content | Acceptance | Size |
 |---|---|---|---|---|
