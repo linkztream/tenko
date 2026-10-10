@@ -78,6 +78,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - The nodes tile of the start page and the cluster summary of the nodes page count a node as soon as it enrols, connects, disconnects or is revoked, instead of keeping the old numbers until a reload.
 - With an operator secret in the vault, the security settings of the Home and Lab profiles can be changed again, for example the reveal policy (TGL-24). Only a change of the password policy or of the MFA requirement that would let a PIN be the only factor is refused, and the settings page says so before anything is sent.
 - After an update installed from the web UI, the health check and the start-up line name the version that runs, so the update page sees the restart into the new version.
+- Revoking a node no longer fails with a conflict when the node's heartbeat changes its record at the same moment, for example right after it connects: the controller plans the revocation again, and does the same for a certificate renewal.
 
 ### Security
 

@@ -157,7 +157,7 @@ The old certificate stays valid until it expires. Both serials are in the node r
 
 ## 3. Revocation
 
-`DELETE /api/v1/nodes/{id}` (administrators) revokes a node. The controller removes the node record and its name, and puts every unexpired certificate serial of the node on the revocation list, the table `cluster.revocations`. The TLS verifier of the cluster port checks that list at every handshake; a revoked certificate fails it with the alert `certificate_revoked`. The heartbeat stream of the node gets a directive that says it was revoked, and its connections close about 0.3 s later. The node then reports the state `revoked` (`cluster.node.revoked`) and tries again every five minutes, which fails the same way.
+`DELETE /api/v1/nodes/{id}` (administrators) revokes a node. The controller removes the node record and its name, and puts every unexpired certificate serial of the node on the revocation list, the table `cluster.revocations`. The TLS verifier of the cluster port checks that list at every handshake; a revoked certificate fails it with the alert `certificate_revoked`. The heartbeat stream of the node gets a directive that says it was revoked, and its connections close about 0.3 s later. The node then reports the state `revoked` (`cluster.node.revoked`) and tries again every five minutes, which fails the same way. The node's own bookkeeping (`last_seen` on connect, on disconnect and every five minutes, and the agreed protocol) writes the same record, so a revocation or a renewal can find it changed between reading and writing it; the controller then reads the record again and plans the change anew, up to three times, so a heartbeat never makes an administrator see `cluster.node.conflict`.
 
 A revoked node does not come back by itself. It needs a new token and gets a new id; its name becomes free again. An entry leaves the revocation list after the expiry of its certificate, when the hourly maintenance pass finds it. The revocation is audited as `cluster.node.revoke`.
 
@@ -355,7 +355,7 @@ A code is stable. The API answers with the HTTP status; on the cluster port the 
 | `cluster.node.name` | 422 | The node name breaks the rule of section 1.1 |
 | `cluster.node.name_taken` | 409 | Another node has the name |
 | `cluster.node.address` | 422 | The address is neither an IP address nor a host name |
-| `cluster.node.conflict` | 409 | The node changed during its revocation; try again |
+| `cluster.node.conflict` | 409 | The node changed during its revocation three times in a row; try again |
 | `cluster.node.unknown` | 403 | The certificate is valid but its node is not enrolled, for example after a revocation |
 | `cluster.node.certificate_unknown` | 403 | The certificate is not one the node was issued, or it expired |
 | `cluster.node.role` | 403 | The node lacks the role the call needs (`Ingest` needs `probe`) |

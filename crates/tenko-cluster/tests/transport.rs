@@ -6,7 +6,10 @@
 use std::{
     net::SocketAddr,
     path::Path,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, Mutex, OnceLock, PoisonError, Weak,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
@@ -17,16 +20,19 @@ use tenko_cluster::{
     client::{self, Agent, AgentConfig},
     error::ClusterError,
     identity::{AgentState, Credentials, NodeIdentity, NodePaths},
-    model::{EnrolRequest, NewEnrolment},
+    model::{self, EnrolRequest, NewEnrolment},
     probe::{IngestCounts, ProbeBatch, ProbeSink, Sighting, SightingSubject},
-    registry::{NodeRegistry, RegistryConfig},
+    registry::{self, NODE_EDIT_ATTEMPTS, NodeRegistry, RegistryConfig},
     server::ClusterListener,
 };
 use tenko_core::{
-    NodeId, RequestCtx, Role, SystemComponent, Timestamp, VrfId, observe::ProbeMethod,
+    NodeId, RequestCtx, Revision, Role, SystemComponent, Timestamp, VrfId, observe::ProbeMethod,
 };
 use tenko_jobs::{EngineConfig, JobEngine};
-use tenko_store::{KeyRange, ReadConsistency, ReadViewExt, Store, mem::MemStore, tables};
+use tenko_store::{
+    ChangeStream, Committed, DerivedIndex, KeyRange, Precondition, ReadConsistency, ReadView,
+    ReadViewExt, Store, StoreError, StoreStatus, WatchFilter, WriteBatch, mem::MemStore, tables,
+};
 use tenko_vault::{MemVault, SecretBytes};
 use tokio::{sync::watch, task::JoinHandle};
 
@@ -679,4 +685,217 @@ async fn renewal_issues_a_new_certificate_that_connects() {
         .await
         .expect("revoke");
     assert_eq!(serials.len(), 2);
+}
+
+// ---------------------------------------------------------------------------------------
+// Edits that race the node's bookkeeping
+// ---------------------------------------------------------------------------------------
+
+/// A store that lets the node's bookkeeping win the race against the next `races` edits of
+/// a node record: before it forwards a revocation or a renewal, it rewrites the record the
+/// way a heartbeat does ([`NodeRegistry::touch`]), so the edit's precondition fails. That
+/// is the window between the read and the write of an edit, made certain.
+struct RacingStore {
+    inner: Arc<MemStore>,
+    registry: OnceLock<Weak<NodeRegistry>>,
+    races: Mutex<usize>,
+    raced: AtomicUsize,
+}
+
+impl RacingStore {
+    fn new(inner: Arc<MemStore>) -> Arc<Self> {
+        Arc::new(Self {
+            inner,
+            registry: OnceLock::new(),
+            races: Mutex::new(0),
+            raced: AtomicUsize::new(0),
+        })
+    }
+
+    /// Lets the heartbeat win the next `races` edits.
+    fn arm(&self, races: usize) {
+        *self.races.lock().unwrap_or_else(PoisonError::into_inner) = races;
+    }
+
+    /// Whether the heartbeat wins this edit (one race fewer to go).
+    fn race(&self) -> bool {
+        let mut left = self.races.lock().unwrap_or_else(PoisonError::into_inner);
+        let race = *left > 0;
+        if race {
+            *left -= 1;
+        }
+        race
+    }
+
+    /// The node an edit of a node record names, when `batch` is a revocation or a renewal.
+    fn edited_node(batch: &WriteBatch) -> Option<NodeId> {
+        let edit = batch.audit.iter().any(|draft| {
+            draft.action == registry::actions::NODE_REVOKE
+                || draft.action == registry::actions::NODE_RENEW
+        });
+        if !edit {
+            return None;
+        }
+        batch
+            .preconditions
+            .iter()
+            .find_map(|precondition| match precondition {
+                Precondition::Version { table, key, .. }
+                    if table == model::tables::NODES.name() =>
+                {
+                    model::tables::NODES.decode_key(key).ok().map(NodeId)
+                }
+                _ => None,
+            })
+    }
+}
+
+#[async_trait]
+impl Store for RacingStore {
+    async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
+        if let Some(node) = Self::edited_node(&batch)
+            && self.race()
+        {
+            let registry = self
+                .registry
+                .get()
+                .and_then(Weak::upgrade)
+                .expect("the registry");
+            registry
+                .touch(node, Timestamp::now(), true)
+                .await
+                .expect("the heartbeat's write");
+            self.raced.fetch_add(1, Ordering::SeqCst);
+        }
+        self.inner.propose(batch).await
+    }
+
+    async fn read(&self, consistency: ReadConsistency) -> Result<Arc<dyn ReadView>, StoreError> {
+        self.inner.read(consistency).await
+    }
+
+    fn watch(
+        &self,
+        from: Option<Revision>,
+        filter: WatchFilter,
+    ) -> Result<ChangeStream, StoreError> {
+        self.inner.watch(from, filter)
+    }
+
+    fn register_index(&self, index: Arc<dyn DerivedIndex>) -> Result<(), StoreError> {
+        self.inner.register_index(index)
+    }
+
+    fn status(&self) -> StoreStatus {
+        self.inner.status()
+    }
+}
+
+/// A registry over a [`RacingStore`], with its job engine, and one enrolled node: its id,
+/// its certificate serial, and the CSR of a renewal for the same key.
+async fn racing_registry() -> (Arc<RacingStore>, Arc<NodeRegistry>, NodeId, String, Vec<u8>) {
+    let mem = Arc::new(MemStore::default());
+    let vault = MemVault::with_store(mem.clone());
+    let ca = InternalCa::load_or_init(&*mem, &vault, &system(), CaPolicy::default())
+        .await
+        .expect("CA");
+    let store = RacingStore::new(mem);
+    let store_dyn: Arc<dyn Store> = store.clone();
+    let engine = JobEngine::new(Arc::clone(&store_dyn), EngineConfig::default());
+    let registry = NodeRegistry::new(store_dyn, Arc::new(ca), RegistryConfig::new(NodeId(1)));
+    registry.register_steps(&engine);
+    let _ = store.registry.set(Arc::downgrade(&registry));
+    let (_, token) = registry
+        .create_enrolment(&system(), NewEnrolment::default())
+        .await
+        .expect("token");
+    let (_, csr) = generate_csr().expect("csr");
+    let enrolled = registry
+        .enrol(
+            &system(),
+            EnrolRequest {
+                token: token.to_text().to_string(),
+                csr: pem_block("CERTIFICATE REQUEST", &csr),
+                name: Some("probe-race".to_owned()),
+                roles: Vec::new(),
+                address: None,
+                version: "0.0.1".to_owned(),
+                majors: vec![1],
+            },
+        )
+        .await
+        .expect("enrol");
+    let serial = enrolled.certificate.info.serial.clone();
+    (store, registry, enrolled.node.id, serial, csr)
+}
+
+/// The audit actions of the registry, in order.
+async fn registry_actions(store: &RacingStore) -> Vec<String> {
+    let view = store
+        .inner
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view");
+    view.scan_typed(&tables::AUDIT, KeyRange::all(), usize::MAX, false)
+        .expect("audit")
+        .into_iter()
+        .map(|(_, record, _)| record.draft.action.as_str().to_owned())
+        .filter(|action| action.starts_with("cluster.node."))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_revocation_that_races_the_heartbeat_is_planned_again() {
+    let (store, registry, node, serial, _) = racing_registry().await;
+    // The heartbeat wins twice; the third plan goes through.
+    store.arm(2);
+    let serials = registry.revoke(&system(), node).await.expect("revoke");
+    assert_eq!(serials, std::slice::from_ref(&serial));
+    assert_eq!(store.raced.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        registry.get_node(node).await.expect_err("gone").code(),
+        "cluster.node.not_found"
+    );
+    assert!(registry.revocations().is_revoked(&serial));
+    // The lost attempts left nothing behind: one revocation in the audit log.
+    assert_eq!(
+        registry_actions(&store).await,
+        ["cluster.node.enrol", "cluster.node.revoke"]
+    );
+}
+
+#[tokio::test]
+async fn a_revocation_that_loses_every_race_is_a_conflict_that_changes_nothing() {
+    let (store, registry, node, serial, _) = racing_registry().await;
+    store.arm(NODE_EDIT_ATTEMPTS);
+    let error = registry
+        .revoke(&system(), node)
+        .await
+        .expect_err("every attempt lost");
+    assert_eq!(error.code(), "cluster.node.conflict");
+    assert_eq!(error.status(), 409);
+    assert_eq!(store.raced.load(Ordering::SeqCst), NODE_EDIT_ATTEMPTS);
+    let view = registry.get_node(node).await.expect("still enrolled");
+    assert_eq!(view.certificate.serial, serial);
+    assert!(view.last_seen.is_some(), "the heartbeats were written");
+    assert!(!registry.revocations().is_revoked(&serial));
+    assert_eq!(registry_actions(&store).await, ["cluster.node.enrol"]);
+}
+
+#[tokio::test]
+async fn a_renewal_that_races_the_heartbeat_is_planned_again_with_the_same_certificate() {
+    let (store, registry, node, serial, csr) = racing_registry().await;
+    store.arm(1);
+    let renewed = registry
+        .renew(node, &serial, &csr, Timestamp::now())
+        .await
+        .expect("renew");
+    assert_eq!(store.raced.load(Ordering::SeqCst), 1);
+    let view = registry.get_node(node).await.expect("node");
+    assert_eq!(view.certificate.serial, renewed.info.serial);
+    assert!(view.last_seen.is_some(), "the heartbeat's write is kept");
+    assert_eq!(
+        registry_actions(&store).await,
+        ["cluster.node.enrol", "cluster.node.renew"]
+    );
 }

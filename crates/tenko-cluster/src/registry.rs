@@ -117,6 +117,11 @@ pub const TOKEN_RETENTION: Duration = Duration::from_secs(7 * 24 * 3600);
 pub const MISMATCH_REPEAT: Duration = Duration::from_secs(3600);
 /// Longest node name.
 pub const MAX_NAME_LEN: usize = 63;
+/// How many times a revocation or a renewal is planned before a conflict is reported: the
+/// node's bookkeeping writes the same record, and a lost race records nothing.
+pub const NODE_EDIT_ATTEMPTS: usize = 3;
+/// The code of a store write whose precondition failed (a lost race).
+const PRECONDITION_FAILED: &str = "sys.store.precondition_failed";
 
 /// Settings of the registry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -974,59 +979,94 @@ impl NodeRegistry {
         Ok(NodeView::new(record, revision, self.sessions.view(node)))
     }
 
+    /// The record of `node` for an edit: as this node has applied it on the first attempt,
+    /// and linearizable after a lost race, so that the next plan starts from the write that
+    /// won.
+    async fn record_for_edit(
+        &self,
+        node: NodeId,
+        attempt: usize,
+    ) -> Result<Option<(NodeRecord, Revision)>, ClusterError> {
+        let consistency = if attempt == 1 {
+            ReadConsistency::Local
+        } else {
+            ReadConsistency::Linearizable
+        };
+        let view = self.store.read(consistency).await?;
+        Ok(view.get_typed(&tables::NODES, &node.0)?)
+    }
+
     /// Revokes a node: removes it, revokes every certificate it holds, tells its sessions
     /// and closes its connections. Returns the revoked serials.
     ///
+    /// The node's own bookkeeping writes the same record (the last sighting when it
+    /// connects, disconnects and every five minutes, the agreed protocol), so a revocation
+    /// can lose the race for the record's revision. The job engine then records nothing and
+    /// leaves re-planning to the caller: the record is read again, with the certificates it
+    /// holds by then, up to [`NODE_EDIT_ATTEMPTS`] times.
+    ///
     /// # Errors
     ///
-    /// `cluster.node.not_found` (404), or a store or job error.
+    /// `cluster.node.not_found` (404), `cluster.node.conflict` (409) when every attempt
+    /// lost the race, or a store or job error.
     pub async fn revoke(&self, cx: &RequestCtx, node: NodeId) -> Result<Vec<String>, ClusterError> {
-        let (record, revision) = self.record(node).await?.ok_or_else(|| not_found(node))?;
-        let serials: Vec<&CertificateRef> = record
-            .serials
-            .iter()
-            .filter(|cert| cert.not_after > cx.now)
-            .collect();
-        let mut batch = WriteBatch::for_request(cx);
-        batch.expect_typed(&tables::NODES, &node.0, Some(revision));
-        batch.delete_typed(&tables::NODES, &node.0);
-        batch.delete_typed(&tables::NODE_NAMES, &record.name.to_lowercase());
-        for cert in &serials {
-            batch.put_typed(
-                &tables::REVOCATIONS,
-                &cert.serial,
-                &Revocation {
-                    node,
-                    revoked_at: cx.now,
-                    not_after: cert.not_after,
-                },
-            )?;
-        }
-        let serial_list: Vec<String> = serials.iter().map(|cert| cert.serial.clone()).collect();
-        batch.audit(
-            AuditDraft::success(actions::NODE_REVOKE, vec![ObjectRef::node(node)])
-                .with_source_ip(cx.source_ip)
-                .with_context("name", record.name.clone())
-                .with_context("serials", serial_list.join(",")),
-        );
-        self.commit(
-            cx,
-            format!("revoke node {}", record.name),
-            vec![ObjectRef::node(node)],
-            batch,
-        )
-        .await
-        .map_err(|error| {
-            if error.code() == "sys.store.precondition_failed" {
-                ClusterError::new(
-                    "cluster.node.conflict",
-                    409,
-                    "the node changed at the same time; try again",
-                )
-            } else {
-                error
+        let mut attempt = 1;
+        let (record, serial_list) = loop {
+            let (record, revision) = self
+                .record_for_edit(node, attempt)
+                .await?
+                .ok_or_else(|| not_found(node))?;
+            let serials: Vec<&CertificateRef> = record
+                .serials
+                .iter()
+                .filter(|cert| cert.not_after > cx.now)
+                .collect();
+            let mut batch = WriteBatch::for_request(cx);
+            batch.expect_typed(&tables::NODES, &node.0, Some(revision));
+            batch.delete_typed(&tables::NODES, &node.0);
+            batch.delete_typed(&tables::NODE_NAMES, &record.name.to_lowercase());
+            for cert in &serials {
+                batch.put_typed(
+                    &tables::REVOCATIONS,
+                    &cert.serial,
+                    &Revocation {
+                        node,
+                        revoked_at: cx.now,
+                        not_after: cert.not_after,
+                    },
+                )?;
             }
-        })?;
+            let serial_list: Vec<String> = serials.iter().map(|cert| cert.serial.clone()).collect();
+            batch.audit(
+                AuditDraft::success(actions::NODE_REVOKE, vec![ObjectRef::node(node)])
+                    .with_source_ip(cx.source_ip)
+                    .with_context("name", record.name.clone())
+                    .with_context("serials", serial_list.join(",")),
+            );
+            match self
+                .commit(
+                    cx,
+                    format!("revoke node {}", record.name),
+                    vec![ObjectRef::node(node)],
+                    batch,
+                )
+                .await
+            {
+                Ok(_) => break (record, serial_list),
+                Err(error) if error.code() == PRECONDITION_FAILED => {
+                    if attempt == NODE_EDIT_ATTEMPTS {
+                        return Err(ClusterError::new(
+                            "cluster.node.conflict",
+                            409,
+                            "the node changed at the same time; try again",
+                        ));
+                    }
+                    tracing::debug!(node = %node, attempt, "the node record changed during the revocation; planning it again");
+                    attempt += 1;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         self.revoked.insert(serial_list.iter().cloned());
         self.sessions.revoke(node, cx.now);
         self.lock_touched().remove(&node);
@@ -1037,10 +1077,15 @@ impl NodeRegistry {
     /// Renews the certificate of a connected node for the key of `csr_der`, with the node's
     /// id and roles. The calling certificate (`serial`) must be one the node holds.
     ///
+    /// The certificate is issued once. Like [`revoke`](Self::revoke), the write of the
+    /// record is planned again from a fresh read when the node's bookkeeping changed the
+    /// record in between, up to [`NODE_EDIT_ATTEMPTS`] times.
+    ///
     /// # Errors
     ///
     /// `cluster.node.not_found` (404), `cluster.node.certificate_unknown` (403),
-    /// `cluster.ca.invalid_csr` (422), or a store or job error.
+    /// `cluster.ca.invalid_csr` (422), or a store or job error (the store's conflict when
+    /// every attempt lost the race).
     pub async fn renew(
         &self,
         node: NodeId,
@@ -1048,7 +1093,10 @@ impl NodeRegistry {
         csr_der: &[u8],
         now: Timestamp,
     ) -> Result<NodeCert, ClusterError> {
-        let (mut record, revision) = self.record(node).await?.ok_or_else(|| not_found(node))?;
+        let (mut record, mut revision) = self
+            .record_for_edit(node, 1)
+            .await?
+            .ok_or_else(|| not_found(node))?;
         if !record.holds(serial, now) {
             return Err(unknown_certificate());
         }
@@ -1061,28 +1109,49 @@ impl NodeRegistry {
             not_before: issued.info.not_before,
             not_after: issued.info.not_after,
         };
-        record.serials.retain(|cert| cert.not_after > now);
-        record.serials.push(certificate.clone());
-        record.certificate = certificate;
-        record.renewed_at = Some(now);
         let mut cx = RequestCtx::new(Principal::Node { id: node });
         cx.now = now;
-        let mut batch = WriteBatch::for_request(&cx);
-        batch.expect_typed(&tables::NODES, &node.0, Some(revision));
-        batch.put_typed(&tables::NODES, &node.0, &record)?;
-        batch.audit(
-            AuditDraft::success(actions::NODE_RENEW, vec![ObjectRef::node(node)])
-                .with_context("serial", issued.info.serial.clone())
-                .with_context("previous", serial.to_owned())
-                .with_context("not_after", issued.info.not_after.to_rfc3339()),
-        );
-        self.commit(
-            &cx,
-            format!("renew the certificate of node {}", record.name),
-            vec![ObjectRef::node(node)],
-            batch,
-        )
-        .await?;
+        let mut attempt = 1;
+        loop {
+            record.serials.retain(|cert| cert.not_after > now);
+            record.serials.push(certificate.clone());
+            record.certificate = certificate.clone();
+            record.renewed_at = Some(now);
+            let mut batch = WriteBatch::for_request(&cx);
+            batch.expect_typed(&tables::NODES, &node.0, Some(revision));
+            batch.put_typed(&tables::NODES, &node.0, &record)?;
+            batch.audit(
+                AuditDraft::success(actions::NODE_RENEW, vec![ObjectRef::node(node)])
+                    .with_context("serial", issued.info.serial.clone())
+                    .with_context("previous", serial.to_owned())
+                    .with_context("not_after", issued.info.not_after.to_rfc3339()),
+            );
+            match self
+                .commit(
+                    &cx,
+                    format!("renew the certificate of node {}", record.name),
+                    vec![ObjectRef::node(node)],
+                    batch,
+                )
+                .await
+            {
+                Ok(_) => break,
+                Err(error)
+                    if error.code() == PRECONDITION_FAILED && attempt < NODE_EDIT_ATTEMPTS =>
+                {
+                    tracing::debug!(node = %node, attempt, "the node record changed during the renewal; planning it again");
+                    attempt += 1;
+                    (record, revision) = self
+                        .record_for_edit(node, attempt)
+                        .await?
+                        .ok_or_else(|| not_found(node))?;
+                    if !record.holds(serial, now) {
+                        return Err(unknown_certificate());
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        }
         tracing::info!(node = %node, not_after = %issued.info.not_after, "node certificate renewed");
         Ok(issued)
     }
