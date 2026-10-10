@@ -26,10 +26,11 @@ pub struct Dataset {
 }
 
 /// The organisation the OUI of `mac` is registered to; `None` for locally administered
-/// or group addresses and for OUIs the table does not know.
+/// or group addresses, for the all-zero address (its block is registered, but no device
+/// carries it) and for OUIs the table does not know.
 pub fn vendor(mac: MacAddr) -> Option<&'static str> {
     let octets = mac.octets();
-    if octets[0] & 0x03 != 0 {
+    if octets[0] & 0x03 != 0 || octets == [0; 6] {
         return None;
     }
     table().lookup(u32::from_be_bytes([0, octets[0], octets[1], octets[2]]))
@@ -152,7 +153,7 @@ mod tests {
 
     #[test]
     fn unknown_oui_has_no_vendor() {
-        assert_eq!(vendor(mac("00:00:5d:00:53:01")), None);
+        assert_eq!(vendor(mac("00:ff:ff:00:53:01")), None);
         assert_eq!(vendor(mac("00:00:00:00:00:00")), None);
         assert_eq!(vendor(mac("fc:ff:ff:00:00:01")), None);
     }
