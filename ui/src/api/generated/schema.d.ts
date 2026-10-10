@@ -1225,6 +1225,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List cluster nodes */
+        get: operations["list_nodes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/enrol": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enrol a node with a token */
+        post: operations["enrol_node"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/enrolments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List enrolment tokens */
+        get: operations["list_enrolments"];
+        put?: never;
+        /** Create an enrolment token */
+        post: operations["create_enrolment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/enrolments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete an enrolment token */
+        delete: operations["delete_enrolment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a cluster node */
+        get: operations["get_node"];
+        put?: never;
+        post?: never;
+        /** Revoke a cluster node */
+        delete: operations["revoke_node"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/observations": {
         parameters: {
             query?: never;
@@ -2921,6 +3008,17 @@ export interface components {
          * @enum {string}
          */
         Capability: "inventory" | "webhook" | "network_controller" | "actuator" | "migration";
+        /** @description A certificate issued to a node, as the registry remembers it. */
+        CertificateRef: {
+            /** @description End of validity. */
+            not_after: components["schemas"]["Timestamp"];
+            /** @description Start of validity. */
+            not_before: components["schemas"]["Timestamp"];
+            /** @description Serial number, lower-case hex. */
+            serial: string;
+            /** @description SHA-256 of the certificate, lower-case hex. */
+            sha256: string;
+        };
         /** @description The certificate the listener serves. */
         CertificateStatus: {
             /**
@@ -2951,6 +3049,33 @@ export interface components {
          * @enum {string}
          */
         CheckOff: "air_gapped" | "setting";
+        /** @description The node transport of a controller, for `GET /system/status`. */
+        ClusterStatus: {
+            /**
+             * Format: int64
+             * @description Nodes connected to this controller now.
+             */
+            connected: number;
+            /** @description The addresses the cluster port listens on; empty while it is off. */
+            listening: string[];
+            /** @description The protocol majors this controller implements. */
+            majors: number[];
+            /**
+             * Format: int64
+             * @description Nodes whose last handshake was refused for want of a common protocol major; each
+             *     also has a `cluster.protocol.mismatch` warning.
+             */
+            mismatched: number;
+            /**
+             * Format: int64
+             * @description Enrolled nodes.
+             */
+            nodes: number;
+            /** @description Software versions of the connected nodes and how many run each. */
+            versions: {
+                [key: string]: number;
+            };
+        };
         /** @description `POST /auth/login/totp` and `POST /auth/login/recovery`. */
         CodeLogin: {
             /** @description The challenge from the password step. */
@@ -3021,6 +3146,37 @@ export interface components {
          * @enum {string}
          */
         ConflictPolicy: "update" | "skip" | "fail";
+        /** @description A live connection of a node to this controller. */
+        ConnectionView: {
+            /**
+             * Format: int64
+             * @description Observation batches waiting in the node's buffer.
+             */
+            buffered_batches: number;
+            /**
+             * Format: int64
+             * @description Their size in bytes.
+             */
+            buffered_bytes: number;
+            certificate_not_after?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: int64
+             * @description Batches the node dropped since it started because its buffer was full.
+             */
+            dropped_batches: number;
+            last_beat?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: int32
+             * @description The agreed protocol major.
+             */
+            major: number;
+            /** @description The node's address as this controller sees it. */
+            peer?: string | null;
+            /** @description When the heartbeat stream opened. */
+            since: components["schemas"]["Timestamp"];
+            /** @description The software version the node reports. */
+            version: string;
+        };
         /** @description The health of an instance: its process and its remote system. */
         ConnectorHealth: {
             /** @description The plugin process on this node. */
@@ -3101,6 +3257,17 @@ export interface components {
          * @enum {string}
          */
         ContextKind: "user_name" | "display_name" | "host_name" | "product";
+        /** @description Answer of `POST /nodes/enrolments`: the token, shown once. */
+        CreatedEnrolment: {
+            /** @description The SHA-256 fingerprint of the internal CA root, for `--ca-fingerprint`. */
+            ca_fingerprint: string;
+            /** @description The command to run on the node, with the token and the fingerprint filled in. */
+            command: string;
+            /** @description The stored token. */
+            enrolment: components["schemas"]["EnrolmentView"];
+            /** @description The token text. It is shown only in this answer and cannot be read again. */
+            token: string;
+        };
         /** @description A new token: the secret is shown once. */
         CreatedToken: {
             /** @description Its metadata. */
@@ -3373,6 +3540,99 @@ export interface components {
             device: string;
             /** @description The port. */
             port?: string | null;
+        };
+        /** @description Body of `POST /nodes/enrol`: a node presents its token and its certificate request. */
+        EnrolRequest: {
+            /**
+             * @description The node's address as the controller should show it; default the address the
+             *     request came from.
+             */
+            address?: string | null;
+            /** @description A PKCS#10 certificate signing request over an ECDSA P-256 key, PEM. */
+            csr: string;
+            /** @description The protocol majors the node implements. */
+            majors?: number[];
+            /** @description The node's name; the token's name wins when it has one. */
+            name?: string | null;
+            /**
+             * @description The roles the node runs; default the token's roles. Each must be allowed by the
+             *     token.
+             */
+            roles?: string[];
+            /** @description The enrolment token. */
+            token: string;
+            /** @description The node's software version. */
+            version?: string;
+        };
+        /** @description Answer of `POST /nodes/enrol`. */
+        EnrolResponse: {
+            /** @description The root of the internal CA, PEM: the node trusts only it on the cluster port. */
+            ca_root: string;
+            /** @description The node certificate, PEM, leaf first. */
+            certificate: string;
+            /**
+             * Format: int32
+             * @description The cluster port of the controller the node enrolled with.
+             */
+            cluster_port?: number | null;
+            /**
+             * @description `host:port` endpoints of the cluster port; empty: the host the node enrolled through
+             *     with `cluster_port`.
+             */
+            endpoints: string[];
+            /**
+             * Format: int32
+             * @description Seconds between two heartbeats.
+             */
+            heartbeat_secs: number;
+            /** @description The protocol majors the controller implements. */
+            majors: number[];
+            /** @description The node as registered. */
+            node: components["schemas"]["NodeView"];
+        };
+        /** @description Body of `GET /nodes/enrolments`. */
+        EnrolmentList: {
+            /** @description Every token, newest first. */
+            items: components["schemas"]["EnrolmentView"][];
+        };
+        /**
+         * @description The state of an enrolment token.
+         * @enum {string}
+         */
+        EnrolmentState: "pending" | "used" | "expired";
+        /** @description An enrolment token as `GET /nodes/enrolments` shows it (never the secret). */
+        EnrolmentView: {
+            /** @description When. */
+            created_at: components["schemas"]["Timestamp"];
+            /**
+             * Format: uuid
+             * @description Who created it.
+             */
+            created_by?: string | null;
+            /** @description When it stops working. */
+            expires_at: components["schemas"]["Timestamp"];
+            /**
+             * Format: uuid
+             * @description The token id.
+             */
+            id: string;
+            /** @description The name the node gets; the node chooses one when absent. */
+            name?: string | null;
+            /**
+             * Format: int64
+             * @description Store revision of the record.
+             */
+            revision: number;
+            /** @description The roles the node may take. */
+            roles: string[];
+            /** @description `pending`, `used` or `expired`. */
+            state: components["schemas"]["EnrolmentState"];
+            used?: components["schemas"]["TokenUse"] | null;
+            /**
+             * Format: uuid
+             * @description The VRF of the node's observations.
+             */
+            vrf?: string | null;
         };
         /**
          * @description How to start an installed plugin: an executable, or a script with its interpreter.
@@ -4712,6 +4972,13 @@ export interface components {
          * @enum {string}
          */
         MfaRequirement: "optional" | "administrators" | "everyone";
+        /** @description A refused handshake. */
+        MismatchRecord: components["schemas"]["VersionMismatch"] & {
+            /** @description When it happened. */
+            at: components["schemas"]["Timestamp"];
+            /** @description The software version the node reported. */
+            version: string;
+        };
         /**
          * @description A product module that an installation can enable or disable (OPS-25).
          * @enum {string}
@@ -4957,6 +5224,23 @@ export interface components {
             /** @description Whether writes are allowed (TGL-20). */
             writes_enabled?: boolean;
         };
+        /** @description Body of `POST /nodes/enrolments`. */
+        NewEnrolment: {
+            /**
+             * Format: int64
+             * @description Seconds until the token expires: 60 to 604,800 (seven days); default 3,600.
+             */
+            expires_in_secs?: number | null;
+            /** @description The name the node gets; without it the node chooses one (its host name). */
+            name?: string | null;
+            /** @description The roles the node may take (`probe`, `dns`, `dhcp`); default `probe`. */
+            roles?: string[];
+            /**
+             * Format: uuid
+             * @description The VRF of the node's observations; default the default VRF.
+             */
+            vrf?: string | null;
+        };
         /** @description A new operator secret. */
         NewOperatorSecret: {
             /** @description What it is. */
@@ -5080,6 +5364,48 @@ export interface components {
             id?: components["schemas"]["NodeId"] | null;
             /** @description Roles this node runs: `controller`, `dns`, `dhcp`, `probe`. */
             roles: string[];
+        };
+        /** @description A node as `GET /nodes` shows it: the stored record and the live connection. */
+        NodeView: {
+            /** @description The address the node gave at enrolment, else the address it enrolled from. */
+            address?: string | null;
+            /** @description The newest certificate. */
+            certificate: components["schemas"]["CertificateRef"];
+            /** @description Whether the node is connected to this controller now. */
+            connected: boolean;
+            connection?: components["schemas"]["ConnectionView"] | null;
+            /** @description When the node enrolled. */
+            enrolled_at: components["schemas"]["Timestamp"];
+            /**
+             * Format: uuid
+             * @description The user who created the enrolment token.
+             */
+            enrolled_by?: string | null;
+            /**
+             * Format: int64
+             * @description The node id.
+             */
+            id: number;
+            last_seen?: components["schemas"]["Timestamp"] | null;
+            /** @description Its name. */
+            name: string;
+            /** @description Protocol negotiation, with the last refused handshake. */
+            protocol: components["schemas"]["ProtocolState"];
+            renewed_at?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: int64
+             * @description Store revision of the record (the `ETag`).
+             */
+            revision: number;
+            /** @description Its roles: `probe`, `dns`, `dhcp`. */
+            roles: string[];
+            /** @description The software version the node reported last. */
+            version?: string | null;
+            /**
+             * Format: uuid
+             * @description The VRF of its observations when a batch names none.
+             */
+            vrf?: string | null;
         };
         /**
          * @description The kind of an object: one variant per entity.
@@ -5686,6 +6012,62 @@ export interface components {
                 targets: components["schemas"]["ObjectRef"][];
                 /** @description Translatable title. */
                 title: components["schemas"]["MessageKey"];
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_NodeView: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description The address the node gave at enrolment, else the address it enrolled from. */
+                address?: string | null;
+                /** @description The newest certificate. */
+                certificate: components["schemas"]["CertificateRef"];
+                /** @description Whether the node is connected to this controller now. */
+                connected: boolean;
+                connection?: components["schemas"]["ConnectionView"] | null;
+                /** @description When the node enrolled. */
+                enrolled_at: components["schemas"]["Timestamp"];
+                /**
+                 * Format: uuid
+                 * @description The user who created the enrolment token.
+                 */
+                enrolled_by?: string | null;
+                /**
+                 * Format: int64
+                 * @description The node id.
+                 */
+                id: number;
+                last_seen?: components["schemas"]["Timestamp"] | null;
+                /** @description Its name. */
+                name: string;
+                /** @description Protocol negotiation, with the last refused handshake. */
+                protocol: components["schemas"]["ProtocolState"];
+                renewed_at?: components["schemas"]["Timestamp"] | null;
+                /**
+                 * Format: int64
+                 * @description Store revision of the record (the `ETag`).
+                 */
+                revision: number;
+                /** @description Its roles: `probe`, `dns`, `dhcp`. */
+                roles: string[];
+                /** @description The software version the node reported last. */
+                version?: string | null;
+                /**
+                 * Format: uuid
+                 * @description The VRF of its observations when a batch names none.
+                 */
+                vrf?: string | null;
             }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
@@ -6673,6 +7055,17 @@ export interface components {
             objects?: components["schemas"]["ObjectRef"][];
             prefix?: components["schemas"]["PrefixId"] | null;
             vrf?: components["schemas"]["VrfId"] | null;
+        };
+        /** @description The protocol state of a node: what it offered and what was agreed. */
+        ProtocolState: {
+            /**
+             * Format: int32
+             * @description The major agreed in the last successful handshake.
+             */
+            agreed?: number | null;
+            mismatch?: components["schemas"]["MismatchRecord"] | null;
+            /** @description The majors the node offered in its last handshake. */
+            offered?: number[];
         };
         /** @description A range of addresses inside a prefix. */
         Range: {
@@ -7769,6 +8162,7 @@ export interface components {
         SystemComponent: "setup" | "api" | "auth" | "vault" | "store" | "ipam" | "import" | "jobs" | "reconciler" | "connector" | "scan" | "cluster";
         /** @description Body of `GET /system/status`. */
         SystemStatus: {
+            cluster?: components["schemas"]["ClusterStatus"] | null;
             /**
              * @description The product modules this installation runs (OPS-25); the UI shows only their
              *     areas. Absent in answers of servers that predate the module switch: all modules.
@@ -7946,12 +8340,19 @@ export interface components {
              */
             days: number;
         } | "unlimited";
+        /** @description The enrolment a token was used for. */
+        TokenUse: {
+            /** @description When. */
+            at: components["schemas"]["Timestamp"];
+            /** @description The node that enrolled. */
+            node: components["schemas"]["NodeId"];
+        };
         /**
          * @description An event topic. `GET /events?topics=ipam,jobs` subscribes to a subset; no `topics`
          *     parameter subscribes to all of them.
          * @enum {string}
          */
-        Topic: "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "connectors" | "discovery" | "secrets";
+        Topic: "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "connectors" | "discovery" | "secrets" | "cluster";
         /**
          * @description The HMAC hash of a TOTP configuration (RFC 6238 section 1.2).
          * @enum {string}
@@ -8409,6 +8810,17 @@ export interface components {
              * @example 12
              */
             used: string;
+        };
+        /**
+         * @description The two sides share no protocol major (`cluster.protocol.unsupported`, HTTP 409).
+         *
+         *     Both lists are kept as they were offered, sorted ascending and without duplicates.
+         */
+        VersionMismatch: {
+            /** @description The majors this side implements, sorted ascending and deduplicated. */
+            ours: number[];
+            /** @description The majors the other side offered, sorted ascending and deduplicated. */
+            theirs: number[];
         };
         /** @description A VLAN (IPAM-03). */
         Vlan: {
@@ -14721,6 +15133,409 @@ export interface operations {
             };
             /** @description IPAM or the job engine is not configured (`ipam.unavailable`, `ipam.move.no_engine`) */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_nodes: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of nodes by id; empty without permission to read nodes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_NodeView"];
+                };
+            };
+            /** @description A parameter is unknown or malformed (`sys.invalid_query`) or the cursor is bad (`sys.invalid_cursor`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    enrol_node: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnrolRequest"];
+            };
+        };
+        responses: {
+            /** @description The node, its certificate and the CA root (`Cache-Control: no-store`) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrolResponse"];
+                };
+            };
+            /** @description The body is not valid JSON (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The token is not valid (`cluster.enrolment.invalid_token`), was used (`cluster.enrolment.used`) or expired (`cluster.enrolment.expired`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The token does not allow a requested role (`cluster.enrolment.roles`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No common protocol major (`cluster.protocol.unsupported`) or the name is taken (`cluster.node.name_taken`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The certificate request (`cluster.ca.invalid_csr`), the name (`cluster.node.name`) or the address (`cluster.node.address`) is not usable */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_enrolments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every token, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrolmentList"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to enrol nodes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_enrolment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewEnrolment"];
+            };
+        };
+        responses: {
+            /** @description The token, shown once (`Cache-Control: no-store`) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedEnrolment"];
+                };
+            };
+            /** @description The body is not valid JSON (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to enrol nodes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A node has the name (`cluster.node.name_taken`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A controller role (`cluster.enrolment.roles`), a lifetime outside 60 s to 7 days (`cluster.enrolment.lifetime`) or a bad name (`cluster.node.name`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_enrolment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Token id (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to enrol nodes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such token (`cluster.enrolment.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_node: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The node, with `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeView"];
+                };
+            };
+            /** @description The identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to read nodes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    revoke_node: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to revoke nodes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node changed at the same time (`cluster.node.conflict`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

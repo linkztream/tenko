@@ -7968,6 +7968,495 @@
         }
       }
     },
+    "/api/v1/nodes": {
+      "get": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "List cluster nodes",
+        "operationId": "list_nodes",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1,000 (default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page's `next_cursor`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least this store revision (read-your-writes after a write).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of nodes by id; empty without permission to read nodes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_NodeView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter is unknown or malformed (`sys.invalid_query`) or the cursor is bad (`sys.invalid_cursor`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/enrol": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Enrol a node with a token",
+        "operationId": "enrol_node",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The node, its certificate and the CA root (`Cache-Control: no-store`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrolResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The token is not valid (`cluster.enrolment.invalid_token`), was used (`cluster.enrolment.used`) or expired (`cluster.enrolment.expired`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not allow a requested role (`cluster.enrolment.roles`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No common protocol major (`cluster.protocol.unsupported`) or the name is taken (`cluster.node.name_taken`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The certificate request (`cluster.ca.invalid_csr`), the name (`cluster.node.name`) or the address (`cluster.node.address`) is not usable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/enrolments": {
+      "get": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "List enrolment tokens",
+        "operationId": "list_enrolments",
+        "responses": {
+          "200": {
+            "description": "Every token, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrolmentList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to enrol nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Create an enrolment token",
+        "operationId": "create_enrolment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewEnrolment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The token, shown once (`Cache-Control: no-store`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedEnrolment"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to enrol nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A node has the name (`cluster.node.name_taken`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A controller role (`cluster.enrolment.roles`), a lifetime outside 60 s to 7 days (`cluster.enrolment.lifetime`) or a bad name (`cluster.node.name`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/enrolments/{id}": {
+      "delete": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Delete an enrolment token",
+        "operationId": "delete_enrolment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Token id (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "400": {
+            "description": "The identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to enrol nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such token (`cluster.enrolment.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}": {
+      "get": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Get a cluster node",
+        "operationId": "get_node",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The node, with `ETag`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to read nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node (`cluster.node.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Revoke a cluster node",
+        "operationId": "revoke_node",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "400": {
+            "description": "The identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to revoke nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node (`cluster.node.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The node changed at the same time (`cluster.node.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/observations": {
       "get": {
         "tags": [
@@ -19151,6 +19640,34 @@
           "migration"
         ]
       },
+      "CertificateRef": {
+        "type": "object",
+        "description": "A certificate issued to a node, as the registry remembers it.",
+        "required": [
+          "serial",
+          "sha256",
+          "not_before",
+          "not_after"
+        ],
+        "properties": {
+          "not_after": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "End of validity."
+          },
+          "not_before": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Start of validity."
+          },
+          "serial": {
+            "type": "string",
+            "description": "Serial number, lower-case hex."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "SHA-256 of the certificate, lower-case hex."
+          }
+        }
+      },
       "CertificateStatus": {
         "type": "object",
         "description": "The certificate the listener serves.",
@@ -19229,6 +19746,66 @@
           "air_gapped",
           "setting"
         ]
+      },
+      "ClusterStatus": {
+        "type": "object",
+        "description": "The node transport of a controller, for `GET /system/status`.",
+        "required": [
+          "listening",
+          "majors",
+          "nodes",
+          "connected",
+          "versions",
+          "mismatched"
+        ],
+        "properties": {
+          "connected": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Nodes connected to this controller now.",
+            "minimum": 0
+          },
+          "listening": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses the cluster port listens on; empty while it is off."
+          },
+          "majors": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The protocol majors this controller implements."
+          },
+          "mismatched": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Nodes whose last handshake was refused for want of a common protocol major; each\nalso has a `cluster.protocol.mismatch` warning.",
+            "minimum": 0
+          },
+          "nodes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Enrolled nodes.",
+            "minimum": 0
+          },
+          "versions": {
+            "type": "object",
+            "description": "Software versions of the connected nodes and how many run each.",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
       },
       "CodeLogin": {
         "type": "object",
@@ -19380,6 +19957,81 @@
           "skip",
           "fail"
         ]
+      },
+      "ConnectionView": {
+        "type": "object",
+        "description": "A live connection of a node to this controller.",
+        "required": [
+          "since",
+          "major",
+          "version",
+          "buffered_batches",
+          "buffered_bytes",
+          "dropped_batches"
+        ],
+        "properties": {
+          "buffered_batches": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Observation batches waiting in the node's buffer.",
+            "minimum": 0
+          },
+          "buffered_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Their size in bytes.",
+            "minimum": 0
+          },
+          "certificate_not_after": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the node's certificate expires, as the node reports it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dropped_batches": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Batches the node dropped since it started because its buffer was full.",
+            "minimum": 0
+          },
+          "last_beat": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "The last heartbeat."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "major": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The agreed protocol major.",
+            "minimum": 0
+          },
+          "peer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The node's address as this controller sees it."
+          },
+          "since": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the heartbeat stream opened."
+          },
+          "version": {
+            "type": "string",
+            "description": "The software version the node reports."
+          }
+        }
       },
       "ConnectorHealth": {
         "type": "object",
@@ -19607,6 +20259,34 @@
           "host_name",
           "product"
         ]
+      },
+      "CreatedEnrolment": {
+        "type": "object",
+        "description": "Answer of `POST /nodes/enrolments`: the token, shown once.",
+        "required": [
+          "enrolment",
+          "token",
+          "ca_fingerprint",
+          "command"
+        ],
+        "properties": {
+          "ca_fingerprint": {
+            "type": "string",
+            "description": "The SHA-256 fingerprint of the internal CA root, for `--ca-fingerprint`."
+          },
+          "command": {
+            "type": "string",
+            "description": "The command to run on the node, with the token and the fingerprint filled in."
+          },
+          "enrolment": {
+            "$ref": "#/components/schemas/EnrolmentView",
+            "description": "The stored token."
+          },
+          "token": {
+            "type": "string",
+            "description": "The token text. It is shown only in this answer and cannot be read again."
+          }
+        }
       },
       "CreatedToken": {
         "type": "object",
@@ -20367,6 +21047,219 @@
               "null"
             ],
             "description": "The port."
+          }
+        }
+      },
+      "EnrolRequest": {
+        "type": "object",
+        "description": "Body of `POST /nodes/enrol`: a node presents its token and its certificate request.",
+        "required": [
+          "token",
+          "csr"
+        ],
+        "properties": {
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The node's address as the controller should show it; default the address the\nrequest came from."
+          },
+          "csr": {
+            "type": "string",
+            "description": "A PKCS#10 certificate signing request over an ECDSA P-256 key, PEM."
+          },
+          "majors": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The protocol majors the node implements."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The node's name; the token's name wins when it has one."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The roles the node runs; default the token's roles. Each must be allowed by the\ntoken."
+          },
+          "token": {
+            "type": "string",
+            "description": "The enrolment token."
+          },
+          "version": {
+            "type": "string",
+            "description": "The node's software version."
+          }
+        },
+        "additionalProperties": false
+      },
+      "EnrolResponse": {
+        "type": "object",
+        "description": "Answer of `POST /nodes/enrol`.",
+        "required": [
+          "node",
+          "certificate",
+          "ca_root",
+          "endpoints",
+          "heartbeat_secs",
+          "majors"
+        ],
+        "properties": {
+          "ca_root": {
+            "type": "string",
+            "description": "The root of the internal CA, PEM: the node trusts only it on the cluster port."
+          },
+          "certificate": {
+            "type": "string",
+            "description": "The node certificate, PEM, leaf first."
+          },
+          "cluster_port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The cluster port of the controller the node enrolled with.",
+            "minimum": 0
+          },
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`host:port` endpoints of the cluster port; empty: the host the node enrolled through\nwith `cluster_port`."
+          },
+          "heartbeat_secs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds between two heartbeats.",
+            "minimum": 0
+          },
+          "majors": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The protocol majors the controller implements."
+          },
+          "node": {
+            "$ref": "#/components/schemas/NodeView",
+            "description": "The node as registered."
+          }
+        }
+      },
+      "EnrolmentList": {
+        "type": "object",
+        "description": "Body of `GET /nodes/enrolments`.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EnrolmentView"
+            },
+            "description": "Every token, newest first."
+          }
+        }
+      },
+      "EnrolmentState": {
+        "type": "string",
+        "description": "The state of an enrolment token.",
+        "enum": [
+          "pending",
+          "used",
+          "expired"
+        ]
+      },
+      "EnrolmentView": {
+        "type": "object",
+        "description": "An enrolment token as `GET /nodes/enrolments` shows it (never the secret).",
+        "required": [
+          "id",
+          "roles",
+          "created_at",
+          "expires_at",
+          "state",
+          "revision"
+        ],
+        "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who created it."
+          },
+          "expires_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it stops working."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The token id."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name the node gets; the node chooses one when absent."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Store revision of the record.",
+            "minimum": 0
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The roles the node may take."
+          },
+          "state": {
+            "$ref": "#/components/schemas/EnrolmentState",
+            "description": "`pending`, `used` or `expired`."
+          },
+          "used": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TokenUse",
+                "description": "The enrolment it was used for."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vrf": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The VRF of the node's observations."
           }
         }
       },
@@ -24367,6 +25260,32 @@
           "everyone"
         ]
       },
+      "MismatchRecord": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/VersionMismatch",
+            "description": "The majors on both sides."
+          },
+          {
+            "type": "object",
+            "required": [
+              "at",
+              "version"
+            ],
+            "properties": {
+              "at": {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When it happened."
+              },
+              "version": {
+                "type": "string",
+                "description": "The software version the node reported."
+              }
+            }
+          }
+        ],
+        "description": "A refused handshake."
+      },
       "Module": {
         "type": "string",
         "description": "A product module that an installation can enable or disable (OPS-25).",
@@ -24969,6 +25888,44 @@
         },
         "additionalProperties": false
       },
+      "NewEnrolment": {
+        "type": "object",
+        "description": "Body of `POST /nodes/enrolments`.",
+        "properties": {
+          "expires_in_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds until the token expires: 60 to 604,800 (seven days); default 3,600.",
+            "minimum": 0
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name the node gets; without it the node chooses one (its host name)."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The roles the node may take (`probe`, `dns`, `dhcp`); default `probe`."
+          },
+          "vrf": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The VRF of the node's observations; default the default VRF."
+          }
+        },
+        "additionalProperties": false
+      },
       "NewOperatorSecret": {
         "type": "object",
         "description": "A new operator secret.",
@@ -25354,6 +26311,124 @@
               "type": "string"
             },
             "description": "Roles this node runs: `controller`, `dns`, `dhcp`, `probe`."
+          }
+        }
+      },
+      "NodeView": {
+        "type": "object",
+        "description": "A node as `GET /nodes` shows it: the stored record and the live connection.",
+        "required": [
+          "id",
+          "name",
+          "roles",
+          "certificate",
+          "enrolled_at",
+          "protocol",
+          "connected",
+          "revision"
+        ],
+        "properties": {
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The address the node gave at enrolment, else the address it enrolled from."
+          },
+          "certificate": {
+            "$ref": "#/components/schemas/CertificateRef",
+            "description": "The newest certificate."
+          },
+          "connected": {
+            "type": "boolean",
+            "description": "Whether the node is connected to this controller now."
+          },
+          "connection": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ConnectionView",
+                "description": "The live connection, while there is one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enrolled_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the node enrolled."
+          },
+          "enrolled_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The user who created the enrolment token."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The node id.",
+            "minimum": 0
+          },
+          "last_seen": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the controller last heard from the node."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/ProtocolState",
+            "description": "Protocol negotiation, with the last refused handshake."
+          },
+          "renewed_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the certificate was last renewed."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Store revision of the record (the `ETag`).",
+            "minimum": 0
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Its roles: `probe`, `dns`, `dhcp`."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The software version the node reported last."
+          },
+          "vrf": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The VRF of its observations when a batch names none."
           }
         }
       },
@@ -27065,6 +28140,149 @@
                 "title": {
                   "$ref": "#/components/schemas/MessageKey",
                   "description": "Translatable title."
+                }
+              }
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
+      "Page_NodeView": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "A node as `GET /nodes` shows it: the stored record and the live connection.",
+              "required": [
+                "id",
+                "name",
+                "roles",
+                "certificate",
+                "enrolled_at",
+                "protocol",
+                "connected",
+                "revision"
+              ],
+              "properties": {
+                "address": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The address the node gave at enrolment, else the address it enrolled from."
+                },
+                "certificate": {
+                  "$ref": "#/components/schemas/CertificateRef",
+                  "description": "The newest certificate."
+                },
+                "connected": {
+                  "type": "boolean",
+                  "description": "Whether the node is connected to this controller now."
+                },
+                "connection": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ConnectionView",
+                      "description": "The live connection, while there is one."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "enrolled_at": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When the node enrolled."
+                },
+                "enrolled_by": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "The user who created the enrolment token."
+                },
+                "id": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "The node id.",
+                  "minimum": 0
+                },
+                "last_seen": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Timestamp",
+                      "description": "When the controller last heard from the node."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Its name."
+                },
+                "protocol": {
+                  "$ref": "#/components/schemas/ProtocolState",
+                  "description": "Protocol negotiation, with the last refused handshake."
+                },
+                "renewed_at": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Timestamp",
+                      "description": "When the certificate was last renewed."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "revision": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Store revision of the record (the `ETag`).",
+                  "minimum": 0
+                },
+                "roles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Its roles: `probe`, `dns`, `dhcp`."
+                },
+                "version": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The software version the node reported last."
+                },
+                "vrf": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "The VRF of its observations when a batch names none."
                 }
               }
             },
@@ -29880,6 +31098,41 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "ProtocolState": {
+        "type": "object",
+        "description": "The protocol state of a node: what it offered and what was agreed.",
+        "properties": {
+          "agreed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The major agreed in the last successful handshake.",
+            "minimum": 0
+          },
+          "mismatch": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MismatchRecord",
+                "description": "The last refused handshake, until a later one succeeds."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "offered": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The majors the node offered in its last handshake."
           }
         }
       },
@@ -32782,6 +34035,17 @@
           "warnings"
         ],
         "properties": {
+          "cluster": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ClusterStatus",
+                "description": "The node transport of a controller (OPS-04, OPS-08): enrolled and connected nodes,\ntheir versions; absent on servers without it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "modules": {
             "$ref": "#/components/schemas/ModuleSet",
             "description": "The product modules this installation runs (OPS-25); the UI shows only their\nareas. Absent in answers of servers that predate the module switch: all modules."
@@ -33246,6 +34510,24 @@
         ],
         "description": "The TGL-05 value in a patch."
       },
+      "TokenUse": {
+        "type": "object",
+        "description": "The enrolment a token was used for.",
+        "required": [
+          "node",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When."
+          },
+          "node": {
+            "$ref": "#/components/schemas/NodeId",
+            "description": "The node that enrolled."
+          }
+        }
+      },
       "Topic": {
         "type": "string",
         "description": "An event topic. `GET /events?topics=ipam,jobs` subscribes to a subset; no `topics`\nparameter subscribes to all of them.",
@@ -33258,7 +34540,8 @@
           "admin",
           "connectors",
           "discovery",
-          "secrets"
+          "secrets",
+          "cluster"
         ]
       },
       "TotpAlgorithm": {
@@ -34420,6 +35703,34 @@
             "type": "string",
             "description": "Addresses in use (for a supernet: covered by children or used directly).",
             "example": "12"
+          }
+        }
+      },
+      "VersionMismatch": {
+        "type": "object",
+        "description": "The two sides share no protocol major (`cluster.protocol.unsupported`, HTTP 409).\n\nBoth lists are kept as they were offered, sorted ascending and without duplicates.",
+        "required": [
+          "ours",
+          "theirs"
+        ],
+        "properties": {
+          "ours": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The majors this side implements, sorted ascending and deduplicated."
+          },
+          "theirs": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The majors the other side offered, sorted ascending and deduplicated."
           }
         }
       },
@@ -36103,16 +37414,20 @@
       "description": "Connector plugins and connector instances"
     },
     {
-      "name": "secrets",
-      "description": "Operator secrets, their reveal, host credentials and the remote access hand-off"
-    },
-    {
       "name": "observations",
       "description": "Observations of connectors and probes, per source and across sources"
     },
     {
       "name": "proposals",
       "description": "Proposals of the reconciler, their decisions and adoption policies"
+    },
+    {
+      "name": "nodes",
+      "description": "Cluster nodes: enrolment tokens, enrolment, the node registry and revocation"
+    },
+    {
+      "name": "secrets",
+      "description": "Operator secrets, their reveal, host credentials and the remote access hand-off"
     }
   ]
 }
