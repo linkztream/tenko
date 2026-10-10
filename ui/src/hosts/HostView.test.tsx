@@ -332,9 +332,11 @@ describe("remote access hand-off", () => {
   const keys = () => rows().map((row) => row.dataset.key);
   const buttons = (kind: "rdp" | "ssh") => within(connect()).getAllByTestId(`host-${kind}`) as HTMLButtonElement[];
   const button = (kind: "rdp" | "ssh", index = 0) => buttons(kind)[index] as HTMLButtonElement;
-  const field = (label: string) => within(connect()).getByLabelText(label) as HTMLInputElement;
+  /** The inputs of the connect panel by their label; they are `field-user`, `field-rdp_port` and `field-ssh_port`. */
+  const FIELD_IDS = { User: "field-user", "RDP port": "field-rdp_port", "SSH port": "field-ssh_port" } as const;
+  const field = (label: keyof typeof FIELD_IDS) => within(connect()).getByTestId(FIELD_IDS[label]) as HTMLInputElement;
 
-  function setField(label: string, value: string): void {
+  function setField(label: keyof typeof FIELD_IDS, value: string): void {
     fireEvent.input(field(label), { target: { value } });
   }
 
@@ -385,6 +387,10 @@ describe("remote access hand-off", () => {
       expect(field("User").value).toBe("");
       expect(field("RDP port").value).toBe("3389");
       expect(field("SSH port").value).toBe("22");
+      // The ids belong to the inputs that the labels name.
+      for (const label of Object.keys(FIELD_IDS) as (keyof typeof FIELD_IDS)[]) {
+        expect(within(connect()).getByLabelText(label)).toBe(field(label));
+      }
       // Nothing is asked of the server until a button is pressed.
       expect(remote).toEqual([]);
     });

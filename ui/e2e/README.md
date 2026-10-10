@@ -11,10 +11,10 @@ and the `data-testid` convention they rely on, are in the section "End-to-end te
 | `setup-wizard`, `sign-in`, `language` | First-run setup, TOTP and passkeys, the UI language |
 | `ipam`, `move`, `import`, `audit` | IPAM writes through the plan dialog, moves, the spreadsheet import, the audit log |
 | `discovery` | Proposal inbox, approve and reject, rejection memory, observations and subject pages, adoption policies, the dashboard tile |
-| `connectors` | Plugins and the CLI list, the schema-generated form, runs and their jobs, observations, lifecycle, secret injection, the dashboard tile |
-| `nodes` | Enrolment tokens shown once, a second `tenko` process enrolled as a probe, the registry and panel, revocation, the dashboard tile |
-| `secrets` | The PIN coupling, create and reveal with the clipboard, the TGL-24 step-up with a passkey, host credentials, the RDP and SSH hand-off |
-| `updates` | Air-gapped default, the check against a local release source, notes and marks, the install with its dry run and restart, what is new, a refused dry run |
+| `connectors` | Plugins and the CLI list, the schema-generated form, runs and their jobs, observations, lifecycle, secret injection, the dashboard tile; the instance page, the list and the tile follow the plugin process without a reload |
+| `nodes` | Enrolment tokens shown once, a second `tenko` process enrolled as a probe, the registry and panel, revocation, the dashboard tile and the cluster summary following enrolment, connection and revocation while open |
+| `secrets` | The PIN coupling, create and reveal with the clipboard, the TGL-24 step-up with a passkey, TGL-24 and MFA changed on /settings/security while the vault holds a secret, host credentials, the RDP and SSH hand-off with a typed user name and ports |
+| `updates` | Air-gapped default, the check against a local release source, notes and marks, the install with its dry run and restart (the health probe names the new version), what is new, a refused dry run |
 
 Each area spec also renders at least one page in Swedish (`support/i18n.ts`). A `test.fixme`
 marks a scenario that waits for a recorded defect.

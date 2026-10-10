@@ -138,6 +138,8 @@ export default function SecurityPage() {
                     <For each={rows(v())}>
                       {(row) => (
                         <tr
+                          data-testid="toggle"
+                          data-key={row.def.id}
                           data-toggle={row.def.id}
                           classList={{ differs: row.state.deviates, weak: row.state.weaker_than_home }}
                         >
@@ -155,6 +157,7 @@ export default function SecurityPage() {
                                 class="btn sm ghost"
                                 disabled={resetting() === row.def.id}
                                 aria-label={t("settings.security.reset_row", { name: t(row.def.name) })}
+                                data-testid="toggle-reset"
                                 onClick={() => void reset(row)}
                               >
                                 {t("settings.security.reset")}
@@ -164,6 +167,7 @@ export default function SecurityPage() {
                               type="button"
                               class="btn sm"
                               aria-label={t("settings.security.edit_row", { name: t(row.def.name) })}
+                              data-testid="toggle-edit"
                               onClick={() => setEditing(row.def)}
                             >
                               {t("common.action.edit")}

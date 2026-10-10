@@ -12,11 +12,17 @@
 // - The step-up of TGL-24: with the rule set to `passkey`, a reveal from a password-and-TOTP
 //   session asks for a passkey in the dialog, the virtual platform authenticator answers, the
 //   reveal repeats and succeeds in a new session of passkey strength.
+// - TGL-24 on /settings/security once the vault holds a secret, under Lab (a PIN may stand
+//   alone): the rule changes to `fresh` through the toggle dialog and a reveal follows it; MFA
+//   for everyone is accepted, and relaxing it again is refused before anything is sent and by
+//   the server (409 `settings.pin_coupling`): only a change of the password policy or of MFA
+//   can let a PIN stand alone.
 // - Host credentials and the hand-off (section 5), with the host binding of TGL-24 on: binding a
 //   secret to a host, the secrets page that cannot reveal it, the reveal from the host view
 //   that names the host, the `ssh://` link the page hands to the operating system, the
-//   downloaded `.rdp` file (the same text as the API, no password in it), and unbinding, which
-//   also takes the user name out of the hand-off.
+//   downloaded `.rdp` file (the same text as the API, no password in it), unbinding, which
+//   also takes the user name out of the hand-off, and a user name and ports typed into the
+//   connect panel.
 // - Swedish: the secrets page, its reveal and edit dialogs and the credentials of a host.
 //
 // Arrangement: setup and the first sign-in come from the fixtures (a PIN session). Tests that
@@ -29,15 +35,11 @@
 // browser refuses (component tests of the dialog and of clipboard.ts), the Standard profile's
 // five-minute freshness (it needs a session older than that), the Hardened host binding (Rust
 // tests), a connector that references a secret (connector scenarios), a hardware security key,
-// and the operating system's own handling of `ssh://` links and `.rdp` files. The TGL-24
-// editor on /settings/security has no test id on its edit and save buttons, so the rule is
-// changed through `PATCH /settings/security`, before the first secret is stored: once the vault
-// holds one, the server refuses every change of the settings in a profile where a PIN may stand
-// alone with optional MFA (409 `settings.pin_coupling`, docs/secrets.md section 2).
+// and the operating system's own handling of `ssh://` links and `.rdp` files.
 
 import { readFile } from "node:fs/promises";
 import type { Locator, Page, Response } from "@playwright/test";
-import type { Api, Schemas } from "./support/api";
+import { ApiError, type Api, type Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
 import type { TenkoServer } from "./support/server";
@@ -354,14 +356,14 @@ test("a reveal that needs a passkey asks for it in the dialog and succeeds in a 
   await strongSession(api);
   await grantClipboard(page, server);
 
-  // TGL-24: from now on a reveal needs a passkey sign-in within the last five minutes. It is set
-  // before the first secret exists: with a secret in the vault the server refuses every change
-  // of the settings in a profile where a PIN may stand alone (`settings.pin_coupling`).
+  // TGL-24: from now on a reveal needs a passkey sign-in within the last five minutes. The
+  // secret exists already, which does not stand in the way: the change cannot let a PIN stand
+  // alone.
+  const secret = await createSecret(api, { name: NAS.name, value: NAS.value, username: NAS.username });
   const changed = await api.patch<Schemas["SecuritySettingsView"]>("/settings/security", {
     secret_reveal: { step_up: "passkey", bound_host_only: false },
   });
   expect(changed.settings.secret_reveal).toEqual({ step_up: "passkey", bound_host_only: false });
-  const secret = await createSecret(api, { name: NAS.name, value: NAS.value, username: NAS.username });
 
   // A passkey on the virtual platform authenticator.
   const authenticator = await addPlatformAuthenticator(page);
@@ -414,6 +416,89 @@ test("a reveal that needs a passkey asks for it in the dialog and succeeds in a 
   expect(await wholeLog(api)).not.toContain(NAS.value);
 });
 
+test("TGL-24 changes on the settings page while the vault holds a secret, and MFA cannot be relaxed to let a PIN stand alone", async ({
+  page,
+  api,
+  server,
+  signedIn,
+}) => {
+  expect(signedIn.session.strength).toBe("pin");
+  await strongSession(api);
+  const secret = await createSecret(api, { name: NAS.name, value: NAS.value, username: NAS.username });
+  const before = await api.get<Schemas["SecuritySettingsView"]>("/settings/security");
+  expect(before.vault_has_operator_secrets).toBe(true);
+  expect(before.settings.profile).toBe("lab");
+  expect(before.settings.mfa).toBe("optional");
+  expect(before.settings.secret_reveal).toEqual({ step_up: "session", bound_host_only: false });
+  const earlierUpdates = (await auditOf(api, "auth.settings.update")).length;
+  await grantClipboard(page, server);
+  const isSettingsPatch = (response: Response): boolean =>
+    new URL(response.url()).pathname === "/api/v1/settings/security" && response.request().method() === "PATCH";
+
+  // TGL-24 to `fresh` through its row: the dialog saves, the row and the API show the new rule.
+  await page.goto("/settings/security");
+  const reveal = withKey(page, "toggle", "TGL-24");
+  await expect(reveal).toBeVisible();
+  await reveal.getByTestId("toggle-edit").click();
+  const dialog = page.getByTestId("dialog-toggle");
+  await expect(dialog).toBeVisible();
+  await dialog.getByTestId("field-step_up-fresh").check();
+  await expect(dialog.getByTestId("toggle-pin-coupling")).toHaveCount(0);
+  const [saved] = await Promise.all([page.waitForResponse(isSettingsPatch), dialog.getByTestId("form-submit").click()]);
+  expect(saved.status()).toBe(200);
+  await expect(dialog).toHaveCount(0);
+  const after = await api.get<Schemas["SecuritySettingsView"]>("/settings/security");
+  expect(after.settings.secret_reveal).toEqual({ step_up: "fresh", bound_host_only: false });
+  expect(after.settings.password_policy).toEqual(before.settings.password_policy);
+  expect(after.settings.mfa).toBe("optional");
+
+  // A reveal now needs a sign-in within five minutes: the session of this test is that fresh.
+  await page.goto("/secrets");
+  await withId(page, "secret", secret.id).getByTestId("secret-reveal").click();
+  const revealed = page.getByTestId("dialog-reveal");
+  await expect(revealed.getByTestId("reveal-status")).toHaveAttribute("data-state", "copied");
+  await revealed.getByTestId("reveal-close").click();
+
+  // MFA for everyone makes the PIN a second factor: accepted with the secret in the vault.
+  await page.goto("/settings/security");
+  const mfa = withKey(page, "toggle", "TGL-02");
+  await mfa.getByTestId("toggle-edit").click();
+  await dialog.getByTestId("field-mfa").selectOption("everyone");
+  await expect(dialog.getByTestId("toggle-pin-coupling")).toHaveCount(0);
+  const [raised] = await Promise.all([page.waitForResponse(isSettingsPatch), dialog.getByTestId("form-submit").click()]);
+  expect(raised.status()).toBe(200);
+  await expect(dialog).toHaveCount(0);
+  expect((await api.get<Schemas["SecuritySettingsView"]>("/settings/security")).settings.mfa).toBe("everyone");
+
+  // Relaxing it again would let a PIN stand alone: the dialog says so and sends nothing...
+  const patches: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "PATCH" && new URL(request.url()).pathname === "/api/v1/settings/security") patches.push(request.url());
+  });
+  await mfa.getByTestId("toggle-edit").click();
+  await dialog.getByTestId("field-mfa").selectOption("optional");
+  await expect(dialog.getByTestId("toggle-pin-coupling")).toBeVisible();
+  await expect(dialog.getByTestId("form-submit")).toBeDisabled();
+  await dialog.getByTestId("form-cancel").click();
+  await expect(dialog).toHaveCount(0);
+  expect(patches).toEqual([]);
+  // ...and the server refuses it with the code, audited as a failed change.
+  const refused = await api.patch("/settings/security", { mfa: "optional" }).then(
+    () => undefined,
+    (reason: unknown) => reason,
+  );
+  expect(refused).toBeInstanceOf(ApiError);
+  expect((refused as ApiError).status).toBe(409);
+  expect((JSON.parse((refused as ApiError).body) as Problem).code).toBe("settings.pin_coupling");
+  expect((await api.get<Schemas["SecuritySettingsView"]>("/settings/security")).settings.mfa).toBe("everyone");
+  const updates = (await auditOf(api, "auth.settings.update")).slice(earlierUpdates);
+  expect(updates.map((record) => record.draft.outcome)).toEqual([
+    { kind: "success" },
+    { kind: "success" },
+    { kind: "failed", code: "settings.pin_coupling" },
+  ]);
+});
+
 test("a secret is bound to a host, revealed from its page, handed off over SSH and RDP, and unbound", async ({
   page,
   api,
@@ -423,9 +508,9 @@ test("a secret is bound to a host, revealed from its page, handed off over SSH a
   expect(signedIn.session.strength).toBe("pin");
   await strongSession(api);
   // TGL-24 with the host binding of the Hardened profile: a secret is revealed only from the
-  // view of a host it is bound to. Set before the first secret exists (see the test above).
-  await api.patch("/settings/security", { secret_reveal: { step_up: "session", bound_host_only: true } });
+  // view of a host it is bound to.
   const secret = await createSecret(api, { name: NAS.name, value: NAS.value, username: NAS.username });
+  await api.patch("/settings/security", { secret_reveal: { step_up: "session", bound_host_only: true } });
   const host = await arrangeHost(api);
   await grantClipboard(page, server);
 
@@ -554,6 +639,17 @@ test("a secret is bound to a host, revealed from its page, handed off over SSH a
   const plain = await api.get<Schemas["SshHandoff"]>(`/hosts/${host}/remote`, { protocol: "ssh", address: HOST });
   expect(plain.uri).toBe(`ssh://${HOST}`);
   expect(plain.username ?? null).toBeNull();
+
+  // A user name and ports typed into the panel go into the link and the file.
+  await connect.getByTestId("field-user").fill("operator");
+  await connect.getByTestId("field-ssh_port").fill("2222");
+  await connect.getByTestId("field-rdp_port").fill("3390");
+  await withKey(connect, "host-ssh", HOST).click();
+  await expect.poll(sshLinks).toEqual([`ssh://admin@${HOST}`, `ssh://${HOST}`, `ssh://operator@${HOST}:2222`]);
+  const [typed] = await Promise.all([page.waitForEvent("download"), withKey(connect, "host-rdp", HOST).click()]);
+  const typedLines = (await readFile(await typed.path(), "utf8")).split("\r\n");
+  expect(typedLines).toContain(`full address:s:${HOST}:3390`);
+  expect(typedLines).toContain("username:s:operator");
   expect(await wholeLog(api)).not.toContain(NAS.value);
 });
 

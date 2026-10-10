@@ -267,7 +267,7 @@ export default function NodesView() {
                             <td>
                               <Show when={token.used} fallback={<span class="muted">–</span>}>
                                 {(u) => (
-                                  <A href={paths.node(u().node)} class="mono">
+                                  <A href={paths.node(u().node)} class="mono" data-testid="enrolment-node" data-id={u().node}>
                                     {source.rows().find((n) => n.id === u().node)?.name ?? t("nodes.panel.id", { id: u().node })}
                                   </A>
                                 )}

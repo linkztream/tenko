@@ -35,6 +35,15 @@
 //! observations ([`super::normalize`]) and hands them to the [`ObservationSink`]; its
 //! outcome is the instance's last run (`connect.runs`). The remote system is also checked
 //! every [`HostConfig::check_interval`]; the result is kept in memory and shown as health.
+//!
+//! # Health changes
+//!
+//! The process state and the remote health live in memory on this node, not in the store,
+//! so no store write announces them. [`ConnectorHost::health_changes`] does: it names an
+//! instance whenever its plugin process changes state (starting, running, backing off,
+//! stopped), when a runtime starts or stops, and when the outcome of a remote check
+//! changes. The server turns these into `connectors` events, so the views that show an
+//! instance read it again.
 
 mod calls;
 pub mod model;
@@ -59,7 +68,11 @@ use tenko_core::{
 use tenko_jobs::{GroupKey, JobEngine, JobKind, JobSpec, StepKind, StepSpec};
 use tenko_store::{KeyRange, ReadConsistency, ReadViewExt, Store, WatchFilter, WriteBatch};
 use tenko_vault::Vault;
-use tokio::{sync::watch, task::JoinHandle, time::Instant};
+use tokio::{
+    sync::{broadcast, watch},
+    task::JoinHandle,
+    time::Instant,
+};
 
 pub use self::model::{
     ConnectorHealth, ConnectorInstance, ConnectorPatch, ConnectorView, HostError, LastRun,
@@ -199,7 +212,12 @@ pub struct ConnectorHost {
     jobs: OnceLock<JobEngine>,
     runtimes: Mutex<HashMap<ConnectorId, Arc<Runtime>>>,
     sync_lock: tokio::sync::Mutex<()>,
+    /// The instances whose process state or health changed ([`Self::health_changes`]).
+    health: broadcast::Sender<ConnectorId>,
 }
+
+/// How many health changes a slow receiver may fall behind before it lags.
+const HEALTH_CHANGES: usize = 256;
 
 impl std::fmt::Debug for ConnectorHost {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -229,7 +247,27 @@ impl ConnectorHost {
             jobs: OnceLock::new(),
             runtimes: Mutex::new(HashMap::new()),
             sync_lock: tokio::sync::Mutex::new(()),
+            health: broadcast::channel(HEALTH_CHANGES).0,
         })
+    }
+
+    /// A receiver of the instances whose plugin process or health changed on this node:
+    /// a change of the process state, a runtime that starts or stops, and a remote check
+    /// whose outcome differs from the one before. A receiver that falls behind gets
+    /// [`broadcast::error::RecvError::Lagged`]; [`Self::supervised`] then names every
+    /// instance that may have changed.
+    pub fn health_changes(&self) -> broadcast::Receiver<ConnectorId> {
+        self.health.subscribe()
+    }
+
+    /// The instances with a runtime on this node (enabled ones), in no particular order.
+    pub fn supervised(&self) -> Vec<ConnectorId> {
+        self.runtime_ids()
+    }
+
+    /// Announces a health change of `id` (nobody listening is fine).
+    fn health_changed(&self, id: ConnectorId) {
+        let _ = self.health.send(id);
     }
 
     /// Registers the job steps (`connect.write`, `connect.poll`) with the engine; edits then
@@ -762,6 +800,7 @@ impl ConnectorHost {
             .collect();
         let mut stopping = Vec::new();
         let mut starting = Vec::new();
+        let mut changed = Vec::new();
         {
             let mut runtimes = self.runtimes.lock().unwrap_or_else(PoisonError::into_inner);
             let wanted: std::collections::HashSet<ConnectorId> = instances
@@ -798,10 +837,16 @@ impl ConnectorHost {
             }
             for instance in starting {
                 let runtime = self.start_runtime(instance);
+                changed.push(runtime.id);
                 runtimes.insert(runtime.id, runtime);
             }
         }
         futures::future::join_all(stopping.iter().map(|runtime| runtime.stop())).await;
+        // A stopped runtime is gone from the map, so its instance now shows as stopped.
+        changed.extend(stopping.iter().map(|runtime| runtime.id));
+        for id in changed {
+            self.health_changed(id);
+        }
         Ok(())
     }
 
@@ -843,6 +888,9 @@ impl ConnectorHost {
                 )
             }
         };
+        if let Some(supervisor) = &supervisor {
+            self.follow(id, supervisor.subscribe());
+        }
         Arc::new(Runtime {
             id,
             manifest,
@@ -854,6 +902,18 @@ impl ConnectorHost {
             remote: Mutex::new(Remote::default()),
             next_run: Mutex::new(Some(Instant::now() + self.config.first_run_delay)),
         })
+    }
+
+    /// Announces every status the supervisor of `id` publishes, until it ends (its
+    /// sender is dropped when the supervisor task ends, after the final `stopped`).
+    fn follow(&self, id: ConnectorId, mut status: watch::Receiver<SupervisorStatus>) {
+        let health = self.health.clone();
+        status.borrow_and_update();
+        tokio::spawn(async move {
+            while status.changed().await.is_ok() {
+                let _ = health.send(id);
+            }
+        });
     }
 
     /// Starts the service: reconciles the instances, follows their table, reads them on
@@ -1273,18 +1333,25 @@ impl ConnectorHost {
     ) -> Result<HealthReport, HostError> {
         let outcome = self.check_inner(id, on_behalf_of).await;
         if let Some(runtime) = self.runtime(id) {
-            let mut remote = runtime
-                .remote
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            remote.checked = Some(Instant::now());
-            remote.checking = false;
-            match &outcome {
-                Ok(report) => {
-                    remote.report = Some(report.clone());
-                    remote.error = None;
+            let changed = {
+                let mut remote = runtime
+                    .remote
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                let before = remote_outcome(&remote);
+                remote.checked = Some(Instant::now());
+                remote.checking = false;
+                match &outcome {
+                    Ok(report) => {
+                        remote.report = Some(report.clone());
+                        remote.error = None;
+                    }
+                    Err(error) => remote.error = Some((*error.0).clone()),
                 }
-                Err(error) => remote.error = Some((*error.0).clone()),
+                remote_outcome(&remote) != before
+            };
+            if changed {
+                self.health_changed(id);
             }
         }
         outcome
@@ -1379,6 +1446,15 @@ impl ConnectorHost {
         }
         Ok(read)
     }
+}
+
+/// What a remote check found, as far as the health of the instance shows it: the health
+/// of the last report and the code of the last error (time and latency do not count).
+fn remote_outcome(remote: &Remote) -> (Option<crate::Health>, Option<String>) {
+    (
+        remote.report.as_ref().map(|report| report.health),
+        remote.error.as_ref().map(|error| error.code.to_string()),
+    )
 }
 
 /// Waits for the next change set; `false` when the stream ended or failed (it is opened

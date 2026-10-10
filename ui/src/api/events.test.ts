@@ -105,6 +105,23 @@ describe("EventStream", () => {
     s.stop();
   });
 
+  it("gives a system event no revision, although EventSource repeats the id of the store event before it", () => {
+    const s = stream();
+    const seen: ApiEvent[] = [];
+    s.subscribe("connectors", (e) => seen.push(e));
+    s.start();
+    const src = FakeSource.last();
+    src.open();
+    src.emit("connectors", { topic: "connectors", revision: 120, objects: [{ kind: "connector", id: "c1" }] }, "120");
+    // No `id:` line: the browser still reports the last id it saw.
+    src.emit("connectors", { topic: "connectors", objects: [{ kind: "connector", id: "c1" }], kind: "connect.health" }, "120");
+    expect(seen.map((e) => e.revision)).toEqual([120, undefined]);
+    expect(seen[1]).toMatchObject({ topic: "connectors", objects: [{ kind: "connector", id: "c1" }] });
+    // The resume position stays at the store event.
+    expect(s.lastEventId).toBe("120");
+    s.stop();
+  });
+
   it("reconnects after an error with jittered exponential backoff and resumes from the last id", () => {
     const s = stream(() => 0.5);
     s.subscribe("jobs", () => undefined);

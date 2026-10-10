@@ -40,6 +40,8 @@ export function SelectField<T extends string>(props: {
   onChange: (value: T) => void;
   help?: JSX.Element;
   disabled?: boolean;
+  /** The `data-testid` of the select (`field-<setting>`, ui/README.md). */
+  testid?: string;
 }) {
   const helpId = () => `${props.id}-help`;
   return (
@@ -47,6 +49,7 @@ export function SelectField<T extends string>(props: {
       <label for={props.id}>{props.label}</label>
       <select
         id={props.id}
+        data-testid={props.testid}
         class="select"
         disabled={props.disabled}
         aria-describedby={props.help ? helpId() : undefined}

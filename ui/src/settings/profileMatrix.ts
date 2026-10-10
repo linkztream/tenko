@@ -4,7 +4,7 @@
 // so this table mirrors docs/SECURITY-PROFILES.md and crates/tenko-auth/src/settings.rs.
 // The server stays the authority: the preview is a preview, and the saved result always
 // comes from the server's answer.
-import type { PasswordPolicy, Profile, SecuritySettings, SecuritySettingsView } from "../api/types";
+import type { MfaRequirement, PasswordPolicy, Profile, SecuritySettings, SecuritySettingsView } from "../api/types";
 import {
   REVEAL_DEFAULT,
   revealOf,
@@ -133,10 +133,62 @@ export function weakerSettings(target: Profile): ToggleDef[] {
   return TOGGLES.filter((def) => weakerThan(def.setting, valueOf(PROFILE_DEFAULTS[target], def.setting), homeValue(def.setting)));
 }
 
+/** Digits-only secrets shorter than this count as PINs whatever the preset (IAM-07). */
+const PIN_LIKE_BELOW = 12;
+
+/** The longest password a Custom policy accepts when it sets no maximum. */
+const DEFAULT_MAX_LENGTH = 256;
+
 /**
- * Whether the server would refuse `next` because of the PIN coupling rule (IAM-07): the PIN
- * preset cannot be selected while the vault holds secrets.
+ * Whether a password policy lets a PIN stand alone: the PIN preset, or a Custom preset that
+ * accepts a digits-only secret shorter than 12 characters (`admits_pin` in
+ * crates/tenko-auth/src/service/account.rs). The server tries a non-trivial digit string of
+ * length `max(min_length, 4)`; such a string passes every other check of a policy, so only
+ * the length limits and the pattern decide. A pattern is matched against the whole string,
+ * as the server does. A pattern that is not a valid JavaScript expression (the server speaks
+ * Rust regex syntax) answers false: the server still refuses what it must, and the dialog
+ * then shows its error.
  */
-export function pinBlocked(view: SecuritySettingsView, next: PasswordPolicy): boolean {
-  return next.preset === "pin" && view.settings.password_policy.preset !== "pin" && view.vault_has_operator_secrets;
+export function admitsPin(policy: PasswordPolicy): boolean {
+  if (policy.preset === "pin") return true;
+  if (policy.preset !== "custom") return false;
+  const length = Math.max(policy.min_length, 4);
+  if (length >= PIN_LIKE_BELOW || length > (policy.max_length ?? DEFAULT_MAX_LENGTH)) return false;
+  const pattern = policy.pattern;
+  if (pattern === undefined || pattern === null) return true;
+  if (pattern === "") return false;
+  try {
+    return new RegExp(`^(?:${pattern})$`, "u").test("7391586240".repeat(2).slice(0, length));
+  } catch {
+    return false;
+  }
+}
+
+/** Whether two policies are the same one for the server (an absent maximum is 256). */
+function samePolicy(a: PasswordPolicy, b: PasswordPolicy): boolean {
+  if (a.preset !== "custom" || b.preset !== "custom") return a.preset === b.preset;
+  return (
+    a.min_length === b.min_length &&
+    (a.max_length ?? DEFAULT_MAX_LENGTH) === (b.max_length ?? DEFAULT_MAX_LENGTH) &&
+    (a.pattern ?? null) === (b.pattern ?? null)
+  );
+}
+
+/**
+ * Whether the server would refuse a change of the security settings because of the PIN
+ * coupling rule (IAM-07, `settings.pin_coupling`). `next` holds the password policy and the
+ * MFA requirement the settings would have after the change. The change is refused exactly
+ * when the vault holds an operator secret, the result lets a PIN stand alone (a policy that
+ * admits a PIN with MFA optional) and the change touches what decides it (the policy or the
+ * MFA requirement differs from the current one). Any other change passes, also under Home
+ * and Lab, which have exactly that combination.
+ */
+export function pinCoupled(
+  view: SecuritySettingsView,
+  next: { password_policy: PasswordPolicy; mfa: MfaRequirement },
+): boolean {
+  if (!view.vault_has_operator_secrets) return false;
+  if (next.mfa !== "optional" || !admitsPin(next.password_policy)) return false;
+  const { password_policy, mfa } = view.settings;
+  return mfa !== next.mfa || !samePolicy(password_policy, next.password_policy);
 }

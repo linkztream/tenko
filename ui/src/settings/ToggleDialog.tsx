@@ -15,7 +15,7 @@ import { ErrorNotice, Notice } from "../components/Notice";
 import { toast } from "../components/toast";
 import { t } from "../i18n";
 import { ReloadedNote } from "./fields";
-import { homeValue, pinBlocked, sameValue } from "./profileMatrix";
+import { homeValue, pinCoupled, sameValue } from "./profileMatrix";
 import { patchFor } from "./toggleEdit";
 import {
   BreachEditor,
@@ -66,9 +66,14 @@ export function ToggleDialog(props: {
   const bannerOn = () => props.view.banner.lab || props.view.banner.weaker_than_home;
   const othersWeak = () => props.view.toggles.some((x) => x.id !== props.def.id && x.weaker_than_home);
   const labActive = () => profile() === "lab";
+  // The PIN coupling rule (IAM-07) looks at the policy and at MFA together; no other toggle can break it.
   const pinRefused = () => {
     const d = draft();
-    return setting === "password_policy" && d !== undefined && pinBlocked(props.view, d.value as PasswordPolicy);
+    if (d === undefined) return false;
+    const { password_policy, mfa } = props.view.settings;
+    if (setting === "password_policy") return pinCoupled(props.view, { password_policy: d.value as PasswordPolicy, mfa });
+    if (setting === "mfa") return pinCoupled(props.view, { password_policy, mfa: d.value as MfaRequirement });
+    return false;
   };
 
   const submit = async (e: Event) => {
@@ -89,7 +94,12 @@ export function ToggleDialog(props: {
   };
 
   return (
-    <Dialog label={t("settings.security.edit_title", { name: name() })} onClose={props.onClose} class="dialog wide">
+    <Dialog
+      label={t("settings.security.edit_title", { name: name() })}
+      onClose={props.onClose}
+      class="dialog wide"
+      testid="dialog-toggle"
+    >
       <form class="dialog-form" onSubmit={(e) => void submit(e)} novalidate>
         <h2 class="dialog-title">
           {t("settings.security.edit_title", { name: name() })} <span class="mono muted">{props.def.id}</span>
@@ -139,7 +149,7 @@ export function ToggleDialog(props: {
               <p class="muted">{t("settings.security.consequence.none")}</p>
             </Show>
             <Show when={pinRefused()}>
-              <Notice kind="bad">{t("errors.settings.pin_coupling")}</Notice>
+              <Notice kind="bad" testid="toggle-pin-coupling">{t("errors.settings.pin_coupling")}</Notice>
             </Show>
             <Show when={changed() && draftWeak()}>
               <Notice kind="bad" title={t("settings.security.marker.weak")}>
@@ -168,10 +178,15 @@ export function ToggleDialog(props: {
           </div>
         </div>
         <div class="dialog-actions">
-          <button type="button" class="btn ghost" onClick={() => props.onClose()}>
+          <button type="button" class="btn ghost" onClick={() => props.onClose()} data-testid="form-cancel">
             {t("common.action.cancel")}
           </button>
-          <button type="submit" class="btn primary" disabled={busy() || !changed() || pinRefused()}>
+          <button
+            type="submit"
+            class="btn primary"
+            disabled={busy() || !changed() || pinRefused()}
+            data-testid="form-submit"
+          >
             {t("settings.security.save")}
           </button>
         </div>

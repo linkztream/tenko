@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { api } from "../api/client";
 import { db } from "../api/mock/db";
+import { profileSettings } from "../api/mock/profiles";
 import { server } from "../api/mock/node";
 import { REVEAL_DEFAULT as MOCK_REVEAL_DEFAULT } from "../api/mock/reveal-policy";
 import { isApiError } from "../api/problem";
@@ -289,8 +290,9 @@ describe("the security page", () => {
     expect(db.settings.mfa).toBe("everyone");
   });
 
-  it("shows why a PIN is refused while the vault holds secrets", async () => {
+  it("shows why a PIN is refused while the vault holds secrets and MFA is optional", async () => {
     await signInAs();
+    db.settings.mfa = "optional";
     db.vaultHasOperatorSecrets = true;
     await openPage();
     expect(screen.getByText("The vault holds secrets")).toBeTruthy();
@@ -306,6 +308,7 @@ describe("the security page", () => {
 
   it("shows the server's refusal of a PIN when the vault gained secrets after the page loaded", async () => {
     await signInAs();
+    db.settings.mfa = "optional";
     await openPage();
     expect(screen.queryByText("The vault holds secrets")).toBeNull();
     const dialog = await openEditor("Password policy preset");
@@ -548,10 +551,10 @@ describe("TGL-24: what revealing an operator secret takes", () => {
     await openPage();
     const bodies = recordPatches();
     const dialog = await openEditor("Secret reveal");
-    const modes = within(dialog).getAllByTestId("field-secret-reveal-step-up");
-    expect(modes.map((m) => m.getAttribute("data-key"))).toEqual(["session", "fresh", "passkey"]);
+    const modes = ["session", "fresh", "passkey"].map((mode) => within(dialog).getByTestId(`field-step_up-${mode}`));
     expect(modes.map((m) => (m as HTMLInputElement).checked)).toEqual([false, true, false]);
     const bound = within(dialog).getByRole("switch", { name: /Only for the host in view/ }) as HTMLInputElement;
+    expect(bound).toBe(within(dialog).getByTestId("field-bound_host_only"));
     expect(bound.checked).toBe(false);
     // Each option says what it means.
     expect(within(dialog).getByText("A session that is signed in with a password or something stronger is enough.")).toBeTruthy();
@@ -586,8 +589,7 @@ describe("TGL-24: what revealing an operator secret takes", () => {
     await signInAs();
     await openPage();
     const dialog = await openEditor("Secret reveal");
-    const modes = within(dialog).getAllByTestId("field-secret-reveal-step-up");
-    fireEvent.click(modes[0] as HTMLElement);
+    fireEvent.click(within(dialog).getByTestId("field-step_up-session"));
     expect(await within(dialog).findByText(/Differs from the Standard profile/)).toBeTruthy();
     expect(within(dialog).queryByText(/Weaker than Home/)).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "Save setting" }));
@@ -666,5 +668,265 @@ describe("TGL-24: what revealing an operator secret takes", () => {
     await openPage();
     const dialog = await openEditor("Secret reveal");
     expect(await axeViolations(dialog)).toEqual([]);
+  });
+});
+
+describe("the PIN coupling rule (IAM-07)", () => {
+  const PIN_NOTICE = "A PIN alone is not allowed while the vault holds secrets. Add a passkey or choose a password preset.";
+
+  /** Home (the PIN preset, MFA optional), with or without an operator secret in the vault. */
+  async function signInAtHome(secrets: boolean) {
+    await signInAs();
+    db.settings = profileSettings("home");
+    db.vaultHasOperatorSecrets = secrets;
+  }
+
+  const saveButton = (dialog: HTMLElement) => within(dialog).getByTestId("form-submit") as HTMLButtonElement;
+  const choose = (dialog: HTMLElement, label: string, value: string) =>
+    fireEvent.change(within(dialog).getByLabelText(label), { target: { value } });
+  const closed = () => waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  const noNotice = (dialog: HTMLElement) => waitFor(() => expect(within(dialog).queryByText(PIN_NOTICE)).toBeNull());
+  const canSave = (dialog: HTMLElement) => waitFor(() => expect(saveButton(dialog).disabled).toBe(false));
+
+  async function openProfileDialog() {
+    fireEvent.click(screen.getByRole("button", { name: "Change profile" }));
+    return screen.findByRole("dialog", { name: "Change security profile" });
+  }
+
+  describe("with an operator secret in the vault", () => {
+    it("saves the reveal policy and the lockout under Home without the notice", async () => {
+      await signInAtHome(true);
+      await openPage();
+      let dialog = await openEditor("Secret reveal");
+      fireEvent.click(within(dialog).getByTestId("field-step_up-passkey"));
+      await canSave(dialog);
+      await noNotice(dialog);
+      fireEvent.click(saveButton(dialog));
+      await closed();
+      expect(db.settings.secret_reveal).toEqual({ step_up: "passkey", bound_host_only: false });
+
+      dialog = await openEditor("Lockout");
+      choose(dialog, "Lockout", "off");
+      await canSave(dialog);
+      await noNotice(dialog);
+      fireEvent.click(saveButton(dialog));
+      await closed();
+      expect(db.settings.lockout).toBe("off");
+      expect(db.settings.password_policy).toEqual({ preset: "pin" });
+    });
+
+    it("lets MFA for everyone through, and refuses optional again while the policy admits a PIN", async () => {
+      await signInAtHome(true);
+      await openPage();
+      let dialog = await openEditor("MFA requirement");
+      choose(dialog, "MFA requirement", "everyone");
+      await canSave(dialog);
+      await noNotice(dialog);
+      fireEvent.click(saveButton(dialog));
+      await closed();
+      expect(db.settings.mfa).toBe("everyone");
+
+      dialog = await openEditor("MFA requirement");
+      choose(dialog, "MFA requirement", "optional");
+      expect(await within(dialog).findByText(PIN_NOTICE)).toBeTruthy();
+      expect(saveButton(dialog).disabled).toBe(true);
+      // A requirement that keeps the PIN from standing alone: the notice goes and saving is possible.
+      choose(dialog, "MFA requirement", "administrators");
+      await noNotice(dialog);
+      await canSave(dialog);
+    });
+
+    it("refuses the PIN preset and a short Custom policy while MFA is optional and the preset is Standard", async () => {
+      await signInAtHome(true);
+      db.settings.password_policy = { preset: "standard" };
+      await openPage();
+      const dialog = await openEditor("Password policy preset");
+      choose(dialog, "Preset", "pin");
+      expect(await within(dialog).findByText(PIN_NOTICE)).toBeTruthy();
+      expect(saveButton(dialog).disabled).toBe(true);
+
+      // Custom starts at 12 characters, which no PIN meets; 8 characters would admit one.
+      choose(dialog, "Preset", "custom");
+      const min = await within(dialog).findByLabelText("Minimum length");
+      await noNotice(dialog);
+      await canSave(dialog);
+      fireEvent.input(min, { target: { value: "8" } });
+      expect(await within(dialog).findByText(PIN_NOTICE)).toBeTruthy();
+      expect(saveButton(dialog).disabled).toBe(true);
+      // A pattern that no number matches keeps the PIN out again; one that digits match does not.
+      const pattern = within(dialog).getByLabelText("Required pattern (optional)");
+      fireEvent.input(pattern, { target: { value: "[a-z]+" } });
+      await noNotice(dialog);
+      await canSave(dialog);
+      fireEvent.input(pattern, { target: { value: "[0-9]+" } });
+      expect(await within(dialog).findByText(PIN_NOTICE)).toBeTruthy();
+      expect(saveButton(dialog).disabled).toBe(true);
+    });
+
+    it("lets the PIN preset through while MFA is required", async () => {
+      await signInAs();
+      db.vaultHasOperatorSecrets = true;
+      await openPage();
+      const dialog = await openEditor("Password policy preset");
+      choose(dialog, "Preset", "pin");
+      await canSave(dialog);
+      await noNotice(dialog);
+      fireEvent.click(saveButton(dialog));
+      await closed();
+      expect(db.settings.password_policy).toEqual({ preset: "pin" });
+      expect(db.settings.mfa).toBe("administrators");
+    });
+
+    it("says nothing about the policy Home already has, and refuses a different one that admits a PIN", async () => {
+      await signInAtHome(true);
+      await openPage();
+      const dialog = await openEditor("Password policy preset");
+      expect(within(dialog).getByText(/Nothing changes yet/)).toBeTruthy();
+      expect(within(dialog).queryByText(PIN_NOTICE)).toBeNull();
+      choose(dialog, "Preset", "custom");
+      const min = await within(dialog).findByLabelText("Minimum length");
+      fireEvent.input(min, { target: { value: "6" } });
+      expect(await within(dialog).findByText(PIN_NOTICE)).toBeTruthy();
+      expect(saveButton(dialog).disabled).toBe(true);
+    });
+
+    it("refuses a switch from Standard to Home or Lab and lets Hardened through", async () => {
+      await signInAs();
+      db.vaultHasOperatorSecrets = true;
+      await openPage();
+      const dialog = await openProfileDialog();
+      fireEvent.click(within(dialog).getByRole("radio", { name: /Home/ }));
+      expect(await within(dialog).findByText(PIN_NOTICE)).toBeTruthy();
+      expect((within(dialog).getByRole("button", { name: "Switch to Home" }) as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.click(within(dialog).getByRole("radio", { name: /Lab/ }));
+      expect(await within(dialog).findByText(PIN_NOTICE)).toBeTruthy();
+      fireEvent.click(within(dialog).getByRole("radio", { name: /Hardened/ }));
+      await noNotice(dialog);
+      expect((within(dialog).getByRole("button", { name: "Switch to Hardened" }) as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it("lets a switch from Home to Lab or Standard through", async () => {
+      await signInAtHome(true);
+      await openPage();
+      const dialog = await openProfileDialog();
+      // Lab sets the same policy and MFA as Home: the PIN is not new, so nothing is refused.
+      fireEvent.click(within(dialog).getByRole("radio", { name: /Lab/ }));
+      fireEvent.click(await within(dialog).findByRole("checkbox"));
+      await waitFor(() =>
+        expect((within(dialog).getByRole("button", { name: "Switch to Lab" }) as HTMLButtonElement).disabled).toBe(false),
+      );
+      expect(within(dialog).queryByText(PIN_NOTICE)).toBeNull();
+      fireEvent.click(within(dialog).getByRole("radio", { name: /Standard/ }));
+      await within(dialog).findByRole("button", { name: "Switch to Standard" });
+      expect(within(dialog).queryByText(PIN_NOTICE)).toBeNull();
+    });
+
+    it("refuses a reset to Home that brings MFA back to optional", async () => {
+      await signInAtHome(true);
+      // MFA for everyone is a deviation from Home; resetting to Home would let the PIN stand alone.
+      db.settings.mfa = "everyone";
+      await openPage();
+      const dialog = await openProfileDialog();
+      expect(await within(dialog).findByText(PIN_NOTICE)).toBeTruthy();
+      expect((within(dialog).getByRole("button", { name: "Reset to Home" }) as HTMLButtonElement).disabled).toBe(true);
+    });
+  });
+
+  describe("without a secret in the vault", () => {
+    it("shows no notice for MFA, for the PIN preset or for a switch to Home", async () => {
+      await signInAs();
+      await openPage();
+      let dialog = await openEditor("MFA requirement");
+      choose(dialog, "MFA requirement", "optional");
+      await canSave(dialog);
+      expect(within(dialog).queryByText(PIN_NOTICE)).toBeNull();
+      fireEvent.click(saveButton(dialog));
+      await closed();
+      expect(db.settings.mfa).toBe("optional");
+
+      dialog = await openEditor("Password policy preset");
+      choose(dialog, "Preset", "pin");
+      await canSave(dialog);
+      expect(within(dialog).queryByText(PIN_NOTICE)).toBeNull();
+      choose(dialog, "Preset", "custom");
+      fireEvent.input(await within(dialog).findByLabelText("Minimum length"), { target: { value: "6" } });
+      await canSave(dialog);
+      expect(within(dialog).queryByText(PIN_NOTICE)).toBeNull();
+      fireEvent.click(within(dialog).getByTestId("form-cancel"));
+      await closed();
+
+      dialog = await openProfileDialog();
+      fireEvent.click(within(dialog).getByRole("radio", { name: /Home/ }));
+      await within(dialog).findByRole("button", { name: "Switch to Home" });
+      expect(within(dialog).queryByText(PIN_NOTICE)).toBeNull();
+      expect((within(dialog).getByRole("button", { name: "Switch to Home" }) as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it("lets Home with MFA for everyone be reset to Home", async () => {
+      await signInAtHome(false);
+      db.settings.mfa = "everyone";
+      await openPage();
+      const dialog = await openProfileDialog();
+      await within(dialog).findByRole("button", { name: "Reset to Home" });
+      expect(within(dialog).queryByText(PIN_NOTICE)).toBeNull();
+      expect((within(dialog).getByRole("button", { name: "Reset to Home" }) as HTMLButtonElement).disabled).toBe(false);
+    });
+  });
+});
+
+describe("the test ids of the security page", () => {
+  it("marks each toggle row with its id and gives it an edit button, and a reset button when it differs", async () => {
+    await signInAs("weak");
+    await openPage();
+    const rows = screen.getAllByTestId("toggle");
+    expect(rows.map((r) => r.getAttribute("data-key"))).toEqual(TOGGLES.map((d) => d.id));
+    expect(rows.map((r) => r.getAttribute("data-toggle"))).toEqual(TOGGLES.map((d) => d.id));
+    for (const r of rows) expect(within(r).getAllByTestId("toggle-edit")).toHaveLength(1);
+    // Home with lockout off: only TGL-07 differs from its profile.
+    const resets = screen.getAllByTestId("toggle-reset");
+    expect(resets).toHaveLength(1);
+    expect(resets[0]?.closest("[data-testid='toggle']")?.getAttribute("data-key")).toBe("TGL-07");
+  });
+
+  it("gives the edit dialog its test ids and the reveal editor a field id for each control", async () => {
+    await signInAs();
+    await openPage();
+    const reveal = screen.getAllByTestId("toggle").find((r) => r.getAttribute("data-key") === "TGL-24") as HTMLElement;
+    fireEvent.click(within(reveal).getByTestId("toggle-edit"));
+    const dialog = await screen.findByTestId("dialog-toggle");
+    expect(dialog.getAttribute("role")).toBe("dialog");
+    const submit = within(dialog).getByTestId("form-submit") as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+
+    // Standard asks for a recent sign-in of any kind, and the host binding is off.
+    const modes = ["session", "fresh", "passkey"].map((mode) => within(dialog).getByTestId(`field-step_up-${mode}`));
+    expect(modes.map((m) => (m as HTMLInputElement).checked)).toEqual([false, true, false]);
+    const bound = within(dialog).getByTestId("field-bound_host_only") as HTMLInputElement;
+    expect(bound.type).toBe("checkbox");
+    expect(bound.checked).toBe(false);
+    fireEvent.click(bound);
+    await waitFor(() => expect(submit.disabled).toBe(false));
+    expect(within(dialog).getByTestId("form-cancel")).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByTestId("form-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("dialog-toggle")).toBeNull());
+  });
+
+  it("names the select of each choice editor after its setting", async () => {
+    await signInAs();
+    await openPage();
+    for (const [id, field] of [
+      ["TGL-01", "field-password_policy"],
+      ["TGL-02", "field-mfa"],
+      ["TGL-06", "field-breach_check"],
+      ["TGL-07", "field-lockout"],
+    ] as const) {
+      const row = screen.getAllByTestId("toggle").find((r) => r.getAttribute("data-key") === id) as HTMLElement;
+      fireEvent.click(within(row).getByTestId("toggle-edit"));
+      const dialog = await screen.findByTestId("dialog-toggle");
+      expect(within(dialog).getByTestId(field).tagName, id).toBe("SELECT");
+      fireEvent.click(within(dialog).getByTestId("form-cancel"));
+      await waitFor(() => expect(screen.queryByTestId("dialog-toggle")).toBeNull());
+    }
   });
 });

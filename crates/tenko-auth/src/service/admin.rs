@@ -23,7 +23,7 @@ use crate::{
         USER_NAMES, USER_TOKENS, USERS, UserRecord,
     },
     roles::{RoleName, satisfies},
-    settings::{SettingsPatch, changes},
+    settings::{MfaRequirement, SecuritySettings, SettingsPatch, changes},
 };
 
 /// The counter that orders changes to the set of administrators.
@@ -691,8 +691,14 @@ impl AuthService {
     }
 
     /// `PATCH /settings/security`: applies a profile and toggles, audited with the old and
-    /// new value of each changed toggle. Refuses the PIN preset as a sole factor while the
-    /// vault holds operator secrets (IAM-07).
+    /// new value of each changed toggle.
+    ///
+    /// The PIN coupling rule (IAM-07): a PIN may be the only factor only while the vault
+    /// holds no operator secret. The change is refused, and audited as failed, exactly when
+    /// it changes the password policy (TGL-01) or the MFA requirement (TGL-02), the result
+    /// lets a PIN stand alone (a preset that admits a PIN with optional MFA), and the vault
+    /// holds an operator secret. Any other change passes, also under settings that already
+    /// let a PIN stand alone.
     ///
     /// # Errors
     ///
@@ -721,9 +727,12 @@ impl AuthService {
         let next = patch.apply(&current);
         next.validate()?;
         // With MFA for administrators or for everyone, the accounts that can reach the vault
-        // need a second factor already; only "optional" leaves a PIN on its own.
-        if super::account::admits_pin(&next.password_policy)
-            && next.mfa == crate::settings::MfaRequirement::Optional
+        // need a second factor already; only "optional" leaves a PIN on its own. A change that
+        // leaves TGL-01 and TGL-02 as they are cannot let a PIN stand alone, also where one
+        // already may, so it is not held to the rule. The cheap conditions come first; the
+        // vault is read last.
+        if pin_stands_alone(&next)
+            && (next.password_policy != current.password_policy || next.mfa != current.mfa)
             && self.has_operator_secrets().await?
         {
             let mut batch = WriteBatch::for_request(ctx);
@@ -757,6 +766,13 @@ impl AuthService {
         }
         self.settings_view().await
     }
+}
+
+/// Whether the settings let a PIN be the only factor: a preset that admits a PIN, and MFA
+/// that is optional for everyone.
+fn pin_stands_alone(settings: &SecuritySettings) -> bool {
+    super::account::admits_pin(&settings.password_policy)
+        && settings.mfa == MfaRequirement::Optional
 }
 
 fn change(field: &str, old: &str, new: &str) -> FieldChange {

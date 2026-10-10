@@ -200,7 +200,9 @@ test("a token is shown once, enrols a probe that connects, and the node shows in
       const used = (await api.get<Schemas["EnrolmentList"]>("/nodes/enrolments")).items[0]!;
       expect(used.state).toBe("used");
       expect(used.used?.node).toBe(NODE);
-      await expect.poll(() => tokenRow.evaluate((row) => [...row.querySelectorAll("a")].map((a) => a.getAttribute("href")))).toContain(`/nodes/${NODE}`);
+      const enrolledLink = tokenRow.getByTestId("enrolment-node");
+      await expect(enrolledLink).toHaveAttribute("data-id", String(NODE));
+      await expect(enrolledLink).toHaveAttribute("href", `/nodes/${NODE}`);
 
       // The same token enrols nothing a second time: another node directory is refused.
       const second = await ProbeNode.create();
@@ -535,31 +537,51 @@ test.describe("a Swedish browser", () => {
   });
 });
 
-// Confirmed defect, so this stays `fixme` until it is fixed: the cluster summary that the nodes
-// page (its subtitle and `nodes-cluster`) and the dashboard tile (`dashboard-nodes`) show goes
-// stale while they are open. They read `cluster` of `GET /system/status` again 500 ms after an
-// event of the `cluster` topic, but the controller refreshes that object every five seconds
-// (HEALTH_INTERVAL in crates/tenko/src/node/controller.rs), so the read right after the
-// enrolment or the connection still gets the old numbers, and no event follows to read again.
-// The tile keeps showing 0 connected of 0 enrolled for as long as the page stays open (checked
-// for 12 seconds after `GET /system/status` already counted the node); a reload shows 1 of 1.
-// The list of the nodes page is not affected: it follows its own `GET /nodes`.
-test.fixme("the dashboard tile follows a node that enrols and connects while it is open", async ({ page, api, server, signedIn }) => {
+// The cluster summary that the dashboard tile (`dashboard-nodes`) and the nodes page
+// (`nodes-cluster`) show comes from `GET /system/status`, which they read again after an event
+// of the `cluster` topic. The controller refreshes that summary when a node's record changes
+// (enrolment, connection, revocation) and then announces it with a `cluster` event of its own,
+// so the open pages never keep the numbers from before the change (found by WP2.11, fixed by
+// WP2.12; it used to refresh every five seconds only, and no event followed).
+test("the dashboard tile and the cluster summary follow a node that enrols, connects and is revoked while they are open", async ({
+  page,
+  api,
+  server,
+  signedIn,
+}) => {
   expect(signedIn.session.user.name).toBe(ADMIN.name);
   const created = await createToken(api, NODE_NAME);
   // The dashboard stays open in `page`; the node list is open in a second page of the browser.
-  await expect(page.getByTestId("dashboard-nodes-link")).toHaveText("0");
+  await page.goto("/");
+  const link = page.getByTestId("dashboard-nodes-link");
+  const hint = page.getByTestId("dashboard-nodes-hint");
+  await expect(link).toHaveText("0");
+  await expect(hint).toHaveAttribute("data-total", "0");
   const nodes = await page.context().newPage();
   await nodes.goto("/nodes");
   await expect(nodes.getByTestId("nodes-empty")).toBeVisible();
+  await expect(nodes.getByTestId("nodes-cluster")).toBeVisible();
   const probe = await ProbeNode.create();
   try {
+    // Enrolled: counted as a node, not yet as a connected one.
     const enrolled = await probe.enrol(server, created.token, { name: NODE_NAME, address: NODE_ADDRESS });
     expect(enrolled.code, enrolled.stderr).toBe(0);
+    await expect(hint).toHaveAttribute("data-total", "1");
+    await expect(link).toHaveText("0");
+
+    // Connected: the tile counts it and the nodes page names its version.
     await probe.serve();
-    await waitForConnected(api);
+    const view = await waitForConnected(api);
     await expect(gridRow(nodes, "nodes", NODE_NAME).getByTestId("node-link")).toHaveAttribute("data-state", "connected");
-    await expect(page.getByTestId("dashboard-nodes-link")).toHaveText("1");
+    await expect(link).toHaveText("1");
+    await expect(hint).toHaveAttribute("data-total", "1");
+    await expect(nodes.getByTestId("nodes-cluster")).toContainText(view.version!);
+
+    // Revoked: gone from both numbers.
+    await api.delete(`/nodes/${NODE}`);
+    await expect(link).toHaveText("0");
+    await expect(hint).toHaveAttribute("data-total", "0");
+    await expect(nodes.getByTestId("nodes-empty")).toBeVisible();
   } finally {
     await probe.stop();
   }

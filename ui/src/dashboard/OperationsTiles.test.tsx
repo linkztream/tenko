@@ -37,7 +37,14 @@ async function openDashboard() {
 
 const tile = (id: string) => screen.getByTestId(id);
 const valueOf = (id: string) => within(tile(id)).getByRole("link").textContent;
-const hintOf = (id: string) => tile(id).querySelector("p.muted")?.textContent;
+const hint = (id: string) => within(tile(id)).getByTestId(`${id}-hint`);
+const hintOf = (id: string) => hint(id).textContent;
+/** The numbers a hint carries as data attributes (absent ones are left out). */
+function hintData(id: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const attr of Array.from(hint(id).attributes)) if (attr.name.startsWith("data-") && attr.name !== "data-testid") out[attr.name] = attr.value;
+  return out;
+}
 
 /** Waits until a tile shows its number: the tiles read their data after the page is up. */
 async function shows(id: string, value: string) {
@@ -67,6 +74,7 @@ describe("the tiles for discovery, connectors and nodes", () => {
     expect(link.getAttribute("href")).toBe("/discovery");
     expect(link.getAttribute("aria-label")).toBeNull();
     expect(hintOf("dashboard-proposals")).toBe("1 conflict");
+    expect(hintData("dashboard-proposals")).toEqual({ "data-conflicts": "1" });
 
     // The same numbers as the inbox has.
     const open = await listProposals({ state: ["open"] });
@@ -81,6 +89,7 @@ describe("the tiles for discovery, connectors and nodes", () => {
     await shows("dashboard-connectors", "1");
     expect(within(connectors).getByTestId("dashboard-connectors-link").getAttribute("href")).toBe("/connectors");
     expect(hintOf("dashboard-connectors")).toBe("of 2 enabled, 1 needs a look");
+    expect(hintData("dashboard-connectors")).toEqual({ "data-total": "2", "data-failing": "1" });
   });
 
   it("counts the nodes that are connected among the enrolled ones and says how many were refused", async () => {
@@ -90,6 +99,7 @@ describe("the tiles for discovery, connectors and nodes", () => {
     await shows("dashboard-nodes", "1");
     expect(within(nodes).getByTestId("dashboard-nodes-link").getAttribute("href")).toBe("/nodes");
     expect(hintOf("dashboard-nodes")).toBe("of 2 enrolled, 1 refused");
+    expect(hintData("dashboard-nodes")).toEqual({ "data-total": "2", "data-mismatched": "1" });
   });
 
   it("has no accessibility violations", async () => {
@@ -119,6 +129,7 @@ describe("the tiles when there is little to count", () => {
     await openDashboard();
     await shows("dashboard-connectors", "1");
     expect(hintOf("dashboard-connectors")).toBe("of 1 enabled");
+    expect(hintData("dashboard-connectors")).toEqual({ "data-total": "1", "data-failing": "0" });
   });
 
   it("counts only the connectors that are enabled", async () => {
@@ -136,6 +147,7 @@ describe("the tiles when there is little to count", () => {
     await waitFor(() => expect(within(tile("dashboard-connectors")).getByRole("link").getAttribute("aria-label")).toBeNull());
     expect(valueOf("dashboard-connectors")).toBe("0");
     expect(hintOf("dashboard-connectors")).toBe("of 0 enabled");
+    expect(hintData("dashboard-connectors")).toEqual({ "data-total": "0", "data-failing": "0" });
   });
 
   it("shows zero connectors, and keeps the page, when the connectors cannot be read", async () => {
@@ -152,6 +164,7 @@ describe("the tiles when there is little to count", () => {
     await openDashboard();
     await shows("dashboard-proposals", "0");
     expect(hintOf("dashboard-proposals")).toBe("no conflict");
+    expect(hintData("dashboard-proposals")).toEqual({ "data-conflicts": "0" });
   });
 
   it("keeps the page and the other tiles when the proposals cannot be read", async () => {
@@ -162,6 +175,8 @@ describe("the tiles when there is little to count", () => {
     expect(screen.getByTestId("dashboard-waiting")).toBeTruthy();
     const proposals = tile("dashboard-proposals");
     expect(within(proposals).getByTestId("dashboard-proposals-link")).toBeTruthy();
+    // The count is not known, so the hint carries none.
+    expect(hintData("dashboard-proposals")).toEqual({});
   });
 
   it("says that there is no cluster port when the status has no cluster", async () => {
@@ -171,6 +186,7 @@ describe("the tiles when there is little to count", () => {
     await waitFor(() => expect(hintOf("dashboard-nodes")).toBe("No cluster port"));
     expect(valueOf("dashboard-nodes")).not.toMatch(/\d/);
     expect(within(tile("dashboard-nodes")).getByTestId("dashboard-nodes-link").getAttribute("aria-label")).toBe("Open the nodes");
+    expect(hintData("dashboard-nodes")).toEqual({});
   });
 
   it("shows the nodes without a refusal once every node shares a protocol", async () => {
@@ -178,6 +194,7 @@ describe("the tiles when there is little to count", () => {
     await openDashboard();
     await shows("dashboard-nodes", "1");
     expect(hintOf("dashboard-nodes")).toBe("of 1 enrolled");
+    expect(hintData("dashboard-nodes")).toEqual({ "data-total": "1", "data-mismatched": "0" });
   });
 });
 

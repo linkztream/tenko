@@ -542,3 +542,66 @@ async fn edits_are_inline_jobs() {
     assert_eq!(stored.1, view.revision);
     fx.host.shutdown().await;
 }
+
+/// The next health change within five seconds, `None` when none comes.
+async fn next_health_change(
+    changes: &mut tokio::sync::broadcast::Receiver<ConnectorId>,
+) -> Option<ConnectorId> {
+    tokio::time::timeout(Duration::from_secs(5), changes.recv())
+        .await
+        .ok()
+        .and_then(Result::ok)
+}
+
+#[tokio::test]
+async fn health_changes_name_the_instance_whose_process_or_remote_health_changed() {
+    let fx = fixture("normal", false);
+    let cx = admin();
+    let mut health = fx.host.health_changes();
+    let view = fx
+        .host
+        .create(&cx, new_sample("Announced"))
+        .await
+        .expect("create");
+    let id = view.instance.id;
+    assert_eq!(fx.host.supervised(), vec![id]);
+
+    // The runtime starts and the plugin process comes up: every step names the instance,
+    // and one of them leaves it running, so a reader that reads again on each sees it.
+    let mut running = false;
+    while !running {
+        let changed = next_health_change(&mut health)
+            .await
+            .expect("a change for each step until the plugin runs");
+        assert_eq!(changed, id);
+        running = fx
+            .host
+            .get(id, None)
+            .await
+            .expect("view")
+            .health
+            .process
+            .is_running();
+    }
+
+    // A remote check with a new outcome is a change; the same outcome again is not.
+    let report = fx.host.check(id, None).await.expect("check");
+    assert_eq!(report.health, Health::Healthy);
+    assert_eq!(next_health_change(&mut health).await, Some(id));
+    fx.host.check(id, None).await.expect("check again");
+    assert!(matches!(
+        health.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+
+    // Disabling stops the process: named again, and the instance reads stopped.
+    fx.host.set_enabled(&cx, id, false).await.expect("disable");
+    assert_eq!(next_health_change(&mut health).await, Some(id));
+    while let Ok(changed) = health.try_recv() {
+        assert_eq!(changed, id);
+    }
+    let view = fx.host.get(id, None).await.expect("view");
+    assert_eq!(view.health.process.state, ProcessState::Stopped);
+    assert_eq!(fx.host.supervised(), Vec::<ConnectorId>::new());
+    fx.host.shutdown().await;
+}

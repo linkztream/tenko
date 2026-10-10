@@ -34,7 +34,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { Page, Route } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { test as base, expect } from "./support/fixtures";
 import { ApiError, type Api, type Schemas } from "./support/api";
 import { expectRendered } from "./support/i18n";
@@ -78,42 +78,6 @@ const test = base.extend<{ source: ReleaseSource; scenario: Scenario }>({
     await use(scenario === "source" ? { updates } : { updates, layout: true, versionFromLayout: scenario === "install" });
   },
 });
-
-/**
- * The public health probe names the version the binary was built as, while the update service
- * of a test server runs as the version of its layout directory (TENKO_TEST_VERSION_FROM_LAYOUT).
- * The page waits for the probe to name the version it installed, which the probe of a test
- * server never does. Once `enable()` is called, the probe's answer to the page names
- * `version`; before that, and for every request of the test itself, the answer is the
- * server's own. In production both versions are one, and no rewriting is needed.
- */
-async function healthNaming(page: Page, version: string): Promise<{ enable: () => void; disable: () => Promise<void> }> {
-  const pattern = "**/api/v1/health";
-  let active = false;
-  const handler = async (route: Route) => {
-    if (!active) {
-      await route.continue();
-      return;
-    }
-    try {
-      const response = await route.fetch();
-      const health = (await response.json()) as Schemas["Health"];
-      await route.fulfill({ response, json: { ...health, version } });
-    } catch {
-      await route.abort();
-    }
-  };
-  await page.route(pattern, handler);
-  return {
-    enable: () => {
-      active = true;
-    },
-    disable: async () => {
-      active = false;
-      await page.unroute(pattern, handler);
-    },
-  };
-}
 
 /** The four steps of the install job, in order (docs 8.5). */
 const STEPS = ["sys.update.fetch", "sys.update.verify", "sys.update.check", "sys.update.switch"] as const;
@@ -317,10 +281,13 @@ test.describe("with a release source", () => {
     await expect(page.getByTestId("updates-newest")).toHaveText(next);
 
     // The notes are elements: three headings, the list items, bold and code inside them.
-    await expect(card.locator("h4")).toHaveText(["Added", "Fixed", "Security"]);
-    await expect(card.locator("li")).toHaveCount(5);
-    await expect(card.locator("li strong")).toHaveText("templates");
-    await expect(card.locator("li code")).toHaveText("HttpOnly");
+    const headings = card.getByTestId("md-heading");
+    await expect(headings).toHaveText(["Added", "Fixed", "Security"]);
+    await expect(headings.first()).toHaveAttribute("data-level", "4");
+    const items = card.getByTestId("md-item");
+    await expect(items).toHaveCount(5);
+    await expect(items.getByTestId("md-strong")).toHaveText("templates");
+    await expect(items.getByTestId("md-code")).toHaveText("HttpOnly");
     // Markup in the notes is text: no image, no script ran.
     await expect(card.locator("img")).toHaveCount(0);
     expect(await page.evaluate(() => "pwned" in window)).toBe(false);
@@ -330,7 +297,7 @@ test.describe("with a release source", () => {
     await expect(withKey(card, "update-mark", "action")).toBeVisible();
     const action = card.getByTestId("update-action");
     await expect(action).toBeVisible();
-    await expect(action.locator("code")).toHaveText("tenko upgrade check");
+    await expect(action.getByTestId("md-code")).toHaveText("tenko upgrade check");
     await expect(action).toContainText("192.0.2.1");
 
     // The notice in the status bar follows the check, and its link leads to this page.
@@ -439,9 +406,11 @@ test.describe("from the version layout", () => {
     const repeated = dialog.getByTestId("update-confirm-action");
     await expect(repeated).toBeVisible();
     await expect(repeated.locator(`[data-key="${next}"]`)).toBeVisible();
-    await expect(repeated.locator("code")).toHaveText("tenko upgrade check");
+    await expect(repeated.getByTestId("md-code")).toHaveText("tenko upgrade check");
     await expect(repeated).toContainText("192.0.2.1");
-    const health = await healthNaming(page, next);
+    // The health probe names the version the server runs as, which the page waits for after
+    // the restart: still the old one.
+    expect((await api.get<Schemas["Health"]>("/health")).version).toBe(running);
     const accepted = await confirmInstall(page);
     expect(accepted.version).toBe(next);
     const job = accepted.job_id;
@@ -463,9 +432,8 @@ test.describe("from the version layout", () => {
     await server.restart();
 
     // The page asks the health probe every two seconds, sees the new version and reloads into it.
-    health.enable();
     await expect(page.getByTestId("updates-running-version")).toHaveText(next, { timeout: 60_000 });
-    await health.disable();
+    expect((await api.get<Schemas["Health"]>("/health")).version).toBe(next);
     await expect(page.getByTestId("updates-progress")).toHaveCount(0);
 
     // What is new: the notes of the version, shown once, recorded when closed.
@@ -478,7 +446,7 @@ test.describe("from the version layout", () => {
     await expect(whatsNew).toBeVisible();
     const notes = withKey(whatsNew.getByTestId("whats-new-notes"), "update-release", next);
     await expect(notes).toBeVisible();
-    await expect(notes.locator("h4")).toHaveText(["Added", "Fixed", "Security"]);
+    await expect(notes.getByTestId("md-heading")).toHaveText(["Added", "Fixed", "Security"]);
     await expect(withKey(notes, "update-mark", "security")).toBeVisible();
     await expect(withKey(notes, "update-mark", "action")).toBeVisible();
     await whatsNew.getByTestId("whats-new-close").click();

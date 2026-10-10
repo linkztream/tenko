@@ -343,6 +343,11 @@ test("the observations list the facts of two sources and open the picture of a s
   await page.goto(`/discovery/observations?source=${firstSource}`);
   await expect(grid.getByTestId("row")).toHaveCount(3);
   await expect(withId(grid, "row", `${secondSource}|host:sample/0`)).toHaveCount(0);
+  // Removing the source chip lists every fact again.
+  await page.getByTestId("filter-source").getByTestId("filter-chip-remove").click();
+  await expect(page.getByTestId("filter-source")).toHaveCount(0);
+  await expect(page).not.toHaveURL(/[?&]source=/);
+  await expect(grid.getByTestId("row")).toHaveCount(facts.length);
 
   // The lookup opens the picture of any subject; one that no fact names says so.
   await page.goto("/discovery/observations");
@@ -405,7 +410,7 @@ test("the observations list the facts of two sources and open the picture of a s
   for (const proposal of about) {
     await expect(withId(subject, "subject-proposal", proposal.id).locator(`[data-state="${proposal.state}"]`)).toBeVisible();
   }
-  await withId(subject, "subject-proposal", hosts[0]!.id).locator("a").click();
+  await withId(subject, "subject-proposal", hosts[0]!.id).getByTestId("subject-proposal-link").click();
   await expect(page).toHaveURL(new RegExp(`/discovery/${hosts[0]!.id}$`));
   await expect(withId(page, "proposal-panel", hosts[0]!.id).getByTestId("proposal-decision")).toBeVisible();
 

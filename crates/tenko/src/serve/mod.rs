@@ -576,7 +576,7 @@ async fn serve(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> Result<(
         roles = %resolved.roles,
         data_dir = %resolved.data_dir.display(),
         "tenko {} starting",
-        version()
+        crate::upgrade::running_version()
     );
     let mut running = Running::new();
     let restart = crate::upgrade::restart::Restart::new();
@@ -1202,6 +1202,11 @@ async fn start(
                     Arc::new(updates.clone());
                 server.extensions.insert(service);
             }
+            server
+                .extensions
+                .insert(tenko_api::routes::system::RunningVersion::new(
+                    crate::upgrade::running_version().to_string(),
+                ));
             if let Some((pem, fingerprint)) = &tls.ca_root {
                 server.extensions.insert(Arc::new(CaRootSource::new(
                     tls.service.clone(),
@@ -1213,6 +1218,7 @@ async fn start(
                 imports.register(&mut server);
             }
             connectors.register(&mut server);
+            connectors.publish_health(&state);
             cluster.register(&mut server, &state);
             if let Some(reconciler) = &reconciler {
                 server.extensions.insert(Arc::clone(reconciler));
@@ -1452,9 +1458,13 @@ fn base64_decode(text: &str) -> Option<Vec<u8>> {
 /// while setup is open.
 fn announce(resolved: &Resolved, services: &Services, ready: &Ready) {
     let url = public_url(resolved, services, &ready.addrs);
-    tracing::info!(url = %url, "tenko {} ready", version());
+    tracing::info!(url = %url, "tenko {} ready", crate::upgrade::running_version());
     let mut out = std::io::stdout().lock();
-    let _ = writeln!(out, "tenko {} ready at {url}", version());
+    let _ = writeln!(
+        out,
+        "tenko {} ready at {url}",
+        crate::upgrade::running_version()
+    );
     if services.lab_plain_http {
         let _ = writeln!(
             out,

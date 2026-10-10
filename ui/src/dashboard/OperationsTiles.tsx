@@ -1,6 +1,11 @@
 // The tiles of the start page for discovery, connectors and nodes (WP2.9): the open proposals
 // with a link to the inbox (and how many of them are conflicts), the health of the connector
 // instances, and the connected nodes from the system status. Each tile follows its topic.
+//
+// The numbers of a hint are inside a translated plural message, so the hint paragraph also
+// carries them as data attributes (`dashboard-proposals-hint`: `data-conflicts`;
+// `dashboard-connectors-hint`: `data-total`, `data-failing`; `dashboard-nodes-hint`:
+// `data-total`, `data-mismatched`). While a tile has not read its data the attributes are absent.
 import { A } from "@solidjs/router";
 import { createMemo, Show } from "solid-js";
 import { api } from "../api/client";
@@ -68,7 +73,9 @@ export function OperationsTiles(props: { status: SystemStatus | null | undefined
               <Si value={proposalsRead() ? open().length : null} />
             </A>
           </div>
-          <p class="muted">{t("dashboard.tile.proposals_hint", { conflicts: conflicts() })}</p>
+          <p class="muted" data-testid="dashboard-proposals-hint" data-conflicts={proposalsRead() ? conflicts() : undefined}>
+            {t("dashboard.tile.proposals_hint", { conflicts: conflicts() })}
+          </p>
         </section>
       </Show>
       <section class="card tile" data-testid="dashboard-connectors">
@@ -78,7 +85,14 @@ export function OperationsTiles(props: { status: SystemStatus | null | undefined
             <Si value={connectors.value.latest ? health().healthy : null} />
           </A>
         </div>
-        <p class="muted">{t("dashboard.tile.connectors_hint", { total: health().total, failing: health().total - health().healthy })}</p>
+        <p
+          class="muted"
+          data-testid="dashboard-connectors-hint"
+          data-total={connectors.value.latest ? health().total : undefined}
+          data-failing={connectors.value.latest ? health().total - health().healthy : undefined}
+        >
+          {t("dashboard.tile.connectors_hint", { total: health().total, failing: health().total - health().healthy })}
+        </p>
       </section>
       <section class="card tile" data-testid="dashboard-nodes">
         <h2>{t("dashboard.tile.nodes")}</h2>
@@ -87,7 +101,12 @@ export function OperationsTiles(props: { status: SystemStatus | null | undefined
             <Si value={cluster() ? cluster()!.connected : null} />
           </A>
         </div>
-        <p class="muted">
+        <p
+          class="muted"
+          data-testid="dashboard-nodes-hint"
+          data-total={cluster()?.nodes}
+          data-mismatched={cluster() ? mismatched() : undefined}
+        >
           {cluster() ? t("dashboard.tile.nodes_hint", { total: cluster()!.nodes, mismatched: mismatched() }) : t("dashboard.tile.nodes_none")}
         </p>
       </section>

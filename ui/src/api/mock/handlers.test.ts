@@ -1166,12 +1166,73 @@ describe("settings", () => {
     expect(custom.body.settings.password_policy).toEqual({ preset: "custom", min_length: 10, max_length: 128, pattern: "[a-z0-9-]+" });
   });
 
+  const SETTINGS = "/api/v1/settings/security";
+  const refused = async (body: unknown) => expectProblem(await patch(SETTINGS, body), 409, "settings.pin_coupling");
+  const passes = async (body: unknown) => (await patch<SecuritySettingsView>(SETTINGS, body)).status;
+
   it("refuses a PIN while the vault holds operator secrets", async () => {
+    // Standard: a password preset and MFA for administrators, so a PIN would not stand alone yet.
     resetMockDb("signed-in");
     db.vaultHasOperatorSecrets = true;
-    expectProblem(await patch("/api/v1/settings/security", { password_policy: { preset: "pin" } }), 409, "settings.pin_coupling");
-    expectProblem(await patch("/api/v1/settings/security", { profile: "home" }), 409, "settings.pin_coupling");
-    expect((await patch("/api/v1/settings/security", { password_policy: { preset: "hardened" } })).status).toBe(200);
+    await refused({ password_policy: { preset: "pin" }, mfa: "optional" });
+    await refused({ profile: "home" });
+    await refused({ profile: "lab" });
+    expect(await passes({ password_policy: { preset: "hardened" } })).toBe(200);
+
+    // With MFA optional, the PIN preset and every Custom preset that accepts a short number would.
+    resetMockDb("signed-in");
+    expect(await passes({ mfa: "optional" })).toBe(200);
+    db.vaultHasOperatorSecrets = true;
+    await refused({ password_policy: { preset: "pin" } });
+    await refused({ password_policy: { preset: "custom", min_length: 8 } });
+    await refused({ password_policy: { preset: "custom", min_length: 4, max_length: 64, pattern: "[0-9]+" } });
+    expect(db.settings.password_policy).toEqual({ preset: "standard" });
+    // A policy that no short number meets leaves the PIN out: 12 characters or more, or a pattern with letters.
+    expect(await passes({ password_policy: { preset: "custom", min_length: 12 } })).toBe(200);
+    expect(await passes({ password_policy: { preset: "custom", min_length: 8, pattern: "[a-z]+" } })).toBe(200);
+    expect(await passes({ password_policy: { preset: "hardened" } })).toBe(200);
+  });
+
+  it("lets a PIN stand alone only through a change of the password policy or MFA", async () => {
+    // Home: the PIN preset with MFA optional is the profile itself. Set it up before the secret exists.
+    resetMockDb("signed-in");
+    expect(await passes({ profile: "home" })).toBe(200);
+    db.vaultHasOperatorSecrets = true;
+
+    // Other toggles pass, and so does saying again what is already set.
+    expect(await passes({ secret_reveal: { step_up: "passkey", bound_host_only: true } })).toBe(200);
+    expect(db.settings.secret_reveal).toEqual({ step_up: "passkey", bound_host_only: true });
+    expect(await passes({ lockout: "off" })).toBe(200);
+    expect(db.settings.lockout).toBe("off");
+    expect(await passes({ session: { absolute_secs: 3600, idle_secs: 600 } })).toBe(200);
+    expect(await passes({ mfa: "optional", password_policy: { preset: "pin" } })).toBe(200);
+    expect(await passes({ profile: "home" })).toBe(200);
+    expect(db.settings.lockout).toBe("progressive_delay");
+
+    // MFA for everyone passes; so does the PIN preset next to it, but optional again is the PIN alone.
+    expect(await passes({ mfa: "everyone" })).toBe(200);
+    expect(db.settings.mfa).toBe("everyone");
+    expect(await passes({ password_policy: { preset: "pin" } })).toBe(200);
+    await refused({ mfa: "optional" });
+    await refused({ mfa: "optional", lockout: "off" });
+    expect(db.settings.mfa).toBe("everyone");
+
+    // A profile switch resets the toggles first: Home sets MFA optional, unless the same request says more.
+    await refused({ profile: "home" });
+    expect(await passes({ profile: "home", mfa: "administrators" })).toBe(200);
+    expect(db.settings.mfa).toBe("administrators");
+    expect(db.settings.password_policy).toEqual({ preset: "pin" });
+  });
+
+  it("compares a Custom policy the way the server does: an absent maximum is 256", async () => {
+    resetMockDb("signed-in");
+    expect(await passes({ mfa: "optional", password_policy: { preset: "custom", min_length: 8 } })).toBe(200);
+    db.vaultHasOperatorSecrets = true;
+    // The same policy again, written with the default maximum: nothing changes, so it passes.
+    expect(await passes({ password_policy: { preset: "custom", min_length: 8, max_length: 256 } })).toBe(200);
+    // A policy that differs and still admits a PIN is refused.
+    await refused({ password_policy: { preset: "custom", min_length: 8, max_length: 128 } });
+    await refused({ password_policy: { preset: "custom", min_length: 6 } });
   });
 
   it("is for administrators to change and administrators and operators to read", async () => {

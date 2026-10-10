@@ -21,9 +21,10 @@
 // - A secret reference reaches the plugin: the vault secret is referenced for the purpose
 //   `api_key`, the sample tags every host with `credential:present`, the injection is
 //   audited, and the value shows nowhere.
-// - A known defect, kept as a fixme test: the page of a new instance does not follow the
-//   plugin process from starting to running (see the comment on that test). The scenarios
-//   that need a running process read the page again, so the rest of the coverage runs.
+// - Process and health follow without a reload: the page of a new instance, the list and the
+//   dashboard tile show the plugin process going from starting to running. The plugin host
+//   announces every change of a process or of its health as a `connectors` event (no store
+//   write carries them), and the views read the instance again.
 //
 // Arrangement: instances are created through the API unless the scenario is about the form;
 // documentation values only (192.0.2.0/24, 2001:db8::/32, MAC 00:00:5e:00:53:xx, names under
@@ -119,12 +120,15 @@ async function expectGone(api: Api, id: string): Promise<void> {
 }
 
 /**
- * The tile of the dashboard shows `healthy` in its number and `enabled` in its hint (the
- * words around the numbers are translated and not asserted).
+ * The tile of the dashboard shows `healthy` in its number, and its hint counts `enabled`
+ * instances of which `enabled - healthy` need a look (the words around the numbers are
+ * translated; the hint carries the numbers as attributes).
  */
 async function expectTile(tile: Locator, healthy: number, enabled: number): Promise<void> {
   await expect(tile.getByTestId("dashboard-connectors-link")).toHaveText(String(healthy));
-  await expect(tile).toContainText(new RegExp(`\\b${healthy}\\b\\D+\\b${enabled}\\b`), { useInnerText: true });
+  const hint = tile.getByTestId("dashboard-connectors-hint");
+  await expect(hint).toHaveAttribute("data-total", String(enabled));
+  await expect(hint).toHaveAttribute("data-failing", String(enabled - healthy));
 }
 
 test("the plugin list agrees with the CLI, and the form generated from the settings schema creates and starts an instance", async ({
@@ -256,10 +260,8 @@ test("the plugin list agrees with the CLI, and the form generated from the setti
   });
   expect((await connectors(api)).map((c) => c.id)).toEqual([id]);
 
-  // The plugin process starts. The page shows it only after it is read again: nothing
-  // announces the change from starting to running (see the fixme test below).
+  // The plugin process starts, and the page follows it from starting to running.
   await waitForConnectorProcess(api, id, "running");
-  await page.reload();
   await expect(processOf(page)).toHaveAttribute("data-state", "running");
   await expect(page.getByTestId("connector-health")).toHaveAttribute("data-health", "healthy");
   const shown = page.getByTestId("connector-settings-view");
@@ -276,20 +278,26 @@ test("the plugin list agrees with the CLI, and the form generated from the setti
   await expect(cell(row, "plugin")).toContainText("sample");
 });
 
-// Defect (found by WP2.11): the health of an instance is the state of its supervised plugin
-// process, and a change of that state publishes no event on the `connectors` topic (only
-// store writes do) while the instance page, the list and the dashboard tile never read it
-// again on their own. An instance page that opens while the process is still starting (the
-// form opens it right after the create answer) therefore shows "starting", health
-// "failing", until the next store write, for example the next scheduled run, minutes later;
-// a reload shows the truth. Reproduction: New connector, a name, Create: the page of the new
-// instance says it is starting and keeps saying so.
-test.fixme("the page of a new instance follows the plugin process from starting to running without a reload", async ({
+// The health of an instance is the state of its supervised plugin process and the outcome of
+// its last remote check, both kept in memory on the node. The page of a new instance opens
+// while the process is still starting (the form opens it right after the create answer); the
+// change to running reaches the page, the list and the dashboard tile as a `connectors` event
+// of the plugin host, without a reload (found by WP2.11, fixed by WP2.12).
+test("the page of a new instance, the list and the dashboard tile follow the plugin process from starting to running", async ({
   page,
   api,
   signedIn,
 }) => {
   expect(signedIn.session.user.name).toBe(ADMIN.name);
+  // The list and the dashboard stay open on two more pages of the same session.
+  const list = await page.context().newPage();
+  await list.goto("/connectors");
+  await expect(list.getByTestId("connectors-empty")).toBeVisible();
+  const dashboard = await page.context().newPage();
+  await dashboard.goto("/");
+  const tile = dashboard.getByTestId("dashboard-connectors");
+  await expectTile(tile, 0, 0);
+
   await page.goto("/connectors");
   await page.getByTestId("connectors-create").click();
   const form = page.getByTestId("dialog-connector-form");
@@ -300,6 +308,21 @@ test.fixme("the page of a new instance follows the plugin process from starting 
   await waitForConnectorProcess(api, id, "running");
   await expect(processOf(page)).toHaveAttribute("data-state", "running");
   await expect(page.getByTestId("connector-health")).toHaveAttribute("data-health", "healthy");
+
+  const row = gridRow(list, "connectors", OFFICE);
+  await expect(row).toHaveAttribute("data-id", id);
+  await expect(cell(row, "process").locator("[data-state]")).toHaveAttribute("data-state", "running");
+  await expect(cell(row, "health").getByTestId("connector-health")).toHaveAttribute("data-health", "healthy");
+  await expectTile(tile, 1, 1);
+
+  // The first scheduled run follows a few seconds after the start. Its outcome reaches the open
+  // page as well: the run is recorded in `connect.runs`, whose event names the instance (the
+  // page reads only events about its instance; found on the Linux runner, fixed by WP2.12).
+  await expect
+    .poll(async () => (await connectorOf(api, id)).last_run?.outcome, { message: "the first scheduled run", timeout: 30_000 })
+    .toBe("succeeded");
+  await expect(page.getByTestId("connector-last-run").locator('[data-outcome="succeeded"]')).toBeVisible();
+  await expect(cell(row, "last_run").locator('[data-outcome="succeeded"]')).toBeVisible();
 });
 
 test("a run follows its job, hands the observations on and a check reports the remote system healthy", async ({ page, api, signedIn }) => {
@@ -398,10 +421,9 @@ test("an instance is edited, disabled, enabled and deleted, and the dashboard ti
   await expect(tile).toBeVisible();
   await expectTile(tile, 0, 0);
 
-  // Two instances that run are two healthy ones (read again: see the fixme test above).
+  // Two instances that run are two healthy ones; the tile follows their processes.
   const office = await createSampleConnector(api, OFFICE, { site: "office", hosts: 4 });
   const lab = await createSampleConnector(api, "Lab sample", { hosts: 2 });
-  await dashboard.reload();
   await expectTile(tile, 2, 2);
 
   // The list shows both; the instance opens from its row.
@@ -464,11 +486,9 @@ test("an instance is edited, disabled, enabled and deleted, and the dashboard ti
   await expect(page.getByTestId("connector-disabled")).toHaveCount(0);
   await waitForConnectorProcess(api, office.id, "running");
   expect((await connectorOf(api, office.id)).enabled).toBe(true);
-  // The pages read the process again: nothing announces its change from starting to running.
-  await page.reload();
+  // The page and the tile follow the process from starting to running.
   await expect(processOf(page)).toHaveAttribute("data-state", "running");
   await expect(page.getByTestId("connector-health")).toHaveAttribute("data-health", "healthy");
-  await dashboard.reload();
   await expectTile(tile, 2, 2);
 
   // Delete: after the confirmation the instance is gone from the list and the API.

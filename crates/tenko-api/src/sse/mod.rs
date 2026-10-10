@@ -167,6 +167,11 @@ impl Default for EventRoutes {
                 Topic::Connectors,
                 Some(ObjectKind::Connector),
             )
+            .table(
+                TableName::from_static("connect.runs"),
+                Topic::Connectors,
+                Some(ObjectKind::Connector),
+            )
             .namespace("connect", Topic::Connectors)
             .table(
                 TableName::from_static("ipam.proposals"),
@@ -263,6 +268,14 @@ mod tests {
         assert_eq!(
             route("jobs.jobs").and_then(|r| r.kind),
             Some(ObjectKind::Job)
+        );
+        assert_eq!(
+            route("connect.runs"),
+            Some(Route {
+                topic: Topic::Connectors,
+                kind: Some(ObjectKind::Connector)
+            }),
+            "a run names its instance"
         );
         assert_eq!(route("ipam.prefix_cidrs"), None, "secondary index");
         assert_eq!(route("jobs.transitions"), None);

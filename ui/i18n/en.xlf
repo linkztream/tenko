@@ -1694,7 +1694,7 @@
         <segment><source>The vault holds secrets</source></segment>
       </unit>
       <unit id="settings.security.vault.body">
-        <segment><source>A PIN alone cannot be the only way to sign in while the vault holds secrets. Every account that can reach them needs at least a passkey, or the PIN as a second factor next to another factor. This holds in every profile, so the PIN preset cannot be selected now (IAM-07).</source></segment>
+        <segment><source>A PIN alone cannot be the only way to sign in while the vault holds secrets. Every account that can reach them needs at least a passkey, or the PIN as a second factor next to another factor. This holds in every profile, so a change of the password policy or of MFA that would let a PIN stand alone is refused now (IAM-07).</source></segment>
       </unit>
       <unit id="settings.security.consequence.none">
         <segment><source>Nothing changes yet. What a change would do appears here.</source></segment>

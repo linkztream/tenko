@@ -52,6 +52,50 @@ describe("Markdown rendering", () => {
     expect(root.querySelector("p")?.textContent).toBe("Text");
   });
 
+  it("gives every element a generic test id", () => {
+    const root = html(
+      [
+        "### Added",
+        "- **bold** and *italic* and `code` and [a link](https://example.org/)",
+        "- plain",
+        "",
+        "#### Detail",
+        "Text",
+        "",
+        "1. one",
+        "2. two",
+        "   - nested",
+        "",
+        "```",
+        "fenced",
+        "```",
+      ].join("\n"),
+    );
+    const all = (id: string) => Array.from(root.querySelectorAll(`[data-testid="${id}"]`));
+    expect(all("md-heading").map((h) => [h.tagName, h.getAttribute("data-level"), h.textContent])).toEqual([
+      ["H4", "4", "Added"],
+      ["H5", "5", "Detail"],
+    ]);
+    expect(all("md-paragraph").map((p) => p.textContent)).toEqual(["Text"]);
+    expect(all("md-list").map((l) => [l.tagName, l.getAttribute("data-ordered")])).toEqual([
+      ["UL", "false"],
+      ["OL", "true"],
+      ["UL", "false"],
+    ]);
+    expect(all("md-item")).toHaveLength(5);
+    expect(all("md-strong").map((e) => e.textContent)).toEqual(["bold"]);
+    expect(all("md-em").map((e) => e.textContent)).toEqual(["italic"]);
+    expect(all("md-code").map((e) => e.textContent)).toEqual(["code"]);
+    expect(all("md-pre").map((e) => e.textContent)).toEqual(["fenced"]);
+    const links = all("md-link");
+    expect(links.map((a) => [a.tagName, a.getAttribute("href"), a.textContent])).toEqual([["A", "https://example.org/", "a link"]]);
+  });
+
+  it("gives the heading level of the element in data-level", () => {
+    expect(html("### Added", 3).querySelector('[data-testid="md-heading"]')?.getAttribute("data-level")).toBe("3");
+    expect(html("###### Deep", 5).querySelector('[data-testid="md-heading"]')?.getAttribute("data-level")).toBe("6");
+  });
+
   it("starts the headings at the level the page asks for", () => {
     expect(html("### Added", 3).querySelector("h3")?.textContent).toBe("Added");
     expect(html("###### Deep", 5).querySelector("h6")?.textContent).toBe("Deep");
@@ -93,6 +137,7 @@ describe("Markdown rendering", () => {
       "[a](javascript:alert(1)) [b](JaVaScRiPt:alert(1)) [c](data:text/html;base64,AAAA) [d](ftp://example.org/x) [e](//example.org/x) [f](/relative)",
     );
     expect(root.querySelector("a")).toBeNull();
+    expect(root.querySelector('[data-testid="md-link"]')).toBeNull();
     expect(root.textContent).toContain("[a](javascript:alert(1)");
     expect(root.textContent).toContain("[c](data:text/html;base64,AAAA)");
   });
@@ -106,19 +151,21 @@ describe("Markdown rendering", () => {
   it("does not let an HTML tag inside a link text or a heading become markup", () => {
     const root = html("### <u>Title</u>\n[<img src=x onerror=alert(1)>](https://example.org/)");
     expect(root.querySelector("u, img")).toBeNull();
-    expect(root.querySelector("h4")?.textContent).toBe("<u>Title</u>");
+    expect(root.querySelector('[data-testid="md-heading"]')?.textContent).toBe("<u>Title</u>");
     expect(root.querySelector("a")?.textContent).toBe("<img src=x onerror=alert(1)>");
   });
 
   it("lets a backslash keep a character literal", () => {
     const root = html("\\*not italic\\* and \\`not code\\`");
     expect(root.querySelector("em, code")).toBeNull();
+    expect(root.querySelector('[data-testid="md-em"], [data-testid="md-code"]')).toBeNull();
     expect(root.textContent).toBe("*not italic* and `not code`");
   });
 
   it("leaves an unclosed marker as text", () => {
     const root = html("a **bold never ends and a `code never ends");
     expect(root.querySelector("strong, code")).toBeNull();
+    expect(root.querySelector('[data-testid="md-strong"], [data-testid="md-code"]')).toBeNull();
     expect(root.textContent).toBe("a **bold never ends and a `code never ends");
   });
 

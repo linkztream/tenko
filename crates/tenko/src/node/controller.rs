@@ -11,8 +11,10 @@ use std::{
 };
 
 use async_trait::async_trait;
+use futures::{FutureExt as _, StreamExt as _};
 use tenko_api::{
     dto::system::{ClusterStatus, StatusWarning},
+    sse::{EventData, Topic},
     state::AppState,
 };
 use tenko_cluster::{
@@ -24,7 +26,7 @@ use tenko_cluster::{
 };
 use tenko_core::{NodeId, RequestCtx, SystemComponent, Timestamp, VrfId};
 use tenko_jobs::JobEngine;
-use tenko_store::{ReadViewExt as _, Store};
+use tenko_store::{ChangeStream, ReadViewExt as _, Store, WatchFilter};
 use tenko_vault::StoreVault;
 use tokio::{sync::watch, task::JoinHandle};
 
@@ -36,8 +38,12 @@ use crate::{
 /// The notice of nodes that share no protocol major with this controller.
 pub const MISMATCH_NOTICE: &str = "cluster.protocol.mismatch";
 
-/// How often the cluster summary of `GET /system/status` is refreshed.
+/// How often the cluster summary of `GET /system/status` is refreshed when nothing under
+/// `cluster.*` is written (heartbeats in memory, a listener that opens).
 const HEALTH_INTERVAL: Duration = Duration::from_secs(5);
+/// The `kind` of the `cluster` event that announces a new cluster summary (no store
+/// change, so no revision).
+pub const STATUS_EVENT: &str = "cluster.status";
 /// How often expired revocations and old tokens are pruned and the revocation list is read
 /// again (other controllers revoke too, Slice 3).
 const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(3600);
@@ -385,6 +391,13 @@ async fn maintenance(
 
 /// Mirrors the registry's health into `GET /system/status`: the cluster summary and a
 /// warning while nodes share no protocol major with this controller.
+///
+/// The summary is read again as soon as anything under `cluster.*` is written (a node
+/// enrols, connects or disconnects, is revoked, reports another version or a refused
+/// handshake: each of these writes the node's record), and every [`HEALTH_INTERVAL`] as
+/// the fallback. When the summary or the warning changed, a `cluster` event follows
+/// ([`STATUS_EVENT`]): the store's own event of the change can reach the views before the
+/// summary is refreshed, so they read the status again on this one and find the new state.
 async fn health(
     registry: Arc<NodeRegistry>,
     state: Arc<OnceLock<AppState>>,
@@ -392,10 +405,22 @@ async fn health(
 ) {
     let mut tick = tokio::time::interval(HEALTH_INTERVAL);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let filter = WatchFilter::namespaces(["cluster"]);
+    let mut changes = registry.store().watch(None, filter.clone()).ok();
+    let mut shown: Option<(ClusterStatus, Option<StatusWarning>)> = None;
     loop {
         tokio::select! {
             () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
             _ = tick.tick() => {}
+            received = next_change(&mut changes) => {
+                if received {
+                    // A burst of writes (an enrolment writes the node and its token) is one
+                    // refresh: take what has arrived already.
+                    drain(&mut changes);
+                } else {
+                    changes = registry.store().watch(None, filter.clone()).ok();
+                }
+            }
         }
         let Some(state) = state.get() else {
             continue;
@@ -407,51 +432,84 @@ async fn health(
                 continue;
             }
         };
-        if health.mismatched.is_empty() {
-            state.clear_notice(MISMATCH_NOTICE);
-        } else {
-            let detail = health
-                .mismatched
-                .iter()
-                .map(|node| {
-                    format!(
-                        "{} (node {}) offers protocol major(s) {}",
-                        node.name,
-                        node.node,
-                        tenko_cluster::version::format_majors(&node.mismatch.majors.theirs)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("; ");
-            state.set_notice(StatusWarning {
-                code: MISMATCH_NOTICE.to_owned(),
-                detail: format!(
-                    "nodes share no protocol major with this controller, which implements {}: \
-                     {detail}; upgrade the older side",
-                    tenko_cluster::version::format_majors(&health.majors)
-                ),
-                params: [
-                    ("count".to_owned(), health.mismatched.len().to_string()),
-                    (
-                        "nodes".to_owned(),
-                        health
-                            .mismatched
-                            .iter()
-                            .map(|node| node.node.to_string())
-                            .collect::<Vec<_>>()
-                            .join(","),
-                    ),
-                ]
-                .into(),
-            });
+        let warning = mismatch_warning(&health);
+        match &warning {
+            Some(warning) => state.set_notice(warning.clone()),
+            None => state.clear_notice(MISMATCH_NOTICE),
         }
-        state.set_cluster_status(Some(ClusterStatus {
+        let status = ClusterStatus {
             listening: health.listening,
             majors: health.majors,
             nodes: health.nodes,
             connected: health.connected,
             versions: health.versions,
             mismatched: u64::try_from(health.mismatched.len()).unwrap_or(u64::MAX),
-        }));
+        };
+        state.set_cluster_status(Some(status.clone()));
+        let now = (status, warning);
+        if shown.as_ref() != Some(&now) {
+            shown = Some(now);
+            let mut event = EventData::new(Topic::Cluster, None);
+            event.kind = Some(STATUS_EVENT.to_owned());
+            state.events().publish_system(&event);
+        }
+    }
+}
+
+/// The warning of nodes that share no protocol major with this controller, if any.
+fn mismatch_warning(health: &tenko_cluster::model::ClusterHealth) -> Option<StatusWarning> {
+    if health.mismatched.is_empty() {
+        return None;
+    }
+    let detail = health
+        .mismatched
+        .iter()
+        .map(|node| {
+            format!(
+                "{} (node {}) offers protocol major(s) {}",
+                node.name,
+                node.node,
+                tenko_cluster::version::format_majors(&node.mismatch.majors.theirs)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    Some(StatusWarning {
+        code: MISMATCH_NOTICE.to_owned(),
+        detail: format!(
+            "nodes share no protocol major with this controller, which implements {}:              {detail}; upgrade the older side",
+            tenko_cluster::version::format_majors(&health.majors)
+        ),
+        params: [
+            ("count".to_owned(), health.mismatched.len().to_string()),
+            (
+                "nodes".to_owned(),
+                health
+                    .mismatched
+                    .iter()
+                    .map(|node| node.node.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
+        ]
+        .into(),
+    })
+}
+
+/// Waits for the next change set; `false` when the stream ended or failed, or there is none
+/// (it is opened again).
+async fn next_change(changes: &mut Option<ChangeStream>) -> bool {
+    if let Some(stream) = changes {
+        matches!(stream.next().await, Some(Ok(_)))
+    } else {
+        tokio::time::sleep(HEALTH_INTERVAL).await;
+        false
+    }
+}
+
+/// Takes the change sets that have arrived already, without waiting.
+fn drain(changes: &mut Option<ChangeStream>) {
+    if let Some(stream) = changes {
+        while let Some(Some(Ok(_))) = stream.next().now_or_never() {}
     }
 }

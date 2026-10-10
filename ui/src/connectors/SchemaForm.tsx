@@ -56,6 +56,8 @@ type Attrs = Record<string, string | undefined>;
 interface Control {
   id: string;
   noteId: string;
+  /** The field path of the setting (`settings.url`), which names its error in `data-field`. */
+  path: string;
   help: () => string | undefined;
   error: () => string | undefined;
   /** For an input or select with its own label. */
@@ -137,6 +139,7 @@ function controlOf(f: SettingField, scope: Scope, helpText: () => string | undef
   return {
     id,
     noteId,
+    path: f.path,
     help: helpText,
     error,
     attrs: {
@@ -170,8 +173,12 @@ function put(scope: Scope, name: string, value: unknown): void {
 // ---------------------------------------------------------------------------------
 // Pieces
 
-/** The line under a control: its error with a glyph (never color alone), else its help. */
-function Note(props: { id: string; help?: string | undefined; error?: string | undefined }) {
+/**
+ * The line under a control: its error with a glyph (never color alone), else its help. The
+ * error is `data-testid="field-error"`; `field` is the setting's path (`settings.url`, for an
+ * item `settings.ssids[1]`), the same path as the control's `field-settings-url`.
+ */
+function Note(props: { id: string; field: string; help?: string | undefined; error?: string | undefined }) {
   return (
     <Show
       when={props.error}
@@ -183,7 +190,7 @@ function Note(props: { id: string; help?: string | undefined; error?: string | u
         </Show>
       }
     >
-      <span class="help bad sf-note" id={props.id} role="alert">
+      <span class="help bad sf-note" id={props.id} role="alert" data-testid="field-error" data-field={props.field}>
         <Icon name="alert" size="xs" />
         {props.error}
       </span>
@@ -199,7 +206,7 @@ function Frame(props: { field: SettingField; c: Control; children: JSX.Element }
         {labelOf(props.field)}
       </label>
       {props.children}
-      <Note id={props.c.noteId} help={props.c.help()} error={props.c.error()} />
+      <Note id={props.c.noteId} field={props.c.path} help={props.c.help()} error={props.c.error()} />
     </div>
   );
 }
@@ -376,7 +383,7 @@ function booleanField(f: BooleanField, scope: Scope): JSX.Element {
         />
         <span>{labelOf(f)}</span>
       </label>
-      <Note id={c.noteId} help={c.help()} error={c.error()} />
+      <Note id={c.noteId} field={c.path} help={c.help()} error={c.error()} />
     </div>
   );
 }
@@ -479,7 +486,7 @@ function Item(props: {
         </button>
       </div>
       <Show when={error()}>
-        <Note id={noteId()} error={error()} />
+        <Note id={noteId()} field={path()} error={error()} />
       </Show>
     </li>
   );
@@ -555,7 +562,7 @@ function arrayField(f: ArrayField, scope: Scope): JSX.Element {
           <Icon name="plus" size="sm" /> {t("connectors.form.item_add")}
         </button>
       </div>
-      <Note id={c.noteId} help={c.help()} error={c.error()} />
+      <Note id={c.noteId} field={c.path} help={c.help()} error={c.error()} />
     </fieldset>
   );
 }
@@ -570,7 +577,7 @@ function groupField(f: GroupField, scope: Scope): JSX.Element {
   return (
     <fieldset {...c.fieldset} class="sf-set">
       <legend classList={{ required: f.required }}>{labelOf(f)}</legend>
-      <Note id={c.noteId} help={c.help()} error={c.error()} />
+      <Note id={c.noteId} field={c.path} help={c.help()} error={c.error()} />
       <div class="sf-fields">
         <Fields fields={f.fields} scope={child} />
       </div>
@@ -593,7 +600,7 @@ function unsupportedField(f: UnsupportedField, scope: Scope): JSX.Element {
       <code class="sf-code mono" data-testid={c.attrs["data-testid"]}>
         {shown()}
       </code>
-      <Note id={c.noteId} help={c.help()} error={c.error()} />
+      <Note id={c.noteId} field={c.path} help={c.help()} error={c.error()} />
     </div>
   );
 }

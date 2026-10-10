@@ -64,6 +64,13 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - Operators may reveal operator secrets, so the PIN rule applies to operator accounts too: once the vault holds a secret, an operator signs in with a password, a second factor or a passkey.
 - A move completes its observation step by itself when the device is seen at its new address from its own MAC address; a person can still confirm the step by hand.
 
+### Fixed
+
+- The page of a connector, the connectors list and the connectors tile of the start page follow the plugin process from starting to running, and every change of its health, without a reload.
+- The nodes tile of the start page and the cluster summary of the nodes page count a node as soon as it enrols, connects, disconnects or is revoked, instead of keeping the old numbers until a reload.
+- With an operator secret in the vault, the security settings of the Home and Lab profiles can be changed again, for example the reveal policy (TGL-24). Only a change of the password policy or of the MFA requirement that would let a PIN be the only factor is refused, and the settings page says so before anything is sent.
+- After an update installed from the web UI, the health check and the start-up line name the version that runs, so the update page sees the restart into the new version.
+
 ### Security
 
 - The cluster port accepts only node certificates of the installation's internal CA that are not revoked, and a node accepts only a controller of its own CA. Enrolment tokens are kept only as a digest, work once and expire after an hour by default; every enrolment, and every refused one, is written to the audit log. On Windows a node's private key is sealed with DPAPI.

@@ -278,7 +278,12 @@ export class EventStream {
     }
     const topic = isTopic(data.topic) ? data.topic : isTopic(e.type) ? e.type : undefined;
     if (!topic) return;
-    const revision = typeof data.revision === "number" ? data.revision : e.lastEventId ? Number(e.lastEventId) : undefined;
+    // A store event names its revision in its data. An event whose data names a topic but no
+    // revision is a system event (a plugin process that started, a new cluster summary): it
+    // has no revision, even though EventSource keeps reporting the id of the event before
+    // it in `lastEventId`. Taking that id would make the views drop it as already seen.
+    const revision =
+      typeof data.revision === "number" ? data.revision : isTopic(data.topic) ? undefined : e.lastEventId ? Number(e.lastEventId) : undefined;
     const event: ApiEvent = {
       topic,
       type: e.type,

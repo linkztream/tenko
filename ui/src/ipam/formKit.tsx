@@ -78,8 +78,11 @@ export interface ControlProps {
   "aria-required": "true" | undefined;
 }
 
-/** The line under a control: its help, or its error with a glyph (never color alone). */
-export function FieldNote(props: { id: string; help?: string | undefined; error?: string | undefined }) {
+/**
+ * The line under a control: its help, or its error with a glyph (never color alone). The
+ * error carries `data-testid="field-error"` and, with `field`, `data-field`.
+ */
+export function FieldNote(props: { id: string; field?: string | undefined; help?: string | undefined; error?: string | undefined }) {
   return (
     <Show
       when={props.error}
@@ -91,7 +94,7 @@ export function FieldNote(props: { id: string; help?: string | undefined; error?
         </Show>
       }
     >
-      <span class="help bad field-note" id={props.id} role="alert">
+      <span class="help bad field-note" id={props.id} role="alert" data-testid="field-error" data-field={props.field}>
         <Icon name="alert" size="xs" />
         {props.error}
       </span>
@@ -137,7 +140,7 @@ export function Field(props: {
         {props.label}
       </label>
       {props.children(control)}
-      <FieldNote id={noteId} help={props.help} error={props.error} />
+      <FieldNote id={noteId} field={props.name} help={props.help} error={props.error} />
     </div>
   );
 }

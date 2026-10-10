@@ -85,7 +85,7 @@ function fill(testid: string, value: string) {
 
 function fieldError(testid: string): string | undefined {
   const field = screen.getByTestId(testid).closest(".field");
-  return field?.querySelector<HTMLElement>("[data-testid='field-error']")?.textContent?.trim() ?? field?.querySelector<HTMLElement>(".help.bad")?.textContent?.trim();
+  return field?.querySelector<HTMLElement>("[data-testid='field-error']")?.textContent?.trim();
 }
 
 function fakeClipboard(options: { writable?: boolean } = {}) {
@@ -457,8 +457,13 @@ describe("the enrolment tokens", () => {
     const used = tokenOf("probe-annex");
     expect(used.dataset.state).toBe("used");
     expect(used.textContent).toContain("Used");
-    const link = within(used).getByRole("link", { name: "probe-annex" });
+    const link = within(used).getByTestId("enrolment-node");
+    expect(link.textContent).toBe("probe-annex");
     expect(link.getAttribute("href")).toBe(`/nodes/${node.id}`);
+    expect(link.getAttribute("data-id")).toBe(String(node.id));
+    expect(within(used).getByRole("link", { name: "probe-annex" })).toBe(link);
+    // A token that nobody used has no node.
+    expect(within(tokenOf("probe-garage")).queryByTestId("enrolment-node")).toBeNull();
     expect(tokenOf("probe-garage").dataset.state).toBe("pending");
   });
 

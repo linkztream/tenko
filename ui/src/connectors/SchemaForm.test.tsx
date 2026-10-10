@@ -734,15 +734,37 @@ describe("SchemaForm: errors", () => {
     expect(noteOf(input("field-settings-ratio"))).toBe("For example 0.5");
   });
 
+  it("marks an error note as field-error with the path of its setting, and not the help line", () => {
+    mount({
+      initial: { ssids: ["guest", "x".repeat(40)] },
+      errors: { "settings.url": "Enter a URI.", "settings.ssids[1]": "At most 32 characters.", "settings.auth.user": "Required.", "settings.auth": "Check the login." },
+    });
+    const notes = screen.getAllByTestId("field-error");
+    expect(notes.map((n) => [n.getAttribute("data-field"), n.textContent])).toEqual([
+      ["settings.url", "Enter a URI."],
+      ["settings.ssids[1]", "At most 32 characters."],
+      ["settings.auth", "Check the login."],
+      ["settings.auth.user", "Required."],
+    ]);
+    // The path is the one of the control: field-settings-auth-user is settings.auth.user.
+    expect(noteOf(input("field-settings-auth-user"))).toBe("Required.");
+    expect(document.getElementById(input("field-settings-auth-user").getAttribute("aria-describedby") ?? "")?.getAttribute("data-field")).toBe("settings.auth.user");
+    // A help line is not an error: it has no test id (the four notes above are all there is).
+    expect(document.getElementById(input("field-settings-ratio").getAttribute("aria-describedby") ?? "")?.hasAttribute("data-testid")).toBe(false);
+  });
+
   it("follows the errors as they come and go, and brings the help back", () => {
     const m = mount();
     const url = input("field-settings-url");
     expect(url.hasAttribute("aria-invalid")).toBe(false);
     expect(noteOf(url)).toMatch(/^Base URL/);
+    expect(screen.queryByTestId("field-error")).toBeNull();
     m.setErrors({ "settings.url": "Enter a URI." });
     expect(url.getAttribute("aria-invalid")).toBe("true");
     expect(noteOf(url)).toBe("Enter a URI.");
+    expect(screen.getByTestId("field-error").getAttribute("data-field")).toBe("settings.url");
     m.setErrors({});
+    expect(screen.queryByTestId("field-error")).toBeNull();
     expect(url.hasAttribute("aria-invalid")).toBe(false);
     expect(noteOf(url)).toMatch(/^Base URL/);
   });

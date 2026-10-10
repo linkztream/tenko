@@ -683,7 +683,7 @@ A plugin logs to standard error, one event per line. The host forwards standard 
 
 ## 9. Supervision
 
-The host supervises every running plugin. A plugin failure is a status of the connector instance; it never reaches the API or the data plane.
+The host supervises every running plugin. A plugin failure is a status of the connector instance; it never reaches the API or the data plane. Every change of that status, and of the remote health that `Check` reports, is announced as an event of the `connectors` topic that names the instance (`kind` `connect.health`, no revision), so the web UI follows it without a reload.
 
 | Policy | Default |
 |---|---|

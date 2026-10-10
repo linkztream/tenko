@@ -46,6 +46,7 @@ export function PolicyEditor(props: EditorProps<PasswordPolicy>) {
     <>
       <SelectField
         id="tg-preset"
+        testid="field-password_policy"
         label={t("settings.security.policy.preset")}
         value={preset()}
         onChange={setPreset}
@@ -129,6 +130,7 @@ export function MfaEditor(props: EditorProps<MfaRequirement>) {
   return (
     <SelectField
       id="tg-mfa"
+      testid="field-mfa"
       label={t("toggles.mfa.name")}
       value={value()}
       onChange={setValue}
@@ -144,6 +146,7 @@ export function BreachEditor(props: EditorProps<BreachMode>) {
   return (
     <SelectField
       id="tg-breach"
+      testid="field-breach_check"
       label={t("toggles.breach_check.name")}
       value={value()}
       onChange={setValue}
@@ -159,6 +162,7 @@ export function LockoutEditor(props: EditorProps<LockoutMode>) {
   return (
     <SelectField
       id="tg-lockout"
+      testid="field-lockout"
       label={t("toggles.lockout.name")}
       value={value()}
       onChange={setValue}
@@ -423,8 +427,7 @@ export function RevealEditor(props: EditorProps<RevealPolicy>) {
                   type="radio"
                   name="tg-secret-reveal-step-up"
                   value={mode}
-                  data-testid="field-secret-reveal-step-up"
-                  data-key={mode}
+                  data-testid={`field-step_up-${mode}`}
                   checked={stepUp() === mode}
                   onChange={() => setStepUp(mode)}
                 />
@@ -437,14 +440,20 @@ export function RevealEditor(props: EditorProps<RevealPolicy>) {
           </For>
         </div>
       </div>
-      <div class="field" data-testid="field-secret-reveal-bound-host">
-        <SwitchControl
-          id="tg-secret-reveal-bound"
-          checked={bound()}
-          onChange={setBound}
-          label={t("settings.security.secret_reveal.bound_host")}
-          hint={t("settings.security.secret_reveal.bound_host_hint")}
-        />
+      <div class="field">
+        {/* The markup of components/Switch, which has no way to carry a test id on its input. */}
+        <label class="pref switch">
+          <span>{t("settings.security.secret_reveal.bound_host")}</span>
+          <input
+            id="tg-secret-reveal-bound"
+            type="checkbox"
+            role="switch"
+            data-testid="field-bound_host_only"
+            checked={bound()}
+            onChange={(e) => setBound(e.currentTarget.checked)}
+          />
+          <small>{t("settings.security.secret_reveal.bound_host_hint")}</small>
+        </label>
       </div>
       <p class="muted" id="tg-secret-reveal-pin-rule">
         {t("settings.security.secret_reveal.pin_rule")}

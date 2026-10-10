@@ -8,6 +8,10 @@
 //   **bold**, *italic*, `code`, and [text](url) for http: and https: URLs only.
 //
 // Anything else is plain text, and so is a link whose URL is not http: or https:.
+//
+// Every element it builds has a generic test id (ui/README.md): `md-heading` (`data-level`,
+// the level of the element), `md-paragraph`, `md-list` (`data-ordered`), `md-item`,
+// `md-strong`, `md-em`, `md-code` (inline), `md-pre` (fenced) and `md-link`.
 import { For, Match, Show, Switch, type JSX } from "solid-js";
 
 // ---------------------------------------------------------------------------------
@@ -165,7 +169,7 @@ export function renderInline(text: string): JSX.Element[] {
       const end = text.indexOf("`", i + 1);
       if (end > i + 1) {
         flush();
-        out.push(<code>{text.slice(i + 1, end)}</code>);
+        out.push(<code data-testid="md-code">{text.slice(i + 1, end)}</code>);
         i = end + 1;
         continue;
       }
@@ -174,7 +178,7 @@ export function renderInline(text: string): JSX.Element[] {
       const end = text.indexOf("**", i + 2);
       if (end > i + 2) {
         flush();
-        out.push(<strong>{renderInline(text.slice(i + 2, end))}</strong>);
+        out.push(<strong data-testid="md-strong">{renderInline(text.slice(i + 2, end))}</strong>);
         i = end + 2;
         continue;
       }
@@ -183,7 +187,7 @@ export function renderInline(text: string): JSX.Element[] {
       const end = text.indexOf("*", i + 1);
       if (end > i + 1 && text.charAt(end - 1) !== " ") {
         flush();
-        out.push(<em>{renderInline(text.slice(i + 1, end))}</em>);
+        out.push(<em data-testid="md-em">{renderInline(text.slice(i + 1, end))}</em>);
         i = end + 1;
         continue;
       }
@@ -195,7 +199,7 @@ export function renderInline(text: string): JSX.Element[] {
         if (href) {
           flush();
           out.push(
-            <a href={href} target="_blank" rel="noopener noreferrer">
+            <a href={href} target="_blank" rel="noopener noreferrer" data-testid="md-link">
               {renderInline(match[1] ?? "")}
             </a>,
           );
@@ -221,7 +225,7 @@ function ListView(props: { list: ListBlock }): JSX.Element {
   const items = () => (
     <For each={props.list.items}>
       {(item) => (
-        <li>
+        <li data-testid="md-item">
           {renderInline(item.text)}
           <Show when={item.children}>{(inner) => <ListView list={inner()} />}</Show>
         </li>
@@ -229,8 +233,17 @@ function ListView(props: { list: ListBlock }): JSX.Element {
     </For>
   );
   return (
-    <Show when={props.list.ordered} fallback={<ul>{items()}</ul>}>
-      <ol>{items()}</ol>
+    <Show
+      when={props.list.ordered}
+      fallback={
+        <ul data-testid="md-list" data-ordered="false">
+          {items()}
+        </ul>
+      }
+    >
+      <ol data-testid="md-list" data-ordered="true">
+        {items()}
+      </ol>
     </Show>
   );
 }
@@ -238,21 +251,37 @@ function ListView(props: { list: ListBlock }): JSX.Element {
 function Heading(props: { level: number; text: string }): JSX.Element {
   const inner = () => renderInline(props.text);
   return (
-    <Switch fallback={<h6>{inner()}</h6>}>
+    <Switch
+      fallback={
+        <h6 data-testid="md-heading" data-level="6">
+          {inner()}
+        </h6>
+      }
+    >
       <Match when={props.level === 1}>
-        <h1>{inner()}</h1>
+        <h1 data-testid="md-heading" data-level="1">
+          {inner()}
+        </h1>
       </Match>
       <Match when={props.level === 2}>
-        <h2>{inner()}</h2>
+        <h2 data-testid="md-heading" data-level="2">
+          {inner()}
+        </h2>
       </Match>
       <Match when={props.level === 3}>
-        <h3>{inner()}</h3>
+        <h3 data-testid="md-heading" data-level="3">
+          {inner()}
+        </h3>
       </Match>
       <Match when={props.level === 4}>
-        <h4>{inner()}</h4>
+        <h4 data-testid="md-heading" data-level="4">
+          {inner()}
+        </h4>
       </Match>
       <Match when={props.level === 5}>
-        <h5>{inner()}</h5>
+        <h5 data-testid="md-heading" data-level="5">
+          {inner()}
+        </h5>
       </Match>
     </Switch>
   );
@@ -274,10 +303,10 @@ export function Markdown(props: { source: string; top?: number; class?: string }
             <Match when={block.kind === "heading" && block}>
               {(b) => <Heading level={level(b().level)} text={b().text} />}
             </Match>
-            <Match when={block.kind === "paragraph" && block}>{(b) => <p>{renderInline(b().text)}</p>}</Match>
+            <Match when={block.kind === "paragraph" && block}>{(b) => <p data-testid="md-paragraph">{renderInline(b().text)}</p>}</Match>
             <Match when={block.kind === "code" && block}>
               {(b) => (
-                <pre>
+                <pre data-testid="md-pre">
                   <code>{b().text}</code>
                 </pre>
               )}

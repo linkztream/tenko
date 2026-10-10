@@ -299,6 +299,31 @@ const getSecuritySettings = route("get", "/api/v1/settings/security", () => {
   return ok(wire(settingsView()), etag(db.settingsRevision));
 });
 
+/** Digits-only secrets shorter than this count as PINs whatever the preset (`PIN_LIKE_BELOW` on the server). */
+const PIN_LIKE_BELOW = 12;
+const PROBE = "73915862407391586240";
+
+/** The server's `admits_pin`: the PIN preset, or a Custom preset that accepts a digits-only secret of its length. */
+function admitsPin(policy: PasswordPolicy): boolean {
+  if (policy.preset === "pin") return true;
+  if (policy.preset !== "custom") return false;
+  const length = Math.max(policy.min_length, 4);
+  if (length >= PIN_LIKE_BELOW || length > (policy.max_length ?? 256)) return false;
+  if (policy.pattern === undefined || policy.pattern === null) return true;
+  // The server tries a non-trivial digit string of that length; a pattern was checked when it was saved.
+  return new RegExp(`^(?:${policy.pattern})$`, "u").test(PROBE.slice(0, length));
+}
+
+/** Whether two policies are equal for the server, which stores an absent maximum as 256. */
+function samePolicy(a: PasswordPolicy, b: PasswordPolicy): boolean {
+  if (a.preset !== "custom" || b.preset !== "custom") return a.preset === b.preset;
+  return (
+    a.min_length === b.min_length &&
+    (a.max_length ?? 256) === (b.max_length ?? 256) &&
+    (a.pattern ?? null) === (b.pattern ?? null)
+  );
+}
+
 const updateSecuritySettings = route("patch", "/api/v1/settings/security", async (ctx) => {
   requireAdmin();
   checkRevision(ctx.ifMatch(), db.settingsRevision);
@@ -316,10 +341,12 @@ const updateSecuritySettings = route("patch", "/api/v1/settings/security", async
   if (body.breach_check !== undefined) next.breach_check = oneOf(body.breach_check, BREACH, "breach_check");
   if (body.lockout !== undefined) next.lockout = oneOf(body.lockout, LOCKOUT, "lockout");
 
-  // The PIN coupling rule: no PIN while the vault holds operator secrets (IAM-07).
-  if (next.password_policy.preset === "pin" && db.settings.password_policy.preset !== "pin" && db.vaultHasOperatorSecrets) {
-    return fail("settings.pin_coupling");
-  }
+  // The server's rule (`update_security_settings` in crates/tenko-auth/src/service/admin.rs, IAM-07): a change is
+  // refused when the vault holds an operator secret, the result lets a PIN stand alone (a policy that admits a
+  // PIN and MFA optional) and the change alters the password policy or MFA; any other change passes.
+  const pinStandsAlone = admitsPin(next.password_policy) && next.mfa === "optional";
+  const touchesIt = !samePolicy(next.password_policy, db.settings.password_policy) || next.mfa !== db.settings.mfa;
+  if (db.vaultHasOperatorSecrets && pinStandsAlone && touchesIt) return fail("settings.pin_coupling");
 
   db.settings = next;
   commit("admin", { tables: ["auth.settings"] });

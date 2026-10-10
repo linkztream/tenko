@@ -33,7 +33,10 @@ use tenko_auth::{
         WebAuthnLoginFinish, WebAuthnLoginStart, WebAuthnRegisterFinish, WebAuthnRegisterStart,
         types::SecretString,
     },
-    settings::{MfaRequirement, Profile, SessionLifetime, SettingsPatch, TokenMaxLifetime},
+    settings::{
+        MfaRequirement, Profile, RevealPolicy, RevealStepUp, SessionLifetime, SettingsPatch,
+        TokenMaxLifetime,
+    },
     testing::{
         SoftAttestation, SoftAuthenticator, SoftKeyAlg, TestEnv,
         env::{ADMIN, ADMIN_PASSWORD, ADMIN_PIN, ORIGIN},
@@ -1941,6 +1944,253 @@ async fn a_passkey_session_keeps_its_rights_when_the_vault_gets_an_operator_secr
         .list_users(&strong)
         .await
         .expect("a passkey suffices");
+}
+
+/// A Home or Lab installation (the PIN preset with optional MFA) and the context of a
+/// passkey session of its administrator. A PIN session loses its administrative rights once
+/// the vault holds an operator secret, and it would not serve after MFA is required for
+/// everyone; a passkey session keeps its rights in both cases.
+async fn pin_installation_with_a_passkey_session(profile: Profile) -> (TestEnv, RequestCtx) {
+    let (env, setup) = TestEnv::installed(profile).await;
+    let mut key = SoftAuthenticator::new(SoftKeyAlg::Es256, SoftAttestation::None);
+    register_passkey(&env, &ctx(&env, &setup).await, &mut key)
+        .await
+        .expect("passkey");
+    let passkey = passkey_login(&env, &mut key).await.expect("passkey login");
+    let admin = ctx(&env, &passkey).await;
+    (env, admin)
+}
+
+/// The same installation after its vault got an operator secret.
+async fn pin_installation_with_an_operator_secret(profile: Profile) -> (TestEnv, RequestCtx) {
+    let (env, admin) = pin_installation_with_a_passkey_session(profile).await;
+    put_operator_secret(&env).await;
+    assert!(
+        env.service
+            .security_settings(&admin)
+            .await
+            .expect("view")
+            .vault_has_operator_secrets
+    );
+    (env, admin)
+}
+
+async fn change_settings(
+    env: &TestEnv,
+    admin: &RequestCtx,
+    patch: &SettingsPatch,
+) -> Result<SecuritySettingsView, AuthError> {
+    env.service
+        .update_security_settings(admin, patch, None)
+        .await
+}
+
+/// The audit trail of the settings updates: the toggles each applied change touched, oldest
+/// first, and the number of changes refused by the PIN coupling rule. Any other outcome
+/// fails the test.
+async fn settings_updates(env: &TestEnv) -> (Vec<Vec<String>>, usize) {
+    let mut applied = Vec::new();
+    let mut refused = 0;
+    for record in audit_of(env, "auth.settings.update").await {
+        match &record.draft.outcome {
+            AuditOutcome::Success => applied.push(changes_of(&record).into_keys().collect()),
+            AuditOutcome::Failed { code } if code == "settings.pin_coupling" => refused += 1,
+            other => panic!("unexpected outcome {other:?}"),
+        }
+    }
+    (applied, refused)
+}
+
+fn pin_like_custom_preset() -> PasswordPolicy {
+    PasswordPolicy::Custom(CustomPolicy {
+        min_length: 4,
+        max_length: 64,
+        pattern: Some("\\d+".to_owned()),
+    })
+}
+
+#[tokio::test]
+async fn toggles_other_than_the_policy_and_mfa_change_freely_under_a_pin_profile_with_an_operator_secret()
+ {
+    // Home and Lab let a PIN stand alone already; the secret in the vault must not freeze
+    // the toggles that have nothing to do with it.
+    for profile in [Profile::Home, Profile::Lab] {
+        let (env, admin) = pin_installation_with_an_operator_secret(profile).await;
+        let initial = env.service.settings();
+        let reveal = RevealPolicy::new(RevealStepUp::Fresh, false);
+
+        let view = change_settings(
+            &env,
+            &admin,
+            &SettingsPatch {
+                secret_reveal: Some(reveal),
+                ..SettingsPatch::default()
+            },
+        )
+        .await
+        .expect("TGL-24 is not held to the coupling rule");
+        assert_eq!(view.settings.secret_reveal(), reveal, "{profile:?}");
+        assert_eq!(env.service.settings().secret_reveal(), reveal);
+
+        change_settings(&env, &admin, &patch_lockout(LockoutMode::LockUntilUnlock))
+            .await
+            .expect("TGL-07 is not held to the coupling rule");
+        assert_eq!(env.service.settings().lockout, LockoutMode::LockUntilUnlock);
+
+        // Sending the profile again resets the toggles, and leaves the policy and MFA alone.
+        change_settings(
+            &env,
+            &admin,
+            &SettingsPatch {
+                profile: Some(profile),
+                ..SettingsPatch::default()
+            },
+        )
+        .await
+        .expect("a profile switch that keeps the policy and MFA");
+        assert_eq!(env.service.settings(), initial, "{profile:?}");
+
+        let (applied, refused) = settings_updates(&env).await;
+        assert_eq!(
+            applied,
+            [vec!["TGL-24"], vec!["TGL-07"], vec!["TGL-07", "TGL-24"]],
+            "{profile:?}"
+        );
+        assert_eq!(refused, 0, "{profile:?}");
+    }
+}
+
+#[tokio::test]
+async fn mfa_for_everyone_passes_with_an_operator_secret_and_relaxing_it_again_is_refused() {
+    let (env, admin) = pin_installation_with_an_operator_secret(Profile::Home).await;
+    let view = change_settings(
+        &env,
+        &admin,
+        &SettingsPatch {
+            mfa: Some(MfaRequirement::Everyone),
+            ..SettingsPatch::default()
+        },
+    )
+    .await
+    .expect("a PIN next to another factor");
+    assert_eq!(view.settings.password_policy, PasswordPolicy::Pin);
+    assert_eq!(view.settings.mfa, MfaRequirement::Everyone);
+
+    // Relaxing MFA would let the PIN stand alone, and so would a switch to the profile.
+    for patch in [
+        SettingsPatch {
+            mfa: Some(MfaRequirement::Optional),
+            ..SettingsPatch::default()
+        },
+        SettingsPatch {
+            profile: Some(Profile::Home),
+            ..SettingsPatch::default()
+        },
+    ] {
+        assert_eq!(
+            change_settings(&env, &admin, &patch)
+                .await
+                .expect_err("IAM-07"),
+            AuthError::PinCoupling,
+            "{patch:?}"
+        );
+    }
+    assert_eq!(env.service.settings(), view.settings);
+    assert_eq!(env.service.settings().mfa, MfaRequirement::Everyone);
+    let (applied, refused) = settings_updates(&env).await;
+    assert_eq!(applied, [vec!["TGL-02"]]);
+    assert_eq!(refused, 2);
+}
+
+#[tokio::test]
+async fn a_preset_that_still_admits_a_pin_is_refused_with_an_operator_secret_and_the_standard_preset_passes()
+ {
+    let (env, admin) = pin_installation_with_an_operator_secret(Profile::Home).await;
+    let custom = SettingsPatch {
+        password_policy: Some(pin_like_custom_preset()),
+        ..SettingsPatch::default()
+    };
+    // TGL-01 changes, and the result still lets a PIN stand alone.
+    assert_eq!(
+        change_settings(&env, &admin, &custom)
+            .await
+            .expect_err("IAM-07"),
+        AuthError::PinCoupling
+    );
+    assert_eq!(env.service.settings().password_policy, PasswordPolicy::Pin);
+    assert_eq!(settings_updates(&env).await, (Vec::<Vec<String>>::new(), 1));
+
+    let view = change_settings(
+        &env,
+        &admin,
+        &SettingsPatch {
+            password_policy: Some(PasswordPolicy::Standard),
+            ..SettingsPatch::default()
+        },
+    )
+    .await
+    .expect("a preset that admits no PIN");
+    assert_eq!(view.settings.password_policy, PasswordPolicy::Standard);
+    assert_eq!(view.settings.mfa, MfaRequirement::Optional);
+    let (applied, refused) = settings_updates(&env).await;
+    assert_eq!(applied, [vec!["TGL-01"]]);
+    assert_eq!(refused, 1);
+}
+
+#[tokio::test]
+async fn every_settings_change_passes_while_the_vault_has_no_operator_secret() {
+    let (env, admin) = pin_installation_with_a_passkey_session(Profile::Home).await;
+    assert!(
+        !env.service
+            .security_settings(&admin)
+            .await
+            .expect("view")
+            .vault_has_operator_secrets
+    );
+    let patches = [
+        SettingsPatch {
+            secret_reveal: Some(RevealPolicy::new(RevealStepUp::Fresh, false)),
+            ..SettingsPatch::default()
+        },
+        patch_lockout(LockoutMode::LockUntilUnlock),
+        SettingsPatch {
+            profile: Some(Profile::Home),
+            ..SettingsPatch::default()
+        },
+        SettingsPatch {
+            mfa: Some(MfaRequirement::Everyone),
+            ..SettingsPatch::default()
+        },
+        // Relaxing MFA lets the PIN stand alone, which is allowed without a secret.
+        SettingsPatch {
+            mfa: Some(MfaRequirement::Optional),
+            ..SettingsPatch::default()
+        },
+        SettingsPatch {
+            password_policy: Some(pin_like_custom_preset()),
+            ..SettingsPatch::default()
+        },
+        SettingsPatch {
+            password_policy: Some(PasswordPolicy::Standard),
+            ..SettingsPatch::default()
+        },
+        // From Standard to Home: the PIN preset with optional MFA.
+        SettingsPatch {
+            profile: Some(Profile::Home),
+            ..SettingsPatch::default()
+        },
+    ];
+    for (index, patch) in patches.iter().enumerate() {
+        change_settings(&env, &admin, patch)
+            .await
+            .unwrap_or_else(|error| panic!("change {index} ({patch:?}): {error:?}"));
+    }
+    let (applied, refused) = settings_updates(&env).await;
+    assert_eq!(applied.len(), patches.len());
+    assert_eq!(refused, 0);
+    assert_eq!(env.service.settings().profile, Profile::Home);
+    assert_eq!(env.service.settings().password_policy, PasswordPolicy::Pin);
+    assert_eq!(env.service.settings().mfa, MfaRequirement::Optional);
 }
 
 // ---------------------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 // A profile switch resets every toggle to the profile's values, so the dialog lists the
 // toggles whose value will change before anything is sent.
 import { createMemo, createSignal, For, Show, untrack } from "solid-js";
-import type { PasswordPolicy, Profile, SecuritySettingsView, SettingsPatch } from "../api/types";
+import type { Profile, SecuritySettingsView, SettingsPatch } from "../api/types";
 import { PROFILES } from "../api/types";
 import { Icon } from "../components/Icon";
 import { Dialog } from "../components/Dialog";
@@ -10,7 +10,7 @@ import { ErrorNotice, Notice } from "../components/Notice";
 import { toast } from "../components/toast";
 import { formatList, t } from "../i18n";
 import { ReloadedNote } from "./fields";
-import { pinBlocked, planProfileChange, PROFILE_DEFAULTS, weakerSettings } from "./profileMatrix";
+import { pinCoupled, planProfileChange, PROFILE_DEFAULTS, weakerSettings } from "./profileMatrix";
 import { formatToggle } from "./toggles";
 
 export function ProfileDialog(props: {
@@ -29,7 +29,12 @@ export function ProfileDialog(props: {
   const weakNames = () => weakerSettings(target()).map((d) => t(d.name));
   const lab = () => target() === "lab";
   const needsAck = () => lab() && !same();
-  const pinRefused = () => pinBlocked(props.view, PROFILE_DEFAULTS[target()].password_policy as PasswordPolicy);
+  // A switch resets every toggle to the profile first, so the password policy and MFA that the
+  // PIN coupling rule looks at (IAM-07) are the profile's, also when the profile stays the same.
+  const pinRefused = () => {
+    const { password_policy, mfa } = PROFILE_DEFAULTS[target()];
+    return pinCoupled(props.view, { password_policy, mfa });
+  };
   const nothing = () => same() && changes().length === 0;
   const name = () => t(`profile.${target()}.name`);
 
@@ -143,7 +148,7 @@ export function ProfileDialog(props: {
             </Show>
 
             <Show when={pinRefused()}>
-              <Notice kind="bad">{t("errors.settings.pin_coupling")}</Notice>
+              <Notice kind="bad" testid="profile-pin-coupling">{t("errors.settings.pin_coupling")}</Notice>
             </Show>
             <Show when={lab() && !same()}>
               <Notice kind="bad" title={t("settings.security.profile.lab_title")}>

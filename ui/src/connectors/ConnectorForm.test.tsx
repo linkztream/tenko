@@ -73,10 +73,16 @@ function submit(form: HTMLElement) {
   fireEvent.click(within(form).getByTestId("form-submit"));
 }
 
-/** The error line under a control (the line with the error glyph), or undefined. */
+/** The error line under a control (the `field-error` with the error glyph), or undefined. */
 function noteOf(testid: string): string | undefined {
   const field = screen.getByTestId(testid).closest(".field");
-  return field?.querySelector<HTMLElement>(".help.bad")?.textContent?.trim();
+  return field?.querySelector<HTMLElement>("[data-testid='field-error']")?.textContent?.trim();
+}
+
+/** The `data-field` of the error line under a control, or undefined. */
+function noteFieldOf(testid: string): string | undefined {
+  const field = screen.getByTestId(testid).closest(".field");
+  return field?.querySelector<HTMLElement>("[data-testid='field-error']")?.getAttribute("data-field") ?? undefined;
 }
 
 const alerts = (form: HTMLElement) => within(form).queryAllByRole("alert").map((a) => a.textContent?.trim());
@@ -246,6 +252,7 @@ describe("creating: the checks before anything is sent", () => {
     const { form, onDone } = await mountForm();
     submit(form);
     await waitFor(() => expect(noteOf("field-name")).toBe("Enter a name."));
+    expect(noteFieldOf("field-name")).toBe("name");
     expect(input("field-name").getAttribute("aria-invalid")).toBe("true");
     expect(seen).toEqual([]);
     expect(onDone).not.toHaveBeenCalled();
@@ -285,6 +292,9 @@ describe("creating: the checks before anything is sent", () => {
     expect(noteOf("field-settings-site")).toBe("Does not match the form the plugin expects (^[a-z0-9-]+$).");
     expect(noteOf("field-settings-page_size")).toBe("A value from 1 to 500.");
     expect(noteOf("field-settings-management_ip")).toBe("Not a valid IPv4 address.");
+    // A setting names its error by its field path (as the API does), the fields of the form kit by the request field (`name` above).
+    expect(noteFieldOf("field-settings-url")).toBe("settings.url");
+    expect(noteFieldOf("field-settings-management_ip")).toBe("settings.management_ip");
     expect(screen.getByTestId("field-settings-url").getAttribute("aria-invalid")).toBe("true");
     expect(noteOf("field-secret-api_key")).toBe("The plugin needs this secret.");
     expect(seen).toEqual([]);

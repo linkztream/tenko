@@ -165,6 +165,7 @@ export function Connect(props: { host: Host; addresses: readonly Address[] }) {
           <label for="connect-user">{t("hosts.connect.user")}</label>
           <input
             id="connect-user"
+            data-testid="field-user"
             class="input mono"
             value={user()}
             spellcheck={false}
@@ -176,6 +177,7 @@ export function Connect(props: { host: Host; addresses: readonly Address[] }) {
           <label for="connect-rdp-port">{t("hosts.connect.rdp_port")}</label>
           <input
             id="connect-rdp-port"
+            data-testid="field-rdp_port"
             class="input num port"
             type="number"
             min="1"
@@ -189,6 +191,7 @@ export function Connect(props: { host: Host; addresses: readonly Address[] }) {
           <label for="connect-ssh-port">{t("hosts.connect.ssh_port")}</label>
           <input
             id="connect-ssh-port"
+            data-testid="field-ssh_port"
             class="input num port"
             type="number"
             min="1"

@@ -14,6 +14,10 @@
 //! is in TLS mode a, so that admin clients and the first-run wizard can install it (Q5). The
 //! server binary provides it as the request extension `Arc<CaRootSource>`; without it, or
 //! in another TLS mode, the answer is 404 `tls.no_internal_ca`.
+//!
+//! `GET /health` and `GET /system/status` name the version the server runs as: the request
+//! extension [`RunningVersion`] when the server binary provides it (under the version layout
+//! of in-app updates, the version the update service reports), else the crate version.
 
 use std::sync::Arc;
 
@@ -108,6 +112,33 @@ impl CaRootSource {
     }
 }
 
+/// The version this server runs as, as the update service sees it (OPS-24). The server
+/// binary adds it as a request extension, so that the liveness probe, which the UI asks
+/// to see the restart into a newly installed version, names the same version as
+/// `GET /system/updates`. Without it the handlers report the crate version.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunningVersion(Arc<str>);
+
+impl RunningVersion {
+    /// The running version `version`, for example `0.4.1`.
+    pub fn new(version: impl Into<Arc<str>>) -> Self {
+        Self(version.into())
+    }
+
+    /// The version.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The version of the extension, else the crate version.
+fn running_version(extension: Option<&Extension<RunningVersion>>) -> String {
+    extension.map_or_else(
+        || crate::version().to_owned(),
+        |Extension(running)| running.as_str().to_owned(),
+    )
+}
+
 #[utoipa::path(
     get,
     path = "/health",
@@ -118,10 +149,10 @@ impl CaRootSource {
         (status = 200, description = "The process answers", body = Health)
     )
 )]
-async fn health() -> Json<Health> {
+async fn health(running: Option<Extension<RunningVersion>>) -> Json<Health> {
     Json(Health {
         status: "ok".to_owned(),
-        version: crate::version().to_owned(),
+        version: running_version(running.as_ref()),
     })
 }
 
@@ -179,10 +210,13 @@ async fn ready(State(state): State<AppState>) -> Result<Json<Readiness>, ApiErro
 )]
 async fn system_status(
     State(state): State<AppState>,
+    running: Option<Extension<RunningVersion>>,
     Ctx(ctx): Ctx,
 ) -> Result<Json<SystemStatus>, ApiError> {
     state.authorize(&ctx.principal, Action::Read, &system_object())?;
-    Ok(Json(status_of(&state, ctx.now)))
+    let mut status = status_of(&state, ctx.now);
+    status.version = running_version(running.as_ref());
+    Ok(Json(status))
 }
 
 /// Downloads the root certificate of the internal CA (TLS mode a), for installation on
@@ -488,5 +522,36 @@ mod tests {
         assert_eq!(source.current().as_deref(), Some(ROOT));
         service.set_mode(reverse_proxy()).expect("switch");
         assert_eq!(source.current(), None);
+    }
+
+    /// The `version` member of the JSON answer of `GET path`, with `running` as the
+    /// request extension when given.
+    async fn version_at(path: &str, running: Option<RunningVersion>) -> String {
+        let mut router = crate::router();
+        if let Some(running) = running {
+            router = router.layer(Extension(running));
+        }
+        let request = Request::get(format!("/api/v1{path}"))
+            .body(Body::empty())
+            .expect("request");
+        let response = router.oneshot(request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        let body = to_bytes(response.into_body(), 256 * 1024)
+            .await
+            .expect("body");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+        json["version"].as_str().expect("version").to_owned()
+    }
+
+    #[tokio::test]
+    async fn health_and_status_name_the_running_version_of_the_server_binary() {
+        for path in ["/health", "/system/status"] {
+            assert_eq!(version_at(path, None).await, crate::version(), "{path}");
+            assert_eq!(
+                version_at(path, Some(RunningVersion::new("9.8.7"))).await,
+                "9.8.7",
+                "{path}"
+            );
+        }
     }
 }
