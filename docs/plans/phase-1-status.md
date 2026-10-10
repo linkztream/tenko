@@ -69,7 +69,7 @@ The committed tree compiles and `Cargo.lock` matches the committed manifests sin
 
 ## Slice 3
 
-The detailed plan is [slice-3-plan.md](slice-3-plan.md) (2026-10-10): WP3.0 contracts, WP3.1a to WP3.1c Raft, WP3.2 RBAC scopes, WP3.3 audit export, WP3.4a and WP3.4b KEK and backup, WP3.5 observability, WP3.6 deployment, WP3.7 language packs, WP3.8 phase exit, WP3.9 partitions, WP3.10 node configuration and probe commands, WP3.11a and WP3.11b UI, WP3.12 Slice 2 follow-ups, WP3.13 fuzz, WP3.14 raw-socket methods (optional). Its section 7 lists the nineteen owner decisions S3-Q1 to S3-Q19 with recommendations; building starts when the owner has answered, except for the packages the plan marks as startable without a decision.
+The detailed plan is [slice-3-plan.md](slice-3-plan.md) (2026-10-10): WP3.0 contracts, WP3.1a to WP3.1c Raft, WP3.2 RBAC scopes, WP3.3 audit export, WP3.4a and WP3.4b KEK and backup, WP3.5 observability, WP3.6 deployment, WP3.7 language packs, WP3.8 phase exit, WP3.9 partitions, WP3.10 node configuration and probe commands, WP3.11a and WP3.11b UI, WP3.12 Slice 2 follow-ups, WP3.13 fuzz, WP3.14 raw-socket methods (optional). The owner accepted all nineteen decisions S3-Q1 to S3-Q19 as recommended on 2026-10-10 (execution plan 9.3 Q12); WP3.0 contracts started the same day.
 
 ## Push state
 

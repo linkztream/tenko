@@ -703,6 +703,8 @@ New entries for the register of the execution plan (9.2), continuing from R18.
 
 ## 7. Owner decisions
 
+**Decided 2026-10-10:** the owner accepted every recommendation below (S3-Q1 to S3-Q19) without change; the plan builds on them.
+
 Ordered by when they are needed. Each recommendation is what the plan assumes if the owner accepts it.
 
 **S3-Q1. Does Slice 3 start before the live connector tests (E5 to E8) are done?**
