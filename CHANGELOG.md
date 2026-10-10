@@ -46,6 +46,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ### Changed
 
+- The API names the health of a connector's remote system `RemoteHealth`, apart from the liveness answer of the health route, so generated clients see the three health values.
 - Credentials taken over by an import are operator secrets bound to their host; the login becomes the user name of the secret. Credentials imported earlier are taken over at the first start of this version.
 - Operators may reveal operator secrets, so the PIN rule applies to operator accounts too: once the vault holds a secret, an operator signs in with a password, a second factor or a passkey.
 - A move completes its observation step by itself when the device is seen at its new address from its own MAC address; a person can still confirm the step by hand.
