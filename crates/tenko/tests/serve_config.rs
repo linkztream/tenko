@@ -335,7 +335,8 @@ fn environment_overrides_the_file_and_the_flags_override_both() {
 fn roles_that_phase_1_does_not_implement_exit_with_status_2() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let data = dir.path().join("data");
-    for roles in ["dns", "dhcp", "probe", "dns,dhcp"] {
+    // `probe` runs without the controller since WP2.2 (`node_serve.rs`).
+    for roles in ["dns", "dhcp", "dns,dhcp"] {
         let served = run_tenko(&["serve", "--roles", roles, "--data-dir", text(&data)], &[]);
         served.assert_code(2);
         served.assert_stderr_contains("not implemented in Phase 1");

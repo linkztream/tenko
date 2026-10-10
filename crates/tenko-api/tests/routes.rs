@@ -230,6 +230,14 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/system/status", "system_status"),
     ("GET", "/openapi.json", "openapi_document"),
     ("GET", "/metrics", "metrics"),
+    // nodes
+    ("GET", "/nodes", "list_nodes"),
+    ("GET", "/nodes/{id}", "get_node"),
+    ("DELETE", "/nodes/{id}", "revoke_node"),
+    ("GET", "/nodes/enrolments", "list_enrolments"),
+    ("POST", "/nodes/enrolments", "create_enrolment"),
+    ("DELETE", "/nodes/enrolments/{id}", "delete_enrolment"),
+    ("POST", "/nodes/enrol", "enrol_node"),
     // secrets
     ("GET", "/secrets", "list_secrets"),
     ("POST", "/secrets", "create_secret"),
@@ -462,7 +470,7 @@ fn operations_have_a_declared_tag_and_a_summary() {
         .flatten()
         .map(|tag| tag.name.as_str())
         .collect();
-    assert_eq!(tags.len(), 20, "one tag per area");
+    assert_eq!(tags.len(), 21, "one tag per area");
     for (path, item) in &document.paths.paths {
         for (method, operation) in operations(item) {
             let operation_tags = operation.tags.as_deref().unwrap_or_default();

@@ -39,6 +39,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - Credentials of a host: secrets bound to a host as its administration, remote desktop, SSH or web login, with "Copy password" on the host page.
 - Remote access from the host page: a Remote Desktop file or an SSH link for each address of a host, with the user name of its credential and no password in either.
 - The security profile toggle TGL-24 decides what a reveal takes: the signed-in session (Home, Lab), a sign-in within the last five minutes (Standard), or a passkey sign-in within the last five minutes and only from the page of a host the secret is bound to (Hardened).
+- Probe nodes: `tenko node enrol` enrols a node with a controller using a single-use enrolment token, which an administrator creates in the API or with `tenko node enrol-token`. The node checks the controller's CA fingerprint, keeps its key to itself and receives a certificate with its node id and roles; `tenko serve --roles probe` then runs it. The node connects to the controller over mutual TLS on the cluster port (8444 by default, opened once a node or a token exists), sends heartbeats, renews its certificate before it expires, and keeps its observations in a buffer on disk while no controller is reachable, sending them in order once one is. `tenko node status` shows the node and its connection, `tenko node renew` renews at once.
+- The node registry: `GET /api/v1/nodes` lists the enrolled nodes with their roles, certificate, version and live connection, enrolment tokens can be listed and deleted, and revoking a node closes its connections and refuses its certificate from then on. `GET /api/v1/system/status` reports enrolled and connected nodes and their versions.
+- Controllers and nodes agree on the protocol version, so they can be upgraded one at a time; a node that shares no version with its controller is refused with a clear error and shown as a warning in the system status.
+- A `[cluster]` section in `tenko.toml`: the addresses of the cluster port, the endpoints nodes are told, the heartbeat interval, the token lifetime and the size of a node's buffer.
 
 ### Changed
 
@@ -48,6 +52,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ### Security
 
+- The cluster port accepts only node certificates of the installation's internal CA that are not revoked, and a node accepts only a controller of its own CA. Enrolment tokens are kept only as a digest, work once and expire after an hour by default; every enrolment, and every refused one, is written to the audit log. On Windows a node's private key is sealed with DPAPI.
 - A PIN session never reveals a secret, and personal API tokens never do. The vault takes no operator secret while an account that may reveal secrets signs in with a PIN alone.
 - Reveals are limited to ten a minute per person.
 - Connectors can be given a secret only by people who may change secrets, so the reveal policy cannot be bypassed through a connector.

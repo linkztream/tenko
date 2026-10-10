@@ -213,7 +213,8 @@ fn roles_all_runs_the_controller_role_only() {
     let mut server = node.start();
     let outcome = server.stop();
     outcome.assert_graceful_shutdown();
+    // The probe role of a controller node starts with the scanner (WP2.3).
     outcome.assert_stderr_contains(
-        "not implemented in Phase 1; this node runs the controller role only",
+        "not implemented on a controller node in Phase 1; this node runs the controller role only",
     );
 }

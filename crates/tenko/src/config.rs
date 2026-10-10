@@ -53,7 +53,8 @@ pub const ENV_SEPARATOR: &str = "__";
 pub const DEFAULT_LISTEN: &str = "0.0.0.0:8443";
 
 /// The top-level keys of the file; environment variables are matched against them.
-const TOP_LEVEL_KEYS: [&str; 17] = [
+const TOP_LEVEL_KEYS: [&str; 18] = [
+    "cluster",
     "data_dir",
     "roles",
     "modules",
@@ -119,6 +120,8 @@ pub struct Config {
     pub log: LogSection,
     /// In-app updates (OPS-24).
     pub updates: UpdatesSection,
+    /// The node transport between controllers and data-plane nodes (OPS-04).
+    pub cluster: ClusterSection,
 }
 
 impl Default for Config {
@@ -141,6 +144,7 @@ impl Default for Config {
             log: LogSection::default(),
             modules: None,
             updates: UpdatesSection::default(),
+            cluster: ClusterSection::default(),
         }
     }
 }
@@ -161,6 +165,113 @@ impl Default for NodeSection {
             id: 1,
             address: String::new(),
         }
+    }
+}
+
+/// The default address of the cluster port on a controller.
+pub const DEFAULT_CLUSTER_LISTEN: &str = "0.0.0.0:8444";
+
+/// `[cluster]`: the node transport, gRPC over mutual TLS between controllers and
+/// data-plane nodes (OPS-04, OPS-08, OPS-28).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ClusterSection {
+    /// Controller: socket addresses of the cluster port. Not set: `0.0.0.0:8444`, opened
+    /// once a node is enrolled or an enrolment token is waiting. An empty list keeps the
+    /// port closed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub listen: Option<Vec<String>>,
+    /// Controller: `host:port` endpoints nodes are told at enrolment. Empty: the host name
+    /// a node enrols through, with the port of the cluster port.
+    pub advertise: Vec<String>,
+    /// Controller: seconds between two heartbeats of a node (default 10).
+    pub heartbeat_secs: u32,
+    /// Controller: lifetime in seconds of an enrolment token whose request names none
+    /// (default 3600, at most 604800).
+    pub enrolment_ttl_secs: u64,
+    /// Data-plane node: mebibytes the observation buffer keeps on disk while no controller
+    /// is reachable; the oldest batches go first when it is full (default 64).
+    pub buffer_mib: u64,
+}
+
+impl Default for ClusterSection {
+    fn default() -> Self {
+        Self {
+            listen: None,
+            advertise: Vec::new(),
+            heartbeat_secs: 10,
+            enrolment_ttl_secs: 3600,
+            buffer_mib: 64,
+        }
+    }
+}
+
+/// How the cluster port of a controller opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClusterListen {
+    /// `listen` not set: the default address, once a node or a token exists.
+    OnDemand(Vec<SocketAddr>),
+    /// `listen` names addresses: always.
+    Always(Vec<SocketAddr>),
+    /// `listen = []`: never.
+    Off,
+}
+
+impl ClusterSection {
+    /// The listening mode.
+    ///
+    /// # Errors
+    ///
+    /// `config.invalid` for an address that is not an address with a port.
+    pub fn listen_mode(&self) -> Result<ClusterListen, ConfigError> {
+        let parse = |text: &str| {
+            text.parse::<SocketAddr>().map_err(|_| {
+                ConfigError::invalid(format!(
+                    "cluster.listen: `{text}` is not an address with a port, such as 0.0.0.0:8444"
+                ))
+            })
+        };
+        match &self.listen {
+            None => Ok(ClusterListen::OnDemand(vec![parse(
+                DEFAULT_CLUSTER_LISTEN,
+            )?])),
+            Some(list) if list.is_empty() => Ok(ClusterListen::Off),
+            Some(list) => Ok(ClusterListen::Always(
+                list.iter()
+                    .map(|text| parse(text))
+                    .collect::<Result<_, _>>()?,
+            )),
+        }
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        self.listen_mode()?;
+        for endpoint in &self.advertise {
+            let valid = endpoint.rsplit_once(':').is_some_and(|(host, port)| {
+                !host.is_empty() && port.parse::<u16>().is_ok_and(|port| port > 0)
+            });
+            if !valid {
+                return Err(ConfigError::invalid(format!(
+                    "cluster.advertise: `{endpoint}` is not a host and port, such as ddi.example.net:8444"
+                )));
+            }
+        }
+        if !(1..=300).contains(&self.heartbeat_secs) {
+            return Err(ConfigError::invalid(
+                "cluster.heartbeat_secs must be between 1 and 300",
+            ));
+        }
+        if !(60..=604_800).contains(&self.enrolment_ttl_secs) {
+            return Err(ConfigError::invalid(
+                "cluster.enrolment_ttl_secs must be between 60 and 604800",
+            ));
+        }
+        if !(1..=4096).contains(&self.buffer_mib) {
+            return Err(ConfigError::invalid(
+                "cluster.buffer_mib must be between 1 and 4096",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -1108,6 +1219,7 @@ impl Config {
         }
         self.log.validate()?;
         self.updates.validate()?;
+        self.cluster.validate()?;
         if let Some(url) = &self.hibp.range_url
             && !(url.starts_with("https://") || url.starts_with("http://"))
         {
@@ -1630,6 +1742,48 @@ mod tests {
         )
         .expect("the example parses");
         loaded.config.resolve().expect("the example is valid");
+    }
+
+    #[test]
+    fn the_cluster_section_is_read_and_checked() {
+        let loaded = from_text(
+            "data_dir = \"/d\"\n[cluster]\nlisten = [\"127.0.0.1:9444\"]\nheartbeat_secs = 5\n",
+            &[("TENKO_CLUSTER__BUFFER_MIB", "16")],
+        )
+        .expect("loads");
+        assert_eq!(
+            loaded.config.cluster.listen_mode().expect("mode"),
+            ClusterListen::Always(vec!["127.0.0.1:9444".parse().expect("address")])
+        );
+        assert_eq!(loaded.config.cluster.heartbeat_secs, 5);
+        assert_eq!(loaded.config.cluster.buffer_mib, 16);
+        loaded.config.resolve().expect("valid");
+
+        let off =
+            from_text("data_dir = \"/d\"\n", &[("TENKO_CLUSTER__LISTEN", "[]")]).expect("loads");
+        assert_eq!(
+            off.config.cluster.listen_mode().expect("mode"),
+            ClusterListen::Off
+        );
+        let default = from_text("data_dir = \"/d\"\n", &[]).expect("loads");
+        assert_eq!(
+            default.config.cluster.listen_mode().expect("mode"),
+            ClusterListen::OnDemand(vec![DEFAULT_CLUSTER_LISTEN.parse().expect("address")])
+        );
+
+        for bad in [
+            "listen = [\"nowhere\"]",
+            "heartbeat_secs = 0",
+            "advertise = [\"ddi.example.net\"]",
+            "buffer_mib = 0",
+            "enrolment_ttl_secs = 10",
+        ] {
+            let loaded =
+                from_text(&format!("data_dir = \"/d\"\n[cluster]\n{bad}\n"), &[]).expect("loads");
+            let error = loaded.config.resolve().expect_err(bad);
+            assert_eq!(error.code, "config.invalid", "{bad}");
+            assert!(error.message.starts_with("cluster."), "{bad}: {error}");
+        }
     }
 
     #[test]

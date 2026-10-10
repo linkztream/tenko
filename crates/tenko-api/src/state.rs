@@ -28,7 +28,7 @@ use tenko_core::{Action, Authenticator, Authorizer, ObjectRef, Principal, Timest
 use tenko_store::{MemStore, Store};
 
 use crate::{
-    dto::system::{NodeStatus, StatusWarning},
+    dto::system::{ClusterStatus, NodeStatus, StatusWarning},
     middleware::{idempotency::InFlight, metrics::Metrics},
     modules::ModuleSet,
     problem::ApiError,
@@ -90,6 +90,8 @@ pub(crate) struct Platform {
     pub(crate) modules: ModuleSet,
     /// Conditions the server binary reports in `/system/status`, by code.
     pub(crate) notices: Mutex<BTreeMap<String, StatusWarning>>,
+    /// The node transport's summary, as the server binary last reported it.
+    pub(crate) cluster: Mutex<Option<ClusterStatus>>,
 }
 
 impl Default for AppState {
@@ -136,6 +138,7 @@ impl AppState {
                 ready: AtomicBool::new(true),
                 modules: options.modules,
                 notices: Mutex::new(BTreeMap::new()),
+                cluster: Mutex::new(None),
             }),
             store,
         }
@@ -182,6 +185,25 @@ impl AppState {
     /// The conditions set with [`AppState::set_notice`], in code order.
     pub fn notices_list(&self) -> Vec<StatusWarning> {
         self.notices().values().cloned().collect()
+    }
+
+    /// Sets the node transport's summary that `GET /system/status` reports (`None`: the
+    /// node has no cluster port).
+    pub fn set_cluster_status(&self, status: Option<ClusterStatus>) {
+        *self
+            .platform
+            .cluster
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = status;
+    }
+
+    /// The node transport's summary.
+    pub fn cluster_status(&self) -> Option<ClusterStatus> {
+        self.platform
+            .cluster
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     fn notices(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, StatusWarning>> {

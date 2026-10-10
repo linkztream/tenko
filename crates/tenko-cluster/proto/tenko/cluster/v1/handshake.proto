@@ -1,0 +1,61 @@
+// Tenko node transport, major version 1: the version handshake.
+//
+// A data-plane node (roles `probe`, `dns`, `dhcp`) talks to a controller over gRPC on the
+// controller's cluster port. The connection is TLS 1.3 with certificates on both sides
+// (mutual TLS): the controller presents a node certificate of its own with the role
+// `controller`, the node presents the certificate it received at enrolment. Both chain to
+// the installation's internal CA. Certificates identify nodes by the URI subject
+// alternative name `urn:tenko:node:<id>` and carry their roles as `urn:tenko:role:<role>`;
+// host names play no part. See docs/cluster.md.
+//
+// Versioning (OPS-08): a node calls Handshake.Hello first, offering every major version it
+// implements; the controller answers with the highest major both implement, or refuses
+// with FAILED_PRECONDITION and the error code `cluster.protocol.unsupported`. This service
+// and its two messages are frozen: every later major keeps serving them unchanged, so two
+// nodes of different majors can always find out what they share.
+//
+// Errors: a refused call carries the metadata entry `tenko-error-code` with a stable code
+// (`cluster.*`) and an English message.
+//
+// Evolution: within major version 1 every change is additive. New fields take new numbers;
+// no field, enum value or method is removed, renamed or renumbered, and both sides ignore
+// fields they do not know. A breaking change is a new package, tenko.cluster.v2, and a new
+// major in the handshake.
+syntax = "proto3";
+
+package tenko.cluster.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Version negotiation. Frozen across majors.
+service Handshake {
+  // Agrees on the protocol major. Refused with FAILED_PRECONDITION
+  // (`cluster.protocol.unsupported`) when the two sides share none, and with
+  // PERMISSION_DENIED (`cluster.node.unknown`) when the certificate belongs to no enrolled
+  // node.
+  rpc Hello(HelloRequest) returns (HelloResponse);
+}
+
+message HelloRequest {
+  // The protocol majors the node implements, in any order.
+  repeated uint32 majors = 1;
+  // The software version of the node, for example `0.4.1`.
+  string version = 2;
+  // The roles the node runs: `probe`, `dns`, `dhcp`.
+  repeated string roles = 3;
+}
+
+message HelloResponse {
+  // The agreed major: the highest one both sides implement.
+  uint32 major = 1;
+  // The majors the controller implements.
+  repeated uint32 majors = 2;
+  // The software version of the controller.
+  string version = 3;
+  // The node id the controller knows the client certificate by.
+  uint64 node_id = 4;
+  // Seconds between two heartbeats of the node.
+  uint32 heartbeat_secs = 5;
+  // The controller's clock.
+  google.protobuf.Timestamp server_time = 6;
+}

@@ -169,21 +169,6 @@ impl Default for EventRoutes {
             )
             .namespace("connect", Topic::Connectors)
             .table(
-                TableName::from_static("vault.operator_meta"),
-                Topic::Secrets,
-                Some(ObjectKind::Secret),
-            )
-            .table(
-                TableName::from_static("vault.reveals"),
-                Topic::Secrets,
-                Some(ObjectKind::Secret),
-            )
-            .table(
-                TableName::from_static("vault.host_bindings"),
-                Topic::Secrets,
-                None,
-            )
-            .table(
                 TableName::from_static("ipam.proposals"),
                 Topic::Ipam,
                 Some(ObjectKind::Proposal),
@@ -203,6 +188,22 @@ impl Default for EventRoutes {
                 Topic::Discovery,
                 None,
             )
+            .table(
+                TableName::from_static("vault.operator_meta"),
+                Topic::Secrets,
+                Some(ObjectKind::Secret),
+            )
+            .table(
+                TableName::from_static("vault.reveals"),
+                Topic::Secrets,
+                Some(ObjectKind::Secret),
+            )
+            .table(
+                TableName::from_static("vault.host_bindings"),
+                Topic::Secrets,
+                None,
+            )
+            .namespace("cluster", Topic::Cluster)
             .namespace("auth", Topic::Admin)
             .namespace("users", Topic::Admin);
         routes

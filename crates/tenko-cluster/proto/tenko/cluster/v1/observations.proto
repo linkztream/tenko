@@ -1,0 +1,131 @@
+// Tenko node transport, major version 1: observations of a probe.
+// See handshake.proto for the transport, the errors and the evolution rule.
+syntax = "proto3";
+
+package tenko.cluster.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Observations from a probe into the controller's reconciler.
+service Observations {
+  // Hands one batch of a probe's buffer to the reconciler. The node sends its batches in
+  // buffer order, one at a time, and removes a batch only after this call succeeded; a
+  // batch sent again after a lost answer is recognised by its epoch and sequence and
+  // answered with `duplicate` set. Refused with PERMISSION_DENIED (`cluster.node.role`)
+  // when the node does not have the role `probe`.
+  rpc Ingest(IngestRequest) returns (IngestResponse);
+}
+
+// How a probe saw its subjects.
+enum ProbeMethod {
+  PROBE_METHOD_UNSPECIFIED = 0;
+  PROBE_METHOD_ARP = 1;
+  PROBE_METHOD_ND = 2;
+  PROBE_METHOD_MDNS = 3;
+  PROBE_METHOD_LLDP = 4;
+  PROBE_METHOD_ICMP = 5;
+  PROBE_METHOD_TCP_SYN = 6;
+  PROBE_METHOD_OS_FINGERPRINT = 7;
+  PROBE_METHOD_SNMP = 8;
+}
+
+message IngestRequest {
+  // The epoch of the node's buffer (a UUID): sequences count within it.
+  string epoch = 1;
+  // The position of the batch in the node's buffer, from 1 within the epoch.
+  uint64 sequence = 2;
+  // How the probe saw what the batch reports.
+  ProbeMethod method = 3;
+  // The VRF the addresses belong to (a UUID). Absent: the VRF the controller assigned to
+  // the node at enrolment, else the default VRF.
+  optional string vrf = 4;
+  // Whether the batch is the probe's whole picture for this method: the controller
+  // expires what the method reported before and no longer reports.
+  bool complete = 5;
+  // When the probe finished collecting the batch.
+  google.protobuf.Timestamp collected_at = 6;
+  // What the probe saw.
+  repeated Sighting sightings = 7;
+}
+
+message Sighting {
+  // When the probe saw it.
+  google.protobuf.Timestamp observed_at = 1;
+  // Seconds the sighting stays current without a refresh; 0 lets the controller decide.
+  uint32 ttl_secs = 2;
+  oneof subject {
+    AddressSighting address = 10;
+    ServicesSighting services = 11;
+    OsSighting os = 12;
+    LinkSighting link = 13;
+    AttachmentSighting attachment = 14;
+  }
+}
+
+// An address in use, with the MAC address behind it when the method shows one.
+message AddressSighting {
+  string ip = 1;
+  optional string mac = 2;
+}
+
+// Open TCP ports of an address.
+message ServicesSighting {
+  string ip = 1;
+  repeated uint32 open_tcp = 2;
+}
+
+// An operating system guess for an address.
+message OsSighting {
+  string ip = 1;
+  string guess = 2;
+  // Confidence in percent, 0 to 100.
+  uint32 confidence = 3;
+}
+
+// One end of a link, as the device names itself and its port.
+message LinkEnd {
+  string device = 1;
+  optional string port = 2;
+}
+
+enum LinkKind {
+  LINK_KIND_UNSPECIFIED = 0;
+  LINK_KIND_LLDP = 1;
+  LINK_KIND_UPLINK = 2;
+  LINK_KIND_WIRED = 3;
+  LINK_KIND_WIRELESS = 4;
+}
+
+// A link between two devices (LLDP, SNMP).
+message LinkSighting {
+  LinkEnd a = 1;
+  LinkEnd b = 2;
+  LinkKind kind = 3;
+}
+
+// Where a client is attached (SNMP bridge tables).
+message AttachmentSighting {
+  string mac = 1;
+  string device = 2;
+  optional string port = 3;
+  optional uint32 vlan = 4;
+}
+
+message IngestResponse {
+  // The sequence of the batch, echoed.
+  uint64 sequence = 1;
+  // The batch had been ingested before (a resend after a lost answer); nothing was done.
+  bool duplicate = 2;
+  // Facts seen for the first time.
+  uint32 new = 3;
+  // Facts whose attributes changed.
+  uint32 changed = 4;
+  // Facts whose last sighting was refreshed.
+  uint32 refreshed = 5;
+  // Facts reported again without a write.
+  uint32 unchanged = 6;
+  // Facts expired because a complete batch no longer reports them.
+  uint32 gone = 7;
+  // Sightings refused as malformed.
+  uint32 skipped = 8;
+}

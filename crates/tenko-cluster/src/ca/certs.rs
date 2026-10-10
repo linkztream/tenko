@@ -14,7 +14,7 @@ use rcgen::{
     SignatureAlgorithm, SigningKey, SubjectPublicKeyInfo, string::Ia5String,
 };
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
-use tenko_core::NodeId;
+use tenko_core::{NodeId, Role, RoleSet};
 use tenko_vault::SecretBytes;
 use time::{Duration, OffsetDateTime, UtcOffset};
 use x509_parser::{
@@ -204,6 +204,71 @@ pub(crate) fn issue_node(
     Ok((cert, pkcs8_of(&key)))
 }
 
+/// Issues a node certificate for the public key of a CSR, with the node's roles as
+/// `urn:tenko:role:<role>` URIs next to `urn:tenko:node:<id>` (enrolment, WP2.2). The
+/// request is checked as in [`issue_node_from_csr`].
+pub(crate) fn issue_node_with_roles_from_csr(
+    signer: &Signer,
+    node: NodeId,
+    roles: RoleSet,
+    csr_der: &[u8],
+    now: OffsetDateTime,
+    validity_days: u32,
+) -> Result<CertificateDer<'static>, CaError> {
+    let public_key = csr_public_key(csr_der)?;
+    let params = node_role_params(node, roles, now, validity_days)?;
+    sign_leaf(signer, &params, &public_key)
+}
+
+/// Issues a node certificate with roles and a fresh P-256 key (the controller's own
+/// certificate on the cluster port).
+pub(crate) fn issue_node_with_roles(
+    signer: &Signer,
+    node: NodeId,
+    roles: RoleSet,
+    now: OffsetDateTime,
+    validity_days: u32,
+) -> Result<(CertificateDer<'static>, SecretBytes), CaError> {
+    let params = node_role_params(node, roles, now, validity_days)?;
+    let key = generate_key()?;
+    let cert = sign_leaf(signer, &params, &*key)?;
+    Ok((cert, pkcs8_of(&key)))
+}
+
+/// A fresh ECDSA P-256 key and a PKCS#10 request over it, DER, for enrolment and renewal
+/// on the node. The request names nothing: the CA takes only the key.
+///
+/// # Errors
+///
+/// [`CaError::Generation`] when the key or the request cannot be made.
+pub fn generate_csr() -> Result<(SecretBytes, Vec<u8>), CaError> {
+    let key = generate_key()?;
+    let csr = CertificateParams::default().serialize_request(&*key)?;
+    Ok((pkcs8_of(&key), csr.der().to_vec()))
+}
+
+/// The URI subject alternative name of a role in a node certificate:
+/// `urn:tenko:role:<role>`.
+pub fn role_uri(role: Role) -> String {
+    format!("urn:tenko:role:{role}")
+}
+
+/// The roles in a node certificate's URI subject alternative names; empty for a
+/// certificate without roles or one that cannot be parsed.
+pub fn roles_of(cert_der: &[u8]) -> RoleSet {
+    let Ok(info) = super::CertInfo::from_der(cert_der) else {
+        return RoleSet::EMPTY;
+    };
+    roles_in(&info.uris)
+}
+
+/// The roles among certificate URIs.
+pub fn roles_in(uris: &[String]) -> RoleSet {
+    uris.iter()
+        .filter_map(|uri| uri.strip_prefix("urn:tenko:role:")?.parse::<Role>().ok())
+        .collect()
+}
+
 /// The URI subject alternative name of a node certificate: `urn:tenko:node:<id>`.
 pub fn node_uri(node: NodeId) -> String {
     format!("urn:tenko:node:{node}")
@@ -294,6 +359,22 @@ fn node_params(
         ExtendedKeyUsagePurpose::ServerAuth,
         ExtendedKeyUsagePurpose::ClientAuth,
     ];
+    Ok(params)
+}
+
+/// [`node_params`] with one `urn:tenko:role:<role>` URI per role.
+fn node_role_params(
+    node: NodeId,
+    roles: RoleSet,
+    now: OffsetDateTime,
+    validity_days: u32,
+) -> Result<CertificateParams, CaError> {
+    let mut params = node_params(node, now, validity_days)?;
+    for role in roles.roles() {
+        params
+            .subject_alt_names
+            .push(SanType::URI(Ia5String::try_from(role_uri(role))?));
+    }
     Ok(params)
 }
 

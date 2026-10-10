@@ -10,6 +10,7 @@
 //! | [`client`] | the client commands over the public API |
 //! | [`kek`] | `tenko kek rotate`: key-encryption key rotation with the server stopped |
 //! | [`modules`] | the module switch of OPS-25 |
+//! | [`node`] | `tenko node`: enrol, status, renew, enrolment tokens; the cluster step of `tenko serve` and the data-plane node process |
 //! | [`upgrade`] | `tenko upgrade`, the data-directory format and its migrations, in-app updates (OPS-23, OPS-24) |
 //! | [`plugin`] | `tenko plugin`: list, run a bundled plugin, conformance test; the connector service of `tenko serve` |
 //! | [`logging`] | `tracing` to standard error or a file, as text or JSON |
@@ -27,6 +28,7 @@ pub mod exit;
 pub mod kek;
 pub mod logging;
 pub mod modules;
+pub mod node;
 pub mod platform;
 pub mod plugin;
 pub mod serve;
@@ -144,6 +146,13 @@ pub enum Command {
         action: plugin::PluginCommand,
     },
 
+    /// Data-plane nodes: enrol with a controller, show the state, renew the certificate.
+    Node {
+        /// The `node` subcommand to run.
+        #[command(subcommand)]
+        action: node::NodeCommand,
+    },
+
     /// Print the OpenAPI document of the API (CI compares it with `docs/api/openapi.json`).
     #[command(hide = true)]
     Openapi,
@@ -210,6 +219,7 @@ impl Command {
                 action: client::hibp::HibpCommand::Build(_),
             } => "hibp build",
             Command::Plugin { action } => action.name(),
+            Command::Node { action } => action.name(),
             Command::Openapi => "openapi",
         }
     }
@@ -239,6 +249,7 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
             exit::OK
         }
         Command::Plugin { action } => plugin::command(action, out, err),
+        Command::Node { action } => node::command(action, out, err),
         Command::Openapi => {
             let _ = write!(out, "{}", tenko_api::openapi_json());
             exit::OK
@@ -483,9 +494,9 @@ mod tests {
     fn serve_without_the_controller_exits_with_status_2() {
         let dir = std::env::temp_dir().join("tenko-lib-test-serve");
         let dir = dir.to_str().expect("UTF-8 temp path");
-        let (status, _, err) = run(&["serve", "--roles", "probe", "--data-dir", dir]);
+        let (status, _, err) = run(&["serve", "--roles", "dns", "--data-dir", dir]);
         assert_eq!(status, exit::USAGE);
-        assert!(err.contains("probe: not implemented in Phase 1"), "{err}");
+        assert!(err.contains("dns: not implemented in Phase 1"), "{err}");
         assert!(!std::path::Path::new(dir).exists());
     }
 

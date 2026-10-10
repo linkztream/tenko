@@ -37,11 +37,13 @@ pub enum Topic {
     Discovery,
     /// Operator secrets: metadata, reveals and host credential bindings (never values).
     Secrets,
+    /// Cluster nodes and enrolment tokens.
+    Cluster,
 }
 
 impl Topic {
     /// Every topic, in declaration order.
-    pub const ALL: [Topic; 9] = [
+    pub const ALL: [Topic; 10] = [
         Topic::Ipam,
         Topic::Jobs,
         Topic::Audit,
@@ -51,6 +53,7 @@ impl Topic {
         Topic::Connectors,
         Topic::Discovery,
         Topic::Secrets,
+        Topic::Cluster,
     ];
 
     /// The stable lower-case name, also the SSE `event` field.
@@ -65,6 +68,7 @@ impl Topic {
             Topic::Connectors => "connectors",
             Topic::Discovery => "discovery",
             Topic::Secrets => "secrets",
+            Topic::Cluster => "cluster",
         }
     }
 
@@ -97,7 +101,7 @@ pub struct TopicSet(u16);
 
 impl TopicSet {
     /// Every topic.
-    pub const ALL: TopicSet = TopicSet(0b1_1111_1111);
+    pub const ALL: TopicSet = TopicSet(0b11_1111_1111);
     /// No topic.
     pub const EMPTY: TopicSet = TopicSet(0);
 

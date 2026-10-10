@@ -6,7 +6,7 @@ use std::{fmt, net::IpAddr};
 use rustls::pki_types::{CertificateDer, pem::PemObject};
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    NodeId, RequestCtx, Timestamp,
+    NodeId, RequestCtx, RoleSet, Timestamp,
     audit::{AuditAction, AuditDraft},
     secret::{SecretClass, SecretRef},
 };
@@ -173,6 +173,16 @@ pub struct NodeCert {
     pub chain: Vec<CertificateDer<'static>>,
     /// What the leaf says.
     pub info: CertInfo,
+}
+
+impl NodeCert {
+    /// The chain as PEM.
+    pub fn chain_pem(&self) -> String {
+        self.chain
+            .iter()
+            .map(|cert| pem("CERTIFICATE", cert))
+            .collect()
+    }
 }
 
 /// The internal certificate authority: an ECDSA P-256 root whose key is a system secret in
@@ -414,6 +424,63 @@ impl InternalCa {
         })
     }
 
+    /// Issues a node certificate for the key in a PKCS#10 CSR with the node's roles:
+    /// `urn:tenko:node:<id>` and one `urn:tenko:role:<role>` per role as URI subject
+    /// alternative names, server and client authentication (enrolment and renewal, WP2.2).
+    ///
+    /// # Errors
+    ///
+    /// [`CaError::InvalidCsr`] or a generation error.
+    pub fn issue_node_cert_for(
+        &self,
+        node: NodeId,
+        roles: RoleSet,
+        csr_der: &[u8],
+        now: Timestamp,
+    ) -> Result<NodeCert, CaError> {
+        let cert = certs::issue_node_with_roles_from_csr(
+            &self.signer,
+            node,
+            roles,
+            csr_der,
+            now.0,
+            self.policy.node_validity_days,
+        )?;
+        let info = CertInfo::from_der(&cert)?;
+        Ok(NodeCert {
+            node,
+            chain: vec![cert],
+            info,
+        })
+    }
+
+    /// Issues a node certificate with roles and a freshly generated key (the controller's
+    /// own certificate on the cluster port).
+    ///
+    /// # Errors
+    ///
+    /// A generation error.
+    pub fn issue_node_cert_with_key_for(
+        &self,
+        node: NodeId,
+        roles: RoleSet,
+        now: Timestamp,
+    ) -> Result<IssuedCert, CaError> {
+        let (cert, key) = certs::issue_node_with_roles(
+            &self.signer,
+            node,
+            roles,
+            now.0,
+            self.policy.node_validity_days,
+        )?;
+        let info = CertInfo::from_der(&cert)?;
+        Ok(IssuedCert {
+            chain: vec![cert],
+            key,
+            info,
+        })
+    }
+
     /// Whether a certificate is due for renewal at `now` (within
     /// [`CaPolicy::renew_before_days`] of expiry, or already expired).
     pub fn needs_renewal(&self, info: &CertInfo, now: Timestamp) -> bool {
@@ -519,8 +586,8 @@ impl InternalCa {
     }
 }
 
-/// PEM-encodes one DER block.
-pub(crate) fn pem(label: &str, der: &[u8]) -> String {
+/// PEM-encodes one DER block, for example `pem("CERTIFICATE", der)`.
+pub fn pem(label: &str, der: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut b64 = String::with_capacity(der.len().div_ceil(3) * 4);
     for chunk in der.chunks(3) {

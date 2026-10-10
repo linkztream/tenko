@@ -48,6 +48,28 @@ pub struct SystemStatus {
     /// Conditions an administrator should look at, for example a certificate close to
     /// expiry or plain HTTP in the Lab profile.
     pub warnings: Vec<StatusWarning>,
+    /// The node transport of a controller (OPS-04, OPS-08): enrolled and connected nodes,
+    /// their versions; absent on servers without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cluster: Option<ClusterStatus>,
+}
+
+/// The node transport of a controller, for `GET /system/status`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ClusterStatus {
+    /// The addresses the cluster port listens on; empty while it is off.
+    pub listening: Vec<String>,
+    /// The protocol majors this controller implements.
+    pub majors: Vec<u32>,
+    /// Enrolled nodes.
+    pub nodes: u64,
+    /// Nodes connected to this controller now.
+    pub connected: u64,
+    /// Software versions of the connected nodes and how many run each.
+    pub versions: BTreeMap<String, u64>,
+    /// Nodes whose last handshake was refused for want of a common protocol major; each
+    /// also has a `cluster.protocol.mismatch` warning.
+    pub mismatched: u64,
 }
 
 /// Identity and roles of the node.

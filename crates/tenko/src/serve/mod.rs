@@ -12,7 +12,9 @@
 //! | 5 | `auth` | users, sessions, passkeys, TOTP, settings; prints the setup token while setup is open |
 //! | 6 | `ipam` | the IPAM domain over the job engine, its prefix tree and alarms |
 //! | 7 | `jobs` | the job runner |
-//! | 8 | `api` | the HTTP API, the web UI and server-sent events |
+//! | 8 | `connectors` | connector plugins and their supervisor (ADR 0012) |
+//! | 9 | `cluster` | the node transport: internal CA node certificate, node registry, the mutual TLS listener for enrolled nodes (OPS-04) |
+//! | 10 | `api` | the HTTP API, the web UI and server-sent events |
 //!
 //! The vault needs the store to check its envelopes, so it opens right after the store.
 //!
@@ -74,7 +76,7 @@ pub const FSYNC_WARN_MICROS: u64 = 10_000;
 const RUNNER_STOP_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The start steps of the controller role, in order.
-pub const START_ORDER: [(&str, &str); 9] = [
+pub const START_ORDER: [(&str, &str); 10] = [
     ("kek", "key-encryption keys"),
     ("store", "replicated store (openraft over redb)"),
     ("vault", "envelope encryption of secrets"),
@@ -83,6 +85,10 @@ pub const START_ORDER: [(&str, &str); 9] = [
     ("ipam", "IPAM domain and job engine"),
     ("jobs", "job runner"),
     ("connectors", "connector plugins and their supervisor"),
+    (
+        "cluster",
+        "node transport: enrolment, mutual TLS listener, node registry",
+    ),
     ("api", "HTTP API, web UI and server-sent events"),
 ];
 
@@ -254,6 +260,9 @@ pub fn command(args: &ServeArgs, err: &mut impl Write) -> u8 {
     if let Some(status) = check_roles(resolved.roles, err) {
         return status;
     }
+    if !resolved.roles.contains(Role::Controller) {
+        return crate::node::agent::command(resolved, args.stop_on_eof, err);
+    }
     if let Err(error) = logging::init_server(
         &resolved.config.log,
         resolved.config.log.file.as_deref(),
@@ -305,32 +314,36 @@ pub fn load(args: &ServeArgs) -> Result<Resolved, ConfigError> {
         .resolve()
 }
 
-/// Reports roles that Phase 1 does not implement. Returns the exit status when the node
-/// has nothing to run.
+/// Reports roles this build does not run. Returns the exit status when the node has nothing
+/// to run: a node without the controller runs the probe role through `crate::node::agent`.
 pub fn check_roles(roles: RoleSet, err: &mut impl Write) -> Option<u8> {
-    let missing: Vec<&str> = roles
+    let mut missing: Vec<&str> = roles
         .roles()
-        .filter(|role| *role != Role::Controller)
+        .filter(|role| !matches!(role, Role::Controller | Role::Probe))
         .map(Role::as_str)
         .collect();
-    if missing.is_empty() {
+    if roles.contains(Role::Controller) {
+        if roles.contains(Role::Probe) {
+            missing.push(Role::Probe.as_str());
+        }
+        if !missing.is_empty() {
+            let _ = writeln!(
+                err,
+                "tenko serve: role(s) {}: not implemented on a controller node in Phase 1; \
+                 this node runs the controller role only",
+                missing.join(", ")
+            );
+        }
         return None;
     }
-    let list = missing.join(", ");
-    if roles.contains(Role::Controller) {
+    if !missing.is_empty() {
         let _ = writeln!(
             err,
-            "tenko serve: role(s) {list}: not implemented in Phase 1; this node runs the \
-             controller role only"
+            "tenko serve: role(s) {}: not implemented in Phase 1",
+            missing.join(", ")
         );
-        None
-    } else {
-        let _ = writeln!(
-            err,
-            "tenko serve: role(s) {list}: not implemented in Phase 1"
-        );
-        Some(exit::USAGE)
     }
+    (!roles.contains(Role::Probe)).then_some(exit::USAGE)
 }
 
 /// Runs the server on a runtime of its own until `shutdown` resolves.
@@ -1089,6 +1102,20 @@ async fn start(
         )
         .await?;
     running.tasks.push(connectors.task());
+    let mut cluster = steps
+        .run(
+            "cluster",
+            crate::node::controller::start(crate::node::controller::Parts {
+                resolved,
+                store: Arc::clone(&store_dyn),
+                vault: Arc::clone(&vault),
+                engine: engine.clone(),
+                reconciler: reconciler.clone(),
+                stop: running.stop.subscribe(),
+            }),
+        )
+        .await?;
+    running.tasks.extend(cluster.tasks());
 
     let lab_plain_http = tls.lab_plain_http;
     let https = tls.https;
@@ -1157,6 +1184,7 @@ async fn start(
                 imports.register(&mut server);
             }
             connectors.register(&mut server);
+            cluster.register(&mut server, &state);
             if let Some(reconciler) = &reconciler {
                 server.extensions.insert(Arc::clone(reconciler));
             }
@@ -1477,6 +1505,7 @@ mod tests {
                 "ipam",
                 "jobs",
                 "connectors",
+                "cluster",
                 "api"
             ]
         );

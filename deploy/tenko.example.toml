@@ -251,3 +251,22 @@ keep_versions = 2
 container = false
 # The image the pull command names.
 image = "ghcr.io/linkztream/tenko"
+
+[cluster]
+# The node transport between controllers and data-plane nodes (probe, dns, dhcp): gRPC
+# over mutual TLS with certificates from the internal CA (OPS-04). docs/cluster.md
+# describes enrolment, renewal, revocation and the firewall rules.
+# Controller: socket addresses of the cluster port. Not set: 0.0.0.0:8444, opened once a
+# node is enrolled or an enrolment token is waiting. An empty list keeps the port closed.
+# listen = ["0.0.0.0:8444"]
+# Controller: host:port endpoints nodes are told at enrolment. Empty: the host name a node
+# enrols through, with the port of the cluster port.
+advertise = []
+# Controller: seconds between two heartbeats of a node.
+heartbeat_secs = 10
+# Controller: lifetime in seconds of an enrolment token whose request names none (at most
+# 604800, seven days).
+enrolment_ttl_secs = 3600
+# Data-plane node: mebibytes the observation buffer keeps on disk while no controller is
+# reachable; the oldest batches go first when it is full.
+buffer_mib = 64

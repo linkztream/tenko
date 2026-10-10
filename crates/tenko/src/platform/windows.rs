@@ -914,6 +914,10 @@ fn serve_until_stopped(
             let _ = stop.await;
         })
     };
+    // A node without the controller role runs the node process (WP2.2).
+    if !resolved.roles.contains(tenko_core::Role::Controller) {
+        return crate::node::agent::serve(resolved, shutdown, hooks(handle));
+    }
     match serve::run(resolved, shutdown, hooks(handle)) {
         Ok(()) => exit::OK,
         Err(error) => {

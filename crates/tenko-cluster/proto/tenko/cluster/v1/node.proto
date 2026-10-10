@@ -1,0 +1,67 @@
+// Tenko node transport, major version 1: liveness and certificate renewal.
+// See handshake.proto for the transport, the errors and the evolution rule.
+syntax = "proto3";
+
+package tenko.cluster.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// The node's own state, reported to the controller.
+service Node {
+  // A stream of heartbeats. The node sends a beat every `heartbeat_secs` of the handshake;
+  // the controller answers every beat with a directive and may push one at any time (a
+  // revocation). The node counts as connected while the stream is open.
+  rpc Heartbeat(stream Beat) returns (stream Directive);
+  // Issues a new certificate for the key of a certificate signing request, with the node
+  // id and roles of the calling certificate. The node renews before its certificate
+  // expires; the old certificate stays valid until its own expiry.
+  rpc Renew(RenewRequest) returns (RenewResponse);
+}
+
+message Beat {
+  // Counts from 1 on every stream.
+  uint64 sequence = 1;
+  // The software version of the node.
+  string version = 2;
+  // The roles the node runs.
+  repeated string roles = 3;
+  // The protocol major agreed in the handshake.
+  uint32 major = 4;
+  // Observation batches waiting in the node's buffer.
+  uint64 buffered_batches = 5;
+  // Their size in bytes.
+  uint64 buffered_bytes = 6;
+  // Batches the node dropped since it started because its buffer was full.
+  uint64 dropped_batches = 7;
+  // When the node's certificate expires.
+  google.protobuf.Timestamp certificate_not_after = 8;
+  // The node's clock when it sent the beat.
+  google.protobuf.Timestamp sent_at = 9;
+}
+
+message Directive {
+  // The beat this answers; 0 for a directive the controller pushes on its own.
+  uint64 sequence = 1;
+  // The controller's clock.
+  google.protobuf.Timestamp server_time = 2;
+  // Renew the certificate now.
+  bool renew = 3;
+  // The node was revoked: the controller closes the connection and refuses the
+  // certificate from now on. The node must be enrolled again.
+  bool revoked = 4;
+  // English detail for the node's log.
+  string detail = 5;
+}
+
+message RenewRequest {
+  // A PKCS#10 certificate signing request, DER, over an ECDSA P-256 key. Only the key is
+  // used; names and extensions in the request are ignored.
+  bytes csr = 1;
+}
+
+message RenewResponse {
+  // The new certificate, PEM, leaf first.
+  string certificate_pem = 1;
+  // When it expires.
+  google.protobuf.Timestamp not_after = 2;
+}

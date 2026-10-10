@@ -606,6 +606,8 @@ pub struct Node {
     kek: Kek,
     args: Vec<String>,
     stop_on_eof: bool,
+    /// Configuration text appended to the generated file (a section of its own).
+    extra_config: String,
 }
 
 impl Default for Node {
@@ -627,6 +629,7 @@ impl Node {
             kek: Kek::File,
             args: Vec::new(),
             stop_on_eof: true,
+            extra_config: String::new(),
         }
     }
 
@@ -648,6 +651,16 @@ impl Node {
     #[must_use]
     pub fn with_args(mut self, args: &[&str]) -> Self {
         self.args.extend(args.iter().map(|arg| (*arg).to_owned()));
+        self
+    }
+
+    /// Appends configuration text, for example a `[cluster]` section, to the generated
+    /// file.
+    #[must_use]
+    pub fn with_config(mut self, text: &str) -> Self {
+        self.extra_config.push('\n');
+        self.extra_config.push_str(text);
+        self.extra_config.push('\n');
         self
     }
 
@@ -742,6 +755,7 @@ impl Node {
         let _ = writeln!(text, "online = false\n");
         let _ = writeln!(text, "[log]");
         let _ = writeln!(text, "level = \"info\"");
+        text.push_str(&self.extra_config);
         text
     }
 

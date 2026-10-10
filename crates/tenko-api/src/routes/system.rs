@@ -281,6 +281,7 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
         ui,
         modules: state.modules(),
         warnings,
+        cluster: state.cluster_status(),
     }
 }
 
