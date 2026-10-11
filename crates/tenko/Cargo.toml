@@ -67,6 +67,9 @@ sd-notify = "0.5.0"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# The in-process cluster fixtures and the memory vault of the leader supervisor tests.
+tenko-store = { workspace = true, features = ["raft", "testing"] }
+tenko-vault = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true

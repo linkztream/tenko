@@ -82,6 +82,10 @@ pub struct ServerConfig {
     /// the server binary (`Arc<tenko_auth::AuthService>`, `Arc<tenko_ipam::IpamService>`,
     /// `tenko_jobs::JobEngine`). Area handlers read them with `Extension<T>`.
     pub extensions: axum::http::Extensions,
+    /// The key of the idempotency fingerprints, derived from the installation's cluster
+    /// key so every controller computes the same fingerprints; `None` draws a random key
+    /// for this process.
+    pub fingerprint_key: Option<idempotency::FingerprintKey>,
 }
 
 impl ServerConfig {
@@ -100,6 +104,7 @@ impl ServerConfig {
             header_read_timeout: Duration::from_secs(30),
             max_connections: 20_000,
             extensions: axum::http::Extensions::new(),
+            fingerprint_key: None,
         }
     }
 
@@ -426,6 +431,9 @@ impl RunningServer {
 /// cannot be bound, or a runtime that cannot be built.
 pub async fn start(config: ServerConfig, state: AppState) -> Result<RunningServer, ServeError> {
     config.validate()?;
+    if let Some(key) = &config.fingerprint_key {
+        state.platform.in_flight.set_key(key.clone());
+    }
     let (router, layers) = build_app(
         state.clone(),
         &config.http,
@@ -577,7 +585,7 @@ async fn run(
     state
         .events()
         .spawn_tasks(Arc::clone(&state.store), tasks_rx.clone());
-    spawn_housekeeping(&state, layers, &config, tasks_rx);
+    spawn_housekeeping(layers, tasks_rx);
 
     let shared = Arc::new(listener::Shared {
         router,
@@ -632,41 +640,19 @@ async fn run(
     Ok(())
 }
 
-/// Periodic work: idle rate-limit buckets every minute, expired idempotency records every
-/// hour.
-fn spawn_housekeeping(
-    state: &AppState,
-    layers: Arc<Layers>,
-    config: &ServerConfig,
-    mut stop: watch::Receiver<bool>,
-) {
-    let state = state.clone();
-    let ttl = config.http.idempotency.ttl;
+/// Periodic work of this controller: idle rate-limit buckets every minute. The limiter is
+/// per controller; the expired idempotency records in the store are purged by the leader
+/// ([`idempotency::purge_expired`], a leader-only service of the server binary).
+fn spawn_housekeeping(layers: Arc<Layers>, mut stop: watch::Receiver<bool>) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(60));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut minutes: u32 = 0;
         loop {
             tokio::select! {
                 _ = tick.tick() => {}
                 _ = stop.changed() => return,
             }
             layers.limiter.purge_idle(std::time::Instant::now());
-            minutes = minutes.wrapping_add(1);
-            if minutes % 60 != 1 {
-                continue;
-            }
-            match idempotency::purge_expired(
-                state.store.as_ref(),
-                ttl,
-                tenko_core::Timestamp::now(),
-            )
-            .await
-            {
-                Ok(0) => {}
-                Ok(purged) => tracing::debug!(purged, "purged expired idempotency records"),
-                Err(error) => tracing::debug!(%error, "idempotency purge failed"),
-            }
         }
     });
 }

@@ -28512,6 +28512,108 @@
           }
         }
       },
+      "LeaderServiceState": {
+        "type": "string",
+        "description": "The state of a leader-only service.",
+        "enum": [
+          "idle",
+          "running",
+          "restarting",
+          "finished"
+        ]
+      },
+      "LeaderServiceStatus": {
+        "type": "object",
+        "description": "One leader-only service.",
+        "required": [
+          "name",
+          "state",
+          "restarts"
+        ],
+        "properties": {
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The error the service last gave up with, in this term of office."
+          },
+          "name": {
+            "type": "string",
+            "description": "The stable name, such as `jobs.runner`."
+          },
+          "restarts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How often the service was restarted after it gave up, in this term of office.",
+            "minimum": 0
+          },
+          "since": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "Since when the service is in its state."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/LeaderServiceState",
+            "description": "What the service does now."
+          }
+        }
+      },
+      "LeaderStatus": {
+        "type": "object",
+        "description": "The leader-only work of a controller, for `GET /system/status`. In a cluster exactly\none controller leads and runs the leader services (the job runner, purges, the online\nKEK rotation and others); the other controllers list them as `idle`.",
+        "required": [
+          "leads",
+          "services"
+        ],
+        "properties": {
+          "clock_skew_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "This controller's clock minus the leader's, in milliseconds, as measured on the\nleader's last clock beat; absent on a single controller and while no beat arrived."
+          },
+          "epoch": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The leader epoch of the term of office (the counter `sys.leader_epoch`) while this\ncontroller leads.",
+            "minimum": 0
+          },
+          "leads": {
+            "type": "boolean",
+            "description": "Whether this controller holds the office and runs the leader services."
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaderServiceStatus"
+            },
+            "description": "Every registered leader service, in start order."
+          },
+          "since": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When this controller took office, or left it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "LinkKind": {
         "type": "string",
         "description": "How a link was learned.",
@@ -39726,6 +39828,17 @@
               {
                 "$ref": "#/components/schemas/KekSummaryView",
                 "description": "The key-encryption key of this controller (IAM-15): provider, protection, the active\ngeneration and the online rotation; absent on servers without the vault service."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "leader": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LeaderStatus",
+                "description": "The leader-only work of this controller (plan section 2.3): whether it leads, the\nleader epoch of its term of office and the state of every leader service; absent\non servers without the leader supervisor."
               },
               {
                 "type": "null"

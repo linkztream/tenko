@@ -21,6 +21,12 @@
 //! `GET /health` and `GET /system/status` name the version the server runs as: the request
 //! extension [`RunningVersion`] when the server binary provides it (under the version layout
 //! of in-app updates, the version the update service reports), else the crate version.
+//!
+//! `GET /system/status` shows the leader-only work of the controller (`leader`) when the
+//! server binary provides the request extension [`LeaderSource`] (the leader supervisor,
+//! WP3.1b); a leader service that gave up adds the warning
+//! `cluster.leader.service_failing`, and a clock that differs from the leader's by more
+//! than five seconds the warning `cluster.clock_skew` (R35).
 
 use std::sync::Arc;
 
@@ -37,7 +43,10 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
 use crate::{
-    dto::system::{Health, NodeStatus, Readiness, StoreSummary, SystemStatus, UiStatus},
+    dto::system::{
+        Health, LeaderServiceState, LeaderStatus, NodeStatus, Readiness, StatusWarning,
+        StoreSummary, SystemStatus, UiStatus,
+    },
     extract::Ctx,
     problem::{ApiError, ProblemDetails, codes},
     state::AppState,
@@ -137,6 +146,83 @@ impl RunningVersion {
     }
 }
 
+/// Where `GET /system/status` reads the leader-only work of this controller: the leader
+/// supervisor of the server binary adds it as a request extension.
+#[derive(Clone)]
+pub struct LeaderSource(Arc<dyn Fn() -> LeaderStatus + Send + Sync>);
+
+impl LeaderSource {
+    /// A source that answers what `read` returns at the time of the request.
+    pub fn new(read: impl Fn() -> LeaderStatus + Send + Sync + 'static) -> Self {
+        Self(Arc::new(read))
+    }
+
+    /// The leader-only work now.
+    pub fn current(&self) -> LeaderStatus {
+        (self.0)()
+    }
+}
+
+impl std::fmt::Debug for LeaderSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LeaderSource").finish_non_exhaustive()
+    }
+}
+
+/// Warning code of a leader service that gave up and waits for its restart.
+pub const LEADER_SERVICE_FAILING: &str = "cluster.leader.service_failing";
+
+/// Warning code of a controller whose clock differs from the leader's by more than
+/// [`CLOCK_SKEW_TOLERANCE_MS`].
+pub const CLOCK_SKEW: &str = "cluster.clock_skew";
+
+/// The clock skew between controllers that is tolerated, in milliseconds (R35).
+pub const CLOCK_SKEW_TOLERANCE_MS: i64 = 5_000;
+
+/// The warnings of the leader-only work: one per service that gave up, and one when this
+/// controller's clock differs from the leader's by more than [`CLOCK_SKEW_TOLERANCE_MS`].
+pub fn leader_warnings(leader: &LeaderStatus) -> Vec<StatusWarning> {
+    let skew = leader
+        .clock_skew_ms
+        .filter(|skew| skew.unsigned_abs() > CLOCK_SKEW_TOLERANCE_MS.unsigned_abs())
+        .map(|skew| {
+            let mut params = std::collections::BTreeMap::new();
+            params.insert("skew_ms".to_owned(), skew.to_string());
+            params.insert(
+                "tolerance_ms".to_owned(),
+                CLOCK_SKEW_TOLERANCE_MS.to_string(),
+            );
+            StatusWarning {
+                code: CLOCK_SKEW.to_owned(),
+                detail: format!(
+                    "the clock of this controller differs from the leader's by {skew} ms"
+                ),
+                params,
+            }
+        });
+    leader
+        .services
+        .iter()
+        .filter(|service| service.state == LeaderServiceState::Restarting)
+        .map(|service| {
+            let error = service.last_error.clone().unwrap_or_default();
+            let mut params = std::collections::BTreeMap::new();
+            params.insert("service".to_owned(), service.name.clone());
+            params.insert("error".to_owned(), error.clone());
+            params.insert("restarts".to_owned(), service.restarts.to_string());
+            StatusWarning {
+                code: LEADER_SERVICE_FAILING.to_owned(),
+                detail: format!(
+                    "the leader service {} gave up and is restarted: {error}",
+                    service.name
+                ),
+                params,
+            }
+        })
+        .chain(skew)
+        .collect()
+}
+
 /// The version of the extension, else the crate version.
 fn running_version(extension: Option<&Extension<RunningVersion>>) -> String {
     extension.map_or_else(
@@ -217,11 +303,17 @@ async fn ready(State(state): State<AppState>) -> Result<Json<Readiness>, ApiErro
 async fn system_status(
     State(state): State<AppState>,
     running: Option<Extension<RunningVersion>>,
+    leader: Option<Extension<LeaderSource>>,
     Ctx(ctx): Ctx,
 ) -> Result<Json<SystemStatus>, ApiError> {
     state.authorize(&ctx.principal, Action::Read, &system_object())?;
     let mut status = status_of(&state, ctx.now);
     status.version = running_version(running.as_ref());
+    if let Some(Extension(source)) = leader {
+        let leader = source.current();
+        status.warnings.extend(leader_warnings(&leader));
+        status.leader = Some(leader);
+    }
     Ok(Json(status))
 }
 
@@ -328,6 +420,7 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
         warnings,
         cluster: state.cluster_status(),
         kek,
+        leader: None,
     }
 }
 
@@ -502,5 +595,54 @@ mod tests {
                 "{path}"
             );
         }
+    }
+
+    #[test]
+    fn a_leader_service_that_gave_up_is_a_warning() {
+        use crate::dto::system::LeaderServiceStatus;
+
+        let service = |name: &str, state, error: Option<&str>| LeaderServiceStatus {
+            name: name.to_owned(),
+            state,
+            restarts: 2,
+            last_error: error.map(str::to_owned),
+            since: None,
+        };
+        let leader = LeaderStatus {
+            leads: true,
+            epoch: Some(4),
+            since: None,
+            clock_skew_ms: None,
+            services: vec![
+                service("jobs.runner", LeaderServiceState::Running, None),
+                service(
+                    "vault.kek_rotation",
+                    LeaderServiceState::Restarting,
+                    Some("the store has no quorum"),
+                ),
+            ],
+        };
+        let warnings = leader_warnings(&leader);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].code, LEADER_SERVICE_FAILING);
+        let skewed = LeaderStatus {
+            clock_skew_ms: Some(-6_200),
+            ..leader.clone()
+        };
+        let warnings = leader_warnings(&skewed);
+        assert_eq!(warnings.len(), 2);
+        assert_eq!(warnings[1].code, CLOCK_SKEW);
+        assert_eq!(warnings[1].params["skew_ms"], "-6200");
+        let within = LeaderStatus {
+            clock_skew_ms: Some(4_900),
+            ..leader.clone()
+        };
+        assert_eq!(leader_warnings(&within).len(), 1);
+        assert_eq!(warnings[0].params["service"], "vault.kek_rotation");
+        assert_eq!(warnings[0].params["restarts"], "2");
+        let source = LeaderSource::new(move || leader.clone());
+        assert_eq!(source.current().epoch, Some(4));
+        let json = serde_json::to_value(source.current()).expect("JSON");
+        assert_eq!(json["services"][1]["state"], "restarting");
     }
 }

@@ -3,11 +3,23 @@
 //!
 //! # Ownership
 //!
-//! A job belongs to the runner named in [`Job::runner`]. A runner may drive a job that is
-//! queued (starting it claims it), that it owns, that nobody owns, or whose owner's lease
-//! in `jobs.runners` has expired; the takeover batch carries a precondition on that lease
-//! row, so an owner that renewed in the meantime wins. Every batch carries a precondition
-//! on the job record, so a runner that lost the job finds out at its next write and stops.
+//! A job belongs to the runner named in [`Job::runner`]. A runner may drive a job that its
+//! [`Scope`] admits and that is queued (starting it claims it), that it owns, that nobody
+//! owns, or whose owner's lease in `jobs.runners` has expired; the takeover batch carries
+//! a precondition on that lease row, so an owner that renewed in the meantime wins. Every
+//! batch carries a precondition on the job record, so a runner that lost the job finds out
+//! at its next write and stops.
+//!
+//! # The leader's runner
+//!
+//! The runner of the leader (`Scope::Leader`) adds the leader epoch to every batch
+//! (`tenko_store::fence`) and takes jobs of other runners over at once, without a lease
+//! precondition: once it has taken office, the previous leader's writes fail on the epoch.
+//! A failed fence ends the drive with [`DriveEnd::Deposed`]. Before it calls `execute` or
+//! `compensate` of a step that is not idempotent, it confirms with a linearizable read
+//! (a read index on the leader) that the epoch is still its own; a step that cannot be
+//! confirmed is not started: the runner retries the confirmation until it is stopped,
+//! and then commits the job without starting the step.
 //!
 //! # Retries
 //!
@@ -28,20 +40,84 @@ use std::{
 };
 
 use futures::FutureExt;
-use tenko_core::{Coded, CodedError, JobId, NodeId, RequestCtx, Revision, Timestamp};
-use tenko_store::{ReadViewExt, StoreError};
+use tenko_core::{
+    Coded, CodedError, JobId, NodeId, RequestCtx, Revision, Timestamp, cluster::LEADER_EPOCH,
+};
+use tenko_store::{FailedPrecondition, ReadConsistency, ReadViewExt, StoreError};
 
 use crate::{
     engine::Inner,
     machine::{Boundary, Machine, ResultOp, step_timeout},
     model::{Job, JobError, JobState, StepContext, StepError, StepKind},
     persist::{self, Author, Loaded},
+    runner::Scope,
     stage::{StagedWrite, run_staged},
     tables::{RUNNERS, RunnerLease},
 };
 
 /// Concurrent changes of one job a drive tolerates in a row before it backs off.
 const RACE_LIMIT: u32 = 100;
+
+/// Longest pause between two attempts to confirm leadership.
+const CONFIRM_BACKOFF_MAX: Duration = Duration::from_secs(2);
+
+/// Whether a write failed because the leader epoch moved on: another controller took
+/// office after the epoch the batch was fenced with.
+pub(crate) fn fenced_out(error: &StoreError) -> bool {
+    matches!(error, StoreError::PreconditionFailed(failures) if failures.iter().any(|failure| {
+        matches!(failure, FailedPrecondition::Counter { counter, .. } if *counter == LEADER_EPOCH)
+    }))
+}
+
+/// The outcome of a leadership confirmation.
+enum Confirmation {
+    /// The epoch is still this runner's: the step may start.
+    Leads,
+    /// Another controller took office.
+    Deposed,
+    /// The runner stops before leadership could be confirmed.
+    Stopped,
+}
+
+/// Confirms with a linearizable read that the leader epoch is still `epoch`, retrying
+/// store errors with a growing pause until the runner stops.
+async fn confirm(inner: &Inner, id: JobId, epoch: u64, stop: &AtomicBool) -> Confirmation {
+    let mut attempt: u32 = 0;
+    loop {
+        if stop.load(Ordering::SeqCst) {
+            return Confirmation::Stopped;
+        }
+        match inner.store.read(ReadConsistency::Linearizable).await {
+            Ok(view) => match view.counter(&LEADER_EPOCH) {
+                Ok(current) if current == epoch => return Confirmation::Leads,
+                Ok(_) => return Confirmation::Deposed,
+                Err(error) => {
+                    tracing::warn!(job = %id, %error, "the leader epoch could not be read");
+                }
+            },
+            Err(error) => {
+                tracing::warn!(job = %id, %error, "leadership could not be confirmed before a step");
+            }
+        }
+        attempt = attempt.saturating_add(1);
+        let pause = Duration::from_millis(100)
+            .saturating_mul(attempt)
+            .min(CONFIRM_BACKOFF_MAX);
+        tokio::time::sleep(pause).await;
+    }
+}
+
+/// Whether the boundary calls a handler of a step that is not idempotent: the leader's
+/// runner confirms leadership before such a call.
+fn needs_confirmation(inner: &Inner, job: &Job, boundary: Option<Boundary>) -> bool {
+    let Some(Boundary::Execute { step } | Boundary::Compensate { step }) = boundary else {
+        return false;
+    };
+    job.steps
+        .get(usize::from(step))
+        .and_then(|record| inner.handler_info(&record.kind))
+        .is_some_and(|info| !info.idempotent)
+}
 
 /// How a drive ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +137,9 @@ pub(crate) enum DriveEnd {
     Stopped,
     /// Transient store errors: look again later.
     Retry,
+    /// A fenced write failed or leadership could not be confirmed: another controller
+    /// took office. The runner ends.
+    Deposed,
 }
 
 /// The lease row this runner writes when it starts or claims a job.
@@ -91,7 +170,9 @@ struct Decided {
     rows: Vec<crate::tables::Transition>,
     boundary: Option<Boundary>,
     execute_deadline: Option<Timestamp>,
-    takeover: Option<(NodeId, Option<Revision>)>,
+    /// The lease row of the previous owner that a takeover expects unchanged (absent for
+    /// the leader's runner, which is fenced instead).
+    lease_expect: Option<(NodeId, Option<Revision>)>,
     claims: bool,
     now: Timestamp,
 }
@@ -107,14 +188,30 @@ enum Flow {
 }
 
 /// Drives a job until it parks, ends, is lost or the runner stops.
-pub(crate) async fn drive(inner: &Arc<Inner>, id: JobId, stop: &AtomicBool) -> DriveEnd {
+pub(crate) async fn drive(
+    inner: &Arc<Inner>,
+    id: JobId,
+    stop: &AtomicBool,
+    scope: Scope,
+) -> DriveEnd {
     let mut pending = Pending::default();
     loop {
-        let decided = match decide(inner, id, &pending, stop.load(Ordering::SeqCst)).await {
+        let stopping = stop.load(Ordering::SeqCst);
+        let decided = match decide(inner, id, &pending, stopping, scope).await {
             Ok(decided) => decided,
             Err(end) => return end,
         };
-        let revision = match commit(inner, id, &decided, &mut pending).await {
+        if let Some(epoch) = scope.epoch()
+            && needs_confirmation(inner, &decided.job, decided.boundary)
+        {
+            match confirm(inner, id, epoch, stop).await {
+                Confirmation::Leads => {}
+                Confirmation::Deposed => return DriveEnd::Deposed,
+                // Decide again while stopping: commit what is known, start nothing.
+                Confirmation::Stopped => continue,
+            }
+        }
+        let revision = match commit(inner, id, &decided, &mut pending, scope).await {
             Flow::Committed(revision) => revision,
             Flow::Again => continue,
             Flow::End(end) => return end,
@@ -161,6 +258,7 @@ async fn decide(
     id: JobId,
     pending: &Pending,
     stopping: bool,
+    scope: Scope,
 ) -> Result<Decided, DriveEnd> {
     let me = inner.config.node;
     let view = inner
@@ -185,18 +283,25 @@ async fn decide(
             revision: loaded.revision,
         });
     }
+    if !scope.admits(&loaded.job, me) {
+        return Err(DriveEnd::NotOwned);
+    }
     let now = inner.clock.now();
-    let mut takeover = None;
+    let mut takeover = false;
+    let mut lease_expect = None;
     if let Some(owner) = loaded.job.runner
         && owner != me
     {
-        match view.get_typed(&RUNNERS, &owner) {
-            Ok(Some((lease, _))) if lease.expires > now => return Err(DriveEnd::NotOwned),
-            Ok(Some((_, revision))) => takeover = Some((owner, Some(revision))),
-            Ok(None) => takeover = Some((owner, None)),
-            Err(error) => {
-                tracing::warn!(job = %id, %error, "runner lease could not be read");
-                return Err(DriveEnd::Retry);
+        takeover = true;
+        if !scope.takes_over_at_once() {
+            match view.get_typed(&RUNNERS, &owner) {
+                Ok(Some((lease, _))) if lease.expires > now => return Err(DriveEnd::NotOwned),
+                Ok(Some((_, revision))) => lease_expect = Some((owner, Some(revision))),
+                Ok(None) => lease_expect = Some((owner, None)),
+                Err(error) => {
+                    tracing::warn!(job = %id, %error, "runner lease could not be read");
+                    return Err(DriveEnd::Retry);
+                }
             }
         }
     }
@@ -217,8 +322,7 @@ async fn decide(
         &handlers,
         &manual_tasks,
     );
-    let claims =
-        takeover.is_some() || (loaded.job.runner.is_none() && loaded.job.state != JobState::Queued);
+    let claims = takeover || (loaded.job.runner.is_none() && loaded.job.state != JobState::Queued);
     if claims {
         machine.claim();
     }
@@ -240,14 +344,20 @@ async fn decide(
         rows,
         boundary,
         execute_deadline,
-        takeover,
+        lease_expect,
         claims,
         now,
     })
 }
 
 /// Commits a decided cycle with the pending staged writes.
-async fn commit(inner: &Inner, id: JobId, decided: &Decided, pending: &mut Pending) -> Flow {
+async fn commit(
+    inner: &Inner,
+    id: JobId,
+    decided: &Decided,
+    pending: &mut Pending,
+    scope: Scope,
+) -> Flow {
     if decided.rows.is_empty() && pending.staged.is_empty() {
         pending.results.clear();
         return Flow::Committed(decided.loaded.revision);
@@ -272,8 +382,11 @@ async fn commit(inner: &Inner, id: JobId, decided: &Decided, pending: &mut Pendi
         if starts || decided.claims {
             batch.put_typed(&RUNNERS, &me, &lease(inner, decided.now))?;
         }
-        if let Some((owner, expect)) = decided.takeover {
+        if let Some((owner, expect)) = decided.lease_expect {
             batch.expect_typed(&RUNNERS, &owner, expect);
+        }
+        if let Some(epoch) = scope.epoch() {
+            batch.preconditions.push(tenko_store::fence(epoch));
         }
         Ok(batch)
     });
@@ -291,6 +404,8 @@ async fn commit(inner: &Inner, id: JobId, decided: &Decided, pending: &mut Pendi
             pending.staged = StagedWrite::default();
             Flow::Committed(committed.revision)
         }
+        // Checked first: a deposed runner must not retry anything.
+        Err(error) if fenced_out(&error) => Flow::End(DriveEnd::Deposed),
         Err(error) if persist::job_changed(&error, id) => {
             // Someone else wrote the job (a cancel request, a takeover): reload and decide
             // again with the same results and staged writes.

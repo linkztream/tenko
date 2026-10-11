@@ -327,6 +327,13 @@ impl AuthService {
         self.scope.set(resolver, Arc::clone(&self.store));
     }
 
+    /// Seals ceremonies under `key` (the installation's ceremony key, derived from the
+    /// cluster key), so a ceremony started on one controller finishes on another. Until it
+    /// is set, ceremonies are sealed under a key of this process.
+    pub fn set_ceremony_key(&self, key: crate::challenge::CeremonyKey) {
+        self.ceremonies.set_key(key);
+    }
+
     /// The authorization index (roles, grants, tokens, policies and settings).
     pub fn index(&self) -> &Arc<AuthIndex> {
         &self.index

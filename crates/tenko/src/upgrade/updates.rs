@@ -607,7 +607,8 @@ impl Updates {
         Ok(policy)
     }
 
-    /// Submits the install job and follows it.
+    /// Submits the install job, pinned to this controller (it downloaded or received the
+    /// release and switches its own binary), and follows it.
     async fn start_job(
         &self,
         ctx: &RequestCtx,
@@ -615,12 +616,13 @@ impl Updates {
         asset: ReleaseAsset,
         fetch: bool,
     ) -> Result<InstallStarted, CodedError> {
-        let spec = steps::job_spec(
+        let mut spec = steps::job_spec(
             &version,
             &asset,
             fetch,
             self.inner.section.ready_timeout_secs,
         )?;
+        spec.node = Some(self.inner.env.node);
         let job_id = self
             .inner
             .engine
@@ -1136,6 +1138,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn installs_from_the_ui_are_refused_on_a_cluster() {
+        let store = Arc::new(MemStore::default());
+        let store_dyn: Arc<dyn Store> = Arc::clone(&store) as Arc<dyn Store>;
+        let engine = JobEngine::new(Arc::clone(&store_dyn), EngineConfig::default());
+        let updates = Updates::new(
+            environment("0.1.0"),
+            Parts {
+                section: section(),
+                store: store_dyn,
+                raft: None,
+                policy: Arc::new(FixedPolicy {
+                    policy: UpdatePolicy::new(UpdateInstall::Ui),
+                    fresh: true,
+                }),
+                engine,
+                restart: Restart::new(),
+                cluster: Box::new(|| true),
+            },
+        )
+        .expect("service");
+        let ctx = admin();
+        updates
+            .put_manifest(&ctx, manifest())
+            .await
+            .expect("upload");
+        let status = updates.status_now().await.expect("status");
+        assert_eq!(
+            status.install.from_source_blocked,
+            Some(InstallBlock::Cluster)
+        );
+        let error = updates
+            .install(&ctx, version("0.2.0"))
+            .await
+            .expect_err("a cluster");
+        assert_eq!(error.code, "update.install_blocked");
+        assert_eq!(
+            error.params.get("reason").map(String::as_str),
+            Some("cluster")
+        );
+    }
+
+    #[tokio::test]
     async fn the_policy_and_the_deployment_block_installs() {
         let store = Arc::new(MemStore::default());
         let ctx = admin();
@@ -1274,6 +1318,7 @@ mod tests {
             kinds,
             [steps::FETCH, steps::VERIFY, steps::CHECK, steps::SWITCH]
         );
+        assert_eq!(job.spec.node, Some(NodeId(1)), "pinned to this controller");
         let status = updates.status_now().await.expect("status");
         assert_eq!(
             status.install.from_source_blocked,

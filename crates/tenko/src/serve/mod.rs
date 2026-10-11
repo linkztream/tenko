@@ -13,15 +13,18 @@
 //! | 6 | `auth` | users, sessions, passkeys, TOTP, settings; the setup token while setup is open |
 //! | 7 | `languages` | language packs: the files in `<data_dir>/i18n/` imported as uploads by the system (S3-Q8); a file the validation refuses is logged and audited, an oversized or unreadable one logged; never a start error |
 //! | 8 | `ipam` | the IPAM domain over the job engine, its prefix tree and alarms |
-//! | 9 | `jobs` | the job runner |
+//! | 9 | `jobs` | the job engine; the runner of the jobs pinned to this controller (the job runner of the installation is a leader service) |
 //! | 10 | `connectors` | connector plugins and their supervisor (ADR 0012) |
 //! | 11 | `nodes` | the node transport: internal CA node certificate, node registry, the mutual TLS listener for enrolled nodes (OPS-04), the probe role in process |
 //! | 12 | `api` | the HTTP API, the web UI and server-sent events |
 //!
-//! After the last step the leader supervisor (WP3.1b) starts the leader-only services
+//! After the last step the leader supervisor ([`leader`]) starts the leader-only services
 //! (`tenko_core::cluster::LeaderService`) once this controller has taken office; on a single
-//! controller that is at once. Until it lands, the loops that will become leader services
-//! start in their steps as before.
+//! controller that is at once. The steps register their services in the
+//! [`leader::LeaderRegistry`] that the start sequence hands around: the online KEK rotation
+//! (`vault.kek_rotation`, step `vault`), the job runner (`jobs.runner`, step `jobs`), the
+//! prune of the node registry (`cluster.prune`, step `nodes`) and the purge of expired
+//! idempotency records (`api.idempotency_purge`, step `api`).
 //!
 //! The cluster step comes before the vault because a controller that was offline during an
 //! online KEK rotation fetches the new key generation from its peers before the vault opens
@@ -30,16 +33,17 @@
 //!
 //! Shutdown (Ctrl-C, `SIGTERM`, the service manager, or the end of standard input with
 //! `--stop-on-eof`) runs in reverse: the API ends its event streams and lets open requests
-//! finish, the job runner stops, the background tasks end, and the store makes its state
-//! durable and closes its files.
+//! finish, the leader services and the job runners stop, the background tasks end, and the
+//! store makes its state durable and closes its files.
 //!
 //! The data directory holds `kek/` (key generations), `store/` (`log.redb`, `sm.redb`,
 //! `snapshots/`), `tls/ca-root.pem` (the public root of the internal CA) and `logs/`
 //! (the service log). While first-run setup is open it also holds `setup-token`, the
 //! one-time setup token that `tenko setup token` prints (see [`setup_token`]).
 
+pub mod cluster_key;
 mod imports;
-mod leader;
+pub(crate) mod leader;
 mod maintenance;
 pub mod setup_token;
 mod tls;
@@ -529,6 +533,9 @@ fn millis(duration: Duration) -> u64 {
 /// Everything that must be stopped, in reverse start order.
 struct Running {
     store: Option<RaftStore>,
+    /// The leader supervisor and its services, the leader's job runner among them.
+    leader: Option<leader::SupervisorHandle>,
+    /// The runner of the jobs pinned to this controller.
     runner: Option<RunnerHandle>,
     stop: watch::Sender<bool>,
     /// Tasks that end when `stop` is set.
@@ -545,6 +552,7 @@ impl Running {
         let (stop, _) = watch::channel(false);
         Self {
             store: None,
+            leader: None,
             runner: None,
             stop,
             tasks: Vec::new(),
@@ -552,8 +560,17 @@ impl Running {
         }
     }
 
-    /// Stops the runner and the background tasks, then closes the store.
+    /// Stops the leader services, the runner and the background tasks, then closes the
+    /// store.
     async fn stop(mut self) {
+        if let Some(leader) = self.leader.take() {
+            let began = Instant::now();
+            leader.stop(RUNNER_STOP_TIMEOUT).await;
+            tracing::info!(
+                elapsed_ms = millis(began.elapsed()),
+                "leader services stopped"
+            );
+        }
         if let Some(runner) = self.runner.take() {
             let began = Instant::now();
             if tokio::time::timeout(RUNNER_STOP_TIMEOUT, runner.stop())
@@ -765,6 +782,9 @@ async fn start(
         .map_err(|error| upgrade_error("store", &error))?;
 
     let fresh = layout.is_fresh();
+    // The leader-only services of every step; the supervisor runs them after the last one.
+    let leaders = leader::LeaderRegistry::new();
+    let leader_view = leader::LeaderView::default();
     let ring: KekRing = steps
         .run("kek", async {
             let kek = resolved.kek.clone();
@@ -902,7 +922,7 @@ async fn start(
         .await?;
     running.tasks.extend(cluster_peers.tasks());
 
-    let (vault, kek_admin) = steps
+    let (vault, kek_admin, cluster_key) = steps
         .run("vault", async {
             let start = VaultStart {
                 node: resolved.node_id,
@@ -925,12 +945,31 @@ async fn start(
                 resolved.node_id,
                 peers,
             );
+            // The cluster key (WP3.1b): every controller derives the same idempotency
+            // fingerprints and ceremony seals from it. Without it this process keys them
+            // itself, as a single controller did before.
+            let (cluster_key, key_summary) =
+                match cluster_key::ClusterKey::load_or_create(store_dyn.as_ref(), vault.as_ref())
+                    .await
+                {
+                    Ok((key, true)) => (Some(key), "cluster key created"),
+                    Ok((key, false)) => (Some(key), "cluster key loaded"),
+                    Err(error) => {
+                        tracing::warn!(
+                            code = %error.code,
+                            "the cluster key could not be read or created ({}); retried requests \
+                             and sign-in ceremonies are keyed by this process only",
+                            error.detail
+                        );
+                        (None, "no cluster key")
+                    }
+                };
             let summary = format!(
-                "{} key(s) loaded, {}",
+                "{} key(s) loaded, {}, {key_summary}",
                 vault.ring().ids().count(),
                 vault.ring().active().protection().describe()
             );
-            Ok(((vault, admin), summary))
+            Ok(((vault, admin, cluster_key), summary))
         })
         .await?;
     // Every controller follows the KEK state (new generations, rotations); the leader runs
@@ -938,11 +977,7 @@ async fn start(
     running.tasks.push(tokio::spawn(
         Arc::clone(&kek_admin).run(leader::stop_token(running.stop.subscribe())),
     ));
-    running.tasks.push(leader::spawn(
-        Arc::clone(&store_dyn),
-        vec![kek_admin.rotation_service()],
-        running.stop.subscribe(),
-    ));
+    leaders.register(kek_admin.rotation_service());
 
     let tls = steps
         .run("tls", async {
@@ -963,6 +998,9 @@ async fn start(
             )
             .await
             .map_err(|error| StartError::coded("auth", &error))?;
+            if let Some(cluster_key) = &cluster_key {
+                auth.set_ceremony_key(cluster_key.ceremony_key());
+            }
             let token = auth
                 .prepare_setup()
                 .await
@@ -1087,6 +1125,7 @@ async fn start(
         running
             .tasks
             .extend(imports.spawn_purge(running.stop.subscribe()));
+        leaders.extend(imports.leader_services());
     }
     if let Some(ipam) = &ipam {
         let mut stop = running.stop.subscribe();
@@ -1200,12 +1239,15 @@ async fn start(
 
     let runner = steps
         .run("jobs", async {
+            // The job runner of the installation runs on the leader; every controller runs
+            // the jobs pinned to it.
             let runner = engine
-                .start()
+                .start_pinned()
                 .map_err(|error| StartError::coded("jobs", &error))?;
+            leaders.register(engine.leader_service());
             let summary = format!(
-                "runner of node {} with {} workers",
-                resolved.node_id, config.jobs.workers
+                "{} workers; the runner of jobs pinned to node {} runs, the job runner of the                  installation runs on the leader",
+                config.jobs.workers, resolved.node_id
             );
             Ok((runner, summary))
         })
@@ -1245,6 +1287,7 @@ async fn start(
         )
         .await?;
     running.tasks.extend(cluster.tasks());
+    leaders.extend(cluster.leader_services());
     if resolved.roles.contains(Role::Probe) {
         let (task, summary) = crate::node::scan::start_on_controller(
             resolved,
@@ -1259,7 +1302,7 @@ async fn start(
 
     let lab_plain_http = tls.lab_plain_http;
     let https = tls.https;
-    let server = steps
+    let (server, events) = steps
         .run("api", async {
             let mut state = AppState::with_options(
                 Arc::clone(&store_dyn),
@@ -1355,6 +1398,16 @@ async fn start(
             server.extensions.insert(Arc::clone(&operator_secrets));
             server.extensions.insert(Arc::clone(&kek_admin));
             state.set_kek(Arc::clone(&kek_admin));
+            server.extensions.insert(leader_view.source());
+            server.fingerprint_key = cluster_key
+                .as_ref()
+                .map(cluster_key::ClusterKey::fingerprint_key);
+            leaders.register(leader::idempotency_purge(
+                Arc::clone(&store_dyn),
+                server.http.idempotency.ttl,
+            ));
+            leaders.register(leader::used_challenges_purge(Arc::clone(&store_dyn)));
+            let events = state.events().clone();
             let running = tenko_api::start(server, state).await.map_err(|error| {
                 let code = match &error {
                     tenko_api::ServeError::Bind { .. } => "start.api.bind",
@@ -1373,9 +1426,27 @@ async fn start(
                     .collect::<Vec<_>>()
                     .join(", ")
             );
-            Ok((running, summary))
+            Ok(((running, events), summary))
         })
         .await?;
+    leaders.register(leader::clock::beat_service(
+        Arc::clone(&store_dyn),
+        resolved.node_id,
+    ));
+    if let Some(task) = leader::clock::follow(
+        Arc::clone(&store_dyn),
+        leader_view.clone(),
+        running.stop.subscribe(),
+    ) {
+        running.tasks.push(task);
+    }
+    running.leader = Some(leader::spawn(
+        Arc::clone(&store_dyn),
+        &leaders,
+        leader_view,
+        Some(events),
+        leader::SupervisorConfig::default(),
+    ));
 
     if let Some(updates) = &updates {
         running

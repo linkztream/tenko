@@ -91,6 +91,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - A member renews its cluster certificate under `<data_dir>/node/` by the rule nodes use.
 - Promoting or removing a controller is an inline job `cluster.edit` (step `cluster.member`), and the answer carries `job_id`.
 - New fuzz target `raft_payloads` with a seed corpus.
+- One job runner per cluster of controllers: the leader drives every job, and when leadership moves another controller takes the running jobs over at once, re-running a step only when it is idempotent and otherwise rolling the job back. Group limits and the worker count hold for the whole cluster, and the install of a release runs on the controller that downloaded it.
+- Sign-in ceremonies (second factor, passkey sign-in and registration, TOTP enrolment) that finish on any controller, without sticky sessions; a used challenge is refused on every controller.
+- Retried requests served by any controller: a retry with the same idempotency key that reaches another controller replays the first answer. Import uploads are staged in the replicated store, so preview, apply and discard work on every controller too.
+- The leader services in `/system/status`: whether the controller leads, its leader epoch, the state of every leader-only service with its restarts and last error, the warning `cluster.leader.service_failing`, and the clock difference to the leader with the warning `cluster.clock_skew` above five seconds.
 
 - Grants within a scope (IAM-01): a person or a service account can hold the operator or viewer role over a VRF, a site or a prefix, with or without what lies below it, and then sees and changes only the objects inside: lists, searches, the prefix tree (which shows the ancestors of a granted prefix as context rows with the network only), exports, observations, proposals, jobs, the topology, the audit log and the event stream are filtered, and anything else answers 403 `auth.out_of_scope`. A delegable grant lets its holder grant a role no higher over a scope inside it; revoking it revokes what was granted under it. Grants are managed under `/api/v1/access/grants` and every change is audited.
 - Service accounts (IAM-10): accounts for automation without a password, passkey or session, created by an administrator, holding roles or grants and acting only through scoped API tokens (`/api/v1/access/service-accounts`).
@@ -100,6 +104,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - An account that must change its password can use nothing else until it has: every other request answers 403 `auth.password_change_required`.
 ### Changed
 
+- The API rate limiter and the login throttle count per controller: behind a load balancer over several controllers a client gets that many times the configured rate and free sign-in attempts before the replicated account lock takes over.
 - The API names the health of a connector's remote system `RemoteHealth`, apart from the liveness answer of the health route, so generated clients see the three health values.
 - Credentials taken over by an import are operator secrets bound to their host; the login becomes the user name of the secret. Credentials imported earlier are taken over at the first start of this version.
 - Operators may reveal operator secrets, so the PIN rule applies to operator accounts too: once the vault holds a secret, an operator signs in with a password, a second factor or a passkey.

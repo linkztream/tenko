@@ -62,8 +62,8 @@ pub const STATUS_EVENT: &str = "cluster.status";
 /// state (OPS-26); its parameters are `state` (`single`, `healthy`, `electing`,
 /// `isolated`) and, when known, `since`, `last_contact` (RFC 3339) and `applied`.
 pub const QUORUM_EVENT: &str = "cluster.quorum";
-/// How often expired revocations and old tokens are pruned and the revocation list is read
-/// again (other controllers revoke too, Slice 3).
+/// How often the revocation list is read again (other controllers revoke too); the prune of
+/// expired revocations and old tokens is the leader service `cluster.prune`.
 const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(3600);
 /// How often the controller's certificate on the cluster port is checked for renewal.
 const CERT_INTERVAL: Duration = Duration::from_secs(24 * 3600);
@@ -459,8 +459,7 @@ impl Cluster {
     }
 
     /// The leader-only work of the node registry, for the leader supervisor: the hourly
-    /// prune of expired revocations and old enrolment tokens (`cluster.prune`). Until the
-    /// supervisor runs it, the maintenance task prunes while this controller leads.
+    /// prune of expired revocations and old enrolment tokens (`cluster.prune`).
     pub fn leader_services(&self) -> Vec<Arc<dyn LeaderService>> {
         vec![Arc::new(PruneService::new(Arc::clone(&self.registry)))]
     }
@@ -501,39 +500,27 @@ async fn on_demand(
     }
 }
 
-/// Prunes expired revocations and old tokens, reads the revocation list again and renews
-/// the controller's certificate on the cluster port when it is due (a single controller:
-/// `resolver`; a member's identity under `<data_dir>/node/` is renewed elsewhere).
+/// Reads the revocation list again and renews the controller's certificate on the cluster
+/// port when it is due (a single controller: `resolver`; a member's identity under
+/// `<data_dir>/node/` is renewed elsewhere). The prune is the leader service
+/// `cluster.prune` ([`Cluster::leader_services`]).
 async fn maintenance(
     registry: Arc<NodeRegistry>,
     vault: Arc<StoreVault>,
     resolver: Option<Arc<TlsResolver>>,
     mut stop: watch::Receiver<bool>,
 ) {
-    let mut prune = tokio::time::interval(MAINTENANCE_INTERVAL);
-    prune.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut revocations = tokio::time::interval(MAINTENANCE_INTERVAL);
+    revocations.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut certificate = tokio::time::interval(CERT_INTERVAL);
     certificate.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     // Both intervals fire at once; the start step just did both.
-    prune.tick().await;
+    revocations.tick().await;
     certificate.tick().await;
     loop {
         tokio::select! {
             () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
-            _ = prune.tick() => {
-                // Leader-only work: the other controllers would only race the leader.
-                let leads = registry
-                    .store()
-                    .leadership()
-                    .borrow()
-                    .is_some_and(|seen| seen.is_self);
-                if leads {
-                    match registry.prune(Timestamp::now()).await {
-                        Ok(0) => {}
-                        Ok(count) => tracing::info!(count, "expired revocations and old enrolment tokens removed"),
-                        Err(error) => tracing::warn!(code = %error.code(), "{}", error.detail()),
-                    }
-                }
+            _ = revocations.tick() => {
                 if let Err(error) = registry.load_revocations().await {
                     tracing::warn!(code = %error.code(), "{}", error.detail());
                 }

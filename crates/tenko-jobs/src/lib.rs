@@ -38,6 +38,12 @@
 //!   is what the `jobs` SSE topic forwards ([`event`]). A restarted runner resumes its
 //!   jobs and runs again only idempotent steps; others take over the jobs of a runner whose
 //!   lease expired.
+//! - **A cluster of controllers** ([`leader`], plan section 2.3): the leader runs the one
+//!   runner of the installation as the leader-only service `jobs.runner`
+//!   ([`JobEngine::leader_service`]); every write it makes carries the leader epoch, so a
+//!   deposed leader's next write fails, and the next leader takes the jobs over at once.
+//!   Jobs pinned to a controller (`JobSpec::node`) run on that controller's own runner
+//!   ([`JobEngine::start_pinned`]).
 //! - **Time** ([`clock`]): every timeout, deadline and lease follows a [`Clock`], so tests
 //!   drive them with [`MockClock`].
 //!
@@ -48,6 +54,7 @@ pub mod clock;
 mod drive;
 pub mod engine;
 pub mod event;
+pub mod leader;
 pub mod machine;
 pub mod manual;
 pub mod model;
@@ -70,7 +77,7 @@ pub use model::{
     StepOutcome, StepPreview, StepRecord, StepSpec, StepState,
 };
 pub use query::{JobDetail, JobPage, JobQuery, JobSummary};
-pub use runner::{AlreadyRunning, RunnerHandle};
+pub use runner::{AlreadyRunning, RunnerExit, RunnerHandle};
 pub use stage::{StagedWrite, stage};
 pub use tables::{Transition, TransitionEvent};
 pub use waiters::PrefixResolver;

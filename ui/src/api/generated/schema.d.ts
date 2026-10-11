@@ -5637,6 +5637,50 @@ export interface components {
             warnings?: string[];
         };
         /**
+         * @description The state of a leader-only service.
+         * @enum {string}
+         */
+        LeaderServiceState: "idle" | "running" | "restarting" | "finished";
+        /** @description One leader-only service. */
+        LeaderServiceStatus: {
+            /** @description The error the service last gave up with, in this term of office. */
+            last_error?: string | null;
+            /** @description The stable name, such as `jobs.runner`. */
+            name: string;
+            /**
+             * Format: int32
+             * @description How often the service was restarted after it gave up, in this term of office.
+             */
+            restarts: number;
+            since?: components["schemas"]["Timestamp"] | null;
+            /** @description What the service does now. */
+            state: components["schemas"]["LeaderServiceState"];
+        };
+        /**
+         * @description The leader-only work of a controller, for `GET /system/status`. In a cluster exactly
+         *     one controller leads and runs the leader services (the job runner, purges, the online
+         *     KEK rotation and others); the other controllers list them as `idle`.
+         */
+        LeaderStatus: {
+            /**
+             * Format: int64
+             * @description This controller's clock minus the leader's, in milliseconds, as measured on the
+             *     leader's last clock beat; absent on a single controller and while no beat arrived.
+             */
+            clock_skew_ms?: number | null;
+            /**
+             * Format: int64
+             * @description The leader epoch of the term of office (the counter `sys.leader_epoch`) while this
+             *     controller leads.
+             */
+            epoch?: number | null;
+            /** @description Whether this controller holds the office and runs the leader services. */
+            leads: boolean;
+            /** @description Every registered leader service, in start order. */
+            services: components["schemas"]["LeaderServiceStatus"][];
+            since?: components["schemas"]["Timestamp"] | null;
+        };
+        /**
          * @description How a link was learned.
          * @enum {string}
          */
@@ -9782,6 +9826,7 @@ export interface components {
         SystemStatus: {
             cluster?: components["schemas"]["ClusterStatus"] | null;
             kek?: components["schemas"]["KekSummaryView"] | null;
+            leader?: components["schemas"]["LeaderStatus"] | null;
             /**
              * @description The product modules this installation runs (OPS-25); the UI shows only their
              *     areas. Absent in answers of servers that predate the module switch: all modules.

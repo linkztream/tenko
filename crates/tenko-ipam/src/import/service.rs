@@ -59,7 +59,7 @@ use super::{
     model::{CredentialValues, ImportModel},
     read::{self, ReadError, ReadLimits, SourceFile},
     reconcile::{self, ItemAction, ItemOutcome, Reconciled, WorkItem},
-    staging::{Frozen, SESSIONS, Session, StagedFile, Stash},
+    staging::{Frozen, PREVIEWS, SESSIONS, Session, StagedFile, Stash, StoredPreview},
     translate::{self, ItemKey, Translation},
     vocab::Target,
 };
@@ -72,8 +72,8 @@ use crate::{
 /// Settings of the import service.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportConfig {
-    /// Where staged uploads are written (encrypted). The server puts it under its data
-    /// directory; the default is a directory in the system temporary directory.
+    /// Where releases before WP3.1b staged uploads on disk; the server empties it at start.
+    /// Uploads are now staged in the store (see [`Stash`]).
     pub staging_dir: PathBuf,
     /// How long an upload stays staged.
     pub ttl: Duration,
@@ -199,19 +199,6 @@ struct Evaluation {
 /// The staging part that holds the rows of the latest preview.
 const ROWS_PART: &str = "rows";
 
-/// Where the rows of the latest preview of an import are kept.
-#[derive(Debug, Clone)]
-struct StoredPreview {
-    /// The mapping revision the preview was computed for.
-    mapping_revision: u64,
-    /// The store revision it was computed from.
-    base_revision: u64,
-    /// Rows in it.
-    total_rows: usize,
-    /// The staged file holding them.
-    stored_as: String,
-}
-
 /// A page of the rows of a stored preview.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreviewRows {
@@ -244,7 +231,6 @@ pub struct ImportService {
     stash: Stash,
     parsed: Mutex<VecDeque<(ImportId, Arc<Vec<SourceFile>>)>>,
     prepared: Mutex<VecDeque<(ImportId, Digest, Arc<Prepared>)>>,
-    previews: Mutex<BTreeMap<ImportId, StoredPreview>>,
     last_rows: Mutex<Option<CachedRows>>,
 }
 
@@ -295,7 +281,7 @@ impl ImportService {
         vault: Option<Arc<dyn Vault>>,
         config: ImportConfig,
     ) -> IpamResult<Arc<Self>> {
-        let stash = Stash::new(&config.staging_dir)?;
+        let stash = Stash::new(Arc::clone(ipam.store()), vault.clone());
         let service = Arc::new_cyclic(|weak| {
             let mut registrar = engine.clone();
             job::register_steps(&mut registrar, weak.clone());
@@ -307,7 +293,6 @@ impl ImportService {
                 stash,
                 parsed: Mutex::new(VecDeque::new()),
                 prepared: Mutex::new(VecDeque::new()),
-                previews: Mutex::new(BTreeMap::new()),
                 last_rows: Mutex::new(None),
             }
         });
@@ -355,7 +340,7 @@ impl ImportService {
         }
         if session.expires < cx.now {
             let _ = self
-                .remove(cx, &session, Some(revision), "import.expire")
+                .remove(cx, &session, Some(revision), "import.expire", None)
                 .await;
             return Err(IpamError::new(
                 codes::EXPIRED,
@@ -404,13 +389,18 @@ impl ImportService {
         session: &Session,
         expect: Option<tenko_core::Revision>,
         action: &'static str,
+        fence: Option<u64>,
     ) -> IpamResult<()> {
         let mut batch = WriteBatch::for_request(cx);
         batch.idempotency = None;
+        if let Some(epoch) = fence {
+            batch.preconditions.push(tenko_store::fence(epoch));
+        }
         if expect.is_some() {
             batch.expect_typed(&SESSIONS, &session.id, expect);
         }
         batch.delete_typed(&SESSIONS, &session.id);
+        self.stash.stage_remove(&mut batch, cx, session.id).await?;
         batch.audit(
             AuditDraft::success(
                 AuditAction::from_static(action),
@@ -419,29 +409,29 @@ impl ImportService {
             .with_source_ip(cx.source_ip),
         );
         self.ipam.store().propose(batch).await?;
-        for file in &session.files {
-            self.stash.remove(&file.stored_as);
-        }
-        lock(&self.parsed).retain(|(id, _)| *id != session.id);
-        lock(&self.prepared).retain(|(id, _, _)| *id != session.id);
-        if let Some(stored) = lock(&self.previews).remove(&session.id) {
-            self.stash.remove(&stored.stored_as);
-        }
-        let mut last = lock(&self.last_rows);
-        if last.as_ref().is_some_and(|(id, _, _)| *id == session.id) {
-            *last = None;
-        }
+        self.forget(session.id);
         Ok(())
     }
 
+    /// Drops what this controller keeps in memory of an import.
+    fn forget(&self, id: ImportId) {
+        self.stash.forget(id);
+        lock(&self.parsed).retain(|(i, _)| *i != id);
+        lock(&self.prepared).retain(|(i, _, _)| *i != id);
+        let mut last = lock(&self.last_rows);
+        if last.as_ref().is_some_and(|(i, _, _)| *i == id) {
+            *last = None;
+        }
+    }
+
     /// The parsed files of a session (cached, else decrypted and read again).
-    fn files(&self, session: &Session) -> IpamResult<Arc<Vec<SourceFile>>> {
+    async fn files(&self, session: &Session) -> IpamResult<Arc<Vec<SourceFile>>> {
         if let Some((_, files)) = lock(&self.parsed).iter().find(|(id, _)| *id == session.id) {
             return Ok(Arc::clone(files));
         }
         let mut files = Vec::with_capacity(session.files.len());
         for (index, file) in session.files.iter().enumerate() {
-            let bytes = self.stash.read(session.id, index, &file.stored_as)?;
+            let bytes = self.stash.read(session.id, index, &file.stored_as).await?;
             files.push(
                 read::read_file(&file.name, &bytes, &self.config.limits).map_err(read_error)?,
             );
@@ -550,7 +540,13 @@ impl ImportService {
         let id = ImportId::generate();
         let mut staged = Vec::with_capacity(uploads.len());
         for (index, (upload, file)) in uploads.iter().zip(&files).enumerate() {
-            let stored_as = self.stash.write(id, index, &upload.bytes)?;
+            let stored_as = match self.stash.write(cx, id, index, &upload.bytes).await {
+                Ok(stored_as) => stored_as,
+                Err(error) => {
+                    self.discard(cx, id).await;
+                    return Err(error);
+                }
+            };
             staged.push(StagedFile {
                 name: upload.name.clone(),
                 format: file.format,
@@ -584,9 +580,7 @@ impl ImportService {
             )
             .await
         {
-            for file in &session.files {
-                self.stash.remove(&file.stored_as);
-            }
+            self.discard(cx, id).await;
             return Err(error);
         }
         let files = Arc::new(files);
@@ -608,7 +602,7 @@ impl ImportService {
     /// `import.not_found` (404), `import.expired` (410), `import.upload.lost` (410).
     pub async fn get(&self, cx: &RequestCtx, id: ImportId) -> IpamResult<ImportView> {
         let (session, _) = self.session(cx, id).await?;
-        let files = self.files(&session)?;
+        let files = self.files(&session).await?;
         let (analyses, suggested) = mapping::analyze(&files);
         self.render(&session, &files, analyses, suggested).await
     }
@@ -632,7 +626,7 @@ impl ImportService {
                 "the import is being applied; wait for its job to finish",
             ));
         }
-        let files = self.files(&session)?;
+        let files = self.files(&session).await?;
         let (analyses, suggested) = mapping::analyze(&files);
         mapping::validate(&mapping, &analyses).map_err(|e| {
             IpamError::new(codes::MAPPING_INVALID, 422, e.0)
@@ -659,34 +653,86 @@ impl ImportService {
                 "the import is being applied; wait for its job to finish",
             ));
         }
-        self.remove(cx, &session, Some(revision), "import.delete")
+        self.remove(cx, &session, Some(revision), "import.delete", None)
             .await
     }
 
-    /// Removes expired sessions and staged files without a session; returns how many
-    /// sessions were removed. The server calls it now and then.
+    /// Removes expired sessions and the stash of imports without a session (the store
+    /// part of the purge), then what this controller keeps in memory of imports that are
+    /// gone (the local part); returns how many sessions were removed.
     ///
     /// # Errors
     ///
     /// Store errors.
     pub async fn purge_expired(&self) -> IpamResult<usize> {
+        let removed = self.purge_store(None).await?;
+        self.sweep_local().await?;
+        Ok(removed)
+    }
+
+    /// The store part of the purge: removes expired sessions with their stash, and the
+    /// stash of imports that have no session (see [`Stash::purge_orphans`]); returns how
+    /// many sessions were removed. The leader runs it with the epoch of its term as
+    /// `fence`, so a deposed leader's purge fails instead of racing the new leader's.
+    ///
+    /// # Errors
+    ///
+    /// Store errors, the precondition failure of a fenced batch among them.
+    pub async fn purge_store(&self, fence: Option<u64>) -> IpamResult<usize> {
         let cx = RequestCtx::system(tenko_core::SystemComponent::Import);
         let view = self.view_at(ReadConsistency::Local).await?;
         let sessions =
             view.scan_typed(&SESSIONS, tenko_store::KeyRange::all(), usize::MAX, false)?;
+        drop(view);
         let mut removed = 0;
-        let mut live = BTreeSet::new();
         for (_, session, revision) in sessions {
             if session.expires < cx.now {
-                self.remove(&cx, &session, Some(revision), "import.expire")
+                self.remove(&cx, &session, Some(revision), "import.expire", fence)
                     .await?;
                 removed += 1;
-            } else {
-                live.insert(session.id.0.to_string());
             }
         }
-        self.stash.sweep(|id| live.contains(id));
+        self.stash.purge_orphans(cx.now, fence).await?;
         Ok(removed)
+    }
+
+    /// The local part of the purge, on every controller: drops the cached keys, parsed
+    /// uploads and preview rows of imports whose sessions are gone; returns how many
+    /// entries were dropped.
+    ///
+    /// # Errors
+    ///
+    /// Store errors.
+    pub async fn sweep_local(&self) -> IpamResult<usize> {
+        let view = self.view_at(ReadConsistency::Local).await?;
+        let live: BTreeSet<ImportId> = view
+            .scan_typed(&SESSIONS, tenko_store::KeyRange::all(), usize::MAX, false)?
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect();
+        let gone: BTreeSet<ImportId> = lock(&self.parsed)
+            .iter()
+            .map(|(id, _)| *id)
+            .chain(lock(&self.prepared).iter().map(|(id, _, _)| *id))
+            .chain(lock(&self.last_rows).iter().map(|(id, _, _)| *id))
+            .filter(|id| !live.contains(id))
+            .collect();
+        let forgotten_keys = self.stash.sweep(|id| live.contains(&id));
+        for id in &gone {
+            self.forget(*id);
+        }
+        Ok(gone.len() + forgotten_keys)
+    }
+
+    /// Removes what a failed upload staged, as far as it can; the purge removes the rest.
+    async fn discard(&self, cx: &RequestCtx, id: ImportId) {
+        let mut batch = WriteBatch::for_request(cx);
+        batch.idempotency = None;
+        let staged = self.stash.stage_remove(&mut batch, cx, id).await;
+        if staged.is_ok() {
+            let _ = self.ipam.store().propose(batch).await;
+        }
+        self.forget(id);
     }
 
     // ----- preview and apply ---------------------------------------------------------------
@@ -810,39 +856,123 @@ impl ImportService {
         gate: &CredentialGate,
     ) -> IpamResult<ImportPreview> {
         let (session, _) = self.session(cx, id).await?;
-        let files = self.files(&session)?;
+        let files = self.files(&session).await?;
         let mapping = Self::effective_mapping(&session, &files);
         let evaluation = self
             .evaluate(cx, &files, &mapping, &BTreeSet::new())
             .await?;
         let limit = rows.unwrap_or(self.config.preview_rows);
-        let (preview, all_rows) = self
+        let (mut preview, all_rows) = self
             .build_preview(cx, id, &mapping, &evaluation, limit, gate)
             .await;
-        self.store_rows(&session, preview.base_revision, all_rows)?;
+        preview.base_revision = self
+            .store_rows(cx, &session, preview.base_revision, all_rows)
+            .await?;
         Ok(preview)
     }
 
     /// Keeps every row of a preview in the staging area (encrypted like the upload), for
     /// paging with [`preview_rows`](Self::preview_rows) without computing the preview again.
-    fn store_rows(
+    /// The record of where they are ([`PREVIEWS`]) replicates, so any controller pages
+    /// them.
+    async fn store_rows(
         &self,
+        cx: &RequestCtx,
         session: &Session,
         base_revision: u64,
         rows: Vec<PreviewRow>,
-    ) -> IpamResult<()> {
+    ) -> IpamResult<u64> {
         let bytes = tenko_core::codec::to_cbor(&rows)
             .map_err(|e| IpamError::new("sys.internal", 500, e.to_string()))?;
-        let stored_as = self.stash.write_part(session.id, ROWS_PART, &bytes)?;
+        let rows_sha256 = Some(Digest(sha256(&bytes)));
+        // The same rows for the same mapping: the stored preview stands, with the revision
+        // it was computed from. Staging them again would move the store revision, and a
+        // second look at an unchanged import would seem to be a changed preview.
+        let same = |stored: &StoredPreview| {
+            stored.mapping_revision == session.mapping_revision
+                && stored.rows_sha256 == rows_sha256
+                && stored.total_rows == rows.len()
+        };
+        let view = self.view_at(ReadConsistency::Linearizable).await?;
+        let previous = view.get_typed(&PREVIEWS, &session.id)?;
+        let current = view
+            .get_typed(&SESSIONS, &session.id)?
+            .map(|(_, revision)| revision);
+        drop(view);
+        if let Some((stored, _)) = &previous
+            && same(stored)
+        {
+            let base = stored.base_revision;
+            *lock(&self.last_rows) = Some((session.id, session.mapping_revision, Arc::new(rows)));
+            return Ok(base);
+        }
+        let stored_as = self
+            .stash
+            .write_part(cx, session.id, ROWS_PART, &bytes)
+            .await?;
         let stored = StoredPreview {
             mapping_revision: session.mapping_revision,
             base_revision,
             total_rows: rows.len(),
             stored_as,
+            rows_sha256,
         };
-        lock(&self.previews).insert(session.id, stored);
+        let mut batch = WriteBatch::for_request(cx);
+        batch.idempotency = None;
+        // Only while the session exists: a preview of a discarded import leaves no row.
+        batch.expect_typed(
+            &SESSIONS,
+            &session.id,
+            current.or(Some(tenko_core::Revision::ZERO)),
+        );
+        batch.expect_typed(
+            &PREVIEWS,
+            &session.id,
+            previous.as_ref().map(|(_, revision)| *revision),
+        );
+        batch.put_typed(&PREVIEWS, &session.id, &stored)?;
+        if let Err(error) = self.ipam.store().propose(batch).await {
+            let _ = self
+                .stash
+                .remove_part(cx, session.id, &stored.stored_as)
+                .await;
+            if !matches!(error, tenko_store::StoreError::PreconditionFailed(_)) {
+                return Err(error.into());
+            }
+            // Another preview of the same import won the race: when it staged the same
+            // rows, its record stands for this one too.
+            return match self.stored_preview(session.id).await? {
+                Some(winner) if same(&winner) => {
+                    *lock(&self.last_rows) =
+                        Some((session.id, session.mapping_revision, Arc::new(rows)));
+                    Ok(winner.base_revision)
+                }
+                _ => Err(state_conflict(
+                    "the import changed at the same time; preview it again",
+                )),
+            };
+        }
+        if let Some((previous, _)) = previous {
+            let _ = self
+                .stash
+                .remove_part(cx, session.id, &previous.stored_as)
+                .await;
+        }
         *lock(&self.last_rows) = Some((session.id, session.mapping_revision, Arc::new(rows)));
-        Ok(())
+        Ok(base_revision)
+    }
+
+    /// Where the latest preview of an import is staged: from this controller's view, or a
+    /// linearizable one when the preview was computed moments ago through another
+    /// controller.
+    async fn stored_preview(&self, id: ImportId) -> IpamResult<Option<StoredPreview>> {
+        let view = self.view_at(ReadConsistency::Local).await?;
+        if let Some((stored, _)) = view.get_typed(&PREVIEWS, &id)? {
+            return Ok(Some(stored));
+        }
+        drop(view);
+        let view = self.view_at(ReadConsistency::Linearizable).await?;
+        Ok(view.get_typed(&PREVIEWS, &id)?.map(|(stored, _)| stored))
     }
 
     /// A page of the rows of the stored preview (`GET /imports/{id}/rows`), from `offset`,
@@ -872,12 +1002,12 @@ impl ImportService {
                 "the mapping changed since this page was listed; preview the import again",
             ));
         }
-        let stored = lock(&self.previews).get(&id).map(|stored| {
+        let stored = self.stored_preview(id).await?.map(|stored| {
             (
                 stored.mapping_revision,
                 stored.base_revision,
                 stored.total_rows,
-                stored.stored_as.clone(),
+                stored.stored_as,
             )
         });
         let Some((revision, base_revision, total_rows, stored_as)) = stored else {
@@ -897,7 +1027,7 @@ impl ImportService {
         let rows = if let Some(rows) = cached {
             rows
         } else {
-            let bytes = self.stash.read_part(id, ROWS_PART, &stored_as)?;
+            let bytes = self.stash.read_part(id, ROWS_PART, &stored_as).await?;
             let rows = Arc::new(
                 tenko_core::codec::from_cbor::<Vec<PreviewRow>>(&bytes)
                     .map_err(|e| IpamError::new("sys.internal", 500, e.to_string()))?,
@@ -1156,7 +1286,7 @@ impl ImportService {
                 "the import is being applied; wait for its job to finish",
             ));
         }
-        let files = self.files(&session)?;
+        let files = self.files(&session).await?;
         let mut mapping = Self::effective_mapping(&session, &files);
         mapping
             .options
@@ -1295,7 +1425,7 @@ impl ImportService {
         let Some(frozen) = session.frozen.clone() else {
             return Err(state_conflict("the import was not prepared for apply"));
         };
-        let files = self.files(&session)?;
+        let files = self.files(&session).await?;
         let known = reconcile::known_prefixes(view.as_ref())?;
         let translation =
             translate::translate(&files, &frozen.mapping, &known, Some(&frozen.proposals));

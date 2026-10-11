@@ -269,7 +269,8 @@ fn assert_audit_counts_secrets(view: &dyn ReadView, secrets: usize) {
         .iter()
         .filter(|(_, record, _)| record.draft.action.as_str() == "vault.secret.create")
         .count();
-    assert_eq!(created, secrets);
+    // One secret per credential, and the data key of the upload's stash.
+    assert_eq!(created, secrets + 1);
     let printed = format!("{records:?}");
     for secret in [
         "example-gw-pass",
@@ -605,6 +606,40 @@ async fn a_changed_credential_replaces_the_secret() {
     );
 }
 
+/// The sealed chunks of every staged upload in the store.
+async fn staged_chunks(store: &MemStore) -> usize {
+    store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view")
+        .scan(
+            &tenko_ipam::import::staging::STASH_CHUNKS,
+            KeyRange::all(),
+            usize::MAX,
+            false,
+        )
+        .expect("scan")
+        .len()
+}
+
+/// A second preview of an unchanged import is the same preview: it reports the revision the
+/// first was computed from and stages nothing again, so a client that compares revisions
+/// sees no change.
+#[tokio::test]
+async fn previewing_an_unchanged_import_again_keeps_its_revision() {
+    let env = env_with(true, ImportConfig::default());
+    let cx = person();
+    let (id, first) = import(&env, &cx, vec![fixture("ip-plan.ods")]).await;
+    let staged = staged_chunks(&env.store).await;
+    let again = env
+        .imports
+        .preview(&cx, id, None, &CredentialGate::Allowed)
+        .await
+        .expect("preview");
+    assert_eq!(again.base_revision, first.base_revision);
+    assert_eq!(staged_chunks(&env.store).await, staged);
+}
+
 /// An upload expires after its time to live; the purge removes the record and the staged
 /// files.
 #[tokio::test]
@@ -624,7 +659,7 @@ async fn uploads_expire() {
         .upload(&cx, vec![fixture("ip-plan.ods")])
         .await
         .expect("upload");
-    assert_eq!(std::fs::read_dir(&dir).expect("dir").count(), 1);
+    assert_eq!(staged_chunks(&env.store).await, 1);
     tokio::time::sleep(Duration::from_millis(5)).await;
     let later = RequestCtx {
         now: tenko_core::Timestamp::now(),
@@ -633,7 +668,7 @@ async fn uploads_expire() {
     let error = env.imports.get(&later, view.id).await.expect_err("expired");
     assert!(error.is(codes::EXPIRED));
     assert_eq!(error.coded().status, 410);
-    assert_eq!(std::fs::read_dir(&dir).expect("dir").count(), 0);
+    assert_eq!(staged_chunks(&env.store).await, 0);
 
     let view = env
         .imports
@@ -642,6 +677,6 @@ async fn uploads_expire() {
         .expect("upload");
     tokio::time::sleep(Duration::from_millis(5)).await;
     assert_eq!(env.imports.purge_expired().await.expect("purge"), 1);
-    assert_eq!(std::fs::read_dir(&dir).expect("dir").count(), 0);
+    assert_eq!(staged_chunks(&env.store).await, 0);
     assert!(env.imports.get(&cx, view.id).await.is_err());
 }

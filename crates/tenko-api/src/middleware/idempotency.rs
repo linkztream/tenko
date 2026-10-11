@@ -14,7 +14,8 @@
 //!    body with `Idempotency-Replayed: true`; the same key with another request is 422
 //!    `sys.idempotency_mismatch`; a retry while the first request still runs is 409
 //!    `sys.idempotency_in_flight` with `Retry-After: 1`. Failed requests are not stored, so
-//!    they can be retried. Records older than the TTL are ignored and purged hourly.
+//!    they can be retried. Records older than the TTL are ignored and purged hourly by the
+//!    leader ([`purge_expired`], a leader-only service of the server).
 //!
 //! **Secret-bearing responses are never stored (NEVER-01).** A successful response that
 //! carries `Cache-Control: no-store` (set by every endpoint that returns a one-time secret:
@@ -26,14 +27,17 @@
 //! default `Cache-Control: no-store` only after this check, so the rule sees what the
 //! handler set.
 //!
-//! **The fingerprint is keyed.** It is HMAC-SHA-256 under a random key that each process
-//! draws at start and holds only in memory ([`InFlight`]), never a plain hash. A plain
-//! hash of a body is a password oracle: whoever reads the store could hash candidate
-//! passwords and compare them offline. Under a key that never leaves the process, a stored
-//! fingerprint means nothing outside it. Each record carries the random, public id of the
-//! key that made it. Within one process the rules above hold unchanged (same key, other
-//! body: 422). A record made by another process (an earlier start, another controller)
-//! cannot be compared, so a retry against it is answered 409
+//! **The fingerprint is keyed.** It is HMAC-SHA-256 under a [`FingerprintKey`], never a
+//! plain hash. A plain hash of a body is a password oracle: whoever reads the store could
+//! hash candidate passwords and compare them offline. Under a key that is not in the store
+//! in plain, a stored fingerprint means nothing without it. The server derives the key
+//! from the installation's cluster key (`sys.cluster_key`, a system secret in the vault),
+//! so every controller and every restart computes the same fingerprints, and a retry that
+//! a load balancer sends to another controller replays the first answer (Slice 3,
+//! WP3.1b). Without a cluster key (tests, a server that could not read it) each process
+//! draws a random key. Each record carries the public id of the key that made it; a
+//! record made under another key (an earlier process key, records from before the cluster
+//! key) cannot be compared, so a retry against it is answered 409
 //! `sys.idempotency_not_replayable`: the request was performed and is neither run again nor
 //! replayed.
 //!
@@ -51,12 +55,12 @@
 use std::{
     collections::HashSet,
     fmt,
-    sync::{Mutex, PoisonError},
+    sync::{Arc, Mutex, PoisonError, RwLock},
     time::Duration,
 };
 
 use aws_lc_rs::{
-    hmac,
+    hkdf, hmac,
     rand::{SecureRandom, SystemRandom},
 };
 
@@ -128,34 +132,88 @@ struct StoredResponse {
     key_id: Bytes,
 }
 
-/// Per-process state of the middleware: the random fingerprint key and the keys of requests
-/// being processed.
-pub(crate) struct InFlight {
-    keys: Mutex<HashSet<[u8; 32]>>,
-    /// HMAC-SHA-256 key of the fingerprints, drawn at start, never stored or logged.
-    fingerprint_key: hmac::Key,
-    /// Random public id of `fingerprint_key`, stored with each record.
-    key_id: [u8; 8],
+/// The HMAC-SHA-256 key of the request fingerprints, with its public id. Never stored or
+/// logged.
+#[derive(Clone)]
+pub struct FingerprintKey {
+    key: hmac::Key,
+    /// Public id of the key, stored with each record.
+    id: [u8; 8],
 }
 
-impl Default for InFlight {
-    /// Draws a new fingerprint key from the operating system's random source.
+/// HKDF-SHA-256 salt of the subkeys of the cluster key.
+const CLUSTER_KEY_SALT: &[u8] = b"tenko cluster key v1";
+/// HKDF info of the fingerprint subkey.
+const FINGERPRINT_INFO: &[u8] = b"idempotency fingerprint";
+/// HMAC input of the public key id.
+const KEY_ID_INPUT: &[u8] = b"tenko idempotency key id";
+
+impl FingerprintKey {
+    /// The fingerprint subkey of the installation's cluster key (HKDF-SHA-256, salt
+    /// `tenko cluster key v1`, info `idempotency fingerprint`). Every controller derives
+    /// the same key and the same public id, so records compare across controllers and
+    /// restarts.
     ///
     /// # Panics
     ///
-    /// Panics if the random source fails, which leaves no way to key the fingerprints.
-    fn default() -> Self {
+    /// Never: HKDF-SHA-256 always yields one block.
+    pub fn from_cluster_key(cluster_key: &[u8; 32]) -> Self {
+        let prk = hkdf::Salt::new(hkdf::HKDF_SHA256, CLUSTER_KEY_SALT).extract(cluster_key);
+        let okm = prk
+            .expand(&[FINGERPRINT_INFO], hmac::HMAC_SHA256)
+            .expect("HKDF-SHA-256 yields one block");
+        let key = hmac::Key::from(okm);
+        let tag = hmac::sign(&key, KEY_ID_INPUT);
+        let mut id = [0_u8; 8];
+        id.copy_from_slice(&tag.as_ref()[..8]);
+        Self { key, id }
+    }
+
+    /// A random key of this process, with a random id.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the operating system's random source fails, which leaves no way to key the
+    /// fingerprints.
+    pub fn random() -> Self {
         let random = SystemRandom::new();
-        let fingerprint_key = hmac::Key::generate(hmac::HMAC_SHA256, &random)
+        let key = hmac::Key::generate(hmac::HMAC_SHA256, &random)
             .expect("the operating system's random source works");
-        let mut key_id = [0_u8; 8];
+        let mut id = [0_u8; 8];
         random
-            .fill(&mut key_id)
+            .fill(&mut id)
             .expect("the operating system's random source works");
+        Self { key, id }
+    }
+
+    /// The public id stored with each record.
+    pub fn id(&self) -> [u8; 8] {
+        self.id
+    }
+}
+
+impl fmt::Debug for FingerprintKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FingerprintKey")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Per-process state of the middleware: the fingerprint key and the keys of requests being
+/// processed.
+pub(crate) struct InFlight {
+    keys: Mutex<HashSet<[u8; 32]>>,
+    /// The fingerprint key: random until the server installs the cluster's.
+    key: RwLock<Arc<FingerprintKey>>,
+}
+
+impl Default for InFlight {
+    /// Draws a random fingerprint key (see [`FingerprintKey::random`]).
+    fn default() -> Self {
         Self {
             keys: Mutex::new(HashSet::new()),
-            fingerprint_key,
-            key_id,
+            key: RwLock::new(Arc::new(FingerprintKey::random())),
         }
     }
 }
@@ -163,7 +221,7 @@ impl Default for InFlight {
 impl fmt::Debug for InFlight {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("InFlight")
-            .field("key_id", &self.key_id)
+            .field("key_id", &self.key().id)
             .finish_non_exhaustive()
     }
 }
@@ -185,6 +243,16 @@ impl Drop for InFlightGuard<'_> {
 }
 
 impl InFlight {
+    /// Uses `key` for the fingerprints from now on.
+    pub(crate) fn set_key(&self, key: FingerprintKey) {
+        *self.key.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(key);
+    }
+
+    /// The fingerprint key now.
+    fn key(&self) -> Arc<FingerprintKey> {
+        Arc::clone(&self.key.read().unwrap_or_else(PoisonError::into_inner))
+    }
+
     fn enter(&self, key: [u8; 32]) -> Option<InFlightGuard<'_>> {
         let inserted = self
             .keys
@@ -235,14 +303,15 @@ where
         )
         .into_response();
     };
-    let fingerprint = in_flight.fingerprint(&parts.method, &parts.uri, &parts.headers, &body);
+    let fingerprint_key = in_flight.key();
+    let fingerprint = fingerprint_key.fingerprint(&parts.method, &parts.uri, &parts.headers, &body);
     let now = Timestamp::now();
 
     let expected = match lookup(
         store,
         &record_key,
         &fingerprint,
-        &in_flight.key_id,
+        &fingerprint_key.id,
         now,
         config.ttl,
     )
@@ -269,7 +338,7 @@ where
         principal,
         key: &record_key,
         fingerprint: &fingerprint,
-        key_id: &in_flight.key_id,
+        key_id: &fingerprint_key.id,
         created: now,
         expected,
     };
@@ -463,9 +532,9 @@ fn record_key(principal: &Principal, key: &IdempotencyKey) -> [u8; 32] {
     hash.finalize().into()
 }
 
-impl InFlight {
-    /// HMAC-SHA-256 under the process key of what makes two requests the same: method,
-    /// path and query, content type and body.
+impl FingerprintKey {
+    /// HMAC-SHA-256 under the key of what makes two requests the same: method, path and
+    /// query, content type and body.
     fn fingerprint(
         &self,
         method: &Method,
@@ -473,7 +542,7 @@ impl InFlight {
         headers: &HeaderMap,
         body: &[u8],
     ) -> [u8; 32] {
-        let mut mac = hmac::Context::with_key(&self.fingerprint_key);
+        let mut mac = hmac::Context::with_key(&self.key);
         mac.update(method.as_str().as_bytes());
         mac.update(&[0]);
         mac.update(
@@ -527,15 +596,25 @@ async fn save(
     Ok(())
 }
 
-/// Deletes stored responses older than `ttl`; returns how many. Runs hourly in the server.
-pub(crate) async fn purge_expired(
+/// Deletes stored responses older than `ttl`; returns how many. The server runs it hourly
+/// on the leader, with the leader epoch of its term as `fence` (`tenko_store::fence`), so a
+/// deposed leader's purge fails instead of racing the new leader's.
+///
+/// # Errors
+///
+/// The store's errors, the precondition failure of a fenced batch among them.
+pub async fn purge_expired(
     store: &dyn Store,
     ttl: Duration,
     now: Timestamp,
+    fence: Option<u64>,
 ) -> Result<usize, ApiError> {
     let view = store.read(ReadConsistency::Local).await?;
     let rows = view.scan(&TABLE, KeyRange::all(), 10_000, false)?;
     let mut batch = WriteBatch::new(Principal::system(tenko_core::SystemComponent::Api), now);
+    if let Some(epoch) = fence {
+        batch.preconditions.push(tenko_store::fence(epoch));
+    }
     let mut purged = 0;
     for (key, versioned) in rows {
         let expired = from_cbor::<StoredResponse>(&versioned.value)
@@ -890,12 +969,11 @@ mod tests {
             HeaderValue::from_static("application/json"),
         );
         let body = b"{\"cidr\":\"192.0.2.0/24\"}";
-        let first = InFlight::default();
-        let second = InFlight::default();
+        let (first, second) = (InFlight::default().key(), InFlight::default().key());
         let a = first.fingerprint(&Method::POST, &uri, &headers, body);
         assert_eq!(a, first.fingerprint(&Method::POST, &uri, &headers, body));
         assert_ne!(a, second.fingerprint(&Method::POST, &uri, &headers, body));
-        assert_ne!(first.key_id, second.key_id);
+        assert_ne!(first.id, second.id);
         assert_ne!(a, first.fingerprint(&Method::POST, &uri, &headers, b"{}"));
         // Not the plain SHA-256 of the same input.
         let mut plain = Sha256::new();
@@ -903,7 +981,16 @@ mod tests {
         plain.update(body);
         let plain: [u8; 32] = plain.finalize().into();
         assert_ne!(a, plain);
-        assert!(!format!("{first:?}").contains("fingerprint_key"));
+        assert!(!format!("{first:?}").contains("key:"));
+        // Keys from one cluster key agree on every controller; another cluster key differs.
+        let cluster = FingerprintKey::from_cluster_key(&[7; 32]);
+        let again = FingerprintKey::from_cluster_key(&[7; 32]);
+        let other = FingerprintKey::from_cluster_key(&[8; 32]);
+        assert_eq!(cluster.id(), again.id());
+        assert_ne!(cluster.id(), other.id());
+        let c = cluster.fingerprint(&Method::POST, &uri, &headers, body);
+        assert_eq!(c, again.fingerprint(&Method::POST, &uri, &headers, body));
+        assert_ne!(c, other.fingerprint(&Method::POST, &uri, &headers, body));
     }
 
     #[test]
@@ -1007,7 +1094,7 @@ mod tests {
         .await;
         let stored = stored_records(&store).await;
         assert_eq!(stored.len(), 1);
-        assert_eq!(stored[0].0.key_id.as_ref(), earlier.key_id.as_slice());
+        assert_eq!(stored[0].0.key_id.as_ref(), earlier.key().id.as_slice());
 
         // After a restart the record cannot be compared: 409, and the handler does not run.
         let restarted = InFlight::default();
@@ -1044,13 +1131,56 @@ mod tests {
         let later = Timestamp::now()
             .checked_add(Duration::from_secs(25 * 3600))
             .expect("time");
-        let purged = purge_expired(&store, Duration::from_secs(24 * 3600), later)
+        let ttl = Duration::from_secs(24 * 3600);
+        // A purge fenced with an epoch that is not the store's changes nothing.
+        assert!(purge_expired(&store, ttl, later, Some(7)).await.is_err());
+        let purged = purge_expired(&store, ttl, later, Some(0))
             .await
             .expect("purge");
         assert_eq!(purged, 1);
-        let purged = purge_expired(&store, Duration::from_secs(24 * 3600), later)
+        let purged = purge_expired(&store, ttl, later, None)
             .await
             .expect("purge");
         assert_eq!(purged, 0);
+    }
+
+    #[tokio::test]
+    async fn a_retry_on_another_controller_replays_under_the_cluster_key() {
+        let store = MemStore::default();
+        let (one, two) = (InFlight::default(), InFlight::default());
+        one.set_key(FingerprintKey::from_cluster_key(&[3; 32]));
+        two.set_key(FingerprintKey::from_cluster_key(&[3; 32]));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let first = run(
+            &store,
+            &one,
+            post("k-cluster", "{}"),
+            &calls,
+            StatusCode::CREATED,
+        )
+        .await;
+        assert_eq!(first.status(), StatusCode::CREATED);
+        let retry = run(
+            &store,
+            &two,
+            post("k-cluster", "{}"),
+            &calls,
+            StatusCode::CREATED,
+        )
+        .await;
+        assert_eq!(retry.status(), StatusCode::CREATED);
+        assert_eq!(retry.headers()[REPLAYED_HEADER], "true");
+        assert_eq!(body(retry).await, "{\"call\":1}");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        // Another body under the same key is still a mismatch on the other controller.
+        let other = run(
+            &store,
+            &two,
+            post("k-cluster", "{\"a\":1}"),
+            &calls,
+            StatusCode::CREATED,
+        )
+        .await;
+        assert_eq!(other.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 }

@@ -3,12 +3,26 @@
 //! - **Workers.** At most `EngineConfig::workers` jobs are driven at once; a job holds a
 //!   worker only while the engine works on it (a handler call or a write), never while it
 //!   waits for an observation or a person.
+//! - **Scope.** A runner drives the jobs its [`Scope`] admits. In a cluster of controllers
+//!   the leader runs the one runner of the installation ([`JobEngine::start_leader`]):
+//!   every job without a pinned node, every write fenced with the leader epoch
+//!   (`tenko_store::fence`), so a deposed runner's next write fails and the runner ends
+//!   with [`RunnerExit::Deposed`]. Every controller also runs the runner of the jobs
+//!   pinned to it ([`JobSpec::node`](crate::JobSpec), [`JobEngine::start_pinned`]), such
+//!   as the install of a release it downloaded. [`JobEngine::start`] drives both kinds on
+//!   one node, for tests and tools.
+//! - **Takeover.** The leader's runner takes the unfinished jobs of another runner over at
+//!   once: the previous leader's writes fail on the epoch, so its lease does not matter.
+//!   The other scopes wait until the owner's lease expires.
 //! - **Groups (CONN-09).** A job with a [`GroupKey`] holds a slot of its group from its
 //!   start until it is final, including while it waits, so a bulk move of 60 devices with
 //!   a limit of 10 has at most 10 devices between "moved" and "confirmed". Queued jobs
 //!   start in submission order as slots free up. Jobs resumed after a restart or taken
 //!   over keep their slot even if that briefly exceeds the limit. Limits apply per runner;
-//!   Slice 1 has one runner.
+//!   with one runner on the leader they hold for the whole cluster.
+//! - **Waiters.** Every runner keeps the engine's index of steps waiting for an
+//!   observation in step with the store, also for jobs another runner drives, so an
+//!   observation ingested on any controller wakes a job that the leader drives.
 //! - **Deadlines.** Waiting jobs are parked with their deadline; the runner looks at them
 //!   again when the deadline passes on its [`Clock`](crate::Clock), when someone changes
 //!   them, or when an observation resumes them.
@@ -28,7 +42,7 @@ use std::{
 };
 
 use futures::StreamExt;
-use tenko_core::{Coded, JobId, Revision, Timestamp, codec::encode_key};
+use tenko_core::{Coded, JobId, NodeId, Revision, Timestamp, codec::encode_key};
 use tenko_store::{KeyRange, ReadView, ReadViewExt, WatchFilter, WriteBatch};
 use tokio::{
     sync::mpsc,
@@ -36,12 +50,136 @@ use tokio::{
 };
 
 use crate::{
-    drive::{DriveEnd, drive, lease},
+    drive::{DriveEnd, drive, fenced_out, lease},
     engine::Inner,
-    model::{GroupKey, JobState},
+    model::{GroupKey, Job, JobState},
     persist::{self, PAGE},
     tables::{BY_STATE, JOBS, RUNNERS},
 };
+
+/// Which jobs a runner drives, and how it writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Scope {
+    /// Every job this node may run: unpinned ones and those pinned to it. Takeover waits
+    /// for the owner's lease. For tests, tools and a node without a leader supervisor.
+    All,
+    /// The leader's runner: unpinned jobs, every write fenced with `epoch`; jobs of other
+    /// runners are taken over at once.
+    Leader {
+        /// The leader epoch of the term of office.
+        epoch: u64,
+    },
+    /// The jobs pinned to this node.
+    Pinned,
+}
+
+impl Scope {
+    /// Whether a runner of this scope on node `me` drives `job`.
+    pub(crate) fn admits(self, job: &Job, me: NodeId) -> bool {
+        match self {
+            Self::All => job.spec.node.is_none_or(|node| node == me),
+            Self::Leader { .. } => job.spec.node.is_none(),
+            Self::Pinned => job.spec.node == Some(me),
+        }
+    }
+
+    /// The epoch every write carries, for the leader's runner.
+    pub(crate) fn epoch(self) -> Option<u64> {
+        match self {
+            Self::Leader { epoch } => Some(epoch),
+            Self::All | Self::Pinned => None,
+        }
+    }
+
+    /// Whether the runner takes the jobs of another runner over without waiting for its
+    /// lease: the leader's, whose fence makes the previous leader's writes fail.
+    pub(crate) fn takes_over_at_once(self) -> bool {
+        matches!(self, Self::Leader { .. })
+    }
+}
+
+/// The runners of an engine: the main one (every job, or the leader's) and the one of the
+/// jobs pinned to this node.
+#[derive(Debug, Default)]
+pub(crate) struct Slots {
+    main: Option<(Scope, mpsc::UnboundedSender<Msg>)>,
+    pinned: Option<mpsc::UnboundedSender<Msg>>,
+}
+
+impl Slots {
+    /// Every live runner.
+    pub(crate) fn senders(&self) -> impl Iterator<Item = &mpsc::UnboundedSender<Msg>> {
+        self.main
+            .iter()
+            .map(|(_, tx)| tx)
+            .chain(self.pinned.iter())
+            .filter(|tx| !tx.is_closed())
+    }
+
+    fn live_main(&self) -> Option<Scope> {
+        self.main
+            .as_ref()
+            .filter(|(_, tx)| !tx.is_closed())
+            .map(|(scope, _)| *scope)
+    }
+
+    fn live_pinned(&self) -> bool {
+        self.pinned.as_ref().is_some_and(|tx| !tx.is_closed())
+    }
+
+    /// Takes the slot of a runner of `scope`, unless a runner that drives some of the same
+    /// jobs runs.
+    fn claim(
+        &mut self,
+        scope: Scope,
+        tx: mpsc::UnboundedSender<Msg>,
+    ) -> Result<(), AlreadyRunning> {
+        let busy = match scope {
+            Scope::All => self.live_main().is_some() || self.live_pinned(),
+            Scope::Leader { .. } => self.live_main().is_some(),
+            Scope::Pinned => self.live_pinned() || self.live_main() == Some(Scope::All),
+        };
+        if busy {
+            return Err(AlreadyRunning);
+        }
+        match scope {
+            Scope::Pinned => self.pinned = Some(tx),
+            Scope::All | Scope::Leader { .. } => self.main = Some((scope, tx)),
+        }
+        Ok(())
+    }
+
+    /// Frees the slot that holds `tx`.
+    fn release(&mut self, tx: &mpsc::UnboundedSender<Msg>) {
+        if self
+            .main
+            .as_ref()
+            .is_some_and(|(_, held)| held.same_channel(tx))
+        {
+            self.main = None;
+        }
+        if self
+            .pinned
+            .as_ref()
+            .is_some_and(|held| held.same_channel(tx))
+        {
+            self.pinned = None;
+        }
+    }
+}
+
+/// Why a runner ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunnerExit {
+    /// Stopped through its handle (or its engine went away).
+    Stopped,
+    /// A write of the leader's runner failed on the leader epoch: another controller took
+    /// office after `epoch`. The runner wrote nothing more and started no further step.
+    Deposed {
+        /// The epoch the runner was started with.
+        epoch: u64,
+    },
+}
 
 /// Messages to the runner.
 #[derive(Debug)]
@@ -59,7 +197,8 @@ pub(crate) enum Msg {
     Stop,
 }
 
-/// [`JobEngine::start`](crate::JobEngine::start) was called while the engine's runner runs.
+/// A runner was started while a runner of the same engine that drives some of the same
+/// jobs runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("the job runner of this engine is already running")]
 pub struct AlreadyRunning;
@@ -76,7 +215,8 @@ impl Coded for AlreadyRunning {
 /// The running runner of an engine. Dropping the handle aborts the runner like
 /// [`abort`](RunnerHandle::abort).
 pub struct RunnerHandle {
-    task: Option<JoinHandle<()>>,
+    task: Option<JoinHandle<RunnerExit>>,
+    exit: Option<RunnerExit>,
     tx: mpsc::UnboundedSender<Msg>,
     stop: Arc<AtomicBool>,
     inner: Arc<Inner>,
@@ -94,7 +234,8 @@ impl std::fmt::Debug for RunnerHandle {
 impl RunnerHandle {
     /// Stops gracefully: no new step starts, steps in flight finish and their results are
     /// written, then the runner ends. Jobs stay owned by this node and resume when a runner
-    /// starts again (or move to another node once the lease expires).
+    /// starts again (or move to another node once the lease expires, or at once to the
+    /// next leader).
     pub async fn stop(mut self) {
         self.stop.store(true, Ordering::SeqCst);
         let _ = self.tx.send(Msg::Stop);
@@ -102,6 +243,21 @@ impl RunnerHandle {
             let _ = task.await;
         }
         self.detach();
+    }
+
+    /// Waits until the runner ends on its own (deposed) or is stopped; returns why.
+    /// Cancel safe.
+    pub async fn wait(&mut self) -> RunnerExit {
+        if let Some(exit) = self.exit {
+            return exit;
+        }
+        let exit = match self.task.as_mut() {
+            Some(task) => task.await.unwrap_or(RunnerExit::Stopped),
+            None => RunnerExit::Stopped,
+        };
+        self.task = None;
+        self.exit = Some(exit);
+        exit
     }
 
     /// Ends the runner at once, as a crash would: steps in flight are dropped where they
@@ -123,14 +279,11 @@ impl RunnerHandle {
     }
 
     fn detach(&self) {
-        let mut slot = self
-            .inner
-            .runner
+        self.inner
+            .runners
             .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        if slot.as_ref().is_some_and(|tx| tx.same_channel(&self.tx)) {
-            *slot = None;
-        }
+            .unwrap_or_else(PoisonError::into_inner)
+            .release(&self.tx);
     }
 }
 
@@ -140,20 +293,20 @@ impl Drop for RunnerHandle {
     }
 }
 
-/// Spawns the runner of an engine.
-pub(crate) fn start(inner: &Arc<Inner>) -> Result<RunnerHandle, AlreadyRunning> {
-    let mut slot = inner.runner.lock().unwrap_or_else(PoisonError::into_inner);
-    if slot.as_ref().is_some_and(|tx| !tx.is_closed()) {
-        return Err(AlreadyRunning);
-    }
+/// Spawns a runner of an engine with `scope`.
+pub(crate) fn start(inner: &Arc<Inner>, scope: Scope) -> Result<RunnerHandle, AlreadyRunning> {
     let (tx, rx) = mpsc::unbounded_channel();
-    *slot = Some(tx.clone());
-    drop(slot);
+    inner
+        .runners
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .claim(scope, tx.clone())?;
     let stop = Arc::new(AtomicBool::new(false));
     let watcher = AbortOnDrop(tokio::spawn(watch(Arc::clone(inner), tx.clone())));
     let now = inner.clock.now();
     let actor = Actor {
         inner: Arc::clone(inner),
+        scope,
         rx,
         tx: tx.clone(),
         stop: Arc::clone(&stop),
@@ -169,11 +322,13 @@ pub(crate) fn start(inner: &Arc<Inner>) -> Result<RunnerHandle, AlreadyRunning> 
         next_scan: now,
         next_renew: None,
         stopping: false,
+        deposed: false,
         _watcher: watcher,
     };
     let task = tokio::spawn(actor.run());
     Ok(RunnerHandle {
         task: Some(task),
+        exit: None,
         tx,
         stop,
         inner: Arc::clone(inner),
@@ -266,6 +421,7 @@ enum Event {
 
 struct Actor {
     inner: Arc<Inner>,
+    scope: Scope,
     rx: mpsc::UnboundedReceiver<Msg>,
     tx: mpsc::UnboundedSender<Msg>,
     stop: Arc<AtomicBool>,
@@ -281,15 +437,17 @@ struct Actor {
     next_scan: Timestamp,
     next_renew: Option<Timestamp>,
     stopping: bool,
+    /// A fenced write failed: drain the drives in flight and end.
+    deposed: bool,
     _watcher: AbortOnDrop,
 }
 
 impl Actor {
-    async fn run(mut self) {
+    async fn run(mut self) -> RunnerExit {
         self.rescan().await;
         loop {
             self.dispatch();
-            if self.stopping && self.in_flight == 0 {
+            if (self.stopping || self.deposed) && self.in_flight == 0 {
                 break;
             }
             let sleep = match self.next_timer() {
@@ -306,6 +464,25 @@ impl Actor {
                 Event::Msg(Some(message)) => self.handle(message).await,
                 Event::Timer => self.on_timer().await,
                 Event::Joined(joined) => self.on_joined(joined),
+            }
+        }
+        match (self.deposed, self.scope.epoch()) {
+            (true, Some(epoch)) => RunnerExit::Deposed { epoch },
+            _ => RunnerExit::Stopped,
+        }
+    }
+
+    /// Ends the runner after a fenced write failed: no step starts any more, the drives in
+    /// flight stop at their next boundary (their writes would fail anyway).
+    fn depose(&mut self) {
+        if !self.deposed {
+            self.deposed = true;
+            self.stop.store(true, Ordering::SeqCst);
+            if let Some(epoch) = self.scope.epoch() {
+                tracing::warn!(
+                    epoch,
+                    "the job runner is deposed: another controller took office"
+                );
             }
         }
     }
@@ -382,15 +559,20 @@ impl Actor {
         };
         let job = &loaded.job;
         if job.state.is_terminal() {
+            self.inner.waiters().remove(id);
             self.remember_finished(id, loaded.revision);
             return;
         }
-        if job.state == JobState::Waiting {
-            self.inner.track_waiter(job);
-        }
+        // The waiter index follows every job, also those another runner drives, so an
+        // observation ingested here reaches a job the leader drives.
+        self.inner.track_waiter(job);
         let me = self.inner.config.node;
+        if !self.scope.admits(job, me) {
+            return;
+        }
         if let Some(owner) = job.runner
             && owner != me
+            && !self.scope.takes_over_at_once()
         {
             let now = self.inner.clock.now();
             match view.get_typed(&RUNNERS, &owner) {
@@ -465,6 +647,16 @@ impl Actor {
                 return;
             }
         };
+        // A leader's runner that has nothing to write would never see its fence fail:
+        // look at the epoch itself, so a deposed runner ends even when idle.
+        if let Some(epoch) = self.scope.epoch()
+            && view
+                .counter(&tenko_core::cluster::LEADER_EPOCH)
+                .is_ok_and(|current| current > epoch)
+        {
+            self.depose();
+            return;
+        }
         for state in [
             JobState::Queued,
             JobState::Running,
@@ -497,7 +689,7 @@ impl Actor {
     }
 
     fn dispatch(&mut self) {
-        if self.stopping {
+        if self.stopping || self.deposed {
             return;
         }
         while self.in_flight < self.inner.config.workers.max(1) {
@@ -530,8 +722,9 @@ impl Actor {
             let inner = Arc::clone(&self.inner);
             let tx = self.tx.clone();
             let stop = Arc::clone(&self.stop);
+            let scope = self.scope;
             let handle = self.tasks.spawn(async move {
-                let end = drive(&inner, job, &stop).await;
+                let end = drive(&inner, job, &stop, scope).await;
                 let _ = tx.send(Msg::Driven { job, end });
             });
             self.task_jobs.insert(handle.id(), job);
@@ -572,7 +765,17 @@ impl Actor {
                 self.release(job);
                 self.remember_finished(job, revision);
             }
+            DriveEnd::NotOwned if self.scope.epoch().is_some() => {
+                // Another runner owns a job this leader's runner drove: it may have been
+                // deposed. The next scan, at once, checks the epoch.
+                self.release(job);
+                self.next_scan = self.inner.clock.now();
+            }
             DriveEnd::NotOwned | DriveEnd::Missing | DriveEnd::Stopped => self.release(job),
+            DriveEnd::Deposed => {
+                self.release(job);
+                self.depose();
+            }
         }
     }
 
@@ -647,15 +850,18 @@ impl Actor {
             tenko_core::Principal::system(tenko_core::SystemComponent::Jobs),
             now,
         );
+        if let Some(epoch) = self.scope.epoch() {
+            batch.preconditions.push(tenko_store::fence(epoch));
+        }
         let renewed = batch
             .put_typed(&RUNNERS, &self.inner.config.node, &lease(&self.inner, now))
             .map(|_| ());
         match renewed {
-            Ok(()) => {
-                if let Err(error) = self.inner.store.propose(batch).await {
-                    tracing::warn!(%error, "runner lease could not be renewed");
-                }
-            }
+            Ok(()) => match self.inner.store.propose(batch).await {
+                Ok(_) => {}
+                Err(error) if fenced_out(&error) => self.depose(),
+                Err(error) => tracing::warn!(%error, "runner lease could not be renewed"),
+            },
             Err(error) => tracing::error!(%error, "runner lease does not encode"),
         }
         let period = self.inner.config.lease_ttl / 3;

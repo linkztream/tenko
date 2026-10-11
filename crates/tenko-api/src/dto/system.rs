@@ -56,6 +56,64 @@ pub struct SystemStatus {
     /// generation and the online rotation; absent on servers without the vault service.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kek: Option<super::kek::KekSummaryView>,
+    /// The leader-only work of this controller (plan section 2.3): whether it leads, the
+    /// leader epoch of its term of office and the state of every leader service; absent
+    /// on servers without the leader supervisor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leader: Option<LeaderStatus>,
+}
+
+/// The leader-only work of a controller, for `GET /system/status`. In a cluster exactly
+/// one controller leads and runs the leader services (the job runner, purges, the online
+/// KEK rotation and others); the other controllers list them as `idle`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct LeaderStatus {
+    /// Whether this controller holds the office and runs the leader services.
+    pub leads: bool,
+    /// The leader epoch of the term of office (the counter `sys.leader_epoch`) while this
+    /// controller leads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epoch: Option<u64>,
+    /// When this controller took office, or left it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<Timestamp>,
+    /// Every registered leader service, in start order.
+    pub services: Vec<LeaderServiceStatus>,
+    /// This controller's clock minus the leader's, in milliseconds, as measured on the
+    /// leader's last clock beat; absent on a single controller and while no beat arrived.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clock_skew_ms: Option<i64>,
+}
+
+/// One leader-only service.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct LeaderServiceStatus {
+    /// The stable name, such as `jobs.runner`.
+    pub name: String,
+    /// What the service does now.
+    pub state: LeaderServiceState,
+    /// How often the service was restarted after it gave up, in this term of office.
+    pub restarts: u32,
+    /// The error the service last gave up with, in this term of office.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    /// Since when the service is in its state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<Timestamp>,
+}
+
+/// The state of a leader-only service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LeaderServiceState {
+    /// This controller does not lead: the service runs on the leader.
+    Idle,
+    /// The service runs on this controller.
+    Running,
+    /// The service gave up and is restarted after a pause.
+    Restarting,
+    /// The service ended its work for this term of office.
+    Finished,
 }
 
 /// The node transport of a controller, for `GET /system/status`.

@@ -16,7 +16,6 @@ use tenko_core::{
     SystemComponent, Timestamp, codec::to_cbor, ipam::Stamp, observe::Observation,
 };
 use tenko_store::{ReadConsistency, ReadView, ReadViewExt, Store, StoreError};
-use tokio::sync::mpsc;
 
 use crate::{
     clock::{Clock, SystemClock},
@@ -29,7 +28,7 @@ use crate::{
     },
     persist::{self, Author, Loaded, job_changed},
     query::{self, JobDetail, JobPage, JobQuery},
-    runner::{self, Msg, RunnerHandle},
+    runner::{self, Msg, RunnerHandle, Scope, Slots},
     stage::StagedWrite,
     tables::{IDEMPOTENCY, PREVIEWS, Transition, TransitionEvent},
     waiters::{PrefixResolver, Waiter, WaiterIndex},
@@ -109,7 +108,7 @@ pub(crate) struct Inner {
     handlers: RwLock<HashMap<StepKind, Arc<dyn StepHandler>>>,
     pub waiters: Mutex<WaiterIndex>,
     prefixes: RwLock<Option<Arc<dyn PrefixResolver>>>,
-    pub runner: Mutex<Option<mpsc::UnboundedSender<Msg>>>,
+    pub runners: Mutex<Slots>,
 }
 
 impl Inner {
@@ -131,13 +130,13 @@ impl Inner {
         self.waiters.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Tells the local runner that a job changed.
+    /// Tells the local runners that a job changed.
     pub fn wake(&self, job: JobId, revision: Option<Revision>) {
-        if let Some(runner) = self
-            .runner
+        for runner in self
+            .runners
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
+            .senders()
         {
             let _ = runner.send(Msg::Wake { job, revision });
         }
@@ -250,7 +249,7 @@ impl JobEngine {
                 handlers: RwLock::new(HashMap::new()),
                 waiters: Mutex::new(WaiterIndex::default()),
                 prefixes: RwLock::new(None),
-                runner: Mutex::new(None),
+                runners: Mutex::new(Slots::default()),
             }),
         };
         engine.register(Arc::new(ManualStep));
@@ -298,15 +297,45 @@ impl JobEngine {
         &self.inner.clock
     }
 
-    /// Starts the runner of this engine on the current tokio runtime: it resumes the jobs
-    /// this node owns, takes over jobs of expired leases, starts queued jobs and drives
-    /// waiting ones to their deadlines.
+    /// Starts a runner of every job this node may run (unpinned ones and those pinned to
+    /// this node) on the current tokio runtime: it resumes the jobs this node owns, takes
+    /// over jobs of expired leases, starts queued jobs and drives waiting ones to their
+    /// deadlines. For tests, tools and a node that runs no leader supervisor; a controller
+    /// runs [`start_leader`](Self::start_leader) while it leads and
+    /// [`start_pinned`](Self::start_pinned) always.
     ///
     /// # Errors
     ///
-    /// Returns [`runner::AlreadyRunning`] if this engine already has a running runner.
+    /// Returns [`runner::AlreadyRunning`] if this engine already runs a runner.
     pub fn start(&self) -> Result<RunnerHandle, runner::AlreadyRunning> {
-        runner::start(&self.inner)
+        runner::start(&self.inner, Scope::All)
+    }
+
+    /// Starts the runner of the leader for the term of office with the leader epoch
+    /// `epoch` (plan section 2.3): every job without a pinned node, every write fenced
+    /// with `epoch`, jobs of other runners taken over at once, leadership confirmed before
+    /// each step that is not idempotent. The runner ends with
+    /// [`RunnerExit::Deposed`](runner::RunnerExit::Deposed) when a fenced write fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`runner::AlreadyRunning`] while another leader runner or a runner of every
+    /// job ([`start`](Self::start)) runs on this engine.
+    pub fn start_leader(&self, epoch: u64) -> Result<RunnerHandle, runner::AlreadyRunning> {
+        runner::start(&self.inner, Scope::Leader { epoch })
+    }
+
+    /// Starts the runner of the jobs pinned to this node (`JobSpec::node`), such as the
+    /// install of a release this controller downloaded. Every controller runs it, whether
+    /// it leads or not; it also keeps the engine's index of waiting steps in step with the
+    /// store, so an observation ingested here reaches every waiting job.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`runner::AlreadyRunning`] while another pinned runner or a runner of every
+    /// job ([`start`](Self::start)) runs on this engine.
+    pub fn start_pinned(&self) -> Result<RunnerHandle, runner::AlreadyRunning> {
+        runner::start(&self.inner, Scope::Pinned)
     }
 
     fn validate(&self, spec: &JobSpec) -> Result<(), JobError> {
@@ -832,7 +861,7 @@ impl JobEngine {
     /// Returns [`JobError::NotFound`] if the job does not exist.
     pub async fn drive_once(&self, id: JobId) -> Result<Job, JobError> {
         let stop = std::sync::atomic::AtomicBool::new(false);
-        let end = drive::drive(&self.inner, id, &stop).await;
+        let end = drive::drive(&self.inner, id, &stop, Scope::All).await;
         if matches!(end, drive::DriveEnd::Missing) {
             return Err(JobError::NotFound(id));
         }

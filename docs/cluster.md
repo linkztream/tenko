@@ -523,7 +523,44 @@ A revocation made on any controller replicates; every controller reads its revoc
 
 `tenko cluster verify` (`GET /api/v1/cluster/digests?revision=`) asks every member for a SHA-256 over every non-empty table at one revision and compares them; it exits with status 9 when they differ. Without a revision it asks again at the newest revision a member reported, so a quiet cluster agrees; under constant writes a member may answer at a later revision than the others, which the column `REVISION` of the command shows.
 
+### 12.8 Leader-only work
+
+Work that must happen once for the whole installation runs on the leader only, under the leader supervisor of `tenko serve`. When a controller becomes leader (after it has applied its first commit of the term), the supervisor takes office: it raises the counter `sys.leader_epoch` by one in a write that expects the counter's current value, and starts every leader service with the new epoch. Every write of a leader service carries that epoch as a precondition, so once another controller has taken office the writes of a deposed one fail instead of racing the new leader's. When leadership moves, the services stop on the old leader and start on the new one; a service that fails is restarted after a pause that doubles from one second to a minute. Each change is a log line and a `cluster` event (`cluster.leader`, `cluster.leader.service`).
+
+| Service | What it does |
+|---|---|
+| `jobs.runner` | Drives every job of the installation. A new leader takes the running and waiting jobs over at once; a step that was running when the old leader went away is run again when it is idempotent and otherwise fails and is rolled back. Before each step that is not idempotent the runner confirms with the cluster that it still leads. Group limits and `[jobs] workers` hold for the whole cluster, because only one runner drives jobs |
+| `vault.kek_rotation` | The online rotation of the key-encryption key |
+| `cluster.prune` | The hourly prune of expired revocations and old enrolment tokens |
+| `api.idempotency_purge` | The hourly purge of expired idempotency records |
+| `auth.used_challenges_purge` | The hourly purge of the records of used sign-in challenges |
+| `import.purge` | The hourly purge of expired import uploads and of staged uploads without an import |
+| `cluster.clock` | Every minute, writes the leader's clock so every controller can compare its own with it |
+
+`GET /api/v1/system/status` shows the office under `leader`: whether this controller leads (`leads`), its epoch and since when, every service with its state (`idle` on a follower; `running`, `restarting` or `finished` on the leader), its restarts and its last error, and `clock_skew_ms` (below). A service that waits for its restart is the warning `cluster.leader.service_failing`.
+
+Jobs whose steps are tied to one host run on that controller's own runner instead: the install of a release runs on the controller that downloaded or received it. Installing a release from the web UI stays refused on a cluster (`update.install_blocked` with the reason `cluster`); update the controllers one at a time as described in [upgrades.md](upgrades.md).
+
+What any controller can finish, whichever started it:
+
+- **Sign-in ceremonies.** The state of a pending second factor, passkey sign-in or registration and TOTP enrolment travels sealed in the challenge id itself (AES-256-GCM under a key derived from the installation's cluster key), so a ceremony started on one controller finishes on another without sticky sessions. Nothing is written when a ceremony starts; finishing it records the challenge as used in the same write that completes the sign-in, so a replayed challenge is refused on every controller.
+- **Retries.** The fingerprints of idempotent requests are keyed from the cluster key too, so a retry that reaches another controller replays the first answer.
+- **Imports.** Uploads are staged in the store, encrypted under a key of their own that the vault holds, so preview, apply and discard work on every controller.
+
+The cluster key (`sys.cluster_key`) is 32 random bytes kept as a system secret in the vault, created by the first controller that starts with this release.
+
+**Clocks.** Ceremonies and tokens expire by the clock of the controller that checks them. Every controller compares its clock with the leader's beat (`cluster.clock`); a difference of more than five seconds is the warning `cluster.clock_skew` in `GET /api/v1/system/status` (params `skew_ms`, this controller's clock minus the leader's, and `tolerance_ms`) and a log line. Keep the controllers' clocks synchronised with NTP.
+
+### 12.9 Limits per controller
+
+Two limits count on each controller separately and are not shared across the cluster:
+
+- **The API rate limiter** (`[rate_limit]`): each controller counts the requests it serves. Behind a load balancer that spreads a client over three controllers, the client gets up to three times the configured rate.
+- **The login throttle** (the pause after wrong passwords or codes, IAM-05): each controller counts the failed attempts it has seen. An attacker spread over three controllers gets up to three times the free attempts before the persisted account lock takes over; the lock is stored and replicated, so it holds on every controller at once, and unlocking the user lifts it on every controller.
+
+A wrong second-factor code keeps its ceremony open on the controller that checked it, with the attempt counted; another controller counts the attempts of the same challenge afresh, so the attempts per challenge are bounded per controller in the same way.
+
 ## 13. What comes next
 
-- **Slice 3.** Configuration flows from the controllers to `dns` and `dhcp` nodes as resumable deltas with a bandwidth cap (OPS-28). The leader-only work (the job runner, the reconciler loop, purges, the prune of the node registry `cluster.prune`) moves under one supervisor that starts it when a controller takes office (WP3.1b).
+- **Slice 3.** Configuration flows from the controllers to `dns` and `dhcp` nodes as resumable deltas with a bandwidth cap (OPS-28). The reconciler loop, the connector polling schedule and the update check join the leader services of section 12.8.
 - **The probe.** What comes next for the scanner of the probe is in [scanning.md](scanning.md#14-what-comes-next).

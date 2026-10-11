@@ -1,12 +1,13 @@
-//! The import service of WP1.5 (cargo feature `import`, on by default): staged uploads under
-//! `<data_dir>/imports`, its job steps registered with the engine, and a purge of expired
-//! uploads at start and every hour. Without the feature the import routes answer 503
-//! `import.unavailable`; nothing else depends on it.
+//! The import service of WP1.5 (cargo feature `import`, on by default): staged uploads, its
+//! job steps registered with the engine, and the purge of expired uploads. Without the
+//! feature the import routes answer 503 `import.unavailable`; nothing else depends on it.
 //!
-//! Uploads are encrypted under a key that lives in this process only, so the files a
-//! previous run staged can never be read again: the staging directory is emptied at start,
-//! their sessions report `import.upload.lost` until the purge removes them, and an apply
-//! job that was running rolls back.
+//! Uploads are staged in the store, encrypted under a data key of their own that the vault
+//! holds (`tenko_ipam::import::staging`), so preview, apply and purge work on every
+//! controller (WP3.1b). The store part of the purge (expired sessions, stash rows without a
+//! session) is the leader service `import.purge`; the sweep of what a controller keeps in
+//! memory runs hourly on every controller. `<data_dir>/imports`, where earlier releases
+//! staged uploads on disk under a key of the process, is emptied at start.
 
 use std::sync::Arc;
 #[cfg(feature = "import")]
@@ -77,10 +78,38 @@ impl Imports {
         server.extensions.insert(Arc::clone(&self.service));
     }
 
-    /// Removes expired uploads at start and every hour until `stop` is set.
+    /// Sweeps what this controller keeps in memory of removed uploads every hour until
+    /// `stop` is set.
     #[cfg(feature = "import")]
     pub(super) fn spawn_purge(&self, stop: watch::Receiver<bool>) -> Vec<JoinHandle<()>> {
-        vec![tokio::spawn(purge(Arc::clone(&self.service), stop))]
+        vec![tokio::spawn(sweep(Arc::clone(&self.service), stop))]
+    }
+
+    /// The leader service `import.purge`: the store part of the purge, hourly and fenced
+    /// with the leader epoch.
+    #[cfg(feature = "import")]
+    pub(super) fn leader_services(&self) -> Vec<Arc<dyn tenko_core::cluster::LeaderService>> {
+        let service = Arc::clone(&self.service);
+        vec![super::leader::periodic(
+            "import.purge",
+            super::leader::PURGE_INTERVAL,
+            move |epoch| {
+                let service = Arc::clone(&service);
+                async move {
+                    service
+                        .purge_store(Some(epoch))
+                        .await
+                        .map_err(|error| error.to_string())
+                }
+            },
+        )]
+    }
+
+    /// Without the feature: no leader service.
+    #[cfg(not(feature = "import"))]
+    #[allow(clippy::unused_self, reason = "the same signature as with the feature")]
+    pub(super) fn leader_services(&self) -> Vec<Arc<dyn tenko_core::cluster::LeaderService>> {
+        Vec::new()
     }
 
     /// Without the feature: nothing to register.
@@ -100,7 +129,8 @@ impl Imports {
     }
 }
 
-/// Removes what a previous run staged; its key is gone, so the files are unreadable.
+/// Removes what an earlier release staged on disk; its key is gone, so the files are
+/// unreadable.
 #[cfg(feature = "import")]
 fn clear_staging(dir: &std::path::Path) -> Result<(), StartError> {
     match std::fs::remove_dir_all(dir) {
@@ -118,7 +148,7 @@ fn clear_staging(dir: &std::path::Path) -> Result<(), StartError> {
 }
 
 #[cfg(feature = "import")]
-async fn purge(service: Arc<tenko_ipam::import::ImportService>, mut stop: watch::Receiver<bool>) {
+async fn sweep(service: Arc<tenko_ipam::import::ImportService>, mut stop: watch::Receiver<bool>) {
     let mut ticker = tokio::time::interval(PURGE_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
@@ -129,10 +159,8 @@ async fn purge(service: Arc<tenko_ipam::import::ImportService>, mut stop: watch:
         if *stop.borrow() {
             return;
         }
-        match service.purge_expired().await {
-            Ok(0) => {}
-            Ok(removed) => tracing::info!(removed, "expired import uploads removed"),
-            Err(error) => tracing::warn!(%error, "expired import uploads could not be removed"),
+        if let Err(error) = service.sweep_local().await {
+            tracing::warn!(%error, "removed import uploads could not be swept from memory");
         }
     }
 }

@@ -22,11 +22,15 @@ tenko-core = { workspace = true }
 tenko-store = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+# `CancellationToken` of the leader-only service `jobs.runner`.
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 utoipa = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+# The in-process cluster of Raft stores for the leader-only runner tests.
+tenko-store = { workspace = true, features = ["raft", "testing"] }
 # Enables the test support for this package's own integration tests.
 tenko-jobs = { path = ".", features = ["testing"] }
 
