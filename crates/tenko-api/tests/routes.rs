@@ -85,6 +85,35 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/settings/security", "get_security_settings"),
     ("PATCH", "/settings/security", "update_security_settings"),
     ("PUT", "/settings/default-language", "set_default_language"),
+    // access
+    ("GET", "/access/grants", "list_grants"),
+    ("POST", "/access/grants", "create_grant"),
+    ("DELETE", "/access/grants/{id}", "revoke_grant"),
+    ("GET", "/access/subjects", "list_grant_subjects"),
+    ("GET", "/access/service-accounts", "list_service_accounts"),
+    ("POST", "/access/service-accounts", "create_service_account"),
+    (
+        "GET",
+        "/access/service-accounts/{id}/tokens",
+        "list_service_account_tokens",
+    ),
+    (
+        "POST",
+        "/access/service-accounts/{id}/tokens",
+        "create_service_account_token",
+    ),
+    (
+        "DELETE",
+        "/access/service-accounts/{id}/tokens/{token}",
+        "revoke_service_account_token",
+    ),
+    ("GET", "/access/role-policies", "list_role_policies"),
+    ("PUT", "/access/role-policies/{role}", "set_role_policy"),
+    (
+        "DELETE",
+        "/access/role-policies/{role}",
+        "clear_role_policy",
+    ),
     // tenancy
     ("GET", "/tenants", "list_tenants"),
     ("POST", "/tenants", "create_tenant"),
@@ -320,6 +349,8 @@ fn concrete(template: &str) -> String {
         .replace("{key}", "owner")
         .replace("{seq}", "1")
         .replace("{index}", "0")
+        .replace("{token}", ID)
+        .replace("{role}", "viewer")
         .replace("{subject}", "00-00-5E-00-53-01")
 }
 

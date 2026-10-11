@@ -45,7 +45,7 @@
 //! lists and the tree are empty when the principal may read nothing of the kind.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     net::IpAddr,
 };
 
@@ -58,8 +58,8 @@ use axum::{
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tenko_core::{
-    Action, AddressId, CodedError, InterfaceId, ObjectKind, PrefixId, RangeId, Revision, SiteId,
-    VlanId, VrfId,
+    Action, AddressId, CodedError, InterfaceId, ObjectKind, ObjectRef, PrefixId, RangeId, Revision,
+    SiteId, VlanId, VrfId,
     error::codes as core_codes,
     ipam::{
         Address, AllocPolicy, CustomValue, FieldKey, Prefix, PrefixRole, Range, RangeRole, Status,
@@ -82,8 +82,8 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 use super::common::{
     DeleteParams, Filter, IdempotencyKeyHeader, IfMatch, Ipam, IpamJson, IpamPath, ReadParams,
-    WriteParams, WriteResponse, authorize, get_one, if_match, list_args, list_collection,
-    may_expand_hosts, may_read_kind, new_of, take_expand, wire_page, write_args, write_one,
+    ReadScope, WriteParams, WriteResponse, authorize, get_one, if_match, list_args,
+    list_collection, may_expand_hosts, new_of, take_expand, wire_page, write_args, write_one,
 };
 use crate::{
     dto::Page,
@@ -124,8 +124,80 @@ pub(crate) struct TreeResponse {
     #[schema(value_type = u64)]
     pub(crate) revision: Revision,
     /// The prefixes in pre-order, each with depth, parent, child count, utilization and
-    /// alarm level.
+    /// alarm level. For a principal whose grants cover only some prefixes (IAM-01), the
+    /// prefixes it may read, with `children` counting the child prefixes it sees as a node
+    /// or as context.
     pub(crate) nodes: Vec<TreeNode>,
+    /// For a scoped principal: the prefixes it may not read that hold one it may read, in
+    /// pre-order, with the network and the tree position only, so that the tree keeps its
+    /// shape (IAM-01, `docs/access.md`). Empty for every other principal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) context: Vec<TreeContextNode>,
+}
+
+/// A prefix shown only as context of the tree: an ancestor, outside the principal's scope,
+/// of a prefix inside it. It carries no name, status, utilization or other detail.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub(crate) struct TreeContextNode {
+    /// The prefix.
+    pub(crate) id: PrefixId,
+    /// The most specific prefix containing it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) parent: Option<PrefixId>,
+    /// Depth below the first level of the answer (0 for its top level).
+    pub(crate) depth: u32,
+    /// The network.
+    #[schema(value_type = String, example = "192.0.2.0/24")]
+    pub(crate) cidr: ipnet::IpNet,
+    /// Direct child prefixes the principal sees, as nodes or as context.
+    pub(crate) children: u32,
+}
+
+/// Narrows a tree to what a scoped principal may read (IAM-01): the prefixes inside its
+/// scope stay nodes, their ancestors outside it become context rows with the network only,
+/// and everything else is left out. `full` is the same tree without a depth limit, from
+/// which the visibility of deeper prefixes is known.
+fn scoped_tree(
+    scope: &ReadScope,
+    nodes: Vec<TreeNode>,
+    full: &[TreeNode],
+) -> (Vec<TreeNode>, Vec<TreeContextNode>) {
+    // Pre-order: a node's descendants follow it, so a reverse walk sees every child before
+    // its parent.
+    let mut readable: HashSet<PrefixId> = HashSet::new();
+    let mut visible: HashSet<PrefixId> = HashSet::new();
+    let mut seen_children: HashMap<PrefixId, u32> = HashMap::new();
+    for node in full.iter().rev() {
+        let own = scope.admits(&ObjectRef::from(node.id));
+        if own {
+            readable.insert(node.id);
+        }
+        if own || visible.contains(&node.id) {
+            visible.insert(node.id);
+            if let Some(parent) = node.parent {
+                visible.insert(parent);
+                *seen_children.entry(parent).or_default() += 1;
+            }
+        }
+    }
+    let mut kept = Vec::new();
+    let mut context = Vec::new();
+    for mut node in nodes {
+        let children = seen_children.get(&node.id).copied().unwrap_or_default();
+        if readable.contains(&node.id) {
+            node.children = children;
+            kept.push(node);
+        } else if visible.contains(&node.id) {
+            context.push(TreeContextNode {
+                id: node.id,
+                parent: node.parent,
+                depth: node.depth,
+                cidr: node.cidr,
+                children,
+            });
+        }
+    }
+    (kept, context)
 }
 
 /// The optional body of `POST /prefixes/{id}/next-free-address`: how the new address is
@@ -409,7 +481,6 @@ async fn create_prefix(
     )
 )]
 async fn get_prefix_tree(
-    State(app): State<AppState>,
     Ctx(cx): Ctx,
     Ipam(ipam): Ipam,
     filters: Filters,
@@ -429,11 +500,13 @@ async fn get_prefix_tree(
     let depth = filters.parse::<u32>("depth")?;
     let view = ipam.view(at_least).await?;
     let revision = view.revision();
-    if !may_read_kind(&app, &cx, ObjectKind::Prefix) {
+    let scope = ipam.read_scope(&cx, ObjectKind::Prefix);
+    if scope.is_nothing() {
         return Ok(Json(TreeResponse {
             vrf,
             revision,
             nodes: Vec::new(),
+            context: Vec::new(),
         }));
     }
     let vrf = match vrf {
@@ -445,10 +518,22 @@ async fn get_prefix_tree(
     let nodes = vrf
         .map(|vrf| ipam.tree().tree(vrf, within, depth))
         .unwrap_or_default();
+    let (nodes, context) = match vrf {
+        Some(vrf) if !scope.is_all() => {
+            let full = if depth.is_some() {
+                ipam.tree().tree(vrf, within, None)
+            } else {
+                nodes.clone()
+            };
+            scoped_tree(&scope, nodes, &full)
+        }
+        _ => (nodes, Vec::new()),
+    };
     Ok(Json(TreeResponse {
         vrf,
         revision,
         nodes,
+        context,
     }))
 }
 
@@ -610,6 +695,7 @@ async fn next_free_address(
     let args = write_args(&filters, false)?;
     let request: NextFreeAddress = optional_body(body)?;
     authorize(&app, &cx, Action::Create, new_of(ObjectKind::Address))?;
+    authorize(&app, &cx, Action::Read, id.into())?;
     ensure_prefix(&ipam, id).await?;
     let command = IpamCommand::AllocateAddress(AllocateAddress {
         prefix: id,
@@ -664,6 +750,7 @@ async fn next_free_prefix(
 ) -> Result<Response, ApiError> {
     let args = write_args(&filters, false)?;
     authorize(&app, &cx, Action::Create, new_of(ObjectKind::Prefix))?;
+    authorize(&app, &cx, Action::Read, id.into())?;
     ensure_prefix(&ipam, id).await?;
     let command = IpamCommand::AllocatePrefix(AllocatePrefix {
         parent: id,
@@ -730,7 +817,8 @@ async fn list_prefix_addresses(
     let limit = page.limit()?;
     authorize(&app, &cx, Action::Read, id.into())?;
     let view = ipam.view(page.at_least.map(Revision)).await?;
-    if !may_read_kind(&app, &cx, ObjectKind::Address) {
+    let readable = ipam.read_scope(&cx, ObjectKind::Address);
+    if readable.is_nothing() {
         query::get::<Prefix>(view.as_ref(), id)?;
         return Ok(Json(Page::new(Vec::new(), None, view.revision())));
     }
@@ -741,6 +829,15 @@ async fn list_prefix_addresses(
         cursor.as_deref(),
         Some(limit),
     )?;
+    // A scoped principal sees the addresses of the page inside its scope (a supernet's
+    // list also holds the addresses of its child prefixes); the free gaps stay as computed
+    // over every address, and the page may hold fewer items than `limit`.
+    if !readable.is_all() {
+        found.items.retain(|item| match item {
+            PrefixAddressItem::Address(row) => readable.admits(&row.address.id.into()),
+            PrefixAddressItem::Free { .. } => true,
+        });
+    }
     if expand && may_expand_hosts(&app, &cx) {
         HostExpander::new(view.as_ref()).expand_items(&mut found.items)?;
     }
@@ -3441,7 +3538,7 @@ mod tests {
         let prefix_ref = ObjectRef::new(ObjectKind::Prefix, id.parse().expect("uuid"));
         assert_eq!(
             policy.asked(),
-            [(Action::Create, ObjectRef::singleton(ObjectKind::Prefix))]
+            [(Action::Create, new_of(ObjectKind::Prefix))]
         );
         let ask = |policy: &Policy, from: usize| policy.asked()[from..].to_vec();
 
@@ -3463,7 +3560,10 @@ mod tests {
             .await;
         assert_eq!(
             ask(&policy, mark),
-            [(Action::Create, ObjectRef::singleton(ObjectKind::Address))]
+            [
+                (Action::Create, new_of(ObjectKind::Address)),
+                (Action::Read, prefix_ref)
+            ]
         );
 
         let mark = policy.asked().len();
@@ -3475,7 +3575,7 @@ mod tests {
             .await;
         assert_eq!(
             ask(&policy, mark),
-            [(Action::Create, ObjectRef::singleton(ObjectKind::Range))]
+            [(Action::Create, new_of(ObjectKind::Range))]
         );
         let range_ref = ObjectRef::new(ObjectKind::Range, range.id().parse().expect("uuid"));
 

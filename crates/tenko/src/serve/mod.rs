@@ -1021,6 +1021,11 @@ async fn start(
     // The network controllers of the VLAN provision job and the topology (WP2.7): filled
     // once the connector service runs; the job steps read it when they run.
     let vlan_controllers = tenko_ipam::vlan::Controllers::new();
+    // The anchors of IPAM objects for scoped authorization (IAM-01, WP3.2): registered on
+    // the store and given to the authorizer while the IPAM module runs. Without the module
+    // it stays empty, so the event filter below passes nothing of IPAM to a scoped
+    // principal.
+    let scope = Arc::new(tenko_ipam::scope::ScopeIndex::new());
     let (ipam, mut engine, imports) = steps
         .run("ipam", async {
             let mut engine = JobEngine::new(
@@ -1053,6 +1058,10 @@ async fn start(
                 IpamConfig::default(),
             )
             .map_err(|error| StartError::coded("ipam", &error))?;
+            store_dyn
+                .register_index(scope.clone())
+                .map_err(|error| StartError::coded("ipam", &error))?;
+            auth.set_anchor_resolver(scope.clone());
             let tree = Arc::clone(ipam.tree());
             engine.set_prefix_resolver(Arc::new(move |prefix| {
                 tree.prefix(prefix).map(|(_, network)| network)
@@ -1266,6 +1275,14 @@ async fn start(
             );
             state.auth = Some(Arc::clone(&auth) as Arc<dyn tenko_core::Authenticator>);
             state.authorizer = Some(auth.authorizer());
+            // Scoped principals receive only the events and references they may read.
+            state
+                .events()
+                .set_filter(Box::new(tenko_api::sse::filter::ScopedEvents::new(
+                    auth.authorizer(),
+                    Arc::clone(&scope),
+                    Arc::clone(&store_dyn),
+                )));
             let mut server =
                 ServerConfig::new(resolved.listen.clone(), tls.service.clone(), tls.policy);
             server.workers = config.server.workers;
@@ -1289,6 +1306,7 @@ async fn start(
             server.extensions.insert(Arc::clone(&languages));
             if let Some(ipam) = &ipam {
                 server.extensions.insert(Arc::clone(ipam));
+                server.extensions.insert(Arc::clone(&scope));
                 server.extensions.insert(Arc::clone(&vlan_controllers));
                 server
                     .extensions

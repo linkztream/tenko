@@ -1313,3 +1313,1091 @@ impl AnchorResolver for ScopeIndex {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        net::IpAddr,
+        sync::Arc,
+    };
+
+    use tenko_core::observe::{ObservationSource, Observed};
+    use tenko_core::{
+        ConnectorId, ObservationId, ProposalId, ScopeRule, SystemComponent, Timestamp,
+        ipam::{AssignmentMode, PrefixRole},
+    };
+    use tenko_store::{MemStore, Store};
+
+    use super::*;
+    use crate::{
+        command::{
+            AddressInput, AddressPatch, HostInput, InterfaceInput, PrefixInput, RangeInput,
+            SiteInput, TenantInput, UpdateAddress, VlanInput, VrfInput,
+        },
+        observe::model::FactSubject,
+        proposals::model::{
+            IntentProposalKind, IntentProposalState, ProposalSeverity, ProposalSubject,
+        },
+    };
+    use tenko_core::{
+        audit::Digest,
+        ipam::{RangeRole, Stamp},
+    };
+
+    /// A scoped authorizer for the tests: the filter of the first matching override, else the
+    /// default; every `check` passes.
+    struct FakeAuthorizer {
+        default: ScopeFilter,
+        overrides: Vec<(Option<Action>, ObjectKind, ScopeFilter)>,
+    }
+
+    impl FakeAuthorizer {
+        fn uniform(filter: ScopeFilter) -> Self {
+            Self {
+                default: filter,
+                overrides: Vec::new(),
+            }
+        }
+
+        fn only(rules: Vec<ScopeRule>) -> Self {
+            Self::uniform(ScopeFilter::Only(rules))
+        }
+
+        fn with(mut self, action: Option<Action>, kind: ObjectKind, filter: ScopeFilter) -> Self {
+            self.overrides.push((action, kind, filter));
+            self
+        }
+    }
+
+    impl Authorizer for FakeAuthorizer {
+        fn check(
+            &self,
+            _principal: &Principal,
+            _action: Action,
+            _object: &ObjectRef,
+        ) -> Result<(), Denied> {
+            Ok(())
+        }
+
+        fn scope(&self, _principal: &Principal, action: Action, kind: ObjectKind) -> ScopeFilter {
+            self.overrides
+                .iter()
+                .find(|(a, k, _)| *k == kind && a.is_none_or(|a| a == action))
+                .map_or_else(|| self.default.clone(), |(_, _, filter)| filter.clone())
+        }
+    }
+
+    fn cx() -> RequestCtx {
+        RequestCtx::system(SystemComponent::Api)
+    }
+
+    fn rule(prefix: PrefixId) -> ScopeRule {
+        ScopeRule::Prefix {
+            id: prefix,
+            subtree: true,
+        }
+    }
+
+    fn ip(text: &str) -> IpAddr {
+        text.parse().expect("ip")
+    }
+
+    fn at() -> Timestamp {
+        "2026-10-10T12:00:00Z".parse().expect("time")
+    }
+
+    fn prefix_input(vrf: VrfId, cidr: &str, site: Option<SiteId>) -> (PrefixId, PrefixInput) {
+        let id = PrefixId::generate();
+        (
+            id,
+            PrefixInput {
+                id: Some(id),
+                vrf: Some(vrf),
+                cidr: cidr.parse().expect("cidr"),
+                role: Some(PrefixRole::Supernet),
+                status: None,
+                vlan: None,
+                site,
+                alarm: None,
+                alloc: None,
+                tags: BTreeSet::new(),
+                custom: BTreeMap::new(),
+                description: None,
+            },
+        )
+    }
+
+    fn new_address(
+        vrf: VrfId,
+        ip_text: &str,
+        interface: Option<InterfaceId>,
+    ) -> (AddressId, AddressInput) {
+        let id = AddressId::generate();
+        (
+            id,
+            AddressInput {
+                id: Some(id),
+                vrf: Some(vrf),
+                ip: ip(ip_text),
+                status: None,
+                interface,
+                dns_name: None,
+                tags: BTreeSet::new(),
+                custom: BTreeMap::new(),
+                description: None,
+            },
+        )
+    }
+
+    fn interface_input(id: InterfaceId, name: &str, last: u8) -> InterfaceInput {
+        InterfaceInput {
+            id: Some(id),
+            host: None,
+            name: name.to_owned(),
+            mac: Some(format!("00:00:5e:00:53:{last:02x}").parse().expect("mac")),
+            duid: None,
+            client_id: None,
+            tags: BTreeSet::new(),
+            custom: BTreeMap::new(),
+            description: None,
+        }
+    }
+
+    fn host_input(
+        name: &str,
+        tenant: Option<TenantId>,
+        site: Option<SiteId>,
+        interfaces: Vec<InterfaceInput>,
+    ) -> (HostId, HostInput) {
+        let id = HostId::generate();
+        (
+            id,
+            HostInput {
+                id: Some(id),
+                tenant,
+                name: name.parse().expect("host name"),
+                mode: Some(AssignmentMode::Static),
+                lock: None,
+                site,
+                interfaces,
+                tags: BTreeSet::new(),
+                custom: BTreeMap::new(),
+                description: None,
+            },
+        )
+    }
+
+    fn delete(object: impl Into<ObjectRef>) -> IpamCommand {
+        IpamCommand::Delete {
+            object: object.into(),
+            expected: None,
+            cascade: false,
+        }
+    }
+
+    fn expected(
+        object: ObjectRef,
+        tenant: Option<TenantId>,
+        vrf: Option<VrfId>,
+        sites: Vec<SiteId>,
+        prefixes: Vec<Vec<PrefixId>>,
+    ) -> Anchors {
+        Anchors {
+            object: Some(object),
+            tenant,
+            vrf,
+            sites,
+            prefixes,
+        }
+    }
+
+    fn sorted(mut anchors: Anchors) -> Anchors {
+        anchors.prefixes.sort();
+        anchors
+    }
+
+    /// A service over a `MemStore` with the live index registered before any write, and a
+    /// small tree: tenant, VRF, a site with a child site, `p1` (192.0.2.0/24, child site)
+    /// and `p2` (198.51.100.0/24, no site) in the VRF.
+    struct World {
+        service: Arc<IpamService>,
+        store: MemStore,
+        index: Arc<ScopeIndex>,
+        tenant: TenantId,
+        vrf: VrfId,
+        site: SiteId,
+        child_site: SiteId,
+        p1: PrefixId,
+        p2: PrefixId,
+    }
+
+    impl World {
+        async fn new() -> Self {
+            let store = MemStore::default();
+            let index = Arc::new(ScopeIndex::new());
+            store
+                .register_index(Arc::clone(&index) as Arc<dyn DerivedIndex>)
+                .expect("register");
+            let service = IpamService::with_direct_jobs(Arc::new(store.clone()) as Arc<dyn Store>)
+                .expect("service");
+            let tenant = TenantId::generate();
+            let vrf = VrfId::generate();
+            let site = SiteId::generate();
+            let child_site = SiteId::generate();
+            let (p1, p1_input) = prefix_input(vrf, "192.0.2.0/24", Some(child_site));
+            let (p2, p2_input) = prefix_input(vrf, "198.51.100.0/24", None);
+            let world = Self {
+                service,
+                store,
+                index,
+                tenant,
+                vrf,
+                site,
+                child_site,
+                p1,
+                p2,
+            };
+            world
+                .run(vec![
+                    IpamCommand::CreateTenant(TenantInput {
+                        id: Some(tenant),
+                        name: "example".to_owned(),
+                        tags: BTreeSet::new(),
+                        custom: BTreeMap::new(),
+                        description: None,
+                    }),
+                    IpamCommand::CreateVrf(VrfInput {
+                        id: Some(vrf),
+                        tenant: Some(tenant),
+                        name: "main".to_owned(),
+                        rd: None,
+                        tags: BTreeSet::new(),
+                        custom: BTreeMap::new(),
+                        description: None,
+                    }),
+                    Self::site_command(site, "hq", None),
+                    Self::site_command(child_site, "lab", Some(site)),
+                    IpamCommand::CreatePrefix(p1_input),
+                    IpamCommand::CreatePrefix(p2_input),
+                ])
+                .await;
+            world
+        }
+
+        fn site_command(id: SiteId, name: &str, parent: Option<SiteId>) -> IpamCommand {
+            IpamCommand::CreateSite(SiteInput {
+                id: Some(id),
+                name: name.to_owned(),
+                parent,
+                ad_site: None,
+                tags: BTreeSet::new(),
+                custom: BTreeMap::new(),
+                description: None,
+            })
+        }
+
+        async fn run(&self, commands: Vec<IpamCommand>) -> Applied {
+            self.service
+                .execute(&commands, &cx(), &PlanOptions::default())
+                .await
+                .expect("execute")
+        }
+
+        async fn plan(&self, commands: Vec<IpamCommand>) -> IpamPlan {
+            self.service
+                .preview(&commands, &cx(), &PlanOptions::default(), None)
+                .await
+                .expect("preview")
+        }
+
+        fn anchors(&self, object: impl Into<ObjectRef>) -> Anchors {
+            self.index.anchors(&object.into())
+        }
+
+        fn check(&self, authorizer: &FakeAuthorizer, plan: &IpamPlan) -> Result<(), Denied> {
+            self.index.check_plan(authorizer, &cx().principal, plan)
+        }
+    }
+
+    fn denied(result: Result<(), Denied>) -> Denied {
+        result.expect_err("refused")
+    }
+
+    // ----- anchors through the live index ---------------------------------------------------
+
+    #[tokio::test]
+    async fn a_prefix_anchors_to_itself_its_vrf_tenant_and_site_chain() {
+        let world = World::new().await;
+        assert_eq!(
+            world.anchors(world.p1),
+            expected(
+                world.p1.into(),
+                Some(world.tenant),
+                Some(world.vrf),
+                vec![world.child_site, world.site],
+                vec![vec![world.p1]],
+            )
+        );
+        // No site anywhere on the chain, no site anchors.
+        assert_eq!(
+            world.anchors(world.p2),
+            expected(
+                world.p2.into(),
+                Some(world.tenant),
+                Some(world.vrf),
+                Vec::new(),
+                vec![vec![world.p2]],
+            )
+        );
+        assert_eq!(
+            world.anchors(world.vrf),
+            Anchors {
+                vrf: Some(world.vrf),
+                tenant: Some(world.tenant),
+                ..Anchors::of(world.vrf.into())
+            }
+        );
+        assert_eq!(
+            world.anchors(world.child_site).sites,
+            vec![world.child_site, world.site]
+        );
+        assert_eq!(world.anchors(world.tenant).tenant, Some(world.tenant));
+    }
+
+    #[tokio::test]
+    async fn a_child_prefix_anchors_to_its_ancestors_and_inherits_the_site() {
+        let world = World::new().await;
+        let (middle, middle_input) = prefix_input(world.vrf, "192.0.2.0/26", None);
+        let (leaf, leaf_input) = prefix_input(world.vrf, "192.0.2.0/28", None);
+        world
+            .run(vec![
+                IpamCommand::CreatePrefix(middle_input),
+                IpamCommand::CreatePrefix(leaf_input),
+            ])
+            .await;
+        let anchors = world.anchors(leaf);
+        assert_eq!(anchors.prefixes, vec![vec![leaf, middle, world.p1]]);
+        assert_eq!(anchors.sites, vec![world.child_site, world.site]);
+        assert_eq!(anchors.vrf, Some(world.vrf));
+        assert_eq!(anchors.tenant, Some(world.tenant));
+        // The parent keeps its own chain.
+        assert_eq!(world.anchors(middle).prefixes, vec![vec![middle, world.p1]]);
+        assert_eq!(world.anchors(world.p1).prefixes, vec![vec![world.p1]]);
+    }
+
+    #[tokio::test]
+    async fn a_prefix_created_later_updates_the_anchors_of_existing_children() {
+        let world = World::new().await;
+        let (leaf, leaf_input) = prefix_input(world.vrf, "192.0.2.0/28", None);
+        world.run(vec![IpamCommand::CreatePrefix(leaf_input)]).await;
+        assert_eq!(
+            world.anchors(leaf).prefixes,
+            vec![vec![leaf, world.p1]],
+            "before the middle prefix"
+        );
+        let (middle, middle_input) = prefix_input(world.vrf, "192.0.2.0/26", None);
+        world
+            .run(vec![IpamCommand::CreatePrefix(middle_input)])
+            .await;
+        assert_eq!(
+            world.anchors(leaf).prefixes,
+            vec![vec![leaf, middle, world.p1]],
+            "after the middle prefix"
+        );
+        world.run(vec![delete(middle)]).await;
+        assert_eq!(
+            world.anchors(leaf).prefixes,
+            vec![vec![leaf, world.p1]],
+            "after the middle prefix is deleted"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_range_and_an_address_anchor_to_their_most_specific_prefix() {
+        let world = World::new().await;
+        let (inner, mut inner_input) = prefix_input(world.vrf, "192.0.2.0/26", None);
+        inner_input.role = Some(PrefixRole::Network);
+        let (address, address_input) = new_address(world.vrf, "192.0.2.10", None);
+        let (outer_address, outer_address_input) = new_address(world.vrf, "192.0.2.200", None);
+        let range = tenko_core::RangeId::generate();
+        world
+            .run(vec![
+                IpamCommand::CreatePrefix(inner_input),
+                IpamCommand::CreateAddress(address_input),
+                IpamCommand::CreateAddress(outer_address_input),
+                IpamCommand::CreateRange(RangeInput {
+                    id: Some(range),
+                    prefix: inner,
+                    first: ip("192.0.2.20"),
+                    last: ip("192.0.2.30"),
+                    role: RangeRole::Reserved,
+                    status: None,
+                    lease_secs: None,
+                    tags: BTreeSet::new(),
+                    custom: BTreeMap::new(),
+                    description: None,
+                }),
+            ])
+            .await;
+        let chain = vec![vec![inner, world.p1]];
+        let anchors = world.anchors(address);
+        assert_eq!(anchors.object, Some(ObjectRef::from(address)));
+        assert_eq!(anchors.prefixes, chain);
+        assert_eq!(anchors.vrf, Some(world.vrf));
+        assert_eq!(anchors.sites, vec![world.child_site, world.site]);
+        assert_eq!(world.anchors(range).prefixes, chain);
+        assert_eq!(
+            world.anchors(outer_address).prefixes,
+            vec![vec![world.p1]],
+            "outside the inner prefix"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_host_anchors_to_its_site_and_the_prefix_chains_of_all_its_addresses() {
+        let world = World::new().await;
+        let (first, second) = (InterfaceId::generate(), InterfaceId::generate());
+        let (host, host_input) = host_input(
+            "web01",
+            Some(world.tenant),
+            Some(world.site),
+            vec![
+                interface_input(first, "eth0", 1),
+                interface_input(second, "eth1", 2),
+            ],
+        );
+        let (_, in_p1) = new_address(world.vrf, "192.0.2.10", Some(first));
+        let (_, in_p2) = new_address(world.vrf, "198.51.100.10", Some(second));
+        world
+            .run(vec![
+                IpamCommand::CreateHost(host_input),
+                IpamCommand::CreateAddress(in_p1),
+                IpamCommand::CreateAddress(in_p2),
+            ])
+            .await;
+        let anchors = sorted(world.anchors(host));
+        assert_eq!(
+            anchors,
+            sorted(expected(
+                host.into(),
+                Some(world.tenant),
+                Some(world.vrf),
+                vec![world.site],
+                vec![vec![world.p1], vec![world.p2]],
+            ))
+        );
+        // An interface anchors like its host, with itself as the object.
+        let interface = sorted(world.anchors(first));
+        assert_eq!(interface.object, Some(ObjectRef::from(first)));
+        assert_eq!(interface.prefixes, anchors.prefixes);
+        assert_eq!(interface.sites, anchors.sites);
+        assert_eq!(interface.tenant, Some(world.tenant));
+    }
+
+    #[tokio::test]
+    async fn a_vlan_anchors_to_its_site_chain() {
+        let world = World::new().await;
+        let vlan = VlanId::generate();
+        world
+            .run(vec![IpamCommand::CreateVlan(VlanInput {
+                id: Some(vlan),
+                vid: 100,
+                vni: None,
+                name: "users".to_owned(),
+                site: Some(world.child_site),
+                status: None,
+                tags: BTreeSet::new(),
+                custom: BTreeMap::new(),
+                description: None,
+            })])
+            .await;
+        assert_eq!(
+            world.anchors(vlan),
+            Anchors {
+                sites: vec![world.child_site, world.site],
+                ..Anchors::of(vlan.into())
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn an_ip_anchors_to_the_prefix_holding_it_and_to_itself_outside_the_tree() {
+        let world = World::new().await;
+        let object = ObjectRef::new(ObjectKind::Observation, uuid::Uuid::from_u128(7));
+        let inside = world
+            .index
+            .anchors_of_ip(object, Some(world.vrf), ip("192.0.2.77"));
+        assert_eq!(
+            inside,
+            expected(
+                object,
+                Some(world.tenant),
+                Some(world.vrf),
+                vec![world.child_site, world.site],
+                vec![vec![world.p1]],
+            )
+        );
+        // Without a VRF, the VRFs that hold the address are searched.
+        assert_eq!(
+            world.index.anchors_of_ip(object, None, ip("192.0.2.77")),
+            inside
+        );
+        let outside = world
+            .index
+            .anchors_of_ip(object, Some(world.vrf), ip("203.0.113.5"));
+        assert_eq!(outside, Anchors::of(object));
+        assert_eq!(
+            world.index.anchors_of_ip(object, None, ip("2001:db8::1")),
+            Anchors::of(object)
+        );
+    }
+
+    #[tokio::test]
+    async fn an_ip_held_by_two_vrfs_carries_both_chains_and_no_single_vrf() {
+        let world = World::new().await;
+        let other = VrfId::generate();
+        let (other_prefix, other_input) = prefix_input(other, "192.0.2.0/25", None);
+        world
+            .run(vec![
+                IpamCommand::CreateVrf(VrfInput {
+                    id: Some(other),
+                    tenant: Some(world.tenant),
+                    name: "other".to_owned(),
+                    rd: None,
+                    tags: BTreeSet::new(),
+                    custom: BTreeMap::new(),
+                    description: None,
+                }),
+                IpamCommand::CreatePrefix(other_input),
+            ])
+            .await;
+        let object = ObjectRef::new(ObjectKind::Observation, uuid::Uuid::from_u128(8));
+        let anchors = sorted(world.index.anchors_of_ip(object, None, ip("192.0.2.5")));
+        assert_eq!(anchors.vrf, None);
+        assert_eq!(anchors.tenant, Some(world.tenant));
+        assert_eq!(anchors.prefixes, {
+            let mut chains = vec![vec![world.p1], vec![other_prefix]];
+            chains.sort();
+            chains
+        });
+    }
+
+    #[tokio::test]
+    async fn targets_merge_into_one_anchor_set_with_every_chain() {
+        let world = World::new().await;
+        let (a, a_input) = new_address(world.vrf, "192.0.2.10", None);
+        let (b, b_input) = new_address(world.vrf, "198.51.100.10", None);
+        world
+            .run(vec![
+                IpamCommand::CreateAddress(a_input),
+                IpamCommand::CreateAddress(b_input),
+            ])
+            .await;
+        let job = ObjectRef::new(ObjectKind::Job, uuid::Uuid::from_u128(9));
+        let merged = sorted(world.index.anchors_of_targets(job, &[a.into(), b.into()]));
+        assert_eq!(merged.object, Some(job));
+        assert_eq!(merged.vrf, Some(world.vrf));
+        assert_eq!(merged.tenant, Some(world.tenant));
+        assert_eq!(merged.sites, Vec::<SiteId>::new(), "the sites differ");
+        assert_eq!(merged.prefixes, {
+            let mut chains = vec![vec![world.p1], vec![world.p2]];
+            chains.sort();
+            chains
+        });
+        // No targets: the job anchors to itself.
+        assert_eq!(world.index.anchors_of_targets(job, &[]), Anchors::of(job));
+    }
+
+    #[tokio::test]
+    async fn the_index_revision_follows_the_store_and_a_late_index_agrees() {
+        let world = World::new().await;
+        let (address, address_input) = new_address(world.vrf, "192.0.2.10", None);
+        let applied = world
+            .run(vec![IpamCommand::CreateAddress(address_input)])
+            .await;
+        assert_eq!(world.index.revision(), applied.revision);
+        let next = world.run(vec![delete(address)]).await;
+        assert!(next.revision > applied.revision);
+        assert_eq!(world.index.revision(), next.revision);
+
+        // An index registered after the writes builds the same anchors.
+        let late = Arc::new(ScopeIndex::new());
+        world
+            .store
+            .register_index(Arc::clone(&late) as Arc<dyn DerivedIndex>)
+            .expect("register");
+        assert_eq!(late.revision(), next.revision);
+        for object in [
+            ObjectRef::from(world.p1),
+            ObjectRef::from(world.p2),
+            ObjectRef::from(address),
+            ObjectRef::from(world.child_site),
+            ObjectRef::from(world.vrf),
+        ] {
+            assert_eq!(late.anchors(&object), world.index.anchors(&object));
+        }
+    }
+
+    // ----- facts and proposals --------------------------------------------------------------
+
+    fn fact(observed: Observed) -> ObservedFact {
+        let subject = FactSubject::of(&observed);
+        ObservedFact {
+            source: ObservationSource::Inventory {
+                connector: ConnectorId::generate(),
+            },
+            source_key: "inventory:example".to_owned(),
+            subject_key: subject.key(),
+            subject,
+            observed,
+            observation: ObservationId::generate(),
+            first_seen: at(),
+            last_seen: at(),
+            received_at: at(),
+            expires_at: None,
+            sightings: 1,
+            counted_at: None,
+            revision: Revision::ZERO,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_fact_anchors_to_the_prefixes_of_the_addresses_it_names() {
+        let world = World::new().await;
+        let address_fact = fact(Observed::Address {
+            vrf: world.vrf,
+            ip: ip("192.0.2.40"),
+            mac: None,
+        });
+        let anchors = world.index.anchors_of_fact(&address_fact);
+        assert_eq!(
+            anchors.object,
+            Some(ObjectRef::new(
+                ObjectKind::Observation,
+                address_fact.observation.0
+            ))
+        );
+        assert_eq!(anchors.prefixes, vec![vec![world.p1]]);
+        assert_eq!(anchors.vrf, Some(world.vrf));
+
+        // A fact that names no address has nothing but itself.
+        let attachment = fact(Observed::Attachment {
+            mac: "00:00:5e:00:53:09".parse().expect("mac"),
+            device: "switch01.example.test".to_owned(),
+            port: None,
+            vlan: None,
+            ssid: None,
+        });
+        let anchors = world.index.anchors_of_fact(&attachment);
+        assert_eq!(
+            anchors,
+            Anchors::of(ObjectRef::new(
+                ObjectKind::Observation,
+                attachment.observation.0
+            ))
+        );
+    }
+
+    fn proposal(subject: ProposalSubject) -> IntentProposal {
+        IntentProposal {
+            id: ProposalId::generate(),
+            kind: IntentProposalKind::DiscoveredHost,
+            rule: "ipam.reconcile.discovered_mac".to_owned(),
+            key: "discovered_host/example".to_owned(),
+            subject,
+            severity: ProposalSeverity::Info,
+            state: IntentProposalState::Open,
+            summary: "new device".to_owned(),
+            params: BTreeMap::new(),
+            evidence: Vec::new(),
+            commands: Vec::new(),
+            fingerprint: Digest([1; 32]),
+            created: at(),
+            updated: at(),
+            decided: Some(Stamp::new(
+                at(),
+                Principal::system(SystemComponent::Reconciler),
+            )),
+            reason: None,
+            adopted_by: None,
+            results: Vec::new(),
+            superseded_by: None,
+            adoption_error: None,
+            revision: Revision::ZERO,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_proposal_anchors_to_its_subject_prefix_address_network_and_objects() {
+        let world = World::new().await;
+        let by_prefix = proposal(ProposalSubject {
+            prefix: Some(world.p2),
+            ..ProposalSubject::default()
+        });
+        assert_eq!(
+            world.index.anchors_of_proposal(&by_prefix).prefixes,
+            vec![vec![world.p2]]
+        );
+        let by_ip = proposal(ProposalSubject {
+            vrf: Some(world.vrf),
+            ip: Some(ip("192.0.2.9")),
+            ..ProposalSubject::default()
+        });
+        let anchors = world.index.anchors_of_proposal(&by_ip);
+        assert_eq!(anchors.object, Some(ObjectRef::from(by_ip.id)));
+        assert_eq!(anchors.prefixes, vec![vec![world.p1]]);
+        assert_eq!(anchors.tenant, Some(world.tenant));
+        let by_cidr = proposal(ProposalSubject {
+            vrf: Some(world.vrf),
+            cidr: Some("198.51.100.64/26".parse().expect("cidr")),
+            ..ProposalSubject::default()
+        });
+        assert_eq!(
+            world.index.anchors_of_proposal(&by_cidr).prefixes,
+            vec![vec![world.p2]]
+        );
+        // The subject prefix and its objects are merged: both chains are needed.
+        let (address, address_input) = new_address(world.vrf, "192.0.2.10", None);
+        world
+            .run(vec![IpamCommand::CreateAddress(address_input)])
+            .await;
+        let merged = sorted(world.index.anchors_of_proposal(&proposal(ProposalSubject {
+            prefix: Some(world.p2),
+            objects: vec![address.into()],
+            ..ProposalSubject::default()
+        })));
+        let mut chains = vec![vec![world.p1], vec![world.p2]];
+        chains.sort();
+        assert_eq!(merged.prefixes, chains);
+        // Nothing to anchor to: the proposal stands alone.
+        let alone = proposal(ProposalSubject::default());
+        assert_eq!(
+            world.index.anchors_of_proposal(&alone),
+            Anchors::of(ObjectRef::from(alone.id))
+        );
+    }
+
+    // ----- check_plan -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn a_plan_creating_an_address_inside_the_scope_passes_and_one_beside_it_is_refused() {
+        let world = World::new().await;
+        let auth = FakeAuthorizer::only(vec![rule(world.p1)]);
+        let (_, inside) = new_address(world.vrf, "192.0.2.10", None);
+        let plan = world.plan(vec![IpamCommand::CreateAddress(inside)]).await;
+        world.check(&auth, &plan).expect("inside");
+
+        let (outside_id, outside) = new_address(world.vrf, "198.51.100.10", None);
+        let plan = world.plan(vec![IpamCommand::CreateAddress(outside)]).await;
+        let refused = denied(world.check(&auth, &plan));
+        assert_eq!(refused.reason, DenyReason::OutOfScope);
+        assert_eq!(refused.action, Action::Create);
+        assert_eq!(refused.object, ObjectRef::from(outside_id));
+    }
+
+    #[tokio::test]
+    async fn moving_an_address_out_of_or_into_the_scope_is_refused() {
+        let world = World::new().await;
+        let (inside, inside_input) = new_address(world.vrf, "192.0.2.10", None);
+        let (outside, outside_input) = new_address(world.vrf, "198.51.100.10", None);
+        world
+            .run(vec![
+                IpamCommand::CreateAddress(inside_input),
+                IpamCommand::CreateAddress(outside_input),
+            ])
+            .await;
+        let auth = FakeAuthorizer::only(vec![rule(world.p1)]);
+        let moves = |id: AddressId, to: &str| {
+            IpamCommand::UpdateAddress(UpdateAddress {
+                id,
+                expected: None,
+                patch: AddressPatch {
+                    ip: Some(ip(to)),
+                    ..AddressPatch::default()
+                },
+            })
+        };
+        // Within the scope, a change passes.
+        let plan = world.plan(vec![moves(inside, "192.0.2.11")]).await;
+        world.check(&auth, &plan).expect("stays inside");
+        // The after-state is outside.
+        let plan = world.plan(vec![moves(inside, "198.51.100.11")]).await;
+        let refused = denied(world.check(&auth, &plan));
+        assert_eq!(refused.reason, DenyReason::OutOfScope);
+        assert_eq!(refused.action, Action::Update);
+        assert_eq!(refused.object, ObjectRef::from(inside));
+        // The before-state is outside.
+        let plan = world.plan(vec![moves(outside, "192.0.2.12")]).await;
+        let refused = denied(world.check(&auth, &plan));
+        assert_eq!(refused.reason, DenyReason::OutOfScope);
+        assert_eq!(refused.object, ObjectRef::from(outside));
+    }
+
+    #[tokio::test]
+    async fn deleting_an_object_outside_the_scope_is_refused() {
+        let world = World::new().await;
+        let (inside, inside_input) = new_address(world.vrf, "192.0.2.10", None);
+        let (outside, outside_input) = new_address(world.vrf, "198.51.100.10", None);
+        world
+            .run(vec![
+                IpamCommand::CreateAddress(inside_input),
+                IpamCommand::CreateAddress(outside_input),
+            ])
+            .await;
+        let auth = FakeAuthorizer::only(vec![rule(world.p1)]);
+        let plan = world.plan(vec![delete(inside)]).await;
+        world.check(&auth, &plan).expect("inside");
+        let plan = world.plan(vec![delete(outside)]).await;
+        let refused = denied(world.check(&auth, &plan));
+        assert_eq!(refused.reason, DenyReason::OutOfScope);
+        assert_eq!(refused.action, Action::Delete);
+        assert_eq!(refused.object, ObjectRef::from(outside));
+    }
+
+    #[tokio::test]
+    async fn binding_an_address_to_a_host_outside_the_scope_is_refused() {
+        let world = World::new().await;
+        let interface = InterfaceId::generate();
+        let (host, host_input) = host_input(
+            "db01",
+            None,
+            None,
+            vec![interface_input(interface, "eth0", 3)],
+        );
+        let (_, host_address) = new_address(world.vrf, "198.51.100.20", Some(interface));
+        let (free, free_input) = new_address(world.vrf, "192.0.2.20", None);
+        world
+            .run(vec![
+                IpamCommand::CreateHost(host_input),
+                IpamCommand::CreateAddress(host_address),
+                IpamCommand::CreateAddress(free_input),
+            ])
+            .await;
+        let auth = FakeAuthorizer::only(vec![rule(world.p1)]);
+        // The address itself is inside the scope; the host it would join is not.
+        let plan = world
+            .plan(vec![IpamCommand::UpdateAddress(UpdateAddress {
+                id: free,
+                expected: None,
+                patch: AddressPatch {
+                    interface: Some(Some(interface)),
+                    ..AddressPatch::default()
+                },
+            })])
+            .await;
+        let refused = denied(world.check(&auth, &plan));
+        assert_eq!(refused.reason, DenyReason::OutOfScope);
+        assert_eq!(refused.action, Action::Update);
+        assert_eq!(refused.object, ObjectRef::from(host));
+        // With the host's prefix in scope too, the same plan passes.
+        let both = FakeAuthorizer::only(vec![rule(world.p1), rule(world.p2)]);
+        world.check(&both, &plan).expect("both prefixes");
+    }
+
+    #[tokio::test]
+    async fn a_kind_without_permission_is_refused_as_missing_permission() {
+        let world = World::new().await;
+        let auth = FakeAuthorizer::only(vec![rule(world.p1)]).with(
+            Some(Action::Create),
+            ObjectKind::Address,
+            ScopeFilter::Nothing,
+        );
+        let (_, inside) = new_address(world.vrf, "192.0.2.10", None);
+        let plan = world.plan(vec![IpamCommand::CreateAddress(inside)]).await;
+        let refused = denied(world.check(&auth, &plan));
+        assert_eq!(refused.reason, DenyReason::MissingPermission);
+        assert_eq!(refused.action, Action::Create);
+        assert_eq!(refused.object.kind, ObjectKind::Address);
+    }
+
+    #[tokio::test]
+    async fn an_unrestricted_filter_admits_every_change() {
+        let world = World::new().await;
+        let (_, outside) = new_address(world.vrf, "198.51.100.10", None);
+        let plan = world.plan(vec![IpamCommand::CreateAddress(outside)]).await;
+        world
+            .check(&FakeAuthorizer::uniform(ScopeFilter::All), &plan)
+            .expect("all");
+        // A scope that names no rule covers nothing.
+        let none = FakeAuthorizer::only(Vec::new());
+        assert_eq!(
+            denied(world.check(&none, &plan)).reason,
+            DenyReason::OutOfScope
+        );
+    }
+
+    #[tokio::test]
+    async fn a_new_host_with_an_address_in_the_same_plan_is_checked_through_the_overlay() {
+        let world = World::new().await;
+        let auth = FakeAuthorizer::only(vec![rule(world.p1)]);
+        let build = |address: &str| {
+            let interface = InterfaceId::generate();
+            let (_, host) = host_input(
+                "app01",
+                Some(world.tenant),
+                None,
+                vec![interface_input(interface, "eth0", 4)],
+            );
+            let (_, address) = new_address(world.vrf, address, Some(interface));
+            vec![
+                IpamCommand::CreateHost(host),
+                IpamCommand::CreateAddress(address),
+            ]
+        };
+        let plan = world.plan(build("192.0.2.30")).await;
+        world.check(&auth, &plan).expect("host inside the scope");
+        let plan = world.plan(build("198.51.100.30")).await;
+        let refused = denied(world.check(&auth, &plan));
+        assert_eq!(refused.reason, DenyReason::OutOfScope);
+    }
+
+    #[tokio::test]
+    async fn a_prefix_created_inside_a_new_parent_anchors_through_the_overlay() {
+        let world = World::new().await;
+        let (parent, parent_input) = prefix_input(world.vrf, "203.0.113.0/24", None);
+        let (_, child_input) = prefix_input(world.vrf, "203.0.113.0/26", None);
+        let plan = world
+            .plan(vec![
+                IpamCommand::CreatePrefix(parent_input),
+                IpamCommand::CreatePrefix(child_input),
+            ])
+            .await;
+        // The scope names the new parent; the child lies below it in the plan only.
+        let auth = FakeAuthorizer::only(vec![rule(parent)]);
+        world.check(&auth, &plan).expect("below the new parent");
+        let elsewhere = FakeAuthorizer::only(vec![rule(world.p1)]);
+        assert_eq!(
+            denied(world.check(&elsewhere, &plan)).reason,
+            DenyReason::OutOfScope
+        );
+    }
+
+    // ----- unrestricted ---------------------------------------------------------------------
+
+    #[test]
+    fn a_principal_is_unrestricted_unless_some_kind_and_action_is_scoped() {
+        let principal = cx().principal;
+        assert!(ScopeIndex::unrestricted(
+            &FakeAuthorizer::uniform(ScopeFilter::All),
+            &principal
+        ));
+        assert!(ScopeIndex::unrestricted(
+            &FakeAuthorizer::uniform(ScopeFilter::Nothing),
+            &principal
+        ));
+        for kind in crate::object::IPAM_KINDS {
+            for action in [Action::Create, Action::Update, Action::Delete] {
+                let auth = FakeAuthorizer::uniform(ScopeFilter::All).with(
+                    Some(action),
+                    kind,
+                    ScopeFilter::Only(vec![rule(PrefixId::generate())]),
+                );
+                assert!(
+                    !ScopeIndex::unrestricted(&auth, &principal),
+                    "{kind:?} {action:?}"
+                );
+            }
+        }
+    }
+
+    // ----- execute_checked ------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn execute_checked_applies_an_in_scope_write_and_leaves_the_store_alone_on_refusal() {
+        let world = World::new().await;
+        let auth = FakeAuthorizer::only(vec![rule(world.p1)]);
+        let options = PlanOptions::default();
+
+        let (inside, inside_input) = new_address(world.vrf, "192.0.2.10", None);
+        let applied = world
+            .index
+            .execute_checked(
+                &world.service,
+                &auth,
+                &[IpamCommand::CreateAddress(inside_input)],
+                &cx(),
+                &options,
+            )
+            .await
+            .expect("in scope");
+        assert_eq!(world.index.revision(), applied.revision);
+        let view = world.service.view(None).await.expect("view");
+        assert!(
+            view.get_typed(&ADDRESSES, &inside).expect("read").is_some(),
+            "applied"
+        );
+        let before = view.revision();
+        drop(view);
+
+        let (outside, outside_input) = new_address(world.vrf, "198.51.100.10", None);
+        let error = world
+            .index
+            .execute_checked(
+                &world.service,
+                &auth,
+                &[IpamCommand::CreateAddress(outside_input)],
+                &cx(),
+                &options,
+            )
+            .await
+            .expect_err("out of scope");
+        match error {
+            ScopedWriteError::Denied(denied) => {
+                assert_eq!(denied.reason, DenyReason::OutOfScope);
+            }
+            ScopedWriteError::Ipam(error) => panic!("planning failed: {error}"),
+        }
+        let view = world.service.view(None).await.expect("view");
+        assert_eq!(view.revision(), before, "no commit");
+        assert!(
+            view.get_typed(&ADDRESSES, &outside)
+                .expect("read")
+                .is_none(),
+            "not written"
+        );
+        assert_eq!(world.index.revision(), before);
+    }
+
+    #[tokio::test]
+    async fn execute_checked_and_preview_checked_pass_an_unscoped_principal_through() {
+        let world = World::new().await;
+        let auth = FakeAuthorizer::uniform(ScopeFilter::All);
+        let options = PlanOptions::default();
+        let (address, address_input) = new_address(world.vrf, "198.51.100.10", None);
+        let commands = [IpamCommand::CreateAddress(address_input)];
+        let plan = world
+            .index
+            .preview_checked(&world.service, &auth, &commands, &cx(), &options)
+            .await
+            .expect("preview");
+        assert_eq!(plan.results, vec![ObjectRef::from(address)]);
+        world
+            .index
+            .execute_checked(&world.service, &auth, &commands, &cx(), &options)
+            .await
+            .expect("execute");
+        let view = world.service.view(None).await.expect("view");
+        assert!(
+            view.get_typed(&ADDRESSES, &address)
+                .expect("read")
+                .is_some()
+        );
+
+        // The dry run of a scoped principal is refused without writing anything.
+        let scoped = FakeAuthorizer::only(vec![rule(world.p1)]);
+        let (_, other) = new_address(world.vrf, "198.51.100.11", None);
+        let error = world
+            .index
+            .preview_checked(
+                &world.service,
+                &scoped,
+                &[IpamCommand::CreateAddress(other)],
+                &cx(),
+                &options,
+            )
+            .await
+            .expect_err("out of scope");
+        assert!(matches!(error, ScopedWriteError::Denied(_)));
+    }
+}

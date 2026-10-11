@@ -3,13 +3,14 @@
 
 use std::{net::IpAddr, sync::Arc};
 
-use tenko_core::{Credentials, RequestCtx, SystemComponent, Timestamp};
-use tenko_store::MemStore;
+use tenko_core::{Credentials, Principal, RequestCtx, SystemComponent, Timestamp, UserId};
+use tenko_store::{MemStore, ReadConsistency, ReadViewExt, Store, WriteBatch};
 use tenko_vault::{MemVault, Vault};
 
 use crate::{
     clock::{Clock, MockClock},
     error::AuthError,
+    model::USERS,
     service::{AuthConfig, AuthService, NewSession, SetupAdmin, SetupRequest, types::SecretString},
     settings::Profile,
 };
@@ -152,6 +153,32 @@ impl TestEnv {
         Ok(RequestCtx::new(authenticated.principal)
             .at(self.now())
             .with_source_ip(Self::client()))
+    }
+
+    /// Clears `password_change_required` of a user, as if the user had changed the
+    /// password an administrator set: tests that create users through the API and then act
+    /// as them use it, since every other route refuses such an account.
+    ///
+    /// # Panics
+    ///
+    /// If the user does not exist or the store refuses the write.
+    pub async fn accept_password(&self, user: UserId) {
+        let view = self
+            .store
+            .read(ReadConsistency::Local)
+            .await
+            .expect("a read view");
+        let (mut record, _) = view
+            .get_typed(&USERS, &user)
+            .expect("read the user")
+            .expect("the user exists");
+        if !record.password_change_required {
+            return;
+        }
+        record.password_change_required = false;
+        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), self.now());
+        batch.put_typed(&USERS, &user, &record).expect("encode");
+        self.store.propose(batch).await.expect("commit");
     }
 
     /// The context of a request on `session`.

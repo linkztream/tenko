@@ -51,7 +51,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 use super::common::{
     Filter, IdempotencyKeyHeader, IfMatch, Ipam, IpamJson, IpamPath, ReadParams, WriteParams,
-    WriteResponse, address_rows, authorize, get_one, if_match, list_args, may_read_kind, new_of,
+    WriteResponse, address_rows, authorize, get_one, if_match, list_args, list_scoped, new_of,
     take_expand, wire_page, write_args, write_one,
 };
 use crate::{
@@ -119,10 +119,8 @@ async fn list_addresses(
         ],
     )?;
     let view = ipam.view(args.page.at_least.map(Revision)).await?;
-    if !may_read_kind(&app, &cx, ObjectKind::Address) {
-        return Ok(Json(Page::new(Vec::new(), None, view.revision())));
-    }
-    let page = query::list::<Address>(view.as_ref(), &args.query)?;
+    let scope = ipam.read_scope(&cx, ObjectKind::Address);
+    let page = list_scoped::<Address>(view.as_ref(), &args.query, &scope)?;
     let items = address_rows(&app, &cx, view.as_ref(), page.items, expand)?;
     Ok(Json(wire_page(
         query::Page {
@@ -1266,7 +1264,10 @@ mod tests {
         assert_eq!(
             policy.asked(),
             [
-                (Action::Create, ObjectRef::singleton(ObjectKind::Address)),
+                (
+                    Action::Create,
+                    crate::routes::common::new_of(ObjectKind::Address)
+                ),
                 (Action::Read, object),
                 (Action::Update, object),
                 (Action::Delete, object),

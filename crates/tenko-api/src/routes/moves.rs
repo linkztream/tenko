@@ -31,9 +31,10 @@
 //! # Authorization
 //!
 //! With an [`Authorizer`](tenko_core::Authorizer) in the state, a move needs
-//! [`Action::Update`] on every named object, [`Action::Execute`] on jobs (the operator
-//! role) and [`Action::Execute`] on every connector an automatic L2 step writes through; a
-//! preview needs [`Action::Read`] on every named object.
+//! [`Action::Update`] on every named object and on the target prefix, [`Action::Execute`]
+//! on jobs (the operator role) and [`Action::Execute`] on every connector an automatic L2
+//! step writes through; a preview needs [`Action::Read`] on every named object and on the
+//! target. A scoped principal therefore moves only objects from and into its scope.
 
 use std::sync::Arc;
 
@@ -113,12 +114,16 @@ async fn create_move(
         for object in &request.objects {
             authorize(&app, &cx, Action::Read, *object)?;
         }
+        authorize(&app, &cx, Action::Read, ObjectRef::from(request.target))?;
         let preview = preview_move(&ipam, &controllers, &request, &cx, at_least).await?;
         return Ok((StatusCode::OK, Json(preview)).into_response());
     }
     for object in &request.objects {
         authorize(&app, &cx, Action::Update, *object)?;
     }
+    // The move writes addresses into the target, so a scoped principal needs the target
+    // inside its scope as well as every moved object (IAM-01).
+    authorize(&app, &cx, Action::Update, ObjectRef::from(request.target))?;
     authorize(&app, &cx, Action::Execute, new_of(ObjectKind::Job))?;
     // The move service takes the refusal as the `CodedError` of the controllers' port.
     #[allow(clippy::result_large_err)]

@@ -5,32 +5,39 @@
 //! Records are identified by their sequence number in the hash chain. `GET /audit/verify`
 //! is registered next to `/audit/{seq}`; axum matches the static segment first.
 //!
-//! All three endpoints need read access to the system. `GET /audit` pages by sequence
-//! number, which is the table key: the cursor holds the last sequence number examined, so a
-//! page costs one range scan however deep it is. A selective filter could make a request
+//! Reading the log needs the read permission on the audit log (`AUDIT_OBJECT`: a global
+//! role that reads the system, the auditor role, or a token with the `audit:read` scope).
+//! A principal whose grants are scoped (IAM-01) lists and reads only the records that name
+//! objects inside its scope, and `GET /audit/verify` needs the global permission.
+//!
+//! `GET /audit` pages by sequence number, which is the table key: the cursor holds the last
+//! sequence number examined, so a page costs one range scan however deep it is. A selective filter could make a request
 //! read the whole table, so a request examines at most 20,000 records. When that runs out
 //! first, the answer holds the matches found so far (possibly none) and a cursor that
 //! continues the scan. `GET /audit/verify` walks the whole chain on a blocking thread.
 
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, State, rejection::PathRejection},
 };
 use bytes::Bytes;
+use tenko_auth::authz::{AUDIT_OBJECT, is_context_kind, is_scoped_kind};
 use tenko_core::{
-    Action, AuditSeq, Coded, CodedError, ObjectKind, ObjectRef, Timestamp,
+    Action, AuditSeq, Coded, CodedError, Denied, DenyReason, ObjectKind, ObjectRef, RequestCtx,
+    Timestamp,
     audit::{AuditAction, AuditOutcome, AuditRecord, ChainHead, ChainVerifier},
     codec::CodecError,
 };
+use tenko_ipam::scope::ScopeIndex;
 use tenko_store::{
     KeyRange, ReadConsistency, ReadView, ReadViewExt, StoreError, Versioned, tables,
 };
 use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
-use super::system::system_object;
+use super::common::{ReadScope, read_scope};
 use crate::{
     dto::{
         Page, SortOrder,
@@ -96,9 +103,10 @@ const VERIFY_CHUNK: usize = 1_000;
 async fn list_audit(
     State(state): State<AppState>,
     Ctx(ctx): Ctx,
+    index: Option<Extension<Arc<ScopeIndex>>>,
     filters: Filters,
 ) -> Result<Json<Page<AuditRecord>>, ApiError> {
-    state.authorize(&ctx.principal, Action::Read, &system_object())?;
+    let visible = Visible::of(&state, &ctx, index)?;
     filters.only(&LIST_PARAMETERS)?;
     let page = filters.page()?;
     let listing = Listing::parse(&filters, page.limit()?)?;
@@ -106,8 +114,12 @@ async fn list_audit(
     let after = page.cursor::<u64>(scope)?.map(AuditSeq);
     let view = page.read(state.store.as_ref()).await?;
     let revision = view.revision();
-    let scanned =
-        blocking(move || scan_page(view.as_ref(), &listing, after, Bounds::DEFAULT)).await?;
+    let scanned = blocking(move || {
+        scan_page_where(view.as_ref(), &listing, after, Bounds::DEFAULT, &|record| {
+            visible.admits(record)
+        })
+    })
+    .await?;
     let next_cursor = scanned.resume.map(|seq| encode_cursor(scope, &seq.get()));
     Ok(Json(Page::new(scanned.items, next_cursor, revision)))
 }
@@ -133,7 +145,7 @@ async fn verify_audit(
     State(state): State<AppState>,
     Ctx(ctx): Ctx,
 ) -> Result<Json<AuditVerifyReport>, ApiError> {
-    state.authorize(&ctx.principal, Action::Read, &system_object())?;
+    state.authorize(&ctx.principal, Action::Read, &AUDIT_OBJECT)?;
     let view = state.store.read(ReadConsistency::Local).await?;
     let report = blocking(move || verify_view(view.as_ref(), VERIFY_CHUNK)).await?;
     Ok(Json(report))
@@ -157,22 +169,83 @@ async fn verify_audit(
 async fn get_audit_record(
     State(state): State<AppState>,
     Ctx(ctx): Ctx,
+    index: Option<Extension<Arc<ScopeIndex>>>,
     seq: Result<Path<String>, PathRejection>,
 ) -> Result<Json<AuditRecord>, ApiError> {
-    state.authorize(&ctx.principal, Action::Read, &system_object())?;
+    let visible = Visible::of(&state, &ctx, index)?;
     let Ok(Path(text)) = seq else {
         return Err(invalid_seq());
     };
     let seq = parse_seq(&text)?;
     let view = state.store.read(ReadConsistency::Local).await?;
     match view.get_typed(&tables::AUDIT, &seq)? {
-        Some((record, _)) => Ok(Json(record)),
+        Some((record, _)) if visible.admits(&record) => Ok(Json(record)),
+        Some(_) => Err(Denied {
+            action: Action::Read,
+            object: AUDIT_OBJECT,
+            reason: DenyReason::OutOfScope,
+        }
+        .into()),
         None => Err(ApiError::new(
             codes::AUDIT_NOT_FOUND,
             404,
             format!("audit record {seq} does not exist"),
         )
         .with_param("seq", seq.to_string())),
+    }
+}
+
+/// Which audit records a principal reads (IAM-01, IAM-18): every record with the read
+/// permission on the audit log ([`AUDIT_OBJECT`]: a global role that reads the system, the
+/// auditor role, or a token with the `audit:read` scope); otherwise, for a principal whose
+/// grants reach IPAM objects, the records that name at least one object and only objects
+/// of scoped kinds inside its scope. Anybody else is refused.
+enum Visible {
+    All,
+    Scoped(Vec<(ObjectKind, ReadScope)>),
+}
+
+impl Visible {
+    fn of(
+        state: &AppState,
+        ctx: &RequestCtx,
+        index: Option<Extension<Arc<ScopeIndex>>>,
+    ) -> Result<Self, ApiError> {
+        let Some(authorizer) = state.authorizer.as_deref() else {
+            return Ok(Self::All);
+        };
+        let denied = match authorizer.check(&ctx.principal, Action::Read, &AUDIT_OBJECT) {
+            Ok(()) => return Ok(Self::All),
+            Err(denied) => denied,
+        };
+        let index = index.map(|Extension(index)| index);
+        let scopes: Vec<(ObjectKind, ReadScope)> = ObjectKind::ALL
+            .iter()
+            .copied()
+            .filter(|kind| is_scoped_kind(*kind) && !is_context_kind(*kind))
+            .map(|kind| (kind, read_scope(Some(authorizer), index.clone(), ctx, kind)))
+            .filter(|(_, scope)| !scope.is_nothing())
+            .collect();
+        if scopes.is_empty() || denied.reason != DenyReason::MissingPermission {
+            return Err(denied.into());
+        }
+        Ok(Self::Scoped(scopes))
+    }
+
+    fn admits(&self, record: &AuditRecord) -> bool {
+        match self {
+            Self::All => true,
+            Self::Scoped(scopes) => {
+                let objects = &record.draft.objects;
+                !objects.is_empty()
+                    && objects.iter().all(|object| {
+                        scopes
+                            .iter()
+                            .find(|(kind, _)| *kind == object.kind)
+                            .is_some_and(|(_, scope)| scope.admits(object))
+                    })
+            }
+        }
     }
 }
 
@@ -415,11 +488,23 @@ struct Scanned {
 
 /// Scans the audit table from after (ascending) or before (descending) `after`, in chunks,
 /// until `limit` records match, the table ends or the budget is spent.
+#[cfg(test)]
 fn scan_page(
     view: &dyn ReadView,
     listing: &Listing,
     after: Option<AuditSeq>,
     bounds: Bounds,
+) -> Result<Scanned, StoreError> {
+    scan_page_where(view, listing, after, bounds, &|_| true)
+}
+
+/// [`scan_page`] counting only the records `keep` lets through (a scoped reader's).
+fn scan_page_where(
+    view: &dyn ReadView,
+    listing: &Listing,
+    after: Option<AuditSeq>,
+    bounds: Bounds,
+    keep: &dyn Fn(&AuditRecord) -> bool,
 ) -> Result<Scanned, StoreError> {
     let descending = listing.order == SortOrder::Desc;
     let mut items = Vec::new();
@@ -444,7 +529,7 @@ fn scan_page(
         for (index, (seq, record, _)) in rows.into_iter().enumerate() {
             examined += 1;
             position = Some(seq);
-            if listing.filter.matches(&record) {
+            if listing.filter.matches(&record) && keep(&record) {
                 items.push(record);
                 if items.len() == listing.limit {
                     let more = index + 1 < count || count == want;

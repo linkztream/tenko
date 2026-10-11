@@ -733,8 +733,10 @@ pub enum ScopeRuleSchema {
     Object(ObjectRef),
 }
 
-/// The holder of a grant or the owner of a token.
+/// The holder of a grant or the owner of a token. Named `GrantSubject` in the API document,
+/// apart from the subject summary of the observations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[schema(as = GrantSubject)]
 pub struct SubjectSummary {
     /// The user id.
     pub id: UserId,

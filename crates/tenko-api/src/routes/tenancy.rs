@@ -2791,7 +2791,7 @@ mod tests {
             .await
             .assert_write(200);
         api.delete(&path, None).await.assert_write(200);
-        let singleton = ObjectRef::singleton(ObjectKind::Tenant);
+        let singleton = crate::routes::common::new_of(ObjectKind::Tenant);
         assert_eq!(
             policy.asked(),
             [

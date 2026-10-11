@@ -44,6 +44,8 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 tenko-auth = { path = ".", features = ["testing"] }
+# The production store, for the scope matrix that runs against both stores.
+tenko-store = { workspace = true, features = ["raft", "testing"] }
 tokio = { workspace = true }
 
 [lints]

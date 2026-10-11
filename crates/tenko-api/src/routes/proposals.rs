@@ -111,7 +111,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 use super::common::{
     IfMatch, Ipam, IpamJson, IpamPath, ReadParams, WriteParams, authorize, command_access,
-    enum_params, if_match, may_read_kind, new_of, with_etag, write_args,
+    enum_params, if_match, new_of, with_etag, write_args,
 };
 use crate::{
     dto::Page,
@@ -201,7 +201,6 @@ fn decided(decision: Decision) -> Response {
     )
 )]
 async fn list_proposals(
-    State(app): State<AppState>,
     Ctx(cx): Ctx,
     Ipam(ipam): Ipam,
     filters: Filters,
@@ -230,10 +229,19 @@ async fn list_proposals(
         cursor: page.cursor::<String>(scope)?,
     };
     let view = ipam.view(page.at_least.map(Revision)).await?;
-    if !may_read_kind(&app, &cx, ObjectKind::Proposal) {
+    let read = ipam.read_scope(&cx, ObjectKind::Proposal);
+    if read.is_nothing() {
         return Ok(Json(Page::new(Vec::new(), None, view.revision())));
     }
-    let found = query::list(view.as_ref(), &query)?;
+    // A scoped reader sees the proposals whose subject lies in its scope, filtered before
+    // paging so that pages stay full (IAM-01).
+    let found = if read.is_all() {
+        query::list(view.as_ref(), &query)?
+    } else {
+        query::list_where(view.as_ref(), &query, &|proposal: &IntentProposal| {
+            read.admits_by(|index| index.anchors_of_proposal(proposal))
+        })?
+    };
     Ok(Json(Page::new(
         found.items,
         found
@@ -316,6 +324,9 @@ async fn approve_proposal(
         let (action, object) = command_access(command);
         authorize(&app, &cx, action, object)?;
     }
+    // A scoped principal's approval is planned and checked first: every object the
+    // proposal creates, changes or deletes must lie inside its scope (IAM-01).
+    ipam.check(&cx, &proposal.commands, &args.options).await?;
     let decision =
         proposals::approve(&ipam, id, &cx, &args.options, args.dry_run, expected).await?;
     if !decision.dry_run {

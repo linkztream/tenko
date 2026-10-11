@@ -39,7 +39,12 @@
 //! # Authorization
 //!
 //! With an [`Authorizer`](tenko_core::Authorizer) in the state, both endpoints need
-//! [`Action::Read`] on observations.
+//! [`Action::Read`] on observations. A principal whose grants cover only some prefixes or
+//! sites (IAM-01) sees the nodes of its readable hosts and of addresses in its readable
+//! prefixes, the edges between two such nodes, a summary counted over them, and no
+//! controller status or controller networks; network devices that no intent anchors are
+//! seen with a global reach only. One node outside the scope answers 403
+//! `auth.out_of_scope`.
 
 use std::sync::Arc;
 
@@ -55,14 +60,16 @@ use tenko_core::{
 use tenko_ipam::{
     query,
     topology::{
-        NodeKind, TopologyFilter, TopologyGraph, TopologyNodeView, TopologyService, codes,
-        filter::MAX_LIMIT,
+        NodeKind, TopologyFilter, TopologyGraph, TopologyNode, TopologyNodeView, TopologyService,
+        codes,
+        filter::{MAX_LIMIT, summarize},
+        model::VlanInView,
     },
 };
 use utoipa::IntoParams;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-use super::common::{Ipam, IpamPath, authorize, new_of};
+use super::common::{Ipam, IpamHandle, IpamPath, ReadScope, authorize, new_of};
 use crate::{
     extract::Ctx,
     list::Filters,
@@ -245,11 +252,71 @@ async fn get_topology(
     let at_least = filters.parse::<u64>("at_least")?.map(Revision);
     authorize(&app, &cx, Action::Read, new_of(ObjectKind::Observation))?;
     let filter = filter_of(&filters, &ipam, at_least).await?;
-    Ok(Json(
-        topology
-            .graph(&filter, at_least, cx.principal.user())
-            .await?,
-    ))
+    let graph = topology
+        .graph(&filter, at_least, cx.principal.user())
+        .await?;
+    Ok(Json(match NodeScope::of(&ipam, &cx) {
+        Some(scope) => scope.narrow(graph),
+        None => graph,
+    }))
+}
+
+/// What of the topology a principal whose grants cover only some objects sees (IAM-01).
+struct NodeScope {
+    hosts: ReadScope,
+    prefixes: ReadScope,
+}
+
+impl NodeScope {
+    /// The node scope of the principal; `None` when it reads every observation.
+    fn of(ipam: &IpamHandle, cx: &tenko_core::RequestCtx) -> Option<Self> {
+        if ipam.read_scope(cx, ObjectKind::Observation).is_all() {
+            return None;
+        }
+        Some(Self {
+            hosts: ipam.read_scope(cx, ObjectKind::Host),
+            prefixes: ipam.read_scope(cx, ObjectKind::Prefix),
+        })
+    }
+
+    /// A node with a readable host of intent, or with an address in a readable prefix.
+    fn admits(&self, node: &TopologyNode) -> bool {
+        node.host
+            .is_some_and(|host| self.hosts.admits(&host.into()))
+            || node
+                .prefixes
+                .iter()
+                .any(|prefix| self.prefixes.admits(&(*prefix).into()))
+    }
+
+    /// The graph with the nodes in scope, the edges between them and a summary counted
+    /// over them; controller status and controller networks are left out.
+    fn narrow(&self, mut graph: TopologyGraph) -> TopologyGraph {
+        graph.nodes.retain(|node| self.admits(node));
+        let kept: std::collections::HashSet<&str> =
+            graph.nodes.iter().map(|node| node.id.as_str()).collect();
+        graph
+            .edges
+            .retain(|edge| kept.contains(edge.a.as_str()) && kept.contains(edge.b.as_str()));
+        let named: std::collections::BTreeMap<u16, VlanInView> = graph
+            .summary
+            .vlans
+            .drain(..)
+            .map(|vlan| (vlan.vid, vlan))
+            .collect();
+        summarize(&mut graph, &[]);
+        for vlan in &mut graph.summary.vlans {
+            if let Some(known) = named.get(&vlan.vid) {
+                vlan.vlan = known.vlan;
+                vlan.name.clone_from(&known.name);
+            }
+        }
+        graph.summary.total_nodes = graph.summary.nodes;
+        graph.summary.total_edges = graph.summary.edges;
+        graph.summary.controllers.clear();
+        graph.summary.networks.clear();
+        graph
+    }
 }
 
 /// One node with its ports, neighbours and intent.
@@ -274,6 +341,7 @@ async fn get_topology(
 async fn get_topology_node(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
+    Ipam(ipam): Ipam,
     Topology(topology): Topology,
     IpamPath(id): IpamPath<String>,
     filters: Filters,
@@ -282,11 +350,39 @@ async fn get_topology_node(
     let at_least = filters.parse::<u64>("at_least")?.map(Revision);
     authorize(&app, &cx, Action::Read, new_of(ObjectKind::Observation))?;
     let port = filters.get("port")?;
-    Ok(Json(
-        topology
-            .node(&id, port, at_least, cx.principal.user())
-            .await?,
-    ))
+    let mut found = topology
+        .node(&id, port, at_least, cx.principal.user())
+        .await?;
+    if let Some(scope) = NodeScope::of(&ipam, &cx) {
+        if !scope.admits(&found.node) {
+            return Err(tenko_core::Denied {
+                action: Action::Read,
+                object: new_of(ObjectKind::Observation),
+                reason: tenko_core::DenyReason::OutOfScope,
+            }
+            .into());
+        }
+        // Neighbours and what hangs on a port are shown when they are in scope too.
+        let all = TopologyFilter {
+            limit: Some(MAX_LIMIT),
+            ..TopologyFilter::default()
+        };
+        let graph = topology.graph(&all, at_least, cx.principal.user()).await?;
+        let visible: std::collections::HashSet<String> = graph
+            .nodes
+            .iter()
+            .filter(|node| scope.admits(node))
+            .map(|node| node.id.clone())
+            .collect();
+        found
+            .neighbours
+            .retain(|neighbour| visible.contains(&neighbour.node));
+        for port in &mut found.ports {
+            port.neighbours
+                .retain(|neighbour| visible.contains(&neighbour.node));
+        }
+    }
+    Ok(Json(found))
 }
 
 #[cfg(test)]

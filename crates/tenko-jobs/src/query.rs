@@ -3,7 +3,8 @@
 //! Lists run newest first (job ids are UUIDv7) and page by an opaque cursor, the id of
 //! the last job of the previous page. A target filter scans `jobs.by_target`, a single
 //! state scans `jobs.by_state`, anything else scans `jobs.jobs`; remaining filters are
-//! applied while scanning.
+//! applied while scanning, so pages stay full: the group filter and the scope of a scoped
+//! principal (IAM-01) of [`JobFilter`] too ([`list_filtered`]).
 
 use serde::{Deserialize, Serialize};
 use tenko_core::{
@@ -14,7 +15,7 @@ use utoipa::ToSchema;
 
 use crate::{
     event::StepStateKind,
-    model::{GroupKey, Job, JobError, JobKind, JobPreview, JobState, StepState},
+    model::{GroupKey, Job, JobError, JobKind, JobPreview, JobState, StepKind, StepState},
     persist::{self, PAGE},
     tables::{BY_STATE, BY_TARGET, JOBS, PREVIEWS, Transition},
 };
@@ -76,6 +77,9 @@ pub struct JobSummary {
     /// The state of that step.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_step_state: Option<StepStateKind>,
+    /// The handler kind of that step (`ipam.move.controller`, `dns.manual`, ...).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_step_kind: Option<StepKind>,
     /// Steps waiting for a person: manual tasks and manual undo tasks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub manual_steps: Vec<u16>,
@@ -114,6 +118,7 @@ impl From<&Job> for JobSummary {
             ),
             current_step: current.map(|record| record.index),
             current_step_state: current.map(|record| StepStateKind::from(&record.state)),
+            current_step_kind: current.map(|record| record.kind.clone()),
             manual_steps: job
                 .steps
                 .iter()
@@ -171,8 +176,41 @@ enum Source {
     All,
 }
 
+/// Filters of a job list beyond [`JobQuery`]: applied while scanning, before the page is
+/// cut.
+#[derive(Default)]
+pub struct JobFilter<'a> {
+    /// Jobs of this parallelism group (a group of move jobs).
+    pub group: Option<GroupKey>,
+    /// Jobs the caller may see (the scope of a scoped principal).
+    pub keep: Option<&'a (dyn Fn(&Job) -> bool + Sync)>,
+}
+
+impl std::fmt::Debug for JobFilter<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JobFilter")
+            .field("group", &self.group)
+            .field("keep", &self.keep.is_some())
+            .finish()
+    }
+}
+
 /// Lists jobs.
 pub(crate) fn list(view: &dyn ReadView, query: &JobQuery) -> Result<JobPage, StoreError> {
+    list_filtered(view, query, &JobFilter::default())
+}
+
+/// Lists jobs with the filters of `filter` too (`GET /jobs` with `group`, and the jobs a
+/// scoped principal may see).
+///
+/// # Errors
+///
+/// A store or decoding error.
+pub fn list_filtered(
+    view: &dyn ReadView,
+    query: &JobQuery,
+    filter: &JobFilter<'_>,
+) -> Result<JobPage, StoreError> {
     let limit = match query.limit {
         0 => DEFAULT_LIMIT,
         limit => limit.min(MAX_LIMIT),
@@ -188,6 +226,11 @@ pub(crate) fn list(view: &dyn ReadView, query: &JobQuery) -> Result<JobPage, Sto
             && query
                 .target
                 .is_none_or(|target| job.spec.targets.contains(&target))
+            && filter
+                .group
+                .as_ref()
+                .is_none_or(|group| job.spec.group.as_ref() == Some(group))
+            && filter.keep.is_none_or(|keep| keep(job))
     };
     let prefix = match &source {
         Source::Target(target) => KeyRange::prefix(encode_key(target)),

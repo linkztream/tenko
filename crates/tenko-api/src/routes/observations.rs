@@ -43,19 +43,25 @@
 //!
 //! With an [`Authorizer`](tenko_core::Authorizer) in the state, a list is empty when the
 //! principal may not read observations at all, and a subject needs [`Action::Read`] on the
-//! kind (403 otherwise).
+//! kind (403 otherwise). A principal whose grants cover only some prefixes (IAM-01) lists the
+//! facts whose addresses lie inside them, and sees a subject only when every addressed fact
+//! and every matching object of intent is inside them (403 `auth.out_of_scope` otherwise).
 
 use std::net::IpAddr;
 
 use axum::{Json, extract::State};
-use tenko_core::{Action, MacAddr, ObjectKind, Revision, Timestamp};
+use tenko_core::{
+    Action, Denied, DenyReason, MacAddr, ObjectKind, ObjectRef, RequestCtx, Revision, Timestamp,
+};
 use tenko_ipam::observe::{
     ObservedFact,
-    view::{FactQuery, SORTS, SubjectQuery, SubjectView, list_facts, subject_view},
+    view::{
+        FactQuery, SORTS, SubjectQuery, SubjectView, list_facts, list_facts_where, subject_view,
+    },
 };
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-use super::common::{Ipam, IpamPath, ReadParams, authorize, may_read_kind, new_of};
+use super::common::{Ipam, IpamHandle, IpamPath, ReadParams, authorize, new_of};
 use crate::{
     dto::Page,
     extract::Ctx,
@@ -129,7 +135,6 @@ fn subject_type(filters: &Filters) -> Result<Option<String>, ApiError> {
     )
 )]
 async fn list_observations(
-    State(app): State<AppState>,
     Ctx(cx): Ctx,
     Ipam(ipam): Ipam,
     filters: Filters,
@@ -162,10 +167,19 @@ async fn list_observations(
         cursor: page.cursor::<String>(scope)?,
     };
     let view = ipam.view(page.at_least.map(Revision)).await?;
-    if !may_read_kind(&app, &cx, ObjectKind::Observation) {
+    let readable = ipam.read_scope(&cx, ObjectKind::Observation);
+    if readable.is_nothing() {
         return Ok(Json(Page::new(Vec::new(), None, view.revision())));
     }
-    let facts = list_facts(view.as_ref(), &query, Timestamp::now())?;
+    // A scoped principal reads the facts whose addresses lie in its scope (IAM-01); a fact
+    // that names no address is read with a global reach only.
+    let facts = if readable.is_all() {
+        list_facts(view.as_ref(), &query, Timestamp::now())?
+    } else {
+        list_facts_where(view.as_ref(), &query, Timestamp::now(), &|fact| {
+            readable.admits_by(|index| index.anchors_of_fact(fact))
+        })?
+    };
     Ok(Json(Page::new(
         facts.items,
         facts
@@ -206,11 +220,59 @@ async fn get_observation(
     authorize(&app, &cx, Action::Read, new_of(ObjectKind::Observation))?;
     let subject: SubjectQuery = subject.parse()?;
     let view = ipam.view(at_least).await?;
-    Ok(Json(subject_view(
-        view.as_ref(),
-        &subject,
-        Timestamp::now(),
-    )?))
+    let found = subject_view(view.as_ref(), &subject, Timestamp::now())?;
+    if !subject_in_scope(&app, &cx, &ipam, &found) {
+        return Err(Denied {
+            action: Action::Read,
+            object: new_of(ObjectKind::Observation),
+            reason: DenyReason::OutOfScope,
+        }
+        .into());
+    }
+    Ok(Json(found))
+}
+
+/// Whether a scoped principal may see the picture of a subject (IAM-01): every fact that
+/// names an address has it inside the scope and at least one does, and every host,
+/// interface and address of intent that matches is readable. Facts that name no address
+/// (an attachment, a vendor) belong to the same subject and come along with it.
+fn subject_in_scope(
+    app: &AppState,
+    cx: &RequestCtx,
+    ipam: &IpamHandle,
+    found: &SubjectView,
+) -> bool {
+    let facts = ipam.read_scope(cx, ObjectKind::Observation);
+    if facts.is_all() {
+        return true;
+    }
+    let Some(index) = facts.index() else {
+        return false;
+    };
+    let mut anchored = false;
+    for fact in &found.facts {
+        let anchors = index.anchors_of_fact(fact);
+        if anchors.prefixes.is_empty() {
+            continue;
+        }
+        if !facts.admits_anchors(&anchors) {
+            return false;
+        }
+        anchored = true;
+    }
+    let readable = |object: ObjectRef| authorize(app, cx, Action::Read, object).is_ok();
+    anchored
+        && found.intent.hosts.iter().all(|id| readable((*id).into()))
+        && found
+            .intent
+            .interfaces
+            .iter()
+            .all(|id| readable((*id).into()))
+        && found
+            .intent
+            .addresses
+            .iter()
+            .all(|id| readable((*id).into()))
 }
 
 /// Route tests of the observations area, driven through the router over a fresh in-memory

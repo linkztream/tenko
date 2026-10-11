@@ -10,6 +10,987 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/api/v1/access/grants": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List scoped grants",
+        "operationId": "list_grants",
+        "parameters": [
+          {
+            "name": "subject",
+            "in": "query",
+            "description": "Only the grants of this user or service account",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The grants the caller may see",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_GrantView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown parameter (`sys.invalid_query`) or a subject that is not a UUID (`sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "token": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Create a scoped grant",
+        "operationId": "create_grant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The grant",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The URL of the grant"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not grant (`auth.forbidden`), the session is not strong enough (`auth.step_up_required`), or a delegation goes beyond the caller's grants (`auth.grant.exceeds_own`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such user or service account (`users.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The subject already holds this role over this scope (`auth.grant.duplicate`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The role is global-only (`auth.grant.invalid_role`) or the scope cannot be granted or does not exist (`auth.grant.invalid_scope`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server has no IP address management to resolve scopes (`auth.scope.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/access/grants/{id}": {
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Revoke a grant and the grants issued under it",
+        "operationId": "revoke_grant",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Grant identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every revoked grant, the requested one first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantsRevoked"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is not a UUID (`sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The session is not strong enough (`auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such grant, or one the caller does not see (`auth.grant.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/access/role-policies": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List the MFA policy of every role",
+        "operationId": "list_role_policies",
+        "responses": {
+          "200": {
+            "description": "One policy per role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_RolePolicyView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/v1/access/role-policies/{role}": {
+      "put": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Set the MFA policy of a role",
+        "operationId": "set_role_policy",
+        "parameters": [
+          {
+            "name": "role",
+            "in": "path",
+            "description": "Role name: `admin`, `operator`, `viewer` or `auditor`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RolePolicyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The policy of the role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RolePolicyView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is malformed (`sys.invalid_request`) or the role is unknown (`auth.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not change settings (`auth.forbidden`) or the session is not strong enough (`auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Let a role follow the profile's MFA requirement again",
+        "operationId": "clear_role_policy",
+        "parameters": [
+          {
+            "name": "role",
+            "in": "path",
+            "description": "Role name: `admin`, `operator`, `viewer` or `auditor`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The policy of the role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RolePolicyView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The role is unknown (`auth.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not change settings (`auth.forbidden`) or the session is not strong enough (`auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/access/service-accounts": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List service accounts",
+        "operationId": "list_service_accounts",
+        "responses": {
+          "200": {
+            "description": "Every service account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_UserInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "token": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Create a service account",
+        "operationId": "create_service_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceAccountCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The service account",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The URL of the account as a user"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is malformed (`sys.invalid_request`) or the name or roles are invalid (`auth.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The name is taken (`users.name_taken`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/access/service-accounts/{id}/tokens": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List the tokens of a service account",
+        "operationId": "list_service_account_tokens",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Service account identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every token of the account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_TokenInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is not a UUID (`sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such service account (`auth.service_account.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "token": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Create a scoped token of a service account, shown once",
+        "operationId": "create_service_account_token",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Service account identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The token: its secret (`tnk_...`, shown once) and its metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is malformed (`sys.invalid_request`) or the name or lifetime is invalid (`auth.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not administer users (`auth.forbidden`), the session is not strong enough (`auth.step_up_required`), or a grant goes beyond the account's (`auth.grant.exceeds_own`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such service account (`auth.service_account.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The lifetime exceeds the maximum of the profile (`auth.token.lifetime_exceeded`), a grant names a global-only role (`auth.grant.invalid_role`) or a scope that cannot be granted (`auth.grant.invalid_scope`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/access/service-accounts/{id}/tokens/{token}": {
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Revoke a token of a service account",
+        "operationId": "revoke_service_account_token",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Service account identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "token",
+            "in": "path",
+            "description": "Token identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The token was revoked"
+          },
+          "400": {
+            "description": "An identifier is not a UUID (`sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such service account (`auth.service_account.not_found`) or token (`auth.token.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/access/subjects": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List the accounts a grant can name",
+        "operationId": "list_grant_subjects",
+        "responses": {
+          "200": {
+            "description": "People and service accounts, ordered by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_GrantSubject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/addresses": {
       "get": {
         "tags": [
@@ -8483,6 +9464,15 @@
             "name": "target",
             "in": "query",
             "description": "Only jobs that change this object, written `kind/uuid`, for example\n`host/0190d1c2-0000-7000-8000-000000000001`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "description": "Only jobs of this parallelism group, for example the jobs of one bulk move.",
             "required": false,
             "schema": {
               "type": "string"
@@ -24035,9 +25025,140 @@
         "type": "string",
         "description": "DNS name"
       },
+      "GrantCreate": {
+        "type": "object",
+        "description": "`POST /access/grants`.",
+        "required": [
+          "subject",
+          "role",
+          "scope"
+        ],
+        "properties": {
+          "delegable": {
+            "type": "boolean",
+            "description": "Whether the holder may delegate it."
+          },
+          "role": {
+            "$ref": "#/components/schemas/RoleName",
+            "description": "The role: `operator` or `viewer`."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ScopeRule",
+            "description": "A VRF, a site or a prefix, with or without its subtree."
+          },
+          "subject": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "The person or service account that receives the grant."
+          }
+        }
+      },
       "GrantId": {
         "type": "string",
         "format": "uuid"
+      },
+      "GrantSubject": {
+        "type": "object",
+        "description": "The holder of a grant or the owner of a token. Named `GrantSubject` in the API document,\napart from the subject summary of the observations.",
+        "required": [
+          "id",
+          "name",
+          "display_name",
+          "kind"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "description": "The display name."
+          },
+          "id": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "The user id."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/UserKind",
+            "description": "A person or a service account."
+          },
+          "name": {
+            "type": "string",
+            "description": "The login name."
+          }
+        }
+      },
+      "GrantView": {
+        "type": "object",
+        "description": "A scoped grant (IAM-01).",
+        "required": [
+          "id",
+          "subject",
+          "role",
+          "scope",
+          "delegable",
+          "granted_at"
+        ],
+        "properties": {
+          "delegable": {
+            "type": "boolean",
+            "description": "Whether the holder may grant a role no higher over a scope inside this one."
+          },
+          "granted_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it was created."
+          },
+          "granted_by": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UserId",
+                "description": "Who created it; absent for the system."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/GrantId",
+            "description": "The grant."
+          },
+          "parent": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/GrantId",
+                "description": "The delegable grant it was issued under."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role": {
+            "$ref": "#/components/schemas/RoleName",
+            "description": "The role: `operator` or `viewer`."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ScopeRule",
+            "description": "Where it applies."
+          },
+          "subject": {
+            "$ref": "#/components/schemas/GrantSubject",
+            "description": "Who holds it."
+          }
+        }
+      },
+      "GrantsRevoked": {
+        "type": "object",
+        "description": "The answer of `DELETE /access/grants/{id}`: the grant and the grants issued under it.",
+        "required": [
+          "revoked"
+        ],
+        "properties": {
+          "revoked": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GrantId"
+            },
+            "description": "Every revoked grant, the requested one first."
+          }
+        }
       },
       "GroupKey": {
         "type": "string",
@@ -26767,6 +27888,17 @@
             "format": "int32",
             "description": "The first step that is neither done nor skipped.",
             "minimum": 0
+          },
+          "current_step_kind": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StepKind",
+                "description": "The handler kind of that step (`ipam.move.controller`, `dns.manual`, ...)."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "current_step_state": {
             "oneOf": [
@@ -31396,6 +32528,144 @@
           }
         }
       },
+      "Page_GrantSubject": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "The holder of a grant or the owner of a token. Named `GrantSubject` in the API document,\napart from the subject summary of the observations.",
+              "required": [
+                "id",
+                "name",
+                "display_name",
+                "kind"
+              ],
+              "properties": {
+                "display_name": {
+                  "type": "string",
+                  "description": "The display name."
+                },
+                "id": {
+                  "$ref": "#/components/schemas/UserId",
+                  "description": "The user id."
+                },
+                "kind": {
+                  "$ref": "#/components/schemas/UserKind",
+                  "description": "A person or a service account."
+                },
+                "name": {
+                  "type": "string",
+                  "description": "The login name."
+                }
+              }
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
+      "Page_GrantView": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "A scoped grant (IAM-01).",
+              "required": [
+                "id",
+                "subject",
+                "role",
+                "scope",
+                "delegable",
+                "granted_at"
+              ],
+              "properties": {
+                "delegable": {
+                  "type": "boolean",
+                  "description": "Whether the holder may grant a role no higher over a scope inside this one."
+                },
+                "granted_at": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When it was created."
+                },
+                "granted_by": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/UserId",
+                      "description": "Who created it; absent for the system."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "id": {
+                  "$ref": "#/components/schemas/GrantId",
+                  "description": "The grant."
+                },
+                "parent": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/GrantId",
+                      "description": "The delegable grant it was issued under."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "role": {
+                  "$ref": "#/components/schemas/RoleName",
+                  "description": "The role: `operator` or `viewer`."
+                },
+                "scope": {
+                  "$ref": "#/components/schemas/ScopeRule",
+                  "description": "Where it applies."
+                },
+                "subject": {
+                  "$ref": "#/components/schemas/GrantSubject",
+                  "description": "Who holds it."
+                }
+              }
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
       "Page_HistoryEntry": {
         "type": "object",
         "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
@@ -31868,6 +33138,17 @@
                   "format": "int32",
                   "description": "The first step that is neither done nor skipped.",
                   "minimum": 0
+                },
+                "current_step_kind": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/StepKind",
+                      "description": "The handler kind of that step (`ipam.move.controller`, `dns.manual`, ...)."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "current_step_state": {
                   "oneOf": [
@@ -32658,6 +33939,65 @@
                 "name": {
                   "$ref": "#/components/schemas/RoleName",
                   "description": "The role."
+                }
+              }
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
+      "Page_RolePolicyView": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "The MFA policy of one role (IAM-06).",
+              "required": [
+                "role",
+                "mfa",
+                "profile_default"
+              ],
+              "properties": {
+                "mfa": {
+                  "$ref": "#/components/schemas/RoleMfa",
+                  "description": "The requirement in force: the stricter of the stored policy and the profile's."
+                },
+                "profile_default": {
+                  "$ref": "#/components/schemas/RoleMfa",
+                  "description": "The requirement of the profile (TGL-02, TGL-03), the floor and the default."
+                },
+                "role": {
+                  "$ref": "#/components/schemas/RoleName",
+                  "description": "The role."
+                },
+                "stored": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/RoleMfa",
+                      "description": "The stored policy, absent when the role follows the profile."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               }
             },
@@ -35893,6 +37233,15 @@
           }
         }
       },
+      "RoleMfa": {
+        "type": "string",
+        "description": "The MFA requirement of a role (IAM-06), from the weakest to the strongest.",
+        "enum": [
+          "optional",
+          "totp_or_stronger",
+          "passkey"
+        ]
+      },
       "RoleName": {
         "type": "string",
         "description": "A global role.",
@@ -35902,6 +37251,53 @@
           "viewer",
           "auditor"
         ]
+      },
+      "RolePolicyUpdate": {
+        "type": "object",
+        "description": "`PUT /access/role-policies/{role}`.",
+        "required": [
+          "mfa"
+        ],
+        "properties": {
+          "mfa": {
+            "$ref": "#/components/schemas/RoleMfa",
+            "description": "The requirement; one weaker than the profile's has no effect beyond it."
+          }
+        }
+      },
+      "RolePolicyView": {
+        "type": "object",
+        "description": "The MFA policy of one role (IAM-06).",
+        "required": [
+          "role",
+          "mfa",
+          "profile_default"
+        ],
+        "properties": {
+          "mfa": {
+            "$ref": "#/components/schemas/RoleMfa",
+            "description": "The requirement in force: the stricter of the stored policy and the profile's."
+          },
+          "profile_default": {
+            "$ref": "#/components/schemas/RoleMfa",
+            "description": "The requirement of the profile (TGL-02, TGL-03), the floor and the default."
+          },
+          "role": {
+            "$ref": "#/components/schemas/RoleName",
+            "description": "The role."
+          },
+          "stored": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RoleMfa",
+                "description": "The stored policy, absent when the role follows the profile."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
       },
       "RoleUsage": {
         "type": "object",
@@ -36504,6 +37900,33 @@
           "vault_has_operator_secrets": {
             "type": "boolean",
             "description": "Whether the vault holds operator secrets (the PIN coupling rule applies)."
+          }
+        }
+      },
+      "ServiceAccountCreate": {
+        "type": "object",
+        "description": "`POST /access/service-accounts`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The display name; defaults to the name."
+          },
+          "name": {
+            "type": "string",
+            "description": "The account name: 1 to 64 characters, no spaces or control characters; shares the\nname space of users."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoleName"
+            },
+            "description": "Global roles; empty for an account that acts through scoped grants only."
           }
         }
       },
@@ -39506,6 +40929,50 @@
           "cancel_requested"
         ]
       },
+      "TreeContextNode": {
+        "type": "object",
+        "description": "A prefix shown only as context of the tree: an ancestor, outside the principal's scope,\nof a prefix inside it. It carries no name, status, utilization or other detail.",
+        "required": [
+          "id",
+          "depth",
+          "cidr",
+          "children"
+        ],
+        "properties": {
+          "children": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Direct child prefixes the principal sees, as nodes or as context.",
+            "minimum": 0
+          },
+          "cidr": {
+            "type": "string",
+            "description": "The network.",
+            "example": "192.0.2.0/24"
+          },
+          "depth": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Depth below the first level of the answer (0 for its top level).",
+            "minimum": 0
+          },
+          "id": {
+            "$ref": "#/components/schemas/PrefixId",
+            "description": "The prefix."
+          },
+          "parent": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PrefixId",
+                "description": "The most specific prefix containing it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "TreeNode": {
         "type": "object",
         "description": "One prefix of the flattened tree (pre-order).",
@@ -39618,12 +41085,19 @@
           "nodes"
         ],
         "properties": {
+          "context": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TreeContextNode"
+            },
+            "description": "For a scoped principal: the prefixes it may not read that hold one it may read, in\npre-order, with the network and the tree position only, so that the tree keeps its\nshape (IAM-01, `docs/access.md`). Empty for every other principal."
+          },
           "nodes": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TreeNode"
             },
-            "description": "The prefixes in pre-order, each with depth, parent, child count, utilization and\nalarm level."
+            "description": "The prefixes in pre-order, each with depth, parent, child count, utilization and\nalarm level. For a principal whose grants cover only some prefixes (IAM-01), the\nprefixes it may read, with `children` counting the child prefixes it sees as a node\nor as context."
           },
           "revision": {
             "type": "integer",

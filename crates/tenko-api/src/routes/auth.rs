@@ -1188,6 +1188,8 @@ pub(crate) mod testkit {
         pub(crate) headers: HeaderMap,
         /// The JSON body; `null` when there is none.
         pub(crate) body: Value,
+        /// The body as text (lossy), for answers that are not JSON.
+        pub(crate) text: String,
     }
 
     impl Reply {
@@ -1199,6 +1201,7 @@ pub(crate) mod testkit {
                 status: parts.status,
                 headers: parts.headers,
                 body: serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+                text: String::from_utf8_lossy(&bytes).into_owned(),
             }
         }
 
@@ -1258,11 +1261,17 @@ pub(crate) mod testkit {
 
     impl Harness {
         fn over(env: TestEnv) -> Self {
+            Self::wired(env, |state| crate::api(state).0)
+        }
+
+        /// A harness over `env` whose router `build` makes from the state of the service
+        /// (authentication and authorization set); the service is added as an extension.
+        pub(crate) fn wired(env: TestEnv, build: impl FnOnce(AppState) -> Router) -> Self {
             let authenticator: Arc<dyn Authenticator> = env.service.clone();
             let mut state = AppState::new(env.store.clone());
             state.auth = Some(authenticator);
             state.authorizer = Some(env.service.authorizer());
-            let router = crate::api(state).0.layer(Extension(env.service.clone()));
+            let router = build(state).layer(Extension(env.service.clone()));
             Self { env, router }
         }
 
@@ -1286,6 +1295,11 @@ pub(crate) mod testkit {
                 .expect("setup succeeds");
             let secret = session.secret.expose().to_owned();
             (harness, secret)
+        }
+
+        /// The router, for answers that stream.
+        pub(crate) fn router(&self) -> Router {
+            self.router.clone()
         }
 
         /// Sends a request.
@@ -1332,7 +1346,9 @@ pub(crate) mod testkit {
             reply.session_secret()
         }
 
-        /// Creates a user as `admin` and returns the answer (`UserInfo`).
+        /// Creates a user as `admin` and returns the answer (`UserInfo`). The user starts
+        /// with the password it was given, as if it had changed the one the administrator
+        /// set (every route but the password change refuses an account that must change it).
         pub(crate) async fn create_user(
             &self,
             admin: &str,
@@ -1349,7 +1365,19 @@ pub(crate) mod testkit {
                 )
                 .await;
             reply.assert_status(201);
-            reply.body
+            let id: tenko_core::UserId =
+                serde_json::from_value(reply.body["id"].clone()).expect("an id");
+            self.env.accept_password(id).await;
+            let current = self
+                .call(
+                    "GET",
+                    &format!("/users/{id}"),
+                    Credential::Cookie(admin),
+                    None,
+                )
+                .await;
+            current.assert_status(200);
+            current.body
         }
 
         /// Registers a software passkey for the user of the session `cookie` and logs `name`

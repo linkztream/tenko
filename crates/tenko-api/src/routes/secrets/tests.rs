@@ -186,7 +186,11 @@ impl Harness {
             )
             .await;
         reply.assert_status(201);
-        reply.body["id"].as_str().expect("an id").to_owned()
+        let id = reply.body["id"].as_str().expect("an id").to_owned();
+        self.env
+            .accept_password(id.parse().expect("a user id"))
+            .await;
+        id
     }
 
     /// Registers a software passkey for the user of `cookie` and logs `name` in with it.

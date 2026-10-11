@@ -2,6 +2,146 @@
 // Regenerate with `npm run api:types`; do not edit.
 
 export interface paths {
+    "/api/v1/access/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List scoped grants */
+        get: operations["list_grants"];
+        put?: never;
+        /** Create a scoped grant */
+        post: operations["create_grant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/access/grants/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke a grant and the grants issued under it */
+        delete: operations["revoke_grant"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/access/role-policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the MFA policy of every role */
+        get: operations["list_role_policies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/access/role-policies/{role}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set the MFA policy of a role */
+        put: operations["set_role_policy"];
+        post?: never;
+        /** Let a role follow the profile's MFA requirement again */
+        delete: operations["clear_role_policy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/access/service-accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List service accounts */
+        get: operations["list_service_accounts"];
+        put?: never;
+        /** Create a service account */
+        post: operations["create_service_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/access/service-accounts/{id}/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the tokens of a service account */
+        get: operations["list_service_account_tokens"];
+        put?: never;
+        /** Create a scoped token of a service account, shown once */
+        post: operations["create_service_account_token"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/access/service-accounts/{id}/tokens/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke a token of a service account */
+        delete: operations["revoke_service_account_token"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/access/subjects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the accounts a grant can name */
+        get: operations["list_grant_subjects"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/addresses": {
         parameters: {
             query?: never;
@@ -4366,8 +4506,55 @@ export interface components {
         };
         /** @description DNS name */
         Fqdn: string;
+        /** @description `POST /access/grants`. */
+        GrantCreate: {
+            /** @description Whether the holder may delegate it. */
+            delegable?: boolean;
+            /** @description The role: `operator` or `viewer`. */
+            role: components["schemas"]["RoleName"];
+            /** @description A VRF, a site or a prefix, with or without its subtree. */
+            scope: components["schemas"]["ScopeRule"];
+            /** @description The person or service account that receives the grant. */
+            subject: components["schemas"]["UserId"];
+        };
         /** Format: uuid */
         GrantId: string;
+        /**
+         * @description The holder of a grant or the owner of a token. Named `GrantSubject` in the API document,
+         *     apart from the subject summary of the observations.
+         */
+        GrantSubject: {
+            /** @description The display name. */
+            display_name: string;
+            /** @description The user id. */
+            id: components["schemas"]["UserId"];
+            /** @description A person or a service account. */
+            kind: components["schemas"]["UserKind"];
+            /** @description The login name. */
+            name: string;
+        };
+        /** @description A scoped grant (IAM-01). */
+        GrantView: {
+            /** @description Whether the holder may grant a role no higher over a scope inside this one. */
+            delegable: boolean;
+            /** @description When it was created. */
+            granted_at: components["schemas"]["Timestamp"];
+            granted_by?: components["schemas"]["UserId"] | null;
+            /** @description The grant. */
+            id: components["schemas"]["GrantId"];
+            parent?: components["schemas"]["GrantId"] | null;
+            /** @description The role: `operator` or `viewer`. */
+            role: components["schemas"]["RoleName"];
+            /** @description Where it applies. */
+            scope: components["schemas"]["ScopeRule"];
+            /** @description Who holds it. */
+            subject: components["schemas"]["GrantSubject"];
+        };
+        /** @description The answer of `DELETE /access/grants/{id}`: the grant and the grants issued under it. */
+        GrantsRevoked: {
+            /** @description Every revoked grant, the requested one first. */
+            revoked: components["schemas"]["GrantId"][];
+        };
         /**
          * @description Groups jobs that share a parallelism limit, for example every write through one
          *     network controller (CONN-09): 1 to 128 visible ASCII characters.
@@ -5238,6 +5425,7 @@ export interface components {
              * @description The first step that is neither done nor skipped.
              */
             current_step?: number | null;
+            current_step_kind?: components["schemas"]["StepKind"] | null;
             current_step_state?: components["schemas"]["StepStateKind"] | null;
             error?: components["schemas"]["CodedError"] | null;
             finished?: components["schemas"]["Timestamp"] | null;
@@ -6965,6 +7153,62 @@ export interface components {
          *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
          *     bound to the query that produced it.
          */
+        Page_GrantSubject: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description The display name. */
+                display_name: string;
+                /** @description The user id. */
+                id: components["schemas"]["UserId"];
+                /** @description A person or a service account. */
+                kind: components["schemas"]["UserKind"];
+                /** @description The login name. */
+                name: string;
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_GrantView: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description Whether the holder may grant a role no higher over a scope inside this one. */
+                delegable: boolean;
+                /** @description When it was created. */
+                granted_at: components["schemas"]["Timestamp"];
+                granted_by?: components["schemas"]["UserId"] | null;
+                /** @description The grant. */
+                id: components["schemas"]["GrantId"];
+                parent?: components["schemas"]["GrantId"] | null;
+                /** @description The role: `operator` or `viewer`. */
+                role: components["schemas"]["RoleName"];
+                /** @description Where it applies. */
+                scope: components["schemas"]["ScopeRule"];
+                /** @description Who holds it. */
+                subject: components["schemas"]["GrantSubject"];
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
         Page_HistoryEntry: {
             /** @description The items of this page, at most `limit` of them. */
             items: {
@@ -7144,6 +7388,7 @@ export interface components {
                  * @description The first step that is neither done nor skipped.
                  */
                 current_step?: number | null;
+                current_step_kind?: components["schemas"]["StepKind"] | null;
                 current_step_state?: components["schemas"]["StepStateKind"] | null;
                 error?: components["schemas"]["CodedError"] | null;
                 finished?: components["schemas"]["Timestamp"] | null;
@@ -7461,6 +7706,30 @@ export interface components {
                 description: string;
                 /** @description The role. */
                 name: components["schemas"]["RoleName"];
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_RolePolicyView: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description The requirement in force: the stricter of the stored policy and the profile's. */
+                mfa: components["schemas"]["RoleMfa"];
+                /** @description The requirement of the profile (TGL-02, TGL-03), the floor and the default. */
+                profile_default: components["schemas"]["RoleMfa"];
+                /** @description The role. */
+                role: components["schemas"]["RoleName"];
+                stored?: components["schemas"]["RoleMfa"] | null;
             }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
@@ -8648,10 +8917,30 @@ export interface components {
             name: components["schemas"]["RoleName"];
         };
         /**
+         * @description The MFA requirement of a role (IAM-06), from the weakest to the strongest.
+         * @enum {string}
+         */
+        RoleMfa: "optional" | "totp_or_stronger" | "passkey";
+        /**
          * @description A global role.
          * @enum {string}
          */
         RoleName: "admin" | "operator" | "viewer" | "auditor";
+        /** @description `PUT /access/role-policies/{role}`. */
+        RolePolicyUpdate: {
+            /** @description The requirement; one weaker than the profile's has no effect beyond it. */
+            mfa: components["schemas"]["RoleMfa"];
+        };
+        /** @description The MFA policy of one role (IAM-06). */
+        RolePolicyView: {
+            /** @description The requirement in force: the stricter of the stored policy and the profile's. */
+            mfa: components["schemas"]["RoleMfa"];
+            /** @description The requirement of the profile (TGL-02, TGL-03), the floor and the default. */
+            profile_default: components["schemas"]["RoleMfa"];
+            /** @description The role. */
+            role: components["schemas"]["RoleName"];
+            stored?: components["schemas"]["RoleMfa"] | null;
+        };
         /** @description The ranges of one role inside a network. */
         RoleUsage: {
             /** @description The role. */
@@ -8874,6 +9163,18 @@ export interface components {
             toggles: components["schemas"]["ToggleState"][];
             /** @description Whether the vault holds operator secrets (the PIN coupling rule applies). */
             vault_has_operator_secrets: boolean;
+        };
+        /** @description `POST /access/service-accounts`. */
+        ServiceAccountCreate: {
+            /** @description The display name; defaults to the name. */
+            display_name?: string | null;
+            /**
+             * @description The account name: 1 to 64 characters, no spaces or control characters; shares the
+             *     name space of users.
+             */
+            name: string;
+            /** @description Global roles; empty for an account that acts through scoped grants only. */
+            roles?: components["schemas"]["RoleName"][];
         };
         /** @description Flags of a session that the UI acts on. */
         SessionFlags: {
@@ -9934,6 +10235,30 @@ export interface components {
          * @enum {string}
          */
         TransitionEvent: "submitted" | "job" | "step" | "claimed" | "cancel_requested";
+        /**
+         * @description A prefix shown only as context of the tree: an ancestor, outside the principal's scope,
+         *     of a prefix inside it. It carries no name, status, utilization or other detail.
+         */
+        TreeContextNode: {
+            /**
+             * Format: int32
+             * @description Direct child prefixes the principal sees, as nodes or as context.
+             */
+            children: number;
+            /**
+             * @description The network.
+             * @example 192.0.2.0/24
+             */
+            cidr: string;
+            /**
+             * Format: int32
+             * @description Depth below the first level of the answer (0 for its top level).
+             */
+            depth: number;
+            /** @description The prefix. */
+            id: components["schemas"]["PrefixId"];
+            parent?: components["schemas"]["PrefixId"] | null;
+        };
         /** @description One prefix of the flattened tree (pre-order). */
         TreeNode: {
             alarm?: components["schemas"]["UtilizationAlarm"] | null;
@@ -9971,8 +10296,16 @@ export interface components {
         /** @description The prefix tree of one VRF (`GET /prefixes/tree`). */
         TreeResponse: {
             /**
+             * @description For a scoped principal: the prefixes it may not read that hold one it may read, in
+             *     pre-order, with the network and the tree position only, so that the tree keeps its
+             *     shape (IAM-01, `docs/access.md`). Empty for every other principal.
+             */
+            context?: components["schemas"]["TreeContextNode"][];
+            /**
              * @description The prefixes in pre-order, each with depth, parent, child count, utilization and
-             *     alarm level.
+             *     alarm level. For a principal whose grants cover only some prefixes (IAM-01), the
+             *     prefixes it may read, with `children` counting the child prefixes it sees as a node
+             *     or as context.
              */
             nodes: components["schemas"]["TreeNode"][];
             /**
@@ -10942,6 +11275,764 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_grants: {
+        parameters: {
+            query?: {
+                /** @description Only the grants of this user or service account */
+                subject?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The grants the caller may see */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_GrantView"];
+                };
+            };
+            /** @description Unknown parameter (`sys.invalid_query`) or a subject that is not a UUID (`sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_grant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrantCreate"];
+            };
+        };
+        responses: {
+            /** @description The grant */
+            201: {
+                headers: {
+                    /** @description The URL of the grant */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantView"];
+                };
+            };
+            /** @description The body is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The caller may not grant (`auth.forbidden`), the session is not strong enough (`auth.step_up_required`), or a delegation goes beyond the caller's grants (`auth.grant.exceeds_own`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such user or service account (`users.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The subject already holds this role over this scope (`auth.grant.duplicate`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The role is global-only (`auth.grant.invalid_role`) or the scope cannot be granted or does not exist (`auth.grant.invalid_scope`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The server has no IP address management to resolve scopes (`auth.scope.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    revoke_grant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Grant identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every revoked grant, the requested one first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantsRevoked"];
+                };
+            };
+            /** @description The identifier is not a UUID (`sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The session is not strong enough (`auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such grant, or one the caller does not see (`auth.grant.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_role_policies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One policy per role */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_RolePolicyView"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    set_role_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Role name: `admin`, `operator`, `viewer` or `auditor` */
+                role: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RolePolicyUpdate"];
+            };
+        };
+        responses: {
+            /** @description The policy of the role */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RolePolicyView"];
+                };
+            };
+            /** @description The body is malformed (`sys.invalid_request`) or the role is unknown (`auth.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The caller may not change settings (`auth.forbidden`) or the session is not strong enough (`auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    clear_role_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Role name: `admin`, `operator`, `viewer` or `auditor` */
+                role: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The policy of the role */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RolePolicyView"];
+                };
+            };
+            /** @description The role is unknown (`auth.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The caller may not change settings (`auth.forbidden`) or the session is not strong enough (`auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_service_accounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every service account */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_UserInfo"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_service_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServiceAccountCreate"];
+            };
+        };
+        responses: {
+            /** @description The service account */
+            201: {
+                headers: {
+                    /** @description The URL of the account as a user */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserInfo"];
+                };
+            };
+            /** @description The body is malformed (`sys.invalid_request`) or the name or roles are invalid (`auth.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The name is taken (`users.name_taken`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_service_account_tokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Service account identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every token of the account */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_TokenInfo"];
+                };
+            };
+            /** @description The identifier is not a UUID (`sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such service account (`auth.service_account.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_service_account_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Service account identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TokenCreate"];
+            };
+        };
+        responses: {
+            /** @description The token: its secret (`tnk_...`, shown once) and its metadata */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedToken"];
+                };
+            };
+            /** @description The body is malformed (`sys.invalid_request`) or the name or lifetime is invalid (`auth.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The caller may not administer users (`auth.forbidden`), the session is not strong enough (`auth.step_up_required`), or a grant goes beyond the account's (`auth.grant.exceeds_own`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such service account (`auth.service_account.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The lifetime exceeds the maximum of the profile (`auth.token.lifetime_exceeded`), a grant names a global-only role (`auth.grant.invalid_role`) or a scope that cannot be granted (`auth.grant.invalid_scope`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    revoke_service_account_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Service account identifier */
+                id: string;
+                /** @description Token identifier */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The token was revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An identifier is not a UUID (`sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such service account (`auth.service_account.not_found`) or token (`auth.token.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_grant_subjects: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description People and service accounts, ordered by name */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_GrantSubject"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     list_addresses: {
         parameters: {
             query?: {
@@ -17228,6 +18319,8 @@ export interface operations {
                  *     `host/0190d1c2-0000-7000-8000-000000000001`.
                  */
                 target?: string;
+                /** @description Only jobs of this parallelism group, for example the jobs of one bulk move. */
+                group?: string;
                 /** @description Page size, 1 to 1,000 (default 100). */
                 limit?: number;
                 /** @description Opaque cursor from the previous page's `next_cursor`. */

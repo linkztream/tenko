@@ -28,28 +28,39 @@
 //!   need [`Action::Read`], creates [`Action::Create`] on the kind, changes
 //!   [`Action::Update`] and deletes [`Action::Delete`] on the object; a list is empty when
 //!   the principal may read nothing of the kind.
+//! - **Scopes (IAM-01, `docs/access.md`).** A principal whose grants cover only some VRFs,
+//!   sites or prefixes reads the objects inside them: lists, searches and the tree filter
+//!   before paging ([`ReadScope`], anchors from the `Arc<tenko_ipam::scope::ScopeIndex>`
+//!   extension), single reads answer 403 `auth.out_of_scope` outside. Its writes are
+//!   planned first and every planned object is checked where it is and where it goes
+//!   ([`IpamHandle::execute`]); creates are checked against [`new_of`], an object of the
+//!   kind somewhere in reach. Tenants, VRFs, sites and custom field definitions are read
+//!   as context by every scoped principal.
 
-use std::{collections::BTreeSet, sync::Arc};
+use std::{collections::BTreeSet, ops::Deref, sync::Arc};
 
 use axum::{
     Json,
-    extract::{FromRequest, FromRequestParts, Path, Request, State},
+    extract::{FromRef, FromRequest, FromRequestParts, Path, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use tenko_auth::authz::{anywhere, is_context_kind};
 use tenko_core::{
-    Action, CodedError, InterfaceId, JobId, ObjectKind, ObjectRef, PrefixId, RequestCtx, Revision,
-    ScopeFilter, SiteId, TenantId, VrfId,
+    Action, AnchorMode, Anchors, Authorizer, CodedError, Denied, DenyReason, InterfaceId, JobId,
+    ObjectKind, ObjectRef, PrefixId, RequestCtx, Revision, ScopeFilter, SiteId, TenantId, VrfId,
     ipam::{
         Address, AssignmentMode, CustomFieldDef, FieldKey, Host, Interface, Prefix, PrefixRole,
         Range, RangeRole, Site, Status, Tag, Tenant, Vlan, Vrf,
     },
 };
 use tenko_ipam::{
-    Entity, HistoryEntry, IpamCommand, IpamService, PlanOptions, PlanView, PlanWarning, codes,
+    Applied, Entity, HistoryEntry, IpamCommand, IpamPlan, IpamService, PlanOptions, PlanView,
+    PlanWarning, codes,
     command::{CustomFieldInput, CustomFieldPatch, UpdateCustomField},
     query::{self, AddressRow, Deleted, HostExpander, ListQuery, Listable, SearchHit, TagCount},
+    scope::{ScopeIndex, ScopedWriteError},
 };
 use tenko_store::ReadView;
 use utoipa::{IntoParams, ToSchema};
@@ -105,22 +116,35 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
 // ===== shared helpers ==================================================================
 
 /// The IPAM service of the request, from the `Arc<IpamService>` extension; 503
-/// `ipam.unavailable` when the server did not add one.
-pub(crate) struct Ipam(pub(crate) Arc<IpamService>);
+/// `ipam.unavailable` when the server did not add one. It carries what scoped
+/// authorization needs: the anchors index (the `Arc<ScopeIndex>` extension, absent in
+/// development and most tests) and the authorizer of the state.
+pub(crate) struct Ipam(pub(crate) IpamHandle);
 
-impl<S: Send + Sync> FromRequestParts<S> for Ipam {
+impl<S> FromRequestParts<S> for Ipam
+where
+    S: Send + Sync,
+    AppState: FromRef<S>,
+{
     type Rejection = ApiError;
 
     fn from_request_parts(
         parts: &mut Parts,
-        _state: &S,
+        state: &S,
     ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+        let app = AppState::from_ref(state);
         std::future::ready(
             parts
                 .extensions
                 .get::<Arc<IpamService>>()
                 .cloned()
-                .map(Ipam)
+                .map(|service| {
+                    Ipam(IpamHandle {
+                        service,
+                        scope: parts.extensions.get::<Arc<ScopeIndex>>().cloned(),
+                        authorizer: app.authorizer.clone(),
+                    })
+                })
                 .ok_or_else(|| {
                     ApiError::from_coded_error(
                         CodedError::new(
@@ -133,6 +157,254 @@ impl<S: Send + Sync> FromRequestParts<S> for Ipam {
                 }),
         )
     }
+}
+
+/// The IPAM service with the anchors index and the authorizer of the request.
+#[derive(Clone)]
+pub(crate) struct IpamHandle {
+    service: Arc<IpamService>,
+    scope: Option<Arc<ScopeIndex>>,
+    authorizer: Option<Arc<dyn Authorizer>>,
+}
+
+impl Deref for IpamHandle {
+    type Target = IpamService;
+
+    fn deref(&self) -> &IpamService {
+        &self.service
+    }
+}
+
+impl IpamHandle {
+    /// What the principal may read of `kind` ([`ReadScope`]).
+    pub(crate) fn read_scope(&self, cx: &RequestCtx, kind: ObjectKind) -> ReadScope {
+        read_scope(self.authorizer.as_deref(), self.scope.clone(), cx, kind)
+    }
+
+    /// Plans `commands` for a dry run (API-09); a scoped principal's plan is checked.
+    pub(crate) async fn preview(
+        &self,
+        cx: &RequestCtx,
+        commands: &[IpamCommand],
+        options: &PlanOptions,
+    ) -> Result<IpamPlan, ApiError> {
+        match (&self.authorizer, &self.scope) {
+            (Some(authorizer), Some(index)) => {
+                precheck(authorizer.as_ref(), index, cx, commands)?;
+                index
+                    .preview_checked(&self.service, authorizer.as_ref(), commands, cx, options)
+                    .await
+                    .map_err(scoped_error)
+            }
+            (Some(authorizer), None)
+                if !ScopeIndex::unrestricted(authorizer.as_ref(), &cx.principal) =>
+            {
+                Err(out_of_scope(commands))
+            }
+            _ => Ok(self.service.preview(commands, cx, options, None).await?),
+        }
+    }
+
+    /// Checks that a scoped principal's plan of `commands` stays inside its scope, without
+    /// applying it; passes at once for a principal without a scoped reach. For writes that
+    /// another component applies (an approved proposal).
+    pub(crate) async fn check(
+        &self,
+        cx: &RequestCtx,
+        commands: &[IpamCommand],
+        options: &PlanOptions,
+    ) -> Result<(), ApiError> {
+        match &self.authorizer {
+            Some(authorizer) if !ScopeIndex::unrestricted(authorizer.as_ref(), &cx.principal) => {
+                self.preview(cx, commands, options).await.map(drop)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Plans and applies `commands`; a scoped principal's plan is checked before it is
+    /// applied (IAM-01), every other principal's goes through [`IpamService::execute`].
+    pub(crate) async fn execute(
+        &self,
+        cx: &RequestCtx,
+        commands: &[IpamCommand],
+        options: &PlanOptions,
+    ) -> Result<Applied, ApiError> {
+        match (&self.authorizer, &self.scope) {
+            (Some(authorizer), Some(index)) => {
+                precheck(authorizer.as_ref(), index, cx, commands)?;
+                index
+                    .execute_checked(&self.service, authorizer.as_ref(), commands, cx, options)
+                    .await
+                    .map_err(scoped_error)
+            }
+            (Some(authorizer), None)
+                if !ScopeIndex::unrestricted(authorizer.as_ref(), &cx.principal) =>
+            {
+                Err(out_of_scope(commands))
+            }
+            _ => Ok(self.service.execute(commands, cx, options).await?),
+        }
+    }
+}
+
+/// Where the addresses and networks a write names land, checked before planning: a
+/// principal whose scope does not cover the place gets `auth.out_of_scope` at once, so a
+/// planning error (an overlap, a taken address) never describes an object outside its
+/// scope (R24). The plan check after planning stays the authority; this check only
+/// refuses early.
+fn precheck(
+    authorizer: &dyn Authorizer,
+    index: &ScopeIndex,
+    cx: &RequestCtx,
+    commands: &[IpamCommand],
+) -> Result<(), ApiError> {
+    for command in commands {
+        let (action, kind, vrf, ip) = match command {
+            IpamCommand::CreatePrefix(input) => (
+                Action::Create,
+                ObjectKind::Prefix,
+                input.vrf,
+                input.cidr.network(),
+            ),
+            IpamCommand::CreateAddress(input) => {
+                (Action::Create, ObjectKind::Address, input.vrf, input.ip)
+            }
+            IpamCommand::UpdatePrefix(update) => match update.patch.cidr {
+                Some(cidr) => (Action::Update, ObjectKind::Prefix, None, cidr.network()),
+                None => continue,
+            },
+            IpamCommand::UpdateAddress(update) => match update.patch.ip {
+                Some(ip) => (Action::Update, ObjectKind::Address, None, ip),
+                None => continue,
+            },
+            _ => continue,
+        };
+        let scope = authorizer.scope(&cx.principal, action, kind);
+        if scope.is_all() {
+            continue;
+        }
+        let object = new_of(kind);
+        if !scope.admits(&index.anchors_of_ip(object, vrf, ip), AnchorMode::All) {
+            return Err(Denied {
+                action,
+                object,
+                reason: DenyReason::OutOfScope,
+            }
+            .into());
+        }
+    }
+    Ok(())
+}
+
+/// The problem of a refused scoped write.
+fn scoped_error(error: ScopedWriteError) -> ApiError {
+    match error {
+        ScopedWriteError::Denied(denied) => denied.into(),
+        ScopedWriteError::Ipam(error) => error.into(),
+    }
+}
+
+/// A scoped write on a server without the anchors index: refused.
+fn out_of_scope(commands: &[IpamCommand]) -> ApiError {
+    let (action, object) = commands.first().map_or(
+        (Action::Update, anywhere(ObjectKind::Prefix)),
+        command_access,
+    );
+    Denied {
+        action,
+        object,
+        reason: DenyReason::OutOfScope,
+    }
+    .into()
+}
+
+/// What a principal may read of one kind of object (IAM-01): everything, nothing, or the
+/// objects whose anchors a rule of its grants covers.
+#[derive(Clone)]
+pub(crate) struct ReadScope {
+    filter: ScopeFilter,
+    index: Option<Arc<ScopeIndex>>,
+}
+
+impl ReadScope {
+    /// Everything.
+    pub(crate) fn everything() -> Self {
+        Self {
+            filter: ScopeFilter::All,
+            index: None,
+        }
+    }
+
+    /// Whether every object passes.
+    pub(crate) fn is_all(&self) -> bool {
+        self.filter.is_all()
+    }
+
+    /// Whether no object passes.
+    pub(crate) fn is_nothing(&self) -> bool {
+        matches!(self.filter, ScopeFilter::Nothing)
+    }
+
+    /// Whether an object with these anchors may be read.
+    pub(crate) fn admits_anchors(&self, anchors: &Anchors) -> bool {
+        self.filter.admits(anchors, AnchorMode::Any)
+    }
+
+    /// Whether the object may be read, its anchors taken from the index.
+    pub(crate) fn admits(&self, object: &ObjectRef) -> bool {
+        match &self.filter {
+            ScopeFilter::All => true,
+            ScopeFilter::Nothing => false,
+            ScopeFilter::Only(_) => self
+                .index
+                .as_ref()
+                .is_some_and(|index| self.admits_anchors(&index.anchors(object))),
+        }
+    }
+
+    /// Whether an object that stands for its targets (a job) may be read.
+    pub(crate) fn admits_targets(&self, object: ObjectRef, targets: &[ObjectRef]) -> bool {
+        self.admits_by(|index| index.anchors_of_targets(object, targets))
+    }
+
+    /// Whether an object may be read whose anchors `anchors` finds in the index (a fact, a
+    /// proposal, an address seen by a device).
+    pub(crate) fn admits_by(&self, anchors: impl FnOnce(&ScopeIndex) -> Anchors) -> bool {
+        match &self.filter {
+            ScopeFilter::All => true,
+            ScopeFilter::Nothing => false,
+            ScopeFilter::Only(_) => self
+                .index
+                .as_ref()
+                .is_some_and(|index| self.admits_anchors(&anchors(index))),
+        }
+    }
+
+    /// The anchors index, when the server wired one.
+    pub(crate) fn index(&self) -> Option<&ScopeIndex> {
+        self.index.as_deref()
+    }
+}
+
+/// The read scope of `kind`: everything without an authorizer or for context kinds, what
+/// [`Authorizer::scope`] answers otherwise, and nothing for a scoped principal when the
+/// server has no anchors index.
+pub(crate) fn read_scope(
+    authorizer: Option<&dyn Authorizer>,
+    index: Option<Arc<ScopeIndex>>,
+    cx: &RequestCtx,
+    kind: ObjectKind,
+) -> ReadScope {
+    let Some(authorizer) = authorizer else {
+        return ReadScope::everything();
+    };
+    let filter = match authorizer.scope(&cx.principal, Action::Read, kind) {
+        ScopeFilter::Only(_) if is_context_kind(kind) => ScopeFilter::All,
+        ScopeFilter::Only(_) if index.is_none() => ScopeFilter::Nothing,
+        filter => filter,
+    };
+    ReadScope { filter, index }
 }
 
 /// A JSON body refused with problem details instead of plain text: 400
@@ -356,20 +628,39 @@ pub(crate) fn list_args<T: Listable>(
     Ok(ListArgs { query, page, scope })
 }
 
-/// Lists one collection with the shared conventions: authorization scope, read view and
-/// page.
+/// Lists one collection with the shared conventions: authorization scope (filtered before
+/// paging for a scoped principal), read view and page.
 pub(crate) async fn list_collection<T: Listable>(
-    app: &AppState,
+    _app: &AppState,
     cx: &RequestCtx,
-    ipam: &IpamService,
+    ipam: &IpamHandle,
     args: ListArgs,
 ) -> Result<Json<Page<T>>, ApiError> {
     let view = ipam.view(args.page.at_least.map(Revision)).await?;
-    if !may_read_kind(app, cx, T::KIND) {
-        return Ok(Json(Page::new(Vec::new(), None, view.revision())));
-    }
-    let page = query::list::<T>(view.as_ref(), &args.query)?;
+    let scope = ipam.read_scope(cx, T::KIND);
+    let page = list_scoped::<T>(view.as_ref(), &args.query, &scope)?;
     Ok(Json(wire_page(page, args.scope)))
+}
+
+/// One page of a collection as `scope` lets the principal read it: everything, nothing,
+/// or the objects inside the scope, filtered before paging so that a page is full.
+pub(crate) fn list_scoped<T: Listable>(
+    view: &dyn ReadView,
+    query: &ListQuery,
+    scope: &ReadScope,
+) -> Result<query::Page<T>, ApiError> {
+    if scope.is_nothing() {
+        return Ok(query::Page {
+            items: Vec::new(),
+            next_cursor: None,
+            revision: view.revision(),
+        });
+    }
+    Ok(if scope.is_all() {
+        query::list::<T>(view, query)?
+    } else {
+        query::list_where::<T>(view, query, &|object: &T| scope.admits(&object.id().into()))?
+    })
 }
 
 /// A domain page with its cursor wrapped into an API cursor bound to `scope`.
@@ -471,13 +762,16 @@ pub(crate) fn authorize(
     Ok(())
 }
 
-/// The object a create is checked against: the kind with a nil identifier.
+/// The object a create, or a read of a kind as a whole, is checked against: an object of
+/// the kind somewhere in the principal's reach ([`anywhere`]). A scoped principal passes
+/// when a grant allows the action on the kind; the write is then checked object by object
+/// in its plan, and a read filters what it answers.
 pub(crate) fn new_of(kind: ObjectKind) -> ObjectRef {
-    ObjectRef::singleton(kind)
+    anywhere(kind)
 }
 
-/// Whether the principal may read objects of the kind at all (Slice 1 scopes are all or
-/// nothing; anything narrower counts as all until scoped grants arrive).
+/// Whether the principal may read objects of the kind at all: everything, or the objects a
+/// scoped grant covers (the caller filters them).
 pub(crate) fn may_read_kind(app: &AppState, cx: &RequestCtx, kind: ObjectKind) -> bool {
     app.authorizer.as_ref().is_none_or(|authorizer| {
         !matches!(
@@ -614,14 +908,14 @@ pub(crate) struct WriteResponse<T> {
 /// Plans or applies `commands` and answers the primary object of the first command as
 /// `T`: 201 for an applied create, 200 otherwise, with `ETag` once applied.
 pub(crate) async fn write_one<T: Entity + Serialize>(
-    ipam: &IpamService,
+    ipam: &IpamHandle,
     cx: &RequestCtx,
     commands: Vec<IpamCommand>,
     args: &WriteArgs,
     created: bool,
 ) -> Result<Response, ApiError> {
     if args.dry_run {
-        let plan = ipam.preview(&commands, cx, &args.options, None).await?;
+        let plan = ipam.preview(cx, &commands, &args.options).await?;
         let primary = plan.results.first().copied();
         let item = primary.and_then(|primary| {
             plan.changes
@@ -642,7 +936,7 @@ pub(crate) async fn write_one<T: Entity + Serialize>(
         };
         return Ok((StatusCode::OK, Json(body)).into_response());
     }
-    let applied = ipam.execute(&commands, cx, &args.options).await?;
+    let applied = ipam.execute(cx, &commands, &args.options).await?;
     let view = ipam.view(Some(applied.revision)).await?;
     let item = match applied.results.first() {
         Some(primary) => Some(query::get::<T>(view.as_ref(), primary.id.into())?),
@@ -758,7 +1052,7 @@ pub(crate) struct IdempotencyKeyHeader {
 async fn history_of(
     app: &AppState,
     cx: &RequestCtx,
-    ipam: &IpamService,
+    ipam: &IpamHandle,
     object: ObjectRef,
     filters: &Filters,
 ) -> Result<Json<Page<HistoryEntry>>, ApiError> {
@@ -781,7 +1075,7 @@ async fn history_of(
 async fn restore_of<T: Entity + Serialize>(
     app: &AppState,
     cx: &RequestCtx,
-    ipam: &IpamService,
+    ipam: &IpamHandle,
     object: ObjectRef,
     headers: &HeaderMap,
     filters: &Filters,
@@ -799,17 +1093,32 @@ async fn restore_of<T: Entity + Serialize>(
     .await
 }
 
+/// Whether the bulk endpoint of `kind` takes `operation`: an operation on its own
+/// collection, and for hosts also the creation of interfaces and addresses, so that a host
+/// is created with its addresses in one plan (a principal whose grants cover prefixes
+/// creates a host that way, IAM-01).
+fn bulk_accepts(kind: ObjectKind, operation: &IpamCommand) -> bool {
+    operation.kind() == kind
+        || (kind == ObjectKind::Host
+            && matches!(
+                operation,
+                IpamCommand::CreateInterface(_)
+                    | IpamCommand::CreateAddress(_)
+                    | IpamCommand::AllocateAddress(_)
+            ))
+}
+
 async fn bulk_of(
     app: &AppState,
     cx: &RequestCtx,
-    ipam: &IpamService,
+    ipam: &IpamHandle,
     kind: ObjectKind,
     request: BulkRequest,
     filters: &Filters,
 ) -> Result<Response, ApiError> {
     let args = write_args(filters, false)?;
     for (index, operation) in request.operations.iter().enumerate() {
-        if operation.kind() != kind {
+        if !bulk_accepts(kind, operation) {
             return Err(ApiError::from_coded_error(
                 CodedError::new(
                     codes::BULK_WRONG_COLLECTION,
@@ -828,9 +1137,7 @@ async fn bulk_of(
         authorize(app, cx, action, object)?;
     }
     if args.dry_run {
-        let plan = ipam
-            .preview(&request.operations, cx, &args.options, None)
-            .await?;
+        let plan = ipam.preview(cx, &request.operations, &args.options).await?;
         let body = BulkResponse {
             revision: None,
             job_id: None,
@@ -842,7 +1149,7 @@ async fn bulk_of(
         };
         return Ok(Json(body).into_response());
     }
-    let applied = ipam.execute(&request.operations, cx, &args.options).await?;
+    let applied = ipam.execute(cx, &request.operations, &args.options).await?;
     Ok(Json(BulkResponse {
         revision: Some(applied.revision),
         job_id: applied.job_id,
@@ -923,7 +1230,9 @@ macro_rules! collection_routes {
         }
 
         /// Applies several operations of this collection in one plan: all or nothing
-        /// (API-04).
+        /// (API-04). The bulk of hosts also takes the creation of interfaces and addresses
+        /// (`create_interface`, `create_address`, `allocate_address`), so that a host is
+        /// created with its addresses in one change.
         #[utoipa::path(
             post,
             path = concat!("/", stringify!($collection), "/bulk"),
@@ -1012,8 +1321,17 @@ async fn list_tags(
 ) -> Result<Json<ListBody<TagCount>>, ApiError> {
     filters.only(&[])?;
     let view = ipam.view(filters.page()?.at_least.map(Revision)).await?;
+    let scopes: std::collections::BTreeMap<ObjectKind, ReadScope> = tenko_ipam::object::IPAM_KINDS
+        .into_iter()
+        .map(|kind| (kind, ipam.read_scope(&cx, kind)))
+        .collect();
+    let items = if scopes.values().all(ReadScope::is_all) {
+        query::tags(view.as_ref())?
+    } else {
+        scoped_tags(view.as_ref(), &scopes)?
+    };
     // Count only the objects of kinds the principal may read.
-    let items = query::tags(view.as_ref())?
+    let items = items
         .into_iter()
         .filter_map(|mut tag| {
             tag.by_kind.retain(|kind, _| {
@@ -1028,6 +1346,40 @@ async fn list_tags(
         items,
         revision: view.revision(),
     }))
+}
+
+/// The tags in use counted over the objects a scoped principal may read.
+fn scoped_tags(
+    view: &dyn ReadView,
+    scopes: &std::collections::BTreeMap<ObjectKind, ReadScope>,
+) -> Result<Vec<TagCount>, ApiError> {
+    use tenko_store::{KeyRange, ReadViewExt};
+    let mut counts: std::collections::BTreeMap<String, TagCount> =
+        std::collections::BTreeMap::new();
+    for ((tag, object), (), _) in view.scan_typed(
+        &tenko_ipam::tables::TAG_USAGE,
+        KeyRange::all(),
+        usize::MAX,
+        false,
+    )? {
+        if !scopes
+            .get(&object.kind)
+            .is_some_and(|scope| scope.admits(&object))
+        {
+            continue;
+        }
+        let entry = counts.entry(tag.clone()).or_insert_with(|| TagCount {
+            tag,
+            count: 0,
+            by_kind: std::collections::BTreeMap::new(),
+        });
+        entry.count += 1;
+        *entry
+            .by_kind
+            .entry(object.kind.as_str().to_owned())
+            .or_default() += 1;
+    }
+    Ok(counts.into_values().collect())
 }
 
 /// Lists the custom field definitions (IPAM-08), by key.
@@ -1065,7 +1417,7 @@ async fn list_custom_fields(
 
 /// Plans or applies one custom field command and answers the definition by key.
 async fn write_custom_field(
-    ipam: &IpamService,
+    ipam: &IpamHandle,
     cx: &RequestCtx,
     command: IpamCommand,
     key: &FieldKey,
@@ -1073,7 +1425,7 @@ async fn write_custom_field(
     created: bool,
 ) -> Result<Response, ApiError> {
     if args.dry_run {
-        let plan = ipam.preview(&[command], cx, &args.options, None).await?;
+        let plan = ipam.preview(cx, &[command], &args.options).await?;
         let item = plan.changes.last().and_then(|change| match &change.after {
             Some(tenko_ipam::IpamObject::CustomField(def)) => Some(def.clone()),
             _ => None,
@@ -1089,7 +1441,7 @@ async fn write_custom_field(
         };
         return Ok(Json(body).into_response());
     }
-    let applied = ipam.execute(&[command], cx, &args.options).await?;
+    let applied = ipam.execute(cx, &[command], &args.options).await?;
     let view = ipam.view(Some(applied.revision)).await?;
     let found = query::custom_field(view.as_ref(), key).ok();
     let body = WriteResponse {
@@ -1329,9 +1681,16 @@ async fn search(
         .into_iter()
         .filter(|kind| may_read_kind(&app, &cx, *kind))
         .collect();
+    let scopes: std::collections::BTreeMap<ObjectKind, ReadScope> = readable
+        .iter()
+        .map(|kind| (*kind, ipam.read_scope(&cx, *kind)))
+        .collect();
     // The domain filters before it counts, so `limit` caps readable hits only.
-    let items = query::search(view.as_ref(), &q, Some(page.limit()?), |kind| {
-        readable.contains(&kind)
+    let items = query::search_where(view.as_ref(), &q, Some(page.limit()?), |item| {
+        let object = item.object_ref();
+        scopes
+            .get(&object.kind)
+            .is_some_and(|scope| scope.admits(&object))
     })?;
     Ok(Json(ListBody {
         items,
@@ -3066,8 +3425,8 @@ mod tests {
             .post("/custom-fields", &text_field("owner"))
             .await
             .assert_problem(403, "auth.forbidden");
-        let tenants = ObjectRef::singleton(ObjectKind::Tenant);
-        let fields = ObjectRef::singleton(ObjectKind::CustomField);
+        let tenants = new_of(ObjectKind::Tenant);
+        let fields = new_of(ObjectKind::CustomField);
         let expected = [
             (Action::Read, tenant),
             (Action::Update, tenant),

@@ -12,6 +12,18 @@ export interface ApiOperation {
 }
 
 export const apiOperations = [
+  { id: "list_grants", method: "get", path: "/api/v1/access/grants", tags: ["access"], summary: "List scoped grants" },
+  { id: "create_grant", method: "post", path: "/api/v1/access/grants", tags: ["access"], summary: "Create a scoped grant" },
+  { id: "revoke_grant", method: "delete", path: "/api/v1/access/grants/{id}", tags: ["access"], summary: "Revoke a grant and the grants issued under it" },
+  { id: "list_role_policies", method: "get", path: "/api/v1/access/role-policies", tags: ["access"], summary: "List the MFA policy of every role" },
+  { id: "set_role_policy", method: "put", path: "/api/v1/access/role-policies/{role}", tags: ["access"], summary: "Set the MFA policy of a role" },
+  { id: "clear_role_policy", method: "delete", path: "/api/v1/access/role-policies/{role}", tags: ["access"], summary: "Let a role follow the profile's MFA requirement again" },
+  { id: "list_service_accounts", method: "get", path: "/api/v1/access/service-accounts", tags: ["access"], summary: "List service accounts" },
+  { id: "create_service_account", method: "post", path: "/api/v1/access/service-accounts", tags: ["access"], summary: "Create a service account" },
+  { id: "list_service_account_tokens", method: "get", path: "/api/v1/access/service-accounts/{id}/tokens", tags: ["access"], summary: "List the tokens of a service account" },
+  { id: "create_service_account_token", method: "post", path: "/api/v1/access/service-accounts/{id}/tokens", tags: ["access"], summary: "Create a scoped token of a service account, shown once" },
+  { id: "revoke_service_account_token", method: "delete", path: "/api/v1/access/service-accounts/{id}/tokens/{token}", tags: ["access"], summary: "Revoke a token of a service account" },
+  { id: "list_grant_subjects", method: "get", path: "/api/v1/access/subjects", tags: ["access"], summary: "List the accounts a grant can name" },
   { id: "list_addresses", method: "get", path: "/api/v1/addresses", tags: ["addresses"], summary: "List addresses" },
   { id: "create_address", method: "post", path: "/api/v1/addresses", tags: ["addresses"], summary: "Create an address" },
   { id: "bulk_addresses", method: "post", path: "/api/v1/addresses/bulk", tags: ["common"], summary: "Change several addresses in one request" },

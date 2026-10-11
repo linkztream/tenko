@@ -45,6 +45,10 @@ pub(crate) const IDEMPOTENCY_HEADER: &str = "idempotency-key";
 ///   503). When the state has no authenticator (development and tests), the request acts as
 ///   the API itself. The full [`Authenticated`] record is stored in the request extensions
 ///   for handlers that need roles or flags ([`authenticated`]).
+/// - While the account must change its password (`password_change_required`), every route
+///   answers 403 `auth.password_change_required` except the password change and its live
+///   check (`POST /auth/password`, `POST /auth/password/check`), sign-out
+///   (`POST /auth/logout`) and the session (`GET /auth/session`) (WP3.2).
 ///
 /// Public endpoints (setup, the login ceremonies, liveness) do not take `Ctx`.
 #[derive(Debug, Clone)]
@@ -79,6 +83,11 @@ where
                         .await
                 };
                 let authenticated = outcome?;
+                if authenticated.flags.password_change_required
+                    && !open_during_password_change(&parts.method, parts.uri.path())
+                {
+                    return Err(tenko_auth::AuthError::PasswordChangeRequired.into());
+                }
                 let principal = authenticated.principal.clone();
                 parts.extensions.insert(authenticated);
                 principal
@@ -92,6 +101,21 @@ where
             idempotency,
         }))
     }
+}
+
+/// The routes an account that must change its password may still use: the password change
+/// and its live policy check, sign-out and the session. `path` may carry the API base or
+/// not (nested routers see it without).
+pub(crate) fn open_during_password_change(method: &axum::http::Method, path: &str) -> bool {
+    let path = path.strip_prefix(crate::API_BASE).unwrap_or(path);
+    let path = path.trim_end_matches('/');
+    matches!(
+        (method.as_str(), path),
+        (
+            "POST",
+            "/auth/password" | "/auth/password/check" | "/auth/logout"
+        ) | ("GET", "/auth/session")
+    )
 }
 
 /// The outcome of the authenticator for the current request, stored by the API middleware
@@ -393,6 +417,80 @@ mod tests {
                 user,
             })),
             ..AppState::default()
+        }
+    }
+
+    /// Answers every session as one whose password must change.
+    struct MustChangePassword(UserId);
+
+    impl Authenticator for MustChangePassword {
+        fn authenticate<'a>(
+            &'a self,
+            _credentials: &'a Credentials,
+            _source_ip: Option<IpAddr>,
+            _now: Timestamp,
+        ) -> AuthFuture<'a> {
+            Box::pin(async move {
+                Ok(Authenticated {
+                    principal: Principal::User {
+                        id: self.0,
+                        session: SessionId::generate(),
+                        strength: AuthStrength::Password,
+                    },
+                    user: Some(self.0),
+                    roles: BTreeSet::from(["viewer".to_owned()]),
+                    strength: AuthStrength::Password,
+                    expires_at: None,
+                    flags: AuthFlags {
+                        password_change_required: true,
+                        ..AuthFlags::default()
+                    },
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_required_password_change_closes_every_route_but_four() {
+        let state = AppState {
+            auth: Some(Arc::new(MustChangePassword(UserId::generate()))),
+            ..AppState::default()
+        };
+        let request = |method: &str, path: &str| {
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header(header::COOKIE, "tenko_session=s3ss10n")
+                .body(Body::empty())
+                .expect("request")
+                .into_parts()
+                .0
+        };
+        for (method, path) in [
+            ("POST", "/api/v1/auth/password"),
+            ("POST", "/api/v1/auth/password/check"),
+            ("POST", "/auth/logout"),
+            ("GET", "/api/v1/auth/session"),
+        ] {
+            let mut parts = request(method, path);
+            assert!(
+                Ctx::from_request_parts(&mut parts, &state).await.is_ok(),
+                "{method} {path}"
+            );
+        }
+        for (method, path) in [
+            ("GET", "/api/v1/prefixes"),
+            ("GET", "/api/v1/auth/password"),
+            ("DELETE", "/api/v1/auth/session"),
+            ("GET", "/api/v1/events"),
+            ("POST", "/api/v1/auth/tokens"),
+        ] {
+            let mut parts = request(method, path);
+            let error = Ctx::from_request_parts(&mut parts, &state)
+                .await
+                .expect_err("refused");
+            assert_eq!(error.coded_error().code, "auth.password_change_required");
+            assert_eq!(error.into_response().status(), StatusCode::FORBIDDEN);
         }
     }
 

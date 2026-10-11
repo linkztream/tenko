@@ -27,7 +27,9 @@
 //! With an [`Authorizer`](tenko_core::Authorizer) in the [`AppState`], reading one job
 //! needs [`Action::Read`] on it, cancelling and completing need [`Action::Execute`], and
 //! the list is empty when the principal may read no jobs. Without an authorizer every check
-//! passes (development and tests).
+//! passes (development and tests). A job anchors to its targets (IAM-01): a scoped
+//! principal lists and reads the jobs one of whose targets lies in its scope, and cancels
+//! or completes those whose targets all do.
 //!
 //! # List conventions
 //!
@@ -41,10 +43,13 @@
 //! - The shared helpers answer `sys.invalid_query` for an unknown or repeated parameter, a
 //!   bad `limit` or `at_least`, and `sys.invalid_cursor` for a bad or foreign cursor.
 //! - This area answers `jobs.query.invalid` (parameters `param` and `value`) for values that
-//!   only jobs understand: a bad `state`, `kind` or `target`, and a malformed job id or step
-//!   index in the path.
+//!   only jobs understand: a bad `state`, `kind`, `target` or `group`, and a malformed job
+//!   id or step index in the path.
+//!
+//! `group=<key>` lists the jobs of one parallelism group (the jobs of a bulk move), and
+//! every [`JobSummary`] names the handler kind of its current step (`current_step_kind`).
 
-use std::{collections::BTreeMap, fmt};
+use std::{collections::BTreeMap, fmt, sync::Arc};
 
 use axum::{
     Extension, Json,
@@ -57,14 +62,19 @@ use serde::{
     de::{IntoDeserializer, value::StrDeserializer},
 };
 use tenko_core::{
-    Action, Coded, CodedError, JobId, ObjectKind, ObjectRef, RequestCtx, Revision, ScopeFilter,
-    error::codes,
+    Action, Coded, CodedError, JobId, ObjectKind, ObjectRef, RequestCtx, Revision, error::codes,
 };
-use tenko_jobs::{JobDetail, JobEngine, JobKind, JobPage, JobQuery, JobState, JobSummary};
+use tenko_ipam::scope::ScopeIndex;
+use tenko_jobs::{
+    JobDetail, JobEngine, JobKind, JobPage, JobQuery, JobState, JobSummary,
+    model::GroupKey,
+    query::{JobFilter, list_filtered},
+};
+use tenko_store::ReadConsistency;
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-use super::not_implemented;
+use super::{common::read_scope, not_implemented};
 use crate::{
     dto::Page,
     extract::Ctx,
@@ -74,7 +84,7 @@ use crate::{
 };
 
 /// The query parameters of `GET /jobs` besides the paging parameters.
-const LIST_PARAMS: [&str; 3] = ["state", "kind", "target"];
+const LIST_PARAMS: [&str; 4] = ["state", "kind", "target", "group"];
 
 /// Names the endpoint in cursors, so that a cursor from another list is refused.
 const CURSOR_ENDPOINT: &str = "jobs.jobs";
@@ -162,6 +172,9 @@ struct JobFilters {
     /// `host/0190d1c2-0000-7000-8000-000000000001`.
     #[param(required = false, value_type = String)]
     target: Option<ObjectRef>,
+    /// Only jobs of this parallelism group, for example the jobs of one bulk move.
+    #[param(required = false, value_type = String)]
+    group: Option<GroupKey>,
 }
 
 impl JobFilters {
@@ -183,23 +196,39 @@ impl JobFilters {
             .map(parse_kind)
             .collect::<Result<Vec<_>, QueryError>>()?;
         let target = filters.get("target")?.map(parse_target).transpose()?;
+        let group = filters
+            .get("group")?
+            .map(|raw| {
+                GroupKey::new(raw.to_owned())
+                    .map_err(|_| QueryError::new("group", raw, "not a group key"))
+            })
+            .transpose()?;
         Ok(Self {
             state,
             kind,
             target,
+            group,
         })
     }
 
-    /// The engine query for these filters, this page and the cursor scope of the request.
-    fn into_query(self, page: &PageParams, scope: CursorScope) -> Result<JobQuery, ApiError> {
-        Ok(JobQuery {
-            states: self.state,
-            kinds: self.kind,
-            target: self.target,
-            limit: page.limit()?,
-            cursor: page.cursor::<JobId>(scope)?,
-            at_least: page.at_least.map(Revision),
-        })
+    /// The engine query for these filters, this page and the cursor scope of the request,
+    /// with the group filter apart.
+    fn into_query(
+        self,
+        page: &PageParams,
+        scope: CursorScope,
+    ) -> Result<(JobQuery, Option<GroupKey>), ApiError> {
+        Ok((
+            JobQuery {
+                states: self.state,
+                kinds: self.kind,
+                target: self.target,
+                limit: page.limit()?,
+                cursor: page.cursor::<JobId>(scope)?,
+                at_least: page.at_least.map(Revision),
+            },
+            self.group,
+        ))
     }
 }
 
@@ -324,26 +353,45 @@ async fn list_jobs(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
     engine: Option<Extension<JobEngine>>,
+    index: Option<Extension<Arc<ScopeIndex>>>,
     filters: Filters,
 ) -> Result<Json<Page<JobSummary>>, ApiError> {
     let engine = engine_or_stub(engine, "GET", "/jobs")?;
     filters.only(&LIST_PARAMS)?;
     let page = filters.page()?;
     let scope = filters.scope(CURSOR_ENDPOINT);
-    let query = JobFilters::from_filters(&filters)?.into_query(&page, scope)?;
-
-    if let Some(authorizer) = &app.authorizer {
-        // Slice 1 authorizers answer `All` or `Nothing`. Any other answer (`Only`, scoped
-        // grants of Slice 3) is treated as `All` until job rows can be matched against
-        // scope rules.
-        if matches!(
-            authorizer.scope(&cx.principal, Action::Read, ObjectKind::Job),
-            ScopeFilter::Nothing
-        ) {
-            return Ok(Json(empty_page(&engine)));
-        }
+    let (query, group) = JobFilters::from_filters(&filters)?.into_query(&page, scope)?;
+    let readable = read_scope(
+        app.authorizer.as_deref(),
+        index.map(|Extension(index)| index),
+        &cx,
+        ObjectKind::Job,
+    );
+    if readable.is_nothing() {
+        return Ok(Json(empty_page(&engine)));
     }
-    Ok(Json(wire_page(engine.list(&query).await?, scope)))
+    if readable.is_all() && group.is_none() {
+        return Ok(Json(wire_page(engine.list(&query).await?, scope)));
+    }
+    // A group, or a scoped principal: filtered while scanning, so pages stay full.
+    let view = app
+        .store
+        .read(match query.at_least {
+            Some(revision) => ReadConsistency::AtLeast(revision),
+            None => ReadConsistency::Local,
+        })
+        .await?;
+    let keep = |job: &tenko_jobs::model::Job| {
+        readable.admits_targets(ObjectRef::from(job.id), &job.spec.targets)
+    };
+    let filter = JobFilter {
+        group,
+        keep: if readable.is_all() { None } else { Some(&keep) },
+    };
+    Ok(Json(wire_page(
+        list_filtered(view.as_ref(), &query, &filter)?,
+        scope,
+    )))
 }
 
 /// Shows one job: its steps, the transition log and the preview computed at submission.
@@ -1332,11 +1380,16 @@ mod tests {
             }
         }
 
-        fn scope(&self, _principal: &Principal, action: Action, kind: ObjectKind) -> ScopeFilter {
+        fn scope(
+            &self,
+            _principal: &Principal,
+            action: Action,
+            kind: ObjectKind,
+        ) -> tenko_core::ScopeFilter {
             if action == Action::Read && kind == ObjectKind::Job && self.read {
-                ScopeFilter::All
+                tenko_core::ScopeFilter::All
             } else {
-                ScopeFilter::Nothing
+                tenko_core::ScopeFilter::Nothing
             }
         }
     }
@@ -1470,7 +1523,9 @@ mod tests {
             .collect();
         assert_eq!(
             parameters,
-            ["state", "kind", "target", "limit", "cursor", "at_least"]
+            [
+                "state", "kind", "target", "group", "limit", "cursor", "at_least"
+            ]
         );
         let ok = &list["responses"]["200"]["content"]["application/json"]["schema"];
         assert!(

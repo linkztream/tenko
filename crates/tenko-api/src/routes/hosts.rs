@@ -69,7 +69,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use super::common::{
     DeleteParams, Filter, IdempotencyKeyHeader, IfMatch, Ipam, IpamJson, IpamPath, ReadParams,
     WriteParams, WriteResponse, authorize, get_one, if_match, list_args, list_collection,
-    may_read_kind, new_of, wire_page, write_args, write_one,
+    list_scoped, new_of, wire_page, write_args, write_one,
 };
 use crate::{
     dto::Page,
@@ -323,10 +323,8 @@ async fn list_host_interfaces(
     authorize(&app, &cx, Action::Read, id.into())?;
     let view = ipam.view(args.page.at_least.map(Revision)).await?;
     query::get::<Host>(view.as_ref(), id)?;
-    if !may_read_kind(&app, &cx, ObjectKind::Interface) {
-        return Ok(Json(Page::new(Vec::new(), None, view.revision())));
-    }
-    let page = query::list::<Interface>(view.as_ref(), &args.query)?;
+    let scope = ipam.read_scope(&cx, ObjectKind::Interface);
+    let page = list_scoped::<Interface>(view.as_ref(), &args.query, &scope)?;
     Ok(Json(wire_page(page, args.scope)))
 }
 
@@ -1730,9 +1728,15 @@ mod tests {
         assert_eq!(
             policy.asked(),
             [
-                (Action::Create, ObjectRef::singleton(ObjectKind::Host)),
+                (
+                    Action::Create,
+                    crate::routes::common::new_of(ObjectKind::Host)
+                ),
                 (Action::Read, host_ref),
-                (Action::Create, ObjectRef::singleton(ObjectKind::Interface)),
+                (
+                    Action::Create,
+                    crate::routes::common::new_of(ObjectKind::Interface)
+                ),
                 (Action::Read, interface_ref),
                 (Action::Update, interface_ref),
                 (Action::Delete, interface_ref),

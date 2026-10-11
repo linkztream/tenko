@@ -92,6 +92,12 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - Promoting or removing a controller is an inline job `cluster.edit` (step `cluster.member`), and the answer carries `job_id`.
 - New fuzz target `raft_payloads` with a seed corpus.
 
+- Grants within a scope (IAM-01): a person or a service account can hold the operator or viewer role over a VRF, a site or a prefix, with or without what lies below it, and then sees and changes only the objects inside: lists, searches, the prefix tree (which shows the ancestors of a granted prefix as context rows with the network only), exports, observations, proposals, jobs, the topology, the audit log and the event stream are filtered, and anything else answers 403 `auth.out_of_scope`. A delegable grant lets its holder grant a role no higher over a scope inside it; revoking it revokes what was granted under it. Grants are managed under `/api/v1/access/grants` and every change is audited.
+- Service accounts (IAM-10): accounts for automation without a password, passkey or session, created by an administrator, holding roles or grants and acting only through scoped API tokens (`/api/v1/access/service-accounts`).
+- Scoped API tokens (IAM-10): a token with grants that lie inside its owner's, and optionally the scopes `metrics` and `audit:read`, created with `POST /api/v1/auth/tokens` or for a service account; it acts with what both the token and its owner hold at the time of the request.
+- The sign-in requirement per role (IAM-06): each role can require a second factor or a passkey (`/api/v1/access/role-policies`); a person must meet the strictest requirement of every role held, globally or through a grant, and the profile's requirement stays the floor.
+- The auditor role: reads the audit log, the audit export status and the system status, and nothing else.
+- An account that must change its password can use nothing else until it has: every other request answers 403 `auth.password_change_required`.
 ### Changed
 
 - The API names the health of a connector's remote system `RemoteHealth`, apart from the liveness answer of the health route, so generated clients see the three health values.
@@ -128,3 +134,6 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - The one-time setup token of a first start no longer appears in the log or in the output of a service. It is kept in `setup-token` in the data directory, readable only by the service account, until setup is complete; `tenko setup token` prints it, and a start in a terminal still shows it on the console.
 - A token for the role `controller` needs an interactive sign-in within the last five minutes and lives at most an hour; the installation's key encryption keys reach a joining controller only sealed to a one-time key of that host, once per token, audited as `vault.kek.transfer`.
 - The controller services of the cluster port accept only controller certificates of the installation, and a data directory refuses to start under another node id.
+- A scoped token never exceeds its owner: its grants must lie inside the owner's when it is created, and every request is checked against the token's and the owner's grants as they are then, so revoking an owner's grant or role takes the right from the token at once. The token lifetime cap (TGL-05) is checked again at every use, so lowering it shortens existing tokens.
+- Grants and scoped tokens are kept in tables that earlier versions do not read, so going back to an earlier version refuses them instead of widening them into global access.
+- Routes refuse a scoped principal unless they decide how the object is scoped, and a scoped write is checked before it is planned and again object by object on its plan, so neither an answer, an event nor an error names an object outside the principal's scope.

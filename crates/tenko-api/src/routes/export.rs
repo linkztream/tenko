@@ -37,7 +37,7 @@
 //! extension (503 `ipam.unavailable` without it, see [`super::common`]). The principal
 //! needs [`Action::Read`] on the kind of the file (prefixes, addresses or hosts).
 
-use std::io;
+use std::{io, sync::Arc};
 
 use axum::{
     body::Body,
@@ -55,7 +55,10 @@ use tenko_ipam::{
 use tokio::task::JoinError;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-use super::{common::Ipam, import::reject_unknown_query};
+use super::{
+    common::{Ipam, IpamHandle, new_of},
+    import::reject_unknown_query,
+};
 use crate::{
     extract::Ctx,
     list::Filters,
@@ -179,19 +182,25 @@ const fn disposition(kind: ExportKind) -> HeaderValue {
 async fn export(
     app: &AppState,
     cx: &tenko_core::RequestCtx,
-    ipam: &tenko_ipam::IpamService,
+    ipam: &IpamHandle,
     filters: &Filters,
     kind: ExportKind,
 ) -> Result<Response, ApiError> {
     reject_unknown_query(filters, &["at_least"])?;
     let at_least = filters.parse::<u64>("at_least")?.map(Revision);
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &ObjectRef::singleton(object_kind(kind)),
-    )?;
+    app.authorize(&cx.principal, Action::Read, &new_of(object_kind(kind)))?;
     let view = ipam.view(at_least).await?;
-    let mut export = CsvExport::new(view, kind)?;
+    // A scoped reader exports only the objects inside its scope (IAM-01).
+    let scope = ipam.read_scope(cx, object_kind(kind));
+    let mut export = if scope.is_all() {
+        CsvExport::new(view, kind)?
+    } else {
+        CsvExport::with_filter(
+            view,
+            kind,
+            Arc::new(move |object: ObjectRef| scope.admits(&object)),
+        )?
+    };
     // The first chunk (byte order mark and header) comes before the response starts, so a
     // failure that is there anyway is answered as problem details.
     let (next, first) = pull(move || export.next_chunk())
@@ -445,9 +454,7 @@ mod tests {
                 .await
                 .assert_problem(403, "auth.forbidden");
             assert!(
-                policy
-                    .asked()
-                    .contains(&(Action::Read, ObjectRef::singleton(kind))),
+                policy.asked().contains(&(Action::Read, new_of(kind))),
                 "{file}"
             );
         }

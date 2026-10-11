@@ -37,8 +37,10 @@
 //! With an [`Authorizer`](tenko_core::Authorizer) in the state, a provision needs
 //! [`Action::Create`] on VLANs for a new VLAN or [`Action::Update`] on the named VLAN,
 //! [`Action::Create`] on prefixes when it creates one and, for a submit,
-//! [`Action::Execute`] on jobs and on the connector it names. The prefix list needs
-//! [`Action::Read`] on the VLAN.
+//! [`Action::Execute`] on jobs and on the connector it names; a principal whose writes are
+//! limited to a scope is refused (the network controller is global-only in Phase 1). The
+//! prefix list needs [`Action::Read`] on the VLAN and lists the prefixes the principal
+//! reads.
 
 pub mod host;
 
@@ -51,8 +53,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use tenko_core::{
-    Action, CodedError, ObjectKind, ObjectRef, RequestCtx, Revision, VlanId, ipam::Prefix,
+    Action, CodedError, Denied, DenyReason, ObjectKind, ObjectRef, RequestCtx, Revision, VlanId,
+    ipam::Prefix,
 };
+use tenko_ipam::scope::ScopeIndex;
 use tenko_ipam::vlan::{
     Controllers, VlanProvisionPreview, VlanProvisionRequest, VlanProvisionSubmitted, codes,
     links::vlan_prefixes, provision,
@@ -136,6 +140,18 @@ fn check(
     request: &VlanProvisionRequest,
     submit: bool,
 ) -> Result<(), ApiError> {
+    // A provision writes through a network controller, which is global-only in Phase 1,
+    // and its plan is applied by the job, so a scoped principal is refused (IAM-01).
+    if let Some(authorizer) = &app.authorizer
+        && !ScopeIndex::unrestricted(authorizer.as_ref(), &cx.principal)
+    {
+        return Err(Denied {
+            action: Action::Create,
+            object: new_of(ObjectKind::Vlan),
+            reason: DenyReason::MissingPermission,
+        }
+        .into());
+    }
     match request.vlan {
         Some(vlan) => authorize(app, cx, Action::Update, ObjectRef::from(vlan))?,
         None => authorize(app, cx, Action::Create, new_of(ObjectKind::Vlan))?,
@@ -233,7 +249,12 @@ async fn list_vlan_prefixes(
     let at_least = filters.page()?.at_least.map(Revision);
     authorize(&app, &cx, Action::Read, ObjectRef::from(id))?;
     let view = ipam.view(at_least).await?;
-    let prefixes = vlan_prefixes(view.as_ref(), id, deleted)?;
+    // A scoped reader sees the linked prefixes inside its scope.
+    let scope = ipam.read_scope(&cx, ObjectKind::Prefix);
+    let prefixes = vlan_prefixes(view.as_ref(), id, deleted)?
+        .into_iter()
+        .filter(|prefix| scope.admits(&ObjectRef::from(prefix.id)))
+        .collect();
     Ok(Json(Page::new(prefixes, None, view.revision())))
 }
 
