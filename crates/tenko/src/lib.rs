@@ -418,42 +418,13 @@ fn config_check(args: &ConfigCheckArgs, out: &mut impl Write, err: &mut impl Wri
     let _ = writeln!(out, "# environment overrides: {env}");
     let _ = writeln!(out, "# roles: {}", resolved.roles);
     let _ = writeln!(out, "# store: {}", layout.store().display());
-    let _ = writeln!(
-        out,
-        "# key-encryption keys: {}",
-        describe_kek(&resolved.kek)
-    );
+    let _ = writeln!(out, "# key-encryption keys: {}", resolved.kek.describe());
     let _ = writeln!(out, "# TLS: {}", describe_tls(&resolved.tls));
     let _ = writeln!(out);
     let _ = write!(out, "{text}");
     // Roles Phase 1 does not implement are a note here, not an error.
     let _ = serve::check_roles(resolved.roles, err);
     exit::OK
-}
-
-fn describe_kek(kek: &tenko_vault::KekConfig) -> String {
-    match kek {
-        tenko_vault::KekConfig::Dpapi { dir, scope } => {
-            let scope = match scope {
-                tenko_vault::kek::DpapiScope::Machine => "machine",
-                tenko_vault::kek::DpapiScope::User => "user",
-            };
-            format!("DPAPI ({scope} scope) in {}", dir.display())
-        }
-        tenko_vault::KekConfig::SystemdCreds { dir, .. } => {
-            format!("systemd-creds in {}", dir.display())
-        }
-        tenko_vault::KekConfig::File { path, retired } => format!(
-            "key file {} (no OS protection){}",
-            path.display(),
-            if retired.is_empty() {
-                String::new()
-            } else {
-                format!(", {} retired", retired.len())
-            }
-        ),
-        _ => "another provider".to_owned(),
-    }
 }
 
 fn describe_tls(tls: &config::TlsSpec) -> String {

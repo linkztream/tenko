@@ -165,6 +165,8 @@ export const apiOperations = [
   { id: "restore_site", method: "post", path: "/api/v1/sites/{id}/restore", tags: ["common"], summary: "Restore one deleted site" },
   { id: "set_break_glass", method: "put", path: "/api/v1/system/break-glass", tags: ["users"], summary: "Configure break-glass access; needs fresh authentication" },
   { id: "get_ca_root", method: "get", path: "/api/v1/system/ca-root", tags: ["system"], summary: "Download the root certificate of the internal CA as PEM" },
+  { id: "get_kek_status", method: "get", path: "/api/v1/system/kek", tags: ["kek"], summary: "Get the key-encryption key status of this controller and the installation" },
+  { id: "rotate_kek", method: "post", path: "/api/v1/system/kek/rotate", tags: ["kek"], summary: "Start an online rotation of the key-encryption key" },
   { id: "get_modules", method: "get", path: "/api/v1/system/modules", tags: ["system"], summary: "Get the product modules this installation runs" },
   { id: "put_modules", method: "put", path: "/api/v1/system/modules", tags: ["system"], summary: "Set the product modules this installation runs" },
   { id: "system_status", method: "get", path: "/api/v1/system/status", tags: ["system"], summary: "Get the status of the installation: version, store, certificates and warnings" },

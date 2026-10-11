@@ -2148,6 +2148,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/system/kek": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the key-encryption key status of this controller and the installation */
+        get: operations["get_kek_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/kek/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start an online rotation of the key-encryption key */
+        post: operations["rotate_kek"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system/modules": {
         parameters: {
             query?: never;
@@ -3528,6 +3562,25 @@ export interface components {
             plugin: string;
             /** @description Whether writes through the instance are allowed (TGL-20). */
             writes_enabled: boolean;
+        };
+        /** @description How one controller of the installation protects its key-encryption key. */
+        ControllerKekView: {
+            /**
+             * Format: int64
+             * @description The controller.
+             */
+            node: number;
+            /** @description The protection at its last start. */
+            protection: components["schemas"]["KekProtectionView"];
+            /** @description Its provider: `dpapi`, `systemd_creds`, `systemd_credential` or `file`. */
+            provider: string;
+            /**
+             * @description The strongest protection this controller ever had; a `protection` weaker than this is
+             *     a downgrade.
+             */
+            strongest: components["schemas"]["KekProtectionView"];
+            /** @description When the controller last started and recorded this. */
+            updated_at: components["schemas"]["Timestamp"];
         };
         /**
          * @description How the network gets onto the switches and access points.
@@ -5075,6 +5128,122 @@ export interface components {
             targets: components["schemas"]["ObjectRef"][];
             /** @description Translatable title. */
             title: components["schemas"]["MessageKey"];
+        };
+        /** @description One key generation of the installation, as this controller sees it. */
+        KekGenerationView: {
+            /** @description Whether the generation wraps new data keys. */
+            active: boolean;
+            created_at?: components["schemas"]["Timestamp"] | null;
+            /** @description The identifier that envelopes name. */
+            id: string;
+            /** @description Whether this controller holds the generation. */
+            loaded: boolean;
+            protection?: components["schemas"]["KekProtectionView"] | null;
+        };
+        /** @description How a key-encryption key is protected at rest. */
+        KekProtectionView: {
+            /**
+             * @description A stable code: `dpapi_user`, `dpapi_machine`, `systemd_creds_host`,
+             *     `systemd_creds_tpm2`, `plain_file` or `memory`. The UI localizes by this code.
+             */
+            code: string;
+            /** @description A short English description, for logs and support. */
+            text: string;
+            /** @description Whether the protection is weak enough to warn about: a plain key file or memory only. */
+            weak: boolean;
+        };
+        /**
+         * @description Where an online rotation of the key-encryption key stands.
+         * @enum {string}
+         */
+        KekRotationPhase: "requested" | "distributing" | "rewrapping" | "done" | "failed";
+        /** @description An online rotation of the key-encryption key: in progress, or the last one. */
+        KekRotationView: {
+            /** @description Why the rotation failed. */
+            error?: string | null;
+            finished_at?: components["schemas"]["Timestamp"] | null;
+            /** @description The new generation, once the leader created it. */
+            generation?: string | null;
+            /** @description Where the rotation stands. */
+            phase: components["schemas"]["KekRotationPhase"];
+            /** @description When an administrator asked for it. */
+            requested_at: components["schemas"]["Timestamp"];
+            /** @description Who asked, as a principal subject such as `user:<id>`. */
+            requested_by: string;
+            /**
+             * Format: int64
+             * @description How many envelopes are re-wrapped under the new generation so far.
+             */
+            rewrapped: number;
+            /**
+             * @description Controllers that could not be reached while the generation was distributed; each
+             *     fetches it when it starts.
+             */
+            unreachable: number[];
+            /** @description When the phase last changed. */
+            updated_at: components["schemas"]["Timestamp"];
+            /** @description Reachable controllers that have not taken the new generation yet. */
+            waiting_for: number[];
+        };
+        /** @description The key-encryption keys of this controller and of the installation. */
+        KekStatusView: {
+            /** @description The active generation, which wraps new data keys. */
+            active: string;
+            /** @description How every controller of the installation protects its key, by node. */
+            controllers: components["schemas"]["ControllerKekView"][];
+            /**
+             * Format: int64
+             * @description The KEK epoch of the active generation; it grows with every activation.
+             */
+            epoch: number;
+            /** @description Every generation of the installation and every generation loaded here, oldest first. */
+            generations: components["schemas"]["KekGenerationView"][];
+            /**
+             * @description Generations of the installation that this controller does not hold; it fetches them
+             *     from a member.
+             */
+            missing: string[];
+            /**
+             * Format: int64
+             * @description The controller that answers.
+             */
+            node: number;
+            /** @description The protection of its active key-encryption key. */
+            protection: components["schemas"]["KekProtectionView"];
+            /** @description Its provider: `dpapi`, `systemd_creds`, `systemd_credential` or `file`. */
+            provider: string;
+            /** @description Plain generation files that this controller refused to load. */
+            refused: components["schemas"]["RefusedGenerationView"][];
+            rotation?: components["schemas"]["KekRotationView"] | null;
+            strongest?: components["schemas"]["KekProtectionView"] | null;
+            /**
+             * @description Conditions to look at: `vault.kek.weak`, `vault.kek.downgrade`, `vault.kek.missing`
+             *     and `vault.kek.rotation_failed`.
+             */
+            warnings: components["schemas"]["StatusWarning"][];
+        };
+        /** @description The key-encryption key fragment of `GET /system/status`. */
+        KekSummaryView: {
+            /** @description The active generation. */
+            active: string;
+            /**
+             * Format: int64
+             * @description The KEK epoch.
+             */
+            epoch: number;
+            /**
+             * Format: int64
+             * @description How many generations this controller holds.
+             */
+            generations: number;
+            /** @description The protection of its active key-encryption key. */
+            protection: components["schemas"]["KekProtectionView"];
+            /**
+             * @description The provider of this controller: `dpapi`, `systemd_creds`, `systemd_credential` or
+             *     `file`.
+             */
+            provider: string;
+            rotation?: components["schemas"]["KekRotationPhase"] | null;
         };
         /** @description The last reveal of a secret: who and when, never the value or the reason. */
         LastReveal: {
@@ -7959,6 +8128,21 @@ export interface components {
             /** @description The codes. */
             codes: components["schemas"]["SecretString"][];
         };
+        /**
+         * @description A plain generation file that this controller refused to load because a sealed generation
+         *     is older (the protection would silently drop).
+         */
+        RefusedGenerationView: {
+            /** @description The file name, without its directory. */
+            file: string;
+            /**
+             * Format: int32
+             * @description The generation number in the file name.
+             */
+            generation: number;
+            /** @description The protection of the file (plain). */
+            protection: components["schemas"]["KekProtectionView"];
+        };
         /** @description A registration result from the browser (`RegistrationResponseJSON`). */
         RegistrationResponse: {
             /** @description `platform` or `cross-platform`, when the client reports it. */
@@ -8983,6 +9167,7 @@ export interface components {
         /** @description Body of `GET /system/status`. */
         SystemStatus: {
             cluster?: components["schemas"]["ClusterStatus"] | null;
+            kek?: components["schemas"]["KekSummaryView"] | null;
             /**
              * @description The product modules this installation runs (OPS-25); the UI shows only their
              *     areas. Absent in answers of servers that predate the module switch: all modules.
@@ -21003,6 +21188,127 @@ export interface operations {
             };
             /** @description The listener does not use the internal CA (`tls.no_internal_ca`) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_kek_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key-encryption key status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KekStatusView"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description This server has no key-encryption key service (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    rotate_kek: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rotation is requested; the status shows it in phase `requested` */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KekStatusView"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`), or the session was not signed in within the last five minutes (`auth.step_up_required`, parameter `required`: `fresh`); personal tokens are refused with `auth.forbidden` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A rotation is already running (`vault.kek.rotation_in_progress`), or a concurrent request won (`sys.store.precondition_failed`; repeat the request) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description This server has no key-encryption key service (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

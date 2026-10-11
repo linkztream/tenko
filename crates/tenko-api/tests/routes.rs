@@ -248,6 +248,9 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("DELETE", "/cluster/members/{id}", "remove_cluster_member"),
     ("POST", "/cluster/step-down", "step_down_cluster_leader"),
     ("GET", "/cluster/digests", "get_cluster_digests"),
+    // kek
+    ("GET", "/system/kek", "get_kek_status"),
+    ("POST", "/system/kek/rotate", "rotate_kek"),
     ("POST", "/nodes/enrol", "enrol_node"),
     // secrets
     ("GET", "/secrets", "list_secrets"),
@@ -487,8 +490,9 @@ fn operations_have_a_declared_tag_and_a_summary() {
         .flatten()
         .map(|tag| tag.name.as_str())
         .collect();
-    // 22 areas of Slices 1 and 2, nine Slice 3 areas (metrics split from system, and eight
-    // that start empty: cluster, access, audit_export, kek, backup, i18n, queue, scans).
+    // 22 areas of Slices 1 and 2, nine Slice 3 areas (metrics split from system, cluster and
+    // kek with their operations, and six that start empty: access, audit_export, backup,
+    // i18n, queue, scans).
     assert_eq!(tags.len(), 31, "one tag per area");
     for (path, item) in &document.paths.paths {
         for (method, operation) in operations(item) {

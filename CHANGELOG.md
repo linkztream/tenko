@@ -77,6 +77,8 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - `/system/status` shows whether the controller reaches a quorum (`store.quorum`: single, healthy, electing or isolated).
 - Controllers of a cluster share the installation's key-encryption key: a joining controller receives every key generation from a member over the cluster port, sealed to a one-time key only it holds, and seals them with its own key store; a controller that was stopped during a key rotation fetches the new generation when it starts.
 - `tenko kek rotate` rotates the `file` key provider too, keeping new generations in the data directory, wrapped under the key file.
+- Online rotation of the key-encryption key (`POST /api/v1/system/kek/rotate`, administrators with a sign-in within the last five minutes): the new key reaches every running controller before it is used, then every secret is re-wrapped under it. `GET /api/v1/system/kek` and `GET /api/v1/system/status` (`kek`) show the key's provider, protection, generations and the rotation.
+- The systemd credential key provider (`[kek] provider = "systemd_credential"`): the key comes from `LoadCredentialEncrypted=` in the unit and is reported as protected by systemd-creds instead of a plain file.
 - API tokens can carry grants and scopes (`POST /auth/tokens`): a scoped token reaches only the metrics or the audit log, or the objects within the grants of its owner. The scoped views of the API follow.
 - The installation's default language is set with `PUT /settings/default-language`.
 - Controllers of a cluster apply a revocation made on any of them within a second, look up nodes enrolled through another controller via the leader, and show the same connected view of the nodes (`connection.controller`) everywhere.
@@ -113,7 +115,9 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 - The cluster port accepts only node certificates of the installation's internal CA that are not revoked, and a node accepts only a controller of its own CA. Enrolment tokens are kept only as a digest, work once and expire after an hour by default; every enrolment, and every refused one, is written to the audit log. On Windows a node's private key is sealed with DPAPI.
 - A PIN session never reveals a secret, and personal API tokens never do. The vault takes no operator secret while an account that may reveal secrets signs in with a PIN alone.
-- Reveals are limited to ten a minute per person.
+- Reveals are limited to ten a minute per person, counted across all controllers of a cluster.
+- A plain, unprotected key generation placed beside generations sealed with DPAPI or systemd-creds is not loaded unless `[kek] allow_plain = true`; the refusal raises an alarm and an audit record.
+- A controller that starts with a weaker key protection than it had before raises the alarm `vault.kek.downgrade` and keeps a warning in the system status.
 - Connectors can be given a secret only by people who may change secrets, so the reveal policy cannot be bypassed through a connector.
 - Repeated requests with an idempotency key are recognised by a fingerprint keyed with a random secret that exists only in memory and changes at every start, so the stored fingerprints reveal nothing about the requests; sign-in, setup and password requests are never fingerprinted. A retry after a restart of a request sent before it is answered as already performed instead of being run again.
 - Before a rollback undoes a write through a network controller (a VLAN network or the network change of a move), the undo steps are checked against the guardrails on a fresh read of the controller, so an undo never changes an uplink or the path through which Tenko or the controller is reached.

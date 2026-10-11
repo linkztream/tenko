@@ -38,6 +38,7 @@
 //! one-time setup token that `tenko setup token` prints (see [`setup_token`]).
 
 mod imports;
+mod leader;
 mod maintenance;
 pub mod setup_token;
 mod tls;
@@ -64,6 +65,7 @@ use tenko_api::{
     ui::UiSource,
 };
 use tenko_auth::{AuthConfig, AuthService, hibp::HibpFilter};
+use tenko_cluster::kek::PeerKekFetch;
 use tenko_core::{Coded, Role, RoleSet};
 use tenko_ipam::{IpamConfig, IpamService};
 use tenko_jobs::{EngineConfig, JobEngine, RunnerHandle};
@@ -71,7 +73,10 @@ use tenko_store::{
     Store,
     raft::{RaftStore, RaftStoreConfig, SmDurability, SnapshotPolicy},
 };
-use tenko_vault::{KekInit, KekRing, StoreVault};
+use tenko_vault::{
+    KekInit, KekRing, StoreVault, VaultStart,
+    distribution::{KekAdmin, KekPeers, NoPeers},
+};
 use tokio::{sync::watch, task::JoinHandle};
 
 use self::imports::Imports;
@@ -761,12 +766,13 @@ async fn start(
     let ring: KekRing = steps
         .run("kek", async {
             let kek = resolved.kek.clone();
+            let options = resolved.kek_options.clone();
             let init = if fresh {
                 KekInit::CreateIfMissing
             } else {
                 KekInit::Require
             };
-            let ring = tokio::task::spawn_blocking(move || kek.load(init))
+            let ring = tokio::task::spawn_blocking(move || kek.load_with(init, &options))
                 .await
                 .map_err(|error| StartError::new("kek", "start.kek.panic", error.to_string()))?
                 .map_err(|error| StartError::coded("kek", &error))?;
@@ -894,15 +900,47 @@ async fn start(
         .await?;
     running.tasks.extend(cluster_peers.tasks());
 
-    let vault = steps
+    let (vault, kek_admin) = steps
         .run("vault", async {
-            let vault = StoreVault::open(Arc::clone(&store_dyn), ring)
+            let start = VaultStart {
+                node: resolved.node_id,
+                provider: resolved.kek.provider_name().to_owned(),
+            };
+            let vault = StoreVault::start(Arc::clone(&store_dyn), ring, &start)
                 .await
                 .map_err(|error| StartError::coded("vault", &error))?;
-            let summary = format!("{} key(s) loaded", vault.ring().ids().count());
-            Ok((Arc::new(vault), summary))
+            let vault = Arc::new(vault);
+            // Missing generations are fetched from the members of a cluster; a single
+            // controller has nobody to ask.
+            let peers: Arc<dyn KekPeers> = match cluster_peers.port() {
+                Some(_) => Arc::new(PeerKekFetch::new(cluster_peers.peers().clone())),
+                None => Arc::new(NoPeers),
+            };
+            let admin = KekAdmin::new(
+                Arc::clone(&vault),
+                resolved.kek.clone(),
+                resolved.kek_options.clone(),
+                resolved.node_id,
+                peers,
+            );
+            let summary = format!(
+                "{} key(s) loaded, {}",
+                vault.ring().ids().count(),
+                vault.ring().active().protection().describe()
+            );
+            Ok(((vault, admin), summary))
         })
         .await?;
+    // Every controller follows the KEK state (new generations, rotations); the leader runs
+    // the rotation itself.
+    running.tasks.push(tokio::spawn(
+        Arc::clone(&kek_admin).run(leader::stop_token(running.stop.subscribe())),
+    ));
+    running.tasks.push(leader::spawn(
+        Arc::clone(&store_dyn),
+        vec![kek_admin.rotation_service()],
+        running.stop.subscribe(),
+    ));
 
     let tls = steps
         .run("tls", async {
@@ -1265,6 +1303,8 @@ async fn start(
                 server.extensions.insert(Arc::clone(reconciler));
             }
             server.extensions.insert(Arc::clone(&operator_secrets));
+            server.extensions.insert(Arc::clone(&kek_admin));
+            state.set_kek(Arc::clone(&kek_admin));
             let running = tenko_api::start(server, state).await.map_err(|error| {
                 let code = match &error {
                     tenko_api::ServeError::Bind { .. } => "start.api.bind",

@@ -287,6 +287,10 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
         |listener| listener.ui(),
     );
     warnings.extend(state.notices_list());
+    let (kek, kek_warnings) = state
+        .kek()
+        .map_or_else(|| (None, Vec::new()), |kek| super::kek::summary_of(&kek));
+    warnings.extend(kek_warnings);
     if ui.stub {
         warnings.push(crate::dto::system::StatusWarning {
             code: "sys.ui.stub".to_owned(),
@@ -323,6 +327,7 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
         modules: state.modules(),
         warnings,
         cluster: state.cluster_status(),
+        kek,
     }
 }
 

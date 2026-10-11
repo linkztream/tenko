@@ -37,7 +37,7 @@ use tenko_store::{
     KeyRange, ReadConsistency, ReadViewExt as _, Store as _,
     raft::{RaftStore, clear_joining},
 };
-use tenko_vault::{KekRing, distribution, kek::KekOptions};
+use tenko_vault::{KekRing, distribution};
 use tokio::{sync::watch, task::JoinHandle};
 
 use crate::{
@@ -321,7 +321,7 @@ pub async fn start_peers(
     let ring = distribution::fetch_missing(
         store,
         &resolved.kek,
-        &KekOptions::default(),
+        &resolved.kek_options,
         ring,
         resolved.node_id,
         &PeerKekFetch::new(peers.clone()),

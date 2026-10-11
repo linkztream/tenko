@@ -14667,6 +14667,143 @@
         }
       }
     },
+    "/api/v1/system/kek": {
+      "get": {
+        "tags": [
+          "kek"
+        ],
+        "summary": "Get the key-encryption key status of this controller and the installation",
+        "operationId": "get_kek_status",
+        "responses": {
+          "200": {
+            "description": "The key-encryption key status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KekStatusView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "This server has no key-encryption key service (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/kek/rotate": {
+      "post": {
+        "tags": [
+          "kek"
+        ],
+        "summary": "Start an online rotation of the key-encryption key",
+        "operationId": "rotate_kek",
+        "responses": {
+          "202": {
+            "description": "The rotation is requested; the status shows it in phase `requested`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KekStatusView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`), or the session was not signed in within the last five minutes (`auth.step_up_required`, parameter `required`: `fresh`); personal tokens are refused with `auth.forbidden`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A rotation is already running (`vault.kek.rotation_in_progress`), or a concurrent request won (`sys.store.precondition_failed`; repeat the request)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "This server has no key-encryption key service (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/system/modules": {
       "get": {
         "tags": [
@@ -21418,6 +21555,41 @@
           }
         }
       },
+      "ControllerKekView": {
+        "type": "object",
+        "description": "How one controller of the installation protects its key-encryption key.",
+        "required": [
+          "node",
+          "provider",
+          "protection",
+          "strongest",
+          "updated_at"
+        ],
+        "properties": {
+          "node": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The controller.",
+            "minimum": 0
+          },
+          "protection": {
+            "$ref": "#/components/schemas/KekProtectionView",
+            "description": "The protection at its last start."
+          },
+          "provider": {
+            "type": "string",
+            "description": "Its provider: `dpapi`, `systemd_creds`, `systemd_credential` or `file`."
+          },
+          "strongest": {
+            "$ref": "#/components/schemas/KekProtectionView",
+            "description": "The strongest protection this controller ever had; a `protection` weaker than this is\na downgrade."
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the controller last started and recorded this."
+          }
+        }
+      },
       "ControllerMode": {
         "type": "string",
         "description": "How the network gets onto the switches and access points.",
@@ -26032,6 +26204,312 @@
           "title": {
             "$ref": "#/components/schemas/MessageKey",
             "description": "Translatable title."
+          }
+        }
+      },
+      "KekGenerationView": {
+        "type": "object",
+        "description": "One key generation of the installation, as this controller sees it.",
+        "required": [
+          "id",
+          "active",
+          "loaded"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "Whether the generation wraps new data keys."
+          },
+          "created_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the installation first listed the generation; absent for a generation that only\nthis controller holds."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "The identifier that envelopes name."
+          },
+          "loaded": {
+            "type": "boolean",
+            "description": "Whether this controller holds the generation."
+          },
+          "protection": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/KekProtectionView",
+                "description": "How this controller protects the generation; absent when it does not hold it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "KekProtectionView": {
+        "type": "object",
+        "description": "How a key-encryption key is protected at rest.",
+        "required": [
+          "code",
+          "text",
+          "weak"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "A stable code: `dpapi_user`, `dpapi_machine`, `systemd_creds_host`,\n`systemd_creds_tpm2`, `plain_file` or `memory`. The UI localizes by this code."
+          },
+          "text": {
+            "type": "string",
+            "description": "A short English description, for logs and support."
+          },
+          "weak": {
+            "type": "boolean",
+            "description": "Whether the protection is weak enough to warn about: a plain key file or memory only."
+          }
+        }
+      },
+      "KekRotationPhase": {
+        "type": "string",
+        "description": "Where an online rotation of the key-encryption key stands.",
+        "enum": [
+          "requested",
+          "distributing",
+          "rewrapping",
+          "done",
+          "failed"
+        ]
+      },
+      "KekRotationView": {
+        "type": "object",
+        "description": "An online rotation of the key-encryption key: in progress, or the last one.",
+        "required": [
+          "phase",
+          "requested_at",
+          "requested_by",
+          "updated_at",
+          "waiting_for",
+          "unreachable",
+          "rewrapped"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the rotation failed."
+          },
+          "finished_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the rotation ended (`done` or `failed`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "generation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The new generation, once the leader created it."
+          },
+          "phase": {
+            "$ref": "#/components/schemas/KekRotationPhase",
+            "description": "Where the rotation stands."
+          },
+          "requested_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When an administrator asked for it."
+          },
+          "requested_by": {
+            "type": "string",
+            "description": "Who asked, as a principal subject such as `user:<id>`."
+          },
+          "rewrapped": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many envelopes are re-wrapped under the new generation so far.",
+            "minimum": 0
+          },
+          "unreachable": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "Controllers that could not be reached while the generation was distributed; each\nfetches it when it starts."
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the phase last changed."
+          },
+          "waiting_for": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "Reachable controllers that have not taken the new generation yet."
+          }
+        }
+      },
+      "KekStatusView": {
+        "type": "object",
+        "description": "The key-encryption keys of this controller and of the installation.",
+        "required": [
+          "node",
+          "provider",
+          "protection",
+          "active",
+          "epoch",
+          "generations",
+          "missing",
+          "refused",
+          "controllers",
+          "warnings"
+        ],
+        "properties": {
+          "active": {
+            "type": "string",
+            "description": "The active generation, which wraps new data keys."
+          },
+          "controllers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ControllerKekView"
+            },
+            "description": "How every controller of the installation protects its key, by node."
+          },
+          "epoch": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The KEK epoch of the active generation; it grows with every activation.",
+            "minimum": 0
+          },
+          "generations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KekGenerationView"
+            },
+            "description": "Every generation of the installation and every generation loaded here, oldest first."
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Generations of the installation that this controller does not hold; it fetches them\nfrom a member."
+          },
+          "node": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The controller that answers.",
+            "minimum": 0
+          },
+          "protection": {
+            "$ref": "#/components/schemas/KekProtectionView",
+            "description": "The protection of its active key-encryption key."
+          },
+          "provider": {
+            "type": "string",
+            "description": "Its provider: `dpapi`, `systemd_creds`, `systemd_credential` or `file`."
+          },
+          "refused": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RefusedGenerationView"
+            },
+            "description": "Plain generation files that this controller refused to load."
+          },
+          "rotation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/KekRotationView",
+                "description": "The online rotation in progress, or the last one; absent when there never was one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "strongest": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/KekProtectionView",
+                "description": "The strongest protection this controller ever had; absent before its first start was\nrecorded."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatusWarning"
+            },
+            "description": "Conditions to look at: `vault.kek.weak`, `vault.kek.downgrade`, `vault.kek.missing`\nand `vault.kek.rotation_failed`."
+          }
+        }
+      },
+      "KekSummaryView": {
+        "type": "object",
+        "description": "The key-encryption key fragment of `GET /system/status`.",
+        "required": [
+          "provider",
+          "protection",
+          "active",
+          "generations",
+          "epoch"
+        ],
+        "properties": {
+          "active": {
+            "type": "string",
+            "description": "The active generation."
+          },
+          "epoch": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The KEK epoch.",
+            "minimum": 0
+          },
+          "generations": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many generations this controller holds.",
+            "minimum": 0
+          },
+          "protection": {
+            "$ref": "#/components/schemas/KekProtectionView",
+            "description": "The protection of its active key-encryption key."
+          },
+          "provider": {
+            "type": "string",
+            "description": "The provider of this controller: `dpapi`, `systemd_creds`, `systemd_credential` or\n`file`."
+          },
+          "rotation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/KekRotationPhase",
+                "description": "The phase of the online rotation in progress or the last one; absent when there never\nwas one."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -33908,6 +34386,31 @@
           }
         }
       },
+      "RefusedGenerationView": {
+        "type": "object",
+        "description": "A plain generation file that this controller refused to load because a sealed generation\nis older (the protection would silently drop).",
+        "required": [
+          "generation",
+          "file",
+          "protection"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "The file name, without its directory."
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The generation number in the file name.",
+            "minimum": 0
+          },
+          "protection": {
+            "$ref": "#/components/schemas/KekProtectionView",
+            "description": "The protection of the file (plain)."
+          }
+        }
+      },
       "RegistrationResponse": {
         "type": "object",
         "description": "A registration result from the browser (`RegistrationResponseJSON`).",
@@ -36701,6 +37204,17 @@
               {
                 "$ref": "#/components/schemas/ClusterStatus",
                 "description": "The node transport of a controller (OPS-04, OPS-08): enrolled and connected nodes,\ntheir versions; absent on servers without it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kek": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/KekSummaryView",
+                "description": "The key-encryption key of this controller (IAM-15): provider, protection, the active\ngeneration and the online rotation; absent on servers without the vault service."
               },
               {
                 "type": "null"

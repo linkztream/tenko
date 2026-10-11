@@ -92,6 +92,8 @@ pub(crate) struct Platform {
     pub(crate) notices: Mutex<BTreeMap<String, StatusWarning>>,
     /// The node transport's summary, as the server binary last reported it.
     pub(crate) cluster: Mutex<Option<ClusterStatus>>,
+    /// The key-encryption key service of the server binary, for the status fragment.
+    pub(crate) kek: ArcSwapOption<tenko_vault::distribution::KekAdmin>,
 }
 
 impl Default for AppState {
@@ -139,6 +141,7 @@ impl AppState {
                 modules: options.modules,
                 notices: Mutex::new(BTreeMap::new()),
                 cluster: Mutex::new(None),
+                kek: ArcSwapOption::empty(),
             }),
             store,
         }
@@ -204,6 +207,16 @@ impl AppState {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
+    }
+
+    /// Sets the key-encryption key service whose summary `GET /system/status` reports.
+    pub fn set_kek(&self, kek: Arc<tenko_vault::distribution::KekAdmin>) {
+        self.platform.kek.store(Some(kek));
+    }
+
+    /// The key-encryption key service, once the server binary set it.
+    pub fn kek(&self) -> Option<Arc<tenko_vault::distribution::KekAdmin>> {
+        self.platform.kek.load_full()
     }
 
     fn notices(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, StatusWarning>> {

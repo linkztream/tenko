@@ -11,6 +11,7 @@ use utoipa::ToSchema;
 
 pub mod audit;
 pub mod events;
+pub mod kek;
 pub mod release;
 pub mod system;
 pub mod updates;

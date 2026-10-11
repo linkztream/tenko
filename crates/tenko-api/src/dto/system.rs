@@ -52,6 +52,10 @@ pub struct SystemStatus {
     /// their versions; absent on servers without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cluster: Option<ClusterStatus>,
+    /// The key-encryption key of this controller (IAM-15): provider, protection, the active
+    /// generation and the online rotation; absent on servers without the vault service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kek: Option<super::kek::KekSummaryView>,
 }
 
 /// The node transport of a controller, for `GET /system/status`.

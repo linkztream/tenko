@@ -41,7 +41,7 @@ use tenko_api::{
 use tenko_auth::settings::Profile;
 use tenko_cluster::ca::TrustedProxies;
 use tenko_core::{NodeId, RoleSet, net::HostName};
-use tenko_vault::kek::{CredsKey, DpapiScope, KekConfig};
+use tenko_vault::kek::{CredsKey, DEFAULT_CREDENTIAL, DpapiScope, KekConfig, KekOptions};
 
 /// Prefix of the environment variables that override configuration keys.
 pub const ENV_PREFIX: &str = "TENKO_";
@@ -628,6 +628,8 @@ pub enum KekProviderName {
     Dpapi,
     /// `systemd-creds`-sealed key generations (Linux).
     SystemdCreds,
+    /// A credential the service manager decrypts from `LoadCredentialEncrypted=` (Linux).
+    SystemdCredential,
     /// An explicit key file (containers, CI); warns at every start.
     File,
 }
@@ -636,14 +638,15 @@ pub enum KekProviderName {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct KekSection {
-    /// `platform` (default), `dpapi`, `systemd_creds` or `file`.
+    /// `platform` (default), `dpapi`, `systemd_creds`, `systemd_credential` or `file`.
     pub provider: KekProviderName,
     /// Directory of the key generations (default `<data_dir>/kek`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dir: Option<PathBuf>,
     /// DPAPI: `user` (default, bound to the service account) or `machine`.
     pub scope: DpapiScope,
-    /// `systemd-creds`: `auto` (default), `tpm2` or `host`.
+    /// `systemd-creds`: `auto` (default), `tpm2` or `host`; `systemd_credential`: the key the
+    /// credential was encrypted with, as the operator declares it.
     pub with_key: CredsKey,
     /// `systemd-creds`: path of the tool (default: found on `PATH`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -651,9 +654,16 @@ pub struct KekSection {
     /// `file`: the active key file (32 raw bytes, 64 hexadecimal digits or base64).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
-    /// `file`: earlier key files still needed until a rotation completes.
+    /// `systemd_credential`: the credential name, as in `LoadCredentialEncrypted=<name>:…`
+    /// (default `tenko_kek`).
+    pub credential: String,
+    /// `file`: earlier key files, `systemd_credential`: earlier credential names, still
+    /// needed until a rotation completes.
     #[serde(deserialize_with = "paths_or_list")]
     pub retired: Vec<PathBuf>,
+    /// Load, create and import plain key generations even beside a sealed one (R15). Off by
+    /// default: such a generation is refused and an alarm is raised.
+    pub allow_plain: bool,
 }
 
 impl Default for KekSection {
@@ -665,7 +675,9 @@ impl Default for KekSection {
             with_key: CredsKey::Auto,
             tool: None,
             path: None,
+            credential: DEFAULT_CREDENTIAL.to_owned(),
             retired: Vec::new(),
+            allow_plain: false,
         }
     }
 }
@@ -1315,6 +1327,8 @@ pub struct Resolved {
     pub tls: TlsSpec,
     /// The KEK provider.
     pub kek: KekConfig,
+    /// The policy of the key generations: `[kek] allow_plain` and the generation directory.
+    pub kek_options: KekOptions,
 }
 
 /// The layout of a data directory.
@@ -1424,7 +1438,7 @@ impl Config {
         let listen = self.server.listen_addrs()?;
         self.server.validate()?;
         let tls = self.tls.resolve(self.profile.name)?;
-        let kek = self.kek.resolve(&data_dir)?;
+        let (kek, kek_options) = self.kek.resolve(&data_dir)?;
         self.rate_limit
             .to_config()
             .validate()
@@ -1468,6 +1482,7 @@ impl Config {
             listen,
             tls,
             kek,
+            kek_options,
         })
     }
 
@@ -1634,8 +1649,12 @@ impl TlsSection {
 }
 
 impl KekSection {
-    fn resolve(&self, data_dir: &Path) -> Result<KekConfig, ConfigError> {
+    fn resolve(&self, data_dir: &Path) -> Result<(KekConfig, KekOptions), ConfigError> {
         let dir = self.dir.clone().unwrap_or_else(|| data_dir.join("kek"));
+        let options = KekOptions {
+            allow_plain: self.allow_plain,
+            file_dir: Some(dir.clone()),
+        };
         let config = match self.provider {
             KekProviderName::Platform => match KekConfig::platform_default(data_dir) {
                 KekConfig::Dpapi { .. } => KekConfig::Dpapi {
@@ -1668,6 +1687,27 @@ impl KekSection {
                     "kek.provider = \"systemd_creds\" is available on Linux only",
                 ));
             }
+            KekProviderName::SystemdCredential if cfg!(unix) => {
+                if self.credential.trim().is_empty() {
+                    return Err(ConfigError::invalid("kek.credential must not be empty"));
+                }
+                KekConfig::SystemdCredential {
+                    name: self.credential.clone(),
+                    retired: self
+                        .retired
+                        .iter()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .collect(),
+                    dir,
+                    with_key: self.with_key,
+                    directory: None,
+                }
+            }
+            KekProviderName::SystemdCredential => {
+                return Err(ConfigError::invalid(
+                    "kek.provider = \"systemd_credential\" is available on Linux only",
+                ));
+            }
             KekProviderName::File => KekConfig::File {
                 path: self.path.clone().ok_or_else(|| {
                     ConfigError::invalid("kek.provider = \"file\" needs kek.path")
@@ -1675,7 +1715,7 @@ impl KekSection {
                 retired: self.retired.clone(),
             },
         };
-        Ok(config)
+        Ok((config, options))
     }
 }
 
@@ -1841,6 +1881,70 @@ mod tests {
             [PathBuf::from("/a.key"), PathBuf::from("/b.key")]
         );
         assert_eq!(loaded.env_overrides.len(), 6);
+    }
+
+    #[test]
+    fn the_kek_options_follow_the_section() {
+        let loaded = from_text(
+            "data_dir = \"/d\"
+[kek]
+allow_plain = true
+dir = \"/keys\"
+",
+            &[],
+        )
+        .expect("parses");
+        let resolved = loaded.config.resolve().expect("resolves");
+        assert!(resolved.kek_options.allow_plain);
+        assert_eq!(
+            resolved.kek_options.file_dir.as_deref(),
+            Some(Path::new("/keys"))
+        );
+        let loaded = from_text(
+            "data_dir = \"/d\"
+",
+            &[],
+        )
+        .expect("parses");
+        let resolved = loaded.config.resolve().expect("resolves");
+        assert!(!resolved.kek_options.allow_plain);
+        assert_eq!(
+            resolved.kek_options.file_dir,
+            Some(resolved.data_dir.join("kek"))
+        );
+    }
+
+    #[test]
+    fn the_systemd_credential_provider_is_linux_only() {
+        let loaded = from_text(
+            "data_dir = \"/d\"
+[kek]
+provider = \"systemd_credential\"
+retired = [\"tenko_kek_old\"]
+",
+            &[],
+        )
+        .expect("parses");
+        assert_eq!(loaded.config.kek.credential, "tenko_kek");
+        let resolved = loaded.config.resolve();
+        if cfg!(unix) {
+            match resolved.expect("resolves").kek {
+                KekConfig::SystemdCredential {
+                    name,
+                    retired,
+                    directory,
+                    ..
+                } => {
+                    assert_eq!(name, "tenko_kek");
+                    assert_eq!(retired, ["tenko_kek_old"]);
+                    assert_eq!(directory, None);
+                }
+                other => panic!("unexpected provider {other:?}"),
+            }
+        } else {
+            let error = resolved.expect_err("refused");
+            assert!(error.message.contains("kek.provider"), "{error}");
+        }
     }
 
     #[test]

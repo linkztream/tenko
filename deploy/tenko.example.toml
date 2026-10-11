@@ -108,25 +108,33 @@ renew_check_hours = 24
 
 [kek]
 # The key-encryption key provider of the vault:
-#   "platform"       DPAPI on Windows, systemd-creds on Linux (default)
-#   "dpapi"          DPAPI-sealed key generations (Windows)
-#   "systemd_creds"  systemd-creds-sealed key generations (Linux; TPM2 where available);
-#                    without systemd-creds the key is a plain file and a warning is logged
-#   "file"           an explicit key file (containers, CI); warns at every start
+#   "platform"            DPAPI on Windows, systemd-creds on Linux (default)
+#   "dpapi"               DPAPI-sealed key generations (Windows)
+#   "systemd_creds"       systemd-creds-sealed key generations (Linux; TPM2 where available);
+#                         without systemd-creds the key is a plain file and a warning is logged
+#   "systemd_credential"  a credential the service manager decrypts (Linux: LoadCredentialEncrypted=
+#                         in the unit, host key or TPM2); further generations are wrapped under it
+#   "file"                an explicit key file (containers, CI); warns at every start
 provider = "platform"
 # Directory of the key generations (default <data_dir>/kek).
 # dir = "/var/lib/tenko/kek"
 # DPAPI: "user" binds the key to the service account (its profile must be loaded);
 # "machine" lets any process on the host unseal it.
 scope = "user"
-# systemd-creds: "auto", "tpm2" or "host".
+# systemd-creds: "auto", "tpm2" or "host". systemd_credential: the key the credential was
+# encrypted with, as declared ("tpm2" is reported as TPM2 protection).
 with_key = "auto"
 # systemd-creds: the tool (default: found on PATH).
 # tool = "/usr/bin/systemd-creds"
+# systemd_credential: the credential name, as in LoadCredentialEncrypted=<name>:... (default tenko_kek).
+# credential = "tenko_kek"
 # file: the active key (32 raw bytes, 64 hexadecimal digits or base64), and earlier keys
-# still needed until a rotation completes.
+# still needed until a rotation completes (systemd_credential: earlier credential names).
 # path = "/run/secrets/tenko_kek"
 retired = []
+# Load plain key generations found beside sealed ones. Off: such a generation is refused and
+# an alarm is raised, so the key store cannot silently fall back to an unprotected file.
+allow_plain = false
 
 [auth]
 # The passkey relying-party ID. Default: tls.public_host in mode c, otherwise the host name

@@ -48,6 +48,7 @@ tenko-store = { workspace = true, features = ["raft"] }
 tenko-vault = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["json"] }
 uuid = { workspace = true }

@@ -101,14 +101,11 @@ pub fn rotate(args: &RotateArgs, out: &mut impl Write, err: &mut impl Write) -> 
     }
 }
 
-/// The policy of the key generations. `kek.allow_plain` is not a setting yet, so plain
-/// generations beside sealed ones stay refused; the `file` provider keeps its generations
-/// in the data directory's `kek/`.
+/// The policy of the key generations as the configuration resolved it: `[kek] allow_plain`
+/// and the generation directory of the `file` provider (`[kek] dir`, by default the data
+/// directory.s `kek/`).
 fn options(resolved: &config::Resolved) -> KekOptions {
-    KekOptions {
-        allow_plain: false,
-        file_dir: Some(resolved.layout().kek()),
-    }
+    resolved.kek_options.clone()
 }
 
 async fn run(resolved: &config::Resolved, keep_retired: bool) -> Result<String, (u8, String)> {
