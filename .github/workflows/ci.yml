@@ -3,11 +3,19 @@ name: CI
 on:
   push:
     branches: [main]
+    # A push that changes only documentation or design files runs nothing: the
+    # changelog and the API document are validated by the gate before every push.
+    paths-ignore:
+      - "docs/**"
+      - "design/**"
+      - "**/*.md"
   pull_request:
   schedule:
-    # Nightly at 03:17 UTC: the Windows matrix runs here instead of on every push,
-    # because Windows runner minutes count double on private repositories.
-    - cron: "17 3 * * *"
+    # Weekly, Sunday 03:17 UTC: the Windows matrix, the cluster lab and the service
+    # smoke run here instead of on every push or every night, because Windows runner
+    # minutes count double on private repositories and the lab takes up to 90 minutes;
+    # run them by hand (workflow_dispatch) when a change needs them sooner.
+    - cron: "17 3 * * 0"
   workflow_dispatch:
 
 permissions:
@@ -49,7 +57,7 @@ jobs:
         run: cargo test --workspace --locked
 
   rust-windows:
-    name: Rust (windows-latest, nightly schedule)
+    name: Rust (windows-latest, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     env:
@@ -244,7 +252,7 @@ jobs:
   # so. Helpers of the lab live in the directory tests/cluster_support/, not in a file
   # named cluster_*.rs, which would be run as a test.
   cluster-lab:
-    name: Cluster lab (ubuntu-latest, nightly schedule)
+    name: Cluster lab (ubuntu-latest, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -285,7 +293,7 @@ jobs:
   # job runs it with the debug binary. Until then it runs the unit tests of the service
   # code, which are all that exists.
   windows-service-smoke:
-    name: Windows service smoke (windows-latest, nightly schedule)
+    name: Windows service smoke (windows-latest, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 60
@@ -320,7 +328,7 @@ jobs:
   # deploy/systemd/smoke.sh (start, stop, upgrade through the layout, restart on exit 12,
   # the credential path); the job runs it as root with the binary path as its only argument.
   systemd-smoke:
-    name: systemd smoke (ubuntu-latest, nightly schedule)
+    name: systemd smoke (ubuntu-latest, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -406,7 +414,7 @@ jobs:
   # fuzz/seeds/<target>/ is used as an extra corpus when it exists. All targets run even
   # after one crashes, then the job fails and keeps fuzz/artifacts/.
   fuzz-smoke:
-    name: Fuzz smoke (ubuntu-latest, nightly schedule)
+    name: Fuzz smoke (ubuntu-latest, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -482,7 +490,7 @@ jobs:
   # so a broken CHANGELOG.md is caught even when no product path changed.
   changelog:
     name: Changelog
-    # Not on the nightly schedule or on manual runs: there is no base to compare with.
+    # Not on the weekly schedule or on manual runs: there is no base to compare with.
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
