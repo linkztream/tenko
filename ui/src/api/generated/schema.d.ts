@@ -1676,6 +1676,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes/{id}/scan-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a probe's scan configuration */
+        get: operations["get_scan_config"];
+        /** Replace a probe's scan configuration */
+        put: operations["update_scan_config"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/scan/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume a probe's scans */
+        post: operations["resume_node_scans"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/scan/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop a probe's scans */
+        post: operations["stop_node_scans"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/observations": {
         parameters: {
             query?: never;
@@ -2156,6 +2208,92 @@ export interface paths {
         };
         /** List the available roles */
         get: operations["list_roles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List scans */
+        get: operations["list_scans"];
+        put?: never;
+        /** Start a scan */
+        post: operations["create_scan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scans/probes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the probes */
+        get: operations["list_scan_probes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scans/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume every probe's scans */
+        post: operations["resume_scans"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scans/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop every probe's scans */
+        post: operations["stop_scans"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scans/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a scan */
+        get: operations["get_scan"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3708,6 +3846,11 @@ export interface components {
             note?: string | null;
         };
         /**
+         * @description Where the configuration a node applies came from.
+         * @enum {string}
+         */
+        ConfigOrigin: "local" | "synced";
+        /**
          * @description What to do when the store already holds an object with different values.
          * @enum {string}
          */
@@ -4191,6 +4334,29 @@ export interface components {
          * @enum {string}
          */
         Deleted: "exclude" | "include" | "only";
+        /** @description The counts of one fact type. */
+        DiffCounts: {
+            /**
+             * Format: int32
+             * @description Seen with other attributes.
+             */
+            changed: number;
+            /**
+             * Format: int32
+             * @description Known before and not seen.
+             */
+            gone: number;
+            /**
+             * Format: int32
+             * @description Seen for the first time.
+             */
+            new: number;
+            /**
+             * Format: int32
+             * @description Seen as before.
+             */
+            unchanged: number;
+        };
         /** @description One line of a read-back diff: what the controller has and what the change would set. */
         DiffEntry: {
             /** @description The planned value; absent when the item goes away. */
@@ -4199,6 +4365,22 @@ export interface components {
             before?: string | null;
             /** @description What changes, for example `networks/iot/vlan`. */
             path: string;
+        };
+        /** @description One changed fact. */
+        DiffItem: {
+            after?: components["schemas"]["Observed"] | null;
+            before?: components["schemas"]["Observed"] | null;
+            /** @description How it changed. */
+            change: components["schemas"]["FactChange"];
+            /**
+             * @description The fact type (`address`, `services`, `os`, `name`, `vendor`, `attachment`,
+             *     `link`).
+             */
+            fact_type: string;
+            /** @description The source key (`probe:<node>:<method>`). */
+            source: string;
+            /** @description The subject key. */
+            subject: string;
         };
         /** @description SHA-256 digest as 64 lowercase hexadecimal characters */
         Digest: string;
@@ -4365,6 +4547,11 @@ export interface components {
             /** @description The topic. */
             topic: components["schemas"]["Topic"];
         };
+        /**
+         * @description How a fact changed in a scan.
+         * @enum {string}
+         */
+        FactChange: "new" | "changed" | "gone";
         /**
          * @description What a fact is about, within its source: the source's own identity of the thing it
          *     reports. Two reports of one source about one subject are the same fact, refreshed.
@@ -4711,6 +4898,32 @@ export interface components {
             mode: components["schemas"]["AssignmentMode"];
             /** @description Name. */
             name: components["schemas"]["HostName"];
+        };
+        /** @description `[scan.icmp]`. */
+        IcmpMethod: {
+            /**
+             * @description Runs on schedule (default true; needs `active`).
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Format: int64
+             * @description Seconds between two sweeps (default 1800).
+             * @default 1800
+             */
+            interval_secs: number;
+            /**
+             * Format: int64
+             * @description Milliseconds to wait for an echo reply (default 1000).
+             * @default 1000
+             */
+            timeout_ms: number;
+            /**
+             * Format: int64
+             * @description Seconds a sighting stays current.
+             * @default null
+             */
+            ttl_secs: number | null;
         };
         /**
          * @description A client-chosen idempotency key (`Idempotency-Key` header, API-04): 1 to 255 visible
@@ -5572,6 +5785,43 @@ export interface components {
             provider: string;
             rotation?: components["schemas"]["KekRotationPhase"] | null;
         };
+        /** @description One probe's kill switch command. */
+        KillSwitchCommand: {
+            /**
+             * Format: uuid
+             * @description The command (`GET /scans` does not list it; the probe's scope report shows the
+             *     switch).
+             */
+            command: string;
+            /**
+             * Format: int64
+             * @description The probe.
+             */
+            node: number;
+        };
+        /** @description The answer of a kill switch request. */
+        KillSwitchResult: {
+            /** @description The commands issued, one per probe. */
+            commands: components["schemas"]["KillSwitchCommand"][];
+        };
+        /**
+         * @description The kill switch of a probe: the last switch command from the controllers, else what the
+         *     probe reported.
+         */
+        KillSwitchView: {
+            at?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: uuid
+             * @description Who switched it.
+             */
+            by?: string | null;
+            /** @description Whether the probe confirmed the last switch command (false while it is offline). */
+            confirmed: boolean;
+            /** @description Why. */
+            reason?: string | null;
+            /** @description Whether it is on (or asked to be on). */
+            stopped: boolean;
+        };
         /** @description A language the UI offers to everyone (`GET /i18n/languages`). */
         LanguageInfo: {
             /** @description Whether the UI has the language built in. */
@@ -5745,6 +5995,38 @@ export interface components {
              */
             revision: number;
         };
+        /** @description `[scan.llmnr]`. */
+        LlmnrMethod: {
+            /**
+             * @description Runs on schedule (default true).
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Format: int64
+             * @description Seconds between two runs (default 3600).
+             * @default 3600
+             */
+            interval_secs: number;
+            /**
+             * Format: int32
+             * @description The port of the queries (default 5355).
+             * @default 5355
+             */
+            port: number;
+            /**
+             * Format: int64
+             * @description Milliseconds to wait for answers after the last query (default 1000).
+             * @default 1000
+             */
+            timeout_ms: number;
+            /**
+             * Format: int64
+             * @description Seconds a sighting stays current.
+             * @default null
+             */
+            ttl_secs: number | null;
+        };
         /**
          * @description How failed logins are punished (TGL-07).
          *
@@ -5893,6 +6175,49 @@ export interface components {
          * @enum {string}
          */
         MaskSource: "index" | "name" | "row_count" | "addresses" | "user";
+        /** @description `[scan.mdns]`. */
+        MdnsMethod: {
+            /**
+             * @description Runs on schedule (default true).
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * @description Where queries go (default `224.0.0.251:5353`).
+             * @default 224.0.0.251:5353
+             */
+            group: string;
+            /**
+             * Format: int64
+             * @description Seconds between two runs (default 900).
+             * @default 900
+             */
+            interval_secs: number;
+            /**
+             * Format: int64
+             * @description Seconds to collect answers and announcements per run (default 4).
+             * @default 4
+             */
+            listen_secs: number;
+            /**
+             * @description Also listens on port 5353 for announcements during the window (default true);
+             *     when another program holds the port exclusively, the run uses queries only.
+             * @default true
+             */
+            passive: boolean;
+            /**
+             * Format: int64
+             * @description Seconds a sighting stays current.
+             * @default null
+             */
+            ttl_secs: number | null;
+            /**
+             * Format: int32
+             * @description The port of unicast queries to known addresses (default 5353).
+             * @default 5353
+             */
+            unicast_port: number;
+        };
         /** @description The state digest of one member. */
         MemberDigest: {
             /**
@@ -7788,6 +8113,66 @@ export interface components {
          *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
          *     bound to the query that produced it.
          */
+        Page_ScanView: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description When. */
+                created_at: components["schemas"]["Timestamp"];
+                /** @description When the job stops waiting. */
+                deadline: components["schemas"]["Timestamp"];
+                diff?: components["schemas"]["ScanDiff"] | null;
+                /** @description Why it failed. */
+                error?: string | null;
+                finished_at?: components["schemas"]["Timestamp"] | null;
+                /**
+                 * Format: uuid
+                 * @description The run id.
+                 */
+                id: string;
+                /**
+                 * Format: uuid
+                 * @description The job that runs it (`GET /jobs/{id}`).
+                 */
+                job_id?: string | null;
+                /** @description What it does. */
+                kinds: components["schemas"]["ScanKind"][];
+                /** @description The networks it resolved to. */
+                networks: string[];
+                /** @description Every probe's part. */
+                probes: components["schemas"]["ProbeProgress"][];
+                /**
+                 * Format: int32
+                 * @description Percent done over every probe.
+                 */
+                progress: number;
+                /**
+                 * Format: uuid
+                 * @description Who asked.
+                 */
+                requested_by?: string | null;
+                /** @description The state. */
+                state: components["schemas"]["ScanState"];
+                /** @description What was asked for. */
+                target: components["schemas"]["ScanTarget"];
+                /**
+                 * Format: uuid
+                 * @description Their VRF.
+                 */
+                vrf?: string | null;
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
         Page_SessionSummary: {
             /** @description The items of this page, at most `limit` of them. */
             items: {
@@ -8384,10 +8769,155 @@ export interface components {
             kind: "node";
         };
         /**
+         * @description Where a stored probe configuration came from.
+         * @enum {string}
+         */
+        ProbeConfigOrigin: "api" | "offer";
+        /** @description A probe's scan configuration as the API shows it. */
+        ProbeConfigView: {
+            applied?: components["schemas"]["ProbeScope"] | null;
+            /**
+             * @description The configuration: the stored one, or the defaults when the controllers hold none
+             *     (the probe then runs on its own `[scan]` section).
+             */
+            config: components["schemas"]["ScanConfig"];
+            /**
+             * @description Whether the probe applies the stored configuration (its reported revision is at
+             *     least the stored one).
+             */
+            in_sync: boolean;
+            /** @description The probe's kill switch. */
+            kill_switch: components["schemas"]["KillSwitchView"];
+            /** @description SNMP devices that still need a vault secret before they are polled, by address. */
+            lacking_secrets?: string[];
+            /**
+             * Format: int64
+             * @description The probe.
+             */
+            node: number;
+            origin?: components["schemas"]["ProbeConfigOrigin"] | null;
+            /**
+             * Format: int64
+             * @description The revision of the stored configuration (the `ETag`).
+             */
+            revision?: number | null;
+            /** @description Whether the controllers hold a configuration for the probe. */
+            stored: boolean;
+            updated_at?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: uuid
+             * @description Who changed it last.
+             */
+            updated_by?: string | null;
+        };
+        /** @description Body of `GET /scans/probes`. */
+        ProbeList: {
+            /** @description Every probe: this controller's own probe role first, then the enrolled probes by id. */
+            items: components["schemas"]["ProbeSummary"][];
+        };
+        /**
          * @description How a probe saw its subject.
          * @enum {string}
          */
         ProbeMethod: "arp" | "nd" | "mdns" | "lldp" | "icmp" | "tcp_syn" | "os_fingerprint" | "snmp" | "tcp_connect" | "reverse_dns" | "llmnr" | "arp_sweep";
+        /** @description One probe's part of a scan as the API shows it. */
+        ProbeProgress: {
+            /**
+             * Format: int32
+             * @description Batches the probe queued for it.
+             */
+            batches?: number | null;
+            /**
+             * Format: uuid
+             * @description The command.
+             */
+            command: string;
+            /** @description The probe's last detail. */
+            detail?: string | null;
+            /**
+             * Format: int32
+             * @description Batches that arrived.
+             */
+            ingested: number;
+            /**
+             * Format: int64
+             * @description The probe.
+             */
+            node: number;
+            /**
+             * Format: int32
+             * @description Percent done.
+             */
+            progress: number;
+            /**
+             * @description The command's state: `pending`, `accepted`, `running`, `done`, `failed`,
+             *     `rejected`, `expired`, `cancelled`.
+             */
+            state: string;
+            /** @description The address or network it scans. */
+            target: string;
+        };
+        /** @description The scope a probe applies, as it last reported it. */
+        ProbeScope: {
+            /** @description Whether active probing is on (TGL-18). */
+            active: boolean;
+            applied_at?: components["schemas"]["Timestamp"] | null;
+            /** @description Why the newest configuration it received does not apply. */
+            error?: string | null;
+            /** @description Prefixes and addresses inside them it never probes (an address as a host prefix). */
+            exclude: string[];
+            /** @description The methods that run on schedule, by name (`arp`, `snmp`). */
+            methods: string[];
+            /**
+             * Format: int64
+             * @description The probe.
+             */
+            node: number;
+            /** @description Where its configuration came from. */
+            origin: components["schemas"]["ConfigOrigin"];
+            /** @description The prefixes it covers. */
+            prefixes: string[];
+            /** @description When a controller recorded the report. */
+            reported_at: components["schemas"]["Timestamp"];
+            /**
+             * Format: int64
+             * @description The configuration revision it applies; 0 for its own file.
+             */
+            revision: number;
+            /** @description Why, as recorded with the kill switch. */
+            stop_reason?: string | null;
+            /** @description Whether its kill switch is on. */
+            stopped: boolean;
+            /**
+             * Format: uuid
+             * @description The VRF its batches name, when its configuration names one.
+             */
+            vrf?: string | null;
+        };
+        /** @description A probe as the scan pages list it. */
+        ProbeSummary: {
+            applied?: components["schemas"]["ProbeScope"] | null;
+            /** @description Whether it is the probe role running inside a controller. */
+            in_process: boolean;
+            /** @description Whether it applies the stored configuration. */
+            in_sync: boolean;
+            /** @description Its kill switch. */
+            kill_switch: components["schemas"]["KillSwitchView"];
+            /** @description Its name; the controller's own probe is called `controller-<id>`. */
+            name: string;
+            /**
+             * Format: int64
+             * @description The node.
+             */
+            node: number;
+            /**
+             * Format: int64
+             * @description The revision of that configuration.
+             */
+            revision?: number | null;
+            /** @description Whether the controllers hold a configuration for it. */
+            stored: boolean;
+        };
         /**
          * @description The JSON body of every error response: RFC 9457 problem details plus the Tenko members
          *     `code`, `params` and `errors`.
@@ -8945,6 +9475,37 @@ export interface components {
             /** @description The value (the password of an imported login). */
             value: components["schemas"]["SecretString"];
         };
+        /** @description `[scan.reverse_dns]`. */
+        ReverseDnsMethod: {
+            /**
+             * @description Runs on schedule (default true).
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Format: int64
+             * @description Seconds between two runs (default 3600).
+             * @default 3600
+             */
+            interval_secs: number;
+            /**
+             * @description DNS servers (`192.0.2.53` or `192.0.2.53:53`); empty: the system's resolvers.
+             * @default []
+             */
+            servers: string[];
+            /**
+             * Format: int64
+             * @description Milliseconds to wait for an answer (default 2000).
+             * @default 2000
+             */
+            timeout_ms: number;
+            /**
+             * Format: int64
+             * @description Seconds a sighting stays current.
+             * @default null
+             */
+            ttl_secs: number | null;
+        };
         /**
          * Format: int64
          * @description Store revision: incremented by exactly one per applied write batch, store-wide. It is
@@ -9044,6 +9605,372 @@ export interface components {
          * @enum {string}
          */
         RunTrigger: "schedule" | "manual";
+        /** @description A method with only the schedule keys. */
+        ScanBasicMethod: {
+            /**
+             * @description Runs on schedule (default true).
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Format: int64
+             * @description Seconds between two runs.
+             * @default 300
+             */
+            interval_secs: number;
+            /**
+             * Format: int64
+             * @description Seconds a sighting stays current; default three intervals (15 minutes to 7 days).
+             * @default null
+             */
+            ttl_secs: number | null;
+        };
+        /** @description `[scan]`. */
+        ScanConfig: {
+            /**
+             * @description Active probing (TGL-18): ICMP sweeps and TCP connect scans. `false` keeps the probe
+             *     passive: neighbour tables, mDNS, LLMNR, reverse DNS and SNMP only.
+             * @default true
+             */
+            active: boolean;
+            /**
+             * @description IPv4 neighbours from the operating system's ARP table.
+             * @default {
+             *       "enabled": true,
+             *       "interval_secs": 300
+             *     }
+             */
+            arp: components["schemas"]["ScanBasicMethod"];
+            /**
+             * @description ARP sweep over raw sockets (declared; not implemented yet).
+             * @default {
+             *       "enabled": false,
+             *       "interval_secs": 3600
+             *     }
+             */
+            arp_sweep: components["schemas"]["ScanRawMethod"];
+            /**
+             * @description Blackout windows such as `mon-fri 08:00-17:00`: no method that sends packets runs in
+             *     them, and a run that reaches one stops.
+             * @default []
+             */
+            blackout: string[];
+            /**
+             * @description Most probes in flight at once (default 32).
+             * @default 32
+             */
+            concurrency: number;
+            /**
+             * @description Runs the scanner when the node has the `probe` role (default true).
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * @description Prefixes and addresses inside `prefixes` that are never probed or reported.
+             * @default []
+             */
+            exclude: string[];
+            /**
+             * @description ICMP echo sweeps.
+             * @default {
+             *       "enabled": true,
+             *       "interval_secs": 1800,
+             *       "timeout_ms": 1000
+             *     }
+             */
+            icmp: components["schemas"]["IcmpMethod"];
+            /**
+             * @description LLDP listening over raw sockets (declared; not implemented yet).
+             * @default {
+             *       "enabled": false,
+             *       "interval_secs": 3600
+             *     }
+             */
+            lldp: components["schemas"]["ScanRawMethod"];
+            /**
+             * @description LLMNR.
+             * @default {
+             *       "enabled": true,
+             *       "interval_secs": 3600,
+             *       "port": 5355,
+             *       "timeout_ms": 1000
+             *     }
+             */
+            llmnr: components["schemas"]["LlmnrMethod"];
+            /**
+             * Format: int32
+             * @description Largest IPv4 prefix, in addresses, that a sweep enumerates (default 4096); larger
+             *     prefixes and IPv6 networks are covered through the addresses other methods saw.
+             * @default 4096
+             */
+            max_hosts_per_prefix: number;
+            /**
+             * @description Multicast DNS.
+             * @default {
+             *       "enabled": true,
+             *       "group": "224.0.0.251:5353",
+             *       "interval_secs": 900,
+             *       "listen_secs": 4,
+             *       "passive": true,
+             *       "unicast_port": 5353
+             *     }
+             */
+            mdns: components["schemas"]["MdnsMethod"];
+            /**
+             * @description IPv6 neighbours from the operating system's neighbour table.
+             * @default {
+             *       "enabled": true,
+             *       "interval_secs": 300
+             *     }
+             */
+            nd: components["schemas"]["ScanBasicMethod"];
+            /**
+             * @description OS fingerprinting over raw sockets (declared; not implemented yet).
+             * @default {
+             *       "enabled": false,
+             *       "interval_secs": 3600
+             *     }
+             */
+            os_fingerprint: components["schemas"]["ScanRawMethod"];
+            /**
+             * Format: int32
+             * @description Probes per second; overrides `rate` when set.
+             * @default null
+             */
+            packets_per_second: number | null;
+            /**
+             * Format: int64
+             * @description Minimum milliseconds between two probes to the same address (default 100).
+             * @default 100
+             */
+            per_host_interval_ms: number;
+            /**
+             * @description The prefixes the probe covers (`192.0.2.0/24`, `2001:db8:10::/64`, or an address).
+             *     Nothing outside them is probed or reported. Empty: the scanner scans nothing.
+             * @default []
+             */
+            prefixes: string[];
+            /**
+             * @description Rate profile (TGL-19): `normal` (100 probes/s), `slow` (50), `slowest` (10) or
+             *     `unlimited`.
+             * @default normal
+             */
+            rate: components["schemas"]["ScanRateProfile"];
+            /**
+             * @description Reverse DNS of the discovered addresses.
+             * @default {
+             *       "enabled": true,
+             *       "interval_secs": 3600,
+             *       "servers": [],
+             *       "timeout_ms": 2000
+             *     }
+             */
+            reverse_dns: components["schemas"]["ReverseDnsMethod"];
+            /**
+             * @description SNMPv3 polling of switches.
+             * @default {
+             *       "attach_on_lldp_ports": false,
+             *       "devices": [],
+             *       "enabled": true,
+             *       "interval_secs": 900,
+             *       "retries": 2,
+             *       "timeout_ms": 2000
+             *     }
+             */
+            snmp: components["schemas"]["SnmpMethod"];
+            /**
+             * @description TCP connect scans.
+             * @default {
+             *       "enabled": true,
+             *       "interval_secs": 21600,
+             *       "ports": [
+             *         21,
+             *         22,
+             *         23,
+             *         25,
+             *         53,
+             *         80,
+             *         110,
+             *         135,
+             *         139,
+             *         143,
+             *         389,
+             *         443,
+             *         445,
+             *         515,
+             *         548,
+             *         554,
+             *         631,
+             *         636,
+             *         1883,
+             *         3306,
+             *         3389,
+             *         5432,
+             *         5900,
+             *         6053,
+             *         8006,
+             *         8080,
+             *         8123,
+             *         8443
+             *       ],
+             *       "targets": "known",
+             *       "timeout_ms": 1500,
+             *       "tls_hint": true
+             *     }
+             */
+            tcp_connect: components["schemas"]["TcpConnectMethod"];
+            /**
+             * @description TCP SYN scan over raw sockets (declared; not implemented yet).
+             * @default {
+             *       "enabled": false,
+             *       "interval_secs": 3600
+             *     }
+             */
+            tcp_syn: components["schemas"]["ScanRawMethod"];
+            /**
+             * @description The time zone of `blackout` (an IANA name such as `Europe/Stockholm`); not set: the
+             *     system time zone.
+             * @default null
+             */
+            timezone: string | null;
+            /**
+             * @description The VRF of the addresses (a VRF id); not set: the VRF of the probe's enrolment
+             *     token, else the default VRF.
+             * @default null
+             */
+            vrf: string | null;
+        };
+        /** @description What a scan found compared with the facts before it (SCAN-09). */
+        ScanDiff: {
+            /** @description Counts per fact type. */
+            counts: {
+                [key: string]: components["schemas"]["DiffCounts"];
+            };
+            /** @description The new, changed and gone facts, at most [`MAX_DIFF_ITEMS`]. */
+            items: components["schemas"]["DiffItem"][];
+            /** @description Whether the list or the baseline was cut. */
+            truncated: boolean;
+        };
+        /**
+         * @description What an on-demand scan does (SCAN-09).
+         * @enum {string}
+         */
+        ScanKind: "passive_refresh" | "port_scan" | "snmp_poll" | "os_fingerprint";
+        /**
+         * @description The rate profile of TGL-19.
+         * @enum {string}
+         */
+        ScanRateProfile: "normal" | "slow" | "slowest" | "unlimited";
+        /** @description A raw-socket method: declared, switched off, not implemented yet. */
+        ScanRawMethod: {
+            /**
+             * @description Runs on schedule once implemented (default false).
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Format: int64
+             * @description Seconds between two runs (default 3600).
+             * @default 3600
+             */
+            interval_secs: number;
+            /**
+             * Format: int64
+             * @description Seconds a sighting stays current.
+             * @default null
+             */
+            ttl_secs: number | null;
+        };
+        /** @description `POST /scans`. */
+        ScanRequest: {
+            /**
+             * Format: int32
+             * @description Seconds the job waits for the probes (30 to 3600, default 600).
+             */
+            deadline_secs?: number | null;
+            /** @description What to do; `passive_refresh` when empty. */
+            kinds?: components["schemas"]["ScanKind"][];
+            /** @description What to scan. */
+            target: components["schemas"]["ScanTarget"];
+            /**
+             * Format: uuid
+             * @description The VRF of an `address` or `network` target; the default VRF when absent. Prefix and
+             *     host targets bring their own.
+             */
+            vrf?: string | null;
+        };
+        /**
+         * @description The state of a scan run.
+         * @enum {string}
+         */
+        ScanState: "queued" | "running" | "done" | "partial" | "failed" | "cancelled";
+        /**
+         * @description What a scan covers: `{"kind": "prefix", "value": "<prefix id>"}`, `{"kind": "host",
+         *     "value": "<host id>"}`, `{"kind": "address", "value": "192.0.2.10"}` or `{"kind":
+         *     "network", "value": "192.0.2.0/28"}`.
+         */
+        ScanTarget: {
+            /** @description The kind. */
+            kind: components["schemas"]["ScanTargetKind"];
+            /** @description The id, address or network. */
+            value: string;
+        };
+        /**
+         * @description What kind of thing a scan covers.
+         * @enum {string}
+         */
+        ScanTargetKind: "prefix" | "host" | "address" | "network";
+        /**
+         * @description Which addresses `tcp_connect` scans.
+         * @enum {string}
+         */
+        ScanTcpTargets: "known" | "all";
+        /** @description A scan run as the API shows it. */
+        ScanView: {
+            /** @description When. */
+            created_at: components["schemas"]["Timestamp"];
+            /** @description When the job stops waiting. */
+            deadline: components["schemas"]["Timestamp"];
+            diff?: components["schemas"]["ScanDiff"] | null;
+            /** @description Why it failed. */
+            error?: string | null;
+            finished_at?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: uuid
+             * @description The run id.
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The job that runs it (`GET /jobs/{id}`).
+             */
+            job_id?: string | null;
+            /** @description What it does. */
+            kinds: components["schemas"]["ScanKind"][];
+            /** @description The networks it resolved to. */
+            networks: string[];
+            /** @description Every probe's part. */
+            probes: components["schemas"]["ProbeProgress"][];
+            /**
+             * Format: int32
+             * @description Percent done over every probe.
+             */
+            progress: number;
+            /**
+             * Format: uuid
+             * @description Who asked.
+             */
+            requested_by?: string | null;
+            /** @description The state. */
+            state: components["schemas"]["ScanState"];
+            /** @description What was asked for. */
+            target: components["schemas"]["ScanTarget"];
+            /**
+             * Format: uuid
+             * @description Their VRF.
+             */
+            vrf?: string | null;
+        };
         /**
          * @description A scope rule in the API (IAM-01): `{"kind": "prefix", "value": {"id": "...",
          *     "subtree": true}}`. Grants use `vrf`, `site` and `prefix`; `tenant` and `object` are
@@ -9505,6 +10432,88 @@ export interface components {
             tags?: components["schemas"]["Tag"][] | null;
         };
         /**
+         * @description SNMPv3 authentication protocols.
+         * @enum {string}
+         */
+        SnmpAuth: "sha1" | "sha224" | "sha256" | "sha384" | "sha512";
+        /** @description One switch to poll. */
+        SnmpDevice: {
+            /** @description Its management address. */
+            address: string;
+            auth?: components["schemas"]["SnmpAuth"] | null;
+            /**
+             * Format: uuid
+             * @description The operator secret of the vault that holds the authentication password; the probe
+             *     fetches it from the controllers when it polls and keeps it in memory only.
+             */
+            auth_secret?: string | null;
+            /** @description The SNMPv3 context name (default empty). */
+            context?: string;
+            /** @description The device name in attachments and links; default its `sysName`, else the address. */
+            name?: string | null;
+            /**
+             * Format: int32
+             * @description Its SNMP port (default 161).
+             */
+            port?: number;
+            privacy?: components["schemas"]["SnmpPrivacy"] | null;
+            /**
+             * Format: uuid
+             * @description The operator secret of the vault that holds the privacy password.
+             */
+            privacy_secret?: string | null;
+            /** @description The SNMPv3 user. */
+            user: string;
+        };
+        /** @description `[scan.snmp]`. */
+        SnmpMethod: {
+            /**
+             * @description Reports clients on ports where an LLDP neighbour is seen (default false: those
+             *     ports lead to other network devices, which report their own clients).
+             * @default false
+             */
+            attach_on_lldp_ports: boolean;
+            /**
+             * @description The switches.
+             * @default []
+             */
+            devices: components["schemas"]["SnmpDevice"][];
+            /**
+             * @description Runs on schedule (default true; needs at least one device).
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Format: int64
+             * @description Seconds between two polls (default 900).
+             * @default 900
+             */
+            interval_secs: number;
+            /**
+             * Format: int32
+             * @description Retries of an unanswered request (default 2).
+             * @default 2
+             */
+            retries: number;
+            /**
+             * Format: int64
+             * @description Milliseconds to wait for an answer (default 2000).
+             * @default 2000
+             */
+            timeout_ms: number;
+            /**
+             * Format: int64
+             * @description Seconds a sighting stays current.
+             * @default null
+             */
+            ttl_secs: number | null;
+        };
+        /**
+         * @description SNMPv3 privacy protocols.
+         * @enum {string}
+         */
+        SnmpPrivacy: "aes128";
+        /**
          * @description Sort direction of lists that only sort by their natural key.
          * @enum {string}
          */
@@ -9697,6 +10706,14 @@ export interface components {
          * @enum {string}
          */
         StepStateKind: "pending" | "running" | "done" | "skipped" | "waiting_for_observation" | "waiting_for_manual" | "failed" | "compensating" | "compensated" | "compensation_failed";
+        /** @description Body of `POST /nodes/{id}/scan/stop` and `POST /scans/stop`. */
+        StopRequest: {
+            /**
+             * @description Why, recorded with the kill switch on the probe and in the audit log (at most 200
+             *     characters).
+             */
+            reason?: string | null;
+        };
         /** @description Summary of the store status. */
         StoreSummary: {
             /** @description Sequence number of the newest audit record. */
@@ -9886,6 +10903,77 @@ export interface components {
             label: string;
             /** @description The target. */
             target: components["schemas"]["Target"];
+        };
+        /** @description `[scan.tcp_connect]`. */
+        TcpConnectMethod: {
+            /**
+             * @description Runs on schedule (default true; needs `active`).
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Format: int64
+             * @description Seconds between two scans (default 21600, six hours).
+             * @default 21600
+             */
+            interval_secs: number;
+            /**
+             * @description The ports (default [`DEFAULT_TCP_PORTS`]).
+             * @default [
+             *       21,
+             *       22,
+             *       23,
+             *       25,
+             *       53,
+             *       80,
+             *       110,
+             *       135,
+             *       139,
+             *       143,
+             *       389,
+             *       443,
+             *       445,
+             *       515,
+             *       548,
+             *       554,
+             *       631,
+             *       636,
+             *       1883,
+             *       3306,
+             *       3389,
+             *       5432,
+             *       5900,
+             *       6053,
+             *       8006,
+             *       8080,
+             *       8123,
+             *       8443
+             *     ]
+             */
+            ports: number[];
+            /**
+             * @description `known` (default) or `all`.
+             * @default known
+             */
+            targets: components["schemas"]["ScanTcpTargets"];
+            /**
+             * Format: int64
+             * @description Milliseconds to wait for a connection (default 1500).
+             * @default 1500
+             */
+            timeout_ms: number;
+            /**
+             * @description Sends a TLS `ClientHello` to every open port and records which answer as TLS
+             *     (default true). Nothing else is sent; no banner is read.
+             * @default true
+             */
+            tls_hint: boolean;
+            /**
+             * Format: int64
+             * @description Seconds a sighting stays current.
+             * @default null
+             */
+            ttl_secs: number | null;
         };
         /** @description A tenant (IPAM-01). */
         Tenant: {
@@ -19158,6 +20246,316 @@ export interface operations {
             };
         };
     };
+    get_scan_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id of the probe */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The configuration, with `ETag` once one is stored */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProbeConfigView"];
+                };
+            };
+            /** @description The identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to read nodes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not have the role probe (`node.config.not_a_probe`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_scan_config: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The revision read, as `"12"`; the write fails with 412 `node.config.revision_mismatch` when the configuration changed since */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Node id of the probe */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScanConfig"];
+            };
+        };
+        responses: {
+            /** @description The stored configuration, with `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProbeConfigView"];
+                };
+            };
+            /** @description The body is not valid JSON or a header is malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to change nodes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not have the role probe (`node.config.not_a_probe`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The configuration changed since it was read (`node.config.revision_mismatch`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A key is out of range or a password is given inline (`node.config.invalid`), or a named secret does not exist or is not an operator secret (`node.config.secret`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No vault to check the secrets against (`node.config.vault_unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    resume_node_scans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id of the probe */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The command is recorded */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KillSwitchResult"];
+                };
+            };
+            /** @description The identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to change nodes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not have the role probe (`node.config.not_a_probe`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    stop_node_scans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id of the probe */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StopRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description The command is recorded */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KillSwitchResult"];
+                };
+            };
+            /** @description The identifier or the body is malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to change nodes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not have the role probe (`node.config.not_a_probe`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     list_observations: {
         parameters: {
             query?: {
@@ -21622,6 +23020,315 @@ export interface operations {
             };
             /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_scans: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of scans, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ScanView"];
+                };
+            };
+            /** @description A parameter is unknown or malformed (`sys.invalid_query`) or the cursor is bad (`sys.invalid_cursor`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to read jobs */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_scan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScanRequest"];
+            };
+        };
+        responses: {
+            /** @description The run is queued; follow `GET /scans/{id}` */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanView"];
+                };
+            };
+            /** @description The body is not valid JSON (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to scan the target */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The prefix or host does not exist (`scan.job.target`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The target cannot be scanned (`scan.job.target`), no probe covers it (`scan.job.no_probe`) or a value is out of range (`scan.job.invalid`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_scan_probes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every probe */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProbeList"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to read nodes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    resume_scans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One command per probe is recorded */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KillSwitchResult"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to change nodes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    stop_scans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StopRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description One command per probe is recorded */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KillSwitchResult"];
+                };
+            };
+            /** @description The body is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to change nodes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_scan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Scan id (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The scan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanView"];
+                };
+            };
+            /** @description The identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed to read jobs */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such scan (`scan.job.not_found`) */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

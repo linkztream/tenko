@@ -468,10 +468,22 @@ impl StepHandler for AwaitStep {
 
     async fn execute(&self, params: &[u8], cx: &StepContext) -> Result<StepOutcome, StepError> {
         let params = params_of(params)?;
-        let filter = WatchFilter::tables([NODE_COMMANDS.name().clone()]);
+        // A cancel request is a write to the job row: it wakes the loop like a report.
+        let filter = WatchFilter::tables([
+            NODE_COMMANDS.name().clone(),
+            tenko_jobs::tables::JOBS.name().clone(),
+        ]);
         let mut changes = None;
         loop {
             let (view, run, _) = read_run(cx, params.run).await?;
+            // The engine checks a cancel request only between steps; ending here lets it
+            // roll back at once, and the dispatch's compensation cancels the commands.
+            if view
+                .get_typed(&tenko_jobs::tables::JOBS, &cx.job)?
+                .is_some_and(|(job, _)| job.cancel_requested.is_some())
+            {
+                return Ok(StepOutcome::Done { output: None });
+            }
             let now = Timestamp::now();
             let mut open = Vec::new();
             for part in &run.parts {

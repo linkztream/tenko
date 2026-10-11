@@ -125,8 +125,25 @@ pub async fn resolve(
     node: &NodeRecord,
     purposes: &[String],
 ) -> Result<Vec<NodeSecretValue>, ClusterError> {
+    resolve_for(sync, node.id, &node.name, &node.roles, purposes).await
+}
+
+/// As [`resolve`], for a node given by its id, name and roles: the in-process probe of a
+/// controller, which has no record in the node registry, resolves its secrets this way.
+///
+/// # Errors
+///
+/// As [`resolve`].
+pub async fn resolve_for(
+    sync: &NodeSync,
+    id: NodeId,
+    name: &str,
+    roles: &[Role],
+    purposes: &[String],
+) -> Result<Vec<NodeSecretValue>, ClusterError> {
+    let node = NodeRef { id, name, roles };
     for purpose in purposes {
-        if !purpose_allowed(purpose, &node.roles) {
+        if !purpose_allowed(purpose, node.roles) {
             return Err(ClusterError::new(
                 codes::SECRETS_PURPOSE,
                 403,
@@ -143,7 +160,7 @@ pub async fn resolve(
         .read(ReadConsistency::Local)
         .await
         .map_err(store_error)?;
-    let wanted: Vec<SecretUse> = uses_of(view.as_ref(), node.id, &node.roles)?
+    let wanted: Vec<SecretUse> = uses_of(view.as_ref(), node.id, node.roles)?
         .into_iter()
         .filter(|used| purposes.contains(&used.purpose))
         .collect();
@@ -186,7 +203,7 @@ pub async fn resolve(
     let mut audit = WriteBatch::new(principal.clone(), Timestamp::now());
     audit.audit(
         AuditDraft::success(SECRETS_ACTION, objects)
-            .with_context("node", node.name.clone())
+            .with_context("node", node.name.to_owned())
             .with_context("purposes", purposes_used.join(",")),
     );
     if let Err(error) = sync.store().propose(audit).await {
@@ -217,6 +234,13 @@ pub async fn resolve(
         });
     }
     Ok(values)
+}
+
+/// The node a resolution is for.
+struct NodeRef<'a> {
+    id: NodeId,
+    name: &'a str,
+    roles: &'a [Role],
 }
 
 /// Secrets a node received, held in memory: by purpose and secret id.

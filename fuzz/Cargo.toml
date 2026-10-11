@@ -92,3 +92,10 @@ path = "fuzz_targets/xliff_pack.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "node_config_payloads"
+path = "fuzz_targets/node_config_payloads.rs"
+test = false
+doc = false
+bench = false

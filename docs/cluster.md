@@ -238,7 +238,7 @@ A batch that fails as a whole (no known method, no collection time, a bad VRF, o
 
 ### 6.1 The buffer
 
-The buffer in `<data_dir>/node/buffer/` keeps every batch on disk until the controller has confirmed it. It sends the oldest batch first and one at a time, survives restarts of the node and of the controller, and replays in order when a connection is back. Delivery is at least once. Each batch has a sequence within the epoch of the buffer, a UUID that changes only when its epoch file is lost. The controller remembers the epoch and the highest sequence it ingested for each node, and answers a batch sent again after a lost answer with `duplicate` set, without ingesting it a second time. That memory is not persistent; a batch resent after a restart of the controller is ingested again, which the reconciler tolerates because a fact that did not change is not rewritten.
+The buffer in `<data_dir>/node/buffer/` keeps every batch on disk until the controller has confirmed it. It sends the oldest batch first and one at a time, survives restarts of the node and of the controller, and replays in order when a connection is back. Delivery is at least once. Each batch has a sequence within the epoch of the buffer, a UUID that changes only when its epoch file is lost. The controller remembers the epoch and the highest sequence it ingested for each node, and answers a batch sent again after a lost answer with `duplicate` set, without ingesting it a second time. That memory lives in the store (`cluster.ingest_cursors`), so it survives a restart of the controller and a batch resent to another controller is recognised there too; see `node-sync.md`.
 
 | Bound | Value |
 |---|---|

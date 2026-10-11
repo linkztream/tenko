@@ -368,7 +368,7 @@ fn a_controller_with_the_probe_role_runs_the_scanner_in_process() {
     let mut server = node.start();
     server
         .wait_stderr_line(WAIT, |line| {
-            line.contains("probe role: scanner over 127.0.0.1/32")
+            line.contains("scanner started") && line.contains("prefixes=127.0.0.1/32")
         })
         .unwrap_or_else(|| panic!("the scanner did not start\n{}", server.diagnostics()));
     let status_file = node.data_dir().join("scan").join("status.json");

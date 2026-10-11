@@ -1,8 +1,8 @@
 # Scanning: the probe's discovery methods
 
-This page describes the discovery methods of the Tenko DDI probe: what each method does, what it needs from the host and the network, what it reports to the reconciler and how often it runs, how its traffic is limited and held back (rate limits, blackout windows, the kill switch), how an operator starts a scan by hand and reads the state of the scanner, what an IDS or EDR product is likely to make of the traffic and how to allow-list the probe, and every key of the `[scan]` section. It is for the administrator who adds a probe to a segment, for the security team that has to tolerate or tune it, and for a developer who adds a method. It describes the behavior of the `tenko-scan` crate, of `tenko node scan` and of the scanner wiring in the node process of `tenko serve` in the `tenko` crate; where this page and the code differ, the code is right. The requirements are SCAN-01 to SCAN-09 in [REQUIREMENTS.md](REQUIREMENTS.md) and the toggles TGL-18 and TGL-19 in [SECURITY-PROFILES.md](SECURITY-PROFILES.md).
+This page describes the discovery methods of the Tenko DDI probe: what each method does, what it needs from the host and the network, what it reports to the reconciler and how often it runs, how its traffic is limited and held back (rate limits, blackout windows, the kill switch), how an operator starts a scan by hand or from the controller and reads the state of the scanner, what an IDS or EDR product is likely to make of the traffic and how to allow-list the probe, and every key of the `[scan]` section. It is for the administrator who adds a probe to a segment, for the security team that has to tolerate or tune it, and for a developer who adds a method. It describes the behavior of the `tenko-scan` crate (the scanner and the scan control of the controllers), of `tenko node scan` and of the scanner wiring in the node process of `tenko serve` in the `tenko` crate, and of the `/scans` and `/nodes/{id}/scan-config` routes of `tenko-api`; where this page and the code differ, the code is right. The requirements are SCAN-01 to SCAN-09 in [REQUIREMENTS.md](REQUIREMENTS.md) and the toggles TGL-18 and TGL-19 in [SECURITY-PROFILES.md](SECURITY-PROFILES.md).
 
-This release (Slice 2, WP2.3) ships the methods that need no special privileges: the neighbor tables of the probe host, ICMP echo, TCP connect scans, reverse DNS, mDNS, LLMNR and SNMPv3 polling. The methods that need raw sockets (`arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp`) are declared and capability-checked but do not run yet (section 9). Section 14 lists what comes next.
+This release ships the methods that need no special privileges: the neighbor tables of the probe host, ICMP echo, TCP connect scans, reverse DNS, mDNS, LLMNR and SNMPv3 polling. The methods that need raw sockets (`arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp`) are declared and capability-checked but do not run yet (section 9). The controllers hold the scan configuration of each probe, start scans on demand and switch the kill switch (sections 7.5 to 7.7); how this travels to the probes is in [node-sync.md](node-sync.md). Section 14 lists what comes next.
 
 Terms used below: a **probe** is a node with the role `probe`; ARP and neighbor discovery do not cross routers, so there is one probe per segment (SCAN-01) and the probe in a DMZ is its own trust zone. A **method** is one way of looking at the segment (`arp`, `icmp`, `snmp` and so on). A **run** is one execution of a method. A **batch** is what one run hands over: the sightings of the run, a flag that says whether the batch is complete, and the time it was collected. A **sighting** is one thing a probe saw. A **fact** is the reconciler's latest knowledge of one subject from one source (see [reconciliation.md](reconciliation.md)). The **scope** is the set of prefixes a probe may look at, minus the exclusions. The **known addresses** are the addresses this probe saw recently through any method.
 
@@ -25,9 +25,9 @@ Contents:
 
 ## 1. Overview
 
-The scanner runs inside the probe node process, `tenko serve --roles probe` (SCAN-01). It starts with the process, runs every method on its own schedule, and stops with the process. Each run produces one batch. On a probe node the batch goes into the observation buffer of the node, which sends it to the controller over the mutual TLS node transport and keeps it through outages (see [cluster.md](cluster.md#6-observations-and-the-buffer)). On a controller node that also has the `probe` role, the scanner starts with the controller and its batches go straight to the reconciler, under the node id of the controller. In both cases the controller files the sightings under the source `probe:<node>:<method>`, so each method of each probe is its own source with its own facts and its own expiry (see [reconciliation.md](reconciliation.md#21-sources-and-keys)).
+The scanner runs inside the probe node process, `tenko serve --roles probe` (SCAN-01). It starts with the process, runs every method on its own schedule, and stops with the process. Each run produces one batch. On a probe node the batch goes into the observation buffer of the node, which sends it to the controller over the mutual TLS node transport and keeps it through outages (see [cluster.md](cluster.md#6-observations-and-the-buffer)). On a controller node that also has the `probe` role, the scanner starts with the controller and its batches go through a local buffer to the ingest of the controller, under the node id of the controller (see [node-sync.md](node-sync.md#8-the-relay-buffer)). In both cases the controller files the sightings under the source `probe:<node>:<method>`, so each method of each probe is its own source with its own facts and its own expiry (see [reconciliation.md](reconciliation.md#21-sources-and-keys)).
 
-The probe reads the `[scan]` section of its own `tenko.toml` for now. The controller will hand out scan configuration to its probes with the configuration sync of a later release (WP3.1); until then the profile values of TGL-18 and TGL-19 are set in that file (sections 4 and 6). The same applies to SNMP credentials: they sit in the probe's file, or in password files that the file names (section 12.3). Keep those files readable by the service account only. Tenko does not check their permissions.
+Where a probe gets its configuration depends on whether the controllers hold one for it. Once they do, the probe runs on that configuration, which an administrator edits with `PUT /api/v1/nodes/{id}/scan-config` (section 7.5) and which the controllers stream to the probe and the probe applies atomically ([node-sync.md](node-sync.md#4-on-the-node)); the profile values of TGL-18 and TGL-19 (sections 4 and 6) are set there. Until the probe has synced, and for `tenko node scan run`, it reads the `[scan]` section of its own `tenko.toml`; at its first connection it offers that section to the controllers as its initial configuration, without passwords, and the controllers keep it only when they hold none. SNMP credentials in a configuration held by the controllers are named as operator secrets of the vault with the purpose `snmp`: the probe fetches them from the controllers over its mutual TLS connection each time it polls, keeps them in memory only and never writes them to disk (section 12.3, [node-sync.md](node-sync.md#6-secrets)). The probe's own file can still name passwords or password files for the devices; they serve only while the probe runs on its own file, and they never leave the probe. Keep such files readable by the service account only. Tenko does not check their permissions.
 
 A probe needs no scan configuration to start, and an empty `[scan]` section is valid, but without `prefixes` the scanner scans nothing: scans never leave the configured prefixes (section 4). A minimal section for one segment:
 
@@ -326,11 +326,11 @@ The profiles map to the settings of the probe's file like this:
 | Hardened | Off (passive only) unless enabled per segment | Slowest | `active = false`, `rate = "slowest"`; `active = true` for a segment where scanning is allowed |
 | Lab | On | Unlimited | `active = true`, `rate = "unlimited"` |
 
-`active` and `rate` are set in the probe's file until the controller hands out the values of the profile with the configuration sync of a later release (section 14). The profile matrix also names OS fingerprinting for Home and the full port range for Lab. In this release OS fingerprinting is the declared raw method `os_fingerprint` (section 9), and the connect scan takes a list of at most 1,024 ports, so the full range of 65,535 ports cannot be listed.
+`active` and `rate` are set in the configuration the controllers hold for the probe (section 7.5), or in the probe's own file while it holds none. The profile matrix also names OS fingerprinting for Home and the full port range for Lab. In this release OS fingerprinting is the declared raw method `os_fingerprint` (section 9), and the connect scan takes a list of at most 1,024 ports, so the full range of 65,535 ports cannot be listed.
 
 ## 7. Kill switch, on-demand runs and status
 
-The commands of this section run on the probe node and read its configuration the way `tenko node status` does. They take `--config FILE` (or `TENKO_CONFIG`), `--data-dir PATH` and `--json`. SCAN-09 asks for on-demand scans from the UI, the API and the CLI; this release provides the CLI (section 14).
+The commands of this section run on the probe node and read its configuration the way `tenko node status` does. They take `--config FILE` (or `TENKO_CONFIG`), `--data-dir PATH` and `--json`. SCAN-09 asks for on-demand scans from the UI, the API and the CLI. Sections 7.1 to 7.4 describe the CLI on the probe; sections 7.5 to 7.7 describe what the controllers add: the configuration of a probe, the kill switch from the API and scans on demand as jobs. A probe reads the `[scan]` section of its own `tenko.toml` for the CLI commands, also when the controllers hold a configuration for it (section 7.5).
 
 ### 7.1 The kill switch
 
@@ -368,7 +368,7 @@ icmp: partial, 3 sighting(s), 13 probe(s) in 1.4 s
 dry run: nothing was queued
 ```
 
-A run that is queued prints `queued for the controller; the running node process sends it within a second`, and a run with nothing to report and nothing to expire prints `nothing to queue`. A run whose batch could not be queued (the buffer directory cannot be written, the disk is full) prints `tenko node scan run: error: the batch could not be queued: ...` on standard error and ends with the exit status 1; what the run saw is lost. A run that was refused prints the error with its code and ends with the exit status of section 13. With `--json` the command prints the object `{"method", "run", "queued", "batch"}`, where `run` is the record of section 7.3, `queued` says whether a batch went to the buffer, and `batch` is the batch of a dry run; the exit statuses are the same. A run with the outcome `failed` ends with the exit status 1; a run that ended `partial` or `cancelled` and whose batch was queued ends with 0. Scan jobs with progress and a result diff, started from the UI and the API, come with a later package.
+A run that is queued prints `queued for the controller; the running node process sends it within a second`, and a run with nothing to report and nothing to expire prints `nothing to queue`. A run whose batch could not be queued (the buffer directory cannot be written, the disk is full) prints `tenko node scan run: error: the batch could not be queued: ...` on standard error and ends with the exit status 1; what the run saw is lost. A run that was refused prints the error with its code and ends with the exit status of section 13. With `--json` the command prints the object `{"method", "run", "queued", "batch"}`, where `run` is the record of section 7.3, `queued` says whether a batch went to the buffer, and `batch` is the batch of a dry run; the exit statuses are the same. A run with the outcome `failed` ends with the exit status 1; a run that ended `partial` or `cancelled` and whose batch was queued ends with 0. Scans with progress and a result diff, started from the API, are in section 7.7.
 
 ### 7.3 Status
 
@@ -433,6 +433,82 @@ The rows of `tcp_syn`, `os_fingerprint` and `lldp` look like the one of `arp_swe
 | `cancelled` | The kill switch, a blackout window, the deadline or the shutdown stopped the run. What it saw went out as a batch that is not complete |
 | `failed` | The method could not run at all. No batch was made, and the error is shown |
 
+### 7.5 Configuration from the controller
+
+The controllers hold one scan configuration per probe. It has the keys of the `[scan]` section (section 12), written as JSON, with one difference: SNMP passwords are named as operator secrets of the vault (`auth_secret`, `privacy_secret`, section 12.3), never as passwords or password files. The routes need the Discovery module and a controller; all paths are below `/api/v1`.
+
+| Route | Needs | Answer |
+|---|---|---|
+| `GET /nodes/{id}/scan-config` | Read on the node (viewers, operators, administrators) | 200 with the configuration and its state; the `ETag` is the revision of the stored configuration and is absent while none is stored |
+| `PUT /nodes/{id}/scan-config` | Update on the node (administrators) | 200 with the stored configuration and its new `ETag`. `If-Match` with the revision read makes the write fail with 412 `node.config.revision_mismatch` when the configuration changed since |
+| `GET /scans/probes` | Read on nodes | 200 `{"items": [...]}`: every probe, this controller's own probe role first (named `controller-<id>`), then the enrolled probes by id |
+
+`{id}` is the node id of a probe, or the node id of the controller when it runs the probe role. The answer of `GET` and `PUT` holds:
+
+| Field | Meaning |
+|---|---|
+| `config` | The stored configuration, or the defaults while the controllers hold none |
+| `stored` | Whether the controllers hold a configuration for the probe. While `false`, the probe runs on its own file |
+| `origin` | `api` (an administrator set it) or `offer` (the probe offered its own file at its first connection) |
+| `revision`, `updated_at`, `updated_by` | The revision of the stored configuration, when it changed and by whom |
+| `applied` | What the probe last reported it applies: `prefixes`, `exclude`, `methods`, `vrf`, `active`, `stopped`, `stop_reason`, `origin` (`synced` or `local`), `revision`, `error`, `applied_at` and `reported_at` |
+| `in_sync` | Whether the probe reports a synced configuration at least as new as the stored one and no error. True while none is stored |
+| `lacking_secrets` | The addresses of SNMP devices that still need a vault secret before they are polled |
+| `kill_switch` | Section 7.6 |
+
+The items of `GET /scans/probes` hold `node`, `name`, `in_process`, `stored`, `revision`, `applied`, `in_sync` and `kill_switch`.
+
+A `PUT` is checked before anything is written. The body must validate as a stored configuration: every key as in section 12, and no `auth_password`, `auth_password_file`, `privacy_password` or `privacy_password_file`, which are refused with 422 `node.config.invalid`. Every secret it names must exist and be an operator secret of the vault (422 `node.config.secret`; 503 `node.config.vault_unavailable` when the controller has no vault). The node must exist (404 `cluster.node.not_found`) and have the role `probe` (409 `node.config.not_a_probe`). The write is an inline job `scan.edit` with the audit record `scan.config.update` (the prefixes and the number of secrets). The probe receives the new row within seconds, over the open stream, and replaces its scanner; the configuration it had before keeps running if the new one does not build, and the error shows in `applied.error` ([node-sync.md](node-sync.md#43-the-probes-configuration)).
+
+A probe offers its file at its first connection with the passwords and password files removed. A device of that file that relied on a password therefore has no credentials in the stored configuration: it is listed in `lacking_secrets`, and the probe skips it with a note (`waits for a vault secret for its passwords`) until an administrator puts the vault secrets into the configuration with a `PUT`. References to vault secrets in the offered file are dropped as well, because a probe cannot name secrets it was never given. The probe's own file stays in use for `tenko node scan run` and `tenko node scan status`, which never read the configuration from the controllers.
+
+### 7.6 The kill switch from the controllers
+
+| Route | Needs | Effect |
+|---|---|---|
+| `POST /nodes/{id}/scan/stop` | Update on the node (administrators) | Turns the kill switch of one probe on |
+| `POST /nodes/{id}/scan/resume` | Update on the node | Turns it off |
+| `POST /scans/stop` | Update on nodes | Turns the kill switch of every probe on: this controller's own probe role and every enrolled node with the role `probe` at that moment |
+| `POST /scans/resume` | Update on nodes | Turns it off for every probe |
+
+The stop routes take an optional body `{"reason": "text"}`; the reason is trimmed and kept to 200 characters, and defaults to `stopped from the controllers`. The answer is 202 with `{"commands": [{"node", "command"}]}`, one command per probe. The request is audited as `scan.stop` or `scan.resume`, with the scope `node` or `installation` and, for a stop, the reason. A node that does not exist gives 404 `cluster.node.not_found`, and a node without the role `probe` gives 409 `node.config.not_a_probe`. With no probe the installation-wide routes record nothing and answer an empty list.
+
+The switch is a command that the controllers deliver to the probe ([node-sync.md](node-sync.md#9-the-kill-switch)): a connected probe has it as soon as the write is applied on the controller it talks to, and stops its running scans at once with the grace of section 7.1. A probe that is offline receives the command when it connects, and it does not expire. The probe keeps the switch in the file of section 8, so a restart does not undo it, and it stays on until a `resume` arrives or `tenko node scan resume` runs on the probe. A probe enrolled after an installation-wide stop does not get it.
+
+`kill_switch` in the answers of section 7.5 has these fields: `stopped` (what the controllers asked for last), `reason`, `at` (when) and `by` (the user), and `confirmed`, which is true once the probe has reported the command done and false while the probe has not (it is offline, or has not applied it yet). The probe's own report of the switch is `applied.stopped` and `applied.stop_reason`. An on-demand scan that is running on a probe is stopped by the switch like any other run.
+
+### 7.7 Scans on demand from the controllers
+
+`POST /api/v1/scans` starts a scan of a network and answers 202 with the run, which `GET /api/v1/scans/{id}` shows from then on. The body:
+
+| Field | Meaning | Default |
+|---|---|---|
+| `target` | `{"kind", "value"}`. `kind` is `prefix` (the id of a prefix of IPAM), `host` (the id of a host, scanning its addresses), `address` (`192.0.2.10`) or `network` (`192.0.2.0/28`) | Required |
+| `kinds` | What to run: `passive_refresh` (`arp`, `nd`, `mdns`, `llmnr`, `reverse_dns`), `port_scan` (`tcp_connect`), `snmp_poll` (`snmp`) and `os_fingerprint` (`os_fingerprint`, which is a raw-socket method that does not run yet, section 9) | `["passive_refresh"]` |
+| `vrf` | The VRF of an `address` or `network` target. A `prefix` or `host` target brings its own | The default VRF |
+| `deadline_secs` | How long the job waits for the probes, 30 to 3,600 (422 `scan.job.invalid` outside) | 600 |
+
+It needs the right to execute on the target: on the prefix or the host for those targets, on addresses in general for an `address` and on prefixes in general for a `network`. Operators and administrators have it. A prefix or host that does not exist is 404 `scan.job.target`, and a host without addresses or a value that does not fit its kind is 422 `scan.job.target`. If the scope of no probe covers the target, the request is refused with 422 `scan.job.no_probe`. The scope of a probe is the prefixes of its stored configuration minus its exclusions, else what it last reported; a probe whose scanner is switched off in its stored configuration covers nothing, and a probe in another VRF is left out. Each probe that overlaps the target gets the part of it that lies inside its scope. The request is audited as `scan.run`, with the run id, the networks and the kinds.
+
+The scan is the job `scan.run` with three steps (the job id is `job_id` of the run, and `GET /api/v1/jobs/{id}` shows it):
+
+1. `scan.dispatch` reads the facts of the target that the probes' methods reported before (the baseline, at most 20,000 facts) and issues one `scan.run` command to every probe, with the methods of the kinds in order, the part of the target inside its scope and the time left to the deadline. Blackout windows and the kill switch of the probe apply as for any run (sections 5 and 7.1): the command asks for no exception.
+2. `scan.await` waits until every command is over and its batches have arrived, or until the deadline. A command that is not finished at the deadline is marked `expired`.
+3. `scan.diff` compares what the batches reported with the baseline and stores the result in the run.
+
+The run has these fields: `id`, `job_id`, `target`, `networks` (what the target resolved to), `vrf`, `kinds`, `requested_by`, `created_at`, `deadline`, `finished_at`, `error`, and:
+
+| Field | Meaning |
+|---|---|
+| `state` | `queued` (waiting for the job runner), `running`, `done` (every probe finished and every batch arrived), `partial` (the deadline passed, or a probe failed, or batches are missing; the diff covers what arrived), `failed` (no probe covered the target any more when the job started) or `cancelled` (cancelled with its job: the commands that were not over are withdrawn and the probes are asked to cancel) |
+| `progress` | Percent, the mean over the probes; 100 once the run ended |
+| `probes` | Per probe: `node`, `command`, `target` (the part it scans), `state` of the command (`pending`, `accepted`, `running`, `done`, `failed`, `rejected`, `expired`, `cancelled`), `progress`, `detail` (the method it runs, or its notes), `batches` and `ingested` |
+| `diff` | Once the run ended |
+
+The diff counts, per fact type (`address`, `services`, `os`, `name`, `vendor`, `attachment`, `link`), the facts that are `new` (not known before), `changed` (other attributes), `unchanged` and `gone`, and lists the new, changed and gone facts as `items` with `change`, `fact_type`, `subject`, `source` and the attributes `before` and `after`; the list holds at most 5,000 items and `truncated` says that it or the baseline was cut. A fact is `gone` only when it was current in the baseline, came from a method of this run on a probe whose command finished, and the scan did not see it. A probe whose command did not finish removes nothing. The facts of the scan are also ingested by the reconciler like those of a scheduled run, so the scan updates the picture of the network as well as describing the difference.
+
+`GET /api/v1/scans` lists the runs, newest first, with the usual `limit` and `cursor` parameters, and only the counts of each diff; it needs the right to read jobs (viewers, operators and administrators). `GET /api/v1/scans/{id}` shows one run with every item of its diff and answers 404 `scan.job.not_found` for an unknown id. Runs are kept for 30 days, and the commands behind them and their results for 7 days after they finish.
+
 ## 8. Files
 
 The scanner keeps its files in `<data_dir>/scan/`. None of them holds a secret.
@@ -442,6 +518,7 @@ The scanner keeps its files in `<data_dir>/scan/`. None of them holds a secret.
 | `status.json` | What the running scanner last wrote for `tenko node scan status` (section 7.3): scope, limits, capabilities, and for each method the state, the next run and the last run. Replaced atomically at every change of state and at least once a minute |
 | `known.json` | The known addresses (section 3.4): per address, the methods that saw it and until when. Written after every batch that was delivered, read at start, at most 65,536 addresses |
 | `stop` | The kill switch (section 7.1). The file exists while the switch is on and holds the time and the reason |
+| `relay/` | Only on a controller with the `probe` role: the local buffer between its scanner and its own ingest ([node-sync.md](node-sync.md#8-the-relay-buffer)) |
 
 Batches that `tenko node scan run` queues go to `<data_dir>/node/buffer/incoming/` (see [cluster.md](cluster.md#61-the-buffer)).
 
@@ -513,7 +590,7 @@ The script keeps the rows of the registry `MA-L`, collapses white space in the n
 
 ## 12. Configuration reference
 
-The `[scan]` section of `tenko.toml`, with the example in `deploy/tenko.example.toml`. A probe reads its own file (section 1).
+The `[scan]` section of `tenko.toml`, with the example in `deploy/tenko.example.toml`. A probe reads its own file until it holds a configuration from the controllers, and for `tenko node scan` (section 1). The configuration that the controllers hold for a probe (section 7.5) has the same keys in JSON, with the differences of section 12.3.
 
 ### 12.1 `[scan]`
 
@@ -562,9 +639,35 @@ Each switch is one `[[scan.snmp.devices]]` entry.
 | `auth_password` | Not set | The authentication password in clear in `tenko.toml`. At least 8 characters |
 | `privacy` | Not set | Privacy protocol: `aes128`. Needs `auth`. Not set: no encryption |
 | `privacy_password_file`, `privacy_password` | Not set | The privacy password, like the authentication password |
+| `auth_secret` | Not set | The id of the operator secret of the vault that holds the authentication password. The probe fetches it from the controllers each time it polls |
+| `privacy_secret` | Not set | The id of the operator secret that holds the privacy password |
 | `context` | Empty | The SNMPv3 context name |
 
-`auth` needs `auth_password_file` or `auth_password`, and `privacy` needs `privacy_password_file` or `privacy_password`. The scanner reads a password file each time it polls the device. An inline password is shown as `(hidden)` in the output of `tenko config check` and in debug output; a password file is shown by its path only. Until the controller hands out the credentials from the vault (IAM-16, section 14), they live in the probe's files. A password in clear in `tenko.toml` makes the node process log a warning at start. Prefer password files that only the service account can read.
+The password of a device comes from one of three places: a file (`auth_password_file`), the key in `tenko.toml` (`auth_password`) or an operator secret of the vault (`auth_secret`). A vault secret cannot be combined with the other two. In the probe's own file `auth` needs one of the three, and `privacy` needs `privacy_password_file`, `privacy_password` or `privacy_secret`. The scanner reads a password file each time it polls the device. An inline password is shown as `(hidden)` in the output of `tenko config check` and in debug output; a password file is shown by its path only. A password in clear in `tenko.toml` makes the node process log a warning at start. Prefer password files that only the service account can read, or the vault.
+
+**In a configuration held by the controllers** (section 7.5) a device names vault secrets only. `auth_password`, `auth_password_file`, `privacy_password` and `privacy_password_file` are refused with 422 `node.config.invalid`, and every secret must exist as an operator secret of the vault (422 `node.config.secret`); the controllers store the list of the secrets with the purpose `snmp`. An example of a device in the JSON body of `PUT /api/v1/nodes/{id}/scan-config`:
+
+```json
+{
+  "snmp": {
+    "devices": [
+      {
+        "address": "192.0.2.2",
+        "name": "switch-a.example.test",
+        "user": "tenko",
+        "auth": "sha256",
+        "auth_secret": "<id of an operator secret>",
+        "privacy": "aes128",
+        "privacy_secret": "<id of another operator secret>"
+      }
+    ]
+  }
+}
+```
+
+A device with `auth` or `privacy` and without the matching secret is kept but not polled; the probe notes that it waits for a vault secret, and the device is listed in `lacking_secrets`. This is the state after a probe's offer, which carries no passwords (section 7.5).
+
+The probe fetches the values over its mutual TLS connection at the start of every `snmp` run, and the controller audits each hand-over as `cluster.node.secrets` ([node-sync.md](node-sync.md#6-secrets)). The values stay in memory and are not written to disk. While no controller answers, the probe uses the values of its last fetch since the process started; after a restart without a reachable controller it has none, the `snmp` run is partial with the note that the secrets could not be fetched, and the other methods run as usual. A value that is not text is not used. A secret is handed only to the probe whose own configuration names it.
 
 ### 12.4 Checks and environment variables
 
@@ -589,7 +692,7 @@ The list of SNMP devices is easier to keep in the file.
 
 ## 13. Error codes
 
-A code is stable. The scanner reports it in the log, in the status (`error` and `notes` of a run) and in the output of `tenko node scan`.
+A code is stable. The scanner reports it in the log, in the status (`error` and `notes` of a run) and in the output of `tenko node scan`. The codes of the scan control of the controllers follow in a second table.
 
 | Code | Meaning | Exit status of `tenko node scan` |
 |---|---|---|
@@ -605,13 +708,26 @@ A code is stable. The scanner reports it in the log, in the status (`error` and 
 | `scan.snmp.auth` | A device rejected the user: unknown user, wrong password or protocol (wrong digest), wrong privacy password (decryption error), an unsupported security level, or a time window the device did not accept after a resynchronization | 0, as a note of the run |
 | `scan.snmp.protocol` | A device broke the protocol: it answered with an error status (such as `noSuchName` or `tooBig`), rejected its own engine id after a new discovery, or sent an unexpected report | 0, as a note of the run |
 
+The codes of the scan control answer the API routes of sections 7.5 to 7.7 as problem details with the status shown. The configuration sync and the commands have codes of their own, listed in [node-sync.md](node-sync.md#113-error-codes).
+
+| Code | Status | Meaning |
+|---|---|---|
+| `cluster.node.not_found` | 404 | The node is not enrolled in this installation |
+| `node.config.not_a_probe` | 409 | The node does not have the role `probe` |
+| `node.config.invalid` | 422 | The configuration does not validate as a stored one: a key out of range (the message names it), or a password or a password file in an SNMP device |
+| `node.config.secret` | 422 | A vault secret that the configuration names does not exist or is not an operator secret |
+| `node.config.revision_mismatch` | 412 | `If-Match` names a revision other than the stored one; read the configuration again |
+| `node.config.vault_unavailable` | 503 | The controller has no vault to check the secrets against |
+| `scan.job.target` | 404, 422 | The prefix or host of the target does not exist (404), or the target cannot be scanned: a host without addresses, a value that does not fit its kind (422) |
+| `scan.job.no_probe` | 422 | The scope of no probe covers the target; set the prefixes of a probe first |
+| `scan.job.invalid` | 422 | A value of the request is out of range, such as `deadline_secs` |
+| `scan.job.not_found` | 404 | There is no scan run with that id |
+
 The last column is the exit status of `tenko node scan run` when it ends with that error. A run that ended `partial` or `cancelled` exits with 0 once its batch is queued. A run whose batch could not be queued exits with 1 and prints `the batch could not be queued` with the cause on standard error; the status of the node process shows the same cause as `delivery_error` of the run and the line `the batch could not be queued: ...` below the method. `status`, `stop` and `resume` exit with 3 when the configuration does not load, and `stop` and `resume` with 1 when the switch file cannot be written or removed.
 
 ## 14. What comes next
 
-- **WP3.1, scan configuration from the controller.** The controller hands the scan configuration, including the profile values of TGL-18 and TGL-19, to its probes with the configuration sync, and SNMP credentials come from the vault (IAM-16, SCAN-05) instead of the file of the probe.
-- **On-demand scan jobs (SCAN-09).** A network, prefix or host can be scanned from the UI and the API as a job with progress and a result diff against the previous scan. This release has the command line only, and it runs one method at a time.
-- **Raw-socket methods.** `arp_sweep`, `tcp_syn`, `os_fingerprint` and passive `lldp` (SCAN-02, SCAN-04, SCAN-08), with the capability setup of section 9.
+- **Raw-socket methods.** `arp_sweep`, `tcp_syn`, `os_fingerprint` and passive `lldp` (SCAN-02, SCAN-04, SCAN-08), with the capability setup of section 9. They are planned only if the owner decides so (S3-Q17, WP3.14 in [plans/slice-3-plan.md](plans/slice-3-plan.md)); until then the probes refuse the method `os_fingerprint` with `scan.unavailable`, so a scan of that kind alone fails on them.
 - **A fresher OUI registry at every release**: the table is regenerated by hand today (section 11); a release step could do it.
-- **The scan scope for the orphan rule.** The reconciler does not yet use the scope of a probe to tell a device that is gone from one that was not scanned (see [reconciliation.md](reconciliation.md#8-what-later-sources-add)).
+- **The scan scope for the orphan rule.** The probes report their effective scope to the controllers (`applied` in section 7.5), but the reconciler does not yet use it to tell a device that is gone from one that was not scanned (see [reconciliation.md](reconciliation.md#8-what-later-sources-add)).
 - **Further sources.** SCAN-03 names DHCP snooping, which this release does not have; DHCP lease facts come with Tenko DHCP. CDP tables of switches are not read; the SNMP method reads LLDP.

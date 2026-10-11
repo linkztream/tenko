@@ -156,21 +156,7 @@ async fn run(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> u8 {
         version()
     );
     let (stop, stopped) = watch::channel(false);
-    let scanner = match crate::node::scan::start(
-        &resolved,
-        Arc::new(crate::node::scan::AgentSink::new(Arc::clone(&agent))),
-        stopped.clone(),
-    ) {
-        Ok(started) => started.map(|(_, task)| task),
-        Err(error) => {
-            tracing::error!(
-                code = error.code(),
-                "the scanner cannot start: {}",
-                error.detail()
-            );
-            return exit::CONFIG;
-        }
-    };
+    let scanner = crate::node::scan::start_on_node(&resolved, &agent, stopped.clone());
     let task = tokio::spawn(Arc::clone(&agent).run(stopped));
     {
         let mut out = std::io::stdout().lock();
@@ -197,12 +183,13 @@ async fn run(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> u8 {
         stopping();
     }
     let _ = stop.send(true);
-    if let Some(scanner) = scanner
-        && tokio::time::timeout(crate::node::scan::STOP_TIMEOUT, scanner)
+    for task in scanner {
+        if tokio::time::timeout(crate::node::scan::STOP_TIMEOUT, task)
             .await
             .is_err()
-    {
-        tracing::warn!("the scanner did not stop in time");
+        {
+            tracing::warn!("the scanner did not stop in time");
+        }
     }
     if tokio::time::timeout(STOP_TIMEOUT, task).await.is_err() {
         tracing::warn!("the node process did not stop in time");

@@ -81,6 +81,7 @@ use model::{
     ScanTarget, ScanView,
     tables::{PROBE_CONFIG, RUNS},
 };
+pub use offer::decode_offer;
 
 use crate::config::{SNMP_SECRET_PURPOSE, ScanConfig};
 
@@ -221,6 +222,37 @@ impl ScanControl {
     /// The leader service that prunes finished commands and old scan runs.
     pub fn housekeeping(&self) -> Arc<dyn LeaderService> {
         Arc::new(housekeeping::Housekeeping::new(self.shared.clone()))
+    }
+
+    /// Keeps the `[scan]` section of this controller's own probe role as its initial
+    /// configuration when the installation holds none for it, as a probe node's offer does
+    /// (passwords removed, audited as `scan.config.offer` under the scanner); `Ok(false)`
+    /// when one exists or this controller runs no probe role.
+    ///
+    /// # Errors
+    ///
+    /// `node.config.invalid` (422) for a section that does not validate as a stored
+    /// configuration, or a store error.
+    pub async fn offer_local(&self, config: &ScanConfig) -> Result<bool, CodedError> {
+        let Some(local) = self.shared.local else {
+            return Ok(false);
+        };
+        let (config, _) = config.offer_form();
+        config.validate_stored().map_err(|error| {
+            CodedError::new(codes::CONFIG_INVALID, 422, error.detail().to_owned())
+        })?;
+        offer::keep(
+            &self.shared,
+            local,
+            &format!("controller-{local}"),
+            config,
+            tenko_core::Principal::System {
+                component: tenko_core::SystemComponent::Scan,
+                on_behalf_of: None,
+            },
+        )
+        .await
+        .map_err(tenko_cluster::error::ClusterError::into_coded)
     }
 
     /// The store.
@@ -714,6 +746,16 @@ impl ScanControl {
     ) -> Result<Revision, CodedError> {
         steps::commit(&self.engine, cx, summary, targets, batch).await
     }
+}
+
+/// The leader service `scan.housekeeping` over `store` without the rest of the scan
+/// control, for the leader runner that starts before the job engine exists; `local` is
+/// this controller's node id when it runs the probe role.
+pub fn housekeeping_service(
+    store: Arc<dyn Store>,
+    local: Option<NodeId>,
+) -> Arc<dyn LeaderService> {
+    Arc::new(housekeeping::Housekeeping::new(Shared { store, local }))
 }
 
 /// The vault secrets a configuration names, as node secret uses.

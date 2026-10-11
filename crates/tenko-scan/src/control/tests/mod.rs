@@ -1,5 +1,12 @@
 //! Tests of the scan control against the in-memory store and a job engine.
 
+mod config;
+mod kill_switch;
+mod offers;
+mod runs;
+mod submit;
+mod support;
+
 use super::*;
 
 #[test]

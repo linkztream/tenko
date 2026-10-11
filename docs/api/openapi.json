@@ -10497,6 +10497,408 @@
         }
       }
     },
+    "/api/v1/nodes/{id}/scan-config": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Get a probe's scan configuration",
+        "operationId": "get_scan_config",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id of the probe",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The configuration, with `ETag` once one is stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeConfigView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to read nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node (`cluster.node.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The node does not have the role probe (`node.config.not_a_probe`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Replace a probe's scan configuration",
+        "operationId": "update_scan_config",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id of the probe",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision read, as `\"12\"`; the write fails with 412 `node.config.revision_mismatch` when the configuration changed since",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The stored configuration, with `ETag`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeConfigView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON or a header is malformed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to change nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node (`cluster.node.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The node does not have the role probe (`node.config.not_a_probe`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The configuration changed since it was read (`node.config.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A key is out of range or a password is given inline (`node.config.invalid`), or a named secret does not exist or is not an operator secret (`node.config.secret`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No vault to check the secrets against (`node.config.vault_unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/scan/resume": {
+      "post": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Resume a probe's scans",
+        "operationId": "resume_node_scans",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id of the probe",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The command is recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillSwitchResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to change nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node (`cluster.node.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The node does not have the role probe (`node.config.not_a_probe`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/scan/stop": {
+      "post": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Stop a probe's scans",
+        "operationId": "stop_node_scans",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id of the probe",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/StopRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "The command is recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillSwitchResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier or the body is malformed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to change nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node (`cluster.node.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The node does not have the role probe (`node.config.not_a_probe`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/observations": {
       "get": {
         "tags": [
@@ -14125,6 +14527,390 @@
             "token": []
           }
         ]
+      }
+    },
+    "/api/v1/scans": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "List scans",
+        "operationId": "list_scans",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1,000 (default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page's `next_cursor`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least this store revision (read-your-writes after a write).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of scans, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ScanView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter is unknown or malformed (`sys.invalid_query`) or the cursor is bad (`sys.invalid_cursor`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to read jobs",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Start a scan",
+        "operationId": "create_scan",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The run is queued; follow `GET /scans/{id}`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to scan the target",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The prefix or host does not exist (`scan.job.target`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The target cannot be scanned (`scan.job.target`), no probe covers it (`scan.job.no_probe`) or a value is out of range (`scan.job.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scans/probes": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "List the probes",
+        "operationId": "list_scan_probes",
+        "responses": {
+          "200": {
+            "description": "Every probe",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to read nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scans/resume": {
+      "post": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Resume every probe's scans",
+        "operationId": "resume_scans",
+        "responses": {
+          "202": {
+            "description": "One command per probe is recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillSwitchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to change nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scans/stop": {
+      "post": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Stop every probe's scans",
+        "operationId": "stop_scans",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/StopRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "One command per probe is recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillSwitchResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to change nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scans/{id}": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Get a scan",
+        "operationId": "get_scan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Scan id (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The scan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to read jobs",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such scan (`scan.job.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/search": {
@@ -22858,6 +23644,14 @@
         },
         "additionalProperties": false
       },
+      "ConfigOrigin": {
+        "type": "string",
+        "description": "Where the configuration a node applies came from.",
+        "enum": [
+          "local",
+          "synced"
+        ]
+      },
       "ConflictPolicy": {
         "type": "string",
         "description": "What to do when the store already holds an object with different values.",
@@ -24182,6 +24976,42 @@
           "only"
         ]
       },
+      "DiffCounts": {
+        "type": "object",
+        "description": "The counts of one fact type.",
+        "required": [
+          "new",
+          "changed",
+          "unchanged",
+          "gone"
+        ],
+        "properties": {
+          "changed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seen with other attributes.",
+            "minimum": 0
+          },
+          "gone": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Known before and not seen.",
+            "minimum": 0
+          },
+          "new": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seen for the first time.",
+            "minimum": 0
+          },
+          "unchanged": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seen as before.",
+            "minimum": 0
+          }
+        }
+      },
       "DiffEntry": {
         "type": "object",
         "description": "One line of a read-back diff: what the controller has and what the change would set.",
@@ -24206,6 +25036,56 @@
           "path": {
             "type": "string",
             "description": "What changes, for example `networks/iot/vlan`."
+          }
+        }
+      },
+      "DiffItem": {
+        "type": "object",
+        "description": "One changed fact.",
+        "required": [
+          "change",
+          "fact_type",
+          "subject",
+          "source"
+        ],
+        "properties": {
+          "after": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Observed",
+                "description": "What the scan saw."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "before": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Observed",
+                "description": "Before the scan."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "change": {
+            "$ref": "#/components/schemas/FactChange",
+            "description": "How it changed."
+          },
+          "fact_type": {
+            "type": "string",
+            "description": "The fact type (`address`, `services`, `os`, `name`, `vendor`, `attachment`,\n`link`)."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source key (`probe:<node>:<method>`)."
+          },
+          "subject": {
+            "type": "string",
+            "description": "The subject key."
           }
         }
       },
@@ -24592,6 +25472,15 @@
             "description": "The topic."
           }
         }
+      },
+      "FactChange": {
+        "type": "string",
+        "description": "How a fact changed in a scan.",
+        "enum": [
+          "new",
+          "changed",
+          "gone"
+        ]
       },
       "FactSubject": {
         "oneOf": [
@@ -25639,6 +26528,42 @@
             "description": "Name."
           }
         }
+      },
+      "IcmpMethod": {
+        "type": "object",
+        "description": "`[scan.icmp]`.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Runs on schedule (default true; needs `active`).",
+            "default": true
+          },
+          "interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between two sweeps (default 1800).",
+            "default": 1800,
+            "minimum": 0
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Milliseconds to wait for an echo reply (default 1000).",
+            "default": 1000,
+            "minimum": 0
+          },
+          "ttl_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds a sighting stays current.",
+            "default": null,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "IdempotencyKey": {
         "type": "string",
@@ -28311,6 +29236,87 @@
           }
         }
       },
+      "KillSwitchCommand": {
+        "type": "object",
+        "description": "One probe's kill switch command.",
+        "required": [
+          "node",
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The command (`GET /scans` does not list it; the probe's scope report shows the\nswitch)."
+          },
+          "node": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The probe.",
+            "minimum": 0
+          }
+        }
+      },
+      "KillSwitchResult": {
+        "type": "object",
+        "description": "The answer of a kill switch request.",
+        "required": [
+          "commands"
+        ],
+        "properties": {
+          "commands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KillSwitchCommand"
+            },
+            "description": "The commands issued, one per probe."
+          }
+        }
+      },
+      "KillSwitchView": {
+        "type": "object",
+        "description": "The kill switch of a probe: the last switch command from the controllers, else what the\nprobe reported.",
+        "required": [
+          "stopped",
+          "confirmed"
+        ],
+        "properties": {
+          "at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When it was switched from the controllers."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who switched it."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Whether the probe confirmed the last switch command (false while it is offline)."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why."
+          },
+          "stopped": {
+            "type": "boolean",
+            "description": "Whether it is on (or asked to be on)."
+          }
+        }
+      },
       "LanguageInfo": {
         "type": "object",
         "description": "A language the UI offers to everyone (`GET /i18n/languages`).",
@@ -28775,6 +29781,49 @@
           }
         }
       },
+      "LlmnrMethod": {
+        "type": "object",
+        "description": "`[scan.llmnr]`.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Runs on schedule (default true).",
+            "default": true
+          },
+          "interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between two runs (default 3600).",
+            "default": 3600,
+            "minimum": 0
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The port of the queries (default 5355).",
+            "default": 5355,
+            "minimum": 0
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Milliseconds to wait for answers after the last query (default 1000).",
+            "default": 1000,
+            "minimum": 0
+          },
+          "ttl_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds a sighting stays current.",
+            "default": null,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "LockoutMode": {
         "type": "string",
         "description": "How failed logins are punished (TGL-07).\n\nThe security presets map onto the modes as Home to `ProgressiveDelay`, Standard to\n`DelayThenTemporaryLock`, Hardened to `LockUntilUnlock` and Lab to `Off`.",
@@ -29132,6 +30181,59 @@
           "addresses",
           "user"
         ]
+      },
+      "MdnsMethod": {
+        "type": "object",
+        "description": "`[scan.mdns]`.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Runs on schedule (default true).",
+            "default": true
+          },
+          "group": {
+            "type": "string",
+            "description": "Where queries go (default `224.0.0.251:5353`).",
+            "default": "224.0.0.251:5353"
+          },
+          "interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between two runs (default 900).",
+            "default": 900,
+            "minimum": 0
+          },
+          "listen_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds to collect answers and announcements per run (default 4).",
+            "default": 4,
+            "minimum": 0
+          },
+          "passive": {
+            "type": "boolean",
+            "description": "Also listens on port 5353 for announcements during the window (default true);\nwhen another program holds the port exclusively, the run uses queries only.",
+            "default": true
+          },
+          "ttl_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds a sighting stays current.",
+            "default": null,
+            "minimum": 0
+          },
+          "unicast_port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The port of unicast queries to known addresses (default 5353).",
+            "default": 5353,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "MemberDigest": {
         "type": "object",
@@ -34118,6 +35220,149 @@
           }
         }
       },
+      "Page_ScanView": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "A scan run as the API shows it.",
+              "required": [
+                "id",
+                "target",
+                "networks",
+                "kinds",
+                "created_at",
+                "deadline",
+                "state",
+                "progress",
+                "probes"
+              ],
+              "properties": {
+                "created_at": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When."
+                },
+                "deadline": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When the job stops waiting."
+                },
+                "diff": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ScanDiff",
+                      "description": "The diff, once the run ended."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Why it failed."
+                },
+                "finished_at": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Timestamp",
+                      "description": "When it ended."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "The run id."
+                },
+                "job_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "The job that runs it (`GET /jobs/{id}`)."
+                },
+                "kinds": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScanKind"
+                  },
+                  "description": "What it does."
+                },
+                "networks": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The networks it resolved to."
+                },
+                "probes": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProbeProgress"
+                  },
+                  "description": "Every probe's part."
+                },
+                "progress": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "Percent done over every probe.",
+                  "minimum": 0
+                },
+                "requested_by": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "Who asked."
+                },
+                "state": {
+                  "$ref": "#/components/schemas/ScanState",
+                  "description": "The state."
+                },
+                "target": {
+                  "$ref": "#/components/schemas/ScanTarget",
+                  "description": "What was asked for."
+                },
+                "vrf": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "Their VRF."
+                }
+              }
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
       "Page_SessionSummary": {
         "type": "object",
         "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
@@ -35978,6 +37223,122 @@
         ],
         "description": "Who performs an action."
       },
+      "ProbeConfigOrigin": {
+        "type": "string",
+        "description": "Where a stored probe configuration came from.",
+        "enum": [
+          "api",
+          "offer"
+        ]
+      },
+      "ProbeConfigView": {
+        "type": "object",
+        "description": "A probe's scan configuration as the API shows it.",
+        "required": [
+          "node",
+          "config",
+          "stored",
+          "in_sync",
+          "kill_switch"
+        ],
+        "properties": {
+          "applied": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProbeScope",
+                "description": "What the probe last reported it applies."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "config": {
+            "$ref": "#/components/schemas/ScanConfig",
+            "description": "The configuration: the stored one, or the defaults when the controllers hold none\n(the probe then runs on its own `[scan]` section)."
+          },
+          "in_sync": {
+            "type": "boolean",
+            "description": "Whether the probe applies the stored configuration (its reported revision is at\nleast the stored one)."
+          },
+          "kill_switch": {
+            "$ref": "#/components/schemas/KillSwitchView",
+            "description": "The probe's kill switch."
+          },
+          "lacking_secrets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "SNMP devices that still need a vault secret before they are polled, by address."
+          },
+          "node": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The probe.",
+            "minimum": 0
+          },
+          "origin": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProbeConfigOrigin",
+                "description": "Where the stored configuration came from."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The revision of the stored configuration (the `ETag`).",
+            "minimum": 0
+          },
+          "stored": {
+            "type": "boolean",
+            "description": "Whether the controllers hold a configuration for the probe."
+          },
+          "updated_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When it last changed."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who changed it last."
+          }
+        }
+      },
+      "ProbeList": {
+        "type": "object",
+        "description": "Body of `GET /scans/probes`.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProbeSummary"
+            },
+            "description": "Every probe: this controller's own probe role first, then the enrolled probes by id."
+          }
+        }
+      },
       "ProbeMethod": {
         "type": "string",
         "description": "How a probe saw its subject.",
@@ -35995,6 +37356,226 @@
           "llmnr",
           "arp_sweep"
         ]
+      },
+      "ProbeProgress": {
+        "type": "object",
+        "description": "One probe's part of a scan as the API shows it.",
+        "required": [
+          "node",
+          "command",
+          "target",
+          "state",
+          "progress",
+          "ingested"
+        ],
+        "properties": {
+          "batches": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Batches the probe queued for it.",
+            "minimum": 0
+          },
+          "command": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The command."
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The probe's last detail."
+          },
+          "ingested": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Batches that arrived.",
+            "minimum": 0
+          },
+          "node": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The probe.",
+            "minimum": 0
+          },
+          "progress": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Percent done.",
+            "minimum": 0
+          },
+          "state": {
+            "type": "string",
+            "description": "The command's state: `pending`, `accepted`, `running`, `done`, `failed`,\n`rejected`, `expired`, `cancelled`."
+          },
+          "target": {
+            "type": "string",
+            "description": "The address or network it scans."
+          }
+        }
+      },
+      "ProbeScope": {
+        "type": "object",
+        "description": "The scope a probe applies, as it last reported it.",
+        "required": [
+          "node",
+          "prefixes",
+          "exclude",
+          "methods",
+          "active",
+          "stopped",
+          "origin",
+          "revision",
+          "reported_at"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "Whether active probing is on (TGL-18)."
+          },
+          "applied_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When it applied the configuration, by its clock."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the newest configuration it received does not apply."
+          },
+          "exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Prefixes and addresses inside them it never probes (an address as a host prefix)."
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The methods that run on schedule, by name (`arp`, `snmp`)."
+          },
+          "node": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The probe.",
+            "minimum": 0
+          },
+          "origin": {
+            "$ref": "#/components/schemas/ConfigOrigin",
+            "description": "Where its configuration came from."
+          },
+          "prefixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The prefixes it covers."
+          },
+          "reported_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When a controller recorded the report."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The configuration revision it applies; 0 for its own file.",
+            "minimum": 0
+          },
+          "stop_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why, as recorded with the kill switch."
+          },
+          "stopped": {
+            "type": "boolean",
+            "description": "Whether its kill switch is on."
+          },
+          "vrf": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The VRF its batches name, when its configuration names one."
+          }
+        }
+      },
+      "ProbeSummary": {
+        "type": "object",
+        "description": "A probe as the scan pages list it.",
+        "required": [
+          "node",
+          "name",
+          "in_process",
+          "stored",
+          "in_sync",
+          "kill_switch"
+        ],
+        "properties": {
+          "applied": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProbeScope",
+                "description": "What it last reported it applies."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "in_process": {
+            "type": "boolean",
+            "description": "Whether it is the probe role running inside a controller."
+          },
+          "in_sync": {
+            "type": "boolean",
+            "description": "Whether it applies the stored configuration."
+          },
+          "kill_switch": {
+            "$ref": "#/components/schemas/KillSwitchView",
+            "description": "Its kill switch."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name; the controller's own probe is called `controller-<id>`."
+          },
+          "node": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The node.",
+            "minimum": 0
+          },
+          "revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The revision of that configuration.",
+            "minimum": 0
+          },
+          "stored": {
+            "type": "boolean",
+            "description": "Whether the controllers hold a configuration for it."
+          }
+        }
       },
       "ProblemDetails": {
         "type": "object",
@@ -37311,6 +38892,50 @@
           }
         }
       },
+      "ReverseDnsMethod": {
+        "type": "object",
+        "description": "`[scan.reverse_dns]`.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Runs on schedule (default true).",
+            "default": true
+          },
+          "interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between two runs (default 3600).",
+            "default": 3600,
+            "minimum": 0
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "DNS servers (`192.0.2.53` or `192.0.2.53:53`); empty: the system's resolvers.",
+            "default": []
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Milliseconds to wait for an answer (default 2000).",
+            "default": 2000,
+            "minimum": 0
+          },
+          "ttl_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds a sighting stays current.",
+            "default": null,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "Revision": {
         "type": "integer",
         "format": "int64",
@@ -37545,6 +39170,555 @@
           "schedule",
           "manual"
         ]
+      },
+      "ScanBasicMethod": {
+        "type": "object",
+        "description": "A method with only the schedule keys.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Runs on schedule (default true).",
+            "default": true
+          },
+          "interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between two runs.",
+            "default": 300,
+            "minimum": 0
+          },
+          "ttl_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds a sighting stays current; default three intervals (15 minutes to 7 days).",
+            "default": null,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScanConfig": {
+        "type": "object",
+        "description": "`[scan]`.",
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "Active probing (TGL-18): ICMP sweeps and TCP connect scans. `false` keeps the probe\npassive: neighbour tables, mDNS, LLMNR, reverse DNS and SNMP only.",
+            "default": true
+          },
+          "arp": {
+            "$ref": "#/components/schemas/ScanBasicMethod",
+            "description": "IPv4 neighbours from the operating system's ARP table.",
+            "default": {
+              "enabled": true,
+              "interval_secs": 300
+            }
+          },
+          "arp_sweep": {
+            "$ref": "#/components/schemas/ScanRawMethod",
+            "description": "ARP sweep over raw sockets (declared; not implemented yet).",
+            "default": {
+              "enabled": false,
+              "interval_secs": 3600
+            }
+          },
+          "blackout": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Blackout windows such as `mon-fri 08:00-17:00`: no method that sends packets runs in\nthem, and a run that reaches one stops.",
+            "default": []
+          },
+          "concurrency": {
+            "type": "integer",
+            "description": "Most probes in flight at once (default 32).",
+            "default": 32,
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Runs the scanner when the node has the `probe` role (default true).",
+            "default": true
+          },
+          "exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Prefixes and addresses inside `prefixes` that are never probed or reported.",
+            "default": []
+          },
+          "icmp": {
+            "$ref": "#/components/schemas/IcmpMethod",
+            "description": "ICMP echo sweeps.",
+            "default": {
+              "enabled": true,
+              "interval_secs": 1800,
+              "timeout_ms": 1000
+            }
+          },
+          "lldp": {
+            "$ref": "#/components/schemas/ScanRawMethod",
+            "description": "LLDP listening over raw sockets (declared; not implemented yet).",
+            "default": {
+              "enabled": false,
+              "interval_secs": 3600
+            }
+          },
+          "llmnr": {
+            "$ref": "#/components/schemas/LlmnrMethod",
+            "description": "LLMNR.",
+            "default": {
+              "enabled": true,
+              "interval_secs": 3600,
+              "port": 5355,
+              "timeout_ms": 1000
+            }
+          },
+          "max_hosts_per_prefix": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Largest IPv4 prefix, in addresses, that a sweep enumerates (default 4096); larger\nprefixes and IPv6 networks are covered through the addresses other methods saw.",
+            "default": 4096,
+            "minimum": 0
+          },
+          "mdns": {
+            "$ref": "#/components/schemas/MdnsMethod",
+            "description": "Multicast DNS.",
+            "default": {
+              "enabled": true,
+              "group": "224.0.0.251:5353",
+              "interval_secs": 900,
+              "listen_secs": 4,
+              "passive": true,
+              "unicast_port": 5353
+            }
+          },
+          "nd": {
+            "$ref": "#/components/schemas/ScanBasicMethod",
+            "description": "IPv6 neighbours from the operating system's neighbour table.",
+            "default": {
+              "enabled": true,
+              "interval_secs": 300
+            }
+          },
+          "os_fingerprint": {
+            "$ref": "#/components/schemas/ScanRawMethod",
+            "description": "OS fingerprinting over raw sockets (declared; not implemented yet).",
+            "default": {
+              "enabled": false,
+              "interval_secs": 3600
+            }
+          },
+          "packets_per_second": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Probes per second; overrides `rate` when set.",
+            "default": null,
+            "minimum": 0
+          },
+          "per_host_interval_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Minimum milliseconds between two probes to the same address (default 100).",
+            "default": 100,
+            "minimum": 0
+          },
+          "prefixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The prefixes the probe covers (`192.0.2.0/24`, `2001:db8:10::/64`, or an address).\nNothing outside them is probed or reported. Empty: the scanner scans nothing.",
+            "default": []
+          },
+          "rate": {
+            "$ref": "#/components/schemas/ScanRateProfile",
+            "description": "Rate profile (TGL-19): `normal` (100 probes/s), `slow` (50), `slowest` (10) or\n`unlimited`.",
+            "default": "normal"
+          },
+          "reverse_dns": {
+            "$ref": "#/components/schemas/ReverseDnsMethod",
+            "description": "Reverse DNS of the discovered addresses.",
+            "default": {
+              "enabled": true,
+              "interval_secs": 3600,
+              "servers": [],
+              "timeout_ms": 2000
+            }
+          },
+          "snmp": {
+            "$ref": "#/components/schemas/SnmpMethod",
+            "description": "SNMPv3 polling of switches.",
+            "default": {
+              "attach_on_lldp_ports": false,
+              "devices": [],
+              "enabled": true,
+              "interval_secs": 900,
+              "retries": 2,
+              "timeout_ms": 2000
+            }
+          },
+          "tcp_connect": {
+            "$ref": "#/components/schemas/TcpConnectMethod",
+            "description": "TCP connect scans.",
+            "default": {
+              "enabled": true,
+              "interval_secs": 21600,
+              "ports": [
+                21,
+                22,
+                23,
+                25,
+                53,
+                80,
+                110,
+                135,
+                139,
+                143,
+                389,
+                443,
+                445,
+                515,
+                548,
+                554,
+                631,
+                636,
+                1883,
+                3306,
+                3389,
+                5432,
+                5900,
+                6053,
+                8006,
+                8080,
+                8123,
+                8443
+              ],
+              "targets": "known",
+              "timeout_ms": 1500,
+              "tls_hint": true
+            }
+          },
+          "tcp_syn": {
+            "$ref": "#/components/schemas/ScanRawMethod",
+            "description": "TCP SYN scan over raw sockets (declared; not implemented yet).",
+            "default": {
+              "enabled": false,
+              "interval_secs": 3600
+            }
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The time zone of `blackout` (an IANA name such as `Europe/Stockholm`); not set: the\nsystem time zone.",
+            "default": null
+          },
+          "vrf": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The VRF of the addresses (a VRF id); not set: the VRF of the probe's enrolment\ntoken, else the default VRF.",
+            "default": null
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScanDiff": {
+        "type": "object",
+        "description": "What a scan found compared with the facts before it (SCAN-09).",
+        "required": [
+          "counts",
+          "items",
+          "truncated"
+        ],
+        "properties": {
+          "counts": {
+            "type": "object",
+            "description": "Counts per fact type.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DiffCounts"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiffItem"
+            },
+            "description": "The new, changed and gone facts, at most [`MAX_DIFF_ITEMS`]."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Whether the list or the baseline was cut."
+          }
+        }
+      },
+      "ScanKind": {
+        "type": "string",
+        "description": "What an on-demand scan does (SCAN-09).",
+        "enum": [
+          "passive_refresh",
+          "port_scan",
+          "snmp_poll",
+          "os_fingerprint"
+        ]
+      },
+      "ScanRateProfile": {
+        "type": "string",
+        "description": "The rate profile of TGL-19.",
+        "enum": [
+          "normal",
+          "slow",
+          "slowest",
+          "unlimited"
+        ]
+      },
+      "ScanRawMethod": {
+        "type": "object",
+        "description": "A raw-socket method: declared, switched off, not implemented yet.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Runs on schedule once implemented (default false).",
+            "default": false
+          },
+          "interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between two runs (default 3600).",
+            "default": 3600,
+            "minimum": 0
+          },
+          "ttl_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds a sighting stays current.",
+            "default": null,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScanRequest": {
+        "type": "object",
+        "description": "`POST /scans`.",
+        "required": [
+          "target"
+        ],
+        "properties": {
+          "deadline_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Seconds the job waits for the probes (30 to 3600, default 600).",
+            "minimum": 0
+          },
+          "kinds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScanKind"
+            },
+            "description": "What to do; `passive_refresh` when empty."
+          },
+          "target": {
+            "$ref": "#/components/schemas/ScanTarget",
+            "description": "What to scan."
+          },
+          "vrf": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The VRF of an `address` or `network` target; the default VRF when absent. Prefix and\nhost targets bring their own."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScanState": {
+        "type": "string",
+        "description": "The state of a scan run.",
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "partial",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "ScanTarget": {
+        "type": "object",
+        "description": "What a scan covers: `{\"kind\": \"prefix\", \"value\": \"<prefix id>\"}`, `{\"kind\": \"host\",\n\"value\": \"<host id>\"}`, `{\"kind\": \"address\", \"value\": \"192.0.2.10\"}` or `{\"kind\":\n\"network\", \"value\": \"192.0.2.0/28\"}`.",
+        "required": [
+          "kind",
+          "value"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ScanTargetKind",
+            "description": "The kind."
+          },
+          "value": {
+            "type": "string",
+            "description": "The id, address or network."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScanTargetKind": {
+        "type": "string",
+        "description": "What kind of thing a scan covers.",
+        "enum": [
+          "prefix",
+          "host",
+          "address",
+          "network"
+        ]
+      },
+      "ScanTcpTargets": {
+        "type": "string",
+        "description": "Which addresses `tcp_connect` scans.",
+        "enum": [
+          "known",
+          "all"
+        ]
+      },
+      "ScanView": {
+        "type": "object",
+        "description": "A scan run as the API shows it.",
+        "required": [
+          "id",
+          "target",
+          "networks",
+          "kinds",
+          "created_at",
+          "deadline",
+          "state",
+          "progress",
+          "probes"
+        ],
+        "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When."
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the job stops waiting."
+          },
+          "diff": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScanDiff",
+                "description": "The diff, once the run ended."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "finished_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When it ended."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The run id."
+          },
+          "job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The job that runs it (`GET /jobs/{id}`)."
+          },
+          "kinds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScanKind"
+            },
+            "description": "What it does."
+          },
+          "networks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The networks it resolved to."
+          },
+          "probes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProbeProgress"
+            },
+            "description": "Every probe's part."
+          },
+          "progress": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Percent done over every probe.",
+            "minimum": 0
+          },
+          "requested_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who asked."
+          },
+          "state": {
+            "$ref": "#/components/schemas/ScanState",
+            "description": "The state."
+          },
+          "target": {
+            "$ref": "#/components/schemas/ScanTarget",
+            "description": "What was asked for."
+          },
+          "vrf": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Their VRF."
+          }
+        }
       },
       "ScopeRule": {
         "oneOf": [
@@ -38897,6 +41071,154 @@
         },
         "additionalProperties": false
       },
+      "SnmpAuth": {
+        "type": "string",
+        "description": "SNMPv3 authentication protocols.",
+        "enum": [
+          "sha1",
+          "sha224",
+          "sha256",
+          "sha384",
+          "sha512"
+        ]
+      },
+      "SnmpDevice": {
+        "type": "object",
+        "description": "One switch to poll.",
+        "required": [
+          "address",
+          "user"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Its management address."
+          },
+          "auth": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SnmpAuth",
+                "description": "The authentication protocol; not set: no authentication (lab use only)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "auth_secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The operator secret of the vault that holds the authentication password; the probe\nfetches it from the controllers when it polls and keeps it in memory only."
+          },
+          "context": {
+            "type": "string",
+            "description": "The SNMPv3 context name (default empty)."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The device name in attachments and links; default its `sysName`, else the address."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Its SNMP port (default 161).",
+            "minimum": 0
+          },
+          "privacy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SnmpPrivacy",
+                "description": "The privacy protocol; not set: no encryption."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "privacy_secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The operator secret of the vault that holds the privacy password."
+          },
+          "user": {
+            "type": "string",
+            "description": "The SNMPv3 user."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SnmpMethod": {
+        "type": "object",
+        "description": "`[scan.snmp]`.",
+        "properties": {
+          "attach_on_lldp_ports": {
+            "type": "boolean",
+            "description": "Reports clients on ports where an LLDP neighbour is seen (default false: those\nports lead to other network devices, which report their own clients).",
+            "default": false
+          },
+          "devices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SnmpDevice"
+            },
+            "description": "The switches.",
+            "default": []
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Runs on schedule (default true; needs at least one device).",
+            "default": true
+          },
+          "interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between two polls (default 900).",
+            "default": 900,
+            "minimum": 0
+          },
+          "retries": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Retries of an unanswered request (default 2).",
+            "default": 2,
+            "minimum": 0
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Milliseconds to wait for an answer (default 2000).",
+            "default": 2000,
+            "minimum": 0
+          },
+          "ttl_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds a sighting stays current.",
+            "default": null,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "SnmpPrivacy": {
+        "type": "string",
+        "description": "SNMPv3 privacy protocols.",
+        "enum": [
+          "aes128"
+        ]
+      },
       "SortOrder": {
         "type": "string",
         "description": "Sort direction of lists that only sort by their natural key.",
@@ -39447,6 +41769,20 @@
           "compensation_failed"
         ]
       },
+      "StopRequest": {
+        "type": "object",
+        "description": "Body of `POST /nodes/{id}/scan/stop` and `POST /scans/stop`.",
+        "properties": {
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why, recorded with the kill switch on the probe and in the audit log (at most 200\ncharacters)."
+          }
+        },
+        "additionalProperties": false
+      },
       "StoreSummary": {
         "type": "object",
         "description": "Summary of the store status.",
@@ -39961,6 +42297,91 @@
             "description": "The target."
           }
         }
+      },
+      "TcpConnectMethod": {
+        "type": "object",
+        "description": "`[scan.tcp_connect]`.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Runs on schedule (default true; needs `active`).",
+            "default": true
+          },
+          "interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between two scans (default 21600, six hours).",
+            "default": 21600,
+            "minimum": 0
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The ports (default [`DEFAULT_TCP_PORTS`]).",
+            "default": [
+              21,
+              22,
+              23,
+              25,
+              53,
+              80,
+              110,
+              135,
+              139,
+              143,
+              389,
+              443,
+              445,
+              515,
+              548,
+              554,
+              631,
+              636,
+              1883,
+              3306,
+              3389,
+              5432,
+              5900,
+              6053,
+              8006,
+              8080,
+              8123,
+              8443
+            ]
+          },
+          "targets": {
+            "$ref": "#/components/schemas/ScanTcpTargets",
+            "description": "`known` (default) or `all`.",
+            "default": "known"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Milliseconds to wait for a connection (default 1500).",
+            "default": 1500,
+            "minimum": 0
+          },
+          "tls_hint": {
+            "type": "boolean",
+            "description": "Sends a TLS `ClientHello` to every open port and records which answer as TLS\n(default true). Nothing else is sent; no banner is read.",
+            "default": true
+          },
+          "ttl_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds a sighting stays current.",
+            "default": null,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "Tenant": {
         "type": "object",

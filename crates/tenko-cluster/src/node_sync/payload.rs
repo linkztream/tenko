@@ -232,6 +232,94 @@ pub fn decode_args<T: DeserializeOwned>(encoding: &str, bytes: &[u8]) -> Result<
     })
 }
 
+/// Runs every decoder a node or a controller applies to node-sync input on `data`: the
+/// first byte picks the decoder, the rest is the input. Payloads and command arguments
+/// decode as they arrive; kind 5 reads the rest as a stream of `Config.Watch` frames (each
+/// a big-endian `u16` length and a `ConfigDelta`), joins them and applies every message to
+/// a node configuration; the other kinds decode the protocol messages of the `Config`,
+/// `Commands` and `Observations` services and what is read out of them. The entry point of
+/// the fuzz target `node_config_payloads`; it never panics on any input.
+pub fn fuzz_payload(data: &[u8]) {
+    use prost::Message as _;
+    use tenko_core::{NodeId, Timestamp};
+
+    use super::{
+        commands::{IncomingCommand, Report},
+        local::{Assembler, NodeConfig},
+        secrets::HeldSecrets,
+    };
+    use crate::{
+        probe::{ProbeScope, run_of},
+        proto::v1,
+    };
+
+    let Some((&kind, input)) = data.split_first() else {
+        return;
+    };
+    match kind % 10 {
+        0 => drop(decode(CBOR, input)),
+        1 => drop(decode(CBOR_DEFLATE, input)),
+        2 => drop(decode_args::<ScanRunArgs>(CBOR, input)),
+        3 => drop(decode_args::<StopArgs>(CBOR, input)),
+        4 => drop(decode_args::<CancelArgs>(CBOR, input)),
+        5 => {
+            let mut assembler = Assembler::default();
+            let mut held = NodeConfig::default();
+            let mut rest = input;
+            while let Some((length, tail)) = rest.split_first_chunk::<2>() {
+                let length = usize::from(u16::from_be_bytes(*length)).min(tail.len());
+                let (frame, tail) = tail.split_at(length);
+                rest = tail;
+                let Ok(frame) = v1::ConfigDelta::decode(frame) else {
+                    continue;
+                };
+                if let Ok(Some(received)) = assembler.push(frame)
+                    && let Some(next) = held.apply(&received, Timestamp::now())
+                {
+                    held = next;
+                }
+            }
+        }
+        6 => {
+            if let Ok(event) = v1::CommandEvent::decode(input) {
+                drop(Report::from_proto(&event));
+            }
+        }
+        7 => {
+            if let Ok(command) = v1::Command::decode(input)
+                && let Some(command) = IncomingCommand::from_proto(command)
+            {
+                drop(decode_args::<ScanRunArgs>(
+                    &command.encoding,
+                    &command.payload,
+                ));
+            }
+        }
+        8 => {
+            if let Ok(report) = v1::ConfigReport::decode(input)
+                && let Some(probe) = &report.probe
+            {
+                drop(ProbeScope::from_report(
+                    NodeId(1001),
+                    &report,
+                    probe,
+                    Timestamp::now(),
+                ));
+            }
+        }
+        _ => {
+            drop(v1::WatchRequest::decode(input));
+            drop(v1::OfferRequest::decode(input));
+            if let Ok(request) = v1::IngestRequest::decode(input) {
+                let _ = run_of(&request);
+            }
+            if let Ok(response) = v1::SecretsResponse::decode(input) {
+                drop(HeldSecrets::from_proto(response));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,6 +392,40 @@ mod tests {
         let error = inflate(&bomb, 4096).expect_err("bomb");
         assert_eq!(error.code(), codes::CONFIG_PAYLOAD);
         assert!(error.detail().contains("inflates"), "{}", error.detail());
+    }
+
+    #[test]
+    fn the_fuzz_entry_point_takes_any_input() {
+        use prost::Message as _;
+
+        let (_, delta) = encode_delta(&sample()).expect("delta");
+        let frame = crate::proto::v1::ConfigDelta {
+            revision: 7,
+            snapshot: false,
+            encoding: CBOR.to_owned(),
+            payload: delta.clone(),
+            partial: false,
+        }
+        .encode_to_vec();
+        let mut stream = vec![5u8];
+        stream.extend_from_slice(&u16::try_from(frame.len()).expect("short").to_be_bytes());
+        stream.extend_from_slice(&frame);
+        fuzz_payload(&stream);
+        for kind in 0u8..10 {
+            for input in [
+                Vec::new(),
+                vec![0],
+                vec![0xff; 4],
+                vec![0xa1, 0x61, 0x61, 0x9f, 0x9f, 0x9f],
+                delta.clone(),
+                frame.clone(),
+            ] {
+                let mut data = vec![kind];
+                data.extend_from_slice(&input);
+                fuzz_payload(&data);
+            }
+        }
+        fuzz_payload(&[]);
     }
 
     #[test]

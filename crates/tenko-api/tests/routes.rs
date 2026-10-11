@@ -337,6 +337,17 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("POST", "/connectors/{id}/disable", "disable_connector"),
     ("POST", "/connectors/{id}/run", "run_connector"),
     ("POST", "/connectors/{id}/check", "check_connector"),
+    // scans (WP3.10)
+    ("GET", "/nodes/{id}/scan-config", "get_scan_config"),
+    ("PUT", "/nodes/{id}/scan-config", "update_scan_config"),
+    ("POST", "/nodes/{id}/scan/stop", "stop_node_scans"),
+    ("POST", "/nodes/{id}/scan/resume", "resume_node_scans"),
+    ("GET", "/scans", "list_scans"),
+    ("POST", "/scans", "create_scan"),
+    ("GET", "/scans/probes", "list_scan_probes"),
+    ("POST", "/scans/stop", "stop_scans"),
+    ("POST", "/scans/resume", "resume_scans"),
+    ("GET", "/scans/{id}", "get_scan"),
 ];
 
 /// The only endpoint that is not a stub.
@@ -537,9 +548,9 @@ fn operations_have_a_declared_tag_and_a_summary() {
         .flatten()
         .map(|tag| tag.name.as_str())
         .collect();
-    // 22 areas of Slices 1 and 2, nine Slice 3 areas (metrics split from system, cluster and
-    // kek with their operations, and six that start empty: access, audit_export, backup,
-    // i18n, queue, scans).
+    // 22 areas of Slices 1 and 2, nine Slice 3 areas (metrics split from system; cluster,
+    // kek and scans with their operations; five that start empty: access, audit_export,
+    // backup, i18n, queue).
     assert_eq!(tags.len(), 31, "one tag per area");
     for (path, item) in &document.paths.paths {
         for (method, operation) in operations(item) {

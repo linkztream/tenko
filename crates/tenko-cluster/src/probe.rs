@@ -167,6 +167,46 @@ impl ProbeScope {
     }
 }
 
+/// Records the scope a probe reports in `scan.scopes`, unless it equals the stored one
+/// apart from its times. Written by the `Config` service for a probe node and by the
+/// in-process probe of a controller.
+///
+/// # Errors
+///
+/// `cluster.no_quorum` (503) while the store cannot write, or a store error.
+pub async fn record_scope(
+    store: &dyn tenko_store::Store,
+    node: NodeId,
+    scope: ProbeScope,
+) -> Result<(), ClusterError> {
+    use tenko_store::{ReadConsistency, ReadViewExt as _, WriteBatch};
+
+    let view = store
+        .read(ReadConsistency::Local)
+        .await
+        .map_err(crate::node_sync::store_error)?;
+    let current = view.get_typed(&tables::SCOPES, &node.0)?;
+    drop(view);
+    if let Some((stored, _)) = &current {
+        let same = ProbeScope {
+            reported_at: stored.reported_at,
+            applied_at: stored.applied_at,
+            ..scope.clone()
+        };
+        if same == *stored {
+            return Ok(());
+        }
+    }
+    let ctx = tenko_core::RequestCtx::new(tenko_core::Principal::Node { id: node });
+    let mut batch = WriteBatch::for_request(&ctx);
+    batch.put_typed(&tables::SCOPES, &node.0, &scope)?;
+    store
+        .propose(batch)
+        .await
+        .map_err(crate::node_sync::store_error)?;
+    Ok(())
+}
+
 /// The command a request answers, from its `run` field; `None` when it has none or the
 /// field is not a UUID.
 pub fn run_of(request: &v1::IngestRequest) -> Option<Uuid> {
@@ -660,6 +700,19 @@ impl ProbeBatch {
         let request = v1::IngestRequest::decode(bytes)
             .map_err(|error| invalid(format!("the batch does not decode: {error}")))?;
         Self::from_request(request)
+    }
+
+    /// As [`decode`](Self::decode), with the command the batch answers ([`run_of`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`decode`](Self::decode).
+    pub fn decode_with_run(bytes: &[u8]) -> Result<(Self, u32, Option<Uuid>), ClusterError> {
+        let request = v1::IngestRequest::decode(bytes)
+            .map_err(|error| invalid(format!("the batch does not decode: {error}")))?;
+        let run = run_of(&request);
+        let (batch, skipped) = Self::from_request(request)?;
+        Ok((batch, skipped, run))
     }
 
     /// The observation source of this batch from `node`.

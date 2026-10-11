@@ -6,15 +6,14 @@
 use std::pin::Pin;
 
 use futures::Stream;
-use tenko_core::{NodeId, Principal, RequestCtx, Role, Timestamp};
-use tenko_store::{ReadConsistency, ReadViewExt as _, WriteBatch};
+use tenko_core::{Role, Timestamp};
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
 use crate::{
     error::ClusterError,
-    node_sync::{NodeSync, codes, secrets, source, store_error, tables::tables_for},
-    probe::{ProbeScope, tables::SCOPES},
+    node_sync::{codes, secrets, source, tables::tables_for},
+    probe::{ProbeScope, record_scope},
     proto::v1,
     server::{ClusterService, peer_of, status_of},
 };
@@ -132,40 +131,10 @@ impl v1::config_server::Config for ClusterService {
             && record.roles.contains(&Role::Probe)
         {
             let scope = ProbeScope::from_report(record.id, &report, probe, Timestamp::now());
-            record_scope(self.registry.node_sync(), record.id, scope)
+            record_scope(self.registry.node_sync().store().as_ref(), record.id, scope)
                 .await
                 .map_err(|error| status_of(&error))?;
         }
         Ok(Response::new(v1::ConfigReportResponse {}))
     }
-}
-
-/// Writes a probe's scope unless it is the same as the stored one apart from the times.
-async fn record_scope(
-    sync: &NodeSync,
-    node: NodeId,
-    scope: ProbeScope,
-) -> Result<(), ClusterError> {
-    let view = sync
-        .store()
-        .read(ReadConsistency::Local)
-        .await
-        .map_err(store_error)?;
-    let current = view.get_typed(&SCOPES, &node.0)?;
-    drop(view);
-    if let Some((stored, _)) = &current {
-        let same = ProbeScope {
-            reported_at: stored.reported_at,
-            applied_at: stored.applied_at,
-            ..scope.clone()
-        };
-        if same == *stored {
-            return Ok(());
-        }
-    }
-    let ctx = RequestCtx::new(Principal::Node { id: node });
-    let mut batch = WriteBatch::for_request(&ctx);
-    batch.put_typed(&SCOPES, &node.0, &scope)?;
-    sync.store().propose(batch).await.map_err(store_error)?;
-    Ok(())
 }

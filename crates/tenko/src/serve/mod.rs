@@ -15,8 +15,9 @@
 //! | 8 | `ipam` | the IPAM domain over the job engine, its prefix tree and alarms |
 //! | 9 | `jobs` | the job engine; the runner of the jobs pinned to this controller (the job runner of the installation is a leader service) |
 //! | 10 | `connectors` | connector plugins and their supervisor (ADR 0012) |
-//! | 11 | `nodes` | the node transport: internal CA node certificate, node registry, the mutual TLS listener for enrolled nodes (OPS-04), the probe role in process |
-//! | 12 | `api` | the HTTP API, the web UI and server-sent events |
+//! | 11 | `nodes` | the node transport: internal CA node certificate, node registry, the mutual TLS listener for enrolled nodes (OPS-04), configuration sync and commands to nodes |
+//! | 12 | `scans` | the scan control (probe configuration, scans on demand, the kill switch) and the probe role in process |
+//! | 13 | `api` | the HTTP API, the web UI and server-sent events |
 //!
 //! After the last step the leader supervisor ([`leader`]) starts the leader-only services
 //! (`tenko_core::cluster::LeaderService`) once this controller has taken office; on a single
@@ -97,7 +98,7 @@ pub const FSYNC_WARN_MICROS: u64 = 10_000;
 const RUNNER_STOP_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The start steps of the controller role, in order.
-pub const START_ORDER: [(&str, &str); 12] = [
+pub const START_ORDER: [(&str, &str); 13] = [
     ("kek", "key-encryption keys"),
     ("store", "replicated store (openraft over redb)"),
     (
@@ -114,6 +115,10 @@ pub const START_ORDER: [(&str, &str); 12] = [
     (
         "nodes",
         "node transport: enrolment, mutual TLS listener, node registry",
+    ),
+    (
+        "scans",
+        "scan control: probe configuration, scans on demand, probe role in process",
     ),
     ("api", "HTTP API, web UI and server-sent events"),
 ];
@@ -978,6 +983,10 @@ async fn start(
         Arc::clone(&kek_admin).run(leader::stop_token(running.stop.subscribe())),
     ));
     leaders.register(kek_admin.rotation_service());
+    leaders.register(crate::node::scan::control::housekeeping(
+        resolved,
+        Arc::clone(&store_dyn),
+    ));
 
     let tls = steps
         .run("tls", async {
@@ -1288,17 +1297,21 @@ async fn start(
         .await?;
     running.tasks.extend(cluster.tasks());
     leaders.extend(cluster.leader_services());
-    if resolved.roles.contains(Role::Probe) {
-        let (task, summary) = crate::node::scan::start_on_controller(
-            resolved,
-            cluster.probe_sink(),
-            resolved.node_id,
-            running.stop.subscribe(),
+    let mut scans = steps
+        .run(
+            "scans",
+            crate::node::scan::control::start(crate::node::scan::control::Parts {
+                resolved,
+                store: Arc::clone(&store_dyn),
+                vault: Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>,
+                engine: engine.clone(),
+                registry: Arc::clone(cluster.registry()),
+                probe_sink: cluster.probe_sink(),
+                stop: running.stop.subscribe(),
+            }),
         )
-        .map_err(|error| StartError::new("nodes", error.code(), error.detail()))?;
-        tracing::info!("probe role: {summary}");
-        running.tasks.extend(task);
-    }
+        .await?;
+    running.tasks.extend(scans.tasks());
 
     let lab_plain_http = tls.lab_plain_http;
     let https = tls.https;
@@ -1392,6 +1405,7 @@ async fn start(
             connectors.register(&mut server);
             connectors.publish_health(&state);
             cluster.register(&mut server, &state);
+            scans.register(&mut server);
             if let Some(reconciler) = &reconciler {
                 server.extensions.insert(Arc::clone(reconciler));
             }
@@ -1787,6 +1801,7 @@ mod tests {
                 "jobs",
                 "connectors",
                 "nodes",
+                "scans",
                 "api"
             ]
         );

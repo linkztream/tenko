@@ -12,7 +12,7 @@ use tenko_cluster::{
     model::NodeRecord,
     node_sync::{OfferHandler, codes as sync_codes, payload, store_error},
 };
-use tenko_core::{ObjectRef, Principal, RequestCtx, Timestamp, audit::AuditDraft};
+use tenko_core::{NodeId, ObjectRef, Principal, RequestCtx, Timestamp, audit::AuditDraft};
 use tenko_store::{ReadConsistency, ReadViewExt, StoreError, WriteBatch};
 
 use super::{
@@ -85,44 +85,64 @@ impl OfferHandler for Offers {
         encoding: &str,
         bytes: &[u8],
     ) -> Result<bool, ClusterError> {
-        let mut config = decode_offer(encoding, bytes)?;
-        let store = &self.shared.store;
-        let view = store
-            .read(ReadConsistency::Local)
-            .await
-            .map_err(store_error)?;
-        if view.get_typed(&PROBE_CONFIG, &node.id.0)?.is_some() {
-            return Ok(false);
-        }
-        drop(view);
-        // A node cannot name vault secrets it was never given: those references are
-        // dropped, so an administrator picks them.
-        for device in &mut config.snmp.devices {
-            device.auth_secret = None;
-            device.privacy_secret = None;
-        }
-        let now = Timestamp::now();
-        let record = ProbeConfigRecord {
-            node: node.id,
-            secrets: secret_uses(&config),
+        let config = decode_offer(encoding, bytes)?;
+        keep(
+            &self.shared,
+            node.id,
+            &node.name,
             config,
-            origin: ProbeConfigOrigin::Offer,
-            updated_at: now,
-            updated_by: None,
-        };
-        let ctx = RequestCtx::new(Principal::Node { id: node.id });
-        let mut batch = WriteBatch::for_request(&ctx);
-        batch.expect_typed(&PROBE_CONFIG, &node.id.0, None);
-        batch.put_typed(&PROBE_CONFIG, &node.id.0, &record)?;
-        batch.audit(
-            AuditDraft::success(actions::CONFIG_OFFER, vec![ObjectRef::node(node.id)])
-                .with_context("node", node.name.clone())
-                .with_context("prefixes", record.config.prefixes.join(",")),
-        );
-        match store.propose(batch).await {
-            Ok(_) => Ok(true),
-            Err(StoreError::PreconditionFailed(_)) => Ok(false),
-            Err(error) => Err(store_error(error)),
-        }
+            Principal::Node { id: node.id },
+        )
+        .await
+    }
+}
+
+/// Keeps `config` as the initial configuration of `node` when the installation holds none
+/// for it, with the audit record `scan.config.offer` under `principal`; `Ok(false)` when
+/// one exists.
+pub(crate) async fn keep(
+    shared: &Shared,
+    node: NodeId,
+    name: &str,
+    mut config: ScanConfig,
+    principal: Principal,
+) -> Result<bool, ClusterError> {
+    let store = &shared.store;
+    let view = store
+        .read(ReadConsistency::Local)
+        .await
+        .map_err(store_error)?;
+    if view.get_typed(&PROBE_CONFIG, &node.0)?.is_some() {
+        return Ok(false);
+    }
+    drop(view);
+    // A node cannot name vault secrets it was never given: those references are dropped,
+    // so an administrator picks them.
+    for device in &mut config.snmp.devices {
+        device.auth_secret = None;
+        device.privacy_secret = None;
+    }
+    let now = Timestamp::now();
+    let record = ProbeConfigRecord {
+        node,
+        secrets: secret_uses(&config),
+        config,
+        origin: ProbeConfigOrigin::Offer,
+        updated_at: now,
+        updated_by: None,
+    };
+    let ctx = RequestCtx::new(principal);
+    let mut batch = WriteBatch::for_request(&ctx);
+    batch.expect_typed(&PROBE_CONFIG, &node.0, None);
+    batch.put_typed(&PROBE_CONFIG, &node.0, &record)?;
+    batch.audit(
+        AuditDraft::success(actions::CONFIG_OFFER, vec![ObjectRef::node(node)])
+            .with_context("node", name.to_owned())
+            .with_context("prefixes", record.config.prefixes.join(",")),
+    );
+    match store.propose(batch).await {
+        Ok(_) => Ok(true),
+        Err(StoreError::PreconditionFailed(_)) => Ok(false),
+        Err(error) => Err(store_error(error)),
     }
 }
