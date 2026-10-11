@@ -331,6 +331,14 @@ export class TenkoServer {
   }
 
   /**
+   * Stops the server process the way `stop()` does but keeps its directory, so that
+   * `restart()` starts the same installation again. Returns the exit code.
+   */
+  async halt(): Promise<number | null> {
+    return this.proc.stop(STOP_TIMEOUT_MS);
+  }
+
+  /**
    * Stops the server the way a supervisor without signals does (closes standard input;
    * the server runs with `--stop-on-eof`), kills it when it does not stop in time, and
    * removes its directory. Returns the exit code.

@@ -1152,6 +1152,107 @@ export function renderKeysTs(catalog) {
   return out.join("\n") + "\n";
 }
 
+/** Character references for the white space that the text rule would otherwise drop. */
+const EDGE_REFERENCES = /** @type {Readonly<Record<string, string>>} */ ({ " ": "&#32;", "\t": "&#9;", "\n": "&#10;" });
+
+/**
+ * Escapes text for element content, as `escape` in crates/tenko-api/src/i18n/template.rs does:
+ * `&`, `<` and `>` become entities. When the text contains a line feed, the white space at its
+ * edges (space, tab, line feed) is written as character references, which the text rule keeps.
+ * @param {string} text
+ * @returns {string}
+ */
+function escapeText(text) {
+  const out = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  if (!text.includes("\n")) return out;
+  /** @param {string} run */
+  const references = (run) => run.replace(/[ \t\n]/g, (c) => EDGE_REFERENCES[c] ?? c);
+  /** @param {number} i */
+  const isEdge = (i) => out[i] === " " || out[i] === "\t" || out[i] === "\n";
+  let start = 0;
+  while (start < out.length && isEdge(start)) start++;
+  if (start === out.length) return references(out);
+  let end = out.length;
+  while (end > start && isEdge(end - 1)) end--;
+  return references(out.slice(0, start)) + out.slice(start, end) + references(out.slice(end));
+}
+
+/**
+ * Escapes text for an attribute value in double quotes: element escaping, plus `"` and every
+ * line feed as references (`escape_attr` in template.rs).
+ * @param {string} text
+ * @returns {string}
+ */
+function escapeAttr(text) {
+  return escapeText(text).replace(/"/g, "&quot;").replace(/\n/g, "&#10;");
+}
+
+/**
+ * One language of the catalog as a single XLIFF 2.0 document with the units of the main file
+ * and of every fragment merged. The server reads these documents at run time for the key set
+ * and the built-in messages (validating uploaded language packs, writing templates). The format
+ * is the one `render` in crates/tenko-api/src/i18n/template.rs writes, with every text escaped
+ * so that its reader returns the texts and notes unchanged.
+ *
+ * The units are the keys of the source language, sorted, with a `<group>` per first key segment
+ * (not the groups of the files). `<source>` is the source language's text of the key. The source
+ * language has no `trgLang` and no `<target>`; a translation has both, and a key it lacks has a
+ * unit without `<target>`. The note is the source message's description.
+ * @param {Catalog} catalog
+ * @param {string} code Language code; throws for a language the catalog does not have.
+ * @returns {string}
+ */
+export function renderMergedXliff(catalog, code) {
+  const messages = messagesOf(catalog, code);
+  const locale = catalog.locales.find((l) => l.code === code);
+  if (locale === undefined) throw new Error(`unknown language ${JSON.stringify(code)}`);
+  const source = messagesOf(catalog, catalog.sourceLocale);
+  const translation = code !== catalog.sourceLocale;
+
+  const trgLang = translation ? ` trgLang="${escapeAttr(code)}"` : "";
+  const out = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<xliff xmlns="${XLIFF_NS}" xmlns:mda="${METADATA_NS}" version="2.0" srcLang="${escapeAttr(catalog.sourceLocale)}"${trgLang}>`,
+    '  <file id="ui">',
+    "    <mda:metadata>",
+    `      <mda:metaGroup category="${META_CATEGORY}">`,
+  ];
+  /** @type {Array<[string, string]>} */
+  const entries = [
+    ["displayName", locale.name === "" ? code : locale.name],
+    ["author", locale.author],
+    ["version", locale.version],
+    ["sourceLanguage", catalog.sourceLocale],
+  ];
+  for (const [type, value] of entries) {
+    out.push(`        <mda:meta type="${type}">${escapeText(value)}</mda:meta>`);
+  }
+  out.push("      </mda:metaGroup>", "    </mda:metadata>");
+
+  /** @type {string | undefined} */
+  let group;
+  for (const key of [...source.keys()].sort(compareText)) {
+    const message = /** @type {Message} */ (source.get(key));
+    const area = key.split(".")[0] ?? "";
+    if (area !== group) {
+      if (group !== undefined) out.push("    </group>");
+      out.push(`    <group id="${escapeAttr(area)}">`);
+      group = area;
+    }
+    out.push(`      <unit id="${escapeAttr(key)}">`);
+    if (message.description !== undefined) {
+      out.push(`        <notes><note category="description">${escapeText(message.description)}</note></notes>`);
+    }
+    out.push("        <segment>", `          <source>${escapeText(message.text)}</source>`);
+    const target = translation ? messages.get(key) : undefined;
+    if (target !== undefined) out.push(`          <target>${escapeText(target.text)}</target>`);
+    out.push("        </segment>", "      </unit>");
+  }
+  if (group !== undefined) out.push("    </group>");
+  out.push("  </file>", "</xliff>", "");
+  return out.join("\n");
+}
+
 /**
  * Console text for diagnostics, one line each: `file: key: message`.
  * @param {readonly Diagnostic[]} diagnostics

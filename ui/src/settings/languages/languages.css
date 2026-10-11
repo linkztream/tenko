@@ -1,0 +1,31 @@
+/* The languages page (LanguagesPage.tsx). Logical properties only: the page mirrors in a
+   right-to-left language. */
+.lang-table td { block-size: auto; padding-block: var(--sp-3); vertical-align: top; }
+.lang-name { font-weight: var(--fw-medium); }
+
+.lang-status { display: inline-flex; align-items: center; gap: var(--sp-2); white-space: nowrap; font-size: var(--fs-12); font-weight: var(--fw-medium); }
+.lang-status.active { color: var(--ok-ink); }
+.lang-status.previewed,
+.lang-status.uploaded { color: var(--ink-2); }
+.lang-status.built_in { color: var(--ink-3); }
+
+.lang-version { display: grid; gap: var(--sp-1); font-size: var(--fs-12); }
+
+.lang-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: flex-end; }
+
+.lang-upload input[type="file"] { min-inline-size: 0; max-inline-size: 100%; }
+
+.lang-problems { display: grid; gap: var(--sp-2); padding-inline-start: var(--sp-6); margin: 0; font-size: var(--fs-12); }
+.lang-problems li { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: baseline; }
+.lang-detail { display: block; font-size: var(--fs-11); overflow-wrap: anywhere; }
+
+.lang-report-body { display: grid; gap: var(--sp-4); padding: var(--sp-6); }
+.lang-report-meta { display: flex; flex-wrap: wrap; gap: var(--sp-4); align-items: baseline; margin: 0; }
+.lang-subhead { font-size: var(--fs-13); margin: 0; }
+
+.lang-group > summary { cursor: pointer; color: var(--ink-2); }
+.lang-keys { columns: 2 18rem; column-gap: var(--sp-6); margin-block: var(--sp-3) 0; padding-inline-start: var(--sp-6); font-size: var(--fs-12); }
+
+.lang-severity { display: inline-flex; align-items: center; gap: var(--sp-2); white-space: nowrap; }
+.lang-severity.error { color: var(--danger-ink); }
+.lang-severity.warning { color: var(--warn-ink); }

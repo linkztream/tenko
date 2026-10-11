@@ -6,9 +6,399 @@
         <notes><note category="description">Title of the languages page and its entry in the browser tab.</note></notes>
         <segment><source>Languages</source></segment>
       </unit>
-      <unit id="languages.placeholder">
-        <notes><note category="description">Placeholder text of the languages page until the page itself exists.</note></notes>
-        <segment><source>The languages page arrives with a later update.</source></segment>
+      <unit id="languages.sub">
+        <notes><note category="description">Subtitle of the languages page.</note></notes>
+        <segment><source>The languages of the user interface: built in, uploaded and active</source></segment>
+      </unit>
+      <unit id="languages.lead">
+        <notes><note category="description">Introduction above the upload form of the languages page.</note></notes>
+        <segment><source>English and Swedish are built in. Upload an XLIFF 2.0 language pack to add a language or to change the texts of a built-in one. The server checks the pack; you preview it in this tab, then activate it for everyone.</source></segment>
+      </unit>
+      <unit id="languages.action.template">
+        <notes><note category="description">Button that downloads the English template, the key set of the user interface as an XLIFF file for translators.</note></notes>
+        <segment><source>Download template</source></segment>
+      </unit>
+      <unit id="languages.action.template_short">
+        <notes><note category="description">Short button in a language row that downloads the template of that language.</note></notes>
+        <segment><source>Template</source></segment>
+      </unit>
+      <unit id="languages.action.template_of">
+        <notes><note category="description">Accessible name of the template button of a language row. The argument name is the language's own name.</note></notes>
+        <segment><source>Download the template of {name}</source></segment>
+      </unit>
+      <unit id="languages.action.preview">
+        <notes><note category="description">Button that shows the uploaded version of a language in this browser tab before it is activated.</note></notes>
+        <segment><source>Preview</source></segment>
+      </unit>
+      <unit id="languages.action.activate">
+        <notes><note category="description">Button that makes the uploaded version of a language available to everyone.</note></notes>
+        <segment><source>Activate</source></segment>
+      </unit>
+      <unit id="languages.action.discard">
+        <notes><note category="description">Button that deletes the uploaded version of a language that is not active.</note></notes>
+        <segment><source>Discard</source></segment>
+      </unit>
+      <unit id="languages.action.report">
+        <notes><note category="description">Button that shows the validation report of a language pack.</note></notes>
+        <segment><source>Report</source></segment>
+      </unit>
+      <unit id="languages.action.remove">
+        <notes><note category="description">Button that removes a language that is not built in.</note></notes>
+        <segment><source>Remove</source></segment>
+      </unit>
+      <unit id="languages.action.revert">
+        <notes><note category="description">Button that returns a built-in language to its built-in texts.</note></notes>
+        <segment><source>Revert</source></segment>
+      </unit>
+      <unit id="languages.activate.hint">
+        <notes><note category="description">Tooltip of the disabled activate button while the uploaded version has not been previewed.</note></notes>
+        <segment><source>Preview the uploaded version first</source></segment>
+      </unit>
+      <unit id="languages.upload.heading">
+        <notes><note category="description">Heading of the upload section of the languages page.</note></notes>
+        <segment><source>Upload a language pack</source></segment>
+      </unit>
+      <unit id="languages.upload.file">
+        <notes><note category="description">Label of the file field of the upload form.</note></notes>
+        <segment><source>XLIFF file</source></segment>
+      </unit>
+      <unit id="languages.upload.help">
+        <notes><note category="description">Help text under the file field of the upload form.</note></notes>
+        <segment><source>An XLIFF 2.0 document of at most 2 MiB whose trgLang names the language. Start from the template.</source></segment>
+      </unit>
+      <unit id="languages.upload.submit">
+        <notes><note category="description">Button that uploads the chosen language pack.</note></notes>
+        <segment><source>Upload</source></segment>
+      </unit>
+      <unit id="languages.upload.done">
+        <notes><note category="description">Toast after an upload. The argument name is the language's own name, percent the share of messages it translates.</note></notes>
+        <segment><source>{name} uploaded: {percent} percent translated</source></segment>
+      </unit>
+      <unit id="languages.list.heading">
+        <notes><note category="description">Heading of the table of languages.</note></notes>
+        <segment><source>Languages of the installation</source></segment>
+      </unit>
+      <unit id="languages.col.language">
+        <notes><note category="description">Column header: the language.</note></notes>
+        <segment><source>Language</source></segment>
+      </unit>
+      <unit id="languages.col.status">
+        <notes><note category="description">Column header: where the language is in its life cycle.</note></notes>
+        <segment><source>Status</source></segment>
+      </unit>
+      <unit id="languages.col.active">
+        <notes><note category="description">Column header: the version everyone sees.</note></notes>
+        <segment><source>Active version</source></segment>
+      </unit>
+      <unit id="languages.col.candidate">
+        <notes><note category="description">Column header: the uploaded version waiting for preview and activation.</note></notes>
+        <segment><source>Uploaded version</source></segment>
+      </unit>
+      <unit id="languages.col.actions">
+        <notes><note category="description">Hidden column header of the action buttons.</note></notes>
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="languages.status.built_in">
+        <notes><note category="description">Status of a built-in language without an uploaded version.</note></notes>
+        <segment><source>Built in</source></segment>
+      </unit>
+      <unit id="languages.status.uploaded">
+        <notes><note category="description">Status of a language whose uploaded version nobody has previewed yet.</note></notes>
+        <segment><source>Uploaded</source></segment>
+      </unit>
+      <unit id="languages.status.previewed">
+        <notes><note category="description">Status of a language whose uploaded version was previewed and can be activated.</note></notes>
+        <segment><source>Previewed</source></segment>
+      </unit>
+      <unit id="languages.status.active">
+        <notes><note category="description">Status of a language with an active uploaded version.</note></notes>
+        <segment><source>Active</source></segment>
+      </unit>
+      <unit id="languages.built_in_texts">
+        <notes><note category="description">Active version column of a built-in language without an override.</note></notes>
+        <segment><source>Built-in texts</source></segment>
+      </unit>
+      <unit id="languages.none">
+        <notes><note category="description">Shown in a version column when there is no such version.</note></notes>
+        <segment><source>None</source></segment>
+      </unit>
+      <unit id="languages.version.percent">
+        <notes><note category="description">Completeness of a pack. The argument percent is a whole number from 0 to 100.</note></notes>
+        <segment><source>{percent} percent</source></segment>
+      </unit>
+      <unit id="languages.version.label">
+        <notes><note category="description">The pack's own version, as its author wrote it.</note></notes>
+        <segment><source>Version {version}</source></segment>
+      </unit>
+      <unit id="languages.version.by">
+        <notes><note category="description">When and by whom a version was uploaded. The argument when is a date and time, who a user or system component.</note></notes>
+        <segment><source>{when}, {who}</source></segment>
+      </unit>
+      <unit id="languages.version.previewed">
+        <notes><note category="description">Note on an uploaded version that was previewed.</note></notes>
+        <segment><source>Previewed</source></segment>
+      </unit>
+      <unit id="languages.version.not_previewed">
+        <notes><note category="description">Note on an uploaded version that nobody has previewed yet.</note></notes>
+        <segment><source>Not previewed yet</source></segment>
+      </unit>
+      <unit id="languages.origin.data_dir">
+        <notes><note category="description">Note on a version imported from the i18n folder of the data directory at start.</note></notes>
+        <segment><source>From the data directory</source></segment>
+      </unit>
+      <unit id="languages.confirm.activate.title">
+        <notes><note category="description">Title of the confirmation before an activation. The argument name is the language's own name.</note></notes>
+        <segment><source>Activate {name}?</source></segment>
+      </unit>
+      <unit id="languages.confirm.activate.body">
+        <notes><note category="description">Consequence of an activation.</note></notes>
+        <segment><source>Everyone can choose {name}, and every open window that shows it switches to this version.</source></segment>
+      </unit>
+      <unit id="languages.confirm.activate.ok">
+        <notes><note category="description">Confirm button of an activation.</note></notes>
+        <segment><source>Activate {name}</source></segment>
+      </unit>
+      <unit id="languages.confirm.discard.title">
+        <notes><note category="description">Title of the confirmation before an uploaded version is discarded.</note></notes>
+        <segment><source>Discard the uploaded version of {name}?</source></segment>
+      </unit>
+      <unit id="languages.confirm.discard.body">
+        <notes><note category="description">Consequence of discarding an uploaded version.</note></notes>
+        <segment><source>The uploaded version is deleted. An active version stays as it is.</source></segment>
+      </unit>
+      <unit id="languages.confirm.discard.ok">
+        <notes><note category="description">Confirm button of a discard.</note></notes>
+        <segment><source>Discard version</source></segment>
+      </unit>
+      <unit id="languages.confirm.remove.title">
+        <notes><note category="description">Title of the confirmation before a language that is not built in is removed.</note></notes>
+        <segment><source>Remove {name}?</source></segment>
+      </unit>
+      <unit id="languages.confirm.remove.body">
+        <notes><note category="description">Consequence of removing a language.</note></notes>
+        <segment><source>Every uploaded version of {name} is deleted. Users who chose it see their browser language or the default language instead.</source></segment>
+      </unit>
+      <unit id="languages.confirm.remove.ok">
+        <notes><note category="description">Confirm button of a removal.</note></notes>
+        <segment><source>Remove {name}</source></segment>
+      </unit>
+      <unit id="languages.confirm.revert.title">
+        <notes><note category="description">Title of the confirmation before a built-in language returns to its built-in texts.</note></notes>
+        <segment><source>Revert {name} to its built-in texts?</source></segment>
+      </unit>
+      <unit id="languages.confirm.revert.body">
+        <notes><note category="description">Consequence of reverting a built-in language.</note></notes>
+        <segment><source>The uploaded texts of {name} are deleted, and everyone sees the built-in texts again.</source></segment>
+      </unit>
+      <unit id="languages.confirm.revert.ok">
+        <notes><note category="description">Confirm button of a revert.</note></notes>
+        <segment><source>Revert {name}</source></segment>
+      </unit>
+      <unit id="languages.toast.activated">
+        <notes><note category="description">Toast after an activation.</note></notes>
+        <segment><source>{name} is active</source></segment>
+      </unit>
+      <unit id="languages.toast.discarded">
+        <notes><note category="description">Toast after a discard.</note></notes>
+        <segment><source>The uploaded version of {name} was discarded</source></segment>
+      </unit>
+      <unit id="languages.toast.removed">
+        <notes><note category="description">Toast after a removal.</note></notes>
+        <segment><source>{name} was removed</source></segment>
+      </unit>
+      <unit id="languages.toast.reverted">
+        <notes><note category="description">Toast after a revert.</note></notes>
+        <segment><source>{name} uses its built-in texts again</source></segment>
+      </unit>
+      <unit id="languages.toast.preview">
+        <notes><note category="description">Toast when a preview starts.</note></notes>
+        <segment><source>Previewing {name} in this tab</source></segment>
+      </unit>
+      <unit id="languages.preview.bar">
+        <notes><note category="description">Bar shown on every page while a preview runs. The argument name is the language's own name.</note></notes>
+        <segment><source>Preview of {name}: the uploaded version, in this tab only.</source></segment>
+      </unit>
+      <unit id="languages.preview.open">
+        <notes><note category="description">Link in the preview bar to the languages page.</note></notes>
+        <segment><source>Open the languages page</source></segment>
+      </unit>
+      <unit id="languages.preview.end">
+        <notes><note category="description">Button in the preview bar that ends the preview.</note></notes>
+        <segment><source>End preview</source></segment>
+      </unit>
+      <unit id="languages.report.heading">
+        <notes><note category="description">Heading of the validation report of a pack. The argument name is the language's own name.</note></notes>
+        <segment><source>Report: {name}</source></segment>
+      </unit>
+      <unit id="languages.report.author">
+        <notes><note category="description">Author of a pack, as its metadata names it.</note></notes>
+        <segment><source>By {author}</source></segment>
+      </unit>
+      <unit id="languages.report.complete">
+        <notes><note category="description">Completeness line of a report.</note></notes>
+        <segment><source>{translated, number} of {total, number} messages translated</source></segment>
+      </unit>
+      <unit id="languages.report.missing">
+        <notes><note category="description">Messages the pack lacks, which show in English.</note></notes>
+        <segment><source>{count, plural, one {# message shows} other {# messages show}} in English</source></segment>
+      </unit>
+      <unit id="languages.report.extra">
+        <notes><note category="description">Units of the pack that the user interface does not have.</note></notes>
+        <segment><source>{count, plural, one {# unit is} other {# units are}} not used: the user interface has no such key</source></segment>
+      </unit>
+      <unit id="languages.report.stale">
+        <notes><note category="description">Translations made from an English text that has changed since.</note></notes>
+        <segment><source>{count, plural, one {# message was} other {# messages were}} translated from an older English text</source></segment>
+      </unit>
+      <unit id="languages.report.more">
+        <notes><note category="description">Last entry of a shortened list of keys.</note></notes>
+        <segment><source>and {count, number} more</source></segment>
+      </unit>
+      <unit id="languages.report.problems">
+        <notes><note category="description">Heading of the problems of a report. The argument count is every problem, errors those of them that leave a unit out.</note></notes>
+        <segment><source>{count, plural, one {# problem} other {# problems}}, {errors, plural, one {# unit left out} other {# units left out}}</source></segment>
+      </unit>
+      <unit id="languages.report.problems_label">
+        <notes><note category="description">Accessible name of the table of problems.</note></notes>
+        <segment><source>Problems of the pack</source></segment>
+      </unit>
+      <unit id="languages.report.none">
+        <notes><note category="description">Shown when a report has no problems.</note></notes>
+        <segment><source>No problems.</source></segment>
+      </unit>
+      <unit id="languages.report.at_line">
+        <notes><note category="description">Where a problem is in the uploaded file.</note></notes>
+        <segment><source>line {line, number}</source></segment>
+      </unit>
+      <unit id="languages.report.col.severity">
+        <notes><note category="description">Column header: error or warning.</note></notes>
+        <segment><source>Severity</source></segment>
+      </unit>
+      <unit id="languages.report.col.problem">
+        <notes><note category="description">Column header: the problem.</note></notes>
+        <segment><source>Problem</source></segment>
+      </unit>
+      <unit id="languages.report.col.key">
+        <notes><note category="description">Column header: the message key of the unit.</note></notes>
+        <segment><source>Key</source></segment>
+      </unit>
+      <unit id="languages.report.col.line">
+        <notes><note category="description">Column header: the line in the file.</note></notes>
+        <segment><source>Line</source></segment>
+      </unit>
+      <unit id="languages.severity.error">
+        <notes><note category="description">A problem that leaves the unit or the pack out.</note></notes>
+        <segment><source>Error</source></segment>
+      </unit>
+      <unit id="languages.severity.warning">
+        <notes><note category="description">A problem worth fixing that does not stop the pack.</note></notes>
+        <segment><source>Warning</source></segment>
+      </unit>
+    </group>
+    <group id="errors">
+      <unit id="errors.i18n.pack.invalid">
+        <notes><note category="description">Error: the uploaded file is not a usable language pack; the problems follow.</note></notes>
+        <segment><source>The file is not a usable language pack.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.too_large">
+        <notes><note category="description">Error: the pack is over the size limit.</note></notes>
+        <segment><source>The pack is larger than 2 MiB.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.not_found">
+        <notes><note category="description">Error: there is no pack for the language.</note></notes>
+        <segment><source>There is no language pack for this language.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.no_candidate">
+        <notes><note category="description">Error: the language has no uploaded version waiting.</note></notes>
+        <segment><source>This language has no uploaded version waiting.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.not_previewed">
+        <notes><note category="description">Error: an activation before a preview.</note></notes>
+        <segment><source>Preview the uploaded version before you activate it.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.default_language">
+        <notes><note category="description">Error: the language is the default language of the installation.</note></notes>
+        <segment><source>This language is the default language of the installation. Choose another default language first.</source></segment>
+      </unit>
+      <unit id="errors.i18n.upload.empty">
+        <notes><note category="description">Error: the upload has no file.</note></notes>
+        <segment><source>Choose a file to upload.</source></segment>
+      </unit>
+      <unit id="errors.i18n.upload.malformed">
+        <notes><note category="description">Error: the upload is not one file in a multipart form.</note></notes>
+        <segment><source>Upload one XLIFF file at a time.</source></segment>
+      </unit>
+      <unit id="errors.i18n.unavailable">
+        <notes><note category="description">Error: the server has no built-in user interface to check packs against.</note></notes>
+        <segment><source>This server has no built-in user interface to check language packs against.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.xml">
+        <notes><note category="description">Problem: the file is not well-formed XML or has a DOCTYPE.</note></notes>
+        <segment><source>The file is not well-formed XML, or it has a DOCTYPE.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.root">
+        <notes><note category="description">Problem: the document is not XLIFF 2.0.</note></notes>
+        <segment><source>The document is not XLIFF 2.0.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.version">
+        <notes><note category="description">Problem: an XLIFF version other than 2.0.</note></notes>
+        <segment><source>Only XLIFF version 2.0 is accepted.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.structure">
+        <notes><note category="description">Problem: a structure language packs do not use (one file, one segment per unit).</note></notes>
+        <segment><source>This structure is not supported: one file, one segment per unit.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.too_many_units">
+        <notes><note category="description">Problem: the document has too many units.</note></notes>
+        <segment><source>The document has too many units.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.src_lang">
+        <notes><note category="description">Problem: the pack does not translate from English.</note></notes>
+        <segment><source>The pack must translate from English (srcLang en).</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.trg_lang">
+        <notes><note category="description">Problem: trgLang is missing.</note></notes>
+        <segment><source>trgLang is missing: it names the language of the pack.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.tag">
+        <notes><note category="description">Problem: trgLang is not a valid language tag in canonical form.</note></notes>
+        <segment><source>trgLang is not a valid language tag, such as fr or pt-BR.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.metadata">
+        <notes><note category="description">Problem: the language pack metadata (display name, author, version) is missing or invalid.</note></notes>
+        <segment><source>The language pack metadata is missing or invalid.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.empty">
+        <notes><note category="description">Problem: the pack translates nothing the user interface uses.</note></notes>
+        <segment><source>The pack translates no message of this user interface.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.markup">
+        <notes><note category="description">Problem: a translation contains XLIFF inline markup.</note></notes>
+        <segment><source>Inline markup is not allowed in a translation.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.duplicate">
+        <notes><note category="description">Problem: a key appears twice; the first one is used.</note></notes>
+        <segment><source>The key appears more than once; the first one is used.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.key">
+        <notes><note category="description">Problem: a unit id is not a message key.</note></notes>
+        <segment><source>The unit id is not a message key.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.icu">
+        <notes><note category="description">Problem: a translation is not a valid ICU message.</note></notes>
+        <segment><source>The translation is not a valid ICU message.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.argument">
+        <notes><note category="description">Problem: a translation uses an argument the English text does not have.</note></notes>
+        <segment><source>The translation uses an argument the English text does not have.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.control">
+        <notes><note category="description">Problem: a translation contains a control character.</note></notes>
+        <segment><source>The translation contains a control character.</source></segment>
+      </unit>
+      <unit id="errors.i18n.pack.bidi">
+        <notes><note category="description">Problem: unbalanced bidirectional formatting characters.</note></notes>
+        <segment><source>The translation has unbalanced bidirectional formatting characters.</source></segment>
       </unit>
     </group>
   </file>

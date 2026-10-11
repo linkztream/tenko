@@ -43,6 +43,8 @@ client = ["dep:reqwest"]
 
 [dependencies]
 bytes = { workspace = true }
+# XLIFF language packs (src/i18n); outside the server feature for the fuzz target.
+quick-xml = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tenko-core = { workspace = true }

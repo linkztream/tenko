@@ -11,11 +11,12 @@
 //! | 4 | `vault` | the vault; it refuses to open when the store holds secrets no loaded KEK opens |
 //! | 5 | `tls` | the TLS mode (OPS-22): the internal CA's certificate, imported files or the reverse proxy |
 //! | 6 | `auth` | users, sessions, passkeys, TOTP, settings; the setup token while setup is open |
-//! | 7 | `ipam` | the IPAM domain over the job engine, its prefix tree and alarms |
-//! | 8 | `jobs` | the job runner |
-//! | 9 | `connectors` | connector plugins and their supervisor (ADR 0012) |
-//! | 10 | `nodes` | the node transport: internal CA node certificate, node registry, the mutual TLS listener for enrolled nodes (OPS-04), the probe role in process |
-//! | 11 | `api` | the HTTP API, the web UI and server-sent events |
+//! | 7 | `languages` | language packs: the files in `<data_dir>/i18n/` imported as uploads by the system (S3-Q8); a file the validation refuses is logged and audited, an oversized or unreadable one logged; never a start error |
+//! | 8 | `ipam` | the IPAM domain over the job engine, its prefix tree and alarms |
+//! | 9 | `jobs` | the job runner |
+//! | 10 | `connectors` | connector plugins and their supervisor (ADR 0012) |
+//! | 11 | `nodes` | the node transport: internal CA node certificate, node registry, the mutual TLS listener for enrolled nodes (OPS-04), the probe role in process |
+//! | 12 | `api` | the HTTP API, the web UI and server-sent events |
 //!
 //! After the last step the leader supervisor (WP3.1b) starts the leader-only services
 //! (`tenko_core::cluster::LeaderService`) once this controller has taken office; on a single
@@ -92,7 +93,7 @@ pub const FSYNC_WARN_MICROS: u64 = 10_000;
 const RUNNER_STOP_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The start steps of the controller role, in order.
-pub const START_ORDER: [(&str, &str); 11] = [
+pub const START_ORDER: [(&str, &str); 12] = [
     ("kek", "key-encryption keys"),
     ("store", "replicated store (openraft over redb)"),
     (
@@ -102,6 +103,7 @@ pub const START_ORDER: [(&str, &str); 11] = [
     ("vault", "envelope encryption of secrets"),
     ("tls", "TLS mode and certificate"),
     ("auth", "users, sessions, passkeys and TOTP"),
+    ("languages", "language packs of the data directory"),
     ("ipam", "IPAM domain and job engine"),
     ("jobs", "job runner"),
     ("connectors", "connector plugins and their supervisor"),
@@ -987,6 +989,35 @@ async fn start(
         ));
     }
 
+    // Language packs (WP3.7): the key set of the UI this server serves, and the packs an
+    // operator dropped into `<data_dir>/i18n/`, imported as uploads by the system. A file the
+    // validation refuses is logged and audited as a failed upload; a file over the size limit
+    // or one that cannot be read is logged. Neither stops the start.
+    let languages = steps
+        .run("languages", async {
+            let languages = match &config.server.ui_dir {
+                Some(dir) => tenko_api::i18n::service::Languages::from_ui_dir(dir),
+                None => tenko_api::i18n::service::Languages::embedded(),
+            };
+            let dir = resolved.data_dir.join("i18n");
+            let summary = match languages.import_dir(store_dyn.as_ref(), &dir).await {
+                Ok(done) => format!(
+                    "{} keys; {} imported, {} skipped, {} refused from {}",
+                    languages.keys().len(),
+                    done.imported,
+                    done.skipped,
+                    done.refused,
+                    dir.display()
+                ),
+                Err(error) => {
+                    tracing::warn!(dir = %dir.display(), %error, "the language pack directory cannot be read");
+                    format!("{} keys; {} not readable", languages.keys().len(), dir.display())
+                }
+            };
+            Ok((languages, summary))
+        })
+        .await?;
+
     // The network controllers of the VLAN provision job and the topology (WP2.7): filled
     // once the connector service runs; the job steps read it when they run.
     let vlan_controllers = tenko_ipam::vlan::Controllers::new();
@@ -1255,6 +1286,7 @@ async fn start(
                 Duration::from_secs(config.server.header_read_timeout_secs);
             server.max_connections = config.server.max_connections;
             server.extensions.insert(Arc::clone(&auth));
+            server.extensions.insert(Arc::clone(&languages));
             if let Some(ipam) = &ipam {
                 server.extensions.insert(Arc::clone(ipam));
                 server.extensions.insert(Arc::clone(&vlan_controllers));
@@ -1661,6 +1693,7 @@ mod tests {
                 "vault",
                 "tls",
                 "auth",
+                "languages",
                 "ipam",
                 "jobs",
                 "connectors",

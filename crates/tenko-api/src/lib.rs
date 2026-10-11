@@ -50,6 +50,7 @@
 #[cfg(feature = "client")]
 pub mod client;
 pub mod dto;
+pub mod i18n;
 pub mod modules;
 pub mod problem;
 

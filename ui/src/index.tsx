@@ -2,6 +2,7 @@ import { render } from "solid-js/web";
 import App from "./App";
 import { loadSession } from "./auth/session";
 import { browserLocales, resolveLocale, setLocale, storedLocale } from "./i18n";
+import { loadLanguages } from "./i18n/remote";
 import "./app/styles/tokens.css";
 import "./app/styles/fonts.css";
 import "./app/styles/design.css";
@@ -15,6 +16,7 @@ async function start(): Promise<void> {
     await startMockWorker();
   }
   // The language before anyone signs in; the session may change it (API-08).
+  await loadLanguages();
   await setLocale(resolveLocale({ stored: storedLocale(), browser: browserLocales() }));
 
   const root = document.getElementById("root");

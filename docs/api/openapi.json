@@ -6364,6 +6364,672 @@
         }
       }
     },
+    "/api/v1/i18n/languages": {
+      "get": {
+        "tags": [
+          "i18n"
+        ],
+        "summary": "List the languages of the installation",
+        "operationId": "get_languages",
+        "responses": {
+          "200": {
+            "description": "The languages users may choose",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/i18n/packs": {
+      "get": {
+        "tags": [
+          "i18n"
+        ],
+        "summary": "List the language packs with their versions",
+        "operationId": "list_packs",
+        "responses": {
+          "200": {
+            "description": "Every language with its versions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "i18n"
+        ],
+        "summary": "Upload a language pack",
+        "operationId": "upload_pack",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/PackUploadForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Validated and stored as the candidate of its language",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackUpload"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No file, several files or a malformed multipart body (`i18n.upload.empty`, `i18n.upload.malformed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Over 2 MiB (`i18n.pack.too_large`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not a usable pack (`i18n.pack.invalid`, the problems in `errors`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No embedded UI to check against (`i18n.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/i18n/packs/{tag}": {
+      "get": {
+        "tags": [
+          "i18n"
+        ],
+        "summary": "Get the messages of an active language pack",
+        "operationId": "get_pack",
+        "parameters": [
+          {
+            "name": "tag",
+            "in": "path",
+            "description": "BCP 47 language tag",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "hash",
+            "in": "query",
+            "description": "The hash from `GET /i18n/languages`: the answer may then be cached for a year.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The messages, with the content hash as ETag",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The content hash in quotes"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackMessages"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Not modified (If-None-Match)"
+          },
+          "404": {
+            "description": "No active uploaded pack for the tag (`i18n.pack.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "i18n"
+        ],
+        "summary": "Remove a language pack, or revert a built-in language",
+        "operationId": "delete_pack",
+        "parameters": [
+          {
+            "name": "tag",
+            "in": "path",
+            "description": "BCP 47 language tag",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing uploaded for the tag (`i18n.pack.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The installation's default language (`i18n.pack.default_language`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/i18n/packs/{tag}/activate": {
+      "post": {
+        "tags": [
+          "i18n"
+        ],
+        "summary": "Activate an uploaded language pack",
+        "operationId": "activate_pack",
+        "parameters": [
+          {
+            "name": "tag",
+            "in": "path",
+            "description": "BCP 47 language tag",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The language with its new active version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No candidate (`i18n.pack.no_candidate`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not previewed yet (`i18n.pack.not_previewed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/i18n/packs/{tag}/candidate": {
+      "get": {
+        "tags": [
+          "i18n"
+        ],
+        "summary": "Get the messages of an uploaded language pack for a preview",
+        "operationId": "get_pack_candidate",
+        "parameters": [
+          {
+            "name": "tag",
+            "in": "path",
+            "description": "BCP 47 language tag",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The messages of the candidate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackMessages"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No candidate (`i18n.pack.no_candidate`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "i18n"
+        ],
+        "summary": "Discard an uploaded language pack that is not active",
+        "operationId": "discard_pack_candidate",
+        "parameters": [
+          {
+            "name": "tag",
+            "in": "path",
+            "description": "BCP 47 language tag",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The language without the candidate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No candidate (`i18n.pack.no_candidate`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/i18n/packs/{tag}/preview": {
+      "post": {
+        "tags": [
+          "i18n"
+        ],
+        "summary": "Preview an uploaded language pack",
+        "operationId": "preview_pack",
+        "parameters": [
+          {
+            "name": "tag",
+            "in": "path",
+            "description": "BCP 47 language tag",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The language with its candidate marked previewed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No candidate (`i18n.pack.no_candidate`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/i18n/packs/{tag}/report": {
+      "get": {
+        "tags": [
+          "i18n"
+        ],
+        "summary": "Get the validation report of a language pack",
+        "operationId": "get_pack_report",
+        "parameters": [
+          {
+            "name": "tag",
+            "in": "path",
+            "description": "BCP 47 language tag",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing uploaded for the tag (`i18n.pack.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/i18n/template.xlf": {
+      "get": {
+        "tags": [
+          "i18n"
+        ],
+        "summary": "Export the template of a language pack",
+        "operationId": "get_template",
+        "parameters": [
+          {
+            "name": "language",
+            "in": "query",
+            "description": "The language whose current messages fill the targets; the source language (`en`) by\ndefault, whose template has the English text as every target.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The XLIFF 2.0 document",
+            "content": {
+              "application/xliff+xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not a language tag (`i18n.pack.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No embedded UI (`i18n.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/imports": {
       "post": {
         "tags": [
@@ -26513,6 +27179,59 @@
           }
         }
       },
+      "LanguageInfo": {
+        "type": "object",
+        "description": "A language the UI offers to everyone (`GET /i18n/languages`).",
+        "required": [
+          "tag",
+          "name",
+          "built_in"
+        ],
+        "properties": {
+          "built_in": {
+            "type": "boolean",
+            "description": "Whether the UI has the language built in."
+          },
+          "hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The content hash of the active uploaded pack, which `GET /i18n/packs/{tag}` serves;\nabsent for a built-in language without an uploaded override."
+          },
+          "name": {
+            "type": "string",
+            "description": "The language's name in itself."
+          },
+          "tag": {
+            "type": "string",
+            "description": "The BCP 47 tag."
+          }
+        }
+      },
+      "LanguageList": {
+        "type": "object",
+        "description": "The languages of the installation (`GET /i18n/languages`).",
+        "required": [
+          "languages"
+        ],
+        "properties": {
+          "default_language": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The installation's default language, once setup has run."
+          },
+          "languages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LanguageInfo"
+            },
+            "description": "The built-in languages, then the active uploaded ones by tag."
+          }
+        }
+      },
       "LastReveal": {
         "type": "object",
         "description": "The last reveal of a secret: who and when, never the value or the reason.",
@@ -30006,6 +30725,375 @@
           "value_updated_at": {
             "$ref": "#/components/schemas/Timestamp",
             "description": "When its value was last written (creation, replacement, key rotation)."
+          }
+        }
+      },
+      "PackInfo": {
+        "type": "object",
+        "description": "A language and its packs, for administrators (`GET /i18n/packs`).",
+        "required": [
+          "tag",
+          "name",
+          "built_in",
+          "status"
+        ],
+        "properties": {
+          "active": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PackVersion",
+                "description": "The active version."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "built_in": {
+            "type": "boolean",
+            "description": "Whether the UI has the language built in (it can be overridden, never removed)."
+          },
+          "candidate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PackVersion",
+                "description": "The version waiting for preview and activation."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "The language's name in itself."
+          },
+          "status": {
+            "$ref": "#/components/schemas/PackStatus",
+            "description": "The life cycle state."
+          },
+          "tag": {
+            "type": "string",
+            "description": "The BCP 47 tag."
+          }
+        }
+      },
+      "PackList": {
+        "type": "object",
+        "description": "Every language with its packs (`GET /i18n/packs`).",
+        "required": [
+          "packs",
+          "keys"
+        ],
+        "properties": {
+          "keys": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The number of keys of the running UI.",
+            "minimum": 0
+          },
+          "packs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PackInfo"
+            },
+            "description": "The built-in languages, then the others by tag."
+          }
+        }
+      },
+      "PackMessages": {
+        "type": "object",
+        "description": "The messages of a pack, ready for the UI (`GET /i18n/packs/{tag}`).",
+        "required": [
+          "tag",
+          "hash",
+          "messages"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string",
+            "description": "The content hash of the messages (also the `ETag`)."
+          },
+          "messages": {
+            "type": "object",
+            "description": "ICU message text by key; keys the pack lacks fall back to the built-in language of the\nsame tag, then to English.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "tag": {
+            "type": "string",
+            "description": "The BCP 47 tag."
+          }
+        }
+      },
+      "PackOrigin": {
+        "type": "string",
+        "description": "Where a pack version came from.",
+        "enum": [
+          "upload",
+          "data_dir"
+        ]
+      },
+      "PackProblem": {
+        "type": "object",
+        "description": "A problem found in a pack.",
+        "required": [
+          "severity",
+          "code",
+          "detail"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The stable code, for example `i18n.pack.icu`."
+          },
+          "detail": {
+            "type": "string",
+            "description": "English explanation."
+          },
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The unit, when the problem belongs to one."
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The 1-based line in the document.",
+            "minimum": 0
+          },
+          "severity": {
+            "$ref": "#/components/schemas/PackSeverity",
+            "description": "Error or warning."
+          }
+        }
+      },
+      "PackReport": {
+        "type": "object",
+        "description": "The validation report of a pack.",
+        "required": [
+          "tag",
+          "display_name",
+          "author",
+          "version",
+          "total",
+          "translated",
+          "percent",
+          "missing",
+          "extra",
+          "stale",
+          "problems"
+        ],
+        "properties": {
+          "author": {
+            "type": "string",
+            "description": "Who made the pack."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "The language's name in itself."
+          },
+          "extra": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Units whose key the running UI does not have; they are not used."
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Keys of the running UI the pack does not translate; they show in English."
+          },
+          "percent": {
+            "type": "integer",
+            "format": "int32",
+            "description": "`translated` in percent of `total`, rounded down (100 when the UI has no keys).",
+            "minimum": 0
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PackProblem"
+            },
+            "description": "Errors of single units (left out) and warnings."
+          },
+          "stale": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Units translated from an English text that has changed since; they are used."
+          },
+          "tag": {
+            "type": "string",
+            "description": "The BCP 47 tag (`trgLang`)."
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The keys of the running UI.",
+            "minimum": 0
+          },
+          "translated": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The keys the pack translates usably.",
+            "minimum": 0
+          },
+          "version": {
+            "type": "string",
+            "description": "The pack's own version."
+          }
+        }
+      },
+      "PackSeverity": {
+        "type": "string",
+        "description": "How bad a problem is.",
+        "enum": [
+          "error",
+          "warning"
+        ]
+      },
+      "PackStatus": {
+        "type": "string",
+        "description": "Where a language is in its life cycle.",
+        "enum": [
+          "built_in",
+          "uploaded",
+          "previewed",
+          "active"
+        ]
+      },
+      "PackUpload": {
+        "type": "object",
+        "description": "An accepted upload (`POST /i18n/packs`): the language and the report of the new version.",
+        "required": [
+          "pack",
+          "report"
+        ],
+        "properties": {
+          "pack": {
+            "$ref": "#/components/schemas/PackInfo",
+            "description": "The language after the upload; the new version is its candidate."
+          },
+          "report": {
+            "$ref": "#/components/schemas/PackReport",
+            "description": "The validation report."
+          }
+        }
+      },
+      "PackUploadForm": {
+        "type": "object",
+        "description": "The multipart form of `POST /i18n/packs`.",
+        "required": [
+          "file"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "description": "The XLIFF 2.0 document, at most 2 MiB; its `trgLang` names the language."
+          }
+        }
+      },
+      "PackVersion": {
+        "type": "object",
+        "description": "One uploaded version of a pack.",
+        "required": [
+          "id",
+          "hash",
+          "display_name",
+          "translated",
+          "total",
+          "percent",
+          "origin",
+          "uploaded_at",
+          "uploaded_by"
+        ],
+        "properties": {
+          "author": {
+            "type": "string",
+            "description": "Who made the pack."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "The language's name in itself."
+          },
+          "hash": {
+            "type": "string",
+            "description": "The content hash of its messages (the `ETag` of `GET /i18n/packs/{tag}`)."
+          },
+          "id": {
+            "type": "string",
+            "description": "The SHA-256 of the uploaded document, hex."
+          },
+          "origin": {
+            "$ref": "#/components/schemas/PackOrigin",
+            "description": "Where it came from."
+          },
+          "percent": {
+            "type": "integer",
+            "format": "int32",
+            "description": "`translated` in percent of `total`, rounded down.",
+            "minimum": 0
+          },
+          "previewed_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When an administrator first previewed it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "previewed_by": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Principal",
+                "description": "Who previewed it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Keys of the running UI when it was uploaded.",
+            "minimum": 0
+          },
+          "translated": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Keys of the running UI the version translates, when it was uploaded.",
+            "minimum": 0
+          },
+          "uploaded_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it was uploaded or imported."
+          },
+          "uploaded_by": {
+            "$ref": "#/components/schemas/Principal",
+            "description": "Who uploaded it."
+          },
+          "version": {
+            "type": "string",
+            "description": "The pack's own version."
           }
         }
       },

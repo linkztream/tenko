@@ -1,0 +1,34 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="it">
+  <file id="ui">
+    <mda:metadata>
+      <mda:metaGroup category="language-pack">
+        <mda:meta type="displayName">Italiano</mda:meta>
+        <mda:meta type="author">Example translators</mda:meta>
+        <mda:meta type="version">1.0</mda:meta>
+        <mda:meta type="sourceLanguage">en</mda:meta>
+      </mda:metaGroup>
+    </mda:metadata>
+    <group id="common">
+      <unit id="common.cancel">
+        <notes><note category="description">Buttonlabel</note></notes>
+        <segment><source>Cancel</source><target>Annulla</target></segment>
+      </unit>
+      <unit id="common.greeting">
+        <segment><source>Signed in as {name}</source><target>Accesso come {name}</target></segment>
+      </unit>
+    </group>
+    <group id="help">
+      <unit id="help.text">
+        <segment>
+          <source>First line of the help.
+Second line of the help.</source>
+          <target>
+            Prima riga della guida.
+            Seconda riga della guida.
+          </target>
+        </segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

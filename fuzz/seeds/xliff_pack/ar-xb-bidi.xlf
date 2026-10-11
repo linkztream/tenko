@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="ar-XB">
+  <file id="ui">
+    <mda:metadata>
+      <mda:metaGroup category="language-pack">
+        <mda:meta type="displayName">Pseudo right-to-left</mda:meta>
+        <mda:meta type="author">Example translators</mda:meta>
+        <mda:meta type="version">0.1</mda:meta>
+        <mda:meta type="sourceLanguage">en</mda:meta>
+      </mda:metaGroup>
+    </mda:metadata>
+    <group id="common">
+      <unit id="common.cancel">
+        <segment><source>Cancel</source><target>‮!lecnaC‬</target></segment>
+      </unit>
+      <unit id="common.greeting">
+        <segment><source>Signed in as {name}</source><target>⁧sA ni dengiS ⁨{name}⁩⁩</target></segment>
+      </unit>
+      <unit id="common.count">
+        <segment><source>{count, plural, one {# item} other {# items}}</source><target>{count, plural, one {‫# meti‬} other {‫# smeti‬}}</target></segment>
+      </unit>
+      <unit id="common.kind">
+        <segment><source>{kind, select, lease {DHCP lease} record {DNS record} other {Entry}}</source><target>‮{kind, select, lease {esael} other {yrtnE}}</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

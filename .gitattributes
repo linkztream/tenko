@@ -43,3 +43,6 @@ crates/tenko-ipam/tests/fixtures/** -text
 # Data-directory compatibility fixtures: redb files and the format marker, byte for byte.
 *.redb binary
 crates/tenko/tests/fixtures/datadir/** -text
+
+# Fuzz seeds are inputs byte for byte (a byte-order mark, CRLF line ends).
+fuzz/seeds/** -text

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xliff [
+  <!ENTITY name "example.test">
+]>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="fi">
+  <file id="ui">
+    <mda:metadata>
+      <mda:metaGroup category="language-pack">
+        <mda:meta type="displayName">Suomi</mda:meta>
+        <mda:meta type="author">Example translators</mda:meta>
+        <mda:meta type="version">1</mda:meta>
+        <mda:meta type="sourceLanguage">en</mda:meta>
+      </mda:metaGroup>
+    </mda:metadata>
+    <unit id="common.cancel">
+      <segment><source>Cancel</source><target>Peruuta &name;</target></segment>
+    </unit>
+  </file>
+</xliff>

@@ -20,6 +20,7 @@ Tenko DDI is a DNS, DHCP and IPAM stack written in Rust with an embedded web UI.
 | [connectors.md](connectors.md) | The Proxmox VE and Home Assistant inventory connectors: what each reads and how it maps to observations, the least-privilege API token and access token, settings, the certificate check shared with the UniFi connector, health checks, what is not read, troubleshooting and the live smoke tests |
 | [connectors-unifi.md](connectors-unifi.md) | The UniFi Network connector: deployments and API families with the spike findings, what it reads and the facts it yields, its guarded writes with undo, the guardrails, least-privilege setup of the local account, API key and certificate pin, settings, health check, retries and troubleshooting |
 | [upgrades.md](upgrades.md) | Data-directory format and migrations, `tenko upgrade check`, releases, manual upgrade and rollback, updates from the UI, the version layout, modules |
+| [languages.md](languages.md) | Language packs: the XLIFF 2.0 format, validation and the report, upload, preview, activation and revert, the template for translators, the data-directory import, storage and caching, limits, the API, audit actions and error codes |
 | [CONFORMANCE.md](CONFORMANCE.md) | RFC and specification matrix with target phase and status |
 | [ROADMAP.md](ROADMAP.md) | Phases 0 to 5 with deliverables, spikes, "Done when" criteria, verification and open questions |
 | [adr/README.md](adr/README.md) | Architecture Decision Records: process and index |

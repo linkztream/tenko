@@ -163,6 +163,19 @@ mirrors through the style sheets alone:
   wrapped in a right-to-left override) or `usePseudoLocale("en-XA")` (accented letters in
   brackets) from `src/i18n/pseudo.ts`; tests that assert Swedish texts keep doing so.
 
+### Uploaded language packs
+
+Languages beyond English and Swedish, and overrides of those two, come from the server as
+XLIFF 2.0 language packs (`docs/languages.md`). `src/i18n/remote.ts` reads
+`GET /api/v1/i18n/languages` before the first render (`loadLanguages()` in `src/index.tsx`) and
+again when an `i18n.*` table changes, registers each active pack with the runtime and fetches
+its messages only when the UI switches to it. Pack messages are ICU text read by the full
+message parser, a lazy chunk loaded with the first pack; a key a pack lacks falls back to
+English. The preview of an uploaded candidate is per browser tab (`startPreview`,
+`endPreview`) and shows the preview bar (`src/i18n/PreviewBar.tsx`). The build writes the
+merged documents of the built-in languages to `dist/i18n/<language>.xlf`; the server reads them
+as its templates and key set.
+
 ### Message packs
 
 The English table of the whole UI would make the first page load too large, so the keys of
@@ -280,7 +293,8 @@ Page roots in this version:
 | `/jobs`, `/jobs/:id` | `page-jobs`, `page-job` |
 | `/audit`, `/audit/:seq` | `page-audit`, `page-audit-record` |
 | `/settings/secrets`, `/settings/secrets/:id` (`/secrets` and everything under it redirect here) | `page-secrets` |
-| `/settings/access`, `/settings/audit-export`, `/settings/vault`, `/settings/backup`, `/settings/languages` | `page-access`, `page-audit-export`, `page-vault`, `page-backup`, `page-languages` (placeholders with `<name>-placeholder`) |
+| `/settings/access`, `/settings/audit-export`, `/settings/vault`, `/settings/backup` | `page-access`, `page-audit-export`, `page-vault`, `page-backup` (placeholders with `<name>-placeholder`) |
+| `/settings/languages` | `page-languages` |
 | `/cluster` | `page-cluster` (placeholder with `cluster-placeholder`) |
 | `/scans`, `/scans/:id` | `page-scans` (placeholder with `scans-placeholder`) |
 | `/discovery`, `/discovery/:id` | `page-discovery` (with `proposal-panel`) |
@@ -309,6 +323,8 @@ The hooks of the WP2.9 views beyond the generic ones:
 | Release notes (`Markdown` of `updates/markdown.tsx`, in `update-release`, `update-action` and the install confirmation) | `md-heading` (`data-level` the level of the element, 1 to 6), `md-paragraph`, `md-list` (`data-ordered` `true` or `false`), `md-item`, `md-strong`, `md-em`, `md-code` (inline code), `md-pre` (fenced code), `md-link`; text that stays text has none |
 | Settings navigation (the tabs of the settings pages and of the secrets page, which administrators see) | `settings-nav` with `settings-nav-link` (`data-key` `security`, `users`, `updates`, `secrets`, `access`, `audit-export`, `vault`, `backup` or `languages`) |
 | Security settings | `toggle` (`data-key` the toggle id, e.g. `TGL-24`) with `toggle-edit` and `toggle-reset` (only while the value deviates from the profile); `dialog-toggle` with `form-submit`, `form-cancel`, `toggle-pin-coupling` (the PIN coupling rule refuses the draft) and the editor's fields: `field-password_policy`, `field-mfa`, `field-breach_check`, `field-lockout`, `field-audit_export-<local, optional or required>`, `field-step_up-<session, fresh or passkey>`, `field-bound_host_only`; the profile dialog shows `profile-pin-coupling` |
+| Languages | `languages-template` (the English template), `languages-upload-form` with `field-file` and `languages-upload`, `languages-refusal` with `languages-refusal-problem` (`data-index`, `data-code`, `data-key` the field), `grid-languages` with `row` (`data-key` the tag, `data-status`), `status-badge` (`data-status`), `languages-previewed` (`data-state` `previewed` or `waiting`), `languages-preview`, `languages-activate`, `languages-discard`, `languages-report-open`, `languages-remove` or `languages-revert` (a built-in language), `languages-template-language`; `languages-report` (`data-key` the tag) with `languages-report-complete` (`data-percent`, `data-translated`, `data-total`), `languages-report-missing`, `languages-report-extra` and `languages-report-stale` (each with `data-count` and a `-keys` list), `languages-report-clean`, `languages-problem` (`data-index`, `data-code`, `data-key`) and `languages-report-close`; dialogs `dialog-activate`, `dialog-discard` and `dialog-remove` with `confirm-ok` and `confirm-cancel` |
+| Preview bar (every page while this tab previews a pack) | `languages-preview-bar` (`data-key` the tag) with `languages-preview-open` and `languages-preview-end` |
 
 A new view follows the same pattern: a page root id, `grid-<id>` for each grid, the generic
 row and cell hooks from `DataGrid`, and `<area>-<action>` for its actions.
@@ -316,8 +332,8 @@ row and cell hooks from `DataGrid`, and `<area>-<action>` for its actions.
 ## End-to-end tests
 
 `ui/e2e/` holds the browser tests of the embedded UI against the real server: first-run wizard,
-sign-in with TOTP and passkeys, IPAM, import, move, audit and language (WP1.11), and discovery,
-connectors, nodes, secrets and updates (WP2.11). Every test starts its own `tenko serve` with a
+sign-in with TOTP and passkeys, IPAM, import, move, audit and language (WP1.11), discovery,
+connectors, nodes, secrets and updates (WP2.11), and language packs (WP3.7). Every test starts its own `tenko serve` with a
 temporary data directory and a free port (`e2e/support/server.ts`), so tests are independent and
 run in parallel; the Slice 2 specs also start a second `tenko` process as a probe node, a local
 release source and the bundled sample connector. `e2e/README.md` describes the specs, the

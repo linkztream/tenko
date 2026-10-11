@@ -7,15 +7,29 @@
 //                                    (contract: src/i18n/virtual.d.ts)
 //   virtual:tenko-i18n/<code>        default export: the core message table of one language
 //   virtual:tenko-i18n/<code>/<pack> default export: one message pack of one language
+//   virtual:tenko-i18n/parser        `parse(message)`: the full ICU message parser with the
+//                                    options of the build (markup is text), for the language
+//                                    packs the browser loads at run time (src/i18n/remote.ts)
 //
 // Message packs (option `packs`: pack name to key prefixes) keep the messages of lazily
 // loaded areas out of the core table, so the first page load does not carry them. A view
 // that uses them loads its packs with its route chunk (see `withPacks` in src/i18n).
 //
+// The build aliases the parser package to its no-parser entry, because the built-in messages
+// arrive as syntax trees. The parser module imports the real entry by its file path, which the
+// alias does not match, so the parser lands in a chunk of its own that only uploaded languages
+// load.
+//
 // A build fails when a language pack is invalid or when src/i18n/generated/keys.ts is stale
 // (run `npm run i18n`). The dev server and vitest rewrite keys.ts instead, and the dev server
 // reloads the page when a language pack changes; a broken edit is logged and the last good
 // tables stay in use.
+//
+// A production build also emits one merged XLIFF document per built-in language as
+// `i18n/<code>.xlf` (see renderMergedXliff): the units of the main file and the fragments in
+// one file. The server embeds it with the UI and reads the key set and the built-in messages
+// from it, to validate uploaded language packs and to write templates. The dev server and
+// vitest do not bundle, so they do not emit it.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -26,6 +40,7 @@ import {
   loadCatalog,
   renderKeysTs,
   renderLocaleModule,
+  renderMergedXliff,
   renderMetaModule,
   packOf,
 } from "./i18n/compile.mjs";
@@ -34,6 +49,23 @@ import {
 
 const VIRTUAL_PREFIX = "virtual:tenko-i18n/";
 const RESOLVED_PREFIX = "\0" + VIRTUAL_PREFIX;
+const PARSER_ID = "parser";
+
+/**
+ * The parser module: the real entry of @formatjs/icu-messageformat-parser by file path.
+ * @returns {string}
+ */
+function renderParserModule() {
+  const entry = fileURLToPath(import.meta.resolve("@formatjs/icu-messageformat-parser")).split(path.sep).join("/");
+  return [
+    `import { parse as parseIcu } from ${JSON.stringify(entry)};`,
+    "/** @param {string} message */",
+    "export function parse(message) {",
+    "  return parseIcu(message, { ignoreTag: true });",
+    "}",
+    "",
+  ].join("\n");
+}
 
 /**
  * @param {string} a
@@ -147,6 +179,7 @@ export function i18n(options = {}) {
     load(id) {
       if (!id.startsWith(RESOLVED_PREFIX)) return undefined;
       const [code = "", pack] = id.slice(RESOLVED_PREFIX.length).split("/");
+      if (code === PARSER_ID && pack === undefined) return renderParserModule();
       const current = currentCatalog(this);
       if (code === "meta") return renderMetaModule(current, { importPrefix: VIRTUAL_PREFIX, packs: packNames });
       if (pack !== undefined && !packNames.includes(pack)) return this.error(`unknown message pack ${JSON.stringify(pack)}`);
@@ -157,6 +190,17 @@ export function i18n(options = {}) {
       }
       const known = current.locales.map((l) => l.code).join(", ");
       return this.error(`unknown language ${JSON.stringify(code)} (available: ${known})`);
+    },
+
+    generateBundle() {
+      const current = currentCatalog(this);
+      for (const locale of current.locales) {
+        this.emitFile({
+          type: "asset",
+          fileName: `i18n/${locale.code}.xlf`,
+          source: renderMergedXliff(current, locale.code),
+        });
+      }
     },
 
     configureServer(server) {

@@ -252,6 +252,22 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/system/kek", "get_kek_status"),
     ("POST", "/system/kek/rotate", "rotate_kek"),
     ("POST", "/nodes/enrol", "enrol_node"),
+    // i18n (WP3.7)
+    ("GET", "/i18n/languages", "get_languages"),
+    ("GET", "/i18n/packs", "list_packs"),
+    ("POST", "/i18n/packs", "upload_pack"),
+    ("GET", "/i18n/packs/{tag}", "get_pack"),
+    ("DELETE", "/i18n/packs/{tag}", "delete_pack"),
+    ("GET", "/i18n/packs/{tag}/report", "get_pack_report"),
+    ("GET", "/i18n/packs/{tag}/candidate", "get_pack_candidate"),
+    (
+        "DELETE",
+        "/i18n/packs/{tag}/candidate",
+        "discard_pack_candidate",
+    ),
+    ("POST", "/i18n/packs/{tag}/preview", "preview_pack"),
+    ("POST", "/i18n/packs/{tag}/activate", "activate_pack"),
+    ("GET", "/i18n/template.xlf", "get_template"),
     // secrets
     ("GET", "/secrets", "list_secrets"),
     ("POST", "/secrets", "create_secret"),

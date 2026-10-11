@@ -18,6 +18,7 @@ before it merges.
 | `connect_unifi_answers` | UniFi controller answers mapped to devices, clients and ports (`tenko_connect_unifi`) |
 | `kek_transfer` | The sealed key-encryption-key frames of a controller join (`tenko_vault::transfer`) |
 | `raft_payloads` | The payloads between controllers: openraft messages, forwarded batches and receipts, store errors in status details, membership changes and the protocol messages that carry them (`tenko_cluster::wire`) |
+| `xliff_pack` | Uploaded language packs: the XLIFF 2.0 reader, the validation against the key set, the ICU message checker, the language tags and the template round trip (`tenko_api::i18n`) |
 
 `fuzz/Cargo.lock` is not committed; the fuzz crate resolves its dependencies when it is built.
 

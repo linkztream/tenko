@@ -34,3 +34,12 @@ declare module "virtual:tenko-i18n/en" {
   const table: Readonly<Record<string, string | readonly unknown[]>>;
   export default table;
 }
+
+declare module "virtual:tenko-i18n/parser" {
+  /**
+   * Parses ICU message text into the syntax tree that intl-messageformat formats, with the
+   * options of the build: markup is text (`ignoreTag`). The full parser, loaded lazily for the
+   * languages that are not compiled in (see remote.ts).
+   */
+  export function parse(message: string): readonly unknown[];
+}

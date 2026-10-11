@@ -37,7 +37,6 @@ const PAGES = [
   { key: "audit-export", url: "/settings/audit-export", title: "Audit export", sentence: "The audit export page arrives with a later update." },
   { key: "vault", url: "/settings/vault", title: "Vault", sentence: "The vault page arrives with a later update." },
   { key: "backup", url: "/settings/backup", title: "Backup", sentence: "The backup page arrives with a later update." },
-  { key: "languages", url: "/settings/languages", title: "Languages", sentence: "The languages page arrives with a later update." },
 ] as const;
 
 describe("the route table", () => {

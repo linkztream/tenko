@@ -995,6 +995,145 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/i18n/languages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the languages of the installation */
+        get: operations["get_languages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/i18n/packs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the language packs with their versions */
+        get: operations["list_packs"];
+        put?: never;
+        /** Upload a language pack */
+        post: operations["upload_pack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/i18n/packs/{tag}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the messages of an active language pack */
+        get: operations["get_pack"];
+        put?: never;
+        post?: never;
+        /** Remove a language pack, or revert a built-in language */
+        delete: operations["delete_pack"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/i18n/packs/{tag}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate an uploaded language pack */
+        post: operations["activate_pack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/i18n/packs/{tag}/candidate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the messages of an uploaded language pack for a preview */
+        get: operations["get_pack_candidate"];
+        put?: never;
+        post?: never;
+        /** Discard an uploaded language pack that is not active */
+        delete: operations["discard_pack_candidate"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/i18n/packs/{tag}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview an uploaded language pack */
+        post: operations["preview_pack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/i18n/packs/{tag}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the validation report of a language pack */
+        get: operations["get_pack_report"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/i18n/template.xlf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export the template of a language pack */
+        get: operations["get_template"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/imports": {
         parameters: {
             query?: never;
@@ -5245,6 +5384,27 @@ export interface components {
             provider: string;
             rotation?: components["schemas"]["KekRotationPhase"] | null;
         };
+        /** @description A language the UI offers to everyone (`GET /i18n/languages`). */
+        LanguageInfo: {
+            /** @description Whether the UI has the language built in. */
+            built_in: boolean;
+            /**
+             * @description The content hash of the active uploaded pack, which `GET /i18n/packs/{tag}` serves;
+             *     absent for a built-in language without an uploaded override.
+             */
+            hash?: string | null;
+            /** @description The language's name in itself. */
+            name: string;
+            /** @description The BCP 47 tag. */
+            tag: string;
+        };
+        /** @description The languages of the installation (`GET /i18n/languages`). */
+        LanguageList: {
+            /** @description The installation's default language, once setup has run. */
+            default_language?: string | null;
+            /** @description The built-in languages, then the active uploaded ones by tag. */
+            languages: components["schemas"]["LanguageInfo"][];
+        };
         /** @description The last reveal of a secret: who and when, never the value or the reason. */
         LastReveal: {
             /** @description When. */
@@ -6529,6 +6689,159 @@ export interface components {
             username?: string | null;
             /** @description When its value was last written (creation, replacement, key rotation). */
             value_updated_at: components["schemas"]["Timestamp"];
+        };
+        /** @description A language and its packs, for administrators (`GET /i18n/packs`). */
+        PackInfo: {
+            active?: components["schemas"]["PackVersion"] | null;
+            /** @description Whether the UI has the language built in (it can be overridden, never removed). */
+            built_in: boolean;
+            candidate?: components["schemas"]["PackVersion"] | null;
+            /** @description The language's name in itself. */
+            name: string;
+            /** @description The life cycle state. */
+            status: components["schemas"]["PackStatus"];
+            /** @description The BCP 47 tag. */
+            tag: string;
+        };
+        /** @description Every language with its packs (`GET /i18n/packs`). */
+        PackList: {
+            /**
+             * Format: int32
+             * @description The number of keys of the running UI.
+             */
+            keys: number;
+            /** @description The built-in languages, then the others by tag. */
+            packs: components["schemas"]["PackInfo"][];
+        };
+        /** @description The messages of a pack, ready for the UI (`GET /i18n/packs/{tag}`). */
+        PackMessages: {
+            /** @description The content hash of the messages (also the `ETag`). */
+            hash: string;
+            /**
+             * @description ICU message text by key; keys the pack lacks fall back to the built-in language of the
+             *     same tag, then to English.
+             */
+            messages: {
+                [key: string]: string;
+            };
+            /** @description The BCP 47 tag. */
+            tag: string;
+        };
+        /**
+         * @description Where a pack version came from.
+         * @enum {string}
+         */
+        PackOrigin: "upload" | "data_dir";
+        /** @description A problem found in a pack. */
+        PackProblem: {
+            /** @description The stable code, for example `i18n.pack.icu`. */
+            code: string;
+            /** @description English explanation. */
+            detail: string;
+            /** @description The unit, when the problem belongs to one. */
+            key?: string | null;
+            /**
+             * Format: int32
+             * @description The 1-based line in the document.
+             */
+            line?: number | null;
+            /** @description Error or warning. */
+            severity: components["schemas"]["PackSeverity"];
+        };
+        /** @description The validation report of a pack. */
+        PackReport: {
+            /** @description Who made the pack. */
+            author: string;
+            /** @description The language's name in itself. */
+            display_name: string;
+            /** @description Units whose key the running UI does not have; they are not used. */
+            extra: string[];
+            /** @description Keys of the running UI the pack does not translate; they show in English. */
+            missing: string[];
+            /**
+             * Format: int32
+             * @description `translated` in percent of `total`, rounded down (100 when the UI has no keys).
+             */
+            percent: number;
+            /** @description Errors of single units (left out) and warnings. */
+            problems: components["schemas"]["PackProblem"][];
+            /** @description Units translated from an English text that has changed since; they are used. */
+            stale: string[];
+            /** @description The BCP 47 tag (`trgLang`). */
+            tag: string;
+            /**
+             * Format: int32
+             * @description The keys of the running UI.
+             */
+            total: number;
+            /**
+             * Format: int32
+             * @description The keys the pack translates usably.
+             */
+            translated: number;
+            /** @description The pack's own version. */
+            version: string;
+        };
+        /**
+         * @description How bad a problem is.
+         * @enum {string}
+         */
+        PackSeverity: "error" | "warning";
+        /**
+         * @description Where a language is in its life cycle.
+         * @enum {string}
+         */
+        PackStatus: "built_in" | "uploaded" | "previewed" | "active";
+        /** @description An accepted upload (`POST /i18n/packs`): the language and the report of the new version. */
+        PackUpload: {
+            /** @description The language after the upload; the new version is its candidate. */
+            pack: components["schemas"]["PackInfo"];
+            /** @description The validation report. */
+            report: components["schemas"]["PackReport"];
+        };
+        /** @description The multipart form of `POST /i18n/packs`. */
+        PackUploadForm: {
+            /**
+             * Format: binary
+             * @description The XLIFF 2.0 document, at most 2 MiB; its `trgLang` names the language.
+             */
+            file: string;
+        };
+        /** @description One uploaded version of a pack. */
+        PackVersion: {
+            /** @description Who made the pack. */
+            author?: string;
+            /** @description The language's name in itself. */
+            display_name: string;
+            /** @description The content hash of its messages (the `ETag` of `GET /i18n/packs/{tag}`). */
+            hash: string;
+            /** @description The SHA-256 of the uploaded document, hex. */
+            id: string;
+            /** @description Where it came from. */
+            origin: components["schemas"]["PackOrigin"];
+            /**
+             * Format: int32
+             * @description `translated` in percent of `total`, rounded down.
+             */
+            percent: number;
+            previewed_at?: components["schemas"]["Timestamp"] | null;
+            previewed_by?: components["schemas"]["Principal"] | null;
+            /**
+             * Format: int32
+             * @description Keys of the running UI when it was uploaded.
+             */
+            total: number;
+            /**
+             * Format: int32
+             * @description Keys of the running UI the version translates, when it was uploaded.
+             */
+            translated: number;
+            /** @description When it was uploaded or imported. */
+            uploaded_at: components["schemas"]["Timestamp"];
+            /** @description Who uploaded it. */
+            uploaded_by: components["schemas"]["Principal"];
+            /** @description The pack's own version. */
+            version?: string;
         };
         /**
          * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
@@ -15271,6 +15584,564 @@ export interface operations {
                 };
             };
             /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_languages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The languages users may choose */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LanguageList"];
+                };
+            };
+        };
+    };
+    list_packs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every language with its versions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackList"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    upload_pack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["PackUploadForm"];
+            };
+        };
+        responses: {
+            /** @description Validated and stored as the candidate of its language */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackUpload"];
+                };
+            };
+            /** @description No file, several files or a malformed multipart body (`i18n.upload.empty`, `i18n.upload.malformed`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Over 2 MiB (`i18n.pack.too_large`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not a usable pack (`i18n.pack.invalid`, the problems in `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No embedded UI to check against (`i18n.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_pack: {
+        parameters: {
+            query?: {
+                /** @description The hash from `GET /i18n/languages`: the answer may then be cached for a year. */
+                hash?: string;
+            };
+            header?: never;
+            path: {
+                /** @description BCP 47 language tag */
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The messages, with the content hash as ETag */
+            200: {
+                headers: {
+                    /** @description The content hash in quotes */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackMessages"];
+                };
+            };
+            /** @description Not modified (If-None-Match) */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No active uploaded pack for the tag (`i18n.pack.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_pack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description BCP 47 language tag */
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Nothing uploaded for the tag (`i18n.pack.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The installation's default language (`i18n.pack.default_language`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    activate_pack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description BCP 47 language tag */
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The language with its new active version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackInfo"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No candidate (`i18n.pack.no_candidate`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not previewed yet (`i18n.pack.not_previewed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_pack_candidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description BCP 47 language tag */
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The messages of the candidate */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackMessages"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No candidate (`i18n.pack.no_candidate`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    discard_pack_candidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description BCP 47 language tag */
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The language without the candidate */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackInfo"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No candidate (`i18n.pack.no_candidate`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    preview_pack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description BCP 47 language tag */
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The language with its candidate marked previewed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackInfo"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No candidate (`i18n.pack.no_candidate`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_pack_report: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description BCP 47 language tag */
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackReport"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Nothing uploaded for the tag (`i18n.pack.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_template: {
+        parameters: {
+            query?: {
+                /**
+                 * @description The language whose current messages fill the targets; the source language (`en`) by
+                 *     default, whose template has the English text as every target.
+                 */
+                language?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The XLIFF 2.0 document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/xliff+xml": string;
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not a language tag (`i18n.pack.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No embedded UI (`i18n.unavailable`) */
             503: {
                 headers: {
                     [name: string]: unknown;

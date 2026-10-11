@@ -858,6 +858,32 @@ export type MessageKey =
   | "errors.generic.not_implemented"
   | "errors.generic.server"
   | "errors.generic.unexpected"
+  | "errors.i18n.pack.argument"
+  | "errors.i18n.pack.bidi"
+  | "errors.i18n.pack.control"
+  | "errors.i18n.pack.default_language"
+  | "errors.i18n.pack.duplicate"
+  | "errors.i18n.pack.empty"
+  | "errors.i18n.pack.icu"
+  | "errors.i18n.pack.invalid"
+  | "errors.i18n.pack.key"
+  | "errors.i18n.pack.markup"
+  | "errors.i18n.pack.metadata"
+  | "errors.i18n.pack.no_candidate"
+  | "errors.i18n.pack.not_found"
+  | "errors.i18n.pack.not_previewed"
+  | "errors.i18n.pack.root"
+  | "errors.i18n.pack.src_lang"
+  | "errors.i18n.pack.structure"
+  | "errors.i18n.pack.tag"
+  | "errors.i18n.pack.too_large"
+  | "errors.i18n.pack.too_many_units"
+  | "errors.i18n.pack.trg_lang"
+  | "errors.i18n.pack.version"
+  | "errors.i18n.pack.xml"
+  | "errors.i18n.unavailable"
+  | "errors.i18n.upload.empty"
+  | "errors.i18n.upload.malformed"
   | "errors.import.apply.failed"
   | "errors.import.conflict.kept"
   | "errors.import.credentials.vault_required"
@@ -2018,8 +2044,79 @@ export type MessageKey =
   | "jobs.view.all"
   | "jobs.view.failed"
   | "jobs.view.finished"
-  | "languages.placeholder"
+  | "languages.action.activate"
+  | "languages.action.discard"
+  | "languages.action.preview"
+  | "languages.action.remove"
+  | "languages.action.report"
+  | "languages.action.revert"
+  | "languages.action.template"
+  | "languages.action.template_of"
+  | "languages.action.template_short"
+  | "languages.activate.hint"
+  | "languages.built_in_texts"
+  | "languages.col.actions"
+  | "languages.col.active"
+  | "languages.col.candidate"
+  | "languages.col.language"
+  | "languages.col.status"
+  | "languages.confirm.activate.body"
+  | "languages.confirm.activate.ok"
+  | "languages.confirm.activate.title"
+  | "languages.confirm.discard.body"
+  | "languages.confirm.discard.ok"
+  | "languages.confirm.discard.title"
+  | "languages.confirm.remove.body"
+  | "languages.confirm.remove.ok"
+  | "languages.confirm.remove.title"
+  | "languages.confirm.revert.body"
+  | "languages.confirm.revert.ok"
+  | "languages.confirm.revert.title"
+  | "languages.lead"
+  | "languages.list.heading"
+  | "languages.none"
+  | "languages.origin.data_dir"
+  | "languages.preview.bar"
+  | "languages.preview.end"
+  | "languages.preview.open"
+  | "languages.report.at_line"
+  | "languages.report.author"
+  | "languages.report.col.key"
+  | "languages.report.col.line"
+  | "languages.report.col.problem"
+  | "languages.report.col.severity"
+  | "languages.report.complete"
+  | "languages.report.extra"
+  | "languages.report.heading"
+  | "languages.report.missing"
+  | "languages.report.more"
+  | "languages.report.none"
+  | "languages.report.problems"
+  | "languages.report.problems_label"
+  | "languages.report.stale"
+  | "languages.severity.error"
+  | "languages.severity.warning"
+  | "languages.status.active"
+  | "languages.status.built_in"
+  | "languages.status.previewed"
+  | "languages.status.uploaded"
+  | "languages.sub"
   | "languages.title"
+  | "languages.toast.activated"
+  | "languages.toast.discarded"
+  | "languages.toast.preview"
+  | "languages.toast.removed"
+  | "languages.toast.reverted"
+  | "languages.upload.done"
+  | "languages.upload.file"
+  | "languages.upload.heading"
+  | "languages.upload.help"
+  | "languages.upload.submit"
+  | "languages.version.by"
+  | "languages.version.label"
+  | "languages.version.not_previewed"
+  | "languages.version.percent"
+  | "languages.version.previewed"
   | "move.checklist"
   | "move.checklist_foot"
   | "move.checklist_sum"
@@ -3730,6 +3827,36 @@ export interface MessageArgs {
   "jobs.task.dns_revert": { name: string | number; old_ip: string | number };
   "jobs.task.dns_update": { name: string | number; new_ip: string | number; old_ip: string | number };
   "jobs.undo.step": { kind: string | number; step: string | number };
+  "languages.action.template_of": { name: string | number };
+  "languages.confirm.activate.body": { name: string | number };
+  "languages.confirm.activate.ok": { name: string | number };
+  "languages.confirm.activate.title": { name: string | number };
+  "languages.confirm.discard.title": { name: string | number };
+  "languages.confirm.remove.body": { name: string | number };
+  "languages.confirm.remove.ok": { name: string | number };
+  "languages.confirm.remove.title": { name: string | number };
+  "languages.confirm.revert.body": { name: string | number };
+  "languages.confirm.revert.ok": { name: string | number };
+  "languages.confirm.revert.title": { name: string | number };
+  "languages.preview.bar": { name: string | number };
+  "languages.report.at_line": { line: number };
+  "languages.report.author": { author: string | number };
+  "languages.report.complete": { total: number; translated: number };
+  "languages.report.extra": { count: number };
+  "languages.report.heading": { name: string | number };
+  "languages.report.missing": { count: number };
+  "languages.report.more": { count: number };
+  "languages.report.problems": { count: number; errors: number };
+  "languages.report.stale": { count: number };
+  "languages.toast.activated": { name: string | number };
+  "languages.toast.discarded": { name: string | number };
+  "languages.toast.preview": { name: string | number };
+  "languages.toast.removed": { name: string | number };
+  "languages.toast.reverted": { name: string | number };
+  "languages.upload.done": { name: string | number; percent: string | number };
+  "languages.version.by": { when: string | number; who: string | number };
+  "languages.version.label": { version: string | number };
+  "languages.version.percent": { percent: string | number };
   "move.checklist_sum": { count: number };
   "move.group.cleanup": { count: number };
   "move.group.device_manual": { count: number };
@@ -4853,6 +4980,32 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.generic.not_implemented",
   "errors.generic.server",
   "errors.generic.unexpected",
+  "errors.i18n.pack.argument",
+  "errors.i18n.pack.bidi",
+  "errors.i18n.pack.control",
+  "errors.i18n.pack.default_language",
+  "errors.i18n.pack.duplicate",
+  "errors.i18n.pack.empty",
+  "errors.i18n.pack.icu",
+  "errors.i18n.pack.invalid",
+  "errors.i18n.pack.key",
+  "errors.i18n.pack.markup",
+  "errors.i18n.pack.metadata",
+  "errors.i18n.pack.no_candidate",
+  "errors.i18n.pack.not_found",
+  "errors.i18n.pack.not_previewed",
+  "errors.i18n.pack.root",
+  "errors.i18n.pack.src_lang",
+  "errors.i18n.pack.structure",
+  "errors.i18n.pack.tag",
+  "errors.i18n.pack.too_large",
+  "errors.i18n.pack.too_many_units",
+  "errors.i18n.pack.trg_lang",
+  "errors.i18n.pack.version",
+  "errors.i18n.pack.xml",
+  "errors.i18n.unavailable",
+  "errors.i18n.upload.empty",
+  "errors.i18n.upload.malformed",
   "errors.import.apply.failed",
   "errors.import.conflict.kept",
   "errors.import.credentials.vault_required",
@@ -6013,8 +6166,79 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.view.all",
   "jobs.view.failed",
   "jobs.view.finished",
-  "languages.placeholder",
+  "languages.action.activate",
+  "languages.action.discard",
+  "languages.action.preview",
+  "languages.action.remove",
+  "languages.action.report",
+  "languages.action.revert",
+  "languages.action.template",
+  "languages.action.template_of",
+  "languages.action.template_short",
+  "languages.activate.hint",
+  "languages.built_in_texts",
+  "languages.col.actions",
+  "languages.col.active",
+  "languages.col.candidate",
+  "languages.col.language",
+  "languages.col.status",
+  "languages.confirm.activate.body",
+  "languages.confirm.activate.ok",
+  "languages.confirm.activate.title",
+  "languages.confirm.discard.body",
+  "languages.confirm.discard.ok",
+  "languages.confirm.discard.title",
+  "languages.confirm.remove.body",
+  "languages.confirm.remove.ok",
+  "languages.confirm.remove.title",
+  "languages.confirm.revert.body",
+  "languages.confirm.revert.ok",
+  "languages.confirm.revert.title",
+  "languages.lead",
+  "languages.list.heading",
+  "languages.none",
+  "languages.origin.data_dir",
+  "languages.preview.bar",
+  "languages.preview.end",
+  "languages.preview.open",
+  "languages.report.at_line",
+  "languages.report.author",
+  "languages.report.col.key",
+  "languages.report.col.line",
+  "languages.report.col.problem",
+  "languages.report.col.severity",
+  "languages.report.complete",
+  "languages.report.extra",
+  "languages.report.heading",
+  "languages.report.missing",
+  "languages.report.more",
+  "languages.report.none",
+  "languages.report.problems",
+  "languages.report.problems_label",
+  "languages.report.stale",
+  "languages.severity.error",
+  "languages.severity.warning",
+  "languages.status.active",
+  "languages.status.built_in",
+  "languages.status.previewed",
+  "languages.status.uploaded",
+  "languages.sub",
   "languages.title",
+  "languages.toast.activated",
+  "languages.toast.discarded",
+  "languages.toast.preview",
+  "languages.toast.removed",
+  "languages.toast.reverted",
+  "languages.upload.done",
+  "languages.upload.file",
+  "languages.upload.heading",
+  "languages.upload.help",
+  "languages.upload.submit",
+  "languages.version.by",
+  "languages.version.label",
+  "languages.version.not_previewed",
+  "languages.version.percent",
+  "languages.version.previewed",
   "move.checklist",
   "move.checklist_foot",
   "move.checklist_sum",

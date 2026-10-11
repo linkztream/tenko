@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="da">
+  <file id="ui">
+    <mda:metadata>
+      <mda:metaGroup category="language-pack">
+        <mda:meta type="displayName">Dansk &amp; <![CDATA[<kort>]]></mda:meta>
+        <mda:meta type="author">Example translators</mda:meta>
+        <mda:meta type="version">1</mda:meta>
+        <mda:meta type="sourceLanguage">en</mda:meta>
+      </mda:metaGroup>
+    </mda:metadata>
+    <group id="common">
+      <unit id="common.cancel">
+        <segment><source>Cancel</source><target>&lt;b&gt;Annuller&lt;/b&gt; &amp;amp; &#x3C;i&#62;</target></segment>
+      </unit>
+      <unit id="common.greeting">
+        <segment><source>Signed in as {name}</source><target><![CDATA[<b>Logget ind som</b> ]]>{name}<![CDATA[ & ]]>&#38;</target></segment>
+      </unit>
+      <unit id="common.apostrophe">
+        <segment><source>Don''t save {name}''s '{'draft'}' twice</source><target>Gem ikke {name}''s '{'kladde'}' to gange &#39;</target></segment>
+      </unit>
+      <unit id="help.text">
+        <segment><source>First line of the help.
+Second line of the help.</source><target>
+          &#32;Første linje<![CDATA[
+  anden linje  ]]>&#10;
+        </target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="fr">
+  <file id="ui">
+    <mda:metadata>
+      <mda:metaGroup category="language-pack">
+        <mda:meta type="displayName">Français</mda:meta>
+        <mda:meta type="author">Example translators</mda:meta>
+        <mda:meta type="version">1.0</mda:meta>
+        <mda:meta type="sourceLanguage">en</mda:meta>
+      </mda:metaGroup>
+    </mda:metadata>
+    <group id="common">
+      <unit id="common.cancel">
+        <segment><source>Cancel</source><target>Annuler</target></segment>
+      </unit>
+      <unit id="common.greeting">
+        <segment><source>Signed in as {name}</source><target>Connecté en tant que {name}</target></segment>
+      </unit>
+      <unit id="common.count">
+        <segment><source>{count, plural, one {# item} other {# items}}</source><target>{count, plural, one {# élément} other {# éléments}}</target></segment>
+      </unit>
+      <unit id="common.kind">
+        <segment><source>{kind, select, lease {DHCP lease} record {DNS record} other {Entry}}</source><target>{kind, select, lease {Bail DHCP} record {Enregistrement DNS} other {Entrée}}</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

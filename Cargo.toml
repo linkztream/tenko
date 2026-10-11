@@ -68,6 +68,7 @@ zip = { version = "8.6.0", default-features = false }
 # Connector plugin protocol (WP2.0): protobuf and gRPC, compiled at build time without protoc.
 prost = "0.14.4"
 prost-types = "0.14.4"
+quick-xml = "0.41"
 tonic = { version = "0.14.6", default-features = false, features = ["transport", "codegen", "router"] }
 tonic-prost = "0.14.6"
 tonic-prost-build = { version = "0.14.6", default-features = false, features = ["transport"] }

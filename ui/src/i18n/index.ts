@@ -93,7 +93,7 @@ export async function registerLanguage(language: RuntimeLanguage): Promise<void>
   setRegistered((list) => [...list.filter((l) => l.code !== language.code), language]);
   runtime.delete(language.code);
   forget(language.code);
-  if (locale() === language.code) await setLocale(language.code);
+  if (locale() === language.code) await switchTo(language.code);
 }
 
 /** Removes a registered language; the UI falls back to the built-in one or to English. */
@@ -102,7 +102,7 @@ export async function unregisterLanguage(code: string): Promise<void> {
   setRegistered((list) => list.filter((l) => l.code !== code));
   runtime.delete(code);
   forget(code);
-  if (locale() === code) await setLocale(code);
+  if (locale() === code) await switchTo(code);
 }
 
 /** The built-in languages, source language first, then the registered ones. */
@@ -177,12 +177,33 @@ export function browserLocales(): readonly string[] {
   return navigator.languages?.length ? navigator.languages : [navigator.language];
 }
 
+/** The language a preview forces (see remote.ts): while set, every switch lands on it. */
+let forced: string | undefined;
+/** The language last asked for with setLocale, which the end of a preview returns to. */
+let requested: string = sourceLocale;
+
 /**
  * Loads a language if needed and switches the UI to it. Unknown codes fall back to English,
  * and so does a registered language whose messages cannot be loaded (a registered override of
- * a built-in language falls back to the built-in messages).
+ * a built-in language falls back to the built-in messages). While a preview forces a language
+ * (forceLocale), the request is remembered and applied when the preview ends.
  */
 export async function setLocale(code: string): Promise<void> {
+  requested = code;
+  await switchTo(forced ?? code);
+}
+
+/**
+ * Forces the UI into a language whatever else asks for one (an administrator's preview of an
+ * uploaded pack, in this tab only), or with `undefined` ends that and returns to the language
+ * last asked for.
+ */
+export async function forceLocale(code: string | undefined): Promise<void> {
+  forced = code;
+  await switchTo(code ?? requested);
+}
+
+async function switchTo(code: string): Promise<void> {
   let target = isAvailable(code) ? code : sourceLocale;
   const extra = registered().find((l) => l.code === target);
   if (extra && !runtime.has(target)) {

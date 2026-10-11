@@ -82,7 +82,7 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   audit_export: ["audit_export."],
   vault: ["vault."],
   backup: ["backup."],
-  languages: ["languages."],
+  languages: ["languages.", "errors.i18n."],
 };
 
 export default defineConfig(({ command, mode }) => {

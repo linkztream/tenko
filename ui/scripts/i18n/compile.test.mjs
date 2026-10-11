@@ -13,9 +13,11 @@ import {
   loadCatalog,
   renderKeysTs,
   renderLocaleModule,
+  renderMergedXliff,
   renderMetaModule,
   packOf,
 } from "./compile.mjs";
+import { i18n } from "../vite-plugin-i18n.mjs";
 
 /** @typedef {import("./compile.mjs").Catalog} Catalog */
 
@@ -1550,5 +1552,414 @@ describe("message packs", () => {
     );
     expect(renderMetaModule(catalog, { packs: [] })).toContain("export const packs = {};\n");
     expect(renderMetaModule(catalog)).not.toContain("packs");
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// The merged document of a language
+// ---------------------------------------------------------------------------------------
+
+describe("renderMergedXliff", () => {
+  /**
+   * Renders every language of a catalog as the single `<code>.xlf` of a new directory (no
+   * fragments) and loads that directory.
+   * @param {Catalog} catalog
+   */
+  function reloadMerged(catalog) {
+    /** @type {Record<string, string>} */
+    const files = {};
+    for (const locale of catalog.locales) files[`${locale.code}.xlf`] = renderMergedXliff(catalog, locale.code);
+    const dir = makeDir(files);
+    return { dir, catalog: loadCatalog(dir) };
+  }
+
+  /**
+   * Key, text and description of every message of a language, sorted by key.
+   * @param {Catalog} catalog
+   * @param {string} code
+   * @returns {Array<[string, string, string | undefined]>}
+   */
+  function summary(catalog, code) {
+    const messages = catalog.messages.get(code);
+    if (messages === undefined) throw new Error(`no language ${code}`);
+    return [...messages.values()]
+      .map((m) => /** @type {[string, string, string | undefined]} */ ([m.key, m.text, m.description]))
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  }
+
+  /** @param {Catalog} catalog */
+  const localeInfo = (catalog) => catalog.locales.map((l) => [l.code, l.name, l.author, l.version]);
+  /** @param {string} xml */
+  const unitIds = (xml) => [...xml.matchAll(/<unit id="([^"]+)">/g)].map((m) => m[1]);
+  /** @param {string} xml */
+  const groupIds = (xml) => [...xml.matchAll(/<group id="([^"]+)">/g)].map((m) => m[1]);
+
+  // Texts that the escaping has to get right: entities, a literal tag, white space at the edges
+  // of a text with line breaks, CDATA, an apostrophe, a plural, a note with markup and texts
+  // made of white space. The Swedish side has the same notes as the source, which is what the
+  // merged document carries.
+  const tricky = {
+    "en.xlf": xliff({
+      meta: meta("English", { author: "Ann &amp; Bo &lt;team&gt;", version: "2.0.1-&quot;rc&quot;" }),
+      units:
+        unit("app.amp", "Tom &amp; Jerry &lt;3 &gt; &quot;q&quot;", undefined, "Shown with a &lt;b&gt; tag &amp; more.") +
+        unit("app.tag", "Press &lt;b&gt;bold&lt;/b&gt; to emphasise") +
+        unit("app.lines", "&#32;first line\n  second line&#10;") +
+        unit("app.cdata", '<![CDATA[<raw> & "quoted"]]>') +
+        unit("app.cdata_lines", "<![CDATA[\n  keep\n]]>") +
+        unit("app.apostrophe", "It&apos;s done, isn&apos;t it?") +
+        unit("app.items", "{count, plural, one {# item} other {# items}}") +
+        unit("app.space", "&#32;"),
+    }),
+    "en.d/cluster.xlf": enFragment(
+      unit("cluster.title", "Cluster &amp; nodes", undefined, "Heading with a &lt;note&gt;.") +
+        unit("cluster.tabs", "&#9;tabbed\nline&#9;") +
+        unit("cluster.blank", "&#10;&#32;&#10;") +
+        unit("cluster.inner", "first\n\n  third"),
+    ),
+    "sv.xlf": sv(
+      unit("app.amp", "Tom &amp; Jerry &lt;3 &gt; &quot;q&quot;", "Kalle &amp; Kajsa &lt;3 &gt; &quot;q&quot;", "Shown with a &lt;b&gt; tag &amp; more.") +
+        unit("app.tag", "Press &lt;b&gt;bold&lt;/b&gt; to emphasise", "Tryck &lt;b&gt;fet&lt;/b&gt; f&#xF6;r betoning") +
+        unit("app.lines", "&#32;first line\n  second line&#10;", "&#32;första raden\n  andra raden&#10;") +
+        unit("app.cdata", '<![CDATA[<raw> & "quoted"]]>', '<![CDATA[<rå> & "citerad"]]>') +
+        unit("app.cdata_lines", "<![CDATA[\n  keep\n]]>", "<![CDATA[\n  behåll\n]]>") +
+        unit("app.apostrophe", "It&apos;s done, isn&apos;t it?", "Klart, &apos;eller hur&apos;?") +
+        unit("app.items", "{count, plural, one {# item} other {# items}}", "{count, plural, one {# sak} other {# saker}}") +
+        unit("app.space", "&#32;", "&#32;&#32;"),
+      { meta: meta("Svenska &amp; Co", { author: "Ann &amp; Bo &lt;team&gt;", version: "2.0.1-&quot;rc&quot;" }) },
+    ),
+    "sv.d/cluster.xlf": svFragment(
+      unit("cluster.title", "Cluster &amp; nodes", "Kluster &amp; noder", "Heading with a &lt;note&gt;.") +
+        unit("cluster.tabs", "&#9;tabbed\nline&#9;", "&#9;flikad\nrad&#9;") +
+        unit("cluster.blank", "&#10;&#32;&#10;", "&#10;&#10;&#32;") +
+        unit("cluster.inner", "first\n\n  third", "först\n\n  tredje"),
+    ),
+  };
+
+  // Two keys in two groups, with a note, for the exact documents.
+  const twoKeys = {
+    "en.xlf": xliff({
+      units: unit("cluster.title", "Cluster &amp; nodes") + unit("app.save", "Save", undefined, "Button that stores changes."),
+    }),
+    "sv.xlf": sv(
+      unit("cluster.title", "Cluster &amp; nodes", "Kluster &amp; noder") +
+        unit("app.save", "Save", "Spara", "Button that stores changes."),
+    ),
+  };
+
+  it("reads back the same texts and notes, for the source language and the translation", () => {
+    const original = load(tricky);
+    expect(original.errors, describeErrors(original)).toEqual([]);
+    expect(original.messages.get("en")?.get("app.lines")?.text).toBe(" first line\n  second line\n");
+    expect(original.messages.get("sv")?.get("cluster.tabs")?.text).toBe("\tflikad\nrad\t");
+
+    const copy = reloadMerged(original);
+    expect(copy.catalog.errors, describeErrorsIn(copy.dir, copy.catalog)).toEqual([]);
+    expect(copy.catalog.warnings, describeErrorsIn(copy.dir, copy.catalog)).toEqual([]);
+    expect(copy.catalog.sourceLocale).toBe(original.sourceLocale);
+    expect(localeInfo(copy.catalog)).toEqual(localeInfo(original));
+    for (const code of ["en", "sv"]) {
+      expect(summary(copy.catalog, code), code).toEqual(summary(original, code));
+    }
+    expect(summary(copy.catalog, "sv")).toContainEqual(["app.amp", 'Kalle & Kajsa <3 > "q"', "Shown with a <b> tag & more."]);
+  });
+
+  it("reads back the language packs of ui/i18n", () => {
+    const dir = fileURLToPath(new URL("../../i18n", import.meta.url));
+    const original = loadCatalog(dir);
+    expect(original.errors, formatDiagnostics(original.errors, dir)).toEqual([]);
+
+    const copy = reloadMerged(original);
+    expect(copy.catalog.errors, describeErrorsIn(copy.dir, copy.catalog)).toEqual([]);
+    expect(localeInfo(copy.catalog)).toEqual(localeInfo(original));
+    for (const locale of original.locales) {
+      /** @param {Catalog} catalog */
+      const texts = (catalog) => summary(catalog, locale.code).map(([key, text]) => [key, text]);
+      expect(texts(copy.catalog), locale.code).toEqual(texts(original));
+    }
+    // The notes of the merged document are the source language's.
+    /** @param {Catalog} catalog */
+    const notes = (catalog) => summary(catalog, original.sourceLocale).map(([key, , note]) => [key, note]);
+    expect(notes(copy.catalog)).toEqual(notes(original));
+  });
+
+  it("writes the exact document of the source language", () => {
+    const catalog = load(twoKeys);
+    expect(catalog.errors, describeErrors(catalog)).toEqual([]);
+
+    expect(renderMergedXliff(catalog, "en")).toBe(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">',
+        '  <file id="ui">',
+        "    <mda:metadata>",
+        '      <mda:metaGroup category="language-pack">',
+        '        <mda:meta type="displayName">English</mda:meta>',
+        '        <mda:meta type="author">Test Author</mda:meta>',
+        '        <mda:meta type="version">1.2.3</mda:meta>',
+        '        <mda:meta type="sourceLanguage">en</mda:meta>',
+        "      </mda:metaGroup>",
+        "    </mda:metadata>",
+        '    <group id="app">',
+        '      <unit id="app.save">',
+        '        <notes><note category="description">Button that stores changes.</note></notes>',
+        "        <segment>",
+        "          <source>Save</source>",
+        "        </segment>",
+        "      </unit>",
+        "    </group>",
+        '    <group id="cluster">',
+        '      <unit id="cluster.title">',
+        "        <segment>",
+        "          <source>Cluster &amp; nodes</source>",
+        "        </segment>",
+        "      </unit>",
+        "    </group>",
+        "  </file>",
+        "</xliff>",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("writes the exact document of a translation", () => {
+    const catalog = load(twoKeys);
+
+    expect(renderMergedXliff(catalog, "sv")).toBe(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">',
+        '  <file id="ui">',
+        "    <mda:metadata>",
+        '      <mda:metaGroup category="language-pack">',
+        '        <mda:meta type="displayName">Svenska</mda:meta>',
+        '        <mda:meta type="author">Test Author</mda:meta>',
+        '        <mda:meta type="version">1.2.3</mda:meta>',
+        '        <mda:meta type="sourceLanguage">en</mda:meta>',
+        "      </mda:metaGroup>",
+        "    </mda:metadata>",
+        '    <group id="app">',
+        '      <unit id="app.save">',
+        '        <notes><note category="description">Button that stores changes.</note></notes>',
+        "        <segment>",
+        "          <source>Save</source>",
+        "          <target>Spara</target>",
+        "        </segment>",
+        "      </unit>",
+        "    </group>",
+        '    <group id="cluster">',
+        '      <unit id="cluster.title">',
+        "        <segment>",
+        "          <source>Cluster &amp; nodes</source>",
+        "          <target>Kluster &amp; noder</target>",
+        "        </segment>",
+        "      </unit>",
+        "    </group>",
+        "  </file>",
+        "</xliff>",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("gives the source language no trgLang and no target, and a translation both", () => {
+    const catalog = load(validPair());
+    const en = renderMergedXliff(catalog, "en");
+    expect(en).not.toContain("trgLang");
+    expect(en).not.toContain("<target>");
+    expect(en.match(/<source>/g)).toHaveLength(3);
+
+    const swedish = renderMergedXliff(catalog, "sv");
+    expect(swedish).toContain(' version="2.0" srcLang="en" trgLang="sv">\n');
+    expect(swedish.match(/<source>/g)).toHaveLength(3);
+    expect(swedish.match(/<target>/g)).toHaveLength(3);
+    // The source is the source language's text, the target the language's own.
+    expect(swedish).toContain("<source>Signed in as {name}</source>\n          <target>Inloggad som {name}</target>");
+  });
+
+  it("leaves the target out of a unit the translation lacks", () => {
+    const catalog = load(validPair());
+    catalog.messages.get("sv")?.delete("app.greeting");
+    const swedish = renderMergedXliff(catalog, "sv");
+    expect(swedish.match(/<unit /g)).toHaveLength(3);
+    expect(swedish.match(/<target>/g)).toHaveLength(2);
+    expect(swedish).toContain(
+      '      <unit id="app.greeting">\n        <segment>\n          <source>Signed in as {name}</source>\n        </segment>\n      </unit>\n',
+    );
+  });
+
+  it("writes the code as the display name of a language without one", () => {
+    const catalog = load(validPair());
+    const locale = catalog.locales.find((l) => l.code === "sv");
+    if (locale === undefined) throw new Error("no sv");
+    locale.name = "";
+    expect(renderMergedXliff(catalog, "sv")).toContain('<mda:meta type="displayName">sv</mda:meta>');
+  });
+
+  it("sorts the keys and groups them by their first segment, whatever the files do", () => {
+    // Plain string order: "1" < "_" < "b" after "app.a", and "." < "_" puts app.* before app_y.*.
+    const keys = ["app.a1", "app.a_b", "app.ab", "app.items", "app.save", "app_y.z", "audit.title", "cluster.nodes", "cluster.title"];
+    const swedish = sv(keys.map((key) => unit(key, "x", "y")).join(""));
+    const flat = load({
+      "en.xlf": xliff({ units: [...keys].reverse().map((key) => unit(key, "x")).join("") }),
+      "sv.xlf": swedish,
+    });
+    // The same keys in a main file and fragments that group them differently.
+    const split = load({
+      "en.xlf": xliff({ units: unit("cluster.title", "x") + unit("app.ab", "x") + unit("audit.title", "x") }),
+      "en.d/b.xlf": enFragment(unit("app_y.z", "x") + unit("cluster.nodes", "x") + unit("app.a_b", "x")),
+      "en.d/a.xlf": enFragment(unit("app.save", "x") + unit("app.a1", "x") + unit("app.items", "x")),
+      "sv.xlf": swedish,
+    });
+    for (const catalog of [flat, split]) {
+      expect(catalog.errors, describeErrors(catalog)).toEqual([]);
+      for (const code of ["en", "sv"]) {
+        const xml = renderMergedXliff(catalog, code);
+        expect(unitIds(xml), code).toEqual(keys);
+        expect(groupIds(xml), code).toEqual(["app", "app_y", "audit", "cluster"]);
+        expect(xml).not.toContain('<group id="g">');
+        expect(xml.match(/<\/group>/g)).toHaveLength(4);
+      }
+    }
+    expect(renderMergedXliff(split, "en")).toBe(renderMergedXliff(flat, "en"));
+    expect(renderMergedXliff(split, "sv")).toBe(renderMergedXliff(flat, "sv"));
+  });
+
+  it("writes a catalog without messages as a document without groups", () => {
+    const catalog = load({ "en.xlf": xliff() });
+    const xml = renderMergedXliff(catalog, "en");
+    expect(xml).not.toContain("<group");
+    expect(xml.endsWith("    </mda:metadata>\n  </file>\n</xliff>\n")).toBe(true);
+  });
+
+  it("writes white space at the edges of a text with line breaks as character references", () => {
+    const catalog = load(tricky);
+    const xml = renderMergedXliff(catalog, "en");
+    expect(xml).toContain("<source>&#32;first line\n  second line&#10;</source>");
+    expect(xml).toContain("<source>&#9;tabbed\nline&#9;</source>");
+    expect(xml).toContain("<source>&#10;&#32;&#10;</source>");
+    expect(xml).toContain("<source>&#10;&#32;&#32;keep&#10;</source>");
+    expect(xml).toContain("<source>first\n\n  third</source>");
+    // A text without a line break keeps its white space as it is.
+    expect(xml).toContain("<source> </source>");
+    expect(renderMergedXliff(catalog, "sv")).toContain("<target>  </target>");
+  });
+
+  it("escapes every text: metadata, notes, sources and targets", () => {
+    const catalog = load(tricky);
+    const xml = renderMergedXliff(catalog, "sv");
+    expect(xml).toContain('<mda:meta type="displayName">Svenska &amp; Co</mda:meta>');
+    expect(xml).toContain('<mda:meta type="author">Ann &amp; Bo &lt;team&gt;</mda:meta>');
+    expect(xml).toContain('<mda:meta type="version">2.0.1-"rc"</mda:meta>');
+    expect(xml).toContain('<note category="description">Shown with a &lt;b&gt; tag &amp; more.</note>');
+    expect(xml).toContain("<source>Press &lt;b&gt;bold&lt;/b&gt; to emphasise</source>");
+    expect(xml).toContain("<target>Tryck &lt;b&gt;fet&lt;/b&gt; för betoning</target>");
+    expect(xml).toContain('<source>&lt;raw&gt; &amp; "quoted"</source>');
+    expect(xml).toContain('<target>&lt;rå&gt; &amp; "citerad"</target>');
+  });
+
+  it("is the same for every call", () => {
+    const catalog = load(tricky);
+    expect(renderMergedXliff(catalog, "sv")).toBe(renderMergedXliff(catalog, "sv"));
+    expect(renderMergedXliff(load(tricky), "en")).toBe(renderMergedXliff(catalog, "en"));
+  });
+
+  it("throws for a language the catalog does not have", () => {
+    const catalog = load(validPair());
+    expect(() => renderMergedXliff(catalog, "de")).toThrow(/unknown language "de"/);
+    expect(() => renderMergedXliff(catalog, "")).toThrow(/unknown language/);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// The Vite plugin
+// ---------------------------------------------------------------------------------------
+
+describe("the i18n Vite plugin emits the merged documents", () => {
+  /**
+   * A plugin hook as a function: Vite lets a hook be a function or an object with a `handler`.
+   * @param {unknown} hook
+   * @returns {(this: unknown, ...args: any[]) => unknown}
+   */
+  function handlerOf(hook) {
+    if (typeof hook === "function") return /** @type {any} */ (hook);
+    if (typeof hook === "object" && hook !== null && "handler" in hook && typeof hook.handler === "function") {
+      return /** @type {any} */ (hook.handler);
+    }
+    throw new Error("the plugin does not have that hook");
+  }
+
+  /** The part of a plugin context that the hooks use, recording what they do. */
+  function fakeContext() {
+    /** @type {string[]} */
+    const watched = [];
+    /** @type {unknown[]} */
+    const emitted = [];
+    return {
+      watched,
+      emitted,
+      /** @param {string} file */
+      addWatchFile(file) {
+        watched.push(file);
+      },
+      /** @param {unknown} file */
+      emitFile(file) {
+        emitted.push(file);
+        return `reference-${emitted.length}`;
+      },
+      /** @param {unknown} problem */
+      error(problem) {
+        throw new Error(typeof problem === "string" ? problem : String(problem));
+      },
+    };
+  }
+
+  /** A language directory with a fragment per language, and a keys file that matches it. */
+  function fixture() {
+    const dir = makeDir({
+      ...validPair(),
+      "en.d/cluster.xlf": enFragment(unit("cluster.title", "Cluster &amp; nodes", undefined, "Heading.")),
+      "sv.d/cluster.xlf": svFragment(unit("cluster.title", "Cluster &amp; nodes", "Kluster &amp; noder", "Heading.")),
+    });
+    const catalog = loadCatalog(dir);
+    expect(catalog.errors, describeErrorsIn(dir, catalog)).toEqual([]);
+    // Not the real ui/src/i18n/generated/keys.ts: a file of the fixture's own.
+    const keysOut = path.join(makeDir({}), "generated", "keys.ts");
+    fs.mkdirSync(path.dirname(keysOut), { recursive: true });
+    fs.writeFileSync(keysOut, renderKeysTs(catalog));
+    return { dir, keysOut, catalog };
+  }
+
+  it("emits i18n/<code>.xlf for every language in generateBundle", () => {
+    const { dir, keysOut, catalog } = fixture();
+    const plugin = i18n({ dir, keysOut });
+    const context = fakeContext();
+
+    handlerOf(plugin.buildStart).call(context);
+    expect(context.emitted).toEqual([]);
+    expect(context.watched.map((file) => path.relative(dir, file).split(path.sep).join("/"))).toEqual([
+      "en.xlf",
+      "sv.xlf",
+      "en.d/cluster.xlf",
+      "sv.d/cluster.xlf",
+    ]);
+
+    handlerOf(plugin.generateBundle).call(context, {}, {}, true);
+    expect(context.emitted).toEqual([
+      { type: "asset", fileName: "i18n/en.xlf", source: renderMergedXliff(catalog, "en") },
+      { type: "asset", fileName: "i18n/sv.xlf", source: renderMergedXliff(catalog, "sv") },
+    ]);
+    const emitted = /** @type {Array<{ source: string }>} */ (context.emitted);
+    expect(emitted[0]?.source).not.toContain("trgLang");
+    expect(emitted[1]?.source).toContain('trgLang="sv"');
+    // The unit of the fragment is in the merged document.
+    expect(emitted[1]?.source).toContain("<target>Kluster &amp; noder</target>");
+  });
+
+  it("loads the catalog itself when generateBundle runs without buildStart", () => {
+    const { dir, keysOut } = fixture();
+    const context = fakeContext();
+    handlerOf(i18n({ dir, keysOut }).generateBundle).call(context, {}, {}, true);
+    expect(context.emitted.map((file) => /** @type {{ fileName: string }} */ (file).fileName)).toEqual(["i18n/en.xlf", "i18n/sv.xlf"]);
   });
 });

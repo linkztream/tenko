@@ -1,0 +1,30 @@
+/* The bar of a language preview (PreviewBar.tsx): floating over the page, centered at the top
+   edge, in both writing directions. */
+.preview-bar-host {
+  position: fixed;
+  inset-block-start: var(--sp-4);
+  inset-inline: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.preview-bar {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  max-inline-size: calc(100vw - 2 * var(--sp-6));
+  padding-block: var(--sp-3);
+  padding-inline: var(--sp-6) var(--sp-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-3);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--fs-12);
+  box-shadow: var(--shadow-float);
+}
+
+.preview-bar > svg.i { color: var(--accent); flex: none; }
+.preview-bar-text { min-inline-size: 0; }

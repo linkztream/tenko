@@ -59,6 +59,8 @@ pub fn content_type(path: &str) -> &'static str {
         "text/plain; charset=utf-8"
     } else if ext_is(ext, &["xml"]) {
         "application/xml"
+    } else if ext_is(ext, &["xlf", "xliff"]) {
+        "application/xliff+xml"
     } else {
         "application/octet-stream"
     }
@@ -85,6 +87,8 @@ pub fn is_compressible(path: &str) -> bool {
             "webmanifest",
             "txt",
             "xml",
+            "xlf",
+            "xliff",
             "wasm",
         ],
     )
@@ -108,6 +112,7 @@ mod tests {
         assert_eq!(content_type("assets/logo.svg"), "image/svg+xml");
         assert_eq!(content_type("assets/logo.png"), "image/png");
         assert_eq!(content_type("assets/font.woff2"), "font/woff2");
+        assert_eq!(content_type("i18n/sv.xlf"), "application/xliff+xml");
         assert_eq!(content_type("assets/blob.bin"), "application/octet-stream");
         assert_eq!(
             content_type("assets/no-extension"),
@@ -126,6 +131,7 @@ mod tests {
             "a.svg",
             "a.json",
             "a.WASM",
+            "i18n/en.xlf",
         ] {
             assert!(is_compressible(path), "{path}");
         }
