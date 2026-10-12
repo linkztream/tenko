@@ -1012,6 +1012,16 @@ pub struct LogSection {
     /// goes to `<data_dir>/logs/tenko.log` when this is not set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<PathBuf>,
+    /// The size in MiB at which the log file is rotated: `tenko.log` becomes `tenko.log.1`,
+    /// `tenko.log.1` becomes `tenko.log.2` and so on (default 64; 0: never rotate).
+    pub max_file_mb: u64,
+    /// Rotated files kept besides the active one, 1 to 100 (default 5).
+    pub keep_files: u32,
+    /// The Windows service also writes events at or above this level to the Application
+    /// Event Log under the service name (OPS-10): `error`, `warn` (default), `info`,
+    /// `debug`, `trace` or `off`. The start and stop of the service are always written.
+    /// Ignored outside the Windows service.
+    pub event_log: EventLogLevel,
 }
 
 impl Default for LogSection {
@@ -1020,8 +1030,30 @@ impl Default for LogSection {
             level: "info".to_owned(),
             format: LogFormat::Text,
             file: None,
+            max_file_mb: 64,
+            keep_files: 5,
+            event_log: EventLogLevel::Warn,
         }
     }
+}
+
+/// The level of the Windows Event Log sink.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventLogLevel {
+    /// Nothing but the start and stop of the service.
+    Off,
+    /// Errors.
+    Error,
+    /// Warnings and errors (default).
+    #[default]
+    Warn,
+    /// Informational events and above.
+    Info,
+    /// Debug events and above.
+    Debug,
+    /// Everything.
+    Trace,
 }
 
 /// The release manifest the update check reads by default: the project's releases.
@@ -1814,8 +1846,18 @@ impl JobsSection {
 impl LogSection {
     fn validate(&self) -> Result<(), ConfigError> {
         tracing_subscriber::EnvFilter::try_new(&self.level)
-            .map(drop)
-            .map_err(|error| ConfigError::invalid(format!("log.level: {error}")))
+            .map_err(|error| ConfigError::invalid(format!("log.level: {error}")))?;
+        if self.max_file_mb > 65_536 {
+            return Err(ConfigError::invalid(
+                "log.max_file_mb must be between 0 (no rotation) and 65536",
+            ));
+        }
+        if !(1..=100).contains(&self.keep_files) {
+            return Err(ConfigError::invalid(
+                "log.keep_files must be between 1 and 100",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -2079,6 +2121,8 @@ retired = [\"tenko_kek_old\"]
             ("[server]\nworkers = 0", "server.workers"),
             ("[kek]\nprovider = \"file\"", "kek.path"),
             ("[log]\nlevel = \"=\"", "log.level"),
+            ("[log]\nkeep_files = 0", "log.keep_files"),
+            ("[log]\nmax_file_mb = 70000", "log.max_file_mb"),
             ("[store]\nsm_cache_mib = 0", "store.sm_cache_mib"),
             (
                 "[rate_limit]\nper_ip = { per_second = 0, burst = 1 }",

@@ -62,10 +62,16 @@ zeroize = { workspace = true }
 # `tenko login` and `tenko setup` (both MIT or Apache-2.0).
 rpassword = "7.5.4"
 toml = "1.1.8"
+# The free space of the data directory's file system before a pre-migration copy (MIT or
+# Apache-2.0; rustix and windows-sys, both already in the graph).
+fs4 = "1.1.0"
 
 [target.'cfg(windows)'.dependencies]
 # Service Control Manager integration (OPS-10); the FFI lives inside the crate.
 windows-service = "0.8.1"
+# The Application Event Log sink of the service (OPS-10, R31); the FFI lives inside the
+# crate (MIT).
+tracing-layer-win-eventlog = "1.0.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # `sd_notify` readiness and stop notifications for `Type=notify` units (OPS-13).

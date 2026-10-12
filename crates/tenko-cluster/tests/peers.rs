@@ -486,6 +486,9 @@ impl Lab {
                         version: "0.0.1".to_owned(),
                         data_format: 2,
                         joined_at: tenko_core::Timestamp::now(),
+                        protocol_majors: Vec::new(),
+                        raft_wire: None,
+                        formats: Vec::new(),
                     },
                 )
                 .expect("member record");
@@ -1035,5 +1038,35 @@ async fn the_fenced_prune_needs_the_current_epoch() {
             .await
             .expect("the current epoch prunes"),
         1
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_member_reports_its_binary_once_after_a_start() {
+    let lab = Lab::three(&no_change).await;
+    let follower = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != lab.first.node())
+        .expect("a joined controller");
+    // A controller that joined has a record without its binary's details until it reports
+    // them at its next start.
+    assert!(follower.peers.announce().await.expect("announce"));
+    assert!(!follower.peers.announce().await.expect("unchanged"));
+    let leader = lab.leader().await;
+    let view = leader.peers.view().await.expect("view");
+    let member = view
+        .members
+        .iter()
+        .find(|member| member.node == follower.node())
+        .expect("the follower");
+    assert_eq!(
+        member.protocol_majors,
+        tenko_cluster::version::SUPPORTED_MAJORS.to_vec()
+    );
+    assert_eq!(member.raft_wire.as_deref(), Some("openraft-0.9/cbor-1"));
+    assert_eq!(
+        member.formats,
+        (1..=member.data_format.expect("format")).collect::<Vec<_>>()
     );
 }

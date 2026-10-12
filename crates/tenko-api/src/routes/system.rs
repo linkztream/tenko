@@ -44,8 +44,8 @@ use uuid::Uuid;
 
 use crate::{
     dto::system::{
-        Health, LeaderServiceState, LeaderStatus, NodeStatus, Readiness, StatusWarning,
-        StoreSummary, SystemStatus, UiStatus,
+        DataFormatStatus, Health, LeaderServiceState, LeaderStatus, NodeStatus, Readiness,
+        StatusWarning, StoreSummary, SystemStatus, UiStatus,
     },
     extract::Ctx,
     problem::{ApiError, ProblemDetails, codes},
@@ -167,6 +167,61 @@ impl std::fmt::Debug for LeaderSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LeaderSource").finish_non_exhaustive()
     }
+}
+
+/// Where `GET /system/status` reads the data-directory format: the server binary adds it
+/// as a request extension and refreshes what it answers in the background.
+#[derive(Clone)]
+pub struct DataFormatSource(Arc<dyn Fn() -> Option<DataFormatStatus> + Send + Sync>);
+
+impl DataFormatSource {
+    /// A source that answers what `read` returns at the time of the request.
+    pub fn new(read: impl Fn() -> Option<DataFormatStatus> + Send + Sync + 'static) -> Self {
+        Self(Arc::new(read))
+    }
+
+    /// The format now, if known.
+    pub fn current(&self) -> Option<DataFormatStatus> {
+        (self.0)()
+    }
+}
+
+impl std::fmt::Debug for DataFormatSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DataFormatSource").finish_non_exhaustive()
+    }
+}
+
+/// Warning code of a format migration that waits for voters with an older binary.
+pub const MIGRATION_BLOCKED: &str = "upgrade.migration_blocked";
+
+/// The warning of a pending migration that voters block, naming them.
+pub fn data_format_warnings(format: &DataFormatStatus) -> Vec<StatusWarning> {
+    let Some(pending) = &format.pending else {
+        return Vec::new();
+    };
+    if pending.blocked_by.is_empty() {
+        return Vec::new();
+    }
+    let nodes = pending
+        .blocked_by
+        .iter()
+        .map(|blocker| blocker.node.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut params = std::collections::BTreeMap::new();
+    params.insert("stored".to_owned(), format.stored.to_string());
+    params.insert("target".to_owned(), pending.target.to_string());
+    params.insert("nodes".to_owned(), nodes.clone());
+    vec![StatusWarning {
+        code: MIGRATION_BLOCKED.to_owned(),
+        detail: format!(
+            "the data stays in format {} until every voter runs a binary that knows format {}; \
+             upgrade controller(s) {nodes}",
+            format.stored, pending.target
+        ),
+        params,
+    }]
 }
 
 /// Warning code of a leader service that gave up and waits for its restart.
@@ -305,6 +360,7 @@ async fn system_status(
     running: Option<Extension<RunningVersion>>,
     leader: Option<Extension<LeaderSource>>,
     backup: Option<Extension<Arc<dyn super::backup::BackupService>>>,
+    format: Option<Extension<DataFormatSource>>,
     Ctx(ctx): Ctx,
 ) -> Result<Json<SystemStatus>, ApiError> {
     state.authorize(&ctx.principal, Action::Read, &system_object())?;
@@ -319,6 +375,10 @@ async fn system_status(
         super::backup::summary_of(backup.as_ref().map(|Extension(service)| service)).await;
     status.backup = backup;
     status.warnings.extend(backup_warnings);
+    if let Some(format) = format.and_then(|Extension(source)| source.current()) {
+        status.warnings.extend(data_format_warnings(&format));
+        status.data_format = Some(format);
+    }
     Ok(Json(status))
 }
 
@@ -427,6 +487,7 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
         kek,
         leader: None,
         backup: None,
+        data_format: None,
     }
 }
 
@@ -650,5 +711,45 @@ mod tests {
         assert_eq!(source.current().epoch, Some(4));
         let json = serde_json::to_value(source.current()).expect("JSON");
         assert_eq!(json["services"][1]["state"], "restarting");
+    }
+
+    #[test]
+    fn a_blocked_migration_names_the_voters() {
+        use crate::dto::system::{FormatBlocker, PendingMigration};
+        let current = DataFormatStatus {
+            stored: 3,
+            binary: 3,
+            pending: None,
+        };
+        assert_eq!(data_format_warnings(&current), Vec::new());
+        let running = DataFormatStatus {
+            stored: 2,
+            binary: 3,
+            pending: Some(PendingMigration {
+                target: 3,
+                blocked_by: Vec::new(),
+            }),
+        };
+        assert_eq!(data_format_warnings(&running), Vec::new());
+        let blocked = DataFormatStatus {
+            pending: Some(PendingMigration {
+                target: 3,
+                blocked_by: vec![FormatBlocker {
+                    node: tenko_core::NodeId(1002),
+                    version: Some("0.1.0".to_owned()),
+                    data_format: Some(2),
+                }],
+            }),
+            ..running
+        };
+        let warnings = data_format_warnings(&blocked);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].code, MIGRATION_BLOCKED);
+        assert_eq!(warnings[0].params["nodes"], "1002");
+        assert_eq!(warnings[0].params["target"], "3");
+        let source = DataFormatSource::new(move || Some(blocked.clone()));
+        let json = serde_json::to_value(source.current()).expect("JSON");
+        assert_eq!(json["pending"]["blocked_by"][0]["node"], 1002);
+        assert_eq!(json["stored"], 2);
     }
 }

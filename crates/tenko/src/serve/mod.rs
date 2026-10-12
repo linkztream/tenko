@@ -827,6 +827,11 @@ async fn start(
 
     let store: RaftStore = steps
         .run("store", async {
+            // A migration (and the copy before it) may take longer than the service
+            // manager's start timeout; the extension ends with this step.
+            let _extension = plan
+                .needs_backup()
+                .then(|| crate::platform::extend_start("copying and migrating the data directory"));
             let backup = if let crate::upgrade::datadir::Plan::Migrate { from, to, .. } = plan {
                 let (data_dir, store_dir) = (resolved.data_dir.clone(), layout.store());
                 let copy = tokio::task::spawn_blocking(move || {
@@ -849,9 +854,19 @@ async fn start(
             if let Some(probation) = probation {
                 probation.pause();
             }
-            let finished =
-                crate::upgrade::datadir::finish(&store, &layout.store(), plan, registry, version())
-                    .await;
+            // A member of a controller cluster leaves the migration to the leader, which
+            // runs it once every voter's binary knows the format (OPS-08).
+            let membership = store.membership();
+            let member = membership.voters.len() + membership.learners.len() > 1;
+            let finished = crate::upgrade::datadir::finish_with(
+                &store,
+                &layout.store(),
+                plan,
+                registry,
+                version(),
+                member,
+            )
+            .await;
             if let Some(probation) = probation {
                 probation.resume();
             }
@@ -901,6 +916,29 @@ async fn start(
         running.stop.subscribe(),
     )));
     let store_dyn: Arc<dyn Store> = Arc::new(store.clone());
+    // Rolling upgrades (OPS-08): the leader migrates the data format once every voter's
+    // binary knows it; every member keeps its marker and the format status.
+    let format_follower = {
+        let members = store.clone();
+        let voters: crate::upgrade::rolling::Voters = Arc::new(move || members.membership().voters);
+        leaders.register(Arc::new(crate::upgrade::rolling::Migrator::new(
+            Arc::clone(&store_dyn),
+            Arc::clone(&voters),
+            registry,
+            version(),
+        )));
+        let follower = crate::upgrade::rolling::Follower::new(
+            Arc::clone(&store_dyn),
+            layout.store(),
+            voters,
+            registry,
+            version(),
+        );
+        running
+            .tasks
+            .push(follower.clone().spawn(running.stop.subscribe()));
+        follower
+    };
     // The module switch (OPS-25): tenko.toml, else the installation's choice, else all.
     let stored_modules = crate::modules::stored(store_dyn.as_ref())
         .await
@@ -1457,6 +1495,7 @@ async fn start(
                 backups as Arc<dyn tenko_api::routes::backup::BackupService>,
             );
             server.extensions.insert(leader_view.source());
+            server.extensions.insert(format_follower.source());
             server.fingerprint_key = cluster_key
                 .as_ref()
                 .map(cluster_key::ClusterKey::fingerprint_key);

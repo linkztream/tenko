@@ -155,6 +155,16 @@ pub struct MemberView {
     pub data_format: Option<u32>,
     /// When it joined.
     pub joined_at: Option<Timestamp>,
+    /// The protocol majors its binary speaks with nodes; empty when it has not reported
+    /// them (a member that has not restarted since it joined with an older build).
+    #[serde(default)]
+    pub protocol_majors: Vec<u32>,
+    /// The wire version of its Raft messages, when reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raft_wire: Option<String>,
+    /// The data formats its binary can open, oldest first; empty when not reported.
+    #[serde(default)]
+    pub formats: Vec<u32>,
 }
 
 /// Body of `POST /cluster/members/{id}/promote`.

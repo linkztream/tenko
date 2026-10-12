@@ -4740,6 +4740,20 @@ export interface components {
             /** @description The chosen option. */
             value: string;
         };
+        /** @description The data-directory format of the installation, for `GET /system/status`. */
+        DataFormatStatus: {
+            /**
+             * Format: int32
+             * @description The newest format this controller's binary knows.
+             */
+            binary: number;
+            pending?: components["schemas"]["PendingMigration"] | null;
+            /**
+             * Format: int32
+             * @description The format the stored (replicated) data is in.
+             */
+            stored: number;
+        };
         /** @description The answer of a decision. */
         Decision: {
             /** @description Whether this is a dry run. */
@@ -5185,6 +5199,21 @@ export interface components {
              */
             size: number;
             text?: components["schemas"]["TextInfo"] | null;
+        };
+        /** @description A voter that keeps a migration from running. */
+        FormatBlocker: {
+            /**
+             * Format: int32
+             * @description The newest data format its binary knows, as it reported it.
+             */
+            data_format?: number | null;
+            /**
+             * Format: int64
+             * @description The node id of the voter.
+             */
+            node: number;
+            /** @description The software version it reported; absent when it never reported one. */
+            version?: string | null;
         };
         /** @description DNS name */
         Fqdn: string;
@@ -6759,6 +6788,8 @@ export interface components {
              * @description The data format its binary knows.
              */
             data_format?: number | null;
+            /** @description The data formats its binary can open, oldest first; empty when not reported. */
+            formats?: number[];
             joined_at?: components["schemas"]["Timestamp"] | null;
             /**
              * Format: int64
@@ -6784,6 +6815,13 @@ export interface components {
              * @description The node id (also its Raft id).
              */
             node: number;
+            /**
+             * @description The protocol majors its binary speaks with nodes; empty when it has not reported
+             *     them (a member that has not restarted since it joined with an older build).
+             */
+            protocol_majors?: number[];
+            /** @description The wire version of its Raft messages, when reported. */
+            raft_wire?: string | null;
             /** @description Voter or learner. */
             role: components["schemas"]["MemberRole"];
             /** @description The software version it reported when it joined or last started. */
@@ -8947,6 +8985,22 @@ export interface components {
             /** @enum {string} */
             preset: "custom";
         });
+        /**
+         * @description A format migration of a controller cluster that waits for the last voters to be
+         *     upgraded (leader-gated migration, R26).
+         */
+        PendingMigration: {
+            /**
+             * @description The voters whose binary does not know the target format yet; empty when the leader
+             *     is about to run the migration.
+             */
+            blocked_by: components["schemas"]["FormatBlocker"][];
+            /**
+             * Format: int32
+             * @description The format the stored data is migrated to.
+             */
+            target: number;
+        };
         /** @description Options of one plan. */
         PlanOptions: {
             /**
@@ -11573,6 +11627,7 @@ export interface components {
         SystemStatus: {
             backup?: components["schemas"]["BackupSummaryView"] | null;
             cluster?: components["schemas"]["ClusterStatus"] | null;
+            data_format?: components["schemas"]["DataFormatStatus"] | null;
             kek?: components["schemas"]["KekSummaryView"] | null;
             leader?: components["schemas"]["LeaderStatus"] | null;
             /**

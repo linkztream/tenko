@@ -73,6 +73,9 @@ tenko service install --config C:\ProgramData\Tenko\tenko.toml
 
 Install does not start the service. Start it with `tenko service start`.
 
+Install also registers the Event Log source of the service (see "Event Log" below), under
+the service name, and uninstall removes it.
+
 ### Account
 
 The default account is the virtual service account `NT SERVICE\tenko` (`NT SERVICE\<name>`
@@ -119,7 +122,20 @@ users, can read the store, the keys or the logs.
 
 Under the SCM there is no console. The service writes its log, appended, to
 `<data_dir>\logs\tenko.log`, or to `log.file` when the file sets one. `log.level` and
-`log.format` apply as usual. The Windows Event Log comes in Slice 3.
+`log.format` apply as usual. Important events also go to the Windows Event Log, see
+"Event Log" below.
+
+The file is rotated by size. When it would grow past `[log] max_file_mb` (default 64), the
+server renames it to `tenko.log.1` and starts a new `tenko.log`. Older files move up
+(`tenko.log.2`, `tenko.log.3`, and so on). `[log] keep_files` (default 5) is the number of
+rotated files that are kept; the oldest is deleted. The disk use is therefore about
+`max_file_mb` times `keep_files + 1`.
+
+```
+[log]
+max_file_mb = 64
+keep_files = 5
+```
 
 At the first start the server has no administrator yet and opens first-run setup. It keeps
 the one-time setup token in the file `setup-token` of the data directory, never in the log;
@@ -134,8 +150,43 @@ removed when setup completes. It inherits the access control list of the data di
 which is limited to the service account, Administrators and SYSTEM.
 
 If the service cannot open its log, or its configuration stopped being valid after the
-install, there is nowhere to write the reason. The SCM then shows only the exit status of
-the service, see below.
+install, the reason goes to the Event Log as an Error, see below. The SCM also shows the
+exit status of the service.
+
+## Event Log
+
+`tenko service install` registers an Event Log source in the Application log. The source
+has the name of the service (`tenko` by default, the value of `--name` otherwise). The
+registration is the registry key
+`HKLM\SYSTEM\CurrentControlSet\Services\EventLog\Application\<name>`. `tenko service
+uninstall` removes it again.
+
+What the running service writes:
+
+- Two lines at every run, both with level Information: `tenko service starting` and
+  `tenko service stopped`. They show when the service started and stopped, also when the
+  SCM restarted it after an update (exit status 12).
+- Every log event at or above the level `[log] event_log`. The default is `"warn"`, so
+  warnings and errors are copied to the Event Log. The values are `error`, `warn`, `info`,
+  `debug`, `trace` and `off`. `off` disables the sink; the two lifecycle lines are still
+  written. Lower levels than `warn` can fill the Application log quickly. `log.level`
+  decides which events exist at all, so `event_log = "debug"` needs `log.level = "debug"`.
+- A failure before the file log is open, as an Error. This is the case that the file log
+  cannot show: a configuration that stopped being valid after the install, or a log
+  directory that cannot be written. The SCM shows the exit status, and the Event Log says
+  why.
+
+Read the entries in an elevated or ordinary PowerShell:
+
+```
+Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'tenko' } -MaxEvents 50 |
+    Format-Table TimeCreated, LevelDisplayName, Message -Wrap
+```
+
+Event Viewer shows the same entries under Windows Logs, Application, with the source
+`tenko`. The source has no message file, so Windows may add a note that it cannot find the
+description of the event. The text of the event is still shown after it, and
+`$_.Properties[0].Value` holds it.
 
 ## Start, stop, uninstall
 
@@ -236,6 +287,60 @@ installed before the layout existed gets it with `tenko service uninstall` and a
 `tenko service install` (the data directory, its permissions and the configuration stay).
 The full procedure, the rollback in detail, updates from the web UI and the recovery from a
 version that crash-loops are in [../../docs/upgrades.md](../../docs/upgrades.md).
+
+## Smoke test
+
+`deploy/windows/smoke.ps1` tests the whole service life on a real Windows host. The owner
+runs it once, in an elevated PowerShell 7, before a release; the weekly CI job runs it on a
+hosted runner. It needs a debug build, because only debug builds honour
+`TENKO_TEST_VERSION_FROM_LAYOUT`, which lets one binary install itself as version 0.0.2.
+
+```
+cargo build -p tenko
+pwsh -File deploy\windows\smoke.ps1 -Binary .\target\debug\tenko.exe
+```
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `-Binary <PATH>` | required | The `tenko.exe` to test. |
+| `-Name <NAME>` | `tenko-smoke` | The service name and Event Log source. |
+| `-Root <DIR>` | `%ProgramData%\TenkoSmoke` | The configuration, data directory and release files. |
+| `-Keep` | off | Leave the service and the directory in place, to look at a failure. |
+
+The script never touches an installed `tenko` service: it uses its own service name and its
+own directory, and it refuses the name `tenko`. It refuses to start when it is not elevated,
+when another service has the name, or when `-Root` holds files that it did not create. A
+service and a directory left by an earlier smoke run are removed first. It talks to the
+loopback address only.
+
+Each step prints a line that starts with `==>`:
+
+1. Writes a configuration with a loopback API port, the Home profile, the DPAPI key
+   provider, `[log] event_log = "info"` and a loopback release source.
+2. Installs the service and checks the service, the Event Log source and the image path
+   `<data_dir>\updates\current\tenko.exe`.
+3. Sets `TENKO_TEST_VERSION_FROM_LAYOUT=1` in the service environment.
+4. Starts the service and waits up to 120 s until `tenko health` answers.
+5. Looks for the Event Log entry `tenko service starting`.
+6. Checks that the file log exists and has content.
+7. Runs first-run setup through the API, offers this binary as version 0.0.2 from a small
+   HTTP server on 127.0.0.1, installs it from the update API and waits until the service
+   has exited with status 12, the SCM has started it again, version 0.0.2 runs, the
+   `updates\current` junction points at `updates\0.0.2` and the update is confirmed.
+8. Stops the service and checks the Event Log entry `tenko service stopped`.
+9. Uninstalls the service and checks that the service and the source are gone.
+
+Then it stops the release server and removes the service and the directory, also after a
+failure. A run takes about three to five minutes; the restart after the update alone waits
+10 s for the SCM and then for the new version to become ready.
+
+The exit status is 0 when all steps pass and 1 otherwise. On a failure the script prints the
+failed step, the last 200 lines of `tenko.log`, the last 50 Event Log entries of the source
+and the state of the service, and then cleans up. Read the output from the top: the first
+line that starts with `FAILED` names the check that did not hold. Run again with `-Keep` to
+keep the directory and the service for a closer look. Remove them afterwards with
+`tenko service uninstall --name tenko-smoke` and by deleting the directory, or start the
+script again, which removes them itself.
 
 ## Run in a console instead
 

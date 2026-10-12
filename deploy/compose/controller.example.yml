@@ -4,7 +4,8 @@
 # private bridge network with port 8443 published. No configuration file is needed: the
 # settings are TENKO_* environment variables (every key of deploy/tenko.example.toml has
 # one). The DNS and DHCP roles do not exist yet; when they do, they need macvlan or host
-# networking (macvlan.example.yml).
+# networking (macvlan.example.yml, host.example.yml). A probe that scans a segment needs
+# the same: it sees only the segment its network is attached to.
 #
 # Before the first start, from this directory:
 #
@@ -51,6 +52,13 @@ services:
     stop_grace_period: 30s
     ports:
       - "8443:8443/tcp"
+      # The cluster port (gRPC over mutual TLS): probes and other controllers connect to it.
+      # Keep the line when this controller has enrolled nodes or cluster members; remove it
+      # for a stand-alone controller, so the port is not reachable at all. Allow it in the
+      # firewall from the node and controller networks only (docs/cluster.md section 7).
+      # Bridge networking is fine for it. The server opens the port once a node is enrolled
+      # or an enrolment token is waiting, so it is closed (connection refused) until then.
+      - "8444:8444/tcp"
     environment:
       # The key-encryption key comes from the Docker secret below, not from the data volume.
       TENKO_KEK__PROVIDER: file
@@ -61,6 +69,14 @@ services:
       TENKO_TLS__MODE: internal_ca
       TENKO_TLS__HOST_NAME: ddi.example.org
       TENKO_TLS__ADDRESSES: 192.0.2.10
+      #
+      # The cluster port must listen on every interface of the container, or the published
+      # port reaches nothing. The default is already 0.0.0.0:8444; it is set here so that a
+      # configuration file mounted below cannot narrow it by accident (a file with
+      # `listen = ["127.0.0.1:8444"]` would). An empty list, '[]', keeps the port closed.
+      # Tell nodes where to find the controller if it is not the host name they enrolled
+      # through: TENKO_CLUSTER__ADVERTISE: '["ddi.example.org:8444"]'
+      TENKO_CLUSTER__LISTEN: '["0.0.0.0:8444"]'
       #
       # Behind a reverse proxy instead (TLS mode c): the proxy terminates TLS and reaches
       # tenko over plain HTTP, or with the PROXY protocol, from the trusted addresses only;

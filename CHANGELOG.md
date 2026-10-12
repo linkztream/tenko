@@ -121,6 +121,13 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - The backup page under Settings: the last good backup with a warning after seven days without one, "Back up now" with a passphrase or the recipient key file, the schedule and how many backups are kept, and a restore preview with the manifest and the command that restores a backup on a new host.
 - The page of a job group lists the jobs that ended without their change, with the reason, and its checklist shows which setting to put back on the network controller when undoing a layer 2 change needs a person.
 - Connector settings take a pinned certificate authority in a multi-line field.
+- The Windows service writes to the Application Event Log under its service name: `tenko service install` registers the source and `tenko service uninstall` removes it, `[log] event_log` chooses the level (default `warn`), the start and stop of the service are always written, and a configuration that cannot be used is reported there before the file log opens.
+- The log file is rotated by size: `[log] max_file_mb` (default 64) and `keep_files` (default 5) keep `tenko.log` and `tenko.log.1` to `tenko.log.5`.
+- `tenko cluster upgrade-check` lists every controller's version, protocol majors, Raft wire version and the data formats it knows, says whether the new binary can replace them, and prints the order of a rolling upgrade.
+- In a controller cluster a newer data format waits until every voter runs a binary that knows it; the leader migrates then. `/system/status` shows the format of the data and, while a migration waits, the controllers that block it.
+- A start that migrates the data directory first checks that the disk has room for the copy of the store, and `tenko upgrade check` checks it too (`upgrade.no_space`).
+- The systemd smoke test (`deploy/systemd/smoke.sh`), the Windows service smoke test (`deploy/windows/smoke.ps1`) and a smoke test of the macvlan Compose example, run weekly in CI.
+- A drop-in for the systemd unit that lets the probe role open raw sockets, a Compose example with host networking, a probe service in the macvlan example, and notes on LXC containers.
 ### Changed
 
 - Switching to the Hardened profile, or setting the audit export to `required`, is refused with 409 `audit.export.required` until at least one export sink is enabled; the refusal is audited like the PIN coupling rule.
@@ -141,6 +148,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - A cancelled job whose cancellation undid the steps that had run shows as "Rolled back (cancelled)".
 - A step that has to be undone by hand names the step in words instead of its internal kind.
 - In right-to-left languages the arrow keys of the grids and of the prefix tree follow the reading direction.
+- The systemd unit reads the key-encryption key with the `systemd_credential` provider instead of as a plain key file, so the warnings about a plain key file are gone, and it creates `/var/log/tenko` for the log file.
+- While a start migrates the data directory, `tenko serve` asks systemd for more time, so a long migration no longer hits the start timeout of the unit.
+- The Linux release binary is statically linked (musl) and runs on any distribution; every release is started once in Debian 12 and in a RHEL 9 compatible container before it is published.
+- The container image and the Compose examples publish the cluster port 8444.
 
 ### Fixed
 

@@ -26608,6 +26608,39 @@
         ],
         "description": "A custom field value."
       },
+      "DataFormatStatus": {
+        "type": "object",
+        "description": "The data-directory format of the installation, for `GET /system/status`.",
+        "required": [
+          "stored",
+          "binary"
+        ],
+        "properties": {
+          "binary": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The newest format this controller's binary knows.",
+            "minimum": 0
+          },
+          "pending": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PendingMigration",
+                "description": "A migration the leader runs once nothing blocks it; absent when the stored data is\nat the newest format of this binary."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stored": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The format the stored (replicated) data is in.",
+            "minimum": 0
+          }
+        }
+      },
       "Decision": {
         "type": "object",
         "description": "The answer of a decision.",
@@ -27755,6 +27788,37 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "FormatBlocker": {
+        "type": "object",
+        "description": "A voter that keeps a migration from running.",
+        "required": [
+          "node"
+        ],
+        "properties": {
+          "data_format": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The newest data format its binary knows, as it reported it.",
+            "minimum": 0
+          },
+          "node": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The node id of the voter.",
+            "minimum": 0
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The software version it reported; absent when it never reported one."
           }
         }
       },
@@ -32181,6 +32245,15 @@
             "description": "The data format its binary knows.",
             "minimum": 0
           },
+          "formats": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The data formats its binary can open, oldest first; empty when not reported."
+          },
           "joined_at": {
             "oneOf": [
               {
@@ -32235,6 +32308,22 @@
             "format": "int64",
             "description": "The node id (also its Raft id).",
             "minimum": 0
+          },
+          "protocol_majors": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The protocol majors its binary speaks with nodes; empty when it has not reported\nthem (a member that has not restarted since it joined with an older build)."
+          },
+          "raft_wire": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The wire version of its Raft messages, when reported."
           },
           "role": {
             "$ref": "#/components/schemas/MemberRole",
@@ -37969,6 +38058,29 @@
           }
         ],
         "description": "The password policy of a security profile (TGL-01).\n\nThe presets differ in length only. There are no composition rules (NIST SP 800-63B,\nsection 3.1.1.2); the Custom preset adds an operator-chosen pattern. Serialized as an\nobject tagged by `preset`: `{\"preset\": \"standard\"}`, or for Custom\n`{\"preset\": \"custom\", \"min_length\": 10, \"max_length\": 128, \"pattern\": \"...\"}`."
+      },
+      "PendingMigration": {
+        "type": "object",
+        "description": "A format migration of a controller cluster that waits for the last voters to be\nupgraded (leader-gated migration, R26).",
+        "required": [
+          "target",
+          "blocked_by"
+        ],
+        "properties": {
+          "blocked_by": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FormatBlocker"
+            },
+            "description": "The voters whose binary does not know the target format yet; empty when the leader\nis about to run the migration."
+          },
+          "target": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The format the stored data is migrated to.",
+            "minimum": 0
+          }
+        }
       },
       "PlanOptions": {
         "type": "object",
@@ -44652,6 +44764,17 @@
               {
                 "$ref": "#/components/schemas/ClusterStatus",
                 "description": "The node transport of a controller (OPS-04, OPS-08): enrolled and connected nodes,\ntheir versions; absent on servers without it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "data_format": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DataFormatStatus",
+                "description": "The data-directory format (OPS-08, OPS-23): the format of the stored data, the\nnewest one this controller's binary knows, and a migration that waits until every\nvoter of the cluster runs a binary that knows its format; absent on servers that\npredate it."
               },
               {
                 "type": "null"

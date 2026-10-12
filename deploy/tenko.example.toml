@@ -231,8 +231,17 @@ level = "info"
 # "text" or "json" (one object per line).
 format = "text"
 # Also append the log to a file. The Windows service writes to <data_dir>/logs/tenko.log
-# when this is not set.
+# when this is not set. The systemd unit creates /var/log/tenko (LogsDirectory=).
 # file = "/var/log/tenko/tenko.log"
+# Rotate the file at this size in MiB: tenko.log becomes tenko.log.1, tenko.log.1 becomes
+# tenko.log.2 and so on. 0 never rotates.
+max_file_mb = 64
+# Rotated files kept besides the active one (1 to 100); the oldest is removed.
+keep_files = 5
+# The Windows service also writes events at or above this level to the Application Event
+# Log, under the service name as the source: "error", "warn", "info", "debug", "trace" or
+# "off". The start and stop of the service are always written. Ignored elsewhere.
+event_log = "warn"
 
 [updates]
 # In-app updates (OPS-24). Whether the server checks for new versions and how they may be

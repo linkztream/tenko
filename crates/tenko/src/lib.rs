@@ -176,21 +176,6 @@ pub enum Command {
     Openapi,
 }
 
-/// The arguments of a command that this build declares but does not implement yet:
-/// anything, ignored. The command prints that it is not available and exits with status 2.
-#[derive(Debug, Clone, Args)]
-pub struct Pending {
-    /// Ignored until the command is implemented.
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
-    pub args: Vec<String>,
-}
-
-/// Reports a declared command that this build does not implement yet; exit status 2.
-pub fn not_available(name: &str, err: &mut impl Write) -> u8 {
-    let _ = writeln!(err, "tenko {name}: not available in this build yet");
-    exit::USAGE
-}
-
 /// Subcommands of `tenko roles`.
 #[derive(Debug, Subcommand)]
 pub enum RolesCommand {
@@ -626,20 +611,6 @@ mod tests {
             let cli = parse(args).expect("valid arguments");
             assert_eq!(cli.command.name(), name);
         }
-    }
-
-    #[test]
-    fn declared_commands_that_are_not_built_yet_exit_with_status_2() {
-        // `cluster upgrade-check` is the last stub; WP3.6 builds it.
-        let args = &["cluster", "upgrade-check"][..];
-        let (status, output, err) = run(args);
-        assert_eq!(status, exit::USAGE);
-        assert_eq!(output, "");
-        assert!(err.contains("not available in this build yet"), "{err}");
-        assert!(
-            err.starts_with(&format!("tenko {} {}", args[0], args[1])),
-            "{err}"
-        );
     }
 
     #[test]

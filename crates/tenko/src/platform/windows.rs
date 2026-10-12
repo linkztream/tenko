@@ -14,10 +14,12 @@
 //! service needs), registers the control handler and moves the service through
 //! `START_PENDING`, `RUNNING`, `STOP_PENDING` and `STOPPED` around [`serve::run`].
 //!
-//! There is no console under the SCM, so the service logs to a file only. A failure before
-//! the log is open (a configuration that stopped being valid, an unwritable log directory)
-//! shows up as the service-specific exit status of the stopped service; the Event Log
-//! arrives in Slice 3.
+//! There is no console under the SCM, so the service logs to a file (rotated by size) and to
+//! the Application Event Log under the service name (`[log] event_log`, OPS-10). `service
+//! install` registers that event source with `reg.exe` and `service uninstall` removes it.
+//! A failure before the log is open (a configuration that stopped being valid, an
+//! unwritable log directory) goes to the Event Log as an error and shows up as the
+//! service-specific exit status of the stopped service.
 
 use std::{
     any::Any,
@@ -488,6 +490,7 @@ fn install_service(args: &InstallArgs, out: &mut impl Write, err: &mut impl Writ
         &account,
     );
     register(&info, out, err)?;
+    register_event_source(name, out, err);
     let _ = writeln!(out, "  account:       {account}");
     let _ = writeln!(out, "  executable:    {}", executable.display());
     let _ = writeln!(out, "  configuration: {}", config.display());
@@ -569,6 +572,89 @@ fn configure(service: &Service, out: &mut impl Write, err: &mut impl Write) {
     }
 }
 
+/// The path of a tool in the system directory. An elevated process does not search its own
+/// directory or `PATH` for it.
+fn system_tool(name: &str) -> PathBuf {
+    system_root().join("System32").join(name)
+}
+
+/// `%SystemRoot%`.
+fn system_root() -> PathBuf {
+    std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
+}
+
+/// The `reg.exe` calls that register the event source `name` in the Application log: the
+/// event types it writes (error, warning, information) and, when it exists, the message file
+/// that renders an event as the text it was written with.
+fn event_source_arguments(name: &str, message_file: Option<&Path>) -> Vec<Vec<OsString>> {
+    let key = OsString::from(logging::event_log::source_key(name));
+    let mut calls = vec![vec![
+        "add".into(),
+        key.clone(),
+        "/v".into(),
+        "TypesSupported".into(),
+        "/t".into(),
+        "REG_DWORD".into(),
+        "/d".into(),
+        "7".into(),
+        "/f".into(),
+    ]];
+    if let Some(file) = message_file {
+        calls.push(vec![
+            "add".into(),
+            key,
+            "/v".into(),
+            "EventMessageFile".into(),
+            "/t".into(),
+            "REG_EXPAND_SZ".into(),
+            "/d".into(),
+            file.into(),
+            "/f".into(),
+        ]);
+    }
+    calls
+}
+
+/// Registers the event source of the service. A failure leaves a working service whose
+/// events show without their text in the Event Viewer, so it is a warning.
+fn register_event_source(name: &str, out: &mut impl Write, err: &mut impl Write) {
+    let message_file = logging::event_log::message_file(&system_root());
+    let message_file = message_file.is_file().then_some(message_file);
+    for arguments in event_source_arguments(name, message_file.as_deref()) {
+        let outcome = Command::new(system_tool("reg.exe"))
+            .args(&arguments)
+            .output();
+        let problem = match outcome {
+            Ok(output) if output.status.success() => continue,
+            Ok(output) => tool_output(&output),
+            Err(error) => error.to_string(),
+        };
+        let _ = writeln!(
+            err,
+            "tenko service install: warning: cannot register the event source `{name}`:              {problem}; the service logs to its file only"
+        );
+        return;
+    }
+    let _ = writeln!(out, "  event log:     Application, source `{name}`");
+    if message_file.is_none() {
+        let _ = writeln!(
+            err,
+            "tenko service install: warning: the .NET Framework message file is missing;              events are written but the Event Viewer shows them without their text"
+        );
+    }
+}
+
+/// Removes the event source of the service; a source that is not registered is fine.
+fn remove_event_source(name: &str, out: &mut impl Write) {
+    let key = logging::event_log::source_key(name);
+    let output = Command::new(system_tool("reg.exe"))
+        .args(["delete", key.as_str(), "/f"])
+        .output();
+    if output.is_ok_and(|output| output.status.success()) {
+        let _ = writeln!(out, "removed the event source `{name}`");
+    }
+}
+
 /// The principal `icacls` takes for an account name.
 fn principal(account: &str) -> String {
     if account.eq_ignore_ascii_case("LocalSystem") {
@@ -596,13 +682,9 @@ fn icacls_arguments(dir: &Path, account: &str) -> Vec<OsString> {
     arguments
 }
 
-/// The path of `icacls.exe` in the system directory. An elevated process does not search
-/// its own directory or `PATH` for it.
+/// The path of `icacls.exe` in the system directory.
 fn icacls_path() -> PathBuf {
-    std::env::var_os("SystemRoot")
-        .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
-        .join("System32")
-        .join("icacls.exe")
+    system_tool("icacls.exe")
 }
 
 /// The text a tool printed, on one line.
@@ -670,6 +752,7 @@ fn uninstall_service(args: &NameArgs, out: &mut impl Write) -> Outcome {
             ));
         }
     }
+    remove_event_source(name, out);
     let _ = writeln!(
         out,
         "removed service `{name}`; the data directory and the configuration file are untouched"
@@ -889,17 +972,39 @@ fn serve_until_stopped(
     handle: ServiceStatusHandle,
     stop: oneshot::Receiver<()>,
 ) -> u8 {
-    let Ok(resolved) = load_config(&args.config, args.data_dir.as_deref()) else {
-        // The log is not open yet; the exit status is all the SCM can show.
-        return exit::CONFIG;
+    let resolved = match load_config(&args.config, args.data_dir.as_deref()) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            // The log is not open yet: the Event Log and the exit status are all there is.
+            logging::event_log::report_early(
+                &args.name,
+                &format!(
+                    "tenko service {}: the configuration {} cannot be used: {error}",
+                    args.name,
+                    args.config.display()
+                ),
+            );
+            return exit::CONFIG;
+        }
     };
     // A restart request (exit status 12) relies on the failure actions below.
     crate::upgrade::restart::set_windows_service();
     let path = log_path(&resolved);
-    if logging::init_server(&resolved.config.log, Some(&path), Sink::FileOnly).is_err() {
+    let layers = logging::Layers {
+        event_log: logging::event_log::layer(&args.name, resolved.config.log.event_log).ok(),
+        extra: None,
+    };
+    if let Err(error) =
+        logging::init_server_with(&resolved.config.log, Some(&path), Sink::FileOnly, layers)
+    {
+        logging::event_log::report_early(
+            &args.name,
+            &format!("tenko service {}: cannot open the log: {error}", args.name),
+        );
         return exit::FAILURE;
     }
     tracing::info!(
+        target: logging::event_log::SERVICE_TARGET,
         service = %args.name,
         config = %args.config.display(),
         log = %path.display(),
@@ -950,12 +1055,17 @@ fn service_main(args: &RunArgs) -> u8 {
     }));
     let status = outcome.unwrap_or_else(|payload| {
         tracing::error!(
+            target: logging::event_log::SERVICE_TARGET,
             panic = panic_message(payload.as_ref()),
             "the service panicked"
         );
         exit::FAILURE
     });
-    tracing::info!(status, "tenko service stopped");
+    tracing::info!(
+        target: logging::event_log::SERVICE_TARGET,
+        status,
+        "tenko service stopped"
+    );
     report(handle, stopped(status));
     status
 }
@@ -1153,6 +1263,43 @@ mod tests {
                 "*S-1-5-18:(OI)(CI)F"
             ]
         );
+    }
+
+    #[test]
+    fn the_event_source_is_registered_in_the_application_log() {
+        let file =
+            PathBuf::from(r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\EventLogMessages.dll");
+        let calls = event_source_arguments("tenko", Some(&file));
+        let key = r"HKLM\SYSTEM\CurrentControlSet\Services\EventLog\Application\tenko";
+        assert_eq!(
+            text(&calls[0]),
+            [
+                "add",
+                key,
+                "/v",
+                "TypesSupported",
+                "/t",
+                "REG_DWORD",
+                "/d",
+                "7",
+                "/f"
+            ]
+        );
+        assert_eq!(
+            text(&calls[1]),
+            [
+                "add",
+                key,
+                "/v",
+                "EventMessageFile",
+                "/t",
+                "REG_EXPAND_SZ",
+                "/d",
+                file.to_str().expect("utf-8"),
+                "/f"
+            ]
+        );
+        assert_eq!(event_source_arguments("other", None).len(), 1);
     }
 
     #[test]

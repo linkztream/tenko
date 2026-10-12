@@ -1,0 +1,114 @@
+# Example only: copy and adapt before use.
+#
+# The controller on the host's network (network_mode: host), with the probe role in the same
+# process. Use it when
+# - the probe must see the segments the Docker host itself is attached to (neighbor table,
+#   ICMP and TCP sweeps, mDNS and LLMNR listening on the host's VLANs) and you do not want a
+#   macvlan network and its host-to-container restriction (macvlan.example.yml);
+# - you want no port publishing: the API (8443/tcp) and the cluster port (8444/tcp) are
+#   bound directly on the host's addresses, and nothing is NATed.
+#
+# The trade-off is that the container has no network isolation. It shares the network
+# namespace of the host: it can see and bind every address and interface of the host, it
+# competes with other services for ports, and a compromise of the process is a compromise
+# on the host's network. The container still runs as uid 65532 with every capability dropped
+# and a read-only root file system. Docker Desktop (Windows, macOS) does not give a
+# container the real host network of the machine; use this file on a Linux host.
+#
+# Which roles run. Phase 1 supports the probe role in two ways (docs/scanning.md section 1,
+# docs/cluster.md section 1.2):
+# - in the controller's process: `--roles controller,probe`, as below. The scanner starts
+#   with the controller and files its sightings under the node id of the controller. No
+#   enrolment, no second container. This is the simplest way to scan the segments of the
+#   host that runs the controller.
+# - as a separate node: a second service with `--roles probe`, enrolled with a token like
+#   the probe of macvlan.example.yml. Use it for a probe on another host, or to give the
+#   probe fewer privileges than the controller has. On a host-network node, run that service
+#   with `network_mode: host` too.
+# The DNS and DHCP roles do not exist yet; they would also run in this container, with
+# NET_BIND_SERVICE (port 53) and NET_RAW (DHCP).
+#
+# Capabilities. The scan methods of this release (neighbor tables, ICMP echo, TCP connect,
+# reverse DNS, mDNS, LLMNR, SNMPv3) need none. ICMP echo uses an unprivileged datagram
+# socket, which works when the host's sysctl net.ipv4.ping_group_range admits gid 65532.
+# With host networking that sysctl is the host's own, not a per-container value (a bridge
+# network gets a permissive one from Docker); the image has no `ping` command to fall back
+# on. Check on the host: `sysctl net.ipv4.ping_group_range` (for example "0 2147483647"),
+# and `docker compose -f host.example.yml exec tenko tenko node scan status`.
+# The raw-socket methods (arp_sweep, tcp_syn, os_fingerprint, lldp) are declared but do not
+# run yet; once they do, the container needs NET_RAW, which `cap_drop: [ALL]` removed: uncomment
+# cap_add below. NET_RAW on the host network lets the process craft packets on every
+# interface of the host, which is why it is off until you need it.
+#
+# Before the first start, from this directory:
+#
+#   umask 077
+#   mkdir -p secrets
+#   openssl rand -hex 32 > secrets/tenko_kek
+#   sudo chown 65532:65532 secrets/tenko_kek
+#   chmod 0400 secrets/tenko_kek
+#
+# See controller.example.yml for what the key is and how to keep it. Start:
+#   docker compose -f host.example.yml up --build -d
+#
+# First-run setup as in controller.example.yml, with the host's address, for example
+#   docker compose -f host.example.yml exec tenko tenko setup token
+# and open https://192.0.2.10:8443/. Nodes (probes of other hosts) enrol against
+# https://192.0.2.10:8443 and then connect to 192.0.2.10:8444. Allow 8444/tcp in the host's
+# firewall from the node and controller networks only: Docker does not manage the rules for
+# a host-network container, so the host firewall (nftables, ufw, firewalld) is the only
+# thing that protects the port.
+#
+# The addresses below are RFC 5737 documentation addresses and the name is an example;
+# replace them with the host's own.
+
+services:
+  tenko:
+    build:
+      context: ../..
+      dockerfile: deploy/Dockerfile
+    image: tenko:local
+    # Controller plus the probe role in one process.
+    command: ["--roles", "controller,probe"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # The host's network namespace. `ports:` and `networks:` do not apply and Docker rejects
+    # them together with this setting.
+    network_mode: host
+    environment:
+      TENKO_KEK__PROVIDER: file
+      TENKO_KEK__PATH: /run/secrets/tenko_kek
+      TENKO_TLS__MODE: internal_ca
+      TENKO_TLS__HOST_NAME: ddi.example.org
+      # The certificate names the host's address(es) that clients and nodes use.
+      TENKO_TLS__ADDRESSES: 192.0.2.10
+      # Bind the API and the cluster port on the host's addresses. Narrow these to one
+      # address (for example '["192.0.2.10:8443"]') when the host has an interface that
+      # must not serve them, such as a public or a client VLAN address. The API default is
+      # 0.0.0.0:8443; the cluster port opens once a node is enrolled or a token is waiting.
+      TENKO_SERVER__LISTEN: '["0.0.0.0:8443"]'
+      TENKO_CLUSTER__LISTEN: '["0.0.0.0:8444"]'
+      # The scan scope (prefixes, methods, limits) is configured in the web UI or through
+      # the API (docs/scanning.md section 7), not here.
+    secrets:
+      - tenko_kek
+    volumes:
+      # SSD or NVMe only (OPS-19).
+      - "tenko-data:/var/lib/tenko"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    # cap_add:
+    #   - NET_RAW            # raw-socket scan methods, when they exist; see the header
+    #   - NET_BIND_SERVICE   # ports below 1024, for the DNS and DHCP roles later
+    security_opt:
+      - no-new-privileges:true
+
+secrets:
+  tenko_kek:
+    file: ./secrets/tenko_kek
+
+volumes:
+  tenko-data: {}

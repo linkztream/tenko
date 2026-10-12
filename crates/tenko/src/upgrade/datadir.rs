@@ -74,6 +74,15 @@ pub enum UpgradeError {
         /// What went wrong.
         reason: String,
     },
+    /// The file system has too little free space for the copy of the store.
+    NoSpace {
+        /// Where the copy goes.
+        dir: PathBuf,
+        /// Bytes the copy needs, with the margin.
+        needed: u64,
+        /// Bytes free for this process.
+        available: u64,
+    },
     /// The format records or the store copy failed.
     Format(FormatError),
     /// The store refused a read or a write.
@@ -88,6 +97,7 @@ impl UpgradeError {
             Self::MissingMigration { .. } => "upgrade.migration_missing",
             Self::Mismatch { .. } => "upgrade.format_mismatch",
             Self::Migration { .. } => "upgrade.migration_failed",
+            Self::NoSpace { .. } => "upgrade.no_space",
             Self::Format(error) => error.code(),
             Self::Store(_) => "upgrade.store",
         }
@@ -121,6 +131,12 @@ impl UpgradeError {
             Self::Migration { to, .. } => {
                 params.insert("to", to.to_string());
             }
+            Self::NoSpace {
+                needed, available, ..
+            } => {
+                params.insert("needed", needed.to_string());
+                params.insert("available", available.to_string());
+            }
             Self::Format(_) | Self::Store(_) => {}
         }
         params
@@ -151,6 +167,19 @@ impl fmt::Display for UpgradeError {
             Self::Migration { to, reason } => {
                 write!(f, "the migration to format {to} failed: {reason}")
             }
+            Self::NoSpace {
+                dir,
+                needed,
+                available,
+            } => write!(
+                f,
+                "{} has {} free, the copy of the store before the migration needs {}: free {} \
+                 and start again (nothing was changed)",
+                dir.display(),
+                mebibytes(*available),
+                mebibytes(*needed),
+                mebibytes(needed.saturating_sub(*available))
+            ),
             Self::Format(error) => fmt::Display::fmt(error, f),
             Self::Store(error) => write!(f, "the store refused the format record: {error}"),
         }
@@ -251,6 +280,7 @@ pub fn backup(
     to: u32,
 ) -> Result<PathBuf, UpgradeError> {
     let root = data_dir.join(BACKUPS_DIR);
+    check_space(&root, store_dir)?;
     let name = format!("{}-format-{from}-to-{to}", compact_utc(Timestamp::now()));
     let target = root.join(name);
     let report = format::copy_closed_store(store_dir, &target.join("store"))?;
@@ -262,6 +292,81 @@ pub fn backup(
     );
     prune_backups(&root, KEEP_BACKUPS);
     Ok(target)
+}
+
+/// The room a copy of the store needs beyond its size: the store grows while the migration
+/// runs, and a full disk must not stop the server in the middle of one.
+const SPACE_MARGIN_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The bytes a copy of a store of `size` bytes needs: its size, a tenth more and
+/// [`SPACE_MARGIN_BYTES`].
+pub fn space_needed(size: u64) -> u64 {
+    size.saturating_add(size / 10)
+        .saturating_add(SPACE_MARGIN_BYTES)
+}
+
+/// The size of the files under `dir`, recursively.
+///
+/// # Errors
+///
+/// A directory cannot be read.
+pub fn dir_size(dir: &Path) -> std::io::Result<u64> {
+    let mut total = 0_u64;
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            total = total.saturating_add(dir_size(&entry.path())?);
+        } else if kind.is_file() {
+            total = total.saturating_add(entry.metadata()?.len());
+        }
+    }
+    Ok(total)
+}
+
+/// The free space for this process on the file system that holds `path`, or its nearest
+/// existing ancestor.
+///
+/// # Errors
+///
+/// The file system cannot be asked.
+pub fn available_space(path: &Path) -> std::io::Result<u64> {
+    let existing = path
+        .ancestors()
+        .find(|candidate| candidate.exists())
+        .unwrap_or(path);
+    fs4::available_space(existing)
+}
+
+/// Refuses a copy of `store_dir` into `target` when its file system lacks the room
+/// [`space_needed`] asks for (OPS-23).
+///
+/// # Errors
+///
+/// [`UpgradeError::NoSpace`], or [`UpgradeError::Format`] when the sizes cannot be read.
+pub fn check_space(target: &Path, store_dir: &Path) -> Result<(), UpgradeError> {
+    let io = |path: &Path| {
+        let path = path.to_owned();
+        move |source| FormatError::Io { path, source }
+    };
+    let size = dir_size(store_dir).map_err(io(store_dir))?;
+    let available = available_space(target).map_err(io(target))?;
+    space_problem(target, space_needed(size), available).map_or(Ok(()), Err)
+}
+
+/// The refusal when `available` is below `needed`.
+fn space_problem(dir: &Path, needed: u64, available: u64) -> Option<UpgradeError> {
+    (available < needed).then(|| UpgradeError::NoSpace {
+        dir: dir.to_owned(),
+        needed,
+        available,
+    })
+}
+
+/// `12.5 MiB`.
+fn mebibytes(bytes: u64) -> String {
+    let tenths = bytes.saturating_mul(10) / (1024 * 1024);
+    format!("{}.{} MiB", tenths / 10, tenths % 10)
 }
 
 /// `20261009T201502Z`: sortable and valid in file names on every platform.
@@ -309,6 +414,9 @@ pub struct Outcome {
     pub record_created: bool,
     /// The marker lagged behind a committed migration and has been repaired.
     pub marker_repaired: bool,
+    /// The format a migration waits for: this controller is a member of a cluster, where
+    /// the leader migrates once every voter's binary knows the format (OPS-08, R26).
+    pub deferred: Option<u32>,
 }
 
 impl Outcome {
@@ -325,6 +433,13 @@ impl Outcome {
         }
         if self.marker_repaired {
             text.push_str(", marker repaired");
+        }
+        if let Some(target) = self.deferred {
+            let _ = write!(
+                text,
+                ", the migration to format {target} waits until every voter runs a binary \
+                 that knows it; the leader runs it then"
+            );
         }
         text
     }
@@ -349,14 +464,71 @@ pub async fn finish(
     registry: Registry<'_>,
     written_by: &str,
 ) -> Result<Outcome, UpgradeError> {
+    finish_with(store, store_dir, plan, registry, written_by, false).await
+}
+
+/// [`finish`], with `defer` for a member of a controller cluster: no migration runs, the
+/// cluster keeps its format until every voter knows the newer one and the leader migrates
+/// then ([`super::rolling`]); [`Outcome::deferred`] names the format that waits.
+///
+/// # Errors
+///
+/// As [`finish`].
+pub async fn finish_with(
+    store: &dyn Store,
+    store_dir: &Path,
+    plan: Plan,
+    registry: Registry<'_>,
+    written_by: &str,
+    defer: bool,
+) -> Result<Outcome, UpgradeError> {
     let marker = format::read_marker(store_dir)?.map(|marker| marker.version);
     let mut outcome = Outcome::default();
     let fresh = plan == Plan::Fresh;
-    let (mut version, mut revision) =
+    let (version, revision) =
         reconcile(store, marker, fresh, registry, written_by, &mut outcome).await?;
     if marker != Some(version) {
         format::write_marker(store_dir, &Marker::new(version, written_by))?;
     }
+    if defer && version < registry.current {
+        outcome.version = version;
+        outcome.deferred = Some(registry.current);
+        return Ok(outcome);
+    }
+    outcome.migrated = migrate(
+        store,
+        Some(store_dir),
+        (version, revision),
+        registry,
+        written_by,
+        None,
+    )
+    .await?;
+    outcome.version = outcome.migrated.last().copied().unwrap_or(version);
+    Ok(outcome)
+}
+
+/// Runs the migrations from `from` (the format and the revision of the stored record) to
+/// the registry's format, each in one batch with the bump of the stored record and an audit
+/// record, and with the precondition `fence` when given (the leader epoch of a cluster
+/// leader). The marker in `store_dir` follows every committed step. Returns the formats
+/// migrated to.
+///
+/// # Errors
+///
+/// [`UpgradeError::MissingMigration`], [`UpgradeError::Migration`] when a migration fails
+/// to plan or its batch is refused (its batch is not committed), or a file system error of
+/// the marker.
+pub async fn migrate(
+    store: &dyn Store,
+    store_dir: Option<&Path>,
+    from: (u32, Option<tenko_core::Revision>),
+    registry: Registry<'_>,
+    written_by: &str,
+    fence: Option<tenko_store::Precondition>,
+) -> Result<Vec<u32>, UpgradeError> {
+    let (mut version, mut revision) = from;
+    let mut migrated = Vec::new();
     let Some(path) = registry.path(version) else {
         let to = ((version + 1)..=registry.current)
             .find(|to| registry.migration(*to).is_none())
@@ -375,6 +547,7 @@ pub async fn finish(
         drop(view);
         let mut batch = system_batch();
         batch.mutations = mutations;
+        batch.preconditions.extend(fence.clone());
         format::stage_stored(&mut batch, revision, &stored_format(to, written_by))?;
         let mut details = AuditDetails::default();
         details
@@ -398,7 +571,9 @@ pub async fn finish(
                 to,
                 reason: error.to_string(),
             })?;
-        format::write_marker(store_dir, &Marker::new(to, written_by))?;
+        if let Some(store_dir) = store_dir {
+            format::write_marker(store_dir, &Marker::new(to, written_by))?;
+        }
         tracing::info!(
             from = version,
             to,
@@ -406,12 +581,11 @@ pub async fn finish(
             "migrated the data directory: {}",
             migration.summary()
         );
-        outcome.migrated.push(to);
+        migrated.push(to);
         version = to;
         revision = Some(committed.revision);
     }
-    outcome.version = version;
-    Ok(outcome)
+    Ok(migrated)
 }
 
 /// The format of the open store and the revision of its stored record, from the stored
@@ -646,7 +820,7 @@ mod tests {
     async fn a_fresh_store_gets_both_records() {
         let dir = temp_dir("fresh");
         let store = MemStore::default();
-        let outcome = finish(&store, &dir, Plan::Fresh, registry(3), "9.9.9")
+        let outcome = finish_with(&store, &dir, Plan::Fresh, registry(3), "9.9.9", false)
             .await
             .expect("finish");
         // A new store starts at the current format: nothing to migrate.
@@ -659,7 +833,7 @@ mod tests {
             Some(Marker::new(3, "9.9.9"))
         );
         // The second start finds both at the current format and does nothing.
-        let again = finish(&store, &dir, OLD, registry(3), "9.9.9")
+        let again = finish_with(&store, &dir, OLD, registry(3), "9.9.9", false)
             .await
             .expect("again");
         assert_eq!(
@@ -676,11 +850,11 @@ mod tests {
     async fn migrations_run_in_order_with_the_bump_and_an_audit_record() {
         let dir = temp_dir("migrate");
         let store = MemStore::default();
-        finish(&store, &dir, Plan::Fresh, registry(1), "0.1.0")
+        finish_with(&store, &dir, Plan::Fresh, registry(1), "0.1.0", false)
             .await
             .expect("format 1");
         assert_eq!(stored(&store).await, Some(1));
-        let outcome = finish(&store, &dir, OLD, registry(3), "0.3.0")
+        let outcome = finish_with(&store, &dir, OLD, registry(3), "0.3.0", false)
             .await
             .expect("migrate");
         assert_eq!(outcome.migrated, [2, 3]);
@@ -713,14 +887,14 @@ mod tests {
     async fn a_failed_migration_leaves_its_step_uncommitted() {
         let dir = temp_dir("broken");
         let store = MemStore::default();
-        finish(&store, &dir, Plan::Fresh, registry(1), "0.1.0")
+        finish_with(&store, &dir, Plan::Fresh, registry(1), "0.1.0", false)
             .await
             .expect("format 1");
         let broken = Registry {
             current: 3,
             migrations: &BROKEN,
         };
-        let error = finish(&store, &dir, OLD, broken, "0.3.0")
+        let error = finish_with(&store, &dir, OLD, broken, "0.3.0", false)
             .await
             .expect_err("fails");
         assert_eq!(error.code(), "upgrade.migration_failed");
@@ -733,7 +907,7 @@ mod tests {
             Some(2)
         );
         // A fixed binary resumes at step 3.
-        let outcome = finish(&store, &dir, OLD, registry(3), "0.3.1")
+        let outcome = finish_with(&store, &dir, OLD, registry(3), "0.3.1", false)
             .await
             .expect("resume");
         assert_eq!(outcome.migrated, [3]);
@@ -744,12 +918,12 @@ mod tests {
     async fn a_lagging_marker_is_repaired_and_other_disagreements_refused() {
         let dir = temp_dir("mismatch");
         let store = MemStore::default();
-        finish(&store, &dir, Plan::Fresh, registry(2), "0.2.0")
+        finish_with(&store, &dir, Plan::Fresh, registry(2), "0.2.0", false)
             .await
             .expect("format 2");
         // The process stopped after the commit of step 2, before the marker followed.
         format::write_marker(&dir, &Marker::new(1, "0.1.0")).expect("marker");
-        let outcome = finish(&store, &dir, OLD, registry(2), "0.2.0")
+        let outcome = finish_with(&store, &dir, OLD, registry(2), "0.2.0", false)
             .await
             .expect("repair");
         assert!(outcome.marker_repaired);
@@ -761,13 +935,13 @@ mod tests {
         );
         // A marker ahead of the store cannot be explained by a migration.
         format::write_marker(&dir, &Marker::new(3, "0.3.0")).expect("marker");
-        let error = finish(&store, &dir, OLD, registry(3), "0.3.0")
+        let error = finish_with(&store, &dir, OLD, registry(3), "0.3.0", false)
             .await
             .expect_err("mismatch");
         assert_eq!(error.code(), "upgrade.format_mismatch");
         // A store newer than the binary is refused like a newer marker.
         format::write_marker(&dir, &Marker::new(2, "0.2.0")).expect("marker");
-        let error = finish(&store, &dir, OLD, registry(1), "0.1.0")
+        let error = finish_with(&store, &dir, OLD, registry(1), "0.1.0", false)
             .await
             .expect_err("newer store");
         assert_eq!(error.code(), "upgrade.format_newer");
@@ -775,10 +949,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_cluster_member_defers_the_migration_to_the_leader() {
+        let dir = temp_dir("defer");
+        let store = MemStore::default();
+        finish_with(&store, &dir, Plan::Fresh, registry(1), "0.1.0", false)
+            .await
+            .expect("format 1");
+        let outcome = finish_with(&store, &dir, OLD, registry(3), "0.3.0", true)
+            .await
+            .expect("deferred");
+        assert_eq!(outcome.version, 1);
+        assert_eq!(outcome.deferred, Some(3));
+        assert_eq!(outcome.migrated, Vec::<u32>::new());
+        assert!(outcome.summary().contains("waits until every voter"));
+        let view = store.read(ReadConsistency::Local).await.expect("read");
+        let stored = format::read_stored(view.as_ref()).expect("stored");
+        assert_eq!(stored.map(|(format, _)| format.version), Some(1));
+        drop(view);
+        // Nothing is deferred once the format is current.
+        let current = finish_with(&store, &dir, OLD, registry(1), "0.1.0", true)
+            .await
+            .expect("current");
+        assert_eq!(current.deferred, None);
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    #[test]
+    fn a_copy_needs_the_store_size_and_a_margin() {
+        assert_eq!(space_needed(0), SPACE_MARGIN_BYTES);
+        assert_eq!(space_needed(1_000), 1_100 + SPACE_MARGIN_BYTES);
+        let dir = Path::new("/data/upgrade-backups");
+        assert!(space_problem(dir, 100, 100).is_none());
+        let error = space_problem(dir, 3 * 1024 * 1024, 1024 * 1024).expect("too little");
+        assert_eq!(error.code(), "upgrade.no_space");
+        assert_eq!(error.exit_code(), exit::START);
+        assert_eq!(error.params()["needed"], (3 * 1024 * 1024).to_string());
+        let text = error.to_string();
+        assert!(text.contains("has 1.0 MiB free"), "{text}");
+        assert!(text.contains("free 2.0 MiB"), "{text}");
+    }
+
+    #[test]
+    fn the_store_size_counts_every_file() {
+        let dir = temp_dir("size");
+        std::fs::create_dir_all(dir.join("snapshots")).expect("dirs");
+        std::fs::write(dir.join("log.redb"), vec![0_u8; 1_000]).expect("file");
+        std::fs::write(dir.join("snapshots").join("a"), vec![0_u8; 24]).expect("file");
+        assert_eq!(dir_size(&dir).expect("size"), 1_024);
+        // The free space of a directory that does not exist yet is that of its parent.
+        let available = available_space(&dir.join("upgrade-backups").join("x")).expect("space");
+        assert!(available > 0);
+        check_space(&dir.join("upgrade-backups"), &dir).expect("room for a small copy");
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    #[tokio::test]
     async fn a_legacy_store_without_records_is_format_1() {
         let dir = temp_dir("legacy");
         let store = MemStore::default();
-        let outcome = finish(&store, &dir, OLD, registry(1), "0.1.0")
+        let outcome = finish_with(&store, &dir, OLD, registry(1), "0.1.0", false)
             .await
             .expect("legacy");
         assert_eq!(outcome.version, 1);

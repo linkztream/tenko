@@ -29,6 +29,36 @@ pub fn notify_hooks() -> Hooks {
     }
 }
 
+/// Keeps the service manager from timing out a slow start step while it lives: a systemd
+/// unit gets `EXTEND_TIMEOUT_USEC` now and every 30 s (OPS-13); elsewhere it does nothing.
+#[must_use = "the extension ends when the guard is dropped"]
+pub struct StartExtension {
+    #[cfg(target_os = "linux")]
+    _systemd: Option<systemd::Extension>,
+}
+
+impl std::fmt::Debug for StartExtension {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StartExtension").finish_non_exhaustive()
+    }
+}
+
+/// Extends the start timeout of the service manager while the returned guard lives;
+/// `reason` becomes the unit's status text.
+pub fn extend_start(reason: &str) -> StartExtension {
+    #[cfg(target_os = "linux")]
+    {
+        StartExtension {
+            _systemd: systemd::extend(reason),
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = reason;
+        StartExtension {}
+    }
+}
+
 /// Subcommands of `tenko service` (Windows only).
 #[derive(Debug, Clone, Subcommand)]
 pub enum ServiceCommand {

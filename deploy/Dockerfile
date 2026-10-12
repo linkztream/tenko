@@ -45,7 +45,8 @@
 # ---------------------------------------------------------------------------
 # NETWORKING AND PRIVILEGES
 #
-# The controller listens on 8443/tcp, above 1024: the image runs as the non-root user
+# The controller listens on 8443/tcp, and on 8444/tcp (the cluster port) when it has nodes
+# or cluster members, both above 1024: the image runs as the non-root user
 # `nonroot` (65532) and needs no capability. The default bridge network with a
 # published port is fine for it (deploy/compose/controller.example.yml); behind a
 # reverse proxy use TENKO_TLS__MODE=reverse_proxy.
@@ -117,8 +118,13 @@ ENV TENKO_DATA_DIR=/var/lib/tenko
 ENV TENKO_UPDATES__CONTAINER=true
 VOLUME ["/var/lib/tenko"]
 # 8443/tcp  HTTPS API and web UI (Phase 1: the controller role)
+# 8444/tcp  Cluster port: gRPC over mutual TLS. Other controllers joining this one and
+#           data-plane nodes (probes) connect to it. It is only needed on a controller that
+#           has cluster members or enrolled nodes; the server opens it once a node is
+#           enrolled or an enrolment token is waiting (docs/cluster.md section 7). Publish
+#           it with `-p 8444:8444` only then, and only to the node and controller networks.
 # Later roles will add: 53/udp and 53/tcp (DNS), 67/udp (DHCPv4), 547/udp (DHCPv6).
-EXPOSE 8443/tcp
+EXPOSE 8443/tcp 8444/tcp
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD ["/usr/local/bin/tenko", "health", "--url", "https://localhost:8443", \
          "--ca-file", "/var/lib/tenko/tls/ca-root.pem"]

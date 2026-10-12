@@ -8,6 +8,7 @@
 //! | [`layout`] | the `current` link layout under `<data_dir>/updates` and `tenko upgrade layout` |
 //! | [`probation`] | the probation of a newly installed version and the switch back |
 //! | [`restart`] | restarts through the service manager (exit status 12) |
+//! | [`rolling`] | rolling upgrades of a controller cluster: the leader-gated migration and the format status |
 //! | [`source`] | the release source: the manifest and downloads from the pinned origin |
 //! | [`updates`] | the update service behind `/system/updates`: check, status, install, uploads, what is new |
 //! | [`steps`] | the steps of the install job: fetch, verify, check, switch |
@@ -21,6 +22,7 @@ pub mod layout;
 pub mod migrations;
 pub mod probation;
 pub mod restart;
+pub mod rolling;
 pub mod source;
 pub mod steps;
 pub mod updates;

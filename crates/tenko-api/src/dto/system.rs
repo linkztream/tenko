@@ -67,6 +67,50 @@ pub struct SystemStatus {
     /// `warnings`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup: Option<super::backup::BackupSummaryView>,
+    /// The data-directory format (OPS-08, OPS-23): the format of the stored data, the
+    /// newest one this controller's binary knows, and a migration that waits until every
+    /// voter of the cluster runs a binary that knows its format; absent on servers that
+    /// predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_format: Option<DataFormatStatus>,
+}
+
+/// The data-directory format of the installation, for `GET /system/status`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DataFormatStatus {
+    /// The format the stored (replicated) data is in.
+    pub stored: u32,
+    /// The newest format this controller's binary knows.
+    pub binary: u32,
+    /// A migration the leader runs once nothing blocks it; absent when the stored data is
+    /// at the newest format of this binary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending: Option<PendingMigration>,
+}
+
+/// A format migration of a controller cluster that waits for the last voters to be
+/// upgraded (leader-gated migration, R26).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PendingMigration {
+    /// The format the stored data is migrated to.
+    pub target: u32,
+    /// The voters whose binary does not know the target format yet; empty when the leader
+    /// is about to run the migration.
+    pub blocked_by: Vec<FormatBlocker>,
+}
+
+/// A voter that keeps a migration from running.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct FormatBlocker {
+    /// The node id of the voter.
+    #[schema(value_type = u64)]
+    pub node: NodeId,
+    /// The software version it reported; absent when it never reported one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// The newest data format its binary knows, as it reported it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_format: Option<u32>,
 }
 
 /// The leader-only work of a controller, for `GET /system/status`. In a cluster exactly

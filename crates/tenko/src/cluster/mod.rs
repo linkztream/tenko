@@ -6,10 +6,12 @@
 //! | `start` | start step 3, `cluster`: the peer layer, the cluster port of a member, the catch-up gate, missing key generations |
 //! | `join` | `tenko cluster join`: enrolment as a controller, the key transfer, the copy of the cluster's data, the configuration |
 //! | [`admin`] | `tenko cluster status|members|promote|remove|step-down|verify` over `/cluster/*` |
+//! | [`upgrade`] | `tenko cluster upgrade-check`: this binary against every member, and the rolling order |
 
 pub mod admin;
 mod join;
 mod start;
+pub mod upgrade;
 
 use std::io::Write;
 
@@ -20,7 +22,7 @@ pub use self::{
     join::JoinArgs,
     start::{ClusterPeers, OpenPort, Start, catch_up, own_address, peer_config, start_peers},
 };
-use crate::{Pending, client, config::Resolved, serve::StartError};
+use crate::{client, config::Resolved, serve::StartError};
 
 /// Start step 3 of `tenko serve` before the peer layer is wired into the start order:
 /// reports the membership the store holds and does nothing else. `tenko serve` moves to
@@ -66,8 +68,9 @@ pub enum ClusterCommand {
     StepDown(admin::StepDownArgs),
     /// Compare the state digests of the members.
     Verify(admin::VerifyArgs),
-    /// List each member's version, protocol majors and the data formats it knows.
-    UpgradeCheck(Pending),
+    /// List each member's version, protocol majors, Raft wire version and the data formats
+    /// it knows, check that this binary can replace them, and print the rolling order.
+    UpgradeCheck(upgrade::UpgradeCheckArgs),
 }
 
 impl ClusterCommand {
@@ -95,7 +98,7 @@ impl ClusterCommand {
             Self::Remove(args) => args.client.json,
             Self::StepDown(args) => args.client.json,
             Self::Verify(args) => args.client.json,
-            Self::UpgradeCheck(_) => false,
+            Self::UpgradeCheck(args) => args.client.json,
         }
     }
 }
@@ -110,7 +113,9 @@ pub fn run(action: &ClusterCommand, out: &mut impl Write, err: &mut impl Write) 
     let name = action.name();
     let json = action.json();
     match action {
-        ClusterCommand::UpgradeCheck(_) => crate::not_available(name, err),
+        ClusterCommand::UpgradeCheck(args) => {
+            client::block_on(name, json, out, err, upgrade::run(args))
+        }
         ClusterCommand::Join(args) => {
             crate::logging::init_client();
             client::block_on(name, json, out, err, join::run(args))

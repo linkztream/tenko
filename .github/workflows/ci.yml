@@ -308,32 +308,32 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build tenko
         run: cargo build -p tenko --locked
+      - name: Windows service unit tests
+        shell: pwsh
+        run: |
+          cargo test -p tenko --locked --lib platform
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Service smoke script
-        if: ${{ hashFiles('deploy/windows/smoke.ps1') != '' }}
+        # Install, start, /health/ready, the Event Log entries, an update through the
+        # version layout with exit status 12, stop and uninstall (deploy/windows/smoke.ps1).
         shell: pwsh
         run: |
           $binary = Join-Path $env:GITHUB_WORKSPACE 'target\debug\tenko.exe'
           pwsh -NoProfile -File deploy/windows/smoke.ps1 -Binary $binary
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Service unit tests (no smoke script yet)
-        if: ${{ hashFiles('deploy/windows/smoke.ps1') == '' }}
-        shell: pwsh
-        run: |
-          Write-Host "::notice::deploy/windows/smoke.ps1 does not exist yet; WP3.6 adds it. Running the unit tests of the Windows service code instead."
-          cargo test -p tenko --locked --lib platform
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-  # Nightly systemd smoke (OPS-13, E10). The hosted Linux runner has systemd as PID 1.
-  # Today the job installs the binary and the hardened unit the way the header of
-  # deploy/systemd/tenko.service describes, checks the unit with systemd-analyze verify and
-  # records the exposure score of systemd-analyze security in the run summary. WP3.6 adds
-  # deploy/systemd/smoke.sh (start, stop, upgrade through the layout, restart on exit 12,
-  # the credential path); the job runs it as root with the binary path as its only argument.
+  # Weekly systemd smoke (OPS-13, OPS-14, E10). The hosted Linux runner has systemd as
+  # PID 1. The job installs the binary and the hardened unit the way the header of
+  # deploy/systemd/tenko.service describes, checks the unit with systemd-analyze verify,
+  # records the exposure score of systemd-analyze security, then runs
+  # deploy/systemd/smoke.sh as root (the credential path, start, stop, LogsDirectory=, an
+  # update through the layout with the restart on exit status 12, the probe drop-in and the
+  # exposure gate below 2.5) and the macvlan compose smoke on a dummy parent interface.
   systemd-smoke:
     name: systemd smoke (ubuntu-latest, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
       TENKO_UI_STUB: "1"
@@ -403,12 +403,13 @@ jobs:
         # smoke.sh starts from the state a real install has: no /var/lib/tenko yet.
         run: sudo rm -rf /var/lib/tenko
       - name: Service smoke script
-        if: ${{ hashFiles('deploy/systemd/smoke.sh') != '' }}
         # Argument 1 is the freshly built binary; /usr/local/bin/tenko is a copy of it.
-        run: sudo bash deploy/systemd/smoke.sh "$GITHUB_WORKSPACE/target/debug/tenko"
-      - name: Service smoke script (not there yet)
-        if: ${{ hashFiles('deploy/systemd/smoke.sh') == '' }}
-        run: echo "::notice::deploy/systemd/smoke.sh does not exist yet; WP3.6 adds it. Only the unit checks ran."
+        run: sudo --preserve-env=GITHUB_STEP_SUMMARY bash deploy/systemd/smoke.sh "$GITHUB_WORKSPACE/target/debug/tenko"
+      - name: Smoke test of the macvlan compose example
+        # Builds the image from deploy/Dockerfile and runs the controller and a probe on a
+        # macvlan network over a dummy parent interface.
+        run: sudo -E env "PATH=$PATH" deploy/compose/smoke-macvlan.sh
+        timeout-minutes: 45
 
   # Nightly fuzz smoke (API-14): 60 seconds for every target that `cargo fuzz list` prints.
   # WP3.13 and the packages that add parsers of network input add targets under

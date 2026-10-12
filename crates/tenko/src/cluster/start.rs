@@ -297,6 +297,7 @@ pub async fn start_peers(
         )
         .map_err(|error| StartError::coded("cluster", &error))?,
     ));
+    let announce_stop = stop.clone();
     let served = listener
         .serve_port(
             Port {
@@ -329,6 +330,12 @@ pub async fn start_peers(
     .await
     .map_err(|error| StartError::coded("cluster", &error))?;
     let _ = clear_joining(&resolved.layout().store());
+    // The member record says which binary runs here: the leader gates format migrations
+    // on it and `tenko cluster upgrade-check` lists it (OPS-08).
+    tasks
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(tokio::spawn(announce(peers.clone(), announce_stop)));
     let status = store.status();
     let membership = store.membership();
     let summary = format!(
@@ -375,6 +382,26 @@ pub async fn start_peers(
         ),
         summary,
     ))
+}
+
+/// How long a member waits before it tries again to report its binary.
+const ANNOUNCE_RETRY: Duration = Duration::from_secs(5);
+
+/// Reports this member's binary in its member record, retrying while there is no quorum,
+/// until it succeeds or the server stops.
+async fn announce(peers: Peers, mut stop: watch::Receiver<bool>) {
+    loop {
+        match peers.announce().await {
+            Ok(_) => return,
+            Err(error) => {
+                tracing::debug!(%error, "cannot report this controller's binary yet; retrying");
+            }
+        }
+        tokio::select! {
+            _ = stop.wait_for(|stopped| *stopped) => return,
+            () = tokio::time::sleep(ANNOUNCE_RETRY) => {}
+        }
+    }
 }
 
 /// Waits until this member has applied everything the leader committed before the call:

@@ -4,9 +4,9 @@ This document specifies how a Tenko DDI installation moves from one version to t
 the format version of the data directory and its migrations (OPS-23), the rule that tells a
 developer when a change needs a new format, the dry-run command `tenko upgrade check`, the
 release artifacts and the release manifest, the operator's procedure for a manual upgrade and
-a rollback, updates installed from the web UI with their probation and switch back (OPS-24,
-TGL-23), the version layout that the service managers run from, and the module switch
-(OPS-25). Requirements are cited by ID and defined in [REQUIREMENTS.md](REQUIREMENTS.md);
+a rollback, the rolling upgrade of a controller cluster (OPS-08), updates installed from the
+web UI with their probation and switch back (OPS-24, TGL-23), the version layout that the
+service managers run from, and the module switch (OPS-25). Requirements are cited by ID and defined in [REQUIREMENTS.md](REQUIREMENTS.md);
 the profile toggle TGL-23 is defined in [SECURITY-PROFILES.md](SECURITY-PROFILES.md).
 
 ## Abstract
@@ -18,7 +18,9 @@ before it touches anything. The operator checks a new binary against a copy of t
 `tenko upgrade check`, switches to it, and can go back, because the previous version stays
 installed and the store is copied before it is migrated. An installation that runs from the
 version layout can do the same from the web UI, with a verified download, a dry run, and an
-automatic switch back when the new version does not become ready.
+automatic switch back when the new version does not become ready. A controller cluster is
+upgraded by hand, one member at a time, and migrates its data once every voter runs the new
+binary.
 
 ## Conventions
 
@@ -73,13 +75,15 @@ Two principles run through every part of the design.
 | `tenko upgrade check` | Dry-runs the migrations on a copy and reports with an exit code | 5 | OPS-23 |
 | Releases and manifest | Binaries, image, checksums and release notes for a tag | 6 | OPS-23, OPS-24 |
 | Manual procedure | Stop, back up, check, switch, start, verify, roll back | 7 | OPS-23 |
+| Cluster upgrade | `tenko cluster upgrade-check`, the rolling order, the migration run by the leader | 3.7, 5.5, 7.7, 8.10 | OPS-08, OPS-24 |
 | Updates from the UI | Notice, release notes, install job, probation, switch back | 8 | OPS-24, TGL-23 |
 | Layout | `current` and `previous` links under `<data_dir>/updates` | 9 | OPS-24 |
 | Modules | Which parts of the product an installation runs | 10 | OPS-25 |
 
 Operators read sections 3, 5 and 7 to 9. Developers read sections 3 to 5. Whoever cuts a
-release reads section 6. This document describes a single node, which is what Phase 1 runs;
-clusters are covered in sections 8.10 and 11.
+release reads section 6. Sections 3 to 9 describe a single node, which is what most
+installations run; the differences of a controller cluster are in sections 3.7, 5.5, 7.7 and
+8.10.
 
 ## 2 Terminology
 
@@ -148,7 +152,8 @@ keys, then settles the rest in the `store` start step.
 |---|---|---|
 | No store | The directory is new. The store is created and both records say the current format. | |
 | The current format | The server starts. A record that is missing is written. | |
-| An older format, every migration present | The closed store is copied aside (section 3.4), the store is opened, and every migration runs in turn (below). | |
+| An older format, every migration present | The closed store is copied aside (section 3.4), the store is opened, and every migration runs in turn (below). In a controller cluster the migration waits for the leader (section 3.7). | |
+| An older format, too little free space for the copy | The start is refused with `upgrade.no_space` before anything is changed (section 3.4). | Exit 4 |
 | An older format, a migration missing | The start is refused with `upgrade.migration_missing`. Upgrade through an intermediate release that has the missing step. | Exit 4 |
 | A newer format | The start is refused with `upgrade.format_newer` (section 3.3). | Exit 3 |
 | Records that disagree | The start is refused with `upgrade.format_mismatch` (section 3.5). | Exit 4 |
@@ -163,8 +168,8 @@ format 3 runs two steps and commits two batches.
 The start log says what happened. The `store` step line carries the format in its summary:
 
 ```
-step 2/9 store ready in 101 ms: opened at revision 15, audit head 17, data format 1, ...
-step 2/9 store ready in 640 ms: opened at revision 15, audit head 18, data format 2 (migrated from format 1 in 1 step(s)), ...
+step 2/13 store ready in 101 ms: opened at revision 15, audit head 17, data format 1, ...
+step 2/13 store ready in 640 ms: opened at revision 15, audit head 18, data format 2 (migrated from format 1 in 1 step(s)), ...
 ```
 
 A migration that fails does not commit its batch and does not move the marker. The start
@@ -175,11 +180,15 @@ same binary resumes from there and takes a new copy of the store as it is then. 
 the newest three copies are kept, an operator who retries a failed migration more than twice
 should first copy the original pre-migration copy out of `upgrade-backups`.
 
-A migration runs before the server reports ready. On a large store it can take longer than
-the 120 seconds that `TimeoutStartSec=` of the systemd unit allows. `tenko upgrade check`
-runs the same migrations, so its run time is a good estimate; where it comes near a minute,
-the operator should raise the limit before the first start with `systemctl edit tenko`
-(`[Service]`, `TimeoutStartSec=600s`).
+A migration runs before the server reports ready. On a large store the copy and the
+migration can take longer than the 120 seconds that `TimeoutStartSec=` of the systemd unit
+allows. While a start copies and migrates the store, `tenko serve` therefore sends
+`EXTEND_TIMEOUT_USEC=90000000` (90 seconds) to systemd every 30 seconds, with the status
+text "copying and migrating the data directory". The operator does not need to raise
+`TimeoutStartSec=` for a migration. The extension ends when the `store` step ends, and the
+timeout applies again to the rest of the start, so a start that hangs in another step still
+fails after 120 seconds. Outside a systemd unit nothing is sent. `tenko upgrade check` runs
+the same migrations, so its run time is a good estimate of how long the `store` step takes.
 
 ### 3.3 A newer format is refused
 
@@ -215,9 +224,23 @@ are consistent only when closed; a store that is open elsewhere makes the copy f
 `upgrade.in_use`.
 
 The copy is a rollback point for the store, not a backup of the installation: it holds no
-keys, certificates, logs or configuration. The operator's backup (section 7.2) is a copy of
-the whole data directory and of the key-encryption key. The copy needs free space of about
-the size of `<data_dir>/store`; the server does not check this before it starts to copy.
+keys, certificates, logs or configuration. A backup made as in [backup.md](backup.md)
+(section 7.2) is the full one: it holds the whole installation, and the key-encryption key
+is kept apart from it.
+
+Before it copies, `tenko serve` measures `<data_dir>/store` and the free space of the file
+system that holds `<data_dir>/upgrade-backups` (of its nearest existing parent directory when
+`upgrade-backups` does not exist yet). The copy needs the size of the store, a tenth more and
+64 MiB. When the file system has less, the start is refused with `upgrade.no_space` and exit
+status 4, and nothing is changed:
+
+```
+/var/lib/tenko/upgrade-backups has 1.0 MiB free, the copy of the store before the migration needs 3.0 MiB: free 2.0 MiB and start again (nothing was changed)
+```
+
+The problem carries the parameters `needed` and `available` in bytes. Free the space, or
+move `upgrade-backups` to a larger volume, and start again. `tenko upgrade check` makes the
+same test ahead of time (section 5.2).
 
 ### 3.5 Records that disagree
 
@@ -237,6 +260,62 @@ of section 3.3, whatever the marker says.
 A data directory without a marker and without a stored record was written before format
 versions existed. It is format 1. The first start of a binary that knows formats writes both
 records. `tenko upgrade check` reports such a directory with `"legacy": true`.
+
+### 3.7 Migration in a controller cluster
+
+The members of a controller cluster share one replicated store, so the format of its data is
+one number for the whole cluster. A migration is a write to that store. While a voter still
+runs a binary that does not know the new format, the cluster must not migrate: that voter
+would read data it does not understand. The migration therefore waits for the last voter
+(OPS-08, R26).
+
+A member of a controller cluster (a node with more than one Raft member) behaves as follows
+when its binary knows a newer format than the store holds:
+
+1. It takes the pre-migration copy of its own store, as a single node does (section 3.4),
+   and opens the store at the old format. It does not migrate. The `store` step line says:
+
+   ```
+   step 2/13 store ready in 88 ms: opened at revision 15, audit head 17, data format 2, the migration to format 3 waits until every voter runs a binary that knows it; the leader runs it then, ...
+   ```
+
+2. After each start it reports its binary in its member record: the version, the protocol
+   majors, the Raft wire version (`openraft-0.9/cbor-1`) and the data formats its binary
+   knows. The audit record `cluster.member.announce` is written when the record changed.
+3. The leader runs the leader service `upgrade.migrate`, which `GET /api/v1/system/status`
+   lists under `leader.services`. Every 10 seconds it compares the stored format with the
+   newest format of its own binary. When the member record of every voter lists that format,
+   it runs the migrations, each in one batch fenced with the leader epoch, so a leader that
+   was deposed cannot migrate. The audit records are the same `sys.upgrade.migrate` records
+   as on a single node. Otherwise it logs once which voters block the migration. Learners do
+   not block it. A voter without a member record does.
+4. Every member refreshes every 10 seconds. Its local marker follows a migration that the
+   leader committed, so that an older binary on that member refuses the directory before it
+   opens the store (section 3.3).
+
+`GET /api/v1/system/status` of every member has the optional field `data_format`:
+
+```json
+{
+  "stored": 2,
+  "binary": 3,
+  "pending": {
+    "target": 3,
+    "blocked_by": [
+      { "node": 1002, "version": "0.1.0", "data_format": 2 }
+    ]
+  }
+}
+```
+
+`stored` is the format of the data and `binary` the newest format of the binary that
+answers. `pending` is absent when nothing waits. `blocked_by` names the voters whose binary
+does not know `target` yet; it is empty while the leader is about to migrate. While a
+migration waits, the status carries the warning `upgrade.migration_blocked` with the
+parameters `stored`, `target` and `nodes`.
+
+A joining controller whose binary does not know the format the cluster stores is refused
+with `cluster.join.format_newer`. The procedure for the whole cluster is section 7.7.
 
 ## 4 The migration convention
 
@@ -648,14 +727,22 @@ migrations pass? Run it with the **new** binary, with the server stopped, before
 3. It refuses a newer format and a missing migration at once, without copying anything.
 4. It refuses a store that another process has open (`upgrade.in_use`, exit status 1),
    because the files of an open redb store are not consistent.
-5. It copies the closed store into the work directory, opens the copy with this binary,
+5. It checks that the file system of the work directory has room for the work copy
+   (below). Too little room is the problem `upgrade.no_space` with the verdict `failed`.
+6. It copies the closed store into the work directory, opens the copy with this binary,
    reconciles the format records and runs every migration on the copy exactly as
    `tenko serve` would, closes the copy and removes it, also after a failure.
+7. When the verdict is `migration_needed`, it checks the room for the real pre-migration
+   copy in `<data_dir>/upgrade-backups` (section 3.4). Too little room is the same problem,
+   `upgrade.no_space`, with the verdict `failed` and exit status 1: the migration would pass
+   but the start would be refused.
 
 The check does not load keys and does not need the key-encryption key. It does not modify
 any file of the data directory; the only thing it creates there is the work copy, which it
-removes. It needs free space of about the size of the store in the work directory, and a
-store of many gigabytes takes as long to copy as it takes to migrate. The run time is a
+removes. The room it asks for is the room of section 3.4: the size of the store, a tenth
+more and 64 MiB, on the file system of the work directory and, for the real copy, of
+`upgrade-backups`. Use `--work-dir` when the data volume is short of space. A store of many
+gigabytes takes as long to copy as it takes to migrate. The run time is a
 good estimate of the migration time at the real start (section 3.2).
 
 ### 5.3 Exit codes
@@ -666,7 +753,7 @@ good estimate of the migration time at the real start (section 3.2).
 | 0 | `current` | The directory is at this binary's format. Nothing to do. |
 | 10 | `migration_needed` | The directory is older. Every migration exists and the dry run passed. `tenko serve` copies the store aside and migrates at its next start. |
 | 11 | `refused` | This binary cannot use the directory: a newer format, a missing migration, records that disagree, a store that cannot be opened, or a migration that failed in the dry run. |
-| 1 | `failed` | The check could not run: the store is open in a running server, a file operation failed, or the runtime could not start. |
+| 1 | `failed` | The check could not run: the store is open in a running server, a file operation failed, there is too little free space for the work copy or for the copy before the migration (`upgrade.no_space`), or the runtime could not start. |
 | 3 | | The configuration is invalid. |
 | 2 | | Usage: an unknown option. |
 
@@ -735,7 +822,78 @@ The problem codes:
 | `upgrade.marker_invalid` | `refused` | The marker cannot be read, or `sm.current` names a state file that does not exist |
 | `upgrade.store` | `refused` | The store refused a read or a write of the format record |
 | `upgrade.in_use` | `failed` | The store is open in another process; stop the server |
+| `upgrade.no_space` | `failed` | The work copy, or the copy before the migration, does not fit on the file system (section 3.4) |
 | `upgrade.io` | `failed` | A file operation failed; the message names the path |
+
+### 5.5 `tenko cluster upgrade-check`
+
+`tenko upgrade check` looks at one data directory. Before a controller cluster is upgraded,
+the new binary also needs to be checked against the cluster as a whole:
+
+```
+tenko cluster upgrade-check [--json]
+```
+
+Run it with the **new** binary. It reads `GET /api/v1/cluster/members` and
+`GET /api/v1/system/status` with the stored sign-in of `tenko login`, like the other
+`tenko cluster` commands, and takes the connection options of those commands. `--json` prints
+the report as JSON. It changes nothing.
+
+The report has a table with one row per member: `NODE`, `NAME`, `ROLE`, `VERSION`, `MAJORS`
+(the protocol majors), `RAFT WIRE`, `FORMATS` (the data formats the member's binary knows)
+and `THIS BINARY`, which is `ok` or `REFUSED`. Below it are a line about this binary, the
+stored format, a pending migration with the voters that block it, and then either the
+rolling order or the reasons why this binary cannot replace members.
+
+This binary fits when all of these hold:
+
+- It speaks the Raft wire version of every member. A new wire version is a change of the
+  Raft protocol itself and needs a planned stop of the whole cluster (R19), not a rolling
+  upgrade.
+- It shares a protocol major with every member.
+- It knows the format that the cluster's data is in.
+
+A newer data format of this binary is not a reason to refuse: the cluster keeps the old
+format until every voter runs a binary that knows the new one (section 3.7).
+
+| Status | Meaning |
+|---|---|
+| 0 | This binary fits. The report ends with the rolling order. |
+| 11 | This binary cannot replace every member. The report names the members and the reasons. |
+
+A member that joined with an older build shows `-` in the columns it has not reported. It
+reports them after its next start, and the report says so. Such a member does not make the
+check fail.
+
+A worked example. Three controllers run 0.1.0, which knows format 1. The new binary is 0.2.0
+and knows formats 1 and 2. Node 1 leads.
+
+```
+NODE  NAME                       ROLE            VERSION  MAJORS  RAFT WIRE            FORMATS  THIS BINARY
+1     controller-1.example.test  voter (leader)  0.1.0    1       openraft-0.9/cbor-1  1        ok
+1001  controller-2.example.test  voter           0.1.0    1       openraft-0.9/cbor-1  1        ok
+1002  controller-3.example.test  voter           0.1.0    1       openraft-0.9/cbor-1  1        ok
+
+this binary: version 0.2.0, protocol major(s) 1, Raft wire openraft-0.9/cbor-1, formats 1 to 2
+the cluster's data is in format 1
+the migration to format 2 waits for controller(s) 1, 1001, 1002
+
+this binary can replace every member. Rolling order, one at a time:
+  1. node 1001
+  2. node 1002
+  3. node 1 (the leader): run `tenko cluster step-down` first, then upgrade it
+wait for each member to be ready and caught up (`tenko cluster members`) before the next one
+```
+
+The migration to format 2 is listed as waiting because no voter knows format 2 yet. That is
+the normal state before an upgrade, not a fault. If node 1002 had reported the Raft wire
+`openraft-0.10/cbor-1`, the table would show `REFUSED` for it, the exit status would be 11,
+and the end of the report would read:
+
+```
+this binary cannot replace every member:
+  - node 1002: speaks the Raft wire openraft-0.10/cbor-1, this binary openraft-0.9/cbor-1: a change of the Raft wire needs a planned stop of the whole cluster
+```
 
 ## 6 Releases
 
@@ -759,15 +917,31 @@ Pushing a tag `v*` runs `.github/workflows/release.yml`. It does these things:
    (`node scripts/changelog.mjs notes <version>` fails when it is missing).
 2. **Build.** The web UI (`npm run build` in `ui/`) and then the binaries for Linux x86_64
    and Windows x86_64 with the real UI embedded. A release build refuses the placeholder
-   page that `TENKO_UI_STUB=1` produces, so a release cannot ship without its UI.
-3. **Image.** The container image from `deploy/Dockerfile`.
-4. **Publish.** `SHA256SUMS` and the manifest `releases.json`
+   page that `TENKO_UI_STUB=1` produces, so a release cannot ship without its UI. The Linux
+   binary is described below.
+3. **Smoke.** The job `smoke-linux` runs the Linux binary on two distributions (below).
+4. **Image.** The container image from `deploy/Dockerfile`.
+5. **Publish.** `SHA256SUMS` and the manifest `releases.json`
    (`scripts/release-manifest.mjs`), a release text taken from the changelog section, and the
    attachment of all of it to the release.
 
+The Linux binary is built for `x86_64-unknown-linux-musl` on `ubuntu-latest` with
+`musl-tools`, so it is one static executable that does not depend on the glibc of the host
+(OPS-01, S3-Q10). The build job fails when `file` and `ldd` do not report a static binary.
+The file name stays `tenko-<version>-linux-x86_64`, so the manifest and `current_platform`
+do not change.
+
+After the build, the job `smoke-linux` runs the binary in `debian:12-slim` and
+`rockylinux/rockylinux:9-minimal`, both with only `sh`. Each run prints the version and the
+data-directory format, checks `deploy/tenko.example.toml` with `tenko config check`, and
+starts `tenko serve` with a temporary data directory and a file KEK on `127.0.0.1`. It waits
+for `tenko health --ca-file` to report ready, then stops the server with SIGTERM and requires
+exit status 0. The image and release jobs wait for both smoke runs, so a binary that does not
+start on those distributions is never published.
+
 | Artifact | Name | Notes |
 |---|---|---|
-| Linux binary | `tenko-<version>-linux-x86_64` | |
+| Linux binary | `tenko-<version>-linux-x86_64` | Static, built for musl |
 | Windows binary | `tenko-<version>-windows-x86_64.exe` | |
 | Container image | `ghcr.io/linkztream/tenko:<version>` | The tag `latest` moves only for releases without a pre-release part |
 | Checksums | `SHA256SUMS` | `sha256sum` format, one line per binary of this release |
@@ -926,12 +1100,20 @@ the same on every platform:
 - The controller is down from step 2 to step 6. The API and the web UI are unavailable in
   that time. The data-plane roles of later phases keep serving from their local copies
   (OPS-02).
-- This procedure is for one node. Cluster upgrades follow OPS-08 (section 8.10).
+- This procedure is for one node. A controller cluster is upgraded one member at a time, as
+  in section 7.7.
 
 ### 7.2 What to back up
 
-A backup consists of two parts that must be kept in different places, because together they
-open the vault.
+The way to back up an installation is `tenko backup create`, described in
+[backup.md](backup.md): section 1 says what a backup holds, section 3 how backups are
+written, section 6 how one is restored and section 7 what changes for a cluster. Take one
+before every upgrade. The copy that `tenko serve` makes before a migration (section 3.4)
+does not replace it.
+
+Where a node is stopped anyway, as in the procedures below, a copy of the files is an
+alternative. It consists of two parts that must be kept in different places, because
+together they open the vault.
 
 1. **The data directory**, copied while the server is stopped: `store/` with the format
    marker, `kek/` where it is used, `tls/`, `updates/` and `upgrade-backups/`. A copy of
@@ -940,7 +1122,7 @@ open the vault.
 
 | Installation | The key | What to keep |
 |---|---|---|
-| Linux, the shipped unit | `/etc/tenko/kek.cred`, an encrypted credential bound to the host | The offline copy of the key (64 hexadecimal digits) made at install, and `/etc/tenko`. A restore on another host needs `systemd-creds encrypt` run again with the same key. |
+| Linux, the shipped unit | `/etc/tenko/kek.cred`, an encrypted credential bound to the host, read through the `systemd_credential` provider | The offline copy of the key (64 hexadecimal digits) made at install, and `/etc/tenko`. A restore on another host needs `systemd-creds encrypt` run again with the same key. |
 | Windows, the default provider | Key files in `<data_dir>\kek`, sealed with DPAPI to the service account | They travel with the data directory but unseal only under the same account on the same machine (`deploy/windows/README.md`). |
 | Containers | A Docker secret, `TENKO_KEK__PATH` | The source of the secret. It is not on the data volume. |
 
@@ -963,7 +1145,7 @@ install -m 0755 tenko-0.2.0-linux-x86_64 /usr/local/bin/tenko-0.2.0
 ```
 
 The staged file `/usr/local/bin/tenko-0.2.0` lies next to the installed binary and replaces
-nothing.
+nothing. The Linux binary is static, so it runs on any distribution that the unit supports.
 
 **2. Stop.**
 
@@ -1037,7 +1219,8 @@ tenko health --live --url https://ddi.example.org:8443 --ca-file /var/lib/tenko/
 tenko health --url https://ddi.example.org:8443 --ca-file /var/lib/tenko/tls/ca-root.pem
 ```
 
-- The service is active and has not restarted.
+- The service is active and has not restarted. A long migration does not make systemd give
+  up the start: the server extends the start timeout while it runs (section 3.2).
 - The log has the line `data format 2`, with `(migrated from format 1 in 1 step(s))` when
   a migration ran. A migration also leaves the audit record `sys.upgrade.migrate`.
 - `tenko health --live` prints the new version, and `tenko health` reports the node as
@@ -1106,7 +1289,10 @@ sc.exe query tenko
 
 The log line `data format 2` (with `(migrated from format 1 in 1 step(s))` after a migration),
 the version printed by `tenko health --live`, and the service state RUNNING are the
-evidence, as on Linux (section 7.3).
+evidence, as on Linux (section 7.3). The file log is rotated by size (section 9.3), so on a
+node that has run for a long time the line may be in `tenko.log.1` and not in `tenko.log`.
+The Application log of Windows has the lines `tenko service starting` and
+`tenko service stopped` under the source named like the service.
 
 ### 7.5 Containers
 
@@ -1251,6 +1437,67 @@ After a rollback, verify as in step 7: the log shows the previous version and it
 format`. Keep the failed store and the output of `tenko upgrade check --json` of the new
 binary when you report the failure.
 
+### 7.7 A controller cluster
+
+A controller cluster is upgraded one member at a time, with the new binary installed by hand
+on each member. The UI installs nothing on a cluster (section 8.10). The cluster keeps its
+quorum and accepts writes during the whole procedure, because one member out of three is
+down at a time. The data keeps its old format until the last voter runs the new binary; the
+leader then migrates it (section 3.7).
+
+**Before the first member.**
+
+1. Read the release notes (section 7.1) and stage the new binary on every member, as in
+   section 7.3, step 1.
+2. Run `tenko cluster upgrade-check` with the new binary (section 5.5). Exit status 0 means
+   that the binary fits and prints the order. Status 11 means stop: the report names the
+   reason, such as a Raft wire version that needs a planned stop of the whole cluster.
+3. Make a backup (section 7.2, [backup.md](backup.md) section 7). A backup before the last
+   voter is upgraded is the one that matters, because it is the rollback point after the
+   migration (below).
+
+**For each member, in the order of the report**: learners first, then the voters that follow,
+the leader last.
+
+1. For the leader only, run `tenko cluster step-down`. It answers when another voter leads.
+   Then treat the old leader as a follower.
+2. Stop the member: `systemctl stop tenko`.
+3. Run `tenko upgrade check` with the new binary on that member's data directory, as in
+   section 7.3, step 4. Statuses 0 and 10 mean go on.
+4. Install the binary and switch the layout (`tenko upgrade layout`), as in section 7.3,
+   step 5.
+5. Start the member: `systemctl start tenko`. When the new binary knows a newer data format,
+   the member takes the copy of its store and logs that the migration waits (section 3.7).
+6. Wait until `tenko cluster members` shows the member with its new `VERSION`, a `LAG` of 0
+   or near it and a recent `CONTACT`, and until `tenko health` reports it ready. Only then
+   go to the next member.
+
+A cluster of three voters keeps its quorum of two while one member is down. On Windows, use
+the commands of section 7.4 for the stop, the check, the switch and the start.
+
+**After the last voter.** The leader finds that every voter's record lists the new format and
+migrates, within about 10 seconds. Watch `GET /api/v1/system/status` on any member:
+`data_format.pending` shrinks as voters are upgraded, `blocked_by` empties when the last one
+is done, and `pending` disappears when the migration has been committed; `stored` then equals
+`binary`. The leader's audit log has the `sys.upgrade.migrate` records, and the warning
+`upgrade.migration_blocked` goes away. Verify the version of every member with
+`tenko cluster members`.
+
+**Going back.**
+
+- *Before the leader migrated* (`data_format.pending` is still there): the data has the old
+  format. A member goes back by switching its link to the previous version, as in
+  section 7.6, with no restore.
+- *After the leader migrated*: an older binary on a member refuses the directory
+  (`upgrade.format_newer`, section 3.3). The rollback point of a member is its own
+  pre-migration copy, taken at its start with the new binary. Putting one member back to the
+  old binary needs that member's copy restored, and the cluster has meanwhile committed data
+  in the new format, which that copy does not hold. In practice this means restoring the
+  whole cluster from a backup ([backup.md](backup.md) section 6 and 7). The changes made after
+  the backup are lost.
+
+This is why a backup before the last voter is upgraded is recommended.
+
 ## 8 Updates from the UI
 
 Updates from the UI (OPS-24) are the manual procedure of section 7 done by the server
@@ -1329,7 +1576,7 @@ for an upload, whether it would start and why not. A refused install answers 409
 | Reason | Applies to | Meaning and remedy |
 |---|---|---|
 | `container` | both | The server runs in a container. Pull the new image (section 8.9). |
-| `cluster` | both | The store has more than one voter. Notice only until OPS-08 (section 8.10). |
+| `cluster` | both | The store has more than one voter. The UI installs nothing on a cluster; upgrade the members by hand (section 7.7). |
 | `layout_missing` | both | The process does not run from `<data_dir>/updates/current`. Set the layout up (section 9). |
 | `unsupervised` | both | No service manager restarts the server after the switch. Run it under systemd or as a Windows service, or declare another supervisor with `TENKO_SUPERVISED=1` (section 9.4). |
 | `in_progress` | both | An install is running, or it waits for its restart or its confirmation. |
@@ -1370,7 +1617,7 @@ listens; the moment it is, the attempt is confirmed.
 
 | Record | This binary | What happens |
 |---|---|---|
-| `restarting` | The new version, first start | Probation. A watchdog switches back unless the version becomes ready within `updates.ready_timeout_secs` (180 by default). The time a migration of the data directory takes is not counted: the dry run of the install job has shown that it passes, and the start timeout of the service manager still bounds it. |
+| `restarting` | The new version, first start | Probation. A watchdog switches back unless the version becomes ready within `updates.ready_timeout_secs` (180 by default). The time a migration of the data directory takes is not counted: the dry run of the install job has shown that it passes, and under systemd the start timeout is extended while it runs (section 3.2). |
 | `restarting` | The new version, a start step fails | It switches back at once and exits with status 12. |
 | `restarting` | The new version, a second start | The first start did not confirm (the process crashed or was killed): it switches back at once. |
 | `rolled_back`, with `restore` set | The previous version | It puts the pre-migration copy back before it opens the store (below). |
@@ -1423,7 +1670,8 @@ Every action of an update is attributable and recorded in the audit log, which i
 |---|---|---|
 | `sys.update.manifest` | When an administrator uploads a manifest that is stored | The newest version in it |
 | `sys.update.upload` | When an uploaded release file matched the manifest | `version`, `sha256`, the source address |
-| `sys.upgrade.migrate` | At start, for each migration step | `from`, `to`, `summary`, `binary` |
+| `sys.upgrade.migrate` | At start, for each migration step; in a controller cluster by the leader, once every voter knows the format (section 3.7) | `from`, `to`, `summary`, `binary` |
+| `cluster.member.announce` | After a start of a cluster member, when its member record changed | The version, protocol majors, Raft wire version and data formats of its binary (section 3.7) |
 | `sys.update.confirm` | Once, by the new version, when the attempt is confirmed | `from`, `to`, `job` |
 | `sys.update.rollback` | Once, by the previous version, after a switch back | `from`, `to`, `reason`, `job` |
 
@@ -1466,10 +1714,24 @@ a container as in section 7.5.
 ### 8.10 Clusters
 
 When the store has more than one voter, the UI shows the notice and the notes and installs
-nothing (`cluster`). The order in which the nodes of a cluster are upgraded, and the
-negotiation between nodes of different versions, come with OPS-08 (section 11). Phase 1 runs
-a single voter, so this case does not occur yet. A cluster must not run two versions until
-OPS-08 defines how.
+nothing (`cluster`). An install job on one member would switch a binary without knowing the
+state of the others, and the order matters (OPS-24, S3-Q14). The members are upgraded by
+hand, one at a time, as in section 7.7. The command `tenko cluster members` shows the
+version of each member, and `tenko cluster upgrade-check` (section 5.5) prints the order.
+
+A cluster runs two versions only while the upgrade is under way. The rules that make this
+safe are these:
+
+- **Order.** Learners first, then the voters that follow, the leader last after
+  `tenko cluster step-down`. One member is down at a time, which keeps the quorum.
+- **What the new binary must share with the old.** The Raft wire version and a protocol
+  major. A change of the Raft wire is not rolling: it needs a planned stop of the whole
+  cluster (R19). `tenko cluster upgrade-check` tests both.
+- **The data format.** The cluster keeps the old format until every voter runs a binary that
+  knows the new one, and the leader migrates then (section 3.7). The members announce their
+  binaries in their member records for this purpose.
+- **The way back.** Until the leader migrates, a member goes back by switching its link.
+  After it, the rollback point is the backup (section 7.7).
 
 ### 8.11 Why installing from the UI is acceptable (R17)
 
@@ -1554,6 +1816,7 @@ ExecStart=/var/lib/tenko/updates/current/tenko serve --config /etc/tenko/tenko.t
 Restart=on-failure
 RestartForceExitStatus=12
 RestartPreventExitStatus=2 3 4
+TimeoutStartSec=120s
 StartLimitIntervalSec=300
 StartLimitBurst=5
 ```
@@ -1573,6 +1836,20 @@ or a newer data format, a failed start step) are not, because the same start wou
 again. At most five starts in 300 seconds are allowed, after which systemd leaves the unit
 failed until `systemctl reset-failed tenko`.
 
+`TimeoutStartSec=` applies to the start, but a start that copies and migrates the store
+extends it as described in section 3.2, so the value needs no change for a long migration.
+
+The unit passes the key-encryption key as a systemd credential: `LoadCredentialEncrypted=`
+reads `/etc/tenko/kek.cred` as the credential `tenko_kek`, and
+`TENKO_KEK__PROVIDER=systemd_credential` tells tenko to read it from there. It also sets
+`LogsDirectory=tenko`, which creates `/var/log/tenko` for `log.file`. The server rotates that
+file by size: `[log] max_file_mb` (default 64) is the size at which `tenko.log` moves to
+`tenko.log.1`, and `keep_files` (default 5) is how many rotated files stay. The journal
+receives the log in either case, so `journalctl -u tenko` in section 7.3 still works.
+
+`deploy/systemd/smoke.sh` tests this on a test host with systemd. Among other steps it
+installs an update through the layout and waits for the restart after exit status 12.
+
 `tenko --version` in a shell runs the bootstrap binary. After an update from the UI it can
 report an older version than the one that runs. The running version is in the status bar of
 the UI, in the start log and in the output of `tenko health --live`.
@@ -1586,6 +1863,16 @@ junction `current`. It prints the layout as the line `versions:`. With `--no-upd
 it registers the executable itself, as earlier versions did, and installs from the UI stay
 off. The service account must be able to write `<data_dir>\updates`; the permissions that
 `service install` sets on the data directory give it full control of everything below.
+
+The service writes its log to `<data_dir>\logs\tenko.log`, or to `log.file`, and the file is
+rotated by size: `[log] max_file_mb` (default 64) is the size at which `tenko.log` moves to
+`tenko.log.1`, and `keep_files` (default 5) is how many rotated files stay. `service install`
+registers an Event Log source named like the service in the Application log, and
+`service uninstall` removes it. The lines `tenko service starting` and `tenko service
+stopped` are always written there; other events go there at the level of `[log] event_log`
+(default `warn`). See `deploy/windows/README.md`. `deploy/windows/smoke.ps1` tests the
+service life on a Windows host, including an update through the layout that ends with exit
+status 12 and a restart by the SCM.
 
 The failure actions of the service restart it after 10 seconds on each of the first three
 failures and leave it stopped on the fourth. The count starts over after a day without a
@@ -1745,8 +2032,8 @@ reserved.
 | Item | What is missing | Tracked by |
 |---|---|---|
 | Signed releases | Signatures for the binaries and the image, Authenticode for the Windows binary, and an SBOM. The manifest field `signature` is reserved and the build feature `release-signatures` is wired into the install job and off. Until it exists the checksum comes from the same origin as the file (section 8.11). | API-19 |
-| Cluster upgrades | The rolling order of nodes and the protocol negotiation between nodes of different versions. Until it exists the UI installs nothing on a cluster (section 8.10). | OPS-08 |
 | Conversion of redb files | A step that runs offline, before the store is opened, for a release that moves to a redb version with another file format. A `Migration` cannot do it (section 4.7). A release should not move across such a change before the step exists. | |
 | A fuzz target for the manifest | `ReleaseManifest::parse` reads input from the network and from uploads and needs a fuzz target under `fuzz/` (CONTRIBUTING rule 3); the fuzz harness has no targets yet. | API-15 |
 | Migrations over 16 MiB | The `Migration` trait yields one batch. A migration that exceeds the batch limit needs idempotent batches with the bump in the last (section 4.6). | |
-| Free space before the copy | The server does not check that the data volume has room for the copy of the store before it migrates (section 3.4). `tenko upgrade check` has the same need. | |
+| Throughput of the musl binary | The Linux binary is a static musl binary (section 6.2). The throughput measurements M5 and M9 have not been made on it yet. S3-Q10 says that Phase 1 ships the glibc binary instead if M5 drops by more than 10 percent. | S3-Q10 |
+| The service smoke tests | `deploy/systemd/smoke.sh` and `deploy/windows/smoke.ps1` run on the weekly CI schedule and once by the owner by hand. They do not run on every push. | OPS-13 |

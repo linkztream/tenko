@@ -1,4 +1,4 @@
-# PROPOSAL for .github/workflows/release.yml (OPS-23, OPS-24).
+# Release workflow (OPS-23, OPS-24).
 #
 # A release is made by pushing a tag `vX.Y.Z` (or `vX.Y.Z-rc.1`) on a commit of main whose
 # changelog has the section `## [X.Y.Z] - <date>` and whose crates/tenko/Cargo.toml has
@@ -6,14 +6,20 @@
 #
 #   1. verify   checks the tag against the crate version and the changelog;
 #   2. ui       builds and tests the web UI once;
-#   3. build    builds the binaries for Linux and Windows with the real UI embedded;
-#   4. image    builds and pushes the container image to ghcr.io;
-#   5. publish  builds releases.json and SHA256SUMS (scripts/release-manifest.mjs), takes the
+#   3. build    builds the binaries for Linux and Windows with the real UI embedded. The Linux
+#               binary is static, built for x86_64-unknown-linux-musl (S3-Q10, OPS-01), so one
+#               file runs on every distribution; the job fails when it is not static;
+#   4. smoke    runs the Linux binary in a Debian 12 and a RHEL 9 compatible container
+#               (version, config check, a real start and a stop with SIGTERM);
+#   5. image    builds and pushes the container image to ghcr.io (amd64 only; `latest` moves
+#               for stable releases only, S3-Q9);
+#   6. publish  builds releases.json and SHA256SUMS (scripts/release-manifest.mjs), takes the
 #               release text from the changelog (scripts/changelog.mjs notes) and creates
 #               the GitHub release with the binaries, releases.json and SHA256SUMS.
 #
 # Running installations read releases.json from the latest release to learn about updates;
-# the file names tenko-<version>-<platform>[.exe] are the contract with scripts/README.md.
+# the file names tenko-<version>-<platform>[.exe] are the contract with scripts/README.md
+# (the platform of the musl binary stays linux-x86_64).
 #
 # Re-running: when a run fails before `publish`, re-run the failed jobs. When `publish`
 # failed after the release was created, delete that release (not the tag) and re-run.
@@ -135,7 +141,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
             platform: linux-x86_64
             exe: ""
           - os: windows-latest
@@ -155,6 +161,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - name: Install the musl C compiler
+        # musl-tools provides musl-gcc, which the C code of aws-lc-sys and ring is built with
+        # for the musl target. Nothing else is needed (no cmake, perl or clang).
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
       # No Rust cache here: a release is built from a clean state. TENKO_UI_STUB is not set,
       # so the build embeds the real UI and refuses the placeholder page.
       - uses: actions/download-artifact@v5
@@ -163,6 +176,21 @@ jobs:
           path: ui/dist
       - name: Build
         run: cargo build --release --locked -p tenko --target ${{ matrix.target }}
+      - name: Check that the Linux binary is static
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          bin="target/${TARGET}/release/tenko"
+          file "$bin"
+          if ! file "$bin" | grep -Eq 'statically linked|static-pie linked'; then
+            echo "::error::The Linux binary is not statically linked."
+            exit 1
+          fi
+          # ldd prints 'not a dynamic executable' (exit 1) or 'statically linked' for a static one.
+          if ldd "$bin" 2>&1 | grep -q '=>'; then
+            echo "::error::ldd lists shared libraries for the Linux binary."
+            exit 1
+          fi
       - name: Smoke test the binary
         shell: bash
         run: |
@@ -191,11 +219,113 @@ jobs:
           retention-days: 1
 
   # -------------------------------------------------------------------------------------
+  smoke-linux:
+    name: Smoke (${{ matrix.name }})
+    # The static binary must run on the distributions the product supports (R33). The
+    # images carry no bash, no curl and no glibc-specific tooling the binary could lean on.
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: Debian 12
+            image: debian:12-slim
+          - name: RHEL 9 compatible
+            image: rockylinux/rockylinux:9-minimal
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      SMOKE_IMAGE: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v5
+        with:
+          name: binary-linux-x86_64
+          path: dist
+      - name: Run the binary in ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          chmod +x "dist/tenko-${VERSION}-linux-x86_64"
+          # The script that runs inside the container: POSIX sh only (minimal images have no
+          # bash). It uses `sh`, `kill`, `sleep` and `mktemp` and nothing else.
+          cat > "$RUNNER_TEMP/smoke.sh" <<'SMOKE_END'
+          #!/bin/sh
+          # In: TENKO_BIN (binary), TENKO_VERSION, SMOKE_CONFIG (example config), SMOKE_PORT.
+          set -eu
+          bin="$TENKO_BIN"
+          work="$(mktemp -d)"
+          export TENKO_DATA_DIR="$work/data"
+          mkdir -p "$TENKO_DATA_DIR"
+          # A file KEK of 64 hexadecimal digits (a test value, never a real key).
+          printf '%s\n' 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef > "$work/kek.key"
+          chmod 600 "$work/kek.key"
+          export TENKO_KEK__PROVIDER=file TENKO_KEK__PATH="$work/kek.key" TENKO_KEK__ALLOW_PLAIN=true
+          export TENKO_SERVER__LISTEN="127.0.0.1:$SMOKE_PORT"
+          # The internal CA certificate must name the loopback address the probe connects to.
+          export TENKO_TLS__ADDRESSES=127.0.0.1
+
+          echo "== version"
+          out="$("$bin" --version)"
+          echo "$out"
+          case "$out" in *"$TENKO_VERSION"*) ;; *) echo "the version is missing from the output"; exit 1 ;; esac
+
+          echo "== upgrade format"
+          format="$("$bin" upgrade format)"
+          echo "$format"
+          case "$format" in ''|*[!0-9]*) echo "not a number"; exit 1 ;; esac
+
+          echo "== config check"
+          "$bin" config check --config "$SMOKE_CONFIG" > /dev/null
+
+          echo "== serve"
+          "$bin" serve --config "$SMOKE_CONFIG" > "$work/serve.log" 2>&1 &
+          pid=$!
+          ready=0
+          i=0
+          while [ "$i" -lt 60 ]; do
+            if ! kill -0 "$pid" 2> /dev/null; then break; fi
+            if [ -f "$TENKO_DATA_DIR/tls/ca-root.pem" ] &&
+              "$bin" health --url "https://127.0.0.1:$SMOKE_PORT" --ca-file "$TENKO_DATA_DIR/tls/ca-root.pem" 2> /dev/null; then
+              ready=1
+              break
+            fi
+            i=$((i + 1))
+            sleep 1
+          done
+          if [ "$ready" != 1 ]; then
+            echo "tenko serve did not become ready"
+            cat "$work/serve.log"
+            kill "$pid" 2> /dev/null || true
+            exit 1
+          fi
+          kill -TERM "$pid"
+          status=0
+          wait "$pid" || status=$?
+          if [ "$status" != 0 ]; then
+            echo "tenko serve exited with status $status after SIGTERM"
+            cat "$work/serve.log"
+            exit 1
+          fi
+          echo "== ok"
+          SMOKE_END
+          docker run --rm \
+            -v "$PWD/dist:/opt/tenko:ro" \
+            -v "$PWD/deploy/tenko.example.toml:/smoke/config.toml:ro" \
+            -v "$RUNNER_TEMP/smoke.sh:/smoke/smoke.sh:ro" \
+            -e "TENKO_BIN=/opt/tenko/tenko-${VERSION}-linux-x86_64" \
+            -e "TENKO_VERSION=${VERSION}" \
+            -e SMOKE_CONFIG=/smoke/config.toml \
+            -e SMOKE_PORT=18443 \
+            "$SMOKE_IMAGE" sh /smoke/smoke.sh
+
+  # -------------------------------------------------------------------------------------
   image:
     name: Container image
-    # After the binaries: nothing is pushed, and `latest` does not move, for a release
-    # whose build failed.
-    needs: [verify, build]
+    # After the binaries and their smoke runs: nothing is pushed, and `latest` does not move,
+    # for a release whose build failed or whose binary does not run.
+    needs: [verify, build, smoke-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -235,7 +365,7 @@ jobs:
   # -------------------------------------------------------------------------------------
   publish:
     name: Publish the release
-    needs: [verify, build, image]
+    needs: [verify, build, smoke-linux, image]
     runs-on: ubuntu-latest
     permissions:
       contents: write

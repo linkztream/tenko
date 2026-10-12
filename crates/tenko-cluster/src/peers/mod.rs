@@ -81,7 +81,7 @@ use crate::{
     proto::v1,
     registry::{EDIT_JOB, EDIT_TITLE, NodeRegistry, WRITE_PREVIEW, check_name},
     server::{code_of, status_of},
-    wire::{self, CLUSTER_WIRE, ChangeEnvelope, ChangeResult, MemberChange, WireCtx},
+    wire::{self, CLUSTER_WIRE, ChangeEnvelope, ChangeResult, MemberChange, RAFT_WIRE, WireCtx},
 };
 
 /// How long a learner stays caught up before the leader promotes it (default of
@@ -102,6 +102,9 @@ pub mod actions {
     pub const MEMBER_PROMOTE: AuditAction = AuditAction::from_static("cluster.member.promote");
     /// A member left the cluster.
     pub const MEMBER_REMOVE: AuditAction = AuditAction::from_static("cluster.member.remove");
+    /// A member reported a changed binary (version, protocol majors, Raft wire version or
+    /// data formats) after a start.
+    pub const MEMBER_ANNOUNCE: AuditAction = AuditAction::from_static("cluster.member.announce");
     /// The leader handed leadership over.
     pub const MEMBER_STEP_DOWN: AuditAction = AuditAction::from_static("cluster.member.step_down");
     /// The key encryption keys went to a joining controller, or to a member that lacked
@@ -121,6 +124,8 @@ pub struct PeerConfig {
     pub version: String,
     /// The data format the binary knows.
     pub data_format: u32,
+    /// The data formats the binary can open, oldest first.
+    pub formats: Vec<u32>,
     /// `[cluster] auto_promote`.
     pub auto_promote: bool,
     /// `[cluster] promote_lag_entries`.
@@ -137,6 +142,7 @@ impl PeerConfig {
             address: String::new(),
             version: crate::version().to_owned(),
             data_format,
+            formats: (1..=data_format).collect(),
             auto_promote: true,
             promote_lag_entries: 100,
             promote_after: PROMOTE_AFTER,
@@ -549,6 +555,9 @@ impl Peers {
             version: request.version.clone(),
             data_format: request.data_format,
             joined_at: Timestamp::now(),
+            protocol_majors: Vec::new(),
+            raft_wire: None,
+            formats: Vec::new(),
         };
         match records.get(&node) {
             None => {
@@ -575,8 +584,12 @@ impl Peers {
                     || known.version != fresh.version
                     || known.data_format != fresh.data_format =>
             {
+                // What the member reported at its own start stays until it reports again.
                 let updated = MemberRecord {
                     joined_at: known.joined_at,
+                    protocol_majors: known.protocol_majors.clone(),
+                    raft_wire: known.raft_wire.clone(),
+                    formats: known.formats.clone(),
                     ..fresh
                 };
                 let mut batch = WriteBatch::for_request(&system());
@@ -586,6 +599,60 @@ impl Peers {
             Some(_) => {}
         }
         Ok(())
+    }
+
+    /// The member record this controller writes about itself.
+    fn own_record(&self, address: String, joined_at: Timestamp) -> MemberRecord {
+        let config = &self.inner.config;
+        MemberRecord {
+            node: config.local,
+            address,
+            version: config.version.clone(),
+            data_format: config.data_format,
+            joined_at,
+            protocol_majors: crate::version::SUPPORTED_MAJORS.to_vec(),
+            raft_wire: Some(RAFT_WIRE.to_owned()),
+            formats: config.formats.clone(),
+        }
+    }
+
+    /// Reports this controller's binary in its member record after a start: the version,
+    /// the protocol majors, the Raft wire version and the data formats it knows (OPS-08).
+    /// The record changes only when one of them differs; the write is forwarded to the
+    /// leader like any other. Returns whether the record was written; `Ok(false)` also for
+    /// a controller without a member record (a single controller).
+    ///
+    /// # Errors
+    ///
+    /// The read or the write failed (no quorum, no leader yet): try again later.
+    pub async fn announce(&self) -> Result<bool, ClusterError> {
+        let me = self.local();
+        let view = self.store().read(ReadConsistency::Linearizable).await?;
+        let Some((known, revision)) = view.get_typed(&tables::MEMBERS, &me.0)? else {
+            return Ok(false);
+        };
+        drop(view);
+        let fresh = self.own_record(known.address.clone(), known.joined_at);
+        if fresh == known {
+            return Ok(false);
+        }
+        let mut batch = WriteBatch::for_request(&system());
+        batch.expect_typed(&tables::MEMBERS, &me.0, Some(revision));
+        batch.put_typed(&tables::MEMBERS, &me.0, &fresh)?;
+        batch.audit(
+            AuditDraft::success(actions::MEMBER_ANNOUNCE, vec![ObjectRef::node(me)])
+                .with_context("version", fresh.version.clone())
+                .with_context("previous_version", known.version.clone())
+                .with_context("data_format", fresh.data_format.to_string()),
+        );
+        self.store().propose(batch).await?;
+        tracing::info!(
+            version = %fresh.version,
+            previous = %known.version,
+            data_format = fresh.data_format,
+            "reported this controller's binary in its member record"
+        );
+        Ok(true)
     }
 
     /// The format the stored data is in (`sys.format`), if recorded.
@@ -665,13 +732,7 @@ impl Peers {
             batch.put_typed(
                 &tables::MEMBERS,
                 &me.0,
-                &MemberRecord {
-                    node: me,
-                    address: address.clone(),
-                    version: self.inner.config.version.clone(),
-                    data_format: self.inner.config.data_format,
-                    joined_at: now,
-                },
+                &self.own_record(address.clone(), now),
             )?;
         }
         batch.audit(
@@ -800,6 +861,13 @@ impl Peers {
                     version: record.map(|record| record.version.clone()),
                     data_format: record.map(|record| record.data_format),
                     joined_at: record.map(|record| record.joined_at),
+                    protocol_majors: record
+                        .map(|record| record.protocol_majors.clone())
+                        .unwrap_or_default(),
+                    raft_wire: record.and_then(|record| record.raft_wire.clone()),
+                    formats: record
+                        .map(|record| record.formats.clone())
+                        .unwrap_or_default(),
                 }
             })
             .collect();

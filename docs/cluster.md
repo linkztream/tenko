@@ -346,6 +346,7 @@ The edits (creating and deleting a token, enrolment, renewal, revocation) run as
 | `cluster.node.version_mismatch` | A handshake was refused for want of a common major; at most once an hour per node and offer | The cluster component |
 | `cluster.node.controller_cert` | A controller issued a certificate for its cluster port | The cluster component |
 | `cluster.member.join` | A controller joined the cluster as a learner, or the first controller recorded itself as a member | The cluster component |
+| `cluster.member.announce` | A controller reported a new binary in its member record after a start; records the version, the previous version and the newest data format the binary knows | The cluster component |
 | `cluster.member.promote` | Learners became voters, by the leader or by an administrator; records the voters afterwards, `force` and a replaced voter | The administrator, or the cluster component for an automatic promotion |
 | `cluster.member.remove` | A controller left the cluster; its certificates were revoked | The administrator |
 | `cluster.member.step_down` | The leader handed leadership over; records the new leader | The administrator |

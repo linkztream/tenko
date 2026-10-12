@@ -301,6 +301,9 @@ pub async fn check(data_dir: &Path, options: &Options, registry: Registry<'_>) -
             .clone()
             .unwrap_or_else(|| data_dir.join("upgrade-check"));
         let _ = std::fs::remove_dir_all(&work);
+        if let Err(error) = datadir::check_space(&work, &store_dir) {
+            return report.problem(Verdict::Failed, error.code(), error.to_string());
+        }
         let copy = work.join("store");
         if let Err(error) = format::copy_closed_store(&store_dir, &copy) {
             let _ = std::fs::remove_dir_all(&work);
@@ -317,6 +320,12 @@ pub async fn check(data_dir: &Path, options: &Options, registry: Registry<'_>) -
         && let Err(error) = std::fs::remove_dir_all(&work)
     {
         tracing::warn!(%error, dir = %work.display(), "cannot remove the work copy");
+    }
+    // The start that migrates copies the store first; it needs the room for that copy.
+    if report.verdict == Verdict::MigrationNeeded
+        && let Err(error) = datadir::check_space(&data_dir.join(datadir::BACKUPS_DIR), &store_dir)
+    {
+        return report.problem(Verdict::Failed, error.code(), error.to_string());
     }
     report
 }

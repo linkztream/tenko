@@ -461,6 +461,9 @@ mod tests {
             version: Some("0.0.1".to_owned()),
             data_format: Some(3),
             joined_at: Some(at()),
+            protocol_majors: Vec::new(),
+            raft_wire: None,
+            formats: Vec::new(),
         }
     }
 

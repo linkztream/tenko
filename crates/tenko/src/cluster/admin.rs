@@ -470,6 +470,9 @@ mod tests {
             version: Some("0.0.1".to_owned()),
             data_format: Some(3),
             joined_at: Some(at("2026-10-10T08:00:00Z")),
+            protocol_majors: Vec::new(),
+            raft_wire: None,
+            formats: Vec::new(),
         }
     }
 
@@ -622,6 +625,9 @@ mod tests {
             version: None,
             data_format: None,
             joined_at: None,
+            protocol_majors: Vec::new(),
+            raft_wire: None,
+            formats: Vec::new(),
         }];
         let text = render_members(&view);
         let row = text.lines().nth(1).expect("row");

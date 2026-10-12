@@ -3,12 +3,23 @@
 # Runs tenko on a macvlan network, so the container is a first-class host on the client
 # segment with its own address and can receive DHCP broadcasts.
 #
-# Phase 1 implements the controller role only (API, web UI, store, IPAM). The `dns` and
-# `dhcp` roles do not exist yet. They are accepted in a role list next to `controller` and
-# skipped with a notice, but a list without `controller` makes the container exit with
-# status 2. This file therefore starts the controller; the macvlan network is what the
-# DHCP role will need later. For a controller on a normal bridge network use
+# Phase 1 implements the controller role (API, web UI, store, IPAM) and the probe role. The
+# `dns` and `dhcp` roles do not exist yet. They are accepted in a role list next to
+# `controller` and skipped with a notice, but a list that has neither `controller` nor
+# `probe` makes the container exit with status 2. The macvlan network is what the DHCP role
+# will need later, and what a probe needs to see the segment. For a controller on a normal bridge network use
 # controller.example.yml.
+#
+# The file also has a probe service (profile `probe`, role `probe`): a separate node that
+# scans the segment the macvlan network is attached to and reports to the controller over
+# the cluster port (8444/tcp). Both containers have their own address on the segment, so
+# nothing is published: the controller answers on 192.0.2.10:8443 and :8444, and the probe
+# connects out to it. See "Adding the probe" below.
+#
+# Settings that differ between hosts are environment variables with the documentation values
+# as defaults: TENKO_PARENT (the host NIC, default eth0), TENKO_SUBNET, TENKO_GATEWAY,
+# TENKO_IP_RANGE, TENKO_CONTROLLER_IP, TENKO_PROBE_IP, TENKO_IMAGE, TENKO_CONFIG_FILE and
+# TENKO_KEK_FILE. Put them in an .env file next to this one or export them.
 #
 # Notes:
 # - The macvlan `parent` must be the host NIC attached to the client network.
@@ -32,14 +43,41 @@
 #     docker compose -f macvlan.example.yml exec tenko tenko setup token
 #   and open https://192.0.2.10:8443/ (see controller.example.yml for `tenko setup`).
 #
-# Start with: docker compose -f macvlan.example.yml up --build
+# Start the controller with: docker compose -f macvlan.example.yml up --build -d
+#
+# Adding the probe. A node needs an enrolment token from an administrator, once; its
+# identity and certificate then live in its own volume (probe-data), which must survive the
+# container (docs/cluster.md section 1). With the controller up and set up (first-run setup
+# above), from the directory of this file:
+#
+#   1. Sign in inside the controller container and create a token (the command prints the
+#      token on standard output and the CA fingerprint as a note):
+#        docker compose -f macvlan.example.yml exec tenko \
+#          tenko login --url https://192.0.2.10:8443 --ca-file /var/lib/tenko/tls/ca-root.pem \
+#          --user <admin>
+#        docker compose -f macvlan.example.yml exec tenko tenko node enrol-token \
+#          --roles probe --name probe-lan --expires-in 3600
+#      (or create the token in the web UI, under Nodes). The token is valid for one use.
+#   2. Enrol the probe into its volume. This runs a one-off container of the probe service
+#      on the macvlan network, so it reaches the controller at its own address:
+#        docker compose -f macvlan.example.yml --profile probe run --rm --no-deps \
+#          --entrypoint /usr/local/bin/tenko probe node enrol \
+#          --controller https://192.0.2.10:8443 --token <token> --ca-fingerprint <sha256> \
+#          --name probe-lan --address 192.0.2.11 --data-dir /var/lib/tenko
+#      (the token can also come from TENKO_ENROL_TOKEN or --token-file, which keeps it out
+#      of the process list).
+#   3. Start the probe: docker compose -f macvlan.example.yml --profile probe up -d probe
+#      and check it: docker compose -f macvlan.example.yml exec probe tenko node status
+#
+# The probe service has a profile so that a plain `up` starts the controller only: a probe
+# that is not enrolled yet exits at once and would restart in a loop.
 
 services:
   tenko:
     build:
       context: ../..
       dockerfile: deploy/Dockerfile
-    image: tenko:local
+    image: ${TENKO_IMAGE:-tenko:local}
     # Phase 1: the controller. When the DNS and DHCP roles arrive, run
     # ["--roles", "controller,dns,dhcp", "--config", "/etc/tenko/tenko.toml"].
     command: ["--roles", "controller", "--config", "/etc/tenko/tenko.toml"]
@@ -49,7 +87,18 @@ services:
       TENKO_KEK__PROVIDER: file
       TENKO_KEK__PATH: /run/secrets/tenko_kek
       # The certificate of the internal CA also names the container's address.
-      TENKO_TLS__ADDRESSES: 192.0.2.10
+      TENKO_TLS__ADDRESSES: ${TENKO_CONTROLLER_IP:-192.0.2.10}
+      # The cluster port (8444/tcp) must listen on the container's address for the probe
+      # and for other controllers. The default is 0.0.0.0:8444 already; set here so a
+      # configuration file cannot narrow it by accident.
+      TENKO_CLUSTER__LISTEN: '["0.0.0.0:8444"]'
+      # Nodes are told this endpoint at enrolment (host:port).
+      TENKO_CLUSTER__ADVERTISE: '["${TENKO_CONTROLLER_IP:-192.0.2.10}:8444"]'
+    # Nothing is published on a macvlan network: the container has its own address, and
+    # every port it listens on is reachable on it. These lines only document the ports.
+    expose:
+      - "8443/tcp"
+      - "8444/tcp"
     secrets:
       - tenko_kek
     # The controller listens on 8443 and needs no capability. The later roles will: DNS on
@@ -65,25 +114,67 @@ services:
     volumes:
       # SSD or NVMe only (OPS-19).
       - "tenko-data:/var/lib/tenko"
-      - "./tenko.toml:/etc/tenko/tenko.toml:ro"
+      - "${TENKO_CONFIG_FILE:-./tenko.toml}:/etc/tenko/tenko.toml:ro"
     networks:
       lan:
-        ipv4_address: 192.0.2.10
+        ipv4_address: ${TENKO_CONTROLLER_IP:-192.0.2.10}
+
+  # A separate probe node on the same segment. Started with `--profile probe` once it is
+  # enrolled (see "Adding the probe" above).
+  probe:
+    profiles: ["probe"]
+    image: ${TENKO_IMAGE:-tenko:local}
+    # Only the probe role: no store and no vault, so no KEK secret and no configuration
+    # file are needed. The node's files are in the data directory.
+    command: ["--roles", "probe"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # The image's HEALTHCHECK asks the API on 8443, which a probe does not serve.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/tenko", "node", "status", "--check", "--data-dir", "/var/lib/tenko"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    volumes:
+      # The identity and certificate of the node, and its observation buffer. Losing the
+      # volume loses the node: enrol again and revoke the old one.
+      - "probe-data:/var/lib/tenko"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    # The scan methods of this release (neighbor tables, ICMP echo, TCP connect, reverse
+    # DNS, mDNS, LLMNR, SNMPv3) need no capability. Only the raw-socket methods do
+    # (arp_sweep, tcp_syn, os_fingerprint, lldp; docs/scanning.md section 9), and they are
+    # declared but do not run yet. Uncomment when they do. NET_RAW lets the process craft
+    # packets on the segment, which is why it is off until you need it. ICMP echo works
+    # without it when the sysctl net.ipv4.ping_group_range admits gid 65532; Docker sets a
+    # permissive value in the container's own network namespace.
+    # cap_add:
+    #   - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      lan:
+        ipv4_address: ${TENKO_PROBE_IP:-192.0.2.11}
 
 networks:
   lan:
     driver: macvlan
     driver_opts:
-      parent: eth0
+      parent: ${TENKO_PARENT:-eth0}
     ipam:
       config:
-        - subnet: 192.0.2.0/24
-          gateway: 192.0.2.1
-          ip_range: 192.0.2.8/29
+        - subnet: ${TENKO_SUBNET:-192.0.2.0/24}
+          gateway: ${TENKO_GATEWAY:-192.0.2.1}
+          ip_range: ${TENKO_IP_RANGE:-192.0.2.8/29}
 
 secrets:
   tenko_kek:
-    file: ./secrets/tenko_kek
+    file: ${TENKO_KEK_FILE:-./secrets/tenko_kek}
 
 volumes:
   tenko-data: {}
+  probe-data: {}

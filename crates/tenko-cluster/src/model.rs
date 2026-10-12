@@ -250,6 +250,30 @@ pub struct MemberRecord {
     pub data_format: u32,
     /// When it joined.
     pub joined_at: Timestamp,
+    /// The protocol majors its binary speaks with nodes (OPS-08); empty in records written
+    /// before members reported them.
+    #[serde(default)]
+    pub protocol_majors: Vec<u32>,
+    /// The wire version of its Raft messages (`openraft-0.9/cbor-1`); absent in records
+    /// written before members reported it.
+    #[serde(default)]
+    pub raft_wire: Option<String>,
+    /// The data formats its binary can open, oldest first (it migrates every older one to
+    /// the newest); empty in records written before members reported them.
+    #[serde(default)]
+    pub formats: Vec<u32>,
+}
+
+impl MemberRecord {
+    /// The data formats the member's binary knows: the reported list, else every format up
+    /// to [`MemberRecord::data_format`].
+    pub fn known_formats(&self) -> Vec<u32> {
+        if self.formats.is_empty() {
+            (1..=self.data_format).collect()
+        } else {
+            self.formats.clone()
+        }
+    }
 }
 
 /// The controller a node is connected to (written at connect, removed at disconnect by the
