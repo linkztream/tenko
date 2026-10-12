@@ -44,7 +44,7 @@
       </unit>
       <unit id="audit_export.col.lag">
         <notes><note category="description">Column: how many audit records a sink still has to deliver.</note></notes>
-        <segment><source>Behind</source><target>Eftersläpning</target></segment>
+        <segment><source>Behind</source><target>Backlog</target></segment>
       </unit>
       <unit id="audit_export.col.actions">
         <notes><note category="description">Hidden header of the column with the buttons of a row.</note></notes>
