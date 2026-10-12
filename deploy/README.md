@@ -459,9 +459,11 @@ Upgrades in LXC are binary upgrades with `tenko upgrade` as on any Linux host
 `IMAGE=<tag>`), starts the controller on a macvlan network on it, waits for the
 `HEALTHCHECK`, checks `/api/v1/health/ready` from a throwaway container on the same network,
 runs first-run setup, enrols the probe with a token and checks that it runs, then removes
-everything, the link included, even on failure. It needs root (sudo), Docker with compose
-and `ip`. The Docker host cannot reach macvlan children, which is why every check runs in a
-container.
+everything, the link included, even on failure. It needs root (sudo), Docker with the compose
+and buildx plugins, and `ip`, and the Docker daemon must run in the network namespace of the
+shell that creates the link (a Linux host, or docker.io inside a WSL distribution; the engine
+of Docker Desktop runs elsewhere and does not see the link). The Docker host cannot reach
+macvlan children, which is why every check runs in a container.
 
 ## Windows
 

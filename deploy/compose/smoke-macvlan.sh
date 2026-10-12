@@ -14,10 +14,11 @@
 #   6. tears everything down (containers, volumes, network, temporary files, the dummy link),
 #      also when a step fails. On failure the logs of both containers are printed first.
 #
-# Needs: bash, Docker with the compose plugin, iproute2 (`ip`), and root for `ip` (the
-# script uses sudo when it is not root). Nothing else. It touches only the dummy link, the
-# Docker project `tenkosmoke` and the image it builds; its containers talk to each other on
-# the private macvlan segment of 192.0.2.0/24 (documentation addresses) and to nothing else.
+# Needs: bash, Docker with the compose and buildx plugins (the Dockerfile uses BuildKit cache
+# mounts), iproute2 (`ip`), and root for `ip` (the script uses sudo when it is not root).
+# Nothing else. It touches only the dummy link, the Docker project `tenkosmoke` and the image
+# it builds; its containers talk to each other on the private macvlan segment of 192.0.2.0/24
+# (documentation addresses) and to nothing else.
 # Only the image build reaches out, to the registries and package mirrors of the Dockerfile.
 #
 # Usage, from anywhere:
@@ -142,8 +143,10 @@ mkdir -p "$work/secrets"
 # owner; the directory is private to this user.
 head -c 32 /dev/urandom | od -An -v -tx1 | tr -d ' \n' >"$work/secrets/tenko_kek"
 chmod 0444 "$work/secrets/tenko_kek"
-# An empty file means the defaults; the example mounts it for the --config option.
-printf '# Smoke test: the defaults.\n' >"$work/tenko.toml"
+# The defaults, except that the breached-password check stays offline: the macvlan segment
+# has no route out, and the online check would only time out. The example mounts the file
+# for the --config option.
+printf '# Smoke test: the defaults, without the online breach check.\n[hibp]\nonline = false\n' >"$work/tenko.toml"
 chmod 0444 "$work/tenko.toml"
 export TENKO_KEK_FILE="$work/secrets/tenko_kek"
 export TENKO_CONFIG_FILE="$work/tenko.toml"
@@ -172,7 +175,9 @@ client_health
 
 step "first-run setup and an enrolment token for the probe (commands run inside the controller)"
 url="https://$TENKO_CONTROLLER_IP:8443"
-password="$(head -c 18 /dev/urandom | od -An -v -tx1 | tr -d ' \n')Aa1!"
+# The defaults keep the Home profile, whose password preset is the PIN: digits only, 4 to 64
+# of them. A random PIN of 8 to 12 digits.
+password="$(od -An -N8 -tu1 /dev/urandom | tr -d ' \n' | cut -c1-12)"
 setup_token="$(compose exec -T tenko "$tenko_bin" setup token | tr -d '\r\n')"
 [[ -n "$setup_token" ]] || fail "no setup token"
 printf '%s\n' "$password" | compose exec -T -e "TENKO_SETUP_TOKEN=$setup_token" tenko \
