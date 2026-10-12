@@ -25439,7 +25439,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `If-Match` is stale (`auth.conflict`), or a PIN would be the only factor while the vault holds operator secrets (`settings.pin_coupling`) */
+            /** @description `If-Match` is stale (`auth.conflict`), a PIN would be the only factor while the vault holds operator secrets (`settings.pin_coupling`), or the change would start to require the audit export while no sink is enabled (`audit.export.required`, TGL-21) */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -120,6 +120,10 @@ pub enum AuthError {
     /// A setting change would break the PIN coupling rule (IAM-07, CON-07).
     #[error("a PIN may be the only factor only while the vault holds no operator secrets")]
     PinCoupling,
+    /// A setting change would start to require the audit export while no sink is enabled
+    /// (TGL-21).
+    #[error("the profile requires an audit export sink; enable one first")]
+    AuditExportRequired,
     /// The account must change its password before it does anything else.
     #[error("the password must be changed first")]
     PasswordChangeRequired,
@@ -223,6 +227,7 @@ impl Coded for AuthError {
             Self::InvalidHostName(_) => "auth.setup.invalid_host_name",
             Self::Invalid { .. } => "auth.invalid_request",
             Self::PinCoupling => "settings.pin_coupling",
+            Self::AuditExportRequired => "audit.export.required",
             Self::PasswordChangeRequired => "auth.password_change_required",
             Self::GrantInvalidScope(_) => "auth.grant.invalid_scope",
             Self::GrantInvalidRole { .. } => "auth.grant.invalid_role",
@@ -265,6 +270,7 @@ impl Coded for AuthError {
             | Self::Conflict
             | Self::SetupClosed
             | Self::PinCoupling
+            | Self::AuditExportRequired
             | Self::GrantDuplicate
             | Self::ServiceAccountNoLogin => 409,
             Self::BreachCheckUnavailable | Self::Unavailable(_) | Self::ScopeUnavailable => 503,
@@ -310,6 +316,7 @@ impl Coded for AuthError {
             Self::StepUpRequired { .. } => "Fresh authentication required",
             Self::SetupClosed => "Setup is closed",
             Self::PinCoupling => "PIN coupling rule",
+            Self::AuditExportRequired => "Audit export required",
             Self::PasswordChangeRequired => "Password change required",
             _ => tenko_core::error::status_title(self.http_status()),
         }

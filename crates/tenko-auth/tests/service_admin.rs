@@ -3059,3 +3059,71 @@ async fn an_account_without_global_roles_is_accepted() {
         .expect("no roles");
     assert_eq!(none.roles, Vec::<RoleName>::new());
 }
+
+#[tokio::test]
+async fn a_change_that_starts_to_require_the_audit_export_needs_an_enabled_sink_first() {
+    use tenko_auth::{
+        audit_export::model::{
+            AuditExportSettings, ExportFormat, FileTarget, SETTINGS, Sink, SinkTarget,
+        },
+        settings::AuditExport,
+    };
+
+    let (env, strong) = standard_with_strong_admin().await;
+    let admin = ctx(&env, &strong).await;
+    let hardened = SettingsPatch {
+        profile: Some(Profile::Hardened),
+        ..SettingsPatch::default()
+    };
+    let explicit = SettingsPatch {
+        audit_export: Some(AuditExport::Required),
+        ..SettingsPatch::default()
+    };
+    // Without an enabled sink the switch is refused and audited as a failed change (TGL-21).
+    for patch in [&hardened, &explicit] {
+        assert_eq!(
+            env.service
+                .update_security_settings(&admin, patch, None)
+                .await
+                .expect_err("TGL-21"),
+            AuthError::AuditExportRequired,
+            "{patch:?}"
+        );
+    }
+    assert_eq!(env.service.settings().audit_export(), AuditExport::Optional);
+    let refused = audit_of(&env, "auth.settings.update").await;
+    assert_eq!(refused.len(), 2);
+    assert!(refused.iter().all(|record| {
+        record.draft.outcome
+            == AuditOutcome::Failed {
+                code: "audit.export.required".into(),
+            }
+    }));
+
+    // With an enabled sink the same change passes.
+    let settings = AuditExportSettings {
+        sinks: vec![Sink {
+            id: uuid::Uuid::now_v7(),
+            name: "file".to_owned(),
+            enabled: true,
+            format: ExportFormat::Json,
+            target: SinkTarget::File(FileTarget {
+                file: "audit.jsonl".to_owned(),
+                max_bytes: 1 << 20,
+                keep: 1,
+            }),
+        }],
+        ..AuditExportSettings::default()
+    };
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), env.now());
+    batch
+        .put_typed(&SETTINGS, &(), &settings)
+        .expect("encode the sink");
+    env.store.propose(batch).await.expect("store the sink");
+    let view = env
+        .service
+        .update_security_settings(&admin, &explicit, None)
+        .await
+        .expect("TGL-21 satisfied");
+    assert_eq!(view.settings.audit_export(), AuditExport::Required);
+}

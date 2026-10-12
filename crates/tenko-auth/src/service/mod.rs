@@ -661,7 +661,11 @@ impl AuthService {
         } else {
             settings.session.idle()
         };
-        if now.saturating_since(session.last_seen_at) >= refresh_interval(idle) {
+        // Without quorum the refresh would wait for a leader and fail, and every later
+        // request of the session would wait again (OPS-26): the refresh waits for the quorum.
+        if now.saturating_since(session.last_seen_at) >= refresh_interval(idle)
+            && self.store.status().quorum.accepts_writes()
+        {
             session.last_seen_at = now;
             session.idle_expires_at = now.checked_add(idle).unwrap_or(now).min(session.expires_at);
             let principal = Principal::User {

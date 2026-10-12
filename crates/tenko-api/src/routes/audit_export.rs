@@ -705,6 +705,28 @@ mod tests {
     #[tokio::test]
     async fn a_required_export_needs_an_enabled_sink() {
         let lab = Lab::new(true).await;
+        // Switching to a required export while no sink is enabled is refused (TGL-21): the
+        // policy stays the profile's and nothing is warned about.
+        let refused = lab
+            .h
+            .call(
+                "PATCH",
+                "/settings/security",
+                Cookie(&lab.admin),
+                Some(&json!({ "audit_export": "required" })),
+            )
+            .await;
+        refused.assert_problem(409, "audit.export.required");
+        let view = lab.get().await;
+        assert_eq!(view.body["policy"]["audit_export"], "local");
+        assert_eq!(view.body["policy"]["required"], false);
+        assert_eq!(view.body["policy"]["satisfied"], true);
+        assert_eq!(view.body["warnings"], json!([]));
+
+        // With an enabled sink the switch passes and the policy is satisfied.
+        lab.put(&json!({ "sinks": [file_sink()] }), None)
+            .await
+            .assert_status(200);
         let toggle = lab
             .h
             .call(
@@ -715,14 +737,12 @@ mod tests {
             )
             .await;
         toggle.assert_status(200);
-
         let view = lab.get().await;
         assert_eq!(view.body["policy"]["audit_export"], "required");
         assert_eq!(view.body["policy"]["required"], true);
-        assert_eq!(view.body["policy"]["satisfied"], false);
-        let warnings = view.body["warnings"].as_array().expect("warnings");
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
-        assert_eq!(warnings[0]["code"], "audit.export.required");
+        assert_eq!(view.body["policy"]["satisfied"], true);
+        assert_eq!(view.body["warnings"], json!([]));
+        let revision = view.body["revision"].clone();
 
         // No sink, and only a disabled one, are both refused and audited as failed.
         lab.put(&json!({ "sinks": [] }), None)
@@ -734,24 +754,20 @@ mod tests {
             .await
             .assert_problem(409, "audit.export.required");
         let updates = lab.drafts("sys.audit_export.update").await;
-        assert_eq!(updates.len(), 2);
-        for draft in &updates {
-            assert_eq!(
-                draft.outcome,
-                tenko_core::audit::AuditOutcome::Failed {
-                    code: "audit.export.required".into()
-                }
-            );
-        }
-        assert_eq!(lab.get().await.body["revision"], 0);
+        let failed = updates
+            .iter()
+            .filter(|draft| {
+                draft.outcome
+                    == tenko_core::audit::AuditOutcome::Failed {
+                        code: "audit.export.required".into(),
+                    }
+            })
+            .count();
+        assert_eq!(failed, 2);
+        assert_eq!(lab.get().await.body["revision"], revision);
 
-        // An enabled sink satisfies the policy and clears the warning.
-        let put = lab.put(&json!({ "sinks": [file_sink()] }), None).await;
-        put.assert_status(200);
-        assert_eq!(put.body["policy"]["satisfied"], true);
-        assert_eq!(put.body["warnings"], json!([]));
-        // Removing it again is refused.
-        let etag = put.header("etag").expect("an etag").to_owned();
+        // Removing the sink with a fresh ETag is refused as well, and the sink stays.
+        let etag = view.header("etag").expect("an etag").to_owned();
         lab.put(&json!({ "sinks": [] }), Some(&etag))
             .await
             .assert_problem(409, "audit.export.required");

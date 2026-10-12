@@ -24,7 +24,7 @@ use crate::{
         USER_NAMES, USER_TOKENS, USERS, UserRecord,
     },
     roles::{RoleName, satisfies},
-    settings::{MfaRequirement, SecuritySettings, SettingsPatch, changes},
+    settings::{AuditExport, MfaRequirement, SecuritySettings, SettingsPatch, changes},
 };
 
 /// The counter that orders changes to the set of administrators.
@@ -763,8 +763,9 @@ impl AuthService {
     /// # Errors
     ///
     /// [`AuthError::Denied`], [`AuthError::Conflict`] when `expect` is stale,
-    /// [`AuthError::Invalid`], [`AuthError::PinCoupling`], [`AuthError::Unavailable`]
-    /// before setup.
+    /// [`AuthError::Invalid`], [`AuthError::PinCoupling`], [`AuthError::AuditExportRequired`]
+    /// when the change starts to require the audit export while no sink is enabled (TGL-21),
+    /// [`AuthError::Unavailable`] before setup.
     pub async fn update_security_settings(
         &self,
         ctx: &RequestCtx,
@@ -786,6 +787,19 @@ impl AuthService {
         }
         let next = patch.apply(&current);
         next.validate()?;
+        // TGL-21: a change that starts to require the audit export needs an enabled sink
+        // first. A sink that fails or is disabled later is the status warning's business.
+        if next.audit_export() == AuditExport::Required
+            && current.audit_export() != AuditExport::Required
+            && crate::audit_export::status::required_unmet(
+                self.view().await?.as_ref(),
+                AuditExport::Required,
+            )?
+        {
+            self.record_refused_settings_change(ctx, &AuthError::AuditExportRequired)
+                .await;
+            return Err(AuthError::AuditExportRequired);
+        }
         // With MFA for administrators or for everyone, the accounts that can reach the vault
         // need a second factor already; only "optional" leaves a PIN on its own. A change that
         // leaves TGL-01 and TGL-02 as they are cannot let a PIN stand alone, also where one
@@ -795,19 +809,8 @@ impl AuthService {
             && (next.password_policy != current.password_policy || next.mfa != current.mfa)
             && self.has_operator_secrets().await?
         {
-            let mut batch = WriteBatch::for_request(ctx);
-            batch.idempotency = None;
-            batch.audit(
-                tenko_core::audit::AuditDraft::failed(
-                    actions::SETTINGS_UPDATE,
-                    vec![ObjectRef::singleton(ObjectKind::Settings)],
-                    &AuthError::PinCoupling,
-                )
-                .with_source_ip(ctx.source_ip),
-            );
-            if let Err(error) = self.store.propose(batch).await {
-                tracing::warn!(%error, "could not record a refused settings change");
-            }
+            self.record_refused_settings_change(ctx, &AuthError::PinCoupling)
+                .await;
             return Err(AuthError::PinCoupling);
         }
         if next != current {
@@ -825,6 +828,24 @@ impl AuthService {
             self.commit(batch).await?;
         }
         self.settings_view().await
+    }
+
+    /// Records a refused settings change as a failed audit record (refused guardrails are
+    /// audited); a store error is logged, not returned, because the refusal stands anyway.
+    async fn record_refused_settings_change(&self, ctx: &RequestCtx, error: &AuthError) {
+        let mut batch = WriteBatch::for_request(ctx);
+        batch.idempotency = None;
+        batch.audit(
+            tenko_core::audit::AuditDraft::failed(
+                actions::SETTINGS_UPDATE,
+                vec![ObjectRef::singleton(ObjectKind::Settings)],
+                error,
+            )
+            .with_source_ip(ctx.source_ip),
+        );
+        if let Err(error) = self.store.propose(batch).await {
+            tracing::warn!(%error, "could not record a refused settings change");
+        }
     }
 }
 

@@ -7,7 +7,7 @@
 //! | Endpoint | Success | Errors |
 //! |---|---|---|
 //! | `GET /settings/security` | 200 `SecuritySettingsView` with `ETag: "<revision>"` | 401, 403, 503 |
-//! | `PATCH /settings/security` | 200 `SecuritySettingsView` with the new `ETag` | 400, 401, 403, 409 `auth.conflict` or `settings.pin_coupling`, 503 |
+//! | `PATCH /settings/security` | 200 `SecuritySettingsView` with the new `ETag` | 400, 401, 403, 409 `auth.conflict`, `settings.pin_coupling` or `audit.export.required`, 503 |
 //! | `PUT /settings/default-language` | 200 `DefaultLanguage` | 400 `auth.invalid_request` (field `language`), 401, 403, 409, 503 |
 //!
 //! `PATCH` takes a `SettingsPatch`: a new profile resets every toggle first, explicit
@@ -81,7 +81,7 @@ async fn get_security_settings(Svc(service): Svc, Ctx(ctx): Ctx) -> Result<Respo
         (status = 200, description = "The settings after the change", body = SecuritySettingsView,
             headers(("ETag" = String, description = "The new revision of the settings"))),
         (status = 400, description = "The body is malformed (`sys.invalid_request`), a value is invalid (`auth.invalid_request`) or `If-Match` is malformed (`sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "`If-Match` is stale (`auth.conflict`), or a PIN would be the only factor while the vault holds operator secrets (`settings.pin_coupling`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "`If-Match` is stale (`auth.conflict`), a PIN would be the only factor while the vault holds operator secrets (`settings.pin_coupling`), or the change would start to require the audit export while no sink is enabled (`audit.export.required`, TGL-21)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
         Forbidden,
         Unavailable
