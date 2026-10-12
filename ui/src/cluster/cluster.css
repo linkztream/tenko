@@ -1,0 +1,54 @@
+/*
+ * The cluster page and the queued changes: the summary, the member table, the dialogs with their
+ * previews and the digest check. Token roles only (tokens.css); every state carries a glyph and a
+ * word, and the properties are logical.
+ */
+.cluster-summary { display: grid; gap: var(--sp-5); }
+.cluster-facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--sp-5) var(--sp-7);
+  margin: 0; padding: var(--sp-5) var(--sp-6);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-3);
+}
+.cluster-facts dt { font-size: var(--fs-12); color: var(--ink-3); }
+.cluster-facts dd { margin: 0; font-size: var(--fs-14); font-weight: var(--fw-medium); overflow-wrap: anywhere; }
+.cluster-facts dd .muted { font-weight: var(--fw-regular); font-size: var(--fs-12); }
+.cluster-facts dd[data-state="isolated"] { color: var(--conflict); }
+.cluster-facts dd[data-state="electing"] { color: var(--discrepancy); }
+
+.cluster-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.cluster-actions.end { justify-content: flex-end; }
+/* The buttons under the token of the enrolment dialog, which this page shares with the nodes page. */
+.nodes-form .row-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+
+/* The members. */
+.cluster-members .member-name { color: var(--ink); font-weight: var(--fw-medium); }
+.cluster-members .member-leader { display: inline-flex; vertical-align: middle; margin-inline-start: var(--sp-3); color: var(--accent); }
+.cluster-members tr.leader td:first-child { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--accent); }
+.tag.cluster-health.leader { background: var(--accent-wash); color: var(--accent); }
+.tag.cluster-health.caught_up { background: var(--ok-wash); color: var(--ok-ink); }
+.tag.cluster-health.catching_up { background: var(--discrepancy-wash); color: var(--discrepancy); }
+.tag.cluster-health.out_of_contact { background: var(--conflict-wash); color: var(--conflict); }
+
+/* The digests. */
+.tag.cluster-digest.agrees { background: var(--ok-wash); color: var(--ok-ink); }
+.tag.cluster-digest.differs { background: var(--conflict-wash); color: var(--conflict); }
+
+/* The dialogs and their previews. */
+.dialog.cluster-dialog { width: min(560px, calc(100vw - 32px)); max-height: 88vh; overflow: auto; }
+.cluster-preview { display: grid; gap: var(--sp-5); }
+.cluster-figures {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--sp-5);
+  margin: 0; padding: var(--sp-5); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface-2);
+}
+.cluster-figures dt { font-size: var(--fs-12); color: var(--ink-3); }
+.cluster-figures dd { margin: 0; font-size: var(--fs-16); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.cluster-list { margin: 0; padding-inline-start: var(--sp-6); display: grid; gap: var(--sp-2); }
+.cluster-force { display: flex; align-items: flex-start; gap: var(--sp-4); cursor: pointer; }
+.cluster-force > span { display: grid; gap: 2px; }
+.cluster-force .help { font-size: var(--fs-12); color: var(--ink-3); }
+
+/* The queue. */
+.tag.queue-state.conflict { background: var(--conflict-wash); color: var(--conflict); }
+.tag.queue-state.expired { background: var(--discrepancy-wash); color: var(--discrepancy); }
+.tag.queue-state.applied, .tag.queue-state.reapplied { background: var(--ok-wash); color: var(--ok-ink); }
+.tag.queue-state.draining { background: var(--accent-wash); color: var(--accent); }

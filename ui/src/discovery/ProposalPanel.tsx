@@ -41,8 +41,7 @@ export function ProposalPanel(props: ProposalPanelProps) {
       return { value: p, revision: p.revision };
     },
   });
-  // `latest` rethrows the error of a failed read; the error is shown below instead.
-  const proposal = () => (live.value.error ? undefined : live.value.latest);
+  const proposal = () => live.latest();
 
   // The suggested change as the planner would run it now: a dry run of the approval. Read
   // once per revision, and only for a person who may approve.

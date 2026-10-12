@@ -15,11 +15,31 @@ import { Field, FieldRow, SelectInput } from "../ipam/formKit";
 import { copyValue } from "../secrets/clipboard";
 import { moduleRunning } from "../updates/modules";
 import { DEFAULT_LIFETIME, enrolCommand, fingerprintPairs, LIFETIMES, lifetimeWord, roleWord } from "./model";
+import "./nodes.css";
 
 const NAME_RULE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
 
-export function EnrolDialog(props: { onCreated: () => void; onClose: () => void }) {
+/** The longest life of a controller token (docs/cluster.md, section 1.1). */
+const CONTROLLER_MAX_LIFETIME = 3_600;
+
+export function EnrolDialog(props: {
+  onCreated: () => void;
+  onClose: () => void;
+  /**
+   * Fixes the roles of the token and hides the role choice: the cluster page asks for
+   * `["controller"]`. The nodes page leaves it out and lets the person choose.
+   */
+  roles?: readonly string[];
+  /** The title of the dialog, instead of the one of a node token. */
+  title?: string;
+  /** The text under the title, instead of the one about nodes. */
+  intro?: string;
+  /** The text under the token, instead of the one that names the roles of a node. */
+  next?: string;
+}) {
   const [roles, setRoles] = createSignal<EnrolRole[]>(["probe"]);
+  const fixed = () => props.roles !== undefined && props.roles.length > 0;
+  const lifetimes = () => (props.roles?.includes("controller") ? LIFETIMES.filter((s) => s <= CONTROLLER_MAX_LIFETIME) : LIFETIMES);
   const [name, setName] = createSignal("");
   const [vrf, setVrf] = createSignal("");
   const [lifetime, setLifetime] = createSignal(String(DEFAULT_LIFETIME));
@@ -41,7 +61,7 @@ export function EnrolDialog(props: { onCreated: () => void; onClose: () => void 
     const n = name().trim();
     return n !== "" && !NAME_RULE.test(n) ? t("nodes.enrol.name_rule") : undefined;
   };
-  const rolesError = () => (roles().length === 0 ? t("nodes.enrol.roles_required") : undefined);
+  const rolesError = () => (!fixed() && roles().length === 0 ? t("nodes.enrol.roles_required") : undefined);
 
   const toggleRole = (role: EnrolRole, on: boolean) => setRoles(on ? [...new Set([...roles(), role])] : roles().filter((r) => r !== role));
 
@@ -53,7 +73,7 @@ export function EnrolDialog(props: { onCreated: () => void; onClose: () => void 
     setError(null);
     try {
       const answer = await createEnrolment({
-        roles: ENROL_ROLES.filter((r) => roles().includes(r)),
+        roles: props.roles ? [...props.roles] : ENROL_ROLES.filter((r) => roles().includes(r)),
         name: name().trim() || null,
         vrf: vrf() || null,
         expires_in_secs: Number(lifetime()),
@@ -73,45 +93,47 @@ export function EnrolDialog(props: { onCreated: () => void; onClose: () => void 
   };
 
   return (
-    <Dialog label={t("nodes.enrol.title")} onClose={props.onClose} class="dialog nodes-dialog">
+    <Dialog label={props.title ?? t("nodes.enrol.title")} onClose={props.onClose} class="dialog nodes-dialog">
       <Show
         when={created()}
         fallback={
           <form class="nodes-form" data-testid="dialog-enrol" onSubmit={(e) => void submit(e)} novalidate>
-            <h2 class="dialog-title">{t("nodes.enrol.title")}</h2>
-            <p class="muted">{t("nodes.enrol.intro")}</p>
-            <fieldset class="nodes-fieldset">
-              <legend>{t("nodes.enrol.roles")}</legend>
-              <For each={ENROL_ROLES}>
-                {(role) => (
-                  <label class="check-row">
-                    <input
-                      type="checkbox"
-                      class="cb"
-                      checked={roles().includes(role)}
-                      data-testid={`field-role-${role}`}
-                      onChange={(e) => toggleRole(role, e.currentTarget.checked)}
-                    />
-                    <span>
-                      {roleWord(role)}
-                      <small class="help">{t(`nodes.enrol.role_hint.${role}`)}</small>
-                    </span>
-                  </label>
-                )}
-              </For>
-              <Show when={tried() && rolesError()}>
-                <p class="help bad" role="alert">
-                  <Icon name="alert" size="xs" /> {rolesError()}
-                </p>
-              </Show>
-            </fieldset>
+            <h2 class="dialog-title">{props.title ?? t("nodes.enrol.title")}</h2>
+            <p class="muted">{props.intro ?? t("nodes.enrol.intro")}</p>
+            <Show when={!fixed()}>
+              <fieldset class="nodes-fieldset">
+                <legend>{t("nodes.enrol.roles")}</legend>
+                <For each={ENROL_ROLES}>
+                  {(role) => (
+                    <label class="check-row">
+                      <input
+                        type="checkbox"
+                        class="cb"
+                        checked={roles().includes(role)}
+                        data-testid={`field-role-${role}`}
+                        onChange={(e) => toggleRole(role, e.currentTarget.checked)}
+                      />
+                      <span>
+                        {roleWord(role)}
+                        <small class="help">{t(`nodes.enrol.role_hint.${role}`)}</small>
+                      </span>
+                    </label>
+                  )}
+                </For>
+                <Show when={tried() && rolesError()}>
+                  <p class="help bad" role="alert">
+                    <Icon name="alert" size="xs" /> {rolesError()}
+                  </p>
+                </Show>
+              </fieldset>
+            </Show>
             <FieldRow>
               <Field name="name" label={t("nodes.enrol.name")} help={t("nodes.enrol.name_help")} error={tried() ? nameError() : undefined}>
                 {(c) => <input {...c} class="input mono" autocomplete="off" spellcheck={false} value={name()} onInput={(e) => setName(e.currentTarget.value)} />}
               </Field>
               <Field name="lifetime" label={t("nodes.enrol.lifetime")} help={t("nodes.enrol.lifetime_help")}>
                 {(c) => (
-                  <SelectInput {...c} value={lifetime()} options={LIFETIMES.map((s) => ({ value: String(s), label: lifetimeWord(s) }))} onChange={setLifetime} />
+                  <SelectInput {...c} value={lifetime()} options={lifetimes().map((s) => ({ value: String(s), label: lifetimeWord(s) }))} onChange={setLifetime} />
                 )}
               </Field>
             </FieldRow>
@@ -178,7 +200,7 @@ export function EnrolDialog(props: { onCreated: () => void; onClose: () => void 
                 </code>
                 <small class="help">{t("nodes.enrol.fingerprint_help")}</small>
               </div>
-              <p class="muted">{t("nodes.enrol.next", { roles: c().enrolment.roles.map(roleWord).join(", ") })}</p>
+              <p class="muted">{props.next ?? t("nodes.enrol.next", { roles: c().enrolment.roles.map(roleWord).join(", ") })}</p>
               <div class="dialog-actions">
                 <button type="button" class="btn primary" data-testid="enrol-done" onClick={() => props.onClose()}>
                   {t("nodes.enrol.done")}

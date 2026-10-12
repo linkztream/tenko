@@ -10,6 +10,7 @@ import { areaEnabled, loadModules, moduleRunning, resetModules, RESTART_WARNING 
 import { UPDATES_PATH } from "../updates/paths";
 import { AccountMenu } from "./AccountMenu";
 import { AREAS } from "./areas";
+import { ClusterBanner } from "./ClusterBanner";
 import { CommandPalette } from "./CommandPalette";
 import { useCommands } from "./commands";
 import { useGlobalKeys } from "./keyboard";
@@ -203,7 +204,11 @@ export function Shell(props: { children?: JSX.Element }) {
         onAccount={(el) => setAccount((cur) => (cur ? null : el))}
         accountOpen={account() !== null}
       />
-      <SecurityBanner />
+      {/* One grid cell for the banners: the security warnings first, then the partition state. */}
+      <div class="banners">
+        <SecurityBanner />
+        <ClusterBanner system={status.system()} />
+      </div>
       <Rail activeJobs={activeJobs()} />
       <main class="main" id="main" tabIndex={-1}>
         <ModuleGate>{props.children}</ModuleGate>

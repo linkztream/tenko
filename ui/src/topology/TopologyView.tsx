@@ -7,7 +7,7 @@
 // shared: `/topology/<id>?site=...&vlan=30&kind=router,switch&q=...`.
 import { A, useLocation, useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import { createEffect, createMemo, createResource, createSignal, For, Match, on, onCleanup, onMount, Show, Switch } from "solid-js";
-import { createLiveQuery } from "../api/live";
+import { createLiveQuery, latest } from "../api/live";
 import { decodeSegment, paths } from "../app/paths";
 import { Icon } from "../components/Icon";
 import { ErrorNotice, Notice } from "../components/Notice";
@@ -149,8 +149,7 @@ export default function TopologyView() {
   });
   createEffect(on(() => filterKey(filter()), () => live.refetch(), { defer: true }));
 
-  // `latest` rethrows the error of a failed read; the error is shown below instead.
-  const loaded = () => (live.value.error ? undefined : live.value.latest);
+  const loaded = () => live.latest();
   const graph = () => loaded()?.graph;
   const summary = () => graph()?.summary;
   const nodes = createMemo<TopologyNode[]>(() => graph()?.nodes ?? []);
@@ -206,14 +205,14 @@ export default function TopologyView() {
   const legendVlans = () => (manyVlans() ? vlansInView().filter((v) => styles().has(v.vid)) : vlansInView());
   const vlanNames = createMemo(() => {
     const names = new Map<number, string>();
-    for (const v of ipamVlans.latest ?? []) names.set(v.vid, v.name);
+    for (const v of latest(ipamVlans) ?? []) names.set(v.vid, v.name);
     for (const v of vlansInView()) if (v.name) names.set(v.vid, v.name);
     return names;
   });
   const vlanName = (vid: number) => vlanNames().get(vid);
 
   const siteOptions = createMemo(() => {
-    const list = [...(sites.latest ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+    const list = [...(latest(sites) ?? [])].sort((a, b) => a.name.localeCompare(b.name));
     const options = list.map((s) => ({ value: s.id, label: s.name }));
     const current = filter().site;
     if (current && !options.some((o) => o.value === current)) {
@@ -222,7 +221,7 @@ export default function TopologyView() {
     return options;
   });
   const vlanOptions = createMemo(() => {
-    const vids = new Set<number>([...(ipamVlans.latest ?? []).map((v) => v.vid), ...vlansInView().map((v) => v.vid)]);
+    const vids = new Set<number>([...(latest(ipamVlans) ?? []).map((v) => v.vid), ...vlansInView().map((v) => v.vid)]);
     const options = [...vids].sort((a, b) => a - b).map((vid) => ({ value: String(vid), label: `${vid} ${vlanNames().get(vid) ?? ""}`.trim() }));
     const current = filter().vlan;
     if (current && !options.some((o) => o.value === current)) {

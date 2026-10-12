@@ -147,8 +147,11 @@ test.describe("language packs", () => {
     const template = await englishTemplate(page, server.url);
     const keys = templateKeys(template);
     // Every tenth key stays English, but the page title is translated and the settings tab of
-    // the page is not, so both cases show on one page.
-    const omit = new Set(keys.filter((key, i) => i % 10 === 9 && key !== "languages.title"));
+    // the page is not, so both cases show on one page. When the title falls on a tenth
+    // position its neighbour is omitted instead, so the set stays one tenth of the keys.
+    const omit = new Set(
+      keys.flatMap((key, i) => (i % 10 === 9 ? [key === "languages.title" ? (keys[i + 1] ?? keys[i - 1] ?? key) : key] : [])),
+    );
     if (!omit.has("settings.nav.languages")) {
       omit.delete([...omit].at(-1)!);
       omit.add("settings.nav.languages");

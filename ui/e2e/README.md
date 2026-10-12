@@ -10,9 +10,11 @@ and the `data-testid` convention they rely on, are in the section "End-to-end te
 |---|---|
 | `setup-wizard`, `sign-in`, `language` | First-run setup, TOTP and passkeys, the UI language |
 | `ipam`, `move`, `import`, `audit` | IPAM writes through the plan dialog, moves, the spreadsheet import, the audit log |
-| `discovery` | Proposal inbox, approve and reject, rejection memory, observations and subject pages, adoption policies, the dashboard tile |
+| `discovery` | Proposal inbox, approve and reject, rejection memory, observations and subject pages, adoption policies, the dashboard tile, the status bar item with the number of open proposals |
 | `connectors` | Plugins and the CLI list, the schema-generated form, runs and their jobs, observations, lifecycle, secret injection, the dashboard tile; the instance page, the list and the tile follow the plugin process without a reload |
 | `nodes` | Enrolment tokens shown once, a second `tenko` process enrolled as a probe, the registry and panel, revocation, the dashboard tile and the cluster summary following enrolment, connection and revocation while open |
+| `cluster` | The cluster page of a single controller (one member, leader and voter, quorum single, no promote or step-down, a removal refused with the reasons of a single member, the digest check), "Add a controller" (a controller token shown once, pending in the token list), a viewer, Swedish; the queue and partition scenarios are `test.fixme` until WP3.9 and a lab that can isolate a controller |
+| `scans` | The scans page and its probes section with an enrolled probe, "Stop all scans" with a reason and "Resume all", "Scan now" refused with `scan.job.no_probe`, the probe's scan configuration (the node panel link, the offered configuration, a save with the scanner off and no prefixes, the revision), the per-probe stop and resume, a viewer, Swedish; nothing is ever scanned |
 | `secrets` | The secrets page under Settings (/settings/secrets) and the redirect from the old /secrets address, the PIN coupling, create and reveal with the clipboard, the TGL-24 step-up with a passkey, TGL-24 and MFA changed on /settings/security while the vault holds a secret, host credentials, the RDP and SSH hand-off with a typed user name and ports |
 | `updates` | Air-gapped default, the check against a local release source, notes and marks, the install with its dry run and restart (the health probe names the new version), what is new, a refused dry run |
 
@@ -30,6 +32,7 @@ marks a scenario that waits for a recorded defect.
 | `support/ui.ts` | Locators by `data-testid`, `data-key`, `data-id`, `data-col`; the account menu |
 | `support/i18n.ts` | `expectRendered`: the document language, and no message key shown instead of its text |
 | `support/discovery.ts` | The bundled sample connector plugin as a source of observations; proposals and facts |
+| `support/accounts.ts` | Other accounts than the administrator: `signInAsViewer`, a viewer signed in through the API |
 | `support/probe.ts` | `ProbeNode`: a second `tenko` process enrolled as a probe node |
 | `support/release.ts` | `ReleaseSource`: a release source on the loopback with a manifest and release files |
 | `support/totp.ts`, `support/webauthn.ts` | TOTP codes (RFC 6238) and Chromium's virtual platform authenticator |

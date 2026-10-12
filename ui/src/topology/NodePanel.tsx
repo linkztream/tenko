@@ -56,8 +56,7 @@ export function NodePanel(props: NodePanelProps) {
       return { value: view, revision: view.revision };
     },
   });
-  // `latest` rethrows the error of a failed read; the error is shown below instead.
-  const view = () => (live.value.error ? undefined : live.value.latest);
+  const view = () => live.latest();
 
   // The port whose neighbours are listed: one more read, for that port only.
   const [openPort, setOpenPort] = createSignal<string | null>(null);

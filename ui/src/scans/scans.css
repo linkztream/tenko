@@ -1,0 +1,56 @@
+/*
+ * The scans: the list of scan jobs with the probes, one scan with its progress and diff, and the
+ * "Scan now" dialog. Token roles only (tokens.css); every state carries a glyph and a word, and
+ * the properties are logical.
+ */
+.scans-section { display: grid; gap: var(--sp-4); align-content: start; }
+.scans-heading { font-size: var(--fs-14); display: flex; align-items: baseline; gap: var(--sp-3); }
+.scans-count { font-size: var(--fs-12); font-weight: var(--fw-regular); }
+.scans-table td, .scans-table th { vertical-align: middle; }
+.scans-table .scan-target { margin-inline-end: var(--sp-3); overflow-wrap: anywhere; }
+.scans-table .scan-command, .scans-table .scan-value { overflow-wrap: anywhere; }
+.scans-table .scan-probe-name { margin-inline-end: var(--sp-3); }
+.scans-table .scan-reason { font-size: var(--fs-12); margin-block-start: var(--sp-1); overflow-wrap: anywhere; }
+.scans-table .r { text-align: end; }
+.scans-totals tfoot th, .scans-totals tfoot td { font-weight: var(--fw-semibold); border-block-start: 1px solid var(--line); }
+
+/* The progress bar. */
+.scan-progress { display: inline-flex; align-items: center; gap: var(--sp-3); }
+.scan-bar { position: relative; display: inline-block; width: 96px; height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; flex: none; }
+.scan-bar > i { position: absolute; inset-block: 0; inset-inline: 0 auto; width: var(--v, 0%); border-radius: 3px; background: var(--accent); }
+.scan-percent { min-width: 4ch; font-size: var(--fs-12); color: var(--ink-3); text-align: end; }
+[data-state="done"] .scan-bar > i { background: var(--job-done); }
+[data-state="failed"] .scan-bar > i, [data-state="rejected"] .scan-bar > i { background: var(--job-failed); }
+
+/* The kill switch and the markers of a probe. */
+.tag.scan-switch.active { background: var(--ok-wash); color: var(--ok-ink); }
+.tag.scan-switch.stopped { background: var(--conflict-wash); color: var(--conflict); }
+.tag.scan-in-process, .tag.scan-target-kind { background: var(--surface-3); color: var(--ink-2); }
+.scans-table td > .tag + .tag, .scans-table td > a + .tag { margin-inline-start: var(--sp-2); }
+
+/* The changes of a diff. */
+.tag.scan-change.new { background: var(--ok-wash); color: var(--ok-ink); }
+.tag.scan-change.changed { background: var(--discrepancy-wash); color: var(--discrepancy); }
+.tag.scan-change.gone { background: var(--conflict-wash); color: var(--conflict); }
+
+/* The facts of one scan. */
+.scans-facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--sp-5) var(--sp-7);
+  margin: 0; padding: var(--sp-5) var(--sp-6);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-3);
+}
+.scans-facts dt { font-size: var(--fs-12); color: var(--ink-3); }
+.scans-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.scans-back { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.scans-back-icon { transform: scaleX(-1); }
+[dir="rtl"] .scans-back-icon { transform: none; }
+
+/* The dialogs. */
+.dialog.scans-dialog { width: min(520px, calc(100vw - 32px)); max-height: 88vh; overflow: auto; }
+.scans-form { display: grid; gap: var(--sp-4); }
+.scans-form textarea.input { resize: vertical; }
+.scans-kinds { display: grid; gap: var(--sp-3); margin: 0; padding: 0; border: 0; min-inline-size: 0; }
+.scans-kinds legend { padding: 0; margin-block-end: var(--sp-2); font-size: var(--fs-12); font-weight: var(--fw-medium); color: var(--ink-2); }
+.scans-kind { display: flex; align-items: flex-start; gap: var(--sp-4); cursor: pointer; }
+.scans-kind > span { display: grid; gap: 2px; }
+.scans-kind .help { font-size: var(--fs-12); color: var(--ink-3); }

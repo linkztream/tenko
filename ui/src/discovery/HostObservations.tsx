@@ -63,8 +63,7 @@ export function HostObservations(props: { host: Host; interfaces: readonly Inter
   // Another interface or address of the host changes what to look up.
   createEffect(on(subjects, () => live.refetch(), { defer: true }));
 
-  // `latest` rethrows the error of a failed read; the error is shown above instead.
-  const picture = () => (live.value.error ? undefined : live.value.latest);
+  const picture = () => live.latest();
   const newest = () => picture()?.facts[0];
   const ports = () => [...new Set((picture()?.facts ?? []).flatMap((f) => (f.observed.type === "services" && isCurrent(f) ? f.observed.data.open_tcp : [])))].sort((a, b) => a - b);
   const os = () =>

@@ -43,8 +43,7 @@ export default function SubjectView() {
     },
   });
 
-  // `latest` rethrows the error of a failed read; the error is shown below instead.
-  const latest = () => (live.value.error ? undefined : live.value.latest);
+  const latest = () => live.latest();
 
   const kindLabel = () => t(`discovery.subject.kind_${subjectKind(subject())}`);
   const title = () => {

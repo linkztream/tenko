@@ -6,9 +6,565 @@
         <notes><note category="description">Title of the scans page and its entry in the browser tab.</note></notes>
         <segment><source>Scans</source><target>Skanningar</target></segment>
       </unit>
-      <unit id="scans.placeholder">
-        <notes><note category="description">Placeholder text of the scans page until the page itself exists.</note></notes>
-        <segment><source>The scan page arrives with a later update.</source><target>Skanningssidan kommer i en senare uppdatering.</target></segment>
+      <unit id="scans.count">
+        <notes><note category="description">Subtitle of the scans page: how many scan jobs are listed. The argument count is the number of jobs.</note></notes>
+        <segment><source>{count, plural, one {# scan} other {# scans}}</source><target>{count, plural, one {# skanning} other {# skanningar}}</target></segment>
+      </unit>
+      <unit id="scans.section.jobs">
+        <notes><note category="description">Heading of the list of scan jobs on the scans page.</note></notes>
+        <segment><source>Scan jobs</source><target>Skanningsjobb</target></segment>
+      </unit>
+      <unit id="scans.section.probes">
+        <notes><note category="description">Heading of the list of probes on the scans page.</note></notes>
+        <segment><source>Probes</source><target>Probar</target></segment>
+      </unit>
+      <unit id="scans.list.label">
+        <notes><note category="description">Accessible name of the table of scan jobs.</note></notes>
+        <segment><source>Scan jobs, newest first</source><target>Skanningsjobb, nyaste först</target></segment>
+      </unit>
+      <unit id="scans.probes.label">
+        <notes><note category="description">Accessible name of the table of probes.</note></notes>
+        <segment><source>Probes and their scan scope</source><target>Probar och deras skanningsomfång</target></segment>
+      </unit>
+      <unit id="scans.col.target">
+        <notes><note category="description">Column heading: what a scan job covers.</note></notes>
+        <segment><source>Target</source><target>Mål</target></segment>
+      </unit>
+      <unit id="scans.col.kinds">
+        <notes><note category="description">Column heading: what a scan job does (passive refresh, port scan and so on).</note></notes>
+        <segment><source>Kinds</source><target>Typer</target></segment>
+      </unit>
+      <unit id="scans.col.state">
+        <notes><note category="description">Column heading: the state of a scan job or of a probe part.</note></notes>
+        <segment><source>State</source><target>Tillstånd</target></segment>
+      </unit>
+      <unit id="scans.col.progress">
+        <notes><note category="description">Column heading: how far a scan job has come.</note></notes>
+        <segment><source>Progress</source><target>Förlopp</target></segment>
+      </unit>
+      <unit id="scans.col.requested_by">
+        <notes><note category="description">Column heading: who started a scan job.</note></notes>
+        <segment><source>Requested by</source><target>Begärd av</target></segment>
+      </unit>
+      <unit id="scans.col.created">
+        <notes><note category="description">Column heading: when a scan job was created.</note></notes>
+        <segment><source>Created</source><target>Skapad</target></segment>
+      </unit>
+      <unit id="scans.col.finished">
+        <notes><note category="description">Column heading: when a scan job ended.</note></notes>
+        <segment><source>Finished</source><target>Avslutad</target></segment>
+      </unit>
+      <unit id="scans.col.changes">
+        <notes><note category="description">Column heading: how many facts a scan job found new, changed or gone.</note></notes>
+        <segment><source>Changes</source><target>Ändringar</target></segment>
+      </unit>
+      <unit id="scans.empty.title">
+        <notes><note category="description">Title of the empty list of scan jobs.</note></notes>
+        <segment><source>No scans yet</source><target>Inga skanningar ännu</target></segment>
+      </unit>
+      <unit id="scans.empty.body">
+        <notes><note category="description">Explains how to start the first scan when the list of scan jobs is empty.</note></notes>
+        <segment><source>Start one with Scan now on a prefix or a host.</source><target>Starta en med Skanna nu på ett prefix eller en värd.</target></segment>
+      </unit>
+      <unit id="scans.target.prefix">
+        <notes><note category="description">Kind of scan target: a prefix of the address plan.</note></notes>
+        <segment><source>Prefix</source><target>Prefix</target></segment>
+      </unit>
+      <unit id="scans.target.host">
+        <notes><note category="description">Kind of scan target: a host of the address plan.</note></notes>
+        <segment><source>Host</source><target>Värd</target></segment>
+      </unit>
+      <unit id="scans.target.address">
+        <notes><note category="description">Kind of scan target: a single IP address.</note></notes>
+        <segment><source>Address</source><target>Adress</target></segment>
+      </unit>
+      <unit id="scans.target.network">
+        <notes><note category="description">Kind of scan target: a network typed as a CIDR block.</note></notes>
+        <segment><source>Network</source><target>Nätverk</target></segment>
+      </unit>
+      <unit id="scans.kind.passive_refresh">
+        <notes><note category="description">Kind of scan: ask the probes to refresh what they have seen without sending probes of their own.</note></notes>
+        <segment><source>Passive refresh</source><target>Passiv uppdatering</target></segment>
+      </unit>
+      <unit id="scans.kind.port_scan">
+        <notes><note category="description">Kind of scan: connect to well-known TCP ports.</note></notes>
+        <segment><source>Port scan</source><target>Portskanning</target></segment>
+      </unit>
+      <unit id="scans.kind.snmp_poll">
+        <notes><note category="description">Kind of scan: poll devices over SNMP.</note></notes>
+        <segment><source>SNMP poll</source><target>SNMP-avfrågning</target></segment>
+      </unit>
+      <unit id="scans.kind.os_fingerprint">
+        <notes><note category="description">Kind of scan: guess the operating system of a host from its network behaviour.</note></notes>
+        <segment><source>OS fingerprint</source><target>OS-fingeravtryck</target></segment>
+      </unit>
+      <unit id="scans.state.queued">
+        <notes><note category="description">State of a scan job that waits for its probes.</note></notes>
+        <segment><source>Queued</source><target>I kö</target></segment>
+      </unit>
+      <unit id="scans.state.running">
+        <notes><note category="description">State of a scan job that its probes are working on.</note></notes>
+        <segment><source>Running</source><target>Pågår</target></segment>
+      </unit>
+      <unit id="scans.state.done">
+        <notes><note category="description">State of a scan job that every probe finished.</note></notes>
+        <segment><source>Done</source><target>Klar</target></segment>
+      </unit>
+      <unit id="scans.state.partial">
+        <notes><note category="description">State of a scan job that ended with only some of its probes finished.</note></notes>
+        <segment><source>Partly done</source><target>Delvis klar</target></segment>
+      </unit>
+      <unit id="scans.state.failed">
+        <notes><note category="description">State of a scan job that no probe finished.</note></notes>
+        <segment><source>Failed</source><target>Misslyckad</target></segment>
+      </unit>
+      <unit id="scans.state.cancelled">
+        <notes><note category="description">State of a scan job that was stopped before it finished.</note></notes>
+        <segment><source>Cancelled</source><target>Avbruten</target></segment>
+      </unit>
+      <unit id="scans.progress.percent">
+        <notes><note category="description">Progress of a scan job in percent. The argument percent is a whole number from 0 to 100.</note></notes>
+        <segment><source>{percent} %</source><target>{percent} %</target></segment>
+      </unit>
+      <unit id="scans.progress.label">
+        <notes><note category="description">Accessible name of the progress bar of a scan job. The argument target is what the job covers.</note></notes>
+        <segment><source>Progress of the scan of {target}</source><target>Förlopp för skanningen av {target}</target></segment>
+      </unit>
+      <unit id="scans.diff.summary">
+        <notes><note category="description">What a scan found compared with the facts before it: counts of new, changed and gone facts.</note></notes>
+        <segment><source>{new} new, {changed} changed, {gone} gone</source><target>{new} nya, {changed} ändrade, {gone} borta</target></segment>
+      </unit>
+      <unit id="scans.diff.pending">
+        <notes><note category="description">Shown in place of the findings while a scan job has no result yet.</note></notes>
+        <segment><source>Not finished</source><target>Inte klar</target></segment>
+      </unit>
+      <unit id="scans.change.new">
+        <notes><note category="description">A fact the scan found that was not known before.</note></notes>
+        <segment><source>New</source><target>Ny</target></segment>
+      </unit>
+      <unit id="scans.change.changed">
+        <notes><note category="description">A fact the scan found with another value than before.</note></notes>
+        <segment><source>Changed</source><target>Ändrad</target></segment>
+      </unit>
+      <unit id="scans.change.gone">
+        <notes><note category="description">A fact that was known before and that the scan did not find.</note></notes>
+        <segment><source>Gone</source><target>Borta</target></segment>
+      </unit>
+      <unit id="scans.change.unchanged">
+        <notes><note category="description">A fact the scan found again with the same value.</note></notes>
+        <segment><source>Unchanged</source><target>Oförändrad</target></segment>
+      </unit>
+      <unit id="scans.fact_type.address">
+        <notes><note category="description">Type of fact: an address in use, with the MAC address behind it.</note></notes>
+        <segment><source>Address</source><target>Adress</target></segment>
+      </unit>
+      <unit id="scans.fact_type.host">
+        <notes><note category="description">Type of fact: a host reported by an inventory source.</note></notes>
+        <segment><source>Host</source><target>Värd</target></segment>
+      </unit>
+      <unit id="scans.fact_type.attachment">
+        <notes><note category="description">Type of fact: where a client is attached to the network.</note></notes>
+        <segment><source>Attachment</source><target>Anslutning</target></segment>
+      </unit>
+      <unit id="scans.fact_type.services">
+        <notes><note category="description">Type of fact: the open TCP ports of an address.</note></notes>
+        <segment><source>Open ports</source><target>Öppna portar</target></segment>
+      </unit>
+      <unit id="scans.fact_type.os">
+        <notes><note category="description">Type of fact: the operating system guessed for an address.</note></notes>
+        <segment><source>Operating system</source><target>Operativsystem</target></segment>
+      </unit>
+      <unit id="scans.fact_type.link">
+        <notes><note category="description">Type of fact: a link between two network devices.</note></notes>
+        <segment><source>Link</source><target>Länk</target></segment>
+      </unit>
+      <unit id="scans.fact_type.name">
+        <notes><note category="description">Type of fact: the name an address resolves to.</note></notes>
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="scans.fact_type.vendor">
+        <notes><note category="description">Type of fact: the maker of a network card, from its MAC address.</note></notes>
+        <segment><source>Vendor</source><target>Tillverkare</target></segment>
+      </unit>
+      <unit id="scans.fact.address">
+        <notes><note category="description">A fact of the type address in one line. The arguments are the IP address and the MAC address behind it.</note></notes>
+        <segment><source>{ip} from {mac}</source><target>{ip} från {mac}</target></segment>
+      </unit>
+      <unit id="scans.fact.ports">
+        <notes><note category="description">The open TCP ports of a services fact. The argument ports is a list of port numbers.</note></notes>
+        <segment><source>TCP {ports}</source><target>TCP {ports}</target></segment>
+      </unit>
+      <unit id="scans.fact.tls">
+        <notes><note category="description">The ports of a services fact that speak TLS. The argument ports is a list of port numbers.</note></notes>
+        <segment><source>TLS on {ports}</source><target>TLS på {ports}</target></segment>
+      </unit>
+      <unit id="scans.fact.os">
+        <notes><note category="description">The operating system guessed for an address, with the confidence in percent.</note></notes>
+        <segment><source>{guess}, {confidence} %</source><target>{guess}, {confidence} %</target></segment>
+      </unit>
+      <unit id="scans.fact.attachment">
+        <notes><note category="description">A client attached to a device. The arguments are the MAC address and the device.</note></notes>
+        <segment><source>{mac} at {device}</source><target>{mac} vid {device}</target></segment>
+      </unit>
+      <unit id="scans.fact.link">
+        <notes><note category="description">A link between two endpoints. The arguments are the two ends and the kind of link.</note></notes>
+        <segment><source>{a} to {b} ({kind})</source><target>{a} till {b} ({kind})</target></segment>
+      </unit>
+      <unit id="scans.fact.none">
+        <notes><note category="description">Shown in the before or after column when a fact did not exist on that side.</note></notes>
+        <segment><source>none</source><target>ingen</target></segment>
+      </unit>
+      <unit id="scans.probe.col.name">
+        <notes><note category="description">Column heading: the name of a probe.</note></notes>
+        <segment><source>Probe</source><target>Prob</target></segment>
+      </unit>
+      <unit id="scans.probe.col.sync">
+        <notes><note category="description">Column heading: whether a probe runs the configuration the controllers hold.</note></notes>
+        <segment><source>Configuration</source><target>Konfiguration</target></segment>
+      </unit>
+      <unit id="scans.probe.col.scope">
+        <notes><note category="description">Column heading: what a probe scans, as it last reported it.</note></notes>
+        <segment><source>Applied scope</source><target>Tillämpat omfång</target></segment>
+      </unit>
+      <unit id="scans.probe.col.switch">
+        <notes><note category="description">Column heading: the kill switch of a probe.</note></notes>
+        <segment><source>Kill switch</source><target>Nödstopp</target></segment>
+      </unit>
+      <unit id="scans.probe.in_process">
+        <notes><note category="description">Marker on the probe that runs inside the controller itself.</note></notes>
+        <segment><source>This controller</source><target>Denna kontroller</target></segment>
+      </unit>
+      <unit id="scans.probe.in_sync">
+        <notes><note category="description">A probe runs the configuration the controllers hold.</note></notes>
+        <segment><source>In sync</source><target>Synkad</target></segment>
+      </unit>
+      <unit id="scans.probe.out_of_sync">
+        <notes><note category="description">A probe has not yet applied the configuration the controllers hold.</note></notes>
+        <segment><source>Not in sync</source><target>Inte synkad</target></segment>
+      </unit>
+      <unit id="scans.probe.scope">
+        <notes><note category="description">The scope a probe applies. The arguments are the number of prefixes and the list of methods.</note></notes>
+        <segment><source>{count, plural, one {# prefix} other {# prefixes}} · {methods}</source><target>{count, plural, one {# prefix} other {# prefix}} · {methods}</target></segment>
+      </unit>
+      <unit id="scans.probe.scope_none">
+        <notes><note category="description">A probe has not reported a scope yet.</note></notes>
+        <segment><source>No scope reported</source><target>Inget omfång rapporterat</target></segment>
+      </unit>
+      <unit id="scans.probe.methods_none">
+        <notes><note category="description">A probe applies no scan method.</note></notes>
+        <segment><source>no methods</source><target>inga metoder</target></segment>
+      </unit>
+      <unit id="scans.probe.node_unnamed">
+        <notes><note category="description">Name of a node that the list of probes does not know. The argument id is the node number.</note></notes>
+        <segment><source>Node {id}</source><target>Nod {id}</target></segment>
+      </unit>
+      <unit id="scans.switch.active">
+        <notes><note category="description">The kill switch of a probe is off: it may scan.</note></notes>
+        <segment><source>Scanning</source><target>Skannar</target></segment>
+      </unit>
+      <unit id="scans.switch.stopped">
+        <notes><note category="description">The kill switch of a probe is on: it does not scan.</note></notes>
+        <segment><source>Stopped</source><target>Stoppad</target></segment>
+      </unit>
+      <unit id="scans.switch.unconfirmed">
+        <notes><note category="description">The kill switch of a probe has been changed but the probe has not confirmed it yet.</note></notes>
+        <segment><source>{state}, not confirmed yet</source><target>{state}, ännu inte bekräftad</target></segment>
+      </unit>
+      <unit id="scans.switch.reason">
+        <notes><note category="description">The reason given when a probe was stopped. The argument reason is free text.</note></notes>
+        <segment><source>Reason: {reason}</source><target>Orsak: {reason}</target></segment>
+      </unit>
+      <unit id="scans.action.stop_all">
+        <notes><note category="description">Button: turn the kill switch of every probe on.</note></notes>
+        <segment><source>Stop all scans</source><target>Stoppa alla skanningar</target></segment>
+      </unit>
+      <unit id="scans.action.resume_all">
+        <notes><note category="description">Button: turn the kill switch of every probe off.</note></notes>
+        <segment><source>Resume all scans</source><target>Återuppta alla skanningar</target></segment>
+      </unit>
+      <unit id="scans.action.back">
+        <notes><note category="description">Link from one scan back to the list of scans.</note></notes>
+        <segment><source>All scans</source><target>Alla skanningar</target></segment>
+      </unit>
+      <unit id="scans.stop.title">
+        <notes><note category="description">Title of the dialog that stops all scans.</note></notes>
+        <segment><source>Stop all scans</source><target>Stoppa alla skanningar</target></segment>
+      </unit>
+      <unit id="scans.stop.body">
+        <notes><note category="description">Explains what stopping all scans does.</note></notes>
+        <segment><source>Every probe stops scanning and runs in progress end. Nothing is deleted. Resume the scans when you are ready.</source><target>Alla probar slutar skanna och pågående körningar avbryts. Inget raderas. Återuppta skanningarna när du är redo.</target></segment>
+      </unit>
+      <unit id="scans.stop.reason">
+        <notes><note category="description">Label of the optional reason for stopping all scans.</note></notes>
+        <segment><source>Reason (optional)</source><target>Orsak (valfri)</target></segment>
+      </unit>
+      <unit id="scans.stop.reason_hint">
+        <notes><note category="description">Hint under the reason field of the stop dialog: where the reason is shown.</note></notes>
+        <segment><source>Shown next to each stopped probe and kept in the audit log.</source><target>Visas vid varje stoppad prob och sparas i granskningsloggen.</target></segment>
+      </unit>
+      <unit id="scans.stop.confirm">
+        <notes><note category="description">Confirm button of the dialog that stops all scans.</note></notes>
+        <segment><source>Stop all scans</source><target>Stoppa alla skanningar</target></segment>
+      </unit>
+      <unit id="scans.toast.stopped">
+        <notes><note category="description">Result of stopping all scans. The argument count is the number of probes that were told to stop.</note></notes>
+        <segment><source>{count, plural, =0 {No probe to stop} one {Stop sent to # probe} other {Stop sent to # probes}}</source><target>{count, plural, =0 {Ingen prob att stoppa} one {Stopp skickat till # prob} other {Stopp skickat till # probar}}</target></segment>
+      </unit>
+      <unit id="scans.toast.resumed">
+        <notes><note category="description">Result of resuming all scans. The argument count is the number of probes that were told to resume.</note></notes>
+        <segment><source>{count, plural, =0 {No probe to resume} one {Resume sent to # probe} other {Resume sent to # probes}}</source><target>{count, plural, =0 {Ingen prob att återuppta} one {Återupptagning skickad till # prob} other {Återupptagning skickad till # probar}}</target></segment>
+      </unit>
+      <unit id="scans.view.title">
+        <notes><note category="description">Heading of the page of one scan job. The argument target is what the job covers.</note></notes>
+        <segment><source>Scan of {target}</source><target>Skanning av {target}</target></segment>
+      </unit>
+      <unit id="scans.view.tab">
+        <notes><note category="description">Title of the page of one scan job in the browser tab.</note></notes>
+        <segment><source>Scan</source><target>Skanning</target></segment>
+      </unit>
+      <unit id="scans.view.loading">
+        <notes><note category="description">Shown while a scan job loads.</note></notes>
+        <segment><source>Loading the scan</source><target>Läser in skanningen</target></segment>
+      </unit>
+      <unit id="scans.view.not_found_title">
+        <notes><note category="description">Title of the notice shown for a scan job that does not exist.</note></notes>
+        <segment><source>Scan not found</source><target>Skanningen finns inte</target></segment>
+      </unit>
+      <unit id="scans.view.not_found">
+        <notes><note category="description">Body of the notice shown for a scan job that does not exist.</note></notes>
+        <segment><source>No scan has this identifier, or it is older than 30 days.</source><target>Ingen skanning har detta id, eller den är äldre än 30 dagar.</target></segment>
+      </unit>
+      <unit id="scans.view.facts">
+        <notes><note category="description">Overview of one scan job: the labels of its details.</note></notes>
+        <segment><source>Details of the scan</source><target>Uppgifter om skanningen</target></segment>
+      </unit>
+      <unit id="scans.view.networks">
+        <notes><note category="description">Label: the networks a scan job covers.</note></notes>
+        <segment><source>Networks</source><target>Nätverk</target></segment>
+      </unit>
+      <unit id="scans.view.deadline">
+        <notes><note category="description">Label: the time by which a scan job must be done.</note></notes>
+        <segment><source>Deadline</source><target>Tidsgräns</target></segment>
+      </unit>
+      <unit id="scans.view.error">
+        <notes><note category="description">Label: why a scan job failed or was cancelled.</note></notes>
+        <segment><source>Ended with</source><target>Slutade med</target></segment>
+      </unit>
+      <unit id="scans.view.probes">
+        <notes><note category="description">Heading of the progress per probe on the page of a scan job.</note></notes>
+        <segment><source>Probes</source><target>Probar</target></segment>
+      </unit>
+      <unit id="scans.view.probes_label">
+        <notes><note category="description">Accessible name of the table with the progress per probe.</note></notes>
+        <segment><source>Progress per probe</source><target>Förlopp per prob</target></segment>
+      </unit>
+      <unit id="scans.part.col.node">
+        <notes><note category="description">Column heading: the probe node of a part of a scan job.</note></notes>
+        <segment><source>Probe</source><target>Prob</target></segment>
+      </unit>
+      <unit id="scans.part.col.command">
+        <notes><note category="description">Column heading: the identifier of the command sent to a probe.</note></notes>
+        <segment><source>Command</source><target>Kommando</target></segment>
+      </unit>
+      <unit id="scans.part.col.ingested">
+        <notes><note category="description">Column heading: how many result batches the controllers have received from a probe.</note></notes>
+        <segment><source>Batches received</source><target>Mottagna paket</target></segment>
+      </unit>
+      <unit id="scans.part.col.detail">
+        <notes><note category="description">Column heading: the note a probe gave about its part of a scan job.</note></notes>
+        <segment><source>Detail</source><target>Detalj</target></segment>
+      </unit>
+      <unit id="scans.part.ingested">
+        <notes><note category="description">Batches received of the batches expected. The arguments are the two numbers.</note></notes>
+        <segment><source>{ingested} of {batches}</source><target>{ingested} av {batches}</target></segment>
+      </unit>
+      <unit id="scans.part.state.pending">
+        <notes><note category="description">State of the command sent to one probe: not yet delivered.</note></notes>
+        <segment><source>Pending</source><target>Väntar</target></segment>
+      </unit>
+      <unit id="scans.part.state.accepted">
+        <notes><note category="description">State of the command sent to one probe: the probe has taken it.</note></notes>
+        <segment><source>Accepted</source><target>Mottaget</target></segment>
+      </unit>
+      <unit id="scans.part.state.running">
+        <notes><note category="description">State of the command sent to one probe: the probe is working on it.</note></notes>
+        <segment><source>Running</source><target>Pågår</target></segment>
+      </unit>
+      <unit id="scans.part.state.done">
+        <notes><note category="description">State of the command sent to one probe: the probe finished.</note></notes>
+        <segment><source>Done</source><target>Klar</target></segment>
+      </unit>
+      <unit id="scans.part.state.failed">
+        <notes><note category="description">State of the command sent to one probe: the probe could not finish.</note></notes>
+        <segment><source>Failed</source><target>Misslyckat</target></segment>
+      </unit>
+      <unit id="scans.part.state.rejected">
+        <notes><note category="description">State of the command sent to one probe: the probe refused it, for example because its kill switch is on.</note></notes>
+        <segment><source>Rejected</source><target>Avvisat</target></segment>
+      </unit>
+      <unit id="scans.part.state.expired">
+        <notes><note category="description">State of the command sent to one probe: the probe did not answer in time.</note></notes>
+        <segment><source>Expired</source><target>Gick ut</target></segment>
+      </unit>
+      <unit id="scans.part.state.cancelled">
+        <notes><note category="description">State of the command sent to one probe: withdrawn before it finished.</note></notes>
+        <segment><source>Cancelled</source><target>Avbrutet</target></segment>
+      </unit>
+      <unit id="scans.diff.heading">
+        <notes><note category="description">Heading of the findings of a scan job.</note></notes>
+        <segment><source>What the scan found</source><target>Vad skanningen hittade</target></segment>
+      </unit>
+      <unit id="scans.diff.totals_label">
+        <notes><note category="description">Accessible name of the counts per fact type.</note></notes>
+        <segment><source>Findings per fact type</source><target>Fynd per faktatyp</target></segment>
+      </unit>
+      <unit id="scans.diff.total">
+        <notes><note category="description">Label of the row with the sums over all fact types.</note></notes>
+        <segment><source>All types</source><target>Alla typer</target></segment>
+      </unit>
+      <unit id="scans.diff.col.type">
+        <notes><note category="description">Column heading: the type of a fact.</note></notes>
+        <segment><source>Fact type</source><target>Faktatyp</target></segment>
+      </unit>
+      <unit id="scans.diff.col.subject">
+        <notes><note category="description">Column heading: what a fact is about, such as an address or a MAC address.</note></notes>
+        <segment><source>Subject</source><target>Ämne</target></segment>
+      </unit>
+      <unit id="scans.diff.col.before">
+        <notes><note category="description">Column heading: the fact as it was known before the scan.</note></notes>
+        <segment><source>Before</source><target>Före</target></segment>
+      </unit>
+      <unit id="scans.diff.col.after">
+        <notes><note category="description">Column heading: the fact as the scan found it.</note></notes>
+        <segment><source>After</source><target>Efter</target></segment>
+      </unit>
+      <unit id="scans.diff.col.change">
+        <notes><note category="description">Column heading: how a fact changed.</note></notes>
+        <segment><source>Change</source><target>Ändring</target></segment>
+      </unit>
+      <unit id="scans.diff.items_label">
+        <notes><note category="description">Accessible name of the table of the facts a scan changed.</note></notes>
+        <segment><source>Facts the scan changed</source><target>Fakta som skanningen ändrade</target></segment>
+      </unit>
+      <unit id="scans.diff.empty">
+        <notes><note category="description">Shown when a finished scan changed nothing.</note></notes>
+        <segment><source>The scan changed nothing.</source><target>Skanningen ändrade ingenting.</target></segment>
+      </unit>
+      <unit id="scans.diff.truncated">
+        <notes><note category="description">Note shown when a scan found more changes than the list holds.</note></notes>
+        <segment><source>The list shows only the first changes; the counts above cover all of them.</source><target>Listan visar bara de första ändringarna; räkningarna ovan omfattar alla.</target></segment>
+      </unit>
+      <unit id="scans.diff.waiting">
+        <notes><note category="description">Shown in place of the findings while a scan job runs.</note></notes>
+        <segment><source>The findings appear when the scan has finished.</source><target>Fynden visas när skanningen är klar.</target></segment>
+      </unit>
+      <unit id="scans.now.action">
+        <notes><note category="description">Button on a prefix or a host: scan it now.</note></notes>
+        <segment><source>Scan now</source><target>Skanna nu</target></segment>
+      </unit>
+      <unit id="scans.now.title">
+        <notes><note category="description">Title of the dialog that starts a scan. The argument target names what is scanned.</note></notes>
+        <segment><source>Scan {target}</source><target>Skanna {target}</target></segment>
+      </unit>
+      <unit id="scans.now.intro">
+        <notes><note category="description">Explains what a scan started from the dialog does.</note></notes>
+        <segment><source>The probes that cover this target run the scan and report what they find. The result is compared with the facts known before.</source><target>De prober som täcker målet kör skanningen och rapporterar vad de hittar. Resultatet jämförs med de fakta som fanns tidigare.</target></segment>
+      </unit>
+      <unit id="scans.now.kinds">
+        <notes><note category="description">Legend of the group of checkboxes that choose what the scan does.</note></notes>
+        <segment><source>What to scan for</source><target>Vad som ska skannas</target></segment>
+      </unit>
+      <unit id="scans.now.kind.passive_refresh">
+        <notes><note category="description">Explains the passive refresh kind in the scan dialog.</note></notes>
+        <segment><source>Ask the probes what they have seen, without sending probes of their own.</source><target>Fråga proberna vad de har sett, utan att skicka egna förfrågningar.</target></segment>
+      </unit>
+      <unit id="scans.now.kind.port_scan">
+        <notes><note category="description">Explains the port scan kind in the scan dialog.</note></notes>
+        <segment><source>Connect to the common TCP ports of known hosts.</source><target>Anslut till vanliga TCP-portar på kända värdar.</target></segment>
+      </unit>
+      <unit id="scans.now.kind.snmp_poll">
+        <notes><note category="description">Explains the SNMP poll kind in the scan dialog.</note></notes>
+        <segment><source>Poll the devices set up for SNMP.</source><target>Fråga de enheter som är inställda för SNMP.</target></segment>
+      </unit>
+      <unit id="scans.now.kind.os_fingerprint">
+        <notes><note category="description">Explains the OS fingerprint kind in the scan dialog.</note></notes>
+        <segment><source>Guess the operating system. Needs raw sockets on the probe, so it may be refused.</source><target>Gissa operativsystemet. Kräver råa sockets på proben och kan därför avvisas.</target></segment>
+      </unit>
+      <unit id="scans.now.kinds_required">
+        <notes><note category="description">Error under the checkboxes when none is ticked.</note></notes>
+        <segment><source>Choose at least one kind.</source><target>Välj minst en typ.</target></segment>
+      </unit>
+      <unit id="scans.now.deadline">
+        <notes><note category="description">Label of the choice of how long the controllers wait for the probes.</note></notes>
+        <segment><source>Wait for the probes up to</source><target>Vänta på proberna i högst</target></segment>
+      </unit>
+      <unit id="scans.now.deadline_hint">
+        <notes><note category="description">Hint under the deadline choice.</note></notes>
+        <segment><source>A scan that is not done by then ends with what the probes have reported.</source><target>En skanning som inte är klar då slutar med det som proberna har rapporterat.</target></segment>
+      </unit>
+      <unit id="scans.now.start">
+        <notes><note category="description">Submit button of the dialog that starts a scan.</note></notes>
+        <segment><source>Start scan</source><target>Starta skanning</target></segment>
+      </unit>
+      <unit id="scans.now.starting">
+        <notes><note category="description">Submit button of the scan dialog while the request is sent.</note></notes>
+        <segment><source>Starting</source><target>Startar</target></segment>
+      </unit>
+      <unit id="scans.now.started_title">
+        <notes><note category="description">Title of the notice shown after a scan was started.</note></notes>
+        <segment><source>Scan started</source><target>Skanningen har startat</target></segment>
+      </unit>
+      <unit id="scans.now.started">
+        <notes><note category="description">Shown after a scan was started. The argument probes is the number of probes that run it.</note></notes>
+        <segment><source>{probes, plural, one {# probe is working on it.} other {# probes are working on it.}} The result appears on the page of the scan.</source><target>{probes, plural, one {# prob arbetar med den.} other {# probar arbetar med den.}} Resultatet visas på skanningens sida.</target></segment>
+      </unit>
+      <unit id="scans.now.refused_title">
+        <notes><note category="description">Title of the notice shown when a scan was created but every probe refused it.</note></notes>
+        <segment><source>Scan refused by the probes</source><target>Skanningen avvisades av proberna</target></segment>
+      </unit>
+      <unit id="scans.now.follow">
+        <notes><note category="description">Link to the page of the scan that was just started.</note></notes>
+        <segment><source>Follow the scan</source><target>Följ skanningen</target></segment>
+      </unit>
+      <unit id="errors.scan.job.target">
+        <notes><note category="description">Error: the target of a scan does not exist or cannot be scanned.</note></notes>
+        <segment><source>This target cannot be scanned. It does not exist, or it has no address to scan.</source><target>Målet kan inte skannas. Det finns inte, eller det saknar adress att skanna.</target></segment>
+      </unit>
+      <unit id="errors.scan.job.no_probe">
+        <notes><note category="description">Error: no probe covers the target of a scan.</note></notes>
+        <segment><source>No probe covers this target. Add its network to the prefixes of a probe first.</source><target>Ingen prob täcker målet. Lägg först till dess nätverk bland en probs prefix.</target></segment>
+      </unit>
+      <unit id="errors.scan.job.invalid">
+        <notes><note category="description">Error: a value of a scan request is out of range.</note></notes>
+        <segment><source>A value of the scan request is out of range. The time limit is 30 to 3,600 seconds.</source><target>Ett värde i skanningsbegäran är utanför tillåtet intervall. Tidsgränsen är 30 till 3 600 sekunder.</target></segment>
+      </unit>
+      <unit id="errors.scan.job.not_found">
+        <notes><note category="description">Error: there is no scan with the identifier.</note></notes>
+        <segment><source>No scan has this identifier, or it is older than 30 days.</source><target>Ingen skanning har detta id, eller den är äldre än 30 dagar.</target></segment>
+      </unit>
+      <unit id="errors.scan.stopped">
+        <notes><note category="description">Error: a scan was refused because the kill switch is on.</note></notes>
+        <segment><source>Scanning is stopped: the kill switch is on. Resume the scans first.</source><target>Skanning är stoppad: nödstoppet är på. Återuppta skanningarna först.</target></segment>
+      </unit>
+      <unit id="errors.node.config.invalid">
+        <notes><note category="description">Error: the scan configuration of a probe was refused as invalid.</note></notes>
+        <segment><source>The scan configuration is not valid; check the marked fields.</source><target>Skanningsinställningarna är ogiltiga; kontrollera de markerade fälten.</target></segment>
+      </unit>
+      <unit id="errors.node.config.not_a_probe">
+        <notes><note category="description">Error: the node has no probe role, so it has no scan configuration.</note></notes>
+        <segment><source>This node is not a probe and has no scan configuration.</source><target>Den här noden är ingen sond och har inga skanningsinställningar.</target></segment>
+      </unit>
+      <unit id="errors.node.config.revision_mismatch">
+        <notes><note category="description">Error: the scan configuration changed since it was read.</note></notes>
+        <segment><source>The scan configuration was changed in the meantime. Reload it and try again.</source><target>Skanningsinställningarna har ändrats under tiden. Läs in dem igen och försök på nytt.</target></segment>
+      </unit>
+      <unit id="errors.node.config.secret">
+        <notes><note category="description">Error: an SNMP device names a secret that does not exist or is not meant for SNMP.</note></notes>
+        <segment><source>An SNMP device names a secret that does not exist or is not tagged for SNMP.</source><target>En SNMP-enhet anger en hemlighet som inte finns eller inte är märkt för SNMP.</target></segment>
+      </unit>
+      <unit id="errors.node.config.vault_unavailable">
+        <notes><note category="description">Error: the vault could not be read to check the SNMP secrets.</note></notes>
+        <segment><source>The vault is not available, so the SNMP secrets cannot be checked. Try again later.</source><target>Valvet är inte tillgängligt, så SNMP-hemligheterna kan inte kontrolleras. Försök igen senare.</target></segment>
       </unit>
     </group>
   </file>

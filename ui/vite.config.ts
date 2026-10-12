@@ -76,7 +76,9 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   // the cluster page, the scans of discovery and the settings sub-pages for access, audit export,
   // the vault keys, backup and language packs. `cluster.job.` is a key of the jobs pack, which
   // is listed above and so wins.
-  cluster: ["cluster."],
+  // The cluster page, the queue view, the partition banner and the refused-write dialog, with the
+  // error texts of the queue endpoints (WP3.11a).
+  cluster: ["cluster.", "errors.queue."],
   scans: ["scans.", "errors.scan.", "errors.node.config."],
   access: ["access."],
   audit_export: ["audit_export."],

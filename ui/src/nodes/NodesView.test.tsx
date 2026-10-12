@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
+import { cleanup, fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api/client";
@@ -232,6 +232,24 @@ describe("a node in the panel", () => {
     // The list stays beside the panel and marks the open node.
     expect(rowOf("probe-dmz").classList.contains("current")).toBe(true);
     expect(rows()).toHaveLength(2);
+  });
+
+  it("links a probe to its scan configuration, and a node without the probe role to nothing", async () => {
+    openNodes(`/nodes/${DMZ}`);
+    const panel = await screen.findByTestId("node-panel");
+    await within(panel).findByRole("heading", { name: "probe-dmz" });
+    const link = within(panel).getByTestId("node-scan-config");
+    expect(link.getAttribute("href")).toBe(`/nodes/${DMZ}/scan`);
+    expect(link.textContent).toContain("Scan configuration");
+    cleanup();
+
+    const node = nodesState().nodes.get(LAB);
+    if (!node) throw new Error("no lab node");
+    node.roles = ["dns"];
+    openNodes(`/nodes/${LAB}`);
+    const other = await screen.findByTestId("node-panel");
+    await within(other).findByRole("heading", { name: "probe-lab" });
+    expect(within(other).queryByTestId("node-scan-config")).toBeNull();
   });
 
   it("opens the focused node with Enter", async () => {

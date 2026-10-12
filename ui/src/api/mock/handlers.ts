@@ -9,7 +9,7 @@ import { auditRoutes } from "./routes-audit";
 import { auditExportRoutes } from "./routes-audit-export";
 import { authRoutes } from "./routes-auth";
 import { backupRoutes } from "./routes-backup";
-import { clusterRoutes } from "./routes-cluster";
+import { clusterRoutes, quorumGate } from "./routes-cluster";
 import { i18nRoutes } from "./routes-i18n";
 import { importRoutes } from "./routes-import";
 import { jobRoutes } from "./routes-jobs";
@@ -34,6 +34,8 @@ export { ok, created, noContent, fail, Problem, Reply } from "./reply";
 /** The handlers that answer for real. IPAM, jobs and audit come first: they replace the
  * shell's early stand-ins for search and the job list. */
 export const happyPaths: HttpHandler[] = [
+  // The quorum gate answers 503 to a write while the controller is isolated, before any write handler.
+  ...quorumGate,
   ...ipamRoutes,
   ...moveRoutes,
   ...importRoutes,

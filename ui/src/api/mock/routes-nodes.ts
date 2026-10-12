@@ -34,6 +34,8 @@ const NODE_ROLES = ["probe", "dns", "dhcp"] as const;
 const NAME_RULE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
 const MIN_LIFETIME = 60;
 const MAX_LIFETIME = 604_800;
+/** A controller token lives at most an hour. */
+const CONTROLLER_MAX_LIFETIME = 3600;
 const DEFAULT_LIFETIME = 3_600;
 const NO_STORE = { "Cache-Control": "no-store" };
 /** The singleton reference of the node registry (token records name no node). */
@@ -75,14 +77,15 @@ function checkName(name: string): void {
   }
 }
 
-/** The roles of a request: known node roles, never `controller`. */
-function readRoles(raw: unknown, fallback: readonly string[], refusal: number): string[] {
+/** The roles of a request: known node roles, or `controller` alone where `controller` allows it. */
+function readRoles(raw: unknown, fallback: readonly string[], refusal: number, controller = false): string[] {
   if (raw === undefined || raw === null) return [...fallback];
   if (!Array.isArray(raw) || raw.some((r) => typeof r !== "string")) throw invalidRequest("roles must be a list of role names", "roles");
   const roles = [...new Set(raw as string[])];
   if (roles.length === 0) return [...fallback];
   for (const role of roles) {
     if (role === "controller") {
+      if (controller && roles.length === 1) return roles;
       throw new Problem("cluster.enrolment.roles", { status: refusal, detail: "a controller does not enrol with a token yet", params: { role } });
     }
     if (!(NODE_ROLES as readonly string[]).includes(role)) throw invalidRequest(`unknown role ${role}`, "roles");
@@ -140,7 +143,9 @@ const createEnrolment = route("post", "/api/v1/nodes/enrolments", async (ctx) =>
   for (const key of Object.keys(body)) {
     if (!["roles", "name", "vrf", "expires_in_secs"].includes(key)) throw invalidRequest(`unknown field ${key}`, key);
   }
-  const roles = readRoles(body.roles, ["probe"], 422);
+  // A controller token (section 12.1 of docs/cluster.md) carries the role alone and lives at most an hour.
+  const roles = readRoles(body.roles, ["probe"], 422, true);
+  const forController = roles.includes("controller");
   let name: string | null = null;
   if (body.name !== undefined && body.name !== null) {
     if (typeof body.name !== "string") throw invalidRequest("name must be text", "name");
@@ -158,11 +163,12 @@ const createEnrolment = route("post", "/api/v1/nodes/enrolments", async (ctx) =>
       throw invalidRequest("expires_in_secs must be a whole number", "expires_in_secs");
     }
     lifetime = body.expires_in_secs;
-    if (lifetime < MIN_LIFETIME || lifetime > MAX_LIFETIME) {
+    const max = forController ? CONTROLLER_MAX_LIFETIME : MAX_LIFETIME;
+    if (lifetime < MIN_LIFETIME || lifetime > max) {
       throw new Problem("cluster.enrolment.lifetime", {
         status: 422,
-        detail: `a token lives 60 to 604800 seconds, not ${lifetime}`,
-        params: { min: String(MIN_LIFETIME), max: String(MAX_LIFETIME), value: String(lifetime) },
+        detail: `a token lives ${MIN_LIFETIME} to ${max} seconds, not ${lifetime}`,
+        params: { min: String(MIN_LIFETIME), max: String(max), value: String(lifetime) },
       });
     }
   }
@@ -195,7 +201,9 @@ const createEnrolment = route("post", "/api/v1/nodes/enrolments", async (ctx) =>
     enrolment: { ...view, state: "pending" },
     token,
     ca_fingerprint: MOCK_CA_FINGERPRINT,
-    command: `tenko node enrol --controller ${ctx.url.origin} --token ${token} --ca-fingerprint ${MOCK_CA_FINGERPRINT}`,
+    command: forController
+      ? `tenko cluster join --controller ${ctx.url.origin} --token ${token} --ca-fingerprint ${MOCK_CA_FINGERPRINT} --address HOST:PORT --data-dir D`
+      : `tenko node enrol --controller ${ctx.url.origin} --token ${token} --ca-fingerprint ${MOCK_CA_FINGERPRINT}`,
   };
   return created(answer, NO_STORE);
 });

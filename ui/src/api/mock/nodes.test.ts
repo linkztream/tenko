@@ -147,13 +147,22 @@ describe("enrolment tokens", () => {
     expect(audit.records.some((r) => r.draft.action === "cluster.enrolment.create")).toBe(true);
   });
 
-  it("defaults to a probe token for an hour and refuses controllers, bad lifetimes and names", async () => {
+  it("makes a controller token for the role alone, for at most an hour, with the join command", async () => {
+    const made = await post<S["CreatedEnrolment"]>(`${V}/nodes/enrolments`, { roles: ["controller"] });
+    expect(made.status).toBe(201);
+    expect(made.body.enrolment.roles).toEqual(["controller"]);
+    expect(made.body.command).toMatch(/^tenko cluster join --controller .* --address HOST:PORT --data-dir D$/);
+    const longer = await post<Problem>(`${V}/nodes/enrolments`, { roles: ["controller"], expires_in_secs: 7200 });
+    expect([longer.status, longer.body.code]).toEqual([422, "cluster.enrolment.lifetime"]);
+  });
+
+  it("defaults to a probe token for an hour and refuses a controller beside other roles, bad lifetimes and names", async () => {
     const plain = await post<S["CreatedEnrolment"]>(`${V}/nodes/enrolments`);
     expect(plain.status).toBe(201);
     expect(plain.body.enrolment.roles).toEqual(["probe"]);
     expect(Date.parse(plain.body.enrolment.expires_at) - Date.parse(plain.body.enrolment.created_at)).toBe(3_600_000);
     const cases: [unknown, number, string][] = [
-      [{ roles: ["controller"] }, 422, "cluster.enrolment.roles"],
+      [{ roles: ["controller", "probe"] }, 422, "cluster.enrolment.roles"],
       [{ expires_in_secs: 5 }, 422, "cluster.enrolment.lifetime"],
       [{ expires_in_secs: 604_801 }, 422, "cluster.enrolment.lifetime"],
       [{ name: "-bad" }, 422, "cluster.node.name"],

@@ -1,0 +1,723 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="nodes">
+      <unit id="nodes.scan.title">
+        <notes><note category="description">Title of the scan configuration page of a probe and its entry in the browser tab.</note></notes>
+        <segment><source>Scan configuration</source></segment>
+      </unit>
+      <unit id="nodes.scan.node_fallback">
+        <notes><note category="description">Name shown for a node whose name could not be read; the argument is the node id.</note></notes>
+        <segment><source>Node {id}</source></segment>
+      </unit>
+      <unit id="nodes.scan.back">
+        <notes><note category="description">Link from the scan configuration page back to the node; the argument is the node name.</note></notes>
+        <segment><source>Back to {name}</source></segment>
+      </unit>
+      <unit id="nodes.scan.panel.title">
+        <notes><note category="description">Heading of the section in the node panel that leads to the scan configuration.</note></notes>
+        <segment><source>Scanning</source></segment>
+      </unit>
+      <unit id="nodes.scan.panel.hint">
+        <notes><note category="description">Text in the node panel of a probe above the link to its scan configuration.</note></notes>
+        <segment><source>What this probe scans, how fast, and the switch that stops it.</source></segment>
+      </unit>
+      <unit id="nodes.scan.panel.link">
+        <notes><note category="description">Link in the node panel of a probe to its scan configuration page.</note></notes>
+        <segment><source>Scan configuration</source></segment>
+      </unit>
+      <unit id="nodes.scan.not_probe.title">
+        <notes><note category="description">Heading of the notice shown when the node has no scan configuration.</note></notes>
+        <segment><source>No scan configuration here</source></segment>
+      </unit>
+      <unit id="nodes.scan.not_probe.body">
+        <notes><note category="description">Notice on the scan configuration page of a node that does not have the probe role; the argument is the node name.</note></notes>
+        <segment><source>{name} does not have the probe role, so there is nothing to configure. Scan settings exist only for nodes enrolled as probes.</source></segment>
+      </unit>
+      <unit id="nodes.scan.not_probe.missing">
+        <notes><note category="description">Notice on the scan configuration page when no enrolled node has the id in the address.</note></notes>
+        <segment><source>No enrolled node has this id. It may have been revoked.</source></segment>
+      </unit>
+      <unit id="nodes.scan.lacking">
+        <notes><note category="description">Warning above the scan configuration when SNMP devices lack vault secrets; the arguments are the number of devices and their addresses.</note></notes>
+        <segment><source>{count, plural, one {The SNMP device {devices} still needs a vault secret and is not polled until you choose one.} other {The SNMP devices {devices} still need vault secrets and are not polled until you choose them.}}</source></segment>
+      </unit>
+      <unit id="nodes.scan.sync.title">
+        <notes><note category="description">Heading of the card about the configuration the controllers hold for a probe.</note></notes>
+        <segment><source>Configuration on the controllers</source></segment>
+      </unit>
+      <unit id="nodes.scan.sync.in_sync">
+        <notes><note category="description">State of a probe that applies the configuration the controllers hold.</note></notes>
+        <segment><source>In sync</source></segment>
+      </unit>
+      <unit id="nodes.scan.sync.not_in_sync">
+        <notes><note category="description">State of a probe that has not yet applied the stored configuration or reports an error.</note></notes>
+        <segment><source>Not in sync</source></segment>
+      </unit>
+      <unit id="nodes.scan.sync.not_stored">
+        <notes><note category="description">Text when the controllers hold no configuration for the probe.</note></notes>
+        <segment><source>The controllers hold no configuration for this probe yet. It runs on its own file until you save one here.</source></segment>
+      </unit>
+      <unit id="nodes.scan.sync.origin">
+        <notes><note category="description">Label of where the stored configuration came from.</note></notes>
+        <segment><source>Origin</source></segment>
+      </unit>
+      <unit id="nodes.scan.sync.origin_api">
+        <notes><note category="description">Origin of a configuration that an administrator set.</note></notes>
+        <segment><source>Set by an administrator</source></segment>
+      </unit>
+      <unit id="nodes.scan.sync.origin_offer">
+        <notes><note category="description">Origin of a configuration the probe offered from its own file when it first connected.</note></notes>
+        <segment><source>Offered by the probe from its own file</source></segment>
+      </unit>
+      <unit id="nodes.scan.sync.revision">
+        <notes><note category="description">Label of the revision number of the stored configuration.</note></notes>
+        <segment><source>Revision</source></segment>
+      </unit>
+      <unit id="nodes.scan.sync.updated_by">
+        <notes><note category="description">Label of who changed the stored configuration last.</note></notes>
+        <segment><source>Changed by</source></segment>
+      </unit>
+      <unit id="nodes.scan.sync.updated_at">
+        <notes><note category="description">Label of when the stored configuration was changed last.</note></notes>
+        <segment><source>Changed</source></segment>
+      </unit>
+      <unit id="nodes.scan.applied.title">
+        <notes><note category="description">Heading of the card about the scope the probe reports it applies.</note></notes>
+        <segment><source>What the probe applies</source></segment>
+      </unit>
+      <unit id="nodes.scan.applied.none">
+        <notes><note category="description">Text when the probe has not reported its scope yet.</note></notes>
+        <segment><source>The probe has not reported what it applies yet.</source></segment>
+      </unit>
+      <unit id="nodes.scan.applied.error">
+        <notes><note category="description">Notice when the probe could not apply the newest configuration; the argument is the probe error.</note></notes>
+        <segment><source>The probe could not apply the newest configuration: {error}</source></segment>
+      </unit>
+      <unit id="nodes.scan.applied.prefixes">
+        <notes><note category="description">Label of the prefixes the probe covers.</note></notes>
+        <segment><source>Prefixes</source></segment>
+      </unit>
+      <unit id="nodes.scan.applied.exclude">
+        <notes><note category="description">Label of the exclusions the probe applies.</note></notes>
+        <segment><source>Exclusions</source></segment>
+      </unit>
+      <unit id="nodes.scan.applied.methods">
+        <notes><note category="description">Label of the methods the probe runs on schedule.</note></notes>
+        <segment><source>Methods</source></segment>
+      </unit>
+      <unit id="nodes.scan.applied.active">
+        <notes><note category="description">Label of whether the probe probes actively.</note></notes>
+        <segment><source>Active probing</source></segment>
+      </unit>
+      <unit id="nodes.scan.applied.origin">
+        <notes><note category="description">Label of where the applied configuration came from.</note></notes>
+        <segment><source>Source</source></segment>
+      </unit>
+      <unit id="nodes.scan.applied.origin_synced">
+        <notes><note category="description">The probe applies the configuration of the controllers.</note></notes>
+        <segment><source>The controllers</source></segment>
+      </unit>
+      <unit id="nodes.scan.applied.origin_local">
+        <notes><note category="description">The probe applies its own file.</note></notes>
+        <segment><source>Its own file</source></segment>
+      </unit>
+      <unit id="nodes.scan.applied.revision">
+        <notes><note category="description">Label of the configuration revision the probe applies.</note></notes>
+        <segment><source>Revision</source></segment>
+      </unit>
+      <unit id="nodes.scan.applied.applied_at">
+        <notes><note category="description">Label of when the probe applied the configuration.</note></notes>
+        <segment><source>Applied</source></segment>
+      </unit>
+      <unit id="nodes.scan.applied.reported_at">
+        <notes><note category="description">Label of when a controller recorded the probe report.</note></notes>
+        <segment><source>Reported</source></segment>
+      </unit>
+      <unit id="nodes.scan.ks.title">
+        <notes><note category="description">Heading of the card with the remote kill switch of a probe.</note></notes>
+        <segment><source>Kill switch</source></segment>
+      </unit>
+      <unit id="nodes.scan.ks.running">
+        <notes><note category="description">State of a probe whose kill switch is off.</note></notes>
+        <segment><source>Scans may run</source></segment>
+      </unit>
+      <unit id="nodes.scan.ks.stopped">
+        <notes><note category="description">State of a probe whose kill switch is on.</note></notes>
+        <segment><source>Scans are stopped</source></segment>
+      </unit>
+      <unit id="nodes.scan.ks.reason">
+        <notes><note category="description">Label of why the scans were stopped.</note></notes>
+        <segment><source>Reason</source></segment>
+      </unit>
+      <unit id="nodes.scan.ks.by">
+        <notes><note category="description">Label of who switched the kill switch.</note></notes>
+        <segment><source>Switched by</source></segment>
+      </unit>
+      <unit id="nodes.scan.ks.at">
+        <notes><note category="description">Label of when the kill switch was switched.</note></notes>
+        <segment><source>Switched</source></segment>
+      </unit>
+      <unit id="nodes.scan.ks.confirmed">
+        <notes><note category="description">Label of whether the probe confirmed the last switch command.</note></notes>
+        <segment><source>Probe</source></segment>
+      </unit>
+      <unit id="nodes.scan.ks.confirmed_yes">
+        <notes><note category="description">The probe confirmed the last kill switch command.</note></notes>
+        <segment><source>Confirmed by the probe</source></segment>
+      </unit>
+      <unit id="nodes.scan.ks.confirmed_no">
+        <notes><note category="description">The probe has not confirmed the last kill switch command, for example because it is offline.</note></notes>
+        <segment><source>Waiting for the probe to confirm</source></segment>
+      </unit>
+      <unit id="nodes.scan.ks.stop">
+        <notes><note category="description">Button that opens the dialog to stop the scans of a probe.</note></notes>
+        <segment><source>Stop scans on this probe</source></segment>
+      </unit>
+      <unit id="nodes.scan.ks.resume">
+        <notes><note category="description">Button that lets a stopped probe scan again.</note></notes>
+        <segment><source>Resume scans</source></segment>
+      </unit>
+      <unit id="nodes.scan.stop.title">
+        <notes><note category="description">Title of the dialog that stops the scans of a probe; the argument is the node name.</note></notes>
+        <segment><source>Stop scans on {name}</source></segment>
+      </unit>
+      <unit id="nodes.scan.stop.body">
+        <notes><note category="description">Explanation in the dialog that stops the scans of a probe.</note></notes>
+        <segment><source>The probe stops its running scans at once and starts none until you resume it. A probe that is offline stops when it connects.</source></segment>
+      </unit>
+      <unit id="nodes.scan.stop.reason">
+        <notes><note category="description">Label of the optional reason in the stop dialog.</note></notes>
+        <segment><source>Reason (optional)</source></segment>
+      </unit>
+      <unit id="nodes.scan.stop.reason_help">
+        <notes><note category="description">Help text under the reason in the stop dialog; the argument is the longest length.</note></notes>
+        <segment><source>Kept with the kill switch and in the audit log, up to {max} characters.</source></segment>
+      </unit>
+      <unit id="nodes.scan.stop.reason_too_long">
+        <notes><note category="description">Error under the reason in the stop dialog when it is too long; the argument is the longest length.</note></notes>
+        <segment><source>The reason is longer than {max} characters.</source></segment>
+      </unit>
+      <unit id="nodes.scan.stop.submit">
+        <notes><note category="description">Button that stops the scans in the stop dialog.</note></notes>
+        <segment><source>Stop scans</source></segment>
+      </unit>
+      <unit id="nodes.scan.stop.done">
+        <notes><note category="description">Message after the scans of a probe were stopped; the argument is the node name.</note></notes>
+        <segment><source>Scans on {name} are stopped</source></segment>
+      </unit>
+      <unit id="nodes.scan.stop.failed">
+        <notes><note category="description">Message when the scans of a probe could not be stopped; the argument is the node name.</note></notes>
+        <segment><source>Could not stop scans on {name}</source></segment>
+      </unit>
+      <unit id="nodes.scan.resume.done">
+        <notes><note category="description">Message after the scans of a probe were allowed again; the argument is the node name.</note></notes>
+        <segment><source>Scans on {name} may run again</source></segment>
+      </unit>
+      <unit id="nodes.scan.resume.failed">
+        <notes><note category="description">Message when the scans of a probe could not be resumed; the argument is the node name.</note></notes>
+        <segment><source>Could not resume scans on {name}</source></segment>
+      </unit>
+      <unit id="nodes.scan.form.title">
+        <notes><note category="description">Heading above the scan configuration form.</note></notes>
+        <segment><source>Configuration</source></segment>
+      </unit>
+      <unit id="nodes.scan.form.label">
+        <notes><note category="description">Accessible name of the scan configuration form.</note></notes>
+        <segment><source>Scan configuration of the probe</source></segment>
+      </unit>
+      <unit id="nodes.scan.form.readonly">
+        <notes><note category="description">Notice above the form for people who may not change it.</note></notes>
+        <segment><source>Only administrators can change the scan configuration. You can read it here.</source></segment>
+      </unit>
+      <unit id="nodes.scan.form.saved">
+        <notes><note category="description">Message after the scan configuration was saved.</note></notes>
+        <segment><source>Scan configuration saved</source></segment>
+      </unit>
+      <unit id="nodes.scan.form.failed">
+        <notes><note category="description">Message when the scan configuration could not be saved.</note></notes>
+        <segment><source>Could not save the scan configuration</source></segment>
+      </unit>
+      <unit id="nodes.scan.form.revert">
+        <notes><note category="description">Button that drops the edits of the scan configuration form.</note></notes>
+        <segment><source>Discard changes</source></segment>
+      </unit>
+      <unit id="nodes.scan.form.reload">
+        <notes><note category="description">Button that loads the configuration the controllers hold now and drops the edits.</note></notes>
+        <segment><source>Load the current version</source></segment>
+      </unit>
+      <unit id="nodes.scan.form.stale">
+        <notes><note category="description">Notice when saving failed because the configuration changed meanwhile.</note></notes>
+        <segment><source>The configuration changed meanwhile, so nothing was saved. Loading the current version discards your edits.</source></segment>
+      </unit>
+      <unit id="nodes.scan.form.remote">
+        <notes><note category="description">Notice when the configuration changed on the controllers while the form has unsaved edits.</note></notes>
+        <segment><source>This configuration changed on the server while you were editing. Your edits are kept; saving them would be refused until you load the new version.</source></segment>
+      </unit>
+      <unit id="nodes.scan.group.general">
+        <notes><note category="description">Heading of the group with the general scan settings.</note></notes>
+        <segment><source>General</source></segment>
+      </unit>
+      <unit id="nodes.scan.group.scope">
+        <notes><note category="description">Heading of the group with the prefixes and exclusions.</note></notes>
+        <segment><source>Scope</source></segment>
+      </unit>
+      <unit id="nodes.scan.group.methods">
+        <notes><note category="description">Heading of the group with the scan methods.</note></notes>
+        <segment><source>Methods</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.enabled">
+        <notes><note category="description">Label of the switch that turns the scanner of the probe on.</note></notes>
+        <segment><source>Scanner enabled</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.enabled_help">
+        <notes><note category="description">Help text of the scanner switch.</note></notes>
+        <segment><source>Off: the probe role stays, but nothing is scanned.</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.active">
+        <notes><note category="description">Label of the switch for active probing.</note></notes>
+        <segment><source>Active probing</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.active_help">
+        <notes><note category="description">Help text of the active probing switch.</note></notes>
+        <segment><source>Off keeps the probe passive: no ping sweeps and no port scans.</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.rate">
+        <notes><note category="description">Label of the rate profile.</note></notes>
+        <segment><source>Rate profile</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.rate_help">
+        <notes><note category="description">Help text of the rate profile.</note></notes>
+        <segment><source>How many probes per second the whole probe may send.</source></segment>
+      </unit>
+      <unit id="nodes.scan.rate.normal">
+        <notes><note category="description">Rate profile normal.</note></notes>
+        <segment><source>Normal (100 per second)</source></segment>
+      </unit>
+      <unit id="nodes.scan.rate.slow">
+        <notes><note category="description">Rate profile slow.</note></notes>
+        <segment><source>Slow (50 per second)</source></segment>
+      </unit>
+      <unit id="nodes.scan.rate.slowest">
+        <notes><note category="description">Rate profile slowest.</note></notes>
+        <segment><source>Slowest (10 per second)</source></segment>
+      </unit>
+      <unit id="nodes.scan.rate.unlimited">
+        <notes><note category="description">Rate profile unlimited.</note></notes>
+        <segment><source>Unlimited</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.pps">
+        <notes><note category="description">Label of the probes per second override.</note></notes>
+        <segment><source>Probes per second</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.pps_help">
+        <notes><note category="description">Help text of the probes per second override.</note></notes>
+        <segment><source>Overrides the profile. Empty uses the profile; 0 is unlimited.</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.concurrency">
+        <notes><note category="description">Label of the concurrency limit.</note></notes>
+        <segment><source>Concurrency</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.concurrency_help">
+        <notes><note category="description">Help text of the concurrency limit.</note></notes>
+        <segment><source>Most probes in flight at once, 1 to 1,024.</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.per_host">
+        <notes><note category="description">Label of the interval between probes to one address.</note></notes>
+        <segment><source>Interval per host (ms)</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.per_host_help">
+        <notes><note category="description">Help text of the interval per host.</note></notes>
+        <segment><source>Least time between two probes to one address, 0 to 60,000.</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.max_hosts">
+        <notes><note category="description">Label of the largest prefix a sweep enumerates.</note></notes>
+        <segment><source>Largest sweep (addresses)</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.max_hosts_help">
+        <notes><note category="description">Help text of the largest sweep.</note></notes>
+        <segment><source>A sweep lists the addresses of an IPv4 prefix up to this size, 1 to 65,536.</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.vrf">
+        <notes><note category="description">Label of the VRF of the scanned addresses.</note></notes>
+        <segment><source>VRF</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.vrf_help">
+        <notes><note category="description">Help text of the VRF choice.</note></notes>
+        <segment><source>The VRF the findings belong to.</source></segment>
+      </unit>
+      <unit id="nodes.scan.vrf.default">
+        <notes><note category="description">Choice of no VRF in the scan configuration.</note></notes>
+        <segment><source>From the enrolment token, else the default VRF</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.timezone">
+        <notes><note category="description">Label of the time zone of the blackout windows.</note></notes>
+        <segment><source>Time zone</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.timezone_help">
+        <notes><note category="description">Help text of the time zone.</note></notes>
+        <segment><source>An IANA name for the blackout windows. Empty uses the time zone of the probe host.</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.prefixes">
+        <notes><note category="description">Label of the prefixes the probe covers.</note></notes>
+        <segment><source>Prefixes</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.prefixes_help">
+        <notes><note category="description">Help text of the prefixes: one per line.</note></notes>
+        <segment><source>One prefix or address per line. Nothing outside them is probed or reported.</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.exclude">
+        <notes><note category="description">Label of the exclusions.</note></notes>
+        <segment><source>Exclusions</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.exclude_help">
+        <notes><note category="description">Help text of the exclusions: one per line.</note></notes>
+        <segment><source>One prefix or address per line inside the prefixes that is never probed.</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.blackout">
+        <notes><note category="description">Label of the blackout windows.</note></notes>
+        <segment><source>Blackout windows</source></segment>
+      </unit>
+      <unit id="nodes.scan.field.blackout_help">
+        <notes><note category="description">Help text of the blackout windows: one per line.</note></notes>
+        <segment><source>One window per line, such as mon-fri 08:00-17:00. No method that sends packets runs inside a window.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.raw">
+        <notes><note category="description">Tag on a scan method that needs raw sockets.</note></notes>
+        <segment><source>Needs raw sockets</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.enabled">
+        <notes><note category="description">Label of the switch that turns one scan method on.</note></notes>
+        <segment><source>Run this method</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.interval">
+        <notes><note category="description">Label of the interval of a scan method.</note></notes>
+        <segment><source>Interval (seconds)</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.interval_help">
+        <notes><note category="description">Help text of the interval of a scan method.</note></notes>
+        <segment><source>30 to 604,800. Counts from the end of a run.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.ttl">
+        <notes><note category="description">Label of how long a sighting of a method stays current.</note></notes>
+        <segment><source>Sighting lifetime (seconds)</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.ttl_help">
+        <notes><note category="description">Help text of the sighting lifetime.</note></notes>
+        <segment><source>60 to 2,592,000. Empty: three intervals.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.timeout">
+        <notes><note category="description">Label of the timeout of a scan method.</note></notes>
+        <segment><source>Timeout (ms)</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.timeout_help">
+        <notes><note category="description">Help text of the timeout of a scan method.</note></notes>
+        <segment><source>10 to 60,000.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.arp.name">
+        <notes><note category="description">Name of the scan method arp.</note></notes>
+        <segment><source>ARP table</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.arp.help">
+        <notes><note category="description">One line about the scan method arp.</note></notes>
+        <segment><source>IPv4 neighbours from the ARP table of the probe host. Sends nothing.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.nd.name">
+        <notes><note category="description">Name of the scan method nd.</note></notes>
+        <segment><source>Neighbour table (IPv6)</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.nd.help">
+        <notes><note category="description">One line about the scan method nd.</note></notes>
+        <segment><source>IPv6 neighbours from the neighbour table of the probe host. Sends nothing.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.icmp.name">
+        <notes><note category="description">Name of the scan method icmp.</note></notes>
+        <segment><source>ICMP echo</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.icmp.help">
+        <notes><note category="description">One line about the scan method icmp.</note></notes>
+        <segment><source>Ping sweep of the prefixes. Needs active probing.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.tcp_connect.name">
+        <notes><note category="description">Name of the scan method tcp_connect.</note></notes>
+        <segment><source>TCP connect</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.tcp_connect.help">
+        <notes><note category="description">One line about the scan method tcp_connect.</note></notes>
+        <segment><source>Tries a list of ports on each address. Needs active probing.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.reverse_dns.name">
+        <notes><note category="description">Name of the scan method reverse_dns.</note></notes>
+        <segment><source>Reverse DNS</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.reverse_dns.help">
+        <notes><note category="description">One line about the scan method reverse_dns.</note></notes>
+        <segment><source>Looks up the names of the addresses already seen.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.mdns.name">
+        <notes><note category="description">Name of the scan method mdns.</note></notes>
+        <segment><source>Multicast DNS</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.mdns.help">
+        <notes><note category="description">One line about the scan method mdns.</note></notes>
+        <segment><source>Asks the local network for names and listens for announcements.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.llmnr.name">
+        <notes><note category="description">Name of the scan method llmnr.</note></notes>
+        <segment><source>LLMNR</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.llmnr.help">
+        <notes><note category="description">One line about the scan method llmnr.</note></notes>
+        <segment><source>Asks known addresses for their link-local names.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.snmp.name">
+        <notes><note category="description">Name of the scan method snmp.</note></notes>
+        <segment><source>SNMP</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.snmp.help">
+        <notes><note category="description">One line about the scan method snmp.</note></notes>
+        <segment><source>Polls switches over SNMPv3 for their address and neighbour tables. Passwords come from the vault.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.arp_sweep.name">
+        <notes><note category="description">Name of the scan method arp_sweep.</note></notes>
+        <segment><source>ARP sweep</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.arp_sweep.help">
+        <notes><note category="description">One line about the scan method arp_sweep.</note></notes>
+        <segment><source>Declared; not implemented yet.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.tcp_syn.name">
+        <notes><note category="description">Name of the scan method tcp_syn.</note></notes>
+        <segment><source>TCP SYN scan</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.tcp_syn.help">
+        <notes><note category="description">One line about the scan method tcp_syn.</note></notes>
+        <segment><source>Declared; not implemented yet.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.os_fingerprint.name">
+        <notes><note category="description">Name of the scan method os_fingerprint.</note></notes>
+        <segment><source>OS fingerprinting</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.os_fingerprint.help">
+        <notes><note category="description">One line about the scan method os_fingerprint.</note></notes>
+        <segment><source>Declared; not implemented yet.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.lldp.name">
+        <notes><note category="description">Name of the scan method lldp.</note></notes>
+        <segment><source>LLDP listening</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.lldp.help">
+        <notes><note category="description">One line about the scan method lldp.</note></notes>
+        <segment><source>Declared; not implemented yet.</source></segment>
+      </unit>
+      <unit id="nodes.scan.tcp.ports">
+        <notes><note category="description">Label of the TCP ports to try.</note></notes>
+        <segment><source>Ports</source></segment>
+      </unit>
+      <unit id="nodes.scan.tcp.ports_help">
+        <notes><note category="description">Help text of the TCP ports.</note></notes>
+        <segment><source>Separated by commas, 1 to 1,024 ports from 1 to 65,535.</source></segment>
+      </unit>
+      <unit id="nodes.scan.tcp.targets">
+        <notes><note category="description">Label of which addresses a TCP connect scan tries.</note></notes>
+        <segment><source>Targets</source></segment>
+      </unit>
+      <unit id="nodes.scan.tcp.targets_help">
+        <notes><note category="description">Help text of the TCP targets.</note></notes>
+        <segment><source>Every address of a large prefix takes long at a low rate.</source></segment>
+      </unit>
+      <unit id="nodes.scan.tcp.targets_known">
+        <notes><note category="description">TCP targets: only addresses already seen.</note></notes>
+        <segment><source>Known addresses only</source></segment>
+      </unit>
+      <unit id="nodes.scan.tcp.targets_all">
+        <notes><note category="description">TCP targets: every address of the prefixes.</note></notes>
+        <segment><source>Every address in the prefixes</source></segment>
+      </unit>
+      <unit id="nodes.scan.tcp.tls_hint">
+        <notes><note category="description">Label of the switch for the TLS exchange per open port.</note></notes>
+        <segment><source>TLS hint</source></segment>
+      </unit>
+      <unit id="nodes.scan.tcp.tls_hint_help">
+        <notes><note category="description">Help text of the TLS hint switch.</note></notes>
+        <segment><source>Tries a TLS exchange on each open port to tell encrypted services.</source></segment>
+      </unit>
+      <unit id="nodes.scan.dns.servers">
+        <notes><note category="description">Label of the DNS servers for reverse lookups.</note></notes>
+        <segment><source>DNS servers</source></segment>
+      </unit>
+      <unit id="nodes.scan.dns.servers_help">
+        <notes><note category="description">Help text of the DNS servers: one per line.</note></notes>
+        <segment><source>One address per line, port 53 unless given. Empty uses the resolvers of the probe host.</source></segment>
+      </unit>
+      <unit id="nodes.scan.mdns.listen">
+        <notes><note category="description">Label of how long mDNS collects answers.</note></notes>
+        <segment><source>Listening time (seconds)</source></segment>
+      </unit>
+      <unit id="nodes.scan.mdns.listen_help">
+        <notes><note category="description">Help text of the mDNS listening time.</note></notes>
+        <segment><source>1 to 60.</source></segment>
+      </unit>
+      <unit id="nodes.scan.mdns.unicast_port">
+        <notes><note category="description">Label of the port of unicast mDNS queries.</note></notes>
+        <segment><source>Unicast port</source></segment>
+      </unit>
+      <unit id="nodes.scan.mdns.unicast_port_help">
+        <notes><note category="description">Help text of the mDNS unicast port.</note></notes>
+        <segment><source>For queries to known addresses.</source></segment>
+      </unit>
+      <unit id="nodes.scan.mdns.group">
+        <notes><note category="description">Label of the multicast group and port of mDNS queries.</note></notes>
+        <segment><source>Multicast group</source></segment>
+      </unit>
+      <unit id="nodes.scan.mdns.group_help">
+        <notes><note category="description">Help text of the mDNS group.</note></notes>
+        <segment><source>Address and port where queries go.</source></segment>
+      </unit>
+      <unit id="nodes.scan.mdns.passive">
+        <notes><note category="description">Label of the switch for passive mDNS listening.</note></notes>
+        <segment><source>Also listen passively</source></segment>
+      </unit>
+      <unit id="nodes.scan.mdns.passive_help">
+        <notes><note category="description">Help text of the passive mDNS switch.</note></notes>
+        <segment><source>Listens on port 5353 for announcements between queries.</source></segment>
+      </unit>
+      <unit id="nodes.scan.llmnr.port">
+        <notes><note category="description">Label of the LLMNR port.</note></notes>
+        <segment><source>Port</source></segment>
+      </unit>
+      <unit id="nodes.scan.snmp.retries">
+        <notes><note category="description">Label of the SNMP retries.</note></notes>
+        <segment><source>Retries</source></segment>
+      </unit>
+      <unit id="nodes.scan.snmp.retries_help">
+        <notes><note category="description">Help text of the SNMP retries.</note></notes>
+        <segment><source>Resends of an unanswered request, 0 to 10.</source></segment>
+      </unit>
+      <unit id="nodes.scan.snmp.lldp_ports">
+        <notes><note category="description">Label of the switch that attaches hosts on LLDP ports.</note></notes>
+        <segment><source>Attach hosts on LLDP ports</source></segment>
+      </unit>
+      <unit id="nodes.scan.snmp.lldp_ports_help">
+        <notes><note category="description">Help text of the LLDP ports switch.</note></notes>
+        <segment><source>Off: a port that sees another switch is not taken as the port of a host.</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.title">
+        <notes><note category="description">Heading of the table of SNMP devices.</note></notes>
+        <segment><source>SNMP devices</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.help">
+        <notes><note category="description">Help text above the table of SNMP devices.</note></notes>
+        <segment><source>Switches to poll with SNMPv3. Passwords are never typed here: choose operator secrets from the vault.</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.empty">
+        <notes><note category="description">Text when no SNMP device is configured.</note></notes>
+        <segment><source>No SNMP devices are configured.</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.add">
+        <notes><note category="description">Button that adds a row to the table of SNMP devices.</note></notes>
+        <segment><source>Add device</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.remove">
+        <notes><note category="description">Accessible name of the button that removes a device row; the argument is the row number.</note></notes>
+        <segment><source>Remove device {n}</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.actions">
+        <notes><note category="description">Hidden heading of the column with the remove buttons.</note></notes>
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.row_label">
+        <notes><note category="description">Accessible name of a field in a device row; the arguments are the column and the row number.</note></notes>
+        <segment><source>{column}, device {n}</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.address">
+        <notes><note category="description">Column of the management address of a device.</note></notes>
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.port">
+        <notes><note category="description">Column of the SNMP port of a device.</note></notes>
+        <segment><source>Port</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.name">
+        <notes><note category="description">Column of the name of a device.</note></notes>
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.user">
+        <notes><note category="description">Column of the SNMPv3 user of a device.</note></notes>
+        <segment><source>User</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.auth">
+        <notes><note category="description">Column of the authentication protocol of a device.</note></notes>
+        <segment><source>Authentication</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.auth_secret">
+        <notes><note category="description">Column of the vault secret with the authentication password.</note></notes>
+        <segment><source>Authentication secret</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.privacy">
+        <notes><note category="description">Column of the privacy protocol of a device.</note></notes>
+        <segment><source>Privacy</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.privacy_secret">
+        <notes><note category="description">Column of the vault secret with the privacy password.</note></notes>
+        <segment><source>Privacy secret</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.no_auth">
+        <notes><note category="description">Choice of no SNMP authentication.</note></notes>
+        <segment><source>None</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.no_privacy">
+        <notes><note category="description">Choice of no SNMP encryption.</note></notes>
+        <segment><source>None</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.no_secret">
+        <notes><note category="description">Choice of no vault secret for a device.</note></notes>
+        <segment><source>No secret</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.lacking">
+        <notes><note category="description">Tag on a device that needs a vault secret before it is polled.</note></notes>
+        <segment><source>Needs a vault secret</source></segment>
+      </unit>
+      <unit id="nodes.scan.devices.error">
+        <notes><note category="description">Error about a field of a device row; the arguments are the row number, the column and the problem.</note></notes>
+        <segment><source>Device {n}, {column}: {error}</source></segment>
+      </unit>
+      <unit id="nodes.scan.error.cidr">
+        <notes><note category="description">Error for a prefix or address that cannot be read (code scans.config.cidr).</note></notes>
+        <segment><source>Not a valid prefix or address.</source></segment>
+      </unit>
+      <unit id="nodes.scan.error.min">
+        <notes><note category="description">Error for a number that is missing or out of range (code scans.config.min).</note></notes>
+        <segment><source>Enter a whole number within the allowed range.</source></segment>
+      </unit>
+      <unit id="nodes.scan.error.port">
+        <notes><note category="description">Error for a port that is not from 1 to 65535 (code scans.config.port).</note></notes>
+        <segment><source>A port is a whole number from 1 to 65,535.</source></segment>
+      </unit>
+      <unit id="nodes.scan.error.unknown">
+        <notes><note category="description">Error for a setting the controllers do not know (code scans.config.unknown).</note></notes>
+        <segment><source>The controllers do not know this setting.</source></segment>
+      </unit>
+      <unit id="nodes.scan.error.type">
+        <notes><note category="description">Error for a value of the wrong kind (code scans.config.type).</note></notes>
+        <segment><source>This value has the wrong kind.</source></segment>
+      </unit>
+      <unit id="nodes.scan.error.invalid">
+        <notes><note category="description">Error for any other refused value.</note></notes>
+        <segment><source>Check this value.</source></segment>
+      </unit>
+      <unit id="nodes.scan.error.general">
+        <notes><note category="description">Heading of the list of refused settings that the form does not show.</note></notes>
+        <segment><source>The controllers refused these settings</source></segment>
+      </unit>
+      <unit id="nodes.scan.error.lines">
+        <notes><note category="description">Where in a list the problem is: the line numbers; the arguments are the count and the numbers.</note></notes>
+        <segment><source>{count, plural, one {See line {positions}.} other {See lines {positions}.}}</source></segment>
+      </unit>
+      <unit id="nodes.scan.error.entries">
+        <notes><note category="description">Where in a comma separated list the problem is: the entry numbers; the arguments are the count and the numbers.</note></notes>
+        <segment><source>{count, plural, one {See entry {positions}.} other {See entries {positions}.}}</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

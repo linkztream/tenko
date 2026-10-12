@@ -38,6 +38,7 @@ import type { VlanStyle } from "../vlan/palette";
 import { saveTextFile } from "../../hosts/handoff";
 import { useWriteToast } from "../plan/PlanDialog";
 import { AdoptionPanel } from "./AdoptionPanel";
+import { ScanNowLazy } from "../../scans/ScanNowLazy";
 
 type Tab = "addresses" | "children" | "ranges" | "adoption" | "history";
 
@@ -249,6 +250,7 @@ export function PrefixPane(props: PrefixPaneProps) {
         </div>
         <div class="actions">
           <Show when={!deleted()}>
+            <ScanNowLazy kind="prefix" value={props.prefix.id} label={props.prefix.cidr} />
             <button type="button" class="btn" data-testid="prefix-edit" onClick={() => setDialog({ kind: "edit" })}>
               <Icon name="settings" />
               {t("ipam.do.edit")}

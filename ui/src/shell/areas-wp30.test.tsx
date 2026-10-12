@@ -1,6 +1,6 @@
 // The areas WP3.0 registers up front: the cluster area on the rail (any signed-in role, no module),
 // and the scans route of the discovery module, which has no place on the rail and disappears with
-// the module. The pages are placeholders until WP3.11a builds them.
+// the module. WP3.11a builds the pages.
 import { createMemoryHistory, MemoryRouter } from "@solidjs/router";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
@@ -62,7 +62,7 @@ describe("the cluster area", () => {
       await renderApp("/cluster", [role]);
       const page = await screen.findByTestId("page-cluster", {}, { timeout: 5000 });
       expect(within(page).getByRole("heading", { level: 1 }).textContent).toBe("Cluster");
-      expect(within(page).getByTestId("cluster-placeholder").textContent).toBe("The cluster page arrives with a later update.");
+      expect((await within(page).findByTestId("cluster-summary")).textContent).toContain("Quorum");
       const labels = railLinks();
       expect(labels.indexOf("Cluster")).toBe(labels.indexOf("Nodes") + 1);
       expect(labels.indexOf("Settings")).toBe(labels.indexOf("Cluster") + 1);
@@ -104,14 +104,15 @@ describe("the scans route of the discovery module", () => {
     const app = await renderApp("/scans");
     const page = await screen.findByTestId("page-scans", {}, { timeout: 5000 });
     expect(within(page).getByRole("heading", { level: 1 }).textContent).toBe("Scans");
-    expect(within(page).getByTestId("scans-placeholder").textContent).toBe("The scan page arrives with a later update.");
+    expect(await within(page).findByTestId("scans-list")).toBeTruthy();
+    expect(within(page).getByTestId("scans-probes")).toBeTruthy();
     expect(railLinks().some((n) => n.startsWith("Scans"))).toBe(false);
     expect(document.title).toBe("Scans - Tenko DDI");
     expect(await axeViolations(page, { disable: ["region"] })).toEqual([]);
     app.unmount();
 
-    await renderApp("/scans/0190d1c2-0000-7000-8000-00000000c001");
-    expect(await screen.findByTestId("page-scans", {}, { timeout: 5000 })).toBeTruthy();
+    await renderApp("/scans/0190d1c2-0000-7000-8000-0000000c5001");
+    expect(await screen.findByTestId("page-scan", {}, { timeout: 5000 })).toBeTruthy();
   });
 
   it("opens for a viewer too: any signed-in account", async () => {

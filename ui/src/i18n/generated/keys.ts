@@ -323,10 +323,175 @@ export type MessageKey =
   | "auth.strength.pin"
   | "backup.placeholder"
   | "backup.title"
+  | "cluster.action.add"
+  | "cluster.action.check_digests"
+  | "cluster.action.promote"
+  | "cluster.action.promote_named"
+  | "cluster.action.queue"
+  | "cluster.action.remove"
+  | "cluster.action.remove_named"
+  | "cluster.action.step_down"
+  | "cluster.add.intro"
+  | "cluster.add.next"
+  | "cluster.add.title"
+  | "cluster.blocker.changing"
+  | "cluster.blocker.even_voters"
+  | "cluster.blocker.last_voter"
+  | "cluster.blocker.no_successor"
+  | "cluster.blocker.not_caught_up"
+  | "cluster.blocker.not_learner"
+  | "cluster.blocker.not_voter"
+  | "cluster.blocker.single"
+  | "cluster.caveat.even_after"
+  | "cluster.caveat.forced"
+  | "cluster.caveat.no_tolerance"
+  | "cluster.caveat.reconnect"
+  | "cluster.caveat.removes_leader"
+  | "cluster.caveat.removes_self"
+  | "cluster.caveat.replaces"
+  | "cluster.caveat.revokes"
+  | "cluster.changing"
+  | "cluster.col.actions"
+  | "cluster.col.address"
+  | "cluster.col.contact"
+  | "cluster.col.format"
+  | "cluster.col.health"
+  | "cluster.col.joined"
+  | "cluster.col.lag"
+  | "cluster.col.name"
+  | "cluster.col.role"
+  | "cluster.col.version"
+  | "cluster.digests.agree"
+  | "cluster.digests.col.digest"
+  | "cluster.digests.col.entries"
+  | "cluster.digests.col.member"
+  | "cluster.digests.col.revision"
+  | "cluster.digests.col.state"
+  | "cluster.digests.col.tables"
+  | "cluster.digests.differ"
+  | "cluster.digests.intro"
+  | "cluster.digests.state.agrees"
+  | "cluster.digests.state.differs"
+  | "cluster.digests.state.missing"
+  | "cluster.digests.title"
+  | "cluster.done.open_job"
+  | "cluster.done.promoted"
+  | "cluster.done.removed"
+  | "cluster.done.stepped_down"
+  | "cluster.health.catching_up"
+  | "cluster.health.caught_up"
+  | "cluster.health.leader"
+  | "cluster.health.out_of_contact"
+  | "cluster.health.unknown"
   | "cluster.job.edit"
   | "cluster.job.write_preview"
-  | "cluster.placeholder"
+  | "cluster.member.leader_marker"
+  | "cluster.member.unnamed"
+  | "cluster.members.count"
+  | "cluster.members.title"
+  | "cluster.no_quorum.body"
+  | "cluster.no_quorum.body_since"
+  | "cluster.no_quorum.not_queueable"
+  | "cluster.no_quorum.queue"
+  | "cluster.no_quorum.queueable"
+  | "cluster.no_quorum.queued"
+  | "cluster.no_quorum.show_queue"
+  | "cluster.no_quorum.title"
+  | "cluster.partition.conflicts"
+  | "cluster.partition.electing.body"
+  | "cluster.partition.electing.title"
+  | "cluster.partition.isolated.body"
+  | "cluster.partition.isolated.title"
+  | "cluster.partition.queue_link"
+  | "cluster.partition.review"
+  | "cluster.partition.stale"
+  | "cluster.partition.stale_title"
+  | "cluster.preview.blockers"
+  | "cluster.preview.caveats"
+  | "cluster.preview.change"
+  | "cluster.preview.forceable"
+  | "cluster.preview.same"
+  | "cluster.preview.tolerated"
+  | "cluster.preview.voters"
+  | "cluster.promote.confirm"
+  | "cluster.promote.force"
+  | "cluster.promote.force_help"
+  | "cluster.promote.intro"
+  | "cluster.promote.replace"
+  | "cluster.promote.replace_help"
+  | "cluster.promote.replace_none"
+  | "cluster.promote.title"
+  | "cluster.queue.action"
+  | "cluster.queue.cancel_body"
+  | "cluster.queue.cancel_confirm"
+  | "cluster.queue.cancel_failed"
+  | "cluster.queue.cancel_named"
+  | "cluster.queue.cancel_title"
+  | "cluster.queue.cancelled"
+  | "cluster.queue.change_state.applied"
+  | "cluster.queue.change_state.conflict"
+  | "cluster.queue.change_state.discarded"
+  | "cluster.queue.change_state.reapplied"
+  | "cluster.queue.changes.empty"
+  | "cluster.queue.changes.intro"
+  | "cluster.queue.changes.title"
+  | "cluster.queue.col.actions"
+  | "cluster.queue.col.change"
+  | "cluster.queue.col.expires"
+  | "cluster.queue.col.queued"
+  | "cluster.queue.col.request"
+  | "cluster.queue.col.result"
+  | "cluster.queue.col.state"
+  | "cluster.queue.conflict.other"
+  | "cluster.queue.conflict.stale"
+  | "cluster.queue.count"
+  | "cluster.queue.discard"
+  | "cluster.queue.discard_body"
+  | "cluster.queue.discard_failed"
+  | "cluster.queue.discard_named"
+  | "cluster.queue.discard_title"
+  | "cluster.queue.discarded"
+  | "cluster.queue.keep"
+  | "cluster.queue.kind"
+  | "cluster.queue.local.empty"
+  | "cluster.queue.local.intro"
+  | "cluster.queue.local.title"
+  | "cluster.queue.reapplied"
+  | "cluster.queue.reapply"
+  | "cluster.queue.reapply_confirm"
+  | "cluster.queue.reapply_intro"
+  | "cluster.queue.reapply_named"
+  | "cluster.queue.reapply_title"
+  | "cluster.queue.state.draining"
+  | "cluster.queue.state.expired"
+  | "cluster.queue.state.queued"
+  | "cluster.queue.title"
+  | "cluster.queue.unavailable"
+  | "cluster.queue.what_unknown"
+  | "cluster.quorum.electing"
+  | "cluster.quorum.healthy"
+  | "cluster.quorum.isolated"
+  | "cluster.quorum.single"
+  | "cluster.remove.confirm"
+  | "cluster.remove.intro"
+  | "cluster.remove.title"
+  | "cluster.role.learner"
+  | "cluster.role.voter"
+  | "cluster.step_down.confirm"
+  | "cluster.step_down.intro"
+  | "cluster.step_down.successor"
+  | "cluster.step_down.title"
+  | "cluster.summary.label"
+  | "cluster.summary.leader"
+  | "cluster.summary.no_leader"
+  | "cluster.summary.node"
+  | "cluster.summary.quorum"
+  | "cluster.summary.since"
+  | "cluster.summary.term"
+  | "cluster.summary.voters"
+  | "cluster.summary.voters_value"
   | "cluster.title"
+  | "cluster.tolerance"
   | "common.action.add"
   | "common.action.back"
   | "common.action.cancel"
@@ -820,10 +985,19 @@ export type MessageKey =
   | "errors.cluster.enrolment.not_found"
   | "errors.cluster.enrolment.random"
   | "errors.cluster.enrolment.roles"
+  | "errors.cluster.member.changing"
+  | "errors.cluster.member.even_voters"
+  | "errors.cluster.member.last_voter"
+  | "errors.cluster.member.no_successor"
+  | "errors.cluster.member.not_caught_up"
+  | "errors.cluster.member.not_found"
+  | "errors.cluster.member.not_learner"
+  | "errors.cluster.no_quorum"
   | "errors.cluster.node.conflict"
   | "errors.cluster.node.name"
   | "errors.cluster.node.name_taken"
   | "errors.cluster.node.not_found"
+  | "errors.cluster.single"
   | "errors.connect.guardrail.management_client"
   | "errors.connect.guardrail.management_port"
   | "errors.connect.guardrail.protected_client"
@@ -970,8 +1144,22 @@ export type MessageKey =
   | "errors.modules.pinned"
   | "errors.modules.store"
   | "errors.modules.unavailable"
+  | "errors.node.config.invalid"
+  | "errors.node.config.not_a_probe"
+  | "errors.node.config.revision_mismatch"
+  | "errors.node.config.secret"
+  | "errors.node.config.vault_unavailable"
+  | "errors.queue.not_conflict"
+  | "errors.queue.not_isolated"
+  | "errors.queue.not_queueable"
+  | "errors.queue.unknown"
   | "errors.remote.address_unknown"
   | "errors.remote.interface_unknown"
+  | "errors.scan.job.invalid"
+  | "errors.scan.job.no_probe"
+  | "errors.scan.job.not_found"
+  | "errors.scan.job.target"
+  | "errors.scan.stopped"
   | "errors.settings.pin_coupling"
   | "errors.sys.csrf_rejected"
   | "errors.sys.internal"
@@ -2300,6 +2488,185 @@ export type MessageKey =
   | "nodes.revoke.failed"
   | "nodes.revoke.hint"
   | "nodes.revoke.title"
+  | "nodes.scan.applied.active"
+  | "nodes.scan.applied.applied_at"
+  | "nodes.scan.applied.error"
+  | "nodes.scan.applied.exclude"
+  | "nodes.scan.applied.methods"
+  | "nodes.scan.applied.none"
+  | "nodes.scan.applied.origin"
+  | "nodes.scan.applied.origin_local"
+  | "nodes.scan.applied.origin_synced"
+  | "nodes.scan.applied.prefixes"
+  | "nodes.scan.applied.reported_at"
+  | "nodes.scan.applied.revision"
+  | "nodes.scan.applied.title"
+  | "nodes.scan.back"
+  | "nodes.scan.devices.actions"
+  | "nodes.scan.devices.add"
+  | "nodes.scan.devices.address"
+  | "nodes.scan.devices.auth"
+  | "nodes.scan.devices.auth_secret"
+  | "nodes.scan.devices.empty"
+  | "nodes.scan.devices.error"
+  | "nodes.scan.devices.help"
+  | "nodes.scan.devices.lacking"
+  | "nodes.scan.devices.name"
+  | "nodes.scan.devices.no_auth"
+  | "nodes.scan.devices.no_privacy"
+  | "nodes.scan.devices.no_secret"
+  | "nodes.scan.devices.port"
+  | "nodes.scan.devices.privacy"
+  | "nodes.scan.devices.privacy_secret"
+  | "nodes.scan.devices.remove"
+  | "nodes.scan.devices.row_label"
+  | "nodes.scan.devices.title"
+  | "nodes.scan.devices.user"
+  | "nodes.scan.dns.servers"
+  | "nodes.scan.dns.servers_help"
+  | "nodes.scan.error.cidr"
+  | "nodes.scan.error.entries"
+  | "nodes.scan.error.general"
+  | "nodes.scan.error.invalid"
+  | "nodes.scan.error.lines"
+  | "nodes.scan.error.min"
+  | "nodes.scan.error.port"
+  | "nodes.scan.error.type"
+  | "nodes.scan.error.unknown"
+  | "nodes.scan.field.active"
+  | "nodes.scan.field.active_help"
+  | "nodes.scan.field.blackout"
+  | "nodes.scan.field.blackout_help"
+  | "nodes.scan.field.concurrency"
+  | "nodes.scan.field.concurrency_help"
+  | "nodes.scan.field.enabled"
+  | "nodes.scan.field.enabled_help"
+  | "nodes.scan.field.exclude"
+  | "nodes.scan.field.exclude_help"
+  | "nodes.scan.field.max_hosts"
+  | "nodes.scan.field.max_hosts_help"
+  | "nodes.scan.field.per_host"
+  | "nodes.scan.field.per_host_help"
+  | "nodes.scan.field.pps"
+  | "nodes.scan.field.pps_help"
+  | "nodes.scan.field.prefixes"
+  | "nodes.scan.field.prefixes_help"
+  | "nodes.scan.field.rate"
+  | "nodes.scan.field.rate_help"
+  | "nodes.scan.field.timezone"
+  | "nodes.scan.field.timezone_help"
+  | "nodes.scan.field.vrf"
+  | "nodes.scan.field.vrf_help"
+  | "nodes.scan.form.failed"
+  | "nodes.scan.form.label"
+  | "nodes.scan.form.readonly"
+  | "nodes.scan.form.reload"
+  | "nodes.scan.form.remote"
+  | "nodes.scan.form.revert"
+  | "nodes.scan.form.saved"
+  | "nodes.scan.form.stale"
+  | "nodes.scan.form.title"
+  | "nodes.scan.group.general"
+  | "nodes.scan.group.methods"
+  | "nodes.scan.group.scope"
+  | "nodes.scan.ks.at"
+  | "nodes.scan.ks.by"
+  | "nodes.scan.ks.confirmed"
+  | "nodes.scan.ks.confirmed_no"
+  | "nodes.scan.ks.confirmed_yes"
+  | "nodes.scan.ks.reason"
+  | "nodes.scan.ks.resume"
+  | "nodes.scan.ks.running"
+  | "nodes.scan.ks.stop"
+  | "nodes.scan.ks.stopped"
+  | "nodes.scan.ks.title"
+  | "nodes.scan.lacking"
+  | "nodes.scan.llmnr.port"
+  | "nodes.scan.mdns.group"
+  | "nodes.scan.mdns.group_help"
+  | "nodes.scan.mdns.listen"
+  | "nodes.scan.mdns.listen_help"
+  | "nodes.scan.mdns.passive"
+  | "nodes.scan.mdns.passive_help"
+  | "nodes.scan.mdns.unicast_port"
+  | "nodes.scan.mdns.unicast_port_help"
+  | "nodes.scan.method.arp.help"
+  | "nodes.scan.method.arp.name"
+  | "nodes.scan.method.arp_sweep.help"
+  | "nodes.scan.method.arp_sweep.name"
+  | "nodes.scan.method.enabled"
+  | "nodes.scan.method.icmp.help"
+  | "nodes.scan.method.icmp.name"
+  | "nodes.scan.method.interval"
+  | "nodes.scan.method.interval_help"
+  | "nodes.scan.method.lldp.help"
+  | "nodes.scan.method.lldp.name"
+  | "nodes.scan.method.llmnr.help"
+  | "nodes.scan.method.llmnr.name"
+  | "nodes.scan.method.mdns.help"
+  | "nodes.scan.method.mdns.name"
+  | "nodes.scan.method.nd.help"
+  | "nodes.scan.method.nd.name"
+  | "nodes.scan.method.os_fingerprint.help"
+  | "nodes.scan.method.os_fingerprint.name"
+  | "nodes.scan.method.raw"
+  | "nodes.scan.method.reverse_dns.help"
+  | "nodes.scan.method.reverse_dns.name"
+  | "nodes.scan.method.snmp.help"
+  | "nodes.scan.method.snmp.name"
+  | "nodes.scan.method.tcp_connect.help"
+  | "nodes.scan.method.tcp_connect.name"
+  | "nodes.scan.method.tcp_syn.help"
+  | "nodes.scan.method.tcp_syn.name"
+  | "nodes.scan.method.timeout"
+  | "nodes.scan.method.timeout_help"
+  | "nodes.scan.method.ttl"
+  | "nodes.scan.method.ttl_help"
+  | "nodes.scan.node_fallback"
+  | "nodes.scan.not_probe.body"
+  | "nodes.scan.not_probe.missing"
+  | "nodes.scan.not_probe.title"
+  | "nodes.scan.panel.hint"
+  | "nodes.scan.panel.link"
+  | "nodes.scan.panel.title"
+  | "nodes.scan.rate.normal"
+  | "nodes.scan.rate.slow"
+  | "nodes.scan.rate.slowest"
+  | "nodes.scan.rate.unlimited"
+  | "nodes.scan.resume.done"
+  | "nodes.scan.resume.failed"
+  | "nodes.scan.snmp.lldp_ports"
+  | "nodes.scan.snmp.lldp_ports_help"
+  | "nodes.scan.snmp.retries"
+  | "nodes.scan.snmp.retries_help"
+  | "nodes.scan.stop.body"
+  | "nodes.scan.stop.done"
+  | "nodes.scan.stop.failed"
+  | "nodes.scan.stop.reason"
+  | "nodes.scan.stop.reason_help"
+  | "nodes.scan.stop.reason_too_long"
+  | "nodes.scan.stop.submit"
+  | "nodes.scan.stop.title"
+  | "nodes.scan.sync.in_sync"
+  | "nodes.scan.sync.not_in_sync"
+  | "nodes.scan.sync.not_stored"
+  | "nodes.scan.sync.origin"
+  | "nodes.scan.sync.origin_api"
+  | "nodes.scan.sync.origin_offer"
+  | "nodes.scan.sync.revision"
+  | "nodes.scan.sync.title"
+  | "nodes.scan.sync.updated_at"
+  | "nodes.scan.sync.updated_by"
+  | "nodes.scan.tcp.ports"
+  | "nodes.scan.tcp.ports_help"
+  | "nodes.scan.tcp.targets"
+  | "nodes.scan.tcp.targets_all"
+  | "nodes.scan.tcp.targets_help"
+  | "nodes.scan.tcp.targets_known"
+  | "nodes.scan.tcp.tls_hint"
+  | "nodes.scan.tcp.tls_hint_help"
+  | "nodes.scan.title"
+  | "nodes.scan.vrf.default"
   | "nodes.summary"
   | "nodes.token.any_name"
   | "nodes.token.col.actions"
@@ -2357,8 +2724,137 @@ export type MessageKey =
   | "role.operator.name"
   | "role.viewer.description"
   | "role.viewer.name"
-  | "scans.placeholder"
+  | "scans.action.back"
+  | "scans.action.resume_all"
+  | "scans.action.stop_all"
+  | "scans.change.changed"
+  | "scans.change.gone"
+  | "scans.change.new"
+  | "scans.change.unchanged"
+  | "scans.col.changes"
+  | "scans.col.created"
+  | "scans.col.finished"
+  | "scans.col.kinds"
+  | "scans.col.progress"
+  | "scans.col.requested_by"
+  | "scans.col.state"
+  | "scans.col.target"
+  | "scans.count"
+  | "scans.diff.col.after"
+  | "scans.diff.col.before"
+  | "scans.diff.col.change"
+  | "scans.diff.col.subject"
+  | "scans.diff.col.type"
+  | "scans.diff.empty"
+  | "scans.diff.heading"
+  | "scans.diff.items_label"
+  | "scans.diff.pending"
+  | "scans.diff.summary"
+  | "scans.diff.total"
+  | "scans.diff.totals_label"
+  | "scans.diff.truncated"
+  | "scans.diff.waiting"
+  | "scans.empty.body"
+  | "scans.empty.title"
+  | "scans.fact.address"
+  | "scans.fact.attachment"
+  | "scans.fact.link"
+  | "scans.fact.none"
+  | "scans.fact.os"
+  | "scans.fact.ports"
+  | "scans.fact.tls"
+  | "scans.fact_type.address"
+  | "scans.fact_type.attachment"
+  | "scans.fact_type.host"
+  | "scans.fact_type.link"
+  | "scans.fact_type.name"
+  | "scans.fact_type.os"
+  | "scans.fact_type.services"
+  | "scans.fact_type.vendor"
+  | "scans.kind.os_fingerprint"
+  | "scans.kind.passive_refresh"
+  | "scans.kind.port_scan"
+  | "scans.kind.snmp_poll"
+  | "scans.list.label"
+  | "scans.now.action"
+  | "scans.now.deadline"
+  | "scans.now.deadline_hint"
+  | "scans.now.follow"
+  | "scans.now.intro"
+  | "scans.now.kind.os_fingerprint"
+  | "scans.now.kind.passive_refresh"
+  | "scans.now.kind.port_scan"
+  | "scans.now.kind.snmp_poll"
+  | "scans.now.kinds"
+  | "scans.now.kinds_required"
+  | "scans.now.refused_title"
+  | "scans.now.start"
+  | "scans.now.started"
+  | "scans.now.started_title"
+  | "scans.now.starting"
+  | "scans.now.title"
+  | "scans.part.col.command"
+  | "scans.part.col.detail"
+  | "scans.part.col.ingested"
+  | "scans.part.col.node"
+  | "scans.part.ingested"
+  | "scans.part.state.accepted"
+  | "scans.part.state.cancelled"
+  | "scans.part.state.done"
+  | "scans.part.state.expired"
+  | "scans.part.state.failed"
+  | "scans.part.state.pending"
+  | "scans.part.state.rejected"
+  | "scans.part.state.running"
+  | "scans.probe.col.name"
+  | "scans.probe.col.scope"
+  | "scans.probe.col.switch"
+  | "scans.probe.col.sync"
+  | "scans.probe.in_process"
+  | "scans.probe.in_sync"
+  | "scans.probe.methods_none"
+  | "scans.probe.node_unnamed"
+  | "scans.probe.out_of_sync"
+  | "scans.probe.scope"
+  | "scans.probe.scope_none"
+  | "scans.probes.label"
+  | "scans.progress.label"
+  | "scans.progress.percent"
+  | "scans.section.jobs"
+  | "scans.section.probes"
+  | "scans.state.cancelled"
+  | "scans.state.done"
+  | "scans.state.failed"
+  | "scans.state.partial"
+  | "scans.state.queued"
+  | "scans.state.running"
+  | "scans.stop.body"
+  | "scans.stop.confirm"
+  | "scans.stop.reason"
+  | "scans.stop.reason_hint"
+  | "scans.stop.title"
+  | "scans.switch.active"
+  | "scans.switch.reason"
+  | "scans.switch.stopped"
+  | "scans.switch.unconfirmed"
+  | "scans.target.address"
+  | "scans.target.host"
+  | "scans.target.network"
+  | "scans.target.prefix"
   | "scans.title"
+  | "scans.toast.resumed"
+  | "scans.toast.stopped"
+  | "scans.view.deadline"
+  | "scans.view.error"
+  | "scans.view.facts"
+  | "scans.view.loading"
+  | "scans.view.networks"
+  | "scans.view.not_found"
+  | "scans.view.not_found_title"
+  | "scans.view.probes"
+  | "scans.view.probes_label"
+  | "scans.view.tab"
+  | "scans.view.title"
   | "secrets.action.create"
   | "secrets.action.delete"
   | "secrets.action.delete_named"
@@ -3136,6 +3632,7 @@ export type MessageKey =
   | "shell.status.modules_restart_title"
   | "shell.status.no_events"
   | "shell.status.offline"
+  | "shell.status.proposals"
   | "shell.status.reconnecting"
   | "shell.status.running"
   | "shell.status.selection"
@@ -3458,6 +3955,40 @@ export interface MessageArgs {
   "audit.record.title": { seq: string | number };
   "audit.row": { seq: string | number };
   "auth.signin.retry_in": { seconds: number };
+  "cluster.action.promote_named": { name: string | number };
+  "cluster.action.remove_named": { name: string | number };
+  "cluster.col.format": { format: string | number };
+  "cluster.digests.agree": { count: number; revision: string | number };
+  "cluster.digests.differ": { revision: string | number };
+  "cluster.done.promoted": { name: string | number };
+  "cluster.done.removed": { name: string | number };
+  "cluster.done.stepped_down": { name: string | number; term: string | number };
+  "cluster.member.unnamed": { id: string | number };
+  "cluster.members.count": { count: number };
+  "cluster.no_quorum.body_since": { since: string | number };
+  "cluster.no_quorum.queued": { expires: string | number };
+  "cluster.partition.conflicts": { count: number };
+  "cluster.partition.electing.body": { duration: string | number };
+  "cluster.partition.isolated.body": { duration: string | number };
+  "cluster.partition.stale": { age: string | number };
+  "cluster.partition.stale_title": { revision: string | number };
+  "cluster.preview.change": { after: string | number; before: string | number };
+  "cluster.preview.same": { count: string | number };
+  "cluster.promote.title": { name: string | number };
+  "cluster.queue.action": { action: string; kind: string | number };
+  "cluster.queue.cancel_body": { what: string | number };
+  "cluster.queue.cancel_named": { what: string | number };
+  "cluster.queue.count": { count: number };
+  "cluster.queue.discard_body": { what: string | number };
+  "cluster.queue.discard_named": { what: string | number };
+  "cluster.queue.kind": { kind: string };
+  "cluster.queue.reapply_intro": { what: string | number };
+  "cluster.queue.reapply_named": { what: string | number };
+  "cluster.remove.title": { name: string | number };
+  "cluster.step_down.successor": { name: string | number };
+  "cluster.summary.since": { since: string | number };
+  "cluster.summary.voters_value": { count: number; tolerance: string | number };
+  "cluster.tolerance": { count: number };
   "common.count.items": { count: number };
   "common.greeting": { name: string | number };
   "connectors.delete.title": { name: string | number };
@@ -3921,6 +4452,23 @@ export interface MessageArgs {
   "nodes.revoke.confirm_title": { name: string | number };
   "nodes.revoke.done": { name: string | number };
   "nodes.revoke.failed": { name: string | number };
+  "nodes.scan.applied.error": { error: string | number };
+  "nodes.scan.back": { name: string | number };
+  "nodes.scan.devices.error": { column: string | number; error: string | number; n: string | number };
+  "nodes.scan.devices.remove": { n: string | number };
+  "nodes.scan.devices.row_label": { column: string | number; n: string | number };
+  "nodes.scan.error.entries": { count: number; positions: string | number };
+  "nodes.scan.error.lines": { count: number; positions: string | number };
+  "nodes.scan.lacking": { count: number; devices: string | number };
+  "nodes.scan.node_fallback": { id: string | number };
+  "nodes.scan.not_probe.body": { name: string | number };
+  "nodes.scan.resume.done": { name: string | number };
+  "nodes.scan.resume.failed": { name: string | number };
+  "nodes.scan.stop.done": { name: string | number };
+  "nodes.scan.stop.failed": { name: string | number };
+  "nodes.scan.stop.reason_help": { max: string | number };
+  "nodes.scan.stop.reason_too_long": { max: string | number };
+  "nodes.scan.stop.title": { name: string | number };
   "nodes.summary": { connected: string | number; nodes: number };
   "nodes.token.delete_named": { name: string | number };
   "nodes.version_count": { count: string | number; version: string | number };
@@ -3930,6 +4478,26 @@ export interface MessageArgs {
   "principal.token": { id: string | number };
   "principal.user": { id: string | number };
   "principal.you": { name: string | number };
+  "scans.count": { count: number };
+  "scans.diff.summary": { changed: string | number; gone: string | number; new: string | number };
+  "scans.fact.address": { ip: string | number; mac: string | number };
+  "scans.fact.attachment": { device: string | number; mac: string | number };
+  "scans.fact.link": { a: string | number; b: string | number; kind: string | number };
+  "scans.fact.os": { confidence: string | number; guess: string | number };
+  "scans.fact.ports": { ports: string | number };
+  "scans.fact.tls": { ports: string | number };
+  "scans.now.started": { probes: number };
+  "scans.now.title": { target: string | number };
+  "scans.part.ingested": { batches: string | number; ingested: string | number };
+  "scans.probe.node_unnamed": { id: string | number };
+  "scans.probe.scope": { count: number; methods: string | number };
+  "scans.progress.label": { target: string | number };
+  "scans.progress.percent": { percent: string | number };
+  "scans.switch.reason": { reason: string | number };
+  "scans.switch.unconfirmed": { state: string | number };
+  "scans.toast.resumed": { count: number };
+  "scans.toast.stopped": { count: number };
+  "scans.view.title": { target: string | number };
   "secrets.action.delete_named": { name: string | number };
   "secrets.action.edit_named": { name: string | number };
   "secrets.action.replace_named": { name: string | number };
@@ -4052,6 +4620,7 @@ export interface MessageArgs {
   "shell.status.alarms": { count: number };
   "shell.status.critical": { count: number };
   "shell.status.last_event": { ago: string | number };
+  "shell.status.proposals": { count: number };
   "shell.status.running": { count: number };
   "shell.status.selection": { selected: number; total: number };
   "shell.status.update": { version: string | number };
@@ -4445,10 +5014,175 @@ export const messageKeys: readonly MessageKey[] = [
   "auth.strength.pin",
   "backup.placeholder",
   "backup.title",
+  "cluster.action.add",
+  "cluster.action.check_digests",
+  "cluster.action.promote",
+  "cluster.action.promote_named",
+  "cluster.action.queue",
+  "cluster.action.remove",
+  "cluster.action.remove_named",
+  "cluster.action.step_down",
+  "cluster.add.intro",
+  "cluster.add.next",
+  "cluster.add.title",
+  "cluster.blocker.changing",
+  "cluster.blocker.even_voters",
+  "cluster.blocker.last_voter",
+  "cluster.blocker.no_successor",
+  "cluster.blocker.not_caught_up",
+  "cluster.blocker.not_learner",
+  "cluster.blocker.not_voter",
+  "cluster.blocker.single",
+  "cluster.caveat.even_after",
+  "cluster.caveat.forced",
+  "cluster.caveat.no_tolerance",
+  "cluster.caveat.reconnect",
+  "cluster.caveat.removes_leader",
+  "cluster.caveat.removes_self",
+  "cluster.caveat.replaces",
+  "cluster.caveat.revokes",
+  "cluster.changing",
+  "cluster.col.actions",
+  "cluster.col.address",
+  "cluster.col.contact",
+  "cluster.col.format",
+  "cluster.col.health",
+  "cluster.col.joined",
+  "cluster.col.lag",
+  "cluster.col.name",
+  "cluster.col.role",
+  "cluster.col.version",
+  "cluster.digests.agree",
+  "cluster.digests.col.digest",
+  "cluster.digests.col.entries",
+  "cluster.digests.col.member",
+  "cluster.digests.col.revision",
+  "cluster.digests.col.state",
+  "cluster.digests.col.tables",
+  "cluster.digests.differ",
+  "cluster.digests.intro",
+  "cluster.digests.state.agrees",
+  "cluster.digests.state.differs",
+  "cluster.digests.state.missing",
+  "cluster.digests.title",
+  "cluster.done.open_job",
+  "cluster.done.promoted",
+  "cluster.done.removed",
+  "cluster.done.stepped_down",
+  "cluster.health.catching_up",
+  "cluster.health.caught_up",
+  "cluster.health.leader",
+  "cluster.health.out_of_contact",
+  "cluster.health.unknown",
   "cluster.job.edit",
   "cluster.job.write_preview",
-  "cluster.placeholder",
+  "cluster.member.leader_marker",
+  "cluster.member.unnamed",
+  "cluster.members.count",
+  "cluster.members.title",
+  "cluster.no_quorum.body",
+  "cluster.no_quorum.body_since",
+  "cluster.no_quorum.not_queueable",
+  "cluster.no_quorum.queue",
+  "cluster.no_quorum.queueable",
+  "cluster.no_quorum.queued",
+  "cluster.no_quorum.show_queue",
+  "cluster.no_quorum.title",
+  "cluster.partition.conflicts",
+  "cluster.partition.electing.body",
+  "cluster.partition.electing.title",
+  "cluster.partition.isolated.body",
+  "cluster.partition.isolated.title",
+  "cluster.partition.queue_link",
+  "cluster.partition.review",
+  "cluster.partition.stale",
+  "cluster.partition.stale_title",
+  "cluster.preview.blockers",
+  "cluster.preview.caveats",
+  "cluster.preview.change",
+  "cluster.preview.forceable",
+  "cluster.preview.same",
+  "cluster.preview.tolerated",
+  "cluster.preview.voters",
+  "cluster.promote.confirm",
+  "cluster.promote.force",
+  "cluster.promote.force_help",
+  "cluster.promote.intro",
+  "cluster.promote.replace",
+  "cluster.promote.replace_help",
+  "cluster.promote.replace_none",
+  "cluster.promote.title",
+  "cluster.queue.action",
+  "cluster.queue.cancel_body",
+  "cluster.queue.cancel_confirm",
+  "cluster.queue.cancel_failed",
+  "cluster.queue.cancel_named",
+  "cluster.queue.cancel_title",
+  "cluster.queue.cancelled",
+  "cluster.queue.change_state.applied",
+  "cluster.queue.change_state.conflict",
+  "cluster.queue.change_state.discarded",
+  "cluster.queue.change_state.reapplied",
+  "cluster.queue.changes.empty",
+  "cluster.queue.changes.intro",
+  "cluster.queue.changes.title",
+  "cluster.queue.col.actions",
+  "cluster.queue.col.change",
+  "cluster.queue.col.expires",
+  "cluster.queue.col.queued",
+  "cluster.queue.col.request",
+  "cluster.queue.col.result",
+  "cluster.queue.col.state",
+  "cluster.queue.conflict.other",
+  "cluster.queue.conflict.stale",
+  "cluster.queue.count",
+  "cluster.queue.discard",
+  "cluster.queue.discard_body",
+  "cluster.queue.discard_failed",
+  "cluster.queue.discard_named",
+  "cluster.queue.discard_title",
+  "cluster.queue.discarded",
+  "cluster.queue.keep",
+  "cluster.queue.kind",
+  "cluster.queue.local.empty",
+  "cluster.queue.local.intro",
+  "cluster.queue.local.title",
+  "cluster.queue.reapplied",
+  "cluster.queue.reapply",
+  "cluster.queue.reapply_confirm",
+  "cluster.queue.reapply_intro",
+  "cluster.queue.reapply_named",
+  "cluster.queue.reapply_title",
+  "cluster.queue.state.draining",
+  "cluster.queue.state.expired",
+  "cluster.queue.state.queued",
+  "cluster.queue.title",
+  "cluster.queue.unavailable",
+  "cluster.queue.what_unknown",
+  "cluster.quorum.electing",
+  "cluster.quorum.healthy",
+  "cluster.quorum.isolated",
+  "cluster.quorum.single",
+  "cluster.remove.confirm",
+  "cluster.remove.intro",
+  "cluster.remove.title",
+  "cluster.role.learner",
+  "cluster.role.voter",
+  "cluster.step_down.confirm",
+  "cluster.step_down.intro",
+  "cluster.step_down.successor",
+  "cluster.step_down.title",
+  "cluster.summary.label",
+  "cluster.summary.leader",
+  "cluster.summary.no_leader",
+  "cluster.summary.node",
+  "cluster.summary.quorum",
+  "cluster.summary.since",
+  "cluster.summary.term",
+  "cluster.summary.voters",
+  "cluster.summary.voters_value",
   "cluster.title",
+  "cluster.tolerance",
   "common.action.add",
   "common.action.back",
   "common.action.cancel",
@@ -4942,10 +5676,19 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.cluster.enrolment.not_found",
   "errors.cluster.enrolment.random",
   "errors.cluster.enrolment.roles",
+  "errors.cluster.member.changing",
+  "errors.cluster.member.even_voters",
+  "errors.cluster.member.last_voter",
+  "errors.cluster.member.no_successor",
+  "errors.cluster.member.not_caught_up",
+  "errors.cluster.member.not_found",
+  "errors.cluster.member.not_learner",
+  "errors.cluster.no_quorum",
   "errors.cluster.node.conflict",
   "errors.cluster.node.name",
   "errors.cluster.node.name_taken",
   "errors.cluster.node.not_found",
+  "errors.cluster.single",
   "errors.connect.guardrail.management_client",
   "errors.connect.guardrail.management_port",
   "errors.connect.guardrail.protected_client",
@@ -5092,8 +5835,22 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.modules.pinned",
   "errors.modules.store",
   "errors.modules.unavailable",
+  "errors.node.config.invalid",
+  "errors.node.config.not_a_probe",
+  "errors.node.config.revision_mismatch",
+  "errors.node.config.secret",
+  "errors.node.config.vault_unavailable",
+  "errors.queue.not_conflict",
+  "errors.queue.not_isolated",
+  "errors.queue.not_queueable",
+  "errors.queue.unknown",
   "errors.remote.address_unknown",
   "errors.remote.interface_unknown",
+  "errors.scan.job.invalid",
+  "errors.scan.job.no_probe",
+  "errors.scan.job.not_found",
+  "errors.scan.job.target",
+  "errors.scan.stopped",
   "errors.settings.pin_coupling",
   "errors.sys.csrf_rejected",
   "errors.sys.internal",
@@ -6422,6 +7179,185 @@ export const messageKeys: readonly MessageKey[] = [
   "nodes.revoke.failed",
   "nodes.revoke.hint",
   "nodes.revoke.title",
+  "nodes.scan.applied.active",
+  "nodes.scan.applied.applied_at",
+  "nodes.scan.applied.error",
+  "nodes.scan.applied.exclude",
+  "nodes.scan.applied.methods",
+  "nodes.scan.applied.none",
+  "nodes.scan.applied.origin",
+  "nodes.scan.applied.origin_local",
+  "nodes.scan.applied.origin_synced",
+  "nodes.scan.applied.prefixes",
+  "nodes.scan.applied.reported_at",
+  "nodes.scan.applied.revision",
+  "nodes.scan.applied.title",
+  "nodes.scan.back",
+  "nodes.scan.devices.actions",
+  "nodes.scan.devices.add",
+  "nodes.scan.devices.address",
+  "nodes.scan.devices.auth",
+  "nodes.scan.devices.auth_secret",
+  "nodes.scan.devices.empty",
+  "nodes.scan.devices.error",
+  "nodes.scan.devices.help",
+  "nodes.scan.devices.lacking",
+  "nodes.scan.devices.name",
+  "nodes.scan.devices.no_auth",
+  "nodes.scan.devices.no_privacy",
+  "nodes.scan.devices.no_secret",
+  "nodes.scan.devices.port",
+  "nodes.scan.devices.privacy",
+  "nodes.scan.devices.privacy_secret",
+  "nodes.scan.devices.remove",
+  "nodes.scan.devices.row_label",
+  "nodes.scan.devices.title",
+  "nodes.scan.devices.user",
+  "nodes.scan.dns.servers",
+  "nodes.scan.dns.servers_help",
+  "nodes.scan.error.cidr",
+  "nodes.scan.error.entries",
+  "nodes.scan.error.general",
+  "nodes.scan.error.invalid",
+  "nodes.scan.error.lines",
+  "nodes.scan.error.min",
+  "nodes.scan.error.port",
+  "nodes.scan.error.type",
+  "nodes.scan.error.unknown",
+  "nodes.scan.field.active",
+  "nodes.scan.field.active_help",
+  "nodes.scan.field.blackout",
+  "nodes.scan.field.blackout_help",
+  "nodes.scan.field.concurrency",
+  "nodes.scan.field.concurrency_help",
+  "nodes.scan.field.enabled",
+  "nodes.scan.field.enabled_help",
+  "nodes.scan.field.exclude",
+  "nodes.scan.field.exclude_help",
+  "nodes.scan.field.max_hosts",
+  "nodes.scan.field.max_hosts_help",
+  "nodes.scan.field.per_host",
+  "nodes.scan.field.per_host_help",
+  "nodes.scan.field.pps",
+  "nodes.scan.field.pps_help",
+  "nodes.scan.field.prefixes",
+  "nodes.scan.field.prefixes_help",
+  "nodes.scan.field.rate",
+  "nodes.scan.field.rate_help",
+  "nodes.scan.field.timezone",
+  "nodes.scan.field.timezone_help",
+  "nodes.scan.field.vrf",
+  "nodes.scan.field.vrf_help",
+  "nodes.scan.form.failed",
+  "nodes.scan.form.label",
+  "nodes.scan.form.readonly",
+  "nodes.scan.form.reload",
+  "nodes.scan.form.remote",
+  "nodes.scan.form.revert",
+  "nodes.scan.form.saved",
+  "nodes.scan.form.stale",
+  "nodes.scan.form.title",
+  "nodes.scan.group.general",
+  "nodes.scan.group.methods",
+  "nodes.scan.group.scope",
+  "nodes.scan.ks.at",
+  "nodes.scan.ks.by",
+  "nodes.scan.ks.confirmed",
+  "nodes.scan.ks.confirmed_no",
+  "nodes.scan.ks.confirmed_yes",
+  "nodes.scan.ks.reason",
+  "nodes.scan.ks.resume",
+  "nodes.scan.ks.running",
+  "nodes.scan.ks.stop",
+  "nodes.scan.ks.stopped",
+  "nodes.scan.ks.title",
+  "nodes.scan.lacking",
+  "nodes.scan.llmnr.port",
+  "nodes.scan.mdns.group",
+  "nodes.scan.mdns.group_help",
+  "nodes.scan.mdns.listen",
+  "nodes.scan.mdns.listen_help",
+  "nodes.scan.mdns.passive",
+  "nodes.scan.mdns.passive_help",
+  "nodes.scan.mdns.unicast_port",
+  "nodes.scan.mdns.unicast_port_help",
+  "nodes.scan.method.arp.help",
+  "nodes.scan.method.arp.name",
+  "nodes.scan.method.arp_sweep.help",
+  "nodes.scan.method.arp_sweep.name",
+  "nodes.scan.method.enabled",
+  "nodes.scan.method.icmp.help",
+  "nodes.scan.method.icmp.name",
+  "nodes.scan.method.interval",
+  "nodes.scan.method.interval_help",
+  "nodes.scan.method.lldp.help",
+  "nodes.scan.method.lldp.name",
+  "nodes.scan.method.llmnr.help",
+  "nodes.scan.method.llmnr.name",
+  "nodes.scan.method.mdns.help",
+  "nodes.scan.method.mdns.name",
+  "nodes.scan.method.nd.help",
+  "nodes.scan.method.nd.name",
+  "nodes.scan.method.os_fingerprint.help",
+  "nodes.scan.method.os_fingerprint.name",
+  "nodes.scan.method.raw",
+  "nodes.scan.method.reverse_dns.help",
+  "nodes.scan.method.reverse_dns.name",
+  "nodes.scan.method.snmp.help",
+  "nodes.scan.method.snmp.name",
+  "nodes.scan.method.tcp_connect.help",
+  "nodes.scan.method.tcp_connect.name",
+  "nodes.scan.method.tcp_syn.help",
+  "nodes.scan.method.tcp_syn.name",
+  "nodes.scan.method.timeout",
+  "nodes.scan.method.timeout_help",
+  "nodes.scan.method.ttl",
+  "nodes.scan.method.ttl_help",
+  "nodes.scan.node_fallback",
+  "nodes.scan.not_probe.body",
+  "nodes.scan.not_probe.missing",
+  "nodes.scan.not_probe.title",
+  "nodes.scan.panel.hint",
+  "nodes.scan.panel.link",
+  "nodes.scan.panel.title",
+  "nodes.scan.rate.normal",
+  "nodes.scan.rate.slow",
+  "nodes.scan.rate.slowest",
+  "nodes.scan.rate.unlimited",
+  "nodes.scan.resume.done",
+  "nodes.scan.resume.failed",
+  "nodes.scan.snmp.lldp_ports",
+  "nodes.scan.snmp.lldp_ports_help",
+  "nodes.scan.snmp.retries",
+  "nodes.scan.snmp.retries_help",
+  "nodes.scan.stop.body",
+  "nodes.scan.stop.done",
+  "nodes.scan.stop.failed",
+  "nodes.scan.stop.reason",
+  "nodes.scan.stop.reason_help",
+  "nodes.scan.stop.reason_too_long",
+  "nodes.scan.stop.submit",
+  "nodes.scan.stop.title",
+  "nodes.scan.sync.in_sync",
+  "nodes.scan.sync.not_in_sync",
+  "nodes.scan.sync.not_stored",
+  "nodes.scan.sync.origin",
+  "nodes.scan.sync.origin_api",
+  "nodes.scan.sync.origin_offer",
+  "nodes.scan.sync.revision",
+  "nodes.scan.sync.title",
+  "nodes.scan.sync.updated_at",
+  "nodes.scan.sync.updated_by",
+  "nodes.scan.tcp.ports",
+  "nodes.scan.tcp.ports_help",
+  "nodes.scan.tcp.targets",
+  "nodes.scan.tcp.targets_all",
+  "nodes.scan.tcp.targets_help",
+  "nodes.scan.tcp.targets_known",
+  "nodes.scan.tcp.tls_hint",
+  "nodes.scan.tcp.tls_hint_help",
+  "nodes.scan.title",
+  "nodes.scan.vrf.default",
   "nodes.summary",
   "nodes.token.any_name",
   "nodes.token.col.actions",
@@ -6479,8 +7415,137 @@ export const messageKeys: readonly MessageKey[] = [
   "role.operator.name",
   "role.viewer.description",
   "role.viewer.name",
-  "scans.placeholder",
+  "scans.action.back",
+  "scans.action.resume_all",
+  "scans.action.stop_all",
+  "scans.change.changed",
+  "scans.change.gone",
+  "scans.change.new",
+  "scans.change.unchanged",
+  "scans.col.changes",
+  "scans.col.created",
+  "scans.col.finished",
+  "scans.col.kinds",
+  "scans.col.progress",
+  "scans.col.requested_by",
+  "scans.col.state",
+  "scans.col.target",
+  "scans.count",
+  "scans.diff.col.after",
+  "scans.diff.col.before",
+  "scans.diff.col.change",
+  "scans.diff.col.subject",
+  "scans.diff.col.type",
+  "scans.diff.empty",
+  "scans.diff.heading",
+  "scans.diff.items_label",
+  "scans.diff.pending",
+  "scans.diff.summary",
+  "scans.diff.total",
+  "scans.diff.totals_label",
+  "scans.diff.truncated",
+  "scans.diff.waiting",
+  "scans.empty.body",
+  "scans.empty.title",
+  "scans.fact.address",
+  "scans.fact.attachment",
+  "scans.fact.link",
+  "scans.fact.none",
+  "scans.fact.os",
+  "scans.fact.ports",
+  "scans.fact.tls",
+  "scans.fact_type.address",
+  "scans.fact_type.attachment",
+  "scans.fact_type.host",
+  "scans.fact_type.link",
+  "scans.fact_type.name",
+  "scans.fact_type.os",
+  "scans.fact_type.services",
+  "scans.fact_type.vendor",
+  "scans.kind.os_fingerprint",
+  "scans.kind.passive_refresh",
+  "scans.kind.port_scan",
+  "scans.kind.snmp_poll",
+  "scans.list.label",
+  "scans.now.action",
+  "scans.now.deadline",
+  "scans.now.deadline_hint",
+  "scans.now.follow",
+  "scans.now.intro",
+  "scans.now.kind.os_fingerprint",
+  "scans.now.kind.passive_refresh",
+  "scans.now.kind.port_scan",
+  "scans.now.kind.snmp_poll",
+  "scans.now.kinds",
+  "scans.now.kinds_required",
+  "scans.now.refused_title",
+  "scans.now.start",
+  "scans.now.started",
+  "scans.now.started_title",
+  "scans.now.starting",
+  "scans.now.title",
+  "scans.part.col.command",
+  "scans.part.col.detail",
+  "scans.part.col.ingested",
+  "scans.part.col.node",
+  "scans.part.ingested",
+  "scans.part.state.accepted",
+  "scans.part.state.cancelled",
+  "scans.part.state.done",
+  "scans.part.state.expired",
+  "scans.part.state.failed",
+  "scans.part.state.pending",
+  "scans.part.state.rejected",
+  "scans.part.state.running",
+  "scans.probe.col.name",
+  "scans.probe.col.scope",
+  "scans.probe.col.switch",
+  "scans.probe.col.sync",
+  "scans.probe.in_process",
+  "scans.probe.in_sync",
+  "scans.probe.methods_none",
+  "scans.probe.node_unnamed",
+  "scans.probe.out_of_sync",
+  "scans.probe.scope",
+  "scans.probe.scope_none",
+  "scans.probes.label",
+  "scans.progress.label",
+  "scans.progress.percent",
+  "scans.section.jobs",
+  "scans.section.probes",
+  "scans.state.cancelled",
+  "scans.state.done",
+  "scans.state.failed",
+  "scans.state.partial",
+  "scans.state.queued",
+  "scans.state.running",
+  "scans.stop.body",
+  "scans.stop.confirm",
+  "scans.stop.reason",
+  "scans.stop.reason_hint",
+  "scans.stop.title",
+  "scans.switch.active",
+  "scans.switch.reason",
+  "scans.switch.stopped",
+  "scans.switch.unconfirmed",
+  "scans.target.address",
+  "scans.target.host",
+  "scans.target.network",
+  "scans.target.prefix",
   "scans.title",
+  "scans.toast.resumed",
+  "scans.toast.stopped",
+  "scans.view.deadline",
+  "scans.view.error",
+  "scans.view.facts",
+  "scans.view.loading",
+  "scans.view.networks",
+  "scans.view.not_found",
+  "scans.view.not_found_title",
+  "scans.view.probes",
+  "scans.view.probes_label",
+  "scans.view.tab",
+  "scans.view.title",
   "secrets.action.create",
   "secrets.action.delete",
   "secrets.action.delete_named",
@@ -7258,6 +8323,7 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.status.modules_restart_title",
   "shell.status.no_events",
   "shell.status.offline",
+  "shell.status.proposals",
   "shell.status.reconnecting",
   "shell.status.running",
   "shell.status.selection",

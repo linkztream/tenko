@@ -21,6 +21,9 @@
 //   discovered-host proposals with ones that include the IPv6 address.
 // - The inbox, an open proposal with its approve and reject dialogs and the report of a run,
 //   the observations and the picture of a subject in Swedish.
+// - The status bar item `status-proposals` shows the number of open proposals on any page,
+//   follows a rejection made elsewhere without a reload, disappears at zero and links to the
+//   inbox.
 //
 // Documentation values only: 192.0.2.0/24, 2001:db8::/32, MAC 00:00:5e:00:53:xx, names under
 // example.test; the rejection reason is invented. What stays manual: an adoption that the
@@ -646,4 +649,46 @@ test.describe("a Swedish browser", () => {
     await expect(subject.getByTestId("subject-proposals").getByTestId("subject-proposal").first()).toBeVisible();
     await expectRendered(page, subject, "sv", testInfo, "subject");
   });
+});
+
+test("the status bar item counts the open proposals, follows a rejection without a reload and links to the inbox", async ({
+  page,
+  api,
+  signedIn,
+}) => {
+  expect(signedIn.session.user.name).toBe("admin");
+  const { hosts, outside } = await arrange(api);
+  const open = [...hosts, outside];
+  expect(open).toHaveLength(4);
+
+  // Nothing but the dashboard is open, and the item already counts what the sample produced.
+  await page.goto("/");
+  await expect(page.getByTestId("page-dashboard")).toBeVisible();
+  const item = page.getByTestId("status-proposals");
+  await expect(item).toHaveText(/^\s*4\s+open proposals\s*$/);
+
+  // A rejection by someone else (here: the API) changes the number on the open page.
+  await api.post(`/proposals/${hosts[0]!.id}/reject`, { reason: "A lab host, not part of the plan" });
+  await expect(item).toHaveText(/^\s*3\s+open proposals\s*$/);
+  expect((await proposals(api, { state: "open" })).length).toBe(3);
+
+  // Down to one, which the item words in the singular, then to none, when it goes away.
+  for (const proposal of open.slice(1, 3)) {
+    await api.post(`/proposals/${proposal.id}/reject`, { reason: "A lab host, not part of the plan" });
+  }
+  await expect(item).toHaveText(/^\s*1\s+open proposal\s*$/);
+  await api.post(`/proposals/${open[3]!.id}/reject`, { reason: "A lab network, not part of the plan" });
+  await expect(item).toHaveCount(0);
+  expect(await proposals(api, { state: "open" })).toHaveLength(0);
+});
+
+test("the status bar item on another page links to the proposal inbox", async ({ page, api, signedIn }) => {
+  expect(signedIn.session.user.name).toBe("admin");
+  await arrange(api);
+  await page.goto("/ipam");
+  await expect(page.getByTestId("page-ipam")).toBeVisible();
+  await page.getByTestId("status-proposals").click();
+  await expect(page.getByTestId("page-discovery")).toBeVisible();
+  await expect(page).toHaveURL(/\/discovery$/);
+  await expect(page.getByTestId("grid-proposals").getByTestId("row")).toHaveCount(4);
 });

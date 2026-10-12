@@ -2,6 +2,7 @@
 // connection (since when, the address the controller sees, the agreed protocol major, the
 // version, the last heartbeat, the observation buffer), the certificate with its days left,
 // the protocol negotiation with a refused handshake, and revocation for administrators.
+import { A } from "@solidjs/router";
 import { createSignal, Show } from "solid-js";
 import { createLiveQuery } from "../api/live";
 import { getNode, revokeNode, type NodeView } from "../api/nodes";
@@ -14,6 +15,7 @@ import { toast } from "../components/toast";
 import { TimeAgo } from "../grid/cells";
 import { formatBytes } from "./format";
 import { formatDateTime, formatNumber, t } from "../i18n";
+import { nodeScanPath } from "../scans/model";
 import { certificateState, linkIcon, linkState, linkWord, roleWord } from "./model";
 
 export function LinkBadge(props: { node: Pick<NodeView, "connected" | "protocol"> }) {
@@ -189,6 +191,18 @@ export function NodePanel(props: { id: string; onClose: () => void; onRevoked: (
                   <p class="muted">{t("nodes.panel.renewal_due")}</p>
                 </Show>
               </section>
+              <Show when={n().roles.includes("probe")}>
+                <section class="section" aria-labelledby="node-scan">
+                  <h3 id="node-scan">{t("nodes.scan.panel.title")}</h3>
+                  <p class="muted">{t("nodes.scan.panel.hint")}</p>
+                  <div class="row-actions">
+                    <A href={nodeScanPath(n().id)} class="btn" data-testid="node-scan-config">
+                      <Icon name="scan" />
+                      {t("nodes.scan.panel.link")}
+                    </A>
+                  </div>
+                </section>
+              </Show>
               <Show when={isAdmin()}>
                 <section class="section" aria-labelledby="node-revoke">
                   <h3 id="node-revoke">{t("nodes.revoke.title")}</h3>

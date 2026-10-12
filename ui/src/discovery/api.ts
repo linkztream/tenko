@@ -40,14 +40,6 @@ export function getProposal(id: string, signal?: AbortSignal): Promise<Proposal>
   return api.get("/api/v1/proposals/{id}", { path: { id }, signal });
 }
 
-/**
- * The `If-Match` header of a decision: the revision the person saw, or any. The client sends
- * `ifMatch` for PATCH, PUT and DELETE only, and a decision is a POST, so it is set here.
- */
-function revisionHeader(proposal: Pick<Proposal, "revision">): Record<string, string> {
-  return { "If-Match": proposal.revision == null ? ANY_REVISION : `"${proposal.revision}"` };
-}
-
 /** Every proposal of a query (the dashboard counts the open ones). */
 export async function listProposals(query: { state?: ProposalState[]; prefix?: string; subject?: string }, signal?: AbortSignal): Promise<Proposal[]> {
   const page = await fetchAll<Proposal>("/api/v1/proposals", { query, signal });
@@ -65,7 +57,7 @@ export function approveProposal(
   return api.post("/api/v1/proposals/{id}/approve", {
     path: { id: proposal.id },
     query: writeQuery(options.dryRun, options.acknowledge),
-    headers: revisionHeader(proposal),
+    ifMatch: proposal.revision ?? ANY_REVISION,
   });
 }
 
@@ -75,7 +67,7 @@ export function rejectProposal(proposal: Pick<Proposal, "id" | "revision">, reas
   return api.post("/api/v1/proposals/{id}/reject", {
     path: { id: proposal.id },
     body: trimmed ? { reason: trimmed } : {},
-    headers: revisionHeader(proposal),
+    ifMatch: proposal.revision ?? ANY_REVISION,
   });
 }
 

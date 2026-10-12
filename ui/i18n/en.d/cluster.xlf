@@ -6,9 +6,721 @@
         <notes><note category="description">Title of the cluster page and its entry in the browser tab.</note></notes>
         <segment><source>Cluster</source></segment>
       </unit>
-      <unit id="cluster.placeholder">
-        <notes><note category="description">Placeholder text of the cluster page until the page itself exists.</note></notes>
-        <segment><source>The cluster page arrives with a later update.</source></segment>
+      <unit id="cluster.member.unnamed">
+        <notes><note category="description">Name of a cluster member that has no name in the node registry.</note></notes>
+        <segment><source>Controller {id}</source></segment>
+      </unit>
+      <unit id="cluster.role.voter">
+        <notes><note category="description">Role of a cluster member that votes in elections.</note></notes>
+        <segment><source>Voter</source></segment>
+      </unit>
+      <unit id="cluster.role.learner">
+        <notes><note category="description">Role of a cluster member that replicates without voting.</note></notes>
+        <segment><source>Learner</source></segment>
+      </unit>
+      <unit id="cluster.health.leader">
+        <notes><note category="description">State of the member that leads the cluster.</note></notes>
+        <segment><source>Leader</source></segment>
+      </unit>
+      <unit id="cluster.health.caught_up">
+        <notes><note category="description">State of a member that is in step with the leader.</note></notes>
+        <segment><source>Caught up</source></segment>
+      </unit>
+      <unit id="cluster.health.catching_up">
+        <notes><note category="description">State of a member that is behind the leader.</note></notes>
+        <segment><source>Catching up</source></segment>
+      </unit>
+      <unit id="cluster.health.out_of_contact">
+        <notes><note category="description">State of a member the leader has not heard from recently.</note></notes>
+        <segment><source>Out of contact</source></segment>
+      </unit>
+      <unit id="cluster.health.unknown">
+        <notes><note category="description">State of a member whose replication figures are not known.</note></notes>
+        <segment><source>Unknown</source></segment>
+      </unit>
+      <unit id="cluster.quorum.single">
+        <notes><note category="description">Quorum state: the only controller.</note></notes>
+        <segment><source>Single controller</source></segment>
+      </unit>
+      <unit id="cluster.quorum.healthy">
+        <notes><note category="description">Quorum state: in contact with a majority of the voters.</note></notes>
+        <segment><source>In contact with a quorum</source></segment>
+      </unit>
+      <unit id="cluster.quorum.electing">
+        <notes><note category="description">Quorum state: no leader known, an election runs.</note></notes>
+        <segment><source>Electing a leader</source></segment>
+      </unit>
+      <unit id="cluster.quorum.isolated">
+        <notes><note category="description">Quorum state: out of contact with a majority of the voters.</note></notes>
+        <segment><source>Isolated</source></segment>
+      </unit>
+      <unit id="cluster.tolerance">
+        <notes><note category="description">How many controller failures a cluster of this many voters survives.</note></notes>
+        <segment><source>{count, plural, =0 {Tolerates no failure} one {Tolerates # failure} other {Tolerates # failures}}</source></segment>
+      </unit>
+      <unit id="cluster.blocker.single">
+        <notes><note category="description">Why a membership change cannot be made.</note></notes>
+        <segment><source>This controller is not part of a cluster.</source></segment>
+      </unit>
+      <unit id="cluster.blocker.changing">
+        <notes><note category="description">Why a membership change cannot be made.</note></notes>
+        <segment><source>Another membership change is in progress.</source></segment>
+      </unit>
+      <unit id="cluster.blocker.not_learner">
+        <notes><note category="description">Why a promotion cannot be made.</note></notes>
+        <segment><source>Only a learner can be promoted.</source></segment>
+      </unit>
+      <unit id="cluster.blocker.not_voter">
+        <notes><note category="description">Why a promotion with a replacement cannot be made.</note></notes>
+        <segment><source>The controller to replace is not a voter.</source></segment>
+      </unit>
+      <unit id="cluster.blocker.even_voters">
+        <notes><note category="description">Why a promotion is refused unless forced.</note></notes>
+        <segment><source>The cluster would have an even number of voters, which is less available than one voter fewer.</source></segment>
+      </unit>
+      <unit id="cluster.blocker.not_caught_up">
+        <notes><note category="description">Why a promotion is refused unless forced.</note></notes>
+        <segment><source>The learner has not caught up with the leader yet.</source></segment>
+      </unit>
+      <unit id="cluster.blocker.last_voter">
+        <notes><note category="description">Why a removal cannot be made.</note></notes>
+        <segment><source>The last voter cannot be removed.</source></segment>
+      </unit>
+      <unit id="cluster.blocker.no_successor">
+        <notes><note category="description">Why leadership cannot be handed over.</note></notes>
+        <segment><source>No other voter has caught up to take over.</source></segment>
+      </unit>
+      <unit id="cluster.caveat.removes_leader">
+        <notes><note category="description">Note in the preview of removing the leader.</note></notes>
+        <segment><source>This controller leads; another voter takes over first.</source></segment>
+      </unit>
+      <unit id="cluster.caveat.removes_self">
+        <notes><note category="description">Note in the preview of removing the controller that serves the page.</note></notes>
+        <segment><source>This page is served by this controller; the browser reconnects to another one.</source></segment>
+      </unit>
+      <unit id="cluster.caveat.even_after">
+        <notes><note category="description">Note in a preview that leaves an even number of voters.</note></notes>
+        <segment><source>The cluster is left with an even number of voters.</source></segment>
+      </unit>
+      <unit id="cluster.caveat.no_tolerance">
+        <notes><note category="description">Note in a preview that leaves a cluster without failure tolerance.</note></notes>
+        <segment><source>With this many voters the cluster tolerates no failure.</source></segment>
+      </unit>
+      <unit id="cluster.caveat.revokes">
+        <notes><note category="description">Note in the preview of a removal.</note></notes>
+        <segment><source>Its certificates are revoked: it can only rejoin with a new join token.</source></segment>
+      </unit>
+      <unit id="cluster.caveat.replaces">
+        <notes><note category="description">Note in the preview of a promotion that replaces a voter.</note></notes>
+        <segment><source>The voter it replaces leaves in the same change.</source></segment>
+      </unit>
+      <unit id="cluster.caveat.forced">
+        <notes><note category="description">Note in the preview of a forced promotion.</note></notes>
+        <segment><source>Forced: the rules that protect availability are overridden.</source></segment>
+      </unit>
+      <unit id="cluster.caveat.reconnect">
+        <notes><note category="description">Note in the preview of a step-down of the controller that serves the page.</note></notes>
+        <segment><source>This controller leads now; requests move to the new leader.</source></segment>
+      </unit>
+      <unit id="cluster.partition.isolated.title">
+        <notes><note category="description">Banner title while this controller has no contact with a quorum of the cluster.</note></notes>
+        <segment><source>This controller is cut off from the cluster</source></segment>
+      </unit>
+      <unit id="cluster.partition.isolated.body">
+        <notes><note category="description">Banner text while isolated; duration is the time since the contact was lost ("4 min").</note></notes>
+        <segment><source>No contact for {duration}. Pages show this controller's local copy; changes are refused and can be queued.</source></segment>
+      </unit>
+      <unit id="cluster.partition.electing.title">
+        <notes><note category="description">Banner title while the cluster elects a new leader.</note></notes>
+        <segment><source>The cluster is electing a leader</source></segment>
+      </unit>
+      <unit id="cluster.partition.electing.body">
+        <notes><note category="description">Banner text while a leader is elected; duration is the time since the election started.</note></notes>
+        <segment><source>Changes are refused until a leader is elected ({duration} so far).</source></segment>
+      </unit>
+      <unit id="cluster.partition.conflicts">
+        <notes><note category="description">Banner text after the cluster healed: queued changes of this person that did not apply by themselves.</note></notes>
+        <segment><source>{count, plural, one {# queued change needs your decision} other {# queued changes need your decision}}</source></segment>
+      </unit>
+      <unit id="cluster.partition.queue_link">
+        <notes><note category="description">Button of the partition banner that opens the queued changes.</note></notes>
+        <segment><source>Queued changes</source></segment>
+      </unit>
+      <unit id="cluster.partition.review">
+        <notes><note category="description">Button of the banner that opens the queued changes waiting for a decision.</note></notes>
+        <segment><source>Review</source></segment>
+      </unit>
+      <unit id="cluster.partition.stale">
+        <notes><note category="description">Status bar item while the controller answers from its local copy; age is the time since it lost contact.</note></notes>
+        <segment><source>Local copy, {age} old</source></segment>
+      </unit>
+      <unit id="cluster.partition.stale_title">
+        <notes><note category="description">Tooltip of the stale status bar item; revision is the store revision of the local copy, or a dash.</note></notes>
+        <segment><source>This controller has no contact with the cluster and answers from its local copy at revision {revision}.</source></segment>
+      </unit>
+      <unit id="errors.cluster.no_quorum">
+        <notes><note category="description">Error: a write was refused because the controller has no contact with a quorum of the cluster.</note></notes>
+        <segment><source>This controller cannot reach the cluster and refuses changes.</source></segment>
+      </unit>
+      <unit id="cluster.no_quorum.title">
+        <notes><note category="description">Title of the dialog of a change refused for want of a quorum.</note></notes>
+        <segment><source>Change refused</source></segment>
+      </unit>
+      <unit id="cluster.no_quorum.body">
+        <notes><note category="description">Text of the refused-change dialog when the time of the isolation is unknown.</note></notes>
+        <segment><source>This controller cannot reach a quorum of the cluster, so it refuses changes.</source></segment>
+      </unit>
+      <unit id="cluster.no_quorum.body_since">
+        <notes><note category="description">Text of the refused-change dialog; since is the date and time the controller lost contact.</note></notes>
+        <segment><source>This controller has not reached a quorum of the cluster since {since}, so it refuses changes.</source></segment>
+      </unit>
+      <unit id="cluster.no_quorum.queueable">
+        <notes><note category="description">Hint of the refused-change dialog when the change can be queued.</note></notes>
+        <segment><source>You can queue the change on this controller. When the cluster heals it is planned again and applied; if something changed in the meantime, it waits for your decision.</source></segment>
+      </unit>
+      <unit id="cluster.no_quorum.not_queueable">
+        <notes><note category="description">Hint of the refused-change dialog when the change cannot be queued.</note></notes>
+        <segment><source>This kind of change cannot be queued. Try again when the cluster has healed.</source></segment>
+      </unit>
+      <unit id="cluster.no_quorum.queue">
+        <notes><note category="description">Button that queues the refused change.</note></notes>
+        <segment><source>Queue this change</source></segment>
+      </unit>
+      <unit id="cluster.no_quorum.queued">
+        <notes><note category="description">Confirmation after queuing; expires is the date and time the queued change expires.</note></notes>
+        <segment><source>Queued. It expires on {expires} unless the cluster heals first.</source></segment>
+      </unit>
+      <unit id="cluster.no_quorum.show_queue">
+        <notes><note category="description">Link from the confirmation to the queued changes.</note></notes>
+        <segment><source>Show the queue</source></segment>
+      </unit>
+      <unit id="cluster.summary.label">
+        <notes><note category="description">Accessible name of the summary block at the top of the cluster page.</note></notes>
+        <segment><source>Cluster summary</source></segment>
+      </unit>
+      <unit id="cluster.summary.quorum">
+        <notes><note category="description">Label in the cluster summary: whether this controller is in contact with a quorum.</note></notes>
+        <segment><source>Quorum</source></segment>
+      </unit>
+      <unit id="cluster.summary.since">
+        <notes><note category="description">Added after the quorum state; since is the date and time the state began.</note></notes>
+        <segment><source>since {since}</source></segment>
+      </unit>
+      <unit id="cluster.summary.term">
+        <notes><note category="description">Label in the cluster summary: the current election term of the cluster.</note></notes>
+        <segment><source>Term</source></segment>
+      </unit>
+      <unit id="cluster.summary.leader">
+        <notes><note category="description">Label in the cluster summary: the controller that leads.</note></notes>
+        <segment><source>Leader</source></segment>
+      </unit>
+      <unit id="cluster.summary.no_leader">
+        <notes><note category="description">Value of the leader in the cluster summary when no leader is known.</note></notes>
+        <segment><source>None</source></segment>
+      </unit>
+      <unit id="cluster.summary.voters">
+        <notes><note category="description">Label in the cluster summary: the controllers that vote.</note></notes>
+        <segment><source>Voters</source></segment>
+      </unit>
+      <unit id="cluster.summary.voters_value">
+        <notes><note category="description">Number of voters with how many failures the cluster survives; tolerance is a sentence such as Tolerates 1 failure.</note></notes>
+        <segment><source>{count, plural, one {# voter} other {# voters}} · {tolerance}</source></segment>
+      </unit>
+      <unit id="cluster.summary.node">
+        <notes><note category="description">Label in the cluster summary: the controller that serves this page.</note></notes>
+        <segment><source>This controller</source></segment>
+      </unit>
+      <unit id="cluster.changing">
+        <notes><note category="description">Note on the cluster page while a membership change is in progress.</note></notes>
+        <segment><source>A membership change is in progress. The table follows when it is done.</source></segment>
+      </unit>
+      <unit id="cluster.action.queue">
+        <notes><note category="description">Link from the cluster page to the queued changes.</note></notes>
+        <segment><source>Queued changes</source></segment>
+      </unit>
+      <unit id="cluster.action.add">
+        <notes><note category="description">Button on the cluster page that creates a join token for a new controller.</note></notes>
+        <segment><source>Add a controller</source></segment>
+      </unit>
+      <unit id="cluster.action.step_down">
+        <notes><note category="description">Button in the cluster summary that hands leadership to another voter.</note></notes>
+        <segment><source>Step down</source></segment>
+      </unit>
+      <unit id="cluster.action.promote">
+        <notes><note category="description">Button in the member table that promotes a learner to a voter.</note></notes>
+        <segment><source>Promote</source></segment>
+      </unit>
+      <unit id="cluster.action.promote_named">
+        <notes><note category="description">Accessible name of the promote button of one member; name is the member.</note></notes>
+        <segment><source>Promote {name}</source></segment>
+      </unit>
+      <unit id="cluster.action.remove">
+        <notes><note category="description">Button in the member table that removes a member from the cluster.</note></notes>
+        <segment><source>Remove</source></segment>
+      </unit>
+      <unit id="cluster.action.remove_named">
+        <notes><note category="description">Accessible name of the remove button of one member; name is the member.</note></notes>
+        <segment><source>Remove {name}</source></segment>
+      </unit>
+      <unit id="cluster.action.check_digests">
+        <notes><note category="description">Button that asks every member for the digest of its data.</note></notes>
+        <segment><source>Check digests</source></segment>
+      </unit>
+      <unit id="cluster.members.title">
+        <notes><note category="description">Heading of the member table on the cluster page.</note></notes>
+        <segment><source>Members</source></segment>
+      </unit>
+      <unit id="cluster.members.count">
+        <notes><note category="description">Number of cluster members beside the heading of the member table.</note></notes>
+        <segment><source>{count, plural, one {# member} other {# members}}</source></segment>
+      </unit>
+      <unit id="cluster.col.name">
+        <notes><note category="description">Column of the member table: the name of the controller.</note></notes>
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="cluster.col.address">
+        <notes><note category="description">Column of the member table: the cluster address of the controller.</note></notes>
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="cluster.col.role">
+        <notes><note category="description">Column of the member table: voter or learner.</note></notes>
+        <segment><source>Role</source></segment>
+      </unit>
+      <unit id="cluster.col.health">
+        <notes><note category="description">Column of the member table: how the member is doing.</note></notes>
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="cluster.col.lag">
+        <notes><note category="description">Column of the member table: how many log entries the member is behind the leader.</note></notes>
+        <segment><source>Lag (entries)</source></segment>
+      </unit>
+      <unit id="cluster.col.contact">
+        <notes><note category="description">Column of the member table: time since the leader last heard from the member.</note></notes>
+        <segment><source>Last contact</source></segment>
+      </unit>
+      <unit id="cluster.col.version">
+        <notes><note category="description">Column of the member table: software version and data format of the member.</note></notes>
+        <segment><source>Version and data format</source></segment>
+      </unit>
+      <unit id="cluster.col.joined">
+        <notes><note category="description">Column of the member table: when the member joined the cluster.</note></notes>
+        <segment><source>Joined</source></segment>
+      </unit>
+      <unit id="cluster.col.actions">
+        <notes><note category="description">Accessible name of the actions column of the member table.</note></notes>
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="cluster.col.format">
+        <notes><note category="description">Data format of a member after its version; format is a number.</note></notes>
+        <segment><source>format {format}</source></segment>
+      </unit>
+      <unit id="cluster.member.leader_marker">
+        <notes><note category="description">Tooltip of the marker beside the name of the leading member.</note></notes>
+        <segment><source>Leads the cluster</source></segment>
+      </unit>
+      <unit id="cluster.preview.voters">
+        <notes><note category="description">Label in a membership preview: the number of voters.</note></notes>
+        <segment><source>Voters</source></segment>
+      </unit>
+      <unit id="cluster.preview.tolerated">
+        <notes><note category="description">Label in a membership preview: how many controller failures the cluster survives.</note></notes>
+        <segment><source>Tolerated failures</source></segment>
+      </unit>
+      <unit id="cluster.preview.change">
+        <notes><note category="description">A figure before and after a membership change.</note></notes>
+        <segment><source>{before} → {after}</source></segment>
+      </unit>
+      <unit id="cluster.preview.same">
+        <notes><note category="description">A figure that the membership change leaves as it is.</note></notes>
+        <segment><source>{count} (unchanged)</source></segment>
+      </unit>
+      <unit id="cluster.preview.blockers">
+        <notes><note category="description">Title of the note that lists why a membership change cannot be made.</note></notes>
+        <segment><source>Cannot be made</source></segment>
+      </unit>
+      <unit id="cluster.preview.forceable">
+        <notes><note category="description">Title of the note that lists rules a forced membership change overrides.</note></notes>
+        <segment><source>Refused unless forced</source></segment>
+      </unit>
+      <unit id="cluster.preview.caveats">
+        <notes><note category="description">Title of the note that lists what to know before confirming a membership change.</note></notes>
+        <segment><source>Please note</source></segment>
+      </unit>
+      <unit id="cluster.promote.title">
+        <notes><note category="description">Title of the dialog that promotes a learner; name is the learner.</note></notes>
+        <segment><source>Promote {name} to voter</source></segment>
+      </unit>
+      <unit id="cluster.promote.intro">
+        <notes><note category="description">Text under the title of the promote dialog.</note></notes>
+        <segment><source>A voter takes part in elections and counts towards the quorum. A learner only replicates the data.</source></segment>
+      </unit>
+      <unit id="cluster.promote.confirm">
+        <notes><note category="description">Button that promotes the learner.</note></notes>
+        <segment><source>Promote</source></segment>
+      </unit>
+      <unit id="cluster.promote.replace">
+        <notes><note category="description">Label of the choice of a voter that leaves in the same change as a promotion.</note></notes>
+        <segment><source>Replace a voter</source></segment>
+      </unit>
+      <unit id="cluster.promote.replace_help">
+        <notes><note category="description">Help under the choice of a voter to replace.</note></notes>
+        <segment><source>The voter leaves in the same change, so the cluster never passes through an even number of voters.</source></segment>
+      </unit>
+      <unit id="cluster.promote.replace_none">
+        <notes><note category="description">Choice in the replace list: no voter leaves.</note></notes>
+        <segment><source>Do not replace a voter</source></segment>
+      </unit>
+      <unit id="cluster.promote.force">
+        <notes><note category="description">Check box that forces a promotion the rules refuse.</note></notes>
+        <segment><source>Force the promotion</source></segment>
+      </unit>
+      <unit id="cluster.promote.force_help">
+        <notes><note category="description">Help under the force check box of the promote dialog.</note></notes>
+        <segment><source>Overrides the rules above. The cluster may be less available afterwards.</source></segment>
+      </unit>
+      <unit id="cluster.remove.title">
+        <notes><note category="description">Title of the dialog that removes a member; name is the member.</note></notes>
+        <segment><source>Remove {name}?</source></segment>
+      </unit>
+      <unit id="cluster.remove.intro">
+        <notes><note category="description">Text under the title of the remove dialog.</note></notes>
+        <segment><source>The controller leaves the cluster and stops replicating the data.</source></segment>
+      </unit>
+      <unit id="cluster.remove.confirm">
+        <notes><note category="description">Button that removes the member.</note></notes>
+        <segment><source>Remove member</source></segment>
+      </unit>
+      <unit id="cluster.step_down.title">
+        <notes><note category="description">Title of the dialog that hands leadership to another controller.</note></notes>
+        <segment><source>Hand over leadership</source></segment>
+      </unit>
+      <unit id="cluster.step_down.intro">
+        <notes><note category="description">Text under the title of the step-down dialog.</note></notes>
+        <segment><source>This controller stops leading and stays a voter. No data is lost.</source></segment>
+      </unit>
+      <unit id="cluster.step_down.successor">
+        <notes><note category="description">Line in the step-down dialog naming the controller that leads next; name is that controller.</note></notes>
+        <segment><source>Leadership passes to {name}.</source></segment>
+      </unit>
+      <unit id="cluster.step_down.confirm">
+        <notes><note category="description">Button that hands leadership over.</note></notes>
+        <segment><source>Step down</source></segment>
+      </unit>
+      <unit id="cluster.done.promoted">
+        <notes><note category="description">Toast after a promotion; name is the member.</note></notes>
+        <segment><source>{name} is a voter now.</source></segment>
+      </unit>
+      <unit id="cluster.done.removed">
+        <notes><note category="description">Toast after a removal; name is the member.</note></notes>
+        <segment><source>{name} was removed from the cluster.</source></segment>
+      </unit>
+      <unit id="cluster.done.stepped_down">
+        <notes><note category="description">Toast after a step-down; name is the new leader, term the number of its term.</note></notes>
+        <segment><source>{name} leads now (term {term}).</source></segment>
+      </unit>
+      <unit id="cluster.done.open_job">
+        <notes><note category="description">Action of a toast and link in a list that opens the job a change ran as.</note></notes>
+        <segment><source>Open job</source></segment>
+      </unit>
+      <unit id="cluster.digests.title">
+        <notes><note category="description">Heading of the digest check on the cluster page.</note></notes>
+        <segment><source>State digests</source></segment>
+      </unit>
+      <unit id="cluster.digests.intro">
+        <notes><note category="description">Text under the heading of the digest check.</note></notes>
+        <segment><source>Asks every member for a SHA-256 over its data at one revision. Members that hold the same data give the same digest.</source></segment>
+      </unit>
+      <unit id="cluster.digests.agree">
+        <notes><note category="description">Result of a digest check when every member agrees; count is the number of members, revision the revision compared.</note></notes>
+        <segment><source>{count, plural, one {The only member holds} other {All # members hold}} the same data at revision {revision}.</source></segment>
+      </unit>
+      <unit id="cluster.digests.differ">
+        <notes><note category="description">Result of a digest check when the members differ; revision is the revision compared.</note></notes>
+        <segment><source>The members do not hold the same data at revision {revision}.</source></segment>
+      </unit>
+      <unit id="cluster.digests.col.member">
+        <notes><note category="description">Column of the digest table: the member.</note></notes>
+        <segment><source>Member</source></segment>
+      </unit>
+      <unit id="cluster.digests.col.revision">
+        <notes><note category="description">Column of the digest table: the revision the digest covers.</note></notes>
+        <segment><source>Revision</source></segment>
+      </unit>
+      <unit id="cluster.digests.col.digest">
+        <notes><note category="description">Column of the digest table: the first digits of the SHA-256.</note></notes>
+        <segment><source>Digest</source></segment>
+      </unit>
+      <unit id="cluster.digests.col.tables">
+        <notes><note category="description">Column of the digest table: number of tables in the digest.</note></notes>
+        <segment><source>Tables</source></segment>
+      </unit>
+      <unit id="cluster.digests.col.entries">
+        <notes><note category="description">Column of the digest table: number of entries in the digest.</note></notes>
+        <segment><source>Entries</source></segment>
+      </unit>
+      <unit id="cluster.digests.col.state">
+        <notes><note category="description">Column of the digest table: whether the member agrees with the others.</note></notes>
+        <segment><source>Result</source></segment>
+      </unit>
+      <unit id="cluster.digests.state.agrees">
+        <notes><note category="description">Digest result of a member that holds the same data as most members.</note></notes>
+        <segment><source>Agrees</source></segment>
+      </unit>
+      <unit id="cluster.digests.state.differs">
+        <notes><note category="description">Digest result of a member whose data differ from most members.</note></notes>
+        <segment><source>Differs</source></segment>
+      </unit>
+      <unit id="cluster.digests.state.missing">
+        <notes><note category="description">Digest result of a member that gave no digest.</note></notes>
+        <segment><source>No digest</source></segment>
+      </unit>
+      <unit id="cluster.add.title">
+        <notes><note category="description">Title of the dialog that creates a join token for a new controller.</note></notes>
+        <segment><source>Add a controller</source></segment>
+      </unit>
+      <unit id="cluster.add.intro">
+        <notes><note category="description">Text under the title of the add-a-controller dialog.</note></notes>
+        <segment><source>A join token lets one new controller enrol once. It lives at most an hour and is shown only once.</source></segment>
+      </unit>
+      <unit id="cluster.add.next">
+        <notes><note category="description">Text under the join token: what happens after the command ran on the new host.</note></notes>
+        <segment><source>The new controller joins as a learner. Promote it here once it has caught up.</source></segment>
+      </unit>
+      <unit id="cluster.queue.title">
+        <notes><note category="description">Title of the queued changes page and its entry in the browser tab.</note></notes>
+        <segment><source>Queued changes</source></segment>
+      </unit>
+      <unit id="cluster.queue.count">
+        <notes><note category="description">Number of queued changes beside a heading.</note></notes>
+        <segment><source>{count, plural, one {# change} other {# changes}}</source></segment>
+      </unit>
+      <unit id="cluster.queue.unavailable">
+        <notes><note category="description">Note on the queued changes page when the server keeps no queue of changes.</note></notes>
+        <segment><source>This controller keeps no queue of changes. Changes made without a quorum are refused.</source></segment>
+      </unit>
+      <unit id="cluster.queue.local.title">
+        <notes><note category="description">Heading of the list of changes queued on this controller.</note></notes>
+        <segment><source>On this controller</source></segment>
+      </unit>
+      <unit id="cluster.queue.local.intro">
+        <notes><note category="description">Text under the heading of the local queue.</note></notes>
+        <segment><source>Changes made while this controller had no quorum. When the cluster heals, each one is planned again against the current data and applied if nothing changed.</source></segment>
+      </unit>
+      <unit id="cluster.queue.local.empty">
+        <notes><note category="description">Text when nothing is queued on this controller.</note></notes>
+        <segment><source>Nothing is queued on this controller.</source></segment>
+      </unit>
+      <unit id="cluster.queue.changes.title">
+        <notes><note category="description">Heading of the list of the person's queued changes after the cluster healed.</note></notes>
+        <segment><source>After the heal</source></segment>
+      </unit>
+      <unit id="cluster.queue.changes.intro">
+        <notes><note category="description">Text under the heading of the queued changes after the heal.</note></notes>
+        <segment><source>What became of your queued changes. A change that no longer fits the data waits for your decision: apply it again after a new preview, or discard it.</source></segment>
+      </unit>
+      <unit id="cluster.queue.changes.empty">
+        <notes><note category="description">Text when no queued change of the person was applied or waits for a decision.</note></notes>
+        <segment><source>None of your queued changes has been applied or waits for a decision.</source></segment>
+      </unit>
+      <unit id="cluster.queue.col.change">
+        <notes><note category="description">Column of the queue tables: what the change does.</note></notes>
+        <segment><source>Change</source></segment>
+      </unit>
+      <unit id="cluster.queue.col.request">
+        <notes><note category="description">Column of the queue table: the request that was queued.</note></notes>
+        <segment><source>Request</source></segment>
+      </unit>
+      <unit id="cluster.queue.col.queued">
+        <notes><note category="description">Column of the queue tables: when the change was queued.</note></notes>
+        <segment><source>Queued</source></segment>
+      </unit>
+      <unit id="cluster.queue.col.expires">
+        <notes><note category="description">Column of the queue table: when the queued change expires.</note></notes>
+        <segment><source>Expires</source></segment>
+      </unit>
+      <unit id="cluster.queue.col.state">
+        <notes><note category="description">Column of the queue tables: the state of the change.</note></notes>
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="cluster.queue.col.result">
+        <notes><note category="description">Column of the table after the heal: the conflict or the job of the change.</note></notes>
+        <segment><source>Result</source></segment>
+      </unit>
+      <unit id="cluster.queue.col.actions">
+        <notes><note category="description">Accessible name of the actions column of the queue tables.</note></notes>
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="cluster.queue.what_unknown">
+        <notes><note category="description">Name of a queued change that carries no summary.</note></notes>
+        <segment><source>Change</source></segment>
+      </unit>
+      <unit id="cluster.queue.kind">
+        <notes><note category="description">The kind of object a queued change touches, as a lower-case noun; kind is the kind code.</note></notes>
+        <segment><source>{kind, select, tenant {tenant} vrf {VRF} site {site} vlan {VLAN} prefix {prefix} range {range} address {address} host {host} other {{kind}}}</source></segment>
+      </unit>
+      <unit id="cluster.queue.action">
+        <notes><note category="description">What a queued change does; action is create, update, delete or bulk, kind the noun for the object.</note></notes>
+        <segment><source>{action, select, create {Create {kind}} update {Update {kind}} delete {Delete {kind}} bulk {Bulk change of {kind}} other {Change {kind}}}</source></segment>
+      </unit>
+      <unit id="cluster.queue.state.queued">
+        <notes><note category="description">State of a change in the local queue: waiting for the cluster to heal.</note></notes>
+        <segment><source>Queued</source></segment>
+      </unit>
+      <unit id="cluster.queue.state.draining">
+        <notes><note category="description">State of a change in the local queue: being applied after the heal.</note></notes>
+        <segment><source>Applying</source></segment>
+      </unit>
+      <unit id="cluster.queue.state.expired">
+        <notes><note category="description">State of a change in the local queue: it waited too long.</note></notes>
+        <segment><source>Expired</source></segment>
+      </unit>
+      <unit id="cluster.queue.change_state.conflict">
+        <notes><note category="description">State of a queued change that no longer fits the data and waits for the person.</note></notes>
+        <segment><source>Needs a decision</source></segment>
+      </unit>
+      <unit id="cluster.queue.change_state.applied">
+        <notes><note category="description">State of a queued change that was applied by itself after the heal.</note></notes>
+        <segment><source>Applied</source></segment>
+      </unit>
+      <unit id="cluster.queue.change_state.reapplied">
+        <notes><note category="description">State of a queued change that the person applied again.</note></notes>
+        <segment><source>Applied again</source></segment>
+      </unit>
+      <unit id="cluster.queue.change_state.discarded">
+        <notes><note category="description">State of a queued change that the person discarded.</note></notes>
+        <segment><source>Discarded</source></segment>
+      </unit>
+      <unit id="cluster.queue.conflict.stale">
+        <notes><note category="description">Why a queued change did not apply: the data changed while it waited.</note></notes>
+        <segment><source>The data changed while the change was queued.</source></segment>
+      </unit>
+      <unit id="cluster.queue.conflict.other">
+        <notes><note category="description">Why a queued change did not apply when the UI has no words for the problem.</note></notes>
+        <segment><source>The change no longer fits the data.</source></segment>
+      </unit>
+      <unit id="cluster.queue.cancel_named">
+        <notes><note category="description">Accessible name of the cancel button of one queued change; what is the change.</note></notes>
+        <segment><source>Cancel: {what}</source></segment>
+      </unit>
+      <unit id="cluster.queue.cancel_title">
+        <notes><note category="description">Title of the dialog that cancels a queued change.</note></notes>
+        <segment><source>Cancel the queued change?</source></segment>
+      </unit>
+      <unit id="cluster.queue.cancel_body">
+        <notes><note category="description">Text of the dialog that cancels a queued change; what is the change.</note></notes>
+        <segment><source>{what} is dropped from the queue and will not be applied.</source></segment>
+      </unit>
+      <unit id="cluster.queue.cancel_confirm">
+        <notes><note category="description">Button that cancels a queued change.</note></notes>
+        <segment><source>Cancel the change</source></segment>
+      </unit>
+      <unit id="cluster.queue.keep">
+        <notes><note category="description">Button that keeps a queued change in the queue.</note></notes>
+        <segment><source>Keep it queued</source></segment>
+      </unit>
+      <unit id="cluster.queue.cancelled">
+        <notes><note category="description">Toast after a queued change was cancelled.</note></notes>
+        <segment><source>The queued change was cancelled.</source></segment>
+      </unit>
+      <unit id="cluster.queue.cancel_failed">
+        <notes><note category="description">Toast title when a queued change could not be cancelled.</note></notes>
+        <segment><source>The queued change could not be cancelled</source></segment>
+      </unit>
+      <unit id="cluster.queue.reapply">
+        <notes><note category="description">Button that applies a queued change that did not fit again.</note></notes>
+        <segment><source>Re-apply</source></segment>
+      </unit>
+      <unit id="cluster.queue.reapply_named">
+        <notes><note category="description">Accessible name of the re-apply button of one queued change; what is the change.</note></notes>
+        <segment><source>Re-apply: {what}</source></segment>
+      </unit>
+      <unit id="cluster.queue.reapply_title">
+        <notes><note category="description">Title of the dialog that previews and applies a queued change again.</note></notes>
+        <segment><source>Apply the change again</source></segment>
+      </unit>
+      <unit id="cluster.queue.reapply_intro">
+        <notes><note category="description">Text in the re-apply dialog: the change is planned against the current data; what is the change.</note></notes>
+        <segment><source>{what} is planned again against the current data. Nothing is applied before you confirm.</source></segment>
+      </unit>
+      <unit id="cluster.queue.reapply_confirm">
+        <notes><note category="description">Button that applies the queued change after the new preview.</note></notes>
+        <segment><source>Apply</source></segment>
+      </unit>
+      <unit id="cluster.queue.reapplied">
+        <notes><note category="description">Toast after a queued change was applied again.</note></notes>
+        <segment><source>The change was applied.</source></segment>
+      </unit>
+      <unit id="cluster.queue.discard">
+        <notes><note category="description">Button that discards a queued change that did not fit.</note></notes>
+        <segment><source>Discard</source></segment>
+      </unit>
+      <unit id="cluster.queue.discard_named">
+        <notes><note category="description">Accessible name of the discard button of one queued change; what is the change.</note></notes>
+        <segment><source>Discard: {what}</source></segment>
+      </unit>
+      <unit id="cluster.queue.discard_title">
+        <notes><note category="description">Title of the dialog that discards a queued change.</note></notes>
+        <segment><source>Discard the queued change?</source></segment>
+      </unit>
+      <unit id="cluster.queue.discard_body">
+        <notes><note category="description">Text of the dialog that discards a queued change; what is the change.</note></notes>
+        <segment><source>{what} is dropped. Nothing is applied.</source></segment>
+      </unit>
+      <unit id="cluster.queue.discarded">
+        <notes><note category="description">Toast after a queued change was discarded.</note></notes>
+        <segment><source>The queued change was discarded.</source></segment>
+      </unit>
+      <unit id="cluster.queue.discard_failed">
+        <notes><note category="description">Toast title when a queued change could not be discarded.</note></notes>
+        <segment><source>The queued change could not be discarded</source></segment>
+      </unit>
+      <unit id="errors.cluster.single">
+        <notes><note category="description">Error: a membership change was asked of a controller that is not part of a cluster.</note></notes>
+        <segment><source>This controller is not part of a cluster.</source></segment>
+      </unit>
+      <unit id="errors.cluster.member.not_found">
+        <notes><note category="description">Error: no cluster member has the id.</note></notes>
+        <segment><source>No cluster member has this id.</source></segment>
+      </unit>
+      <unit id="errors.cluster.member.changing">
+        <notes><note category="description">Error: a membership change was asked while another one runs.</note></notes>
+        <segment><source>Another membership change is in progress.</source></segment>
+      </unit>
+      <unit id="errors.cluster.member.not_learner">
+        <notes><note category="description">Error: a member that is not a learner was to be promoted.</note></notes>
+        <segment><source>Only a learner can be promoted.</source></segment>
+      </unit>
+      <unit id="errors.cluster.member.even_voters">
+        <notes><note category="description">Error: a promotion would leave an even number of voters and was not forced.</note></notes>
+        <segment><source>The cluster would have an even number of voters. Force the change to go ahead.</source></segment>
+      </unit>
+      <unit id="errors.cluster.member.not_caught_up">
+        <notes><note category="description">Error: a learner that is behind the leader was to be promoted without force.</note></notes>
+        <segment><source>The learner has not caught up with the leader. Force the change to go ahead.</source></segment>
+      </unit>
+      <unit id="errors.cluster.member.last_voter">
+        <notes><note category="description">Error: a change would remove the last voter.</note></notes>
+        <segment><source>The change would remove the last voter.</source></segment>
+      </unit>
+      <unit id="errors.cluster.member.no_successor">
+        <notes><note category="description">Error: leadership cannot be handed over because no other voter has caught up.</note></notes>
+        <segment><source>No other voter has caught up to take over.</source></segment>
+      </unit>
+      <unit id="errors.queue.unknown">
+        <notes><note category="description">Error: no queued change of the person has the id.</note></notes>
+        <segment><source>No queued change of yours has this id.</source></segment>
+      </unit>
+      <unit id="errors.queue.not_conflict">
+        <notes><note category="description">Error: the queued change does not wait for a decision.</note></notes>
+        <segment><source>The change is not waiting for a decision.</source></segment>
+      </unit>
+      <unit id="errors.queue.not_isolated">
+        <notes><note category="description">Error: a change was queued on a controller that has a quorum.</note></notes>
+        <segment><source>This controller is in contact with a quorum. Make the change directly.</source></segment>
+      </unit>
+      <unit id="errors.queue.not_queueable">
+        <notes><note category="description">Error: a change that cannot be queued was queued.</note></notes>
+        <segment><source>Only changes to IPAM objects can be queued.</source></segment>
       </unit>
     </group>
   </file>
