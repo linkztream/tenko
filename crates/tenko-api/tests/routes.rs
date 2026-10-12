@@ -357,6 +357,17 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("POST", "/scans/stop", "stop_scans"),
     ("POST", "/scans/resume", "resume_scans"),
     ("GET", "/scans/{id}", "get_scan"),
+    // queue (WP3.9)
+    ("GET", "/queue", "list_queue"),
+    ("POST", "/queue", "queue_change"),
+    ("DELETE", "/queue/{id}", "withdraw_queued_change"),
+    ("GET", "/queue/conflicts", "list_queued_changes"),
+    (
+        "POST",
+        "/queue/conflicts/{id}/reapply",
+        "reapply_queued_change",
+    ),
+    ("DELETE", "/queue/conflicts/{id}", "discard_queued_change"),
 ];
 
 /// The only endpoint that is not a stub.
@@ -558,8 +569,8 @@ fn operations_have_a_declared_tag_and_a_summary() {
         .map(|tag| tag.name.as_str())
         .collect();
     // 22 areas of Slices 1 and 2, nine Slice 3 areas (metrics split from system; cluster,
-    // kek, scans, audit_export and backup with their operations; three that start empty:
-    // access, i18n, queue).
+    // kek, scans, audit_export, backup and queue with their operations; two that start
+    // empty: access, i18n).
     assert_eq!(tags.len(), 31, "one tag per area");
     for (path, item) in &document.paths.paths {
         for (method, operation) in operations(item) {

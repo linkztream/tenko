@@ -26,7 +26,7 @@ pub struct HealthArgs {
 /// The [`Failure`] of the probe.
 pub async fn run(args: &HealthArgs) -> Result<Output, Failure> {
     let target = Target::resolve(&args.client, false)?;
-    let client = target.client()?;
+    let client = target.connect().await?;
     if args.live {
         let health = client.health().await?;
         if target.json {

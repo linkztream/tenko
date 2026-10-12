@@ -145,7 +145,7 @@ struct ListQuery<'a> {
 }
 
 async fn list(target: &Target, args: &ListArgs) -> Result<Output, Failure> {
-    let client = target.client()?;
+    let client = target.connect().await?;
     let mut items: Vec<Value> = Vec::new();
     let mut cursor: Option<String> = None;
     let revision = loop {
@@ -184,7 +184,7 @@ async fn list(target: &Target, args: &ListArgs) -> Result<Output, Failure> {
 }
 
 async fn get(target: &Target, args: &GetArgs) -> Result<Output, Failure> {
-    let client = target.client()?;
+    let client = target.connect().await?;
     let value: Value = if args.prefix.contains('/') {
         let query = ListQuery {
             limit: 1000,
@@ -228,7 +228,7 @@ async fn get(target: &Target, args: &GetArgs) -> Result<Output, Failure> {
 }
 
 async fn create(target: &Target, args: &CreateArgs) -> Result<Output, Failure> {
-    let client = target.client()?;
+    let client = target.connect().await?;
     let mut body = Map::new();
     body.insert("cidr".to_owned(), json!(args.cidr));
     let optional = [

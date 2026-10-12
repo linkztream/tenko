@@ -147,7 +147,7 @@ pub struct ImportArgs {
 pub async fn run(args: &ImportArgs) -> Result<Output, Failure> {
     let input = Input::load(args).await?;
     let target = Target::resolve(&args.client, true)?;
-    let client = target.client()?;
+    let client = target.connect().await?;
     let upload: Value = target
         .raw()?
         .upload("/imports", "file", &input.name, input.bytes)

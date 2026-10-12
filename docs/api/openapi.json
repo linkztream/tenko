@@ -13894,6 +13894,459 @@
         }
       }
     },
+    "/api/v1/queue": {
+      "get": {
+        "tags": [
+          "queue"
+        ],
+        "summary": "List my queued changes on this controller",
+        "operationId": "list_queue",
+        "responses": {
+          "200": {
+            "description": "The caller's queued changes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No queue on this server (`queue.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "queue"
+        ],
+        "summary": "Queue a change on an isolated controller",
+        "operationId": "queue_change",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueuedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The queued change with its plan against the local copy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueItemView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request, its query or `If-Match` is invalid as the endpoint would find it (`ipam.validation`, `sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed: the endpoint's own check (`auth.forbidden`, `auth.out_of_scope`), or not a person (`queue.not_a_person`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The controller accepts writes: send the request itself (`queue.not_isolated`); or the plan fails against the local copy as the endpoint would answer (`ipam.*`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Too large to queue (`queue.too_large`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not queueable (`queue.not_queueable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No queue or no IPAM on this server (`queue.unavailable`, `ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "The queue of this controller is full (`queue.full`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queue/conflicts": {
+      "get": {
+        "tags": [
+          "queue"
+        ],
+        "summary": "List my settled queued changes",
+        "operationId": "list_queued_changes",
+        "responses": {
+          "200": {
+            "description": "The caller's settled queued changes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuedChangeList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queue/conflicts/{id}": {
+      "delete": {
+        "tags": [
+          "queue"
+        ],
+        "summary": "Discard a settled queued change",
+        "operationId": "discard_queued_change",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Queued change identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Discarded"
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The caller has no such settled change (`queue.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The record changed meanwhile (`queue.changed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The controller cannot write (`cluster.no_quorum`) or IPAM is not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queue/conflicts/{id}/reapply": {
+      "post": {
+        "tags": [
+          "queue"
+        ],
+        "summary": "Re-apply a queued change",
+        "operationId": "reapply_queued_change",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Queued change identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "description": "Plan the change and return the plan without writing (API-09).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "acknowledge",
+            "in": "query",
+            "description": "Warning codes to acknowledge, comma-separated (for example\n`ipam.prefix.nibble_boundary`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as `\"12\"`; the write fails with 412\n`ipam.revision_mismatch` when the object changed since.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The change applied or planned, as the endpoint of the original request answers (`WriteResponse` of the object, or `BulkResponse` for a bulk change)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "A create applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameter or `If-Match`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`, `auth.out_of_scope`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The caller has no such settled change (`queue.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The change was applied already (`queue.changed`), or the write fails as the endpoint would answer (`ipam.*`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The controller cannot write (`cluster.no_quorum`) or IPAM is not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queue/{id}": {
+      "delete": {
+        "tags": [
+          "queue"
+        ],
+        "summary": "Withdraw a queued change",
+        "operationId": "withdraw_queued_change",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Queued change identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Withdrawn"
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The caller has no such queued change here (`queue.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The controller is applying it now (`queue.changed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No queue on this server (`queue.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/ranges/bulk": {
       "post": {
         "tags": [
@@ -24574,6 +25027,40 @@
           "remove"
         ]
       },
+      "ChangeState": {
+        "type": "string",
+        "description": "What became of a queued change.",
+        "enum": [
+          "applied",
+          "conflict",
+          "expired"
+        ]
+      },
+      "ChangeSummary": {
+        "type": "object",
+        "description": "The one-line summary of a queued change.",
+        "required": [
+          "action",
+          "kind"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/SummaryAction",
+            "description": "What the change does."
+          },
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A human key of the object (its name, CIDR or address), when the plan shows one."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ObjectKind",
+            "description": "The kind of object."
+          }
+        }
+      },
       "CheckOff": {
         "type": "string",
         "description": "Why the scheduled check does not run.",
@@ -24866,6 +25353,48 @@
           "local",
           "synced"
         ]
+      },
+      "Conflict": {
+        "type": "object",
+        "description": "Why a queued change was not applied, as problem details carry it.",
+        "required": [
+          "code",
+          "status",
+          "detail"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable code, for example `queue.plan_changed`, `ipam.address.duplicate` or\n`auth.forbidden`."
+          },
+          "detail": {
+            "type": "string",
+            "description": "English detail."
+          },
+          "params": {
+            "type": "object",
+            "description": "Named parameters for the translated message.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The HTTP status the code has in an answer.",
+            "minimum": 0
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "English title."
+          }
+        }
       },
       "ConflictPolicy": {
         "type": "string",
@@ -29839,6 +30368,15 @@
           }
         ],
         "description": "A model item, by natural key."
+      },
+      "ItemState": {
+        "type": "string",
+        "description": "The state of an item in the local queue.",
+        "enum": [
+          "queued",
+          "applying",
+          "expired"
+        ]
       },
       "Job": {
         "type": "object",
@@ -37432,6 +37970,20 @@
         ],
         "description": "The password policy of a security profile (TGL-01).\n\nThe presets differ in length only. There are no composition rules (NIST SP 800-63B,\nsection 3.1.1.2); the Custom preset adds an operator-chosen pattern. Serialized as an\nobject tagged by `preset`: `{\"preset\": \"standard\"}`, or for Custom\n`{\"preset\": \"custom\", \"min_length\": 10, \"max_length\": 128, \"pattern\": \"...\"}`."
       },
+      "PlanOptions": {
+        "type": "object",
+        "description": "Options of one plan.",
+        "properties": {
+          "acknowledge": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Warning codes the caller acknowledges (IPAM-06): a plan with a warning that needs\nan acknowledgement applies only when its code is listed here.",
+            "uniqueItems": true
+          }
+        }
+      },
       "PlanProblem": {
         "type": "object",
         "description": "A problem that stops the plan, as in problem details.",
@@ -39393,6 +39945,267 @@
               "minimum": 0
             },
             "description": "The majors the node offered in its last handshake."
+          }
+        }
+      },
+      "QueueItemView": {
+        "type": "object",
+        "description": "A queued change, as `GET /queue` lists it.",
+        "required": [
+          "id",
+          "queued_at",
+          "queued_on",
+          "method",
+          "path",
+          "summary",
+          "plan",
+          "expires_at",
+          "state"
+        ],
+        "properties": {
+          "expires_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it expires."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier."
+          },
+          "method": {
+            "type": "string",
+            "description": "The method of the request."
+          },
+          "path": {
+            "type": "string",
+            "description": "The path of the request, relative to `/api/v1`."
+          },
+          "plan": {
+            "$ref": "#/components/schemas/PlanView",
+            "description": "The plan against the local copy when it was queued."
+          },
+          "queued_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it was queued."
+          },
+          "queued_on": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The controller whose queue holds it.",
+            "minimum": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/ItemState",
+            "description": "Its state."
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ChangeSummary",
+            "description": "What it does."
+          }
+        }
+      },
+      "QueueList": {
+        "type": "object",
+        "description": "Body of `GET /queue`.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueItemView"
+            },
+            "description": "The caller's queued changes on this controller, oldest first."
+          }
+        }
+      },
+      "QueuedChange": {
+        "type": "object",
+        "description": "A settled queued change.",
+        "required": [
+          "id",
+          "author",
+          "principal",
+          "queued_at",
+          "queued_on",
+          "settled_at",
+          "state",
+          "request",
+          "summary",
+          "commands",
+          "queued_plan"
+        ],
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "The user who queued it."
+          },
+          "commands": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "The planner commands, for a re-apply."
+          },
+          "conflict": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Conflict",
+                "description": "Why it was not applied; absent for `applied`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current_plan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlanView",
+                "description": "The plan after the heal, when planning succeeded."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The identifier of the queued item."
+          },
+          "options": {
+            "$ref": "#/components/schemas/PlanOptions",
+            "description": "The acknowledged warnings of the request."
+          },
+          "original_session": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SessionId",
+                "description": "The session it was queued in."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "principal": {
+            "$ref": "#/components/schemas/Principal",
+            "description": "The principal it was queued with."
+          },
+          "queued_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it was queued."
+          },
+          "queued_on": {
+            "$ref": "#/components/schemas/NodeId",
+            "description": "The controller that queued it."
+          },
+          "queued_plan": {
+            "$ref": "#/components/schemas/PlanView",
+            "description": "The plan made when the change was queued."
+          },
+          "request": {
+            "$ref": "#/components/schemas/QueuedRequest",
+            "description": "The request."
+          },
+          "settled_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the controller settled it."
+          },
+          "state": {
+            "$ref": "#/components/schemas/ChangeState",
+            "description": "What became of it."
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ChangeSummary",
+            "description": "The one-line summary."
+          }
+        }
+      },
+      "QueuedChangeList": {
+        "type": "object",
+        "description": "Body of `GET /queue/conflicts`.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueuedChangeView"
+            },
+            "description": "The caller's settled queued changes, oldest first."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The revision the list was read at.",
+            "minimum": 0
+          }
+        }
+      },
+      "QueuedChangeView": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/QueuedChange",
+            "description": "The record."
+          },
+          {
+            "type": "object",
+            "required": [
+              "revision"
+            ],
+            "properties": {
+              "revision": {
+                "type": "integer",
+                "format": "int64",
+                "description": "The revision that wrote the record; for an `applied` change, the revision of the\nchange itself.",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "A settled queued change with the revision that wrote its record."
+      },
+      "QueuedRequest": {
+        "type": "object",
+        "description": "The request as the client would have sent it, relative to the API base.",
+        "required": [
+          "method",
+          "path"
+        ],
+        "properties": {
+          "body": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The JSON body."
+          },
+          "if_match": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `If-Match` value (`\"12\"` or `12`), for changes, deletes and restores."
+          },
+          "method": {
+            "type": "string",
+            "description": "`POST`, `PATCH` or `DELETE`."
+          },
+          "path": {
+            "type": "string",
+            "description": "The path, for example `/addresses/0192…`; `/api/v1` in front is accepted."
+          },
+          "query": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The query string without `?`, for example `acknowledge=ipam.address.in_supernet`."
           }
         }
       },
@@ -43663,6 +44476,17 @@
             "description": "The picture across sources."
           }
         }
+      },
+      "SummaryAction": {
+        "type": "string",
+        "description": "What a queued change does, in words a list can show.",
+        "enum": [
+          "create",
+          "update",
+          "delete",
+          "restore",
+          "bulk"
+        ]
       },
       "SummaryCount": {
         "type": "object",

@@ -81,6 +81,7 @@ pub mod observe;
 pub mod plan;
 pub mod proposals;
 pub mod query;
+pub mod queue;
 pub mod reconcile;
 pub mod scope;
 pub mod service;

@@ -52,7 +52,7 @@ pub struct ExportArgs {
 /// The [`Failure`] of the request or of writing the file.
 pub async fn run(args: &ExportArgs) -> Result<Output, Failure> {
     let target = Target::resolve(&args.client, true)?;
-    let csv = target.client()?.get_text(args.kind.path()).await?;
+    let csv = target.connect().await?.get_text(args.kind.path()).await?;
     match &args.output {
         Some(path) => {
             std::fs::write(path, csv.as_bytes()).map_err(|error| {

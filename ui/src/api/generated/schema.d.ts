@@ -2144,6 +2144,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List my queued changes on this controller */
+        get: operations["list_queue"];
+        put?: never;
+        /** Queue a change on an isolated controller */
+        post: operations["queue_change"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/queue/conflicts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List my settled queued changes */
+        get: operations["list_queued_changes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/queue/conflicts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Discard a settled queued change */
+        delete: operations["discard_queued_change"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/queue/conflicts/{id}/reapply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-apply a queued change */
+        post: operations["reapply_queued_change"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/queue/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Withdraw a queued change */
+        delete: operations["withdraw_queued_change"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ranges/bulk": {
         parameters: {
             query?: never;
@@ -4032,6 +4118,20 @@ export interface components {
          */
         ChangeAction: "create" | "update" | "delete" | "restore" | "lock" | "unlock" | "remove";
         /**
+         * @description What became of a queued change.
+         * @enum {string}
+         */
+        ChangeState: "applied" | "conflict" | "expired";
+        /** @description The one-line summary of a queued change. */
+        ChangeSummary: {
+            /** @description What the change does. */
+            action: components["schemas"]["SummaryAction"];
+            /** @description A human key of the object (its name, CIDR or address), when the plan shows one. */
+            key?: string | null;
+            /** @description The kind of object. */
+            kind: components["schemas"]["ObjectKind"];
+        };
+        /**
          * @description Why the scheduled check does not run.
          * @enum {string}
          */
@@ -4176,6 +4276,27 @@ export interface components {
          * @enum {string}
          */
         ConfigOrigin: "local" | "synced";
+        /** @description Why a queued change was not applied, as problem details carry it. */
+        Conflict: {
+            /**
+             * @description Stable code, for example `queue.plan_changed`, `ipam.address.duplicate` or
+             *     `auth.forbidden`.
+             */
+            code: string;
+            /** @description English detail. */
+            detail: string;
+            /** @description Named parameters for the translated message. */
+            params?: {
+                [key: string]: string;
+            };
+            /**
+             * Format: int32
+             * @description The HTTP status the code has in an answer.
+             */
+            status: number;
+            /** @description English title. */
+            title?: string | null;
+        };
         /**
          * @description What to do when the store already holds an object with different values.
          * @enum {string}
@@ -5930,6 +6051,11 @@ export interface components {
             /** @enum {string} */
             kind: "credential";
         };
+        /**
+         * @description The state of an item in the local queue.
+         * @enum {string}
+         */
+        ItemState: "queued" | "applying" | "expired";
         /** @description A job as stored and shown. */
         Job: {
             cancel_requested?: components["schemas"]["Stamp"] | null;
@@ -8821,6 +8947,14 @@ export interface components {
             /** @enum {string} */
             preset: "custom";
         });
+        /** @description Options of one plan. */
+        PlanOptions: {
+            /**
+             * @description Warning codes the caller acknowledges (IPAM-06): a plan with a warning that needs
+             *     an acknowledgement applies only when its code is listed here.
+             */
+            acknowledge?: string[];
+        };
         /** @description A problem that stops the plan, as in problem details. */
         PlanProblem: {
             /** @description Stable code (`ipam.prefix.overlap`). */
@@ -9481,6 +9615,103 @@ export interface components {
             mismatch?: components["schemas"]["MismatchRecord"] | null;
             /** @description The majors the node offered in its last handshake. */
             offered?: number[];
+        };
+        /** @description A queued change, as `GET /queue` lists it. */
+        QueueItemView: {
+            /** @description When it expires. */
+            expires_at: components["schemas"]["Timestamp"];
+            /**
+             * Format: uuid
+             * @description Identifier.
+             */
+            id: string;
+            /** @description The method of the request. */
+            method: string;
+            /** @description The path of the request, relative to `/api/v1`. */
+            path: string;
+            /** @description The plan against the local copy when it was queued. */
+            plan: components["schemas"]["PlanView"];
+            /** @description When it was queued. */
+            queued_at: components["schemas"]["Timestamp"];
+            /**
+             * Format: int64
+             * @description The controller whose queue holds it.
+             */
+            queued_on: number;
+            /** @description Its state. */
+            state: components["schemas"]["ItemState"];
+            /** @description What it does. */
+            summary: components["schemas"]["ChangeSummary"];
+        };
+        /** @description Body of `GET /queue`. */
+        QueueList: {
+            /** @description The caller's queued changes on this controller, oldest first. */
+            items: components["schemas"]["QueueItemView"][];
+        };
+        /** @description A settled queued change. */
+        QueuedChange: {
+            /** @description The user who queued it. */
+            author: components["schemas"]["UserId"];
+            /** @description The planner commands, for a re-apply. */
+            commands: Record<string, never>[];
+            conflict?: components["schemas"]["Conflict"] | null;
+            current_plan?: components["schemas"]["PlanView"] | null;
+            /**
+             * Format: uuid
+             * @description The identifier of the queued item.
+             */
+            id: string;
+            /** @description The acknowledged warnings of the request. */
+            options?: components["schemas"]["PlanOptions"];
+            original_session?: components["schemas"]["SessionId"] | null;
+            /** @description The principal it was queued with. */
+            principal: components["schemas"]["Principal"];
+            /** @description When it was queued. */
+            queued_at: components["schemas"]["Timestamp"];
+            /** @description The controller that queued it. */
+            queued_on: components["schemas"]["NodeId"];
+            /** @description The plan made when the change was queued. */
+            queued_plan: components["schemas"]["PlanView"];
+            /** @description The request. */
+            request: components["schemas"]["QueuedRequest"];
+            /** @description When the controller settled it. */
+            settled_at: components["schemas"]["Timestamp"];
+            /** @description What became of it. */
+            state: components["schemas"]["ChangeState"];
+            /** @description The one-line summary. */
+            summary: components["schemas"]["ChangeSummary"];
+        };
+        /** @description Body of `GET /queue/conflicts`. */
+        QueuedChangeList: {
+            /** @description The caller's settled queued changes, oldest first. */
+            items: components["schemas"]["QueuedChangeView"][];
+            /**
+             * Format: int64
+             * @description The revision the list was read at.
+             */
+            revision: number;
+        };
+        /** @description A settled queued change with the revision that wrote its record. */
+        QueuedChangeView: components["schemas"]["QueuedChange"] & {
+            /**
+             * Format: int64
+             * @description The revision that wrote the record; for an `applied` change, the revision of the
+             *     change itself.
+             */
+            revision: number;
+        };
+        /** @description The request as the client would have sent it, relative to the API base. */
+        QueuedRequest: {
+            /** @description The JSON body. */
+            body?: Record<string, never> | null;
+            /** @description The `If-Match` value (`"12"` or `12`), for changes, deletes and restores. */
+            if_match?: string | null;
+            /** @description `POST`, `PATCH` or `DELETE`. */
+            method: string;
+            /** @description The path, for example `/addresses/0192…`; `/api/v1` in front is accepted. */
+            path: string;
+            /** @description The query string without `?`, for example `acknowledge=ipam.address.in_supernet`. */
+            query?: string | null;
         };
         /**
          * @description The kind of quorum state of a controller.
@@ -11282,6 +11513,11 @@ export interface components {
             /** @description The picture across sources. */
             summary: components["schemas"]["SubjectSummary"];
         };
+        /**
+         * @description What a queued change does, in words a list can show.
+         * @enum {string}
+         */
+        SummaryAction: "create" | "update" | "delete" | "restore" | "bulk";
         /** @description How many objects of a kind a plan changes in one way. */
         SummaryCount: {
             /** @description The action. */
@@ -23070,6 +23306,392 @@ export interface operations {
                 };
             };
             /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_queue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's queued changes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueueList"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No queue on this server (`queue.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    queue_change: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QueuedRequest"];
+            };
+        };
+        responses: {
+            /** @description The queued change with its plan against the local copy */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueueItemView"];
+                };
+            };
+            /** @description The request, its query or `If-Match` is invalid as the endpoint would find it (`ipam.validation`, `sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed: the endpoint's own check (`auth.forbidden`, `auth.out_of_scope`), or not a person (`queue.not_a_person`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The controller accepts writes: send the request itself (`queue.not_isolated`); or the plan fails against the local copy as the endpoint would answer (`ipam.*`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too large to queue (`queue.too_large`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not queueable (`queue.not_queueable`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No queue or no IPAM on this server (`queue.unavailable`, `ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The queue of this controller is full (`queue.full`) */
+            507: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_queued_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's settled queued changes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueuedChangeList"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    discard_queued_change: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Queued change identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Discarded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The caller has no such settled change (`queue.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The record changed meanwhile (`queue.changed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The controller cannot write (`cluster.no_quorum`) or IPAM is not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    reapply_queued_change: {
+        parameters: {
+            query?: {
+                /** @description Plan the change and return the plan without writing (API-09). */
+                dry_run?: boolean;
+                /**
+                 * @description Warning codes to acknowledge, comma-separated (for example
+                 *     `ipam.prefix.nibble_boundary`).
+                 */
+                acknowledge?: string;
+            };
+            header?: {
+                /**
+                 * @description The revision the client read, as `"12"`; the write fails with 412
+                 *     `ipam.revision_mismatch` when the object changed since.
+                 */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Queued change identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The change applied or planned, as the endpoint of the original request answers (`WriteResponse` of the object, or `BulkResponse` for a bulk change) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description A create applied */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description Invalid parameter or `If-Match` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`, `auth.out_of_scope`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The caller has no such settled change (`queue.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The change was applied already (`queue.changed`), or the write fails as the endpoint would answer (`ipam.*`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The controller cannot write (`cluster.no_quorum`) or IPAM is not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    withdraw_queued_change: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Queued change identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Withdrawn */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The caller has no such queued change here (`queue.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The controller is applying it now (`queue.changed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No queue on this server (`queue.unavailable`) */
             503: {
                 headers: {
                     [name: string]: unknown;

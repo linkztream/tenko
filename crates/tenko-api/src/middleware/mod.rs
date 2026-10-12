@@ -10,20 +10,20 @@
 //!   authentication, so it shields the login path), authentication through the
 //!   [`Authenticator`](tenko_core::Authenticator) of the state (once per request; the
 //!   outcome goes to [`AuthOutcome`] for `Ctx`), the per-principal rate limit, the quorum
-//!   gate of an isolated controller (`quorum`, WP3.9; pass-through until then), the
-//!   `Idempotency-Key` replay ([`idempotency`]), and `Cache-Control: no-store` on API
-//!   responses that set no caching themselves.
+//!   gate of an isolated controller ([`quorum`]), the `Idempotency-Key` replay
+//!   ([`idempotency`]), `Cache-Control: no-store` on API responses that set no caching
+//!   themselves, and `Tenko-Staleness` on every answer of a controller without quorum.
 //!
 //! Refusals are problem details: 403 `sys.csrf_rejected`, 429 `sys.rate_limited` with
 //! `Retry-After`, 422 `sys.idempotency_mismatch`, 409 `sys.idempotency_in_flight`, 409
 //! `sys.idempotency_not_replayable` (a secret-bearing response is never stored, see
-//! [`idempotency`]).
+//! [`idempotency`]), 503 `cluster.no_quorum` with `Retry-After` ([`quorum`]).
 
 pub(crate) mod csrf;
 pub mod headers;
 pub mod idempotency;
 pub(crate) mod metrics;
-pub(crate) mod quorum;
+pub mod quorum;
 pub mod rate_limit;
 
 use std::{sync::Arc, time::Instant};
@@ -157,9 +157,10 @@ pub(crate) async fn api(
         || UNMATCHED_ROUTE.to_owned(),
         |path| path.as_str().to_owned(),
     );
+    let quorum = quorum::Quorum::read(&layers.state);
     let refusal = match guard(&layers, &mut request).await {
         Some(refusal) => Some(refusal),
-        None => quorum::check(&layers.state, &request),
+        None => quorum.check(&request),
     };
     let mut response = if let Some(refusal) = refusal {
         refusal
@@ -184,6 +185,7 @@ pub(crate) async fn api(
         .await
     };
     response.extensions_mut().insert(RouteLabel(route));
+    quorum.stamp(&mut response);
     response
         .headers_mut()
         .entry(header::CACHE_CONTROL)

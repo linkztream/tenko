@@ -150,7 +150,7 @@ fn parse_head(text: &str) -> Result<ChainHead, String> {
 /// The [`Failure`] of the request.
 pub async fn verify(args: &VerifyArgs) -> Result<Output, Failure> {
     let target = Target::resolve(&args.client, true)?;
-    let report = target.client()?.audit_verify().await?;
+    let report = target.connect().await?.audit_verify().await?;
     let mut output = if target.json {
         Output::json(&report)
     } else if report.intact {

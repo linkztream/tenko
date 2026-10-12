@@ -47,6 +47,7 @@ pub mod cluster_key;
 mod imports;
 pub(crate) mod leader;
 mod maintenance;
+pub mod queue;
 pub mod setup_token;
 mod tls;
 
@@ -1315,6 +1316,26 @@ async fn start(
         .await?;
     running.tasks.extend(scans.tasks());
 
+    // The queue of changes made while this controller is cut off from its cluster
+    // (OPS-26): local to the controller and drained by it after the heal.
+    let change_queue = match &ipam {
+        Some(ipam) => {
+            let started = queue::start(queue::Parts {
+                data_dir: resolved.data_dir.clone(),
+                node: resolved.node_id,
+                ipam: Arc::clone(ipam),
+                authorizer: Some(auth.authorizer()),
+                scope: Some(Arc::clone(&scope)),
+                quorum: Some(store.quorum()),
+                stop: running.stop.subscribe(),
+            })
+            .map_err(|error| StartError::new("ipam", "start.queue.io", error.to_string()))?;
+            running.tasks.push(started.task);
+            Some(started.queue)
+        }
+        None => None,
+    };
+
     let lab_plain_http = tls.lab_plain_http;
     let https = tls.https;
     let (server, events, warnings_state) = steps
@@ -1362,6 +1383,9 @@ async fn start(
             server.max_connections = config.server.max_connections;
             server.extensions.insert(Arc::clone(&auth));
             server.extensions.insert(Arc::clone(&languages));
+            if let Some(change_queue) = &change_queue {
+                server.extensions.insert(Arc::clone(change_queue));
+            }
             if let Some(ipam) = &ipam {
                 server.extensions.insert(Arc::clone(ipam));
                 server.extensions.insert(Arc::clone(&scope));

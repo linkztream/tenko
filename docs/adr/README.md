@@ -65,6 +65,7 @@ The date is the date the ADR was written or last changed status.
 | [0010](0010-webauthn-relying-party.md) | WebAuthn relying-party implementation without OpenSSL | Accepted | 2026-10-09 |
 | [0011](0011-store-write-model.md) | Store write model | Accepted | 2026-10-09 |
 | [0012](0012-connector-plugins.md) | Connectors as plugins over a published protocol | Accepted | 2026-10-09 |
+| [0013](0013-partitions.md) | Partitions and multi-site ownership | Accepted | 2026-10-11 |
 | [0014](0014-controller-cluster.md) | The controller cluster | Accepted | 2026-10-10 |
 | [0015](0015-scoped-authorization.md) | Scoped authorization, service accounts and scoped tokens | Accepted | 2026-10-11 |
 | [0016](0016-backup-and-restore.md) | Backup and restore | Accepted | 2026-10-11 |

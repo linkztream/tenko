@@ -19,6 +19,11 @@
 //! Errors print one line, `error[<code>]: <detail>`, and set the exit status of
 //! [`crate::exit`]. With `--json`, the raw JSON bodies are printed instead, problem details
 //! included.
+//!
+//! A controller cut off from its cluster marks every answer with `Tenko-Staleness`
+//! (OPS-26, `docs/partitions.md`); the commands then print one warning on standard error
+//! with the time since the controller lost contact and the revision of its copy
+//! ([`warn_if_stale`]).
 
 pub mod audit;
 pub mod ca_root;
@@ -295,6 +300,20 @@ impl Target {
         Client::new(config).map_err(|error| Failure::from_client(&error))
     }
 
+    /// The API client, after a liveness request whose answer says whether the controller
+    /// is cut off from its cluster ([`warn_if_stale`]); the typed client does not show
+    /// response headers.
+    ///
+    /// # Errors
+    ///
+    /// As [`Target::client`].
+    pub async fn connect(&self) -> Result<Client, Failure> {
+        if let Ok(raw) = self.raw() {
+            raw.probe_staleness().await;
+        }
+        self.client()
+    }
+
     /// The raw HTTP helper for cookies and uploads.
     ///
     /// # Errors
@@ -507,6 +526,16 @@ impl Raw {
         format!("{}{}{path}", self.base, tenko_api::API_BASE)
     }
 
+    /// `GET /api/v1/health`, only for its staleness header; failures are ignored (the
+    /// command itself reports an unreachable server).
+    async fn probe_staleness(&self) {
+        let request = self
+            .http
+            .get(self.url("/health"))
+            .timeout(STALENESS_PROBE_TIMEOUT);
+        let _ = self.send(request).await;
+    }
+
     async fn send(&self, request: reqwest::RequestBuilder) -> Result<RawResponse, Failure> {
         let response = request.send().await.map_err(|error| {
             Failure::new(
@@ -516,6 +545,7 @@ impl Raw {
         })?;
         let status = response.status();
         let headers = response.headers().clone();
+        warn_if_stale(&self.base, &headers);
         let body = response
             .bytes()
             .await
@@ -531,6 +561,47 @@ impl Raw {
             headers,
             body,
         })
+    }
+}
+
+/// How long the staleness probe of [`Target::connect`] waits.
+const STALENESS_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Whether this process printed the staleness warning already.
+static STALENESS_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The warning of a controller cut off from its cluster, from the `Tenko-Staleness` header
+/// of an answer; `None` without the header.
+pub fn staleness_warning(base: &str, headers: &HeaderMap) -> Option<String> {
+    let value = headers
+        .get(tenko_api::middleware::quorum::STALENESS_HEADER)?
+        .to_str()
+        .ok()?;
+    let Ok(staleness) = value.parse::<tenko_api::middleware::quorum::Staleness>() else {
+        return Some(format!(
+            "warning: {base} is cut off from its cluster ({value}); its answers may be out of date \
+             and it refuses changes\n"
+        ));
+    };
+    let minutes = tenko_core::Timestamp::now()
+        .saturating_since(staleness.since)
+        .as_secs()
+        / 60;
+    Some(format!(
+        "warning: {base} is cut off from its cluster since {} ({minutes} min); it answers from \
+         its copy at revision {} and refuses changes until it is back (IPAM changes can be \
+         queued, see docs/partitions.md)\n",
+        staleness.since.to_rfc3339(),
+        staleness.revision.0,
+    ))
+}
+
+/// Prints [`staleness_warning`] on standard error, once per process.
+pub fn warn_if_stale(base: &str, headers: &HeaderMap) {
+    if let Some(warning) = staleness_warning(base, headers)
+        && !STALENESS_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        let _ = std::io::stderr().lock().write_all(warning.as_bytes());
     }
 }
 
