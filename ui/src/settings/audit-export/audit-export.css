@@ -1,0 +1,10 @@
+/* The audit export page (WP3.11b). */
+.ae-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); flex-wrap: wrap; }
+.ae-help { display: block; }
+.ae-actions { white-space: nowrap; }
+.ae-actions .btn + .btn { margin-inline-start: var(--sp-2); }
+.ae-host { display: grid; grid-template-columns: minmax(0, 1fr) 8rem; gap: var(--sp-4); }
+.ae-command { margin: 0; padding: var(--sp-3) var(--sp-4); background: var(--surface-2); border-radius: var(--r-2); overflow-x: auto; }
+.ae-test { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.ae-test.ok { color: var(--ok-ink); }
+.ae-test.bad { color: var(--danger-ink); }

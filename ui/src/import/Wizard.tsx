@@ -159,7 +159,7 @@ export default function Wizard() {
   });
   createEffect(on(() => state().jobId, () => job.refetch(), { defer: true }));
   createEffect(() => {
-    const d = job.value.latest;
+    const d = job.latest();
     if (d && state().step === "apply" && FINAL.has(d.job.state)) send({ type: "finished", succeeded: d.job.state === "succeeded" });
   });
 
@@ -225,7 +225,7 @@ export default function Wizard() {
           <Match when={state().step === "apply" || state().step === "done"}>
             <ResultStep
               state={state()}
-              job={job.value.latest ?? null}
+              job={job.latest() ?? null}
               onAgain={() => {
                 send({ type: "reset" });
                 setParams({ id: undefined });

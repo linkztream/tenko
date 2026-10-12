@@ -6,7 +6,7 @@
 // keys, because the server owns the jobs but not the language. A key this UI does not know yet
 // is shown as it is, which is readable enough to report; it never breaks a page.
 import { errorMessage, isApiError } from "../api/problem";
-import type { CodedError, JobState, ManualTask, StepPreview, StepRecord, StepStateKind } from "../api/types";
+import type { CodedError, JobState, JobSummary, ManualTask, StepPreview, StepRecord, StepStateKind } from "../api/types";
 import { t, tDynamic } from "../i18n";
 import { manualOf } from "./model";
 
@@ -41,6 +41,25 @@ export function jobStateClass(state: JobState): string {
     case "cancelled":
       return "queued cancelled";
   }
+}
+
+/**
+ * Whether a cancelled job was rolled back by its cancellation: a cancel that reaches a job whose
+ * steps have run undoes them first, and the job still ends `cancelled` (a move then keeps the old
+ * address and tags the host `move-failed`). A summary tells by its current step, the first step
+ * that is not done, which the compensation leaves `compensated`; a full job by its steps.
+ */
+export function cancelRolledBack(
+  job: Pick<JobSummary, "state" | "current_step_state"> | { state: JobState; steps: readonly StepRecord[] },
+): boolean {
+  if (job.state !== "cancelled") return false;
+  if ("steps" in job) return job.steps.some((step) => step.state.state === "compensated");
+  return job.current_step_state === "compensated";
+}
+
+/** The state of a job in words, with "Rolled back (cancelled)" for a cancel that undid steps. */
+export function jobStateText(state: JobState, rollback?: "cancel"): string {
+  return rollback === "cancel" && state === "cancelled" ? t("jobs.state.cancelled_rolled_back") : jobStateWord(state);
 }
 
 /** The state of one step in words. */
@@ -178,6 +197,10 @@ export function describeStep(step: StepRecord, preview?: StepPreview): string {
  */
 export function taskText(task: ManualTask, undo = false): string {
   const key = undo && task.undo ? task.undo : task.instruction;
+  // The engine's generic undo text names the raw step kind; the words of the kind read better.
+  if (key === "jobs.undo.step" && task.args?.kind && task.args.step !== undefined) {
+    return t("jobs.undo.step_named", { step: task.args.step, name: stepName(task.args.kind) });
+  }
   return tDynamic(key, task.args) ?? key;
 }
 

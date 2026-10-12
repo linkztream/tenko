@@ -12,6 +12,7 @@ import { errorMessage } from "../api/problem";
 import type { Address, AssignmentMode, Host, Interface, JobSummary, Site, Tenant } from "../api/types";
 import { ASSIGNMENT_MODES } from "../api/types";
 import { decodeSegment, paths } from "../app/paths";
+import { may } from "../auth/gate";
 import { Addr, Mac } from "../components/Addr";
 import { Icon } from "../components/Icon";
 import { Kbd } from "../components/Kbd";
@@ -34,7 +35,7 @@ import { useTree } from "../ipam/tree/PrefixTree";
 import { modeHint, modeWord } from "../ipam/words";
 import { HostObservations } from "../discovery/HostObservations";
 import { JobStateChip } from "../jobs/StateChip";
-import { jobTitle } from "../jobs/words";
+import { cancelRolledBack, jobTitle } from "../jobs/words";
 import { isTyping } from "../shell/keyboard";
 import { Connect } from "./Connect";
 import { HostCredentialsSection } from "./credentials";
@@ -128,6 +129,12 @@ export default function HostView() {
   >(null);
   const [modeMenu, setModeMenu] = createSignal<HTMLElement | null>(null);
 
+  /** Whether the principal may change this host: judged by the anchors of the host (docs/access.md 3.2). */
+  const mayHost = () => {
+    const h = host();
+    return !!h && may.host(h);
+  };
+
   const interfaces = () => (data()?.interfaces ?? []).filter((i) => !i.meta.deleted);
   const addresses = () => data()?.addresses ?? [];
   const missing = createMemo(() => {
@@ -163,7 +170,7 @@ export default function HostView() {
   onMount(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || isTyping(e) || e.ctrlKey || e.metaKey || e.altKey || dialog()) return;
-      if (document.querySelector("[aria-modal='true']") || !host() || host()?.meta.deleted) return;
+      if (document.querySelector("[aria-modal='true']") || !host() || host()?.meta.deleted || !mayHost()) return;
       if (e.key === "M" && e.shiftKey) {
         e.preventDefault();
         setModeMenu(document.querySelector<HTMLElement>("[data-testid='host-mode']"));
@@ -226,6 +233,7 @@ export default function HostView() {
                 </h1>
               </div>
               <div class="actions">
+                <Show when={mayHost()}>
                 <Show
                   when={!h().meta.deleted}
                   fallback={
@@ -257,6 +265,7 @@ export default function HostView() {
                     <Icon name="trash" />
                     {t("ipam.do.delete")}
                   </button>
+                </Show>
                 </Show>
               </div>
             </div>
@@ -300,7 +309,7 @@ export default function HostView() {
               <section class="page-section" aria-labelledby="host-ifaces-title">
                 <h2 id="host-ifaces-title">
                   {t("hosts.interfaces.title")}
-                  <Show when={!h().meta.deleted}>
+                  <Show when={!h().meta.deleted && mayHost()}>
                     <button type="button" class="btn sm aside-btn" data-testid="interface-add" onClick={() => setDialog({ kind: "iface" })}>
                       <Icon name="plus" size="sm" />
                       {t("hosts.interfaces.add")}
@@ -337,11 +346,13 @@ export default function HostView() {
                       },
                       { id: "tags", header: () => t("ipam.col.tags"), width: 140, hidden: true, render: (i) => <Tags tags={i.meta.tags} /> },
                     ]}
-                    onOpen={(i) => setDialog({ kind: "iface", iface: i })}
-                    rowActions={[
+                    onOpen={(i) => {
+                      if (mayHost()) setDialog({ kind: "iface", iface: i });
+                    }}
+                    rowActions={mayHost() ? [
                       { id: "edit", label: () => t("ipam.do.edit"), run: (i) => setDialog({ kind: "iface", iface: i }) },
                       { id: "delete", label: () => t("ipam.do.delete"), danger: true, run: (i) => setDialog({ kind: "iface_delete", iface: i }) },
-                    ]}
+                    ] : []}
                     empty={
                       <div class="empty">
                         <h3>{t("hosts.interfaces.empty")}</h3>
@@ -415,7 +426,12 @@ export default function HostView() {
                     <For each={data()?.jobs ?? []}>
                       {(j) => (
                         <li>
-                          <JobStateChip state={j.state} done={j.steps_done} total={j.step_count} /> <A href={paths.job(j.id)}>{jobTitle(j)}</A>{" "}
+                          <JobStateChip
+                            state={j.state}
+                            done={j.steps_done}
+                            total={j.step_count}
+                            rollback={cancelRolledBack(j) ? "cancel" : undefined}
+                          /> <A href={paths.job(j.id)}>{jobTitle(j)}</A>{" "}
                           <TimeAgo at={j.created.at} />
                         </li>
                       )}
@@ -426,7 +442,7 @@ export default function HostView() {
 
               <section class="page-section" aria-labelledby="host-history-title">
                 <h2 id="host-history-title">{t("ipam.prefix.tab.history")}</h2>
-                <HistoryPanel collection="hosts" id={h().id} label={h().name} deleted={!!h().meta.deleted} revision={h().meta.revision} onRestored={() => void refetch()} />
+                <HistoryPanel collection="hosts" id={h().id} label={h().name} deleted={!!h().meta.deleted} mayRestore={mayHost()} revision={h().meta.revision} onRestored={() => void refetch()} />
               </section>
             </div>
 

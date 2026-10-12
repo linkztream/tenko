@@ -10,6 +10,7 @@ import { ASSIGNMENT_MODES } from "../api/types";
 import { fetchAll } from "../api/paginate";
 import { createLiveQuery } from "../api/live";
 import { paths } from "../app/paths";
+import { may } from "../auth/gate";
 import { Icon } from "../components/Icon";
 import { ActionBar, ActionButton } from "../grid/ActionBar";
 import { DeletedTag, LockFlag, ModeBadge, Tags, TimeAgo } from "../grid/cells";
@@ -93,8 +94,8 @@ export default function HostsView() {
       return { value: { sites: sites.items, tenants: tenants.items } };
     },
   });
-  const siteName = (id?: string | null) => (id ? lookups.value.latest?.sites.find((s) => s.id === id)?.name : undefined);
-  const tenantName = (id: string) => lookups.value.latest?.tenants.find((tn) => tn.id === id)?.name ?? "";
+  const siteName = (id?: string | null) => (id ? lookups.latest()?.sites.find((s) => s.id === id)?.name : undefined);
+  const tenantName = (id: string) => lookups.latest()?.tenants.find((tn) => tn.id === id)?.name ?? "";
 
   const parsed = createMemo(() => parseQuery(applied(), FIELDS));
   const source = createListSource<Host>({
@@ -102,7 +103,7 @@ export default function HostsView() {
     query: () => {
       const p = { ...parsed().params };
       // `site:Home` is typed by name; the API filters by id.
-      if (p.site) p.site = lookups.value.latest?.sites.find((s) => s.name.toLowerCase() === p.site?.toLowerCase())?.id ?? p.site;
+      if (p.site) p.site = lookups.latest()?.sites.find((s) => s.name.toLowerCase() === p.site?.toLowerCase())?.id ?? p.site;
       return {
         ...p,
         locked: locked() ? true : undefined,
@@ -157,20 +158,25 @@ export default function HostsView() {
   const selectable = (h: Host) => !h.meta.deleted;
   const selection = createGridSelection(source.rows, (h) => h.id, selectable);
   const selected = () => source.rows().filter((h) => selection.has(h.id));
+  /** Whether the principal may change this host: judged by the anchors of the host (docs/access.md 3.2). */
+  const mayRow = (h: Host) => may.host(h);
+  /** The write actions of the bar: every selected host must be inside the principal's scope. */
+  const maySelected = () => selected().length > 0 && selected().every(mayRow);
   const items = (list: Host[]): DragItem[] => list.map((h) => ({ kind: "host", id: h.id, label: h.name }));
 
   const actions: RowAction<Host>[] = [
     { id: "open", label: () => t("ipam.do.open"), run: (h) => navigate(paths.host(h.name)) },
-    { id: "move", label: () => t("ipam.do.move"), disabled: (h) => !!h.meta.deleted, run: (h) => setDialog({ kind: "move", items: items([h]) }) },
+    { id: "move", label: () => t("ipam.do.move"), disabled: (h) => !!h.meta.deleted, hidden: (h) => !mayRow(h), run: (h) => setDialog({ kind: "move", items: items([h]) }) },
     {
       id: "lock",
       label: () => t("hosts.do.toggle_lock"),
       disabled: (h) => !!h.meta.deleted,
+      hidden: (h) => !mayRow(h),
       run: (h) => setDialog({ kind: "bulk", bulk: { kind: "lock", lock: !h.lock }, hosts: [h] }),
     },
     { id: "history", label: () => t("ipam.do.history"), run: (h) => setDialog({ kind: "history", host: h }) },
-    { id: "restore", label: () => t("ipam.do.restore"), disabled: (h) => !h.meta.deleted, run: (h) => setDialog({ kind: "restore", host: h }) },
-    { id: "delete", label: () => t("ipam.do.delete"), danger: true, disabled: (h) => !!h.meta.deleted, run: (h) => setDialog({ kind: "delete", host: h }) },
+    { id: "restore", label: () => t("ipam.do.restore"), disabled: (h) => !h.meta.deleted, hidden: (h) => !mayRow(h), run: (h) => setDialog({ kind: "restore", host: h }) },
+    { id: "delete", label: () => t("ipam.do.delete"), danger: true, disabled: (h) => !!h.meta.deleted, hidden: (h) => !mayRow(h), run: (h) => setDialog({ kind: "delete", host: h }) },
   ];
 
   const bulkSend = (bulk: Bulk, hosts: Host[]) => (o: { dryRun: boolean; acknowledge: string[] }) => {
@@ -184,11 +190,11 @@ export default function HostsView() {
 
   const move = () => {
     const list = selected();
-    if (list.length) setDialog({ kind: "move", items: items(list) });
+    if (list.length && maySelected()) setDialog({ kind: "move", items: items(list) });
   };
   const toggleLock = () => {
     const list = selected();
-    if (list.length) setDialog({ kind: "bulk", bulk: { kind: "lock", lock: !list.every((h) => h.lock) }, hosts: list });
+    if (list.length && maySelected()) setDialog({ kind: "bulk", bulk: { kind: "lock", lock: !list.every((h) => h.lock) }, hosts: list });
   };
 
   onMount(() => {
@@ -198,7 +204,7 @@ export default function HostsView() {
       if (e.key === "M" && e.shiftKey) {
         e.preventDefault();
         const button = document.querySelector<HTMLElement>("[data-testid='action-mode']");
-        if (button && selected().length) setModeMenu(button);
+        if (button && maySelected()) setModeMenu(button);
       } else if (e.key === "m") {
         e.preventDefault();
         move();
@@ -226,10 +232,12 @@ export default function HostsView() {
           <h1 tabIndex={-1}>{t("ipam.nav.hosts")}</h1>
         </div>
         <div class="actions">
-          <button type="button" class="btn primary" data-testid="hosts-create" onClick={() => setDialog({ kind: "create" })}>
-            <Icon name="plus" />
-            {t("hosts.do.create")}
-          </button>
+          <Show when={may.create("host")}>
+            <button type="button" class="btn primary" data-testid="hosts-create" onClick={() => setDialog({ kind: "create" })}>
+              <Icon name="plus" />
+              {t("hosts.do.create")}
+            </button>
+          </Show>
         </div>
       </div>
       <FilterBar
@@ -282,7 +290,8 @@ export default function HostsView() {
           onOpen={(h) => navigate(paths.host(h.name))}
           onOpenPage={(h) => navigate(paths.host(h.name))}
           rowActions={actions}
-          dragItems={(list) => (list.length ? items(list) : null)}
+          dragItems={(list) => (list.length && list.every(mayRow) ? items(list) : null)}
+          draggable={mayRow}
           dragLabel={(list) => t("ipam.move.dragging", { count: list.length })}
           empty={
             <div class="empty">
@@ -291,14 +300,16 @@ export default function HostsView() {
           }
         />
         <ActionBar count={selection.count()} onClear={selection.clear}>
-          <ActionButton primary icon="move" label={t("ipam.do.move")} keys={["M"]} onClick={move} testid="action-move" />
-          <ActionButton
-            label={t("hosts.do.set_mode")}
-            keys={["Shift", "M"]}
-            testid="action-mode"
-            onClick={() => setModeMenu(document.querySelector<HTMLElement>("[data-testid='action-mode']"))}
-          />
-          <ActionButton icon="lock" label={t("hosts.do.toggle_lock")} keys={["L"]} onClick={toggleLock} testid="action-lock" />
+          <Show when={maySelected()}>
+            <ActionButton primary icon="move" label={t("ipam.do.move")} keys={["M"]} onClick={move} testid="action-move" />
+            <ActionButton
+              label={t("hosts.do.set_mode")}
+              keys={["Shift", "M"]}
+              testid="action-mode"
+              onClick={() => setModeMenu(document.querySelector<HTMLElement>("[data-testid='action-mode']"))}
+            />
+            <ActionButton icon="lock" label={t("hosts.do.toggle_lock")} keys={["L"]} onClick={toggleLock} testid="action-lock" />
+          </Show>
           <ActionButton
             icon="export"
             label={t("ipam.do.export_csv")}
@@ -397,6 +408,7 @@ export default function HostsView() {
                   id={d.host.id}
                   label={d.host.name}
                   deleted={!!d.host.meta.deleted}
+                  mayRestore={mayRow(d.host)}
                   revision={d.host.meta.revision}
                   onClose={() => setDialog(null)}
                 />

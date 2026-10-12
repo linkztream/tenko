@@ -32,3 +32,22 @@ export function pendingRoute<M extends Method, P extends PendingPaths<M>>(
   // any path, which is what a pending operation needs.
   return route(method as never, path as never, resolver as never);
 }
+
+/** The context of a loose handler: path parameters and bodies as plain records. */
+export interface LooseMockContext extends Omit<MockContext<Method, never>, "params" | "body" | "optionalBody"> {
+  readonly params: Record<string, string>;
+  body(): Promise<Record<string, unknown>>;
+  optionalBody(): Promise<Record<string, unknown>>;
+}
+
+/**
+ * Registers a handler for an operation the document describes whose mock still answers the
+ * working model of its area (WP3.11c moves the last ones to `route()` with the generated types).
+ */
+export function looseRoute(
+  method: Method,
+  path: string,
+  resolver: (ctx: LooseMockContext) => Awaitable<Reply<unknown> | Response>,
+): HttpHandler {
+  return route(method as never, path as never, resolver as never);
+}

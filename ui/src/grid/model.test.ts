@@ -1,6 +1,6 @@
 import { createRoot } from "solid-js";
 import { describe, expect, it } from "vitest";
-import { moveFocus, scrollToShow, visibleWindow } from "./focus";
+import { isRtl, logicalArrow, moveFocus, scrollToShow, visibleWindow } from "./focus";
 import { orderColumns } from "./prefs";
 import { formatTerms, parseQuery, tokenize, type QueryField } from "./query";
 import { createSelection, idsBetween } from "./selection";
@@ -16,6 +16,23 @@ describe("focus", () => {
     expect(moveFocus({ row: 9, col: 1 }, "j", bounds)).toEqual({ row: 9, col: 1 });
     expect(moveFocus({ row: 2, col: 3 }, "ArrowRight", bounds)).toEqual({ row: 2, col: 3 });
     expect(moveFocus({ row: 2, col: 0 }, "ArrowLeft", bounds)).toEqual({ row: 2, col: 0 });
+  });
+
+  it("swaps the horizontal arrows in a right-to-left layout only", () => {
+    const rtl = document.createElement("div");
+    rtl.setAttribute("dir", "rtl");
+    const inner = document.createElement("table");
+    rtl.append(inner);
+    const ltr = document.createElement("table");
+    expect(isRtl(inner)).toBe(true);
+    expect(isRtl(ltr)).toBe(false);
+    expect(isRtl(null)).toBe(false);
+    expect(logicalArrow("ArrowLeft", inner)).toBe("ArrowRight");
+    expect(logicalArrow("ArrowRight", inner)).toBe("ArrowLeft");
+    expect(logicalArrow("ArrowDown", inner)).toBe("ArrowDown");
+    expect(logicalArrow("Home", inner)).toBe("Home");
+    expect(logicalArrow("ArrowLeft", ltr)).toBe("ArrowLeft");
+    expect(logicalArrow("ArrowRight", undefined)).toBe("ArrowRight");
   });
 
   it("jumps with Home, End, Ctrl and the page keys", () => {

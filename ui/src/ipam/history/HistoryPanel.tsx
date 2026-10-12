@@ -3,6 +3,7 @@
 // follows the live events: a change of the object loads the first page again.
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { events } from "../../api/events";
+import { writesAny } from "../../auth/gate";
 import type { HistoryEntry } from "../../api/types";
 import { Dialog } from "../../components/Dialog";
 import { Icon } from "../../components/Icon";
@@ -34,6 +35,11 @@ interface PanelProps {
   label: string;
   deleted?: boolean | undefined;
   revision?: number | null | undefined;
+  /**
+   * Whether the principal may restore the object (the caller judges it by the object's anchors).
+   * Without an answer, anybody who writes anything sees the button; the server decides.
+   */
+  mayRestore?: boolean | undefined;
   /** Called after the object was restored from the history. */
   onRestored?: (() => void) | undefined;
 }
@@ -118,7 +124,7 @@ export function HistoryPanel(props: PanelProps) {
 
   return (
     <section class="history" data-testid="history-panel" aria-label={t("ipam.history.label", { label: props.label })}>
-      <Show when={props.deleted}>
+      <Show when={props.deleted && (props.mayRestore ?? writesAny())}>
         <div class="history-head">
           <button type="button" class="btn" data-testid="history-restore" onClick={() => setRestoring(true)}>
             <Icon name="undo" />
@@ -201,6 +207,7 @@ export function HistoryDialog(props: PanelProps & { onClose: () => void }) {
           id={props.id}
           label={props.label}
           deleted={props.deleted}
+          mayRestore={props.mayRestore}
           revision={props.revision}
           onRestored={() => {
             props.onRestored?.();

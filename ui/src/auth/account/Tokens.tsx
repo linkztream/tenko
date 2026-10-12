@@ -8,6 +8,10 @@ import { Icon } from "../../components/Icon";
 import { ErrorNotice, Notice } from "../../components/Notice";
 import { toast } from "../../components/toast";
 import { formatDate, formatNumber, formatRelative, t } from "../../i18n";
+import { catalogNames, createScopeCatalog, type ScopeCatalog } from "../../settings/access/data";
+import { scopedTokenBody, tokenReach, type TokenScope } from "../../settings/access/model";
+import { rowsToGrants, TokenGrantsEditor, type GrantRow } from "../../settings/access/TokenGrants";
+import "../../settings/access/access.css";
 import { session } from "../session";
 import { lifetimeChoices, tokenMaxDays } from "./client";
 import { copyText, describeError, latest } from "./shared";
@@ -15,7 +19,11 @@ import { copyText, describeError, latest } from "./shared";
 /** The value of the lifetime choice that creates a token without an expiry. */
 const NO_EXPIRY = "none";
 
-/** Personal API tokens (IAM-10): list, create (shown once) and revoke. */
+/**
+ * Personal and scoped API tokens (IAM-10): list with what each may do, create (shown once) and
+ * revoke. A scoped token acts with the grants and special scopes chosen at creation, never with
+ * more than its owner has (docs/access.md section 7).
+ */
 export default function Tokens() {
   const query = createLiveQuery<TokenInfo[]>({
     topics: ["admin"],
@@ -30,6 +38,9 @@ export default function Tokens() {
   const [busy, setBusy] = createSignal(false);
 
   const tokens = () => latest(query);
+  // The names of the VRFs, sites and prefixes that scoped tokens name.
+  const catalog = createScopeCatalog();
+  const names = createMemo(() => catalogNames(latest(catalog)));
 
   const revoke = async (token: TokenInfo) => {
     setRevokeError(null);
@@ -90,6 +101,7 @@ export default function Tokens() {
                       <th scope="col">{t("account.tokens.col.created")}</th>
                       <th scope="col">{t("account.tokens.col.expires")}</th>
                       <th scope="col">{t("account.tokens.col.last_used")}</th>
+                      <th scope="col">{t("access.token.col.reach")}</th>
                       <th scope="col" class="r">
                         <span class="sr-only">{t("account.sessions.col.actions")}</span>
                       </th>
@@ -122,6 +134,11 @@ export default function Tokens() {
                               {(at) => <span title={formatDate(at(), { dateStyle: "medium", timeStyle: "short" })}>{formatRelative(at())}</span>}
                             </Show>
                           </td>
+                          <td data-testid="token-reach" data-scoped={token.scoped ? "true" : "false"}>
+                            <ul class="plain-list">
+                              <For each={tokenReach(token, names())}>{(line) => <li>{line}</li>}</For>
+                            </ul>
+                          </td>
                           <td class="r">
                             <button
                               type="button"
@@ -147,7 +164,7 @@ export default function Tokens() {
       </section>
 
       <Show when={creating()}>
-        <CreateTokenDialog onCreated={() => query.refetch()} onClose={() => setCreating(false)} />
+        <CreateTokenDialog catalog={latest(catalog)} onCreated={() => query.refetch()} onClose={() => setCreating(false)} />
       </Show>
 
       <Show when={revoking()}>
@@ -181,7 +198,7 @@ export default function Tokens() {
  * Asks for a name and a lifetime, then shows the token once. The dialog stays open until
  * the person confirms the token is stored.
  */
-function CreateTokenDialog(props: { onCreated: () => void; onClose: () => void }) {
+function CreateTokenDialog(props: { catalog: ScopeCatalog | undefined; onCreated: () => void; onClose: () => void }) {
   const max = createMemo(() => {
     const profile = session()?.profile;
     return profile ? tokenMaxDays(profile) : 30;
@@ -193,6 +210,18 @@ function CreateTokenDialog(props: { onCreated: () => void; onClose: () => void }
   const [error, setError] = createSignal<unknown>(null);
   const [created, setCreated] = createSignal<CreatedToken | null>(null);
   const [stored, setStored] = createSignal(false);
+  // A scoped token: its grants (a role over the installation or a scope) and special scopes.
+  const [scoped, setScoped] = createSignal(false);
+  const [rows, setRows] = createSignal<GrantRow[]>([{ key: 1, role: "viewer", scope: undefined }]);
+  const [scopes, setScopes] = createSignal<TokenScope[]>([]);
+  const [tried, setTried] = createSignal(false);
+  const grantsError = () => {
+    if (!tried() || !scoped()) return undefined;
+    const grants = rowsToGrants(rows());
+    if (!grants) return t("access.token.error.scope");
+    if (grants.length === 0 && scopes().length === 0) return t("access.token.error.empty");
+    return undefined;
+  };
   let nameInput!: HTMLInputElement;
 
   const submit = async (e: Event) => {
@@ -201,11 +230,16 @@ function CreateTokenDialog(props: { onCreated: () => void; onClose: () => void }
       nameInput.focus();
       return;
     }
+    setTried(true);
+    if (grantsError()) return;
     setError(null);
     setBusy(true);
     try {
       const days = lifetime() === NO_EXPIRY ? null : Number(lifetime());
-      const token = await api.post("/api/v1/auth/tokens", { body: { name: name().trim(), expires_in_days: days } });
+      const body = scoped()
+        ? scopedTokenBody(name().trim(), days, rowsToGrants(rows()) ?? [], scopes())
+        : { name: name().trim(), expires_in_days: days };
+      const token = await api.post("/api/v1/auth/tokens", { body });
       setCreated(token);
       props.onCreated();
     } catch (err) {
@@ -258,7 +292,8 @@ function CreateTokenDialog(props: { onCreated: () => void; onClose: () => void }
         <Dialog
           label={t("account.tokens.create_title")}
           onClose={props.onClose}
-          class="dialog"
+          class="dialog wide"
+          testid="dialog-token"
           initialFocus={() => nameInput}
         >
           <h2 class="dialog-title">{t("account.tokens.create_title")}</h2>
@@ -310,6 +345,42 @@ function CreateTokenDialog(props: { onCreated: () => void; onClose: () => void }
                     })}
               </span>
             </div>
+            <fieldset class="field">
+              <legend class="label">{t("access.token.kind")}</legend>
+              <div class="choices" role="radiogroup" aria-label={t("access.token.kind")}>
+                <label class="choice">
+                  <input
+                    type="radio"
+                    name="acct-token-kind"
+                    checked={!scoped()}
+                    data-testid="field-kind-personal"
+                    onChange={() => setScoped(false)}
+                  />
+                  <span>
+                    <strong>{t("access.token.kind_personal")}</strong>
+                    <small class="muted">{t("access.token.kind_personal_help")}</small>
+                  </span>
+                </label>
+                <label class="choice">
+                  <input type="radio" name="acct-token-kind" checked={scoped()} data-testid="field-kind-scoped" onChange={() => setScoped(true)} />
+                  <span>
+                    <strong>{t("access.token.kind_scoped")}</strong>
+                    <small class="muted">{t("access.token.kind_scoped_help")}</small>
+                  </span>
+                </label>
+              </div>
+            </fieldset>
+            <Show when={scoped()}>
+              <TokenGrantsEditor
+                id="acct-token"
+                catalog={props.catalog}
+                rows={rows()}
+                onRows={setRows}
+                scopes={scopes()}
+                onScopes={setScopes}
+                error={grantsError()}
+              />
+            </Show>
             <ErrorNotice error={error()} />
             <div class="dialog-actions">
               <button type="button" class="btn ghost" onClick={() => props.onClose()}>

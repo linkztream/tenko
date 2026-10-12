@@ -63,6 +63,8 @@ export interface AddressColumnOptions {
   prefixLength?: number;
   /** Adds the prefix and VRF columns (the global list). */
   withPrefix?: (address: Row) => string | undefined;
+  /** Whether the principal may change this address, so the DNS name edits in place (default: yes). */
+  mayWrite?: (address: Row) => boolean;
 }
 
 /** The columns for rows of type T, given how a row yields its address. */
@@ -82,7 +84,10 @@ export function addressColumns<T>(get: (row: T) => Row | null, options: AddressC
       header: () => t("ipam.col.dns_name"),
       sort: "dns_name",
       text: (r) => get(r)?.dns_name ?? "",
-      editable: (r) => !!get(r) && !get(r)?.meta.deleted,
+      editable: (r) => {
+        const a = get(r);
+        return !!a && !a.meta.deleted && (options.mayWrite?.(a) ?? true);
+      },
       render: (r) => <DnsName name={get(r)?.dns_name} />,
     },
     {

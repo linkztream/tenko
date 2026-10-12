@@ -11,6 +11,7 @@ import type {
   TokenInfo,
 } from "../types";
 import { PROFILES } from "../types";
+import { forgetToken, isScopedRequest, issueScopedToken, parseTokenRequest } from "./access-store";
 import {
   clearThrottle,
   checkThrottle,
@@ -20,6 +21,7 @@ import {
   needsSecondFactor,
   passwordStrength,
   requireSession,
+  requireStrength,
   sessionInfo,
   startSession,
 } from "./auth";
@@ -526,8 +528,17 @@ const listTokens = route("get", "/api/v1/auth/tokens", () => {
 });
 
 const createToken = route("post", "/api/v1/auth/tokens", async (ctx) => {
-  const { user } = requireSession();
+  const { session, user } = requireSession();
   const body = await ctx.body();
+  // With grants or scopes the token is a scoped token of the caller (IAM-10, docs/access.md section 7).
+  const request = parseTokenRequest(body);
+  if (isScopedRequest(request)) {
+    if (user.break_glass) return fail("auth.break_glass.hardware_key_only");
+    requireStrength(session, user);
+    const issued = issueScopedToken(user, request);
+    commit("admin", { objects: [{ kind: "token", id: issued.info.id }], tables: ["auth.tokens", "auth.scoped_tokens"] });
+    return created({ token: issued.token, info: issued.info });
+  }
   const name = reqString(body, "name").trim();
   if (name === "" || Array.from(name).length > 100) invalid("name", "1 to 100 characters");
   const days = optInt(body, "expires_in_days");
@@ -557,6 +568,7 @@ const revokeToken = route("delete", "/api/v1/auth/tokens/{id}", (ctx) => {
   const index = db.tokens.findIndex((t) => t.info.id === ctx.params.id && t.user_id === user.id);
   if (index < 0) return fail("auth.token.not_found");
   db.tokens.splice(index, 1);
+  forgetToken(ctx.params.id);
   commit("admin", { deleted: [{ kind: "token", id: ctx.params.id }], tables: ["auth.tokens"] });
   return noContent();
 });

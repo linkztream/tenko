@@ -16,7 +16,7 @@ import { PageHead } from "../components/PageHead";
 import { TimeAgo } from "../grid/cells";
 import { formatDateTime, formatList, formatNumber, t, tDynamic } from "../i18n";
 import { JobStateChip } from "../jobs/StateChip";
-import { jobTitle } from "../jobs/words";
+import { cancelRolledBack, jobTitle } from "../jobs/words";
 import { listSecrets } from "../secrets/api";
 import { secretsPath } from "../secrets/paths";
 import { getConnector, listPlugins, type ConnectorView } from "./api";
@@ -299,7 +299,12 @@ export default function ConnectorDetail() {
                     <For each={recentRuns()}>
                       {(job) => (
                         <li data-testid="connector-run-job" data-id={job.id}>
-                          <JobStateChip state={job.state} done={job.steps_done} total={job.step_count} />
+                          <JobStateChip
+                            state={job.state}
+                            done={job.steps_done}
+                            total={job.step_count}
+                            rollback={cancelRolledBack(job) ? "cancel" : undefined}
+                          />
                           <A href={paths.job(job.id)}>{jobTitle(job)}</A>
                           <TimeAgo at={job.created.at} />
                         </li>

@@ -7,6 +7,7 @@ import { api } from "../../api/client";
 import { events } from "../../api/events";
 import type { AddressRow as Address } from "../../api/types";
 import { decodeSegment, paths } from "../../app/paths";
+import { may } from "../../auth/gate";
 import { Addr, Mac } from "../../components/Addr";
 import { Icon } from "../../components/Icon";
 import { ErrorNotice } from "../../components/Notice";
@@ -104,27 +105,29 @@ export default function AddressView() {
                 </h1>
               </div>
               <div class="actions">
-                <Show
-                  when={!a().meta.deleted}
-                  fallback={
-                    <button type="button" class="btn primary" data-testid="address-restore" onClick={() => setDialog("restore")}>
-                      <Icon name="undo" />
-                      {t("ipam.do.restore")}
+                <Show when={may.inPrefix(a().prefix)}>
+                  <Show
+                    when={!a().meta.deleted}
+                    fallback={
+                      <button type="button" class="btn primary" data-testid="address-restore" onClick={() => setDialog("restore")}>
+                        <Icon name="undo" />
+                        {t("ipam.do.restore")}
+                      </button>
+                    }
+                  >
+                    <button type="button" class="btn" data-testid="address-edit" onClick={() => setDialog("edit")}>
+                      <Icon name="settings" />
+                      {t("ipam.do.edit")}
                     </button>
-                  }
-                >
-                  <button type="button" class="btn" data-testid="address-edit" onClick={() => setDialog("edit")}>
-                    <Icon name="settings" />
-                    {t("ipam.do.edit")}
-                  </button>
-                  <button type="button" class="btn" data-testid="address-move" onClick={() => setDialog("move")}>
-                    <Icon name="move" />
-                    {t("ipam.do.move")}
-                  </button>
-                  <button type="button" class="btn danger" data-testid="address-delete" onClick={() => setDialog("delete")}>
-                    <Icon name="trash" />
-                    {t("ipam.do.delete")}
-                  </button>
+                    <button type="button" class="btn" data-testid="address-move" onClick={() => setDialog("move")}>
+                      <Icon name="move" />
+                      {t("ipam.do.move")}
+                    </button>
+                    <button type="button" class="btn danger" data-testid="address-delete" onClick={() => setDialog("delete")}>
+                      <Icon name="trash" />
+                      {t("ipam.do.delete")}
+                    </button>
+                  </Show>
                 </Show>
               </div>
             </div>
@@ -188,12 +191,13 @@ export default function AddressView() {
                   id={a().id}
                   label={a().ip}
                   deleted={!!a().meta.deleted}
+                  mayRestore={may.inPrefix(a().prefix)}
                   revision={a().meta.revision}
                   onRestored={() => void refetch()}
                 />
               </section>
             </div>
-            <Show when={dialog() === "edit"}>
+            <Show when={dialog() === "edit" && may.inPrefix(a().prefix)}>
               <AddressForm
                 address={a()}
                 onClose={() => setDialog(null)}
@@ -204,14 +208,14 @@ export default function AddressView() {
                 }}
               />
             </Show>
-            <Show when={dialog() === "move"}>
+            <Show when={dialog() === "move" && may.inPrefix(a().prefix)}>
               <MoveDialog
                 tree={tree.tree()}
                 items={[{ kind: "address", id: a().id, label: a().dns_name ?? a().ip, ip: a().ip }]}
                 onClose={() => setDialog(null)}
               />
             </Show>
-            <Show when={dialog() === "delete"}>
+            <Show when={dialog() === "delete" && may.inPrefix(a().prefix)}>
               <DeleteDialog
                 collection="addresses"
                 id={a().id}
@@ -225,7 +229,7 @@ export default function AddressView() {
                 }}
               />
             </Show>
-            <Show when={dialog() === "restore"}>
+            <Show when={dialog() === "restore" && may.inPrefix(a().prefix)}>
               <RestoreDialog
                 collection="addresses"
                 id={a().id}

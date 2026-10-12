@@ -267,6 +267,21 @@ describe("one group of jobs", () => {
     expect(await screen.findByText("Step 2 marked done")).toBeTruthy();
   });
 
+  it("lists the jobs that were not moved with their reason and the tag", async () => {
+    renderList(url);
+    await listed(3);
+    const section = screen.getByTestId("job-group-not-moved");
+    expect(within(section).getByRole("heading", { name: "Not moved" })).toBeTruthy();
+    const items = within(section).getAllByTestId("job-group-not-moved-item");
+    expect(items.map((item) => item.dataset.job)).toEqual([MOCK_JOB_IDS.moveRolledBack]);
+    const item = items[0]!;
+    expect(item.dataset.state).toBe("rolled_back");
+    expect(await within(item).findByText("cam-door")).toBeTruthy();
+    expect(within(item).getByTestId("job-group-move-failed").textContent).toBe("move-failed");
+    expect(within(item).getByTestId("job-group-not-moved-reason").textContent).not.toBe("");
+    expect(within(item).getByTestId("job-group-not-moved-link").getAttribute("href")).toBe(`/jobs/${MOCK_JOB_IDS.moveRolledBack}`);
+  });
+
   it("has no accessibility violations", async () => {
     const view = renderList(url);
     await listed(3);

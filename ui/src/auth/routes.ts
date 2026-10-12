@@ -10,5 +10,5 @@ export const routes: AppRoute[] = [
     access: "public",
     title: "auth.signin.title",
   },
-  { path: "/account/:section?", component: lazy(withPacks(["account"], () => import("./account/Account"))), title: "account.title" },
+  { path: "/account/:section?", component: lazy(withPacks(["account", "access"], () => import("./account/Account"))), title: "account.title" },
 ];

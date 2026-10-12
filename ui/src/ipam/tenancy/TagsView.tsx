@@ -22,7 +22,7 @@ export default function TagsView() {
       return { value: list.items as TagCount[], revision: list.revision };
     },
   });
-  const rows = createMemo(() => [...(live.value.latest ?? [])].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag)));
+  const rows = createMemo(() => [...(live.latest() ?? [])].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag)));
 
   const columns: Column<TagCount>[] = [
     { id: "tag", header: () => t("ipam.col.tag"), width: 220, fixed: true, text: (r) => r.tag, render: (r) => <span class="tag">{r.tag}</span> },
@@ -79,7 +79,7 @@ export default function TagsView() {
           rowId={(r) => r.tag}
           rowKey={(r) => r.tag}
           loading={live.value.loading}
-          initial={live.value.latest === undefined}
+          initial={live.latest() === undefined}
           error={live.value.error}
           onRetry={live.refetch}
           empty={

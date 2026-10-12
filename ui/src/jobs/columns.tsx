@@ -14,13 +14,18 @@ import { readJobDetail } from "./data";
 import { isFinal, needsPerson } from "./model";
 import { JobStateChip } from "./StateChip";
 import { firstHost, TargetLabel } from "./Target";
-import { describeStep, jobStateWord, jobTitle, stepStateWord } from "./words";
+import { cancelRolledBack, describeStep, jobStateText, jobTitle, stepStateWord } from "./words";
 
 /** The state in glyph and word, with a marker when the job waits for a person. */
 function StateCell(props: { job: JobSummary }) {
   return (
     <span class="job-state-cell">
-      <JobStateChip state={props.job.state} done={props.job.steps_done} total={props.job.step_count} />
+      <JobStateChip
+        state={props.job.state}
+        done={props.job.steps_done}
+        total={props.job.step_count}
+        rollback={cancelRolledBack(props.job) ? "cancel" : undefined}
+      />
       <Show when={needsPerson(props.job)}>
         <span class="flag discrepancy job-needs" data-testid="job-needs">
           <Icon name="alert" size="xs" />
@@ -99,7 +104,7 @@ export function jobColumns(): Column<JobSummary>[] {
       header: () => t("jobs.col.state"),
       width: 250,
       fixed: true,
-      text: (j) => jobStateWord(j.state),
+      text: (j) => jobStateText(j.state, cancelRolledBack(j) ? "cancel" : undefined),
       render: (j) => <StateCell job={j} />,
     },
     {

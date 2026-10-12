@@ -9,6 +9,7 @@
 // once per revision (data.ts); a job that changes brings a new revision and is read again.
 import { A } from "@solidjs/router";
 import { createMemo, createResource, For, Show } from "solid-js";
+import { latest } from "../api/live";
 import { createStore } from "solid-js/store";
 import type { JobState, JobSummary, ObjectRef } from "../api/types";
 import { JOB_STATES } from "../api/types";
@@ -17,10 +18,13 @@ import { Icon } from "../components/Icon";
 import { shortId } from "../components/Principal";
 import { toast } from "../components/toast";
 import { formatNumber, t } from "../i18n";
+import { canExecuteJob } from "./access";
 import { completeStep, mapLimit, readJobDetail } from "./data";
 import { groupLabel, kindRank, manualOf, needsPerson } from "./model";
+import { undoLine } from "./L2Step";
+import { JobStateChip } from "./StateChip";
 import { firstHost, TargetLabel } from "./Target";
-import { jobStateClass, jobStateWord, problemText, stepName, taskText } from "./words";
+import { cancelRolledBack, codedErrorText, jobStateClass, jobStateWord, problemText, stepName, taskText } from "./words";
 import "./jobs.css";
 
 /** Jobs read at the same time while the tasks of a group load. */
@@ -29,12 +33,30 @@ const PARALLEL_READS = 6;
 interface ChecklistTask {
   key: string;
   jobId: string;
+  /** The targets of the job: whether the account may complete the task depends on them. */
+  targets: readonly ObjectRef[];
   index: number;
   kind: string;
   text: string;
   undo: boolean;
   /** The host the job is about, shown next to the task. */
   host: ObjectRef | undefined;
+  /** For the undo of a layer 2 change: the setting to put back on the network controller. */
+  hint: string | undefined;
+}
+
+/** The tag a rolled back move leaves on its object (docs/moves.md): a value, never translated. */
+const MOVE_FAILED_TAG = "move-failed";
+
+/** The step kind of a move's layer 2 change through the network controller. */
+const CONTROLLER_STEP = "ipam.move.controller";
+
+/**
+ * Whether a job of the group ended without its change: rolled back, failed, or rolled back by
+ * its cancellation. For a move the object keeps its old address and carries the tag `move-failed`.
+ */
+export function notMoved(job: JobSummary): boolean {
+  return job.state === "rolled_back" || job.state === "failed" || cancelRolledBack(job);
 }
 
 interface ItemState {
@@ -48,7 +70,6 @@ export function GroupPanel(props: {
   jobs: readonly JobSummary[];
   /** More pages of the list are still on their way, so the group may not be complete. */
   loading: boolean;
-  canExecute: boolean;
   /** A task was completed: the list reads again. */
   onChanged: () => void;
 }) {
@@ -85,19 +106,25 @@ export function GroupPanel(props: {
   });
 
   const tasks = createMemo<ChecklistTask[]>(() =>
-    (details.latest ?? []).flatMap((detail) =>
+    (latest(details) ?? []).flatMap((detail) =>
       detail.job.steps.flatMap((step) => {
         const manual = manualOf(step);
         if (!manual) return [];
+        const undo = detail.job.state === "rolling_back";
+        const line = undo && step.kind === CONTROLLER_STEP ? undoLine(step, detail.preview?.steps[step.index]) : undefined;
         return [
           {
             key: `${detail.job.id}:${step.index}`,
             jobId: detail.job.id,
+            targets: detail.job.spec.targets,
             index: step.index,
             kind: step.kind,
             text: taskText(manual.task),
-            undo: detail.job.state === "rolling_back",
+            undo,
             host: firstHost(detail.job.spec.targets),
+            hint: line
+              ? t("jobs.l2.undo_hint", { path: line.path, before: line.before || t("jobs.l2.absent") })
+              : undefined,
           },
         ];
       }),
@@ -111,6 +138,9 @@ export function GroupPanel(props: {
       .sort(([a], [b]) => kindRank(a) - kindRank(b) || a.localeCompare(b))
       .map(([kind, list]) => ({ kind, tasks: list }));
   });
+
+  // The jobs that ended without their change, with the reason the job recorded.
+  const failed = createMemo(() => props.jobs.filter(notMoved));
 
   const complete = async (task: ChecklistTask) => {
     setItems(task.key, { status: "busy", error: undefined });
@@ -179,6 +209,13 @@ export function GroupPanel(props: {
                             )}
                           </Show>
                           <span>{task.text}</span>
+                          <Show when={task.hint}>
+                            {(hint) => (
+                              <p class="l2-hint" data-testid="job-group-l2-hint">
+                                {hint()}
+                              </p>
+                            )}
+                          </Show>
                           <Show when={items[task.key]?.error}>
                             {(message) => (
                               <p class="help bad field-error" role="alert">
@@ -196,8 +233,8 @@ export function GroupPanel(props: {
                           class="btn sm"
                           data-testid="job-group-task-complete"
                           aria-label={t("jobs.checklist.mark_done", { task: task.text })}
-                          disabled={!props.canExecute || (items[task.key]?.status ?? "idle") !== "idle"}
-                          title={props.canExecute ? undefined : t("jobs.no_right")}
+                          disabled={!canExecuteJob({ id: task.jobId, targets: task.targets }) || (items[task.key]?.status ?? "idle") !== "idle"}
+                          title={canExecuteJob({ id: task.jobId, targets: task.targets }) ? undefined : t("jobs.no_right")}
                           onClick={() => void complete(task)}
                         >
                           {t("jobs.complete.button")}
@@ -211,6 +248,47 @@ export function GroupPanel(props: {
           </For>
         </Show>
       </div>
+
+      <Show when={failed().length > 0}>
+        <div class="job-group-failed" data-testid="job-group-not-moved">
+          <div class="job-group-tasks-head">
+            <h3>{t("jobs.group.not_moved.heading")}</h3>
+            <span class="muted">{t("jobs.group.not_moved.count", { count: failed().length })}</span>
+          </div>
+          <p class="muted">{t("jobs.group.not_moved.hint")}</p>
+          <ul class="check-list">
+            <For each={failed()}>
+              {(job) => (
+                <li class="check-item" data-testid="job-group-not-moved-item" data-job={job.id} data-state={job.state}>
+                  <div class="check-text">
+                    <Show when={firstHost(job.targets)}>
+                      {(host) => (
+                        <>
+                          <strong class="check-host">
+                            <TargetLabel target={host()} />
+                          </strong>{" "}
+                        </>
+                      )}
+                    </Show>
+                    <JobStateChip state={job.state} rollback={cancelRolledBack(job) ? "cancel" : undefined} />{" "}
+                    <Show when={job.kind === "ipam.move"}>
+                      <span class="tag mono" data-testid="job-group-move-failed">
+                        {MOVE_FAILED_TAG}
+                      </span>
+                    </Show>
+                    <p class="help" data-testid="job-group-not-moved-reason">
+                      {job.error ? codedErrorText(job.error) : t("jobs.group.not_moved.no_reason")}
+                    </p>
+                  </div>
+                  <A class="mono check-job" href={paths.job(job.id)} data-testid="job-group-not-moved-link">
+                    {shortId(job.id)}
+                  </A>
+                </li>
+              )}
+            </For>
+          </ul>
+        </div>
+      </Show>
     </section>
   );
 }

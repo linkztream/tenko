@@ -17,6 +17,9 @@ and the `data-testid` convention they rely on, are in the section "End-to-end te
 | `scans` | The scans page and its probes section with an enrolled probe, "Stop all scans" with a reason and "Resume all", "Scan now" refused with `scan.job.no_probe`, the probe's scan configuration (the node panel link, the offered configuration, a save with the scanner off and no prefixes, the revision), the per-probe stop and resume, a viewer, Swedish; nothing is ever scanned |
 | `secrets` | The secrets page under Settings (/settings/secrets) and the redirect from the old /secrets address, the PIN coupling, create and reveal with the clipboard, the TGL-24 step-up with a passkey, TGL-24 and MFA changed on /settings/security while the vault holds a secret, host credentials, the RDP and SSH hand-off with a typed user name and ports |
 | `updates` | Air-gapped default, the check against a local release source, notes and marks, the install with its dry run and restart (the health probe names the new version), what is new, a refused dry run |
+| `access` | The access page: a scoped grant through the scope picker and its revocation, the sign-in requirement of a role, a service account with a scoped token shown once that reads only its prefix as a bearer, and display gating: a scoped operator sees the write actions on the prefix of its grant and none on a prefix it may only read |
+| `vault` | The vault page: the key of the controller with its file provider marked weak, the generations, and the online rotation followed to a new generation and epoch |
+| `audit-export`, `backup` | The audit export and backup pages; `test.fixme` until the routes of WP3.3 and WP3.4b are merged |
 
 Each area spec also renders at least one page in Swedish (`support/i18n.ts`). A `test.fixme`
 marks a scenario that waits for a recorded defect.

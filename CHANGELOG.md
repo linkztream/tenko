@@ -115,7 +115,12 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - Scans in the web UI: "Scan now" on a prefix, the list of scans with their progress per probe and what each found (new, changed and gone facts), the probes with their applied scope, and the kill switch for every probe at once or for one.
 - The scan configuration of a probe in the web UI (Nodes, then the probe): every method with its schedule and settings, the prefixes and exclusions, the rate profile and the SNMP devices with their vault secrets, the state of the sync to the probe, and the kill switch of that probe.
 - The number of open proposals in the status bar, as a link to the proposal inbox.
-
+- The access page under Settings: the four roles with the sign-in each requires, every scoped grant with a picker for the VRF, site or prefix it covers, and service accounts with their scoped tokens. The page of a user lists that account's grants, and of a service account its tokens; your own API tokens can be scoped too.
+- The vault page under Settings: the key-encryption key of each controller, how it is protected, its generations, and the online rotation, followed phase by phase.
+- The audit export page under Settings: syslog and file sinks with their format, delivery state and backlog, and a test record before a sink is saved.
+- The backup page under Settings: the last good backup with a warning after seven days without one, "Back up now" with a passphrase or the recipient key file, the schedule and how many backups are kept, and a restore preview with the manifest and the command that restores a backup on a new host.
+- The page of a job group lists the jobs that ended without their change, with the reason, and its checklist shows which setting to put back on the network controller when undoing a layer 2 change needs a person.
+- Connector settings take a pinned certificate authority in a multi-line field.
 ### Changed
 
 - Switching to the Hardened profile, or setting the audit export to `required`, is refused with 409 `audit.export.required` until at least one export sink is enabled; the refusal is audited like the PIN coupling rule.
@@ -132,6 +137,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - `tenko kek rotate` refuses to run on a member of a cluster.
 - A user may hold no global role at all: grants within a scope can be their only access.
 - The prune of the node registry runs on the leader only (`cluster.prune`).
+- The web UI shows inventory actions only to those who may take them: viewers and the auditor no longer see the write actions of the IPAM, host and job views, and a person with scoped grants sees them only on objects inside the scope. The server still decides every request.
+- A cancelled job whose cancellation undid the steps that had run shows as "Rolled back (cancelled)".
+- A step that has to be undone by hand names the step in words instead of its internal kind.
+- In right-to-left languages the arrow keys of the grids and of the prefix tree follow the reading direction.
 
 ### Fixed
 

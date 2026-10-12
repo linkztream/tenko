@@ -10,6 +10,7 @@ import {
   type MockSession,
   type MockUser,
 } from "./db";
+import { policyFloor, sessionGrantsOf } from "./access-store";
 import { banner } from "./profiles";
 import { Problem, fail } from "./reply";
 import { iso } from "./util";
@@ -31,9 +32,22 @@ export function passwordStrength(settings: SecuritySettings): AuthStrength {
 export function requiredStrength(user: MockUser, settings: SecuritySettings): AuthStrength {
   if (user.break_glass) return "hardware_key";
   const admin = isAdmin(user);
-  if (admin && settings.passkey_for_admins) return "passkey";
-  if (settings.mfa === "everyone" || (settings.mfa === "administrators" && admin)) return "password_totp";
-  return passwordStrength(settings);
+  let required: AuthStrength;
+  if (admin && settings.passkey_for_admins) required = "passkey";
+  else if (settings.mfa === "everyone" || (settings.mfa === "administrators" && admin)) required = "password_totp";
+  else required = passwordStrength(settings);
+  // The stored policies of every role the user holds, globally or through a grant (IAM-06): the strictest wins.
+  const floor = policyFloor(user);
+  if (floor !== null && STRENGTH_RANK[floor] > STRENGTH_RANK[required]) required = floor;
+  return required;
+}
+
+/** Fails with `auth.step_up_required` when the session is weaker than its account must be. */
+export function requireStrength(session: MockSession, user: MockUser): void {
+  const required = requiredStrength(user, db.settings);
+  if (STRENGTH_RANK[session.strength] < STRENGTH_RANK[required]) {
+    fail("auth.step_up_required", { params: { required } });
+  }
 }
 
 /** Whether the profile asks the account for a second factor. */
@@ -64,6 +78,8 @@ export function sessionInfo(session: MockSession, user: MockUser): SessionInfo {
     default_language: db.installation.language,
   };
   if (user.language) info.user.language = user.language;
+  const grants = sessionGrantsOf(user.id);
+  if (grants.length > 0) info.grants = grants;
   return info;
 }
 

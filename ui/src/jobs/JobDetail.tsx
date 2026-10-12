@@ -19,14 +19,14 @@ import { PrincipalLabel, shortId } from "../components/Principal";
 import { toast } from "../components/toast";
 import { TimeAgo } from "../grid/cells";
 import { formatDuration, t, tx } from "../i18n";
-import { canExecuteJobs } from "./access";
+import { canExecuteJob } from "./access";
 import { cancelJob } from "./data";
 import { canCancel, groupLabel, isFinal } from "./model";
 import { TransitionLog } from "./Log";
 import { JobStateChip } from "./StateChip";
 import { StepList } from "./Steps";
 import { TargetLabel } from "./Target";
-import { codedErrorDetail, codedErrorText, jobTitle, problemText } from "./words";
+import { cancelRolledBack, codedErrorDetail, codedErrorText, jobTitle, problemText } from "./words";
 import "./jobs.css";
 
 function Fact(props: { label: string; children: JSX.Element; testid?: string }) {
@@ -99,6 +99,7 @@ function JobBody(props: { detail: JobDetailData; onChanged: () => void }) {
   const [cancelling, setCancelling] = createSignal(false);
   const job = () => props.detail.job;
   const spec = () => job().spec;
+  const canExecute = () => canExecuteJob({ id: job().id, targets: spec().targets });
   const done = () => job().steps.filter((s) => s.state.state === "done" || s.state.state === "skipped").length;
 
   return (
@@ -109,7 +110,12 @@ function JobBody(props: { detail: JobDetailData; onChanged: () => void }) {
         sub={
           <>
             <span class="mono">{spec().kind}</span>
-            <JobStateChip state={job().state} done={done()} total={job().steps.length} />
+            <JobStateChip
+              state={job().state}
+              done={done()}
+              total={job().steps.length}
+              rollback={cancelRolledBack(job()) ? "cancel" : undefined}
+            />
           </>
         }
         actions={
@@ -118,8 +124,8 @@ function JobBody(props: { detail: JobDetailData; onChanged: () => void }) {
               type="button"
               class="btn danger"
               data-testid="job-cancel"
-              disabled={!canExecuteJobs()}
-              title={canExecuteJobs() ? undefined : t("jobs.no_right")}
+              disabled={!canExecute()}
+              title={canExecute() ? undefined : t("jobs.no_right")}
               onClick={() => setCancelling(true)}
             >
               {t("jobs.cancel.button")}
@@ -224,7 +230,7 @@ function JobBody(props: { detail: JobDetailData; onChanged: () => void }) {
             {t("jobs.steps.heading")}
             <span class="aside">{t("jobs.progress", { done: done(), total: job().steps.length })}</span>
           </h2>
-          <StepList detail={props.detail} canExecute={canExecuteJobs()} onChanged={props.onChanged} />
+          <StepList detail={props.detail} canExecute={canExecute()} onChanged={props.onChanged} />
         </section>
 
         <section class="page-section" aria-labelledby="job-log-title">

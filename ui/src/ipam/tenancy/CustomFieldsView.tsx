@@ -4,6 +4,8 @@ import { createMemo, createSignal, For, Show, untrack } from "solid-js";
 import { api, ANY_REVISION } from "../../api/client";
 import { createLiveQuery } from "../../api/live";
 import type { CustomFieldDef, CustomFieldInput, CustomFieldPatch, CustomKind, ObjectKind } from "../../api/types";
+import { writesAll } from "../../auth/gate";
+import { isAdmin } from "../../auth/session";
 import { Icon } from "../../components/Icon";
 import { DataGrid } from "../../grid/DataGrid";
 import type { Column } from "../../grid/types";
@@ -124,7 +126,7 @@ export default function CustomFieldsView() {
       return { value: list.items as CustomFieldDef[], revision: list.revision };
     },
   });
-  const rows = createMemo(() => [...(live.value.latest ?? [])].sort((a, b) => a.key.localeCompare(b.key)));
+  const rows = createMemo(() => [...(live.latest() ?? [])].sort((a, b) => a.key.localeCompare(b.key)));
   const [dialog, setDialog] = createSignal<{ kind: "create" } | { kind: "edit" | "delete"; def: CustomFieldDef } | null>(null);
   const close = (changed: boolean) => {
     setDialog(null);
@@ -151,10 +153,13 @@ export default function CustomFieldsView() {
           <h1 tabIndex={-1}>{t("ipam.nav.custom_fields")}</h1>
         </div>
         <div class="actions">
-          <button type="button" class="btn primary" data-testid="custom-field-create" onClick={() => setDialog({ kind: "create" })}>
-            <Icon name="plus" />
-            {t("ipam.cfdef.create")}
-          </button>
+          {/* Operators cannot create custom fields (docs/access.md section 2). */}
+          <Show when={isAdmin()}>
+            <button type="button" class="btn primary" data-testid="custom-field-create" onClick={() => setDialog({ kind: "create" })}>
+              <Icon name="plus" />
+              {t("ipam.cfdef.create")}
+            </button>
+          </Show>
         </div>
       </div>
       <div class="list-body">
@@ -167,14 +172,16 @@ export default function CustomFieldsView() {
           rowId={(d) => d.id}
           rowKey={(d) => d.key}
           loading={live.value.loading}
-          initial={live.value.latest === undefined}
+          initial={live.latest() === undefined}
           error={live.value.error}
           onRetry={live.refetch}
-          onOpen={(d) => setDialog({ kind: "edit", def: d })}
-          rowActions={[
+          onOpen={(d) => {
+            if (writesAll()) setDialog({ kind: "edit", def: d });
+          }}
+          rowActions={writesAll() ? [
             { id: "edit", label: () => t("ipam.do.edit"), run: (d) => setDialog({ kind: "edit", def: d }) },
             { id: "delete", label: () => t("ipam.do.delete"), danger: true, run: (d) => setDialog({ kind: "delete", def: d }) },
-          ]}
+          ] : []}
           empty={
             <div class="empty">
               <h3>{t("ipam.cfdef.empty")}</h3>

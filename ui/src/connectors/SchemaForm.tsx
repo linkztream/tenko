@@ -305,6 +305,14 @@ function NumberInput(props: {
 // ---------------------------------------------------------------------------------
 // Fields
 
+/**
+ * Whether a text field takes several lines: the pinned certificate authority of the HTTP
+ * settings (`tls_ca`, a PEM block) and any free text longer than a URL can be.
+ */
+export function multiline(f: StringField): boolean {
+  return f.name === "tls_ca" || (f.format === undefined && (f.maxLength ?? 0) > 4096);
+}
+
 function stringField(f: StringField, scope: Scope): JSX.Element {
   const c = controlOf(f, scope);
   const value = () => text(scope.values()[f.name]);
@@ -314,6 +322,18 @@ function stringField(f: StringField, scope: Scope): JSX.Element {
     <Frame field={f} c={c}>
       {options ? (
         <EnumSelect attrs={c.attrs} options={options} value={value()} required={f.required} disabled={scope.env.disabled} onPick={set} />
+      ) : multiline(f) ? (
+        <textarea
+          {...c.attrs}
+          class="input mono"
+          rows={6}
+          spellcheck={false}
+          autocomplete="off"
+          placeholder={exampleOf(f.examples)}
+          disabled={scope.env.disabled}
+          value={value()}
+          onInput={(e) => set(e.currentTarget.value)}
+        />
       ) : (
         <input
           {...c.attrs}

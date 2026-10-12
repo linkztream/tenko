@@ -5,6 +5,7 @@ import { api } from "../../api/client";
 import { fetchAll } from "../../api/paginate";
 import type { Site, Status, Tag, Vlan, VlanInput, VlanPatch } from "../../api/types";
 import { STATUSES } from "../../api/types";
+import { may, writesAll } from "../../auth/gate";
 import { Icon } from "../../components/Icon";
 import { StatusBadge, Tags, TimeAgo } from "../../grid/cells";
 import type { ListSource } from "../../grid/source";
@@ -115,7 +116,7 @@ export default function VlansView() {
   const [provisioning, setProvisioning] = createSignal<{ vlan?: Vlan } | null>(null);
   const [listing, setListing] = createSignal<Vlan | null>(null);
   const rowActions: RowAction<Vlan>[] = [
-    { id: "provision", label: () => t("ipam.vlan.provision.row_action"), disabled: (v) => !!v.meta.deleted, run: (v) => setProvisioning({ vlan: v }) },
+    { id: "provision", label: () => t("ipam.vlan.provision.row_action"), disabled: (v) => !!v.meta.deleted, hidden: () => !writesAll(), run: (v) => setProvisioning({ vlan: v }) },
     { id: "prefixes", label: () => t("ipam.vlan.prefixes.row_action"), run: (v) => setListing(v) },
   ];
 
@@ -146,14 +147,19 @@ export default function VlansView() {
           <h1 tabIndex={-1}>{t("ipam.nav.vlans")}</h1>
         </div>
         <div class="actions">
-          <button type="button" class="btn" data-testid="vlan-provision" onClick={() => setProvisioning({})}>
-            <Icon name="plus" />
-            {t("ipam.vlan.provision.action")}
-          </button>
-          <button type="button" class="btn primary" data-testid="vlan-create" onClick={() => setCreating(true)}>
-            <Icon name="plus" />
-            {t("ipam.vlan.create")}
-          </button>
+          {/* Provisioning writes through a network controller: refused to scoped principals. */}
+          <Show when={writesAll()}>
+            <button type="button" class="btn" data-testid="vlan-provision" onClick={() => setProvisioning({})}>
+              <Icon name="plus" />
+              {t("ipam.vlan.provision.action")}
+            </button>
+          </Show>
+          <Show when={may.create("vlan")}>
+            <button type="button" class="btn primary" data-testid="vlan-create" onClick={() => setCreating(true)}>
+              <Icon name="plus" />
+              {t("ipam.vlan.create")}
+            </button>
+          </Show>
         </div>
       </div>
       <CollectionPage<Vlan>
@@ -170,6 +176,7 @@ export default function VlansView() {
         rowLabel={(v) => `${v.vid} ${v.name}`}
         sourceRef={(s) => setSource(() => s)}
         actions={rowActions}
+        mayWrite={(v) => may.vlan(v)}
         edit={(v, close) => <VlanForm vlan={v} sites={sites() ?? []} onDone={() => close(true)} onClose={() => close(false)} />}
         empty={
           <div class="empty">

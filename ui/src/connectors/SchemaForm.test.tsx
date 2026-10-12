@@ -325,6 +325,30 @@ describe("SchemaForm: strings", () => {
     expect(input("field-settings-site").value).toBe("");
   });
 
+  it("takes a pinned certificate authority (tls_ca) and long free text in a text area", () => {
+    const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----";
+    const m = mount({
+      schema: {
+        type: "object",
+        properties: {
+          tls_ca: { type: "string", title: "Pinned certificate authority (PEM)", maxLength: 65536 },
+          notes: { type: "string", maxLength: 8192 },
+          url: { type: "string", format: "uri", maxLength: 8192 },
+        },
+      },
+      initial: { tls_ca: pem },
+    });
+    const ca = input("field-settings-tls_ca") as unknown as HTMLTextAreaElement;
+    expect(ca.tagName).toBe("TEXTAREA");
+    expect(ca.className).toBe("input mono");
+    expect(ca.value).toBe(pem);
+    expect(ca.getAttribute("spellcheck")).toBe("false");
+    expect(input("field-settings-notes").tagName).toBe("TEXTAREA");
+    expect(input("field-settings-url").tagName).toBe("INPUT");
+    fireEvent.input(ca, { target: { value: `${pem}\n` } });
+    expect(m.calls.at(-1)?.tls_ca).toBe(`${pem}\n`);
+  });
+
   it("shows the stored value, whatever its type", () => {
     mount({ initial: { site: 42, domain: { a: 1 } } });
     expect(input("field-settings-site").value).toBe("42");

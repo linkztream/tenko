@@ -7,6 +7,7 @@ import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { api } from "../api/client";
 import { events } from "../api/events";
+import { may } from "../auth/gate";
 import { createLiveQuery } from "../api/live";
 import { fetchAll } from "../api/paginate";
 import type { Prefix, TreeNode, Vlan } from "../api/types";
@@ -101,6 +102,13 @@ export default function IpamView() {
 
   const selected = () => found()?.prefix ?? null;
   const node = () => tree.tree()?.nodes.find((n) => n.id === selected()?.id);
+  // A new prefix is offered where one could be created; inside a supernet in view, as its child,
+  // only when the supernet itself may be written.
+  const canAdd = () => {
+    if (!may.create("prefix")) return false;
+    const current = selected();
+    return current?.role === "supernet" ? may.prefix(current.id) : true;
+  };
 
   const open = (n: TreeNode) => navigate(paths.prefix(n.cidr));
 
@@ -126,6 +134,7 @@ export default function IpamView() {
       group: "actions",
       icon: "plus",
       label: () => t("ipam.tree.add"),
+      when: canAdd,
       run: () => setCreating(true),
     },
     {
@@ -158,17 +167,19 @@ export default function IpamView() {
                 onInput={(e) => setFilter(e.currentTarget.value)}
               />
             </label>
-            <button
-              type="button"
-              class="icon-btn"
-              aria-label={t("ipam.tree.add")}
-              title={t("ipam.tree.add")}
-              data-testid="ipam-add-prefix"
-              disabled={!scope.vrf()}
-              onClick={() => setCreating(true)}
-            >
-              <Icon name="plus" />
-            </button>
+            <Show when={canAdd()}>
+              <button
+                type="button"
+                class="icon-btn"
+                aria-label={t("ipam.tree.add")}
+                title={t("ipam.tree.add")}
+                data-testid="ipam-add-prefix"
+                disabled={!scope.vrf()}
+                onClick={() => setCreating(true)}
+              >
+                <Icon name="plus" />
+              </button>
+            </Show>
           </div>
           <PrefixTree
             tree={tree.tree()}
@@ -246,7 +257,7 @@ export default function IpamView() {
           </Show>
         </section>
       </div>
-      <Show when={creating() && scope.vrf()}>
+      <Show when={creating() && canAdd() && scope.vrf()}>
         <PrefixForm
           vrf={scope.vrf()!}
           parentCidr={selected()?.role === "supernet" ? selected()?.cidr : undefined}

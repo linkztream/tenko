@@ -71,7 +71,7 @@ export function ProfileDialog(props: {
   };
 
   return (
-    <Dialog label={t("settings.security.profile.dialog_title")} onClose={props.onClose} class="dialog wide">
+    <Dialog label={t("settings.security.profile.dialog_title")} onClose={props.onClose} class="dialog wide" testid="dialog-profile">
       <form class="dialog-form" onSubmit={(e) => void submit(e)} novalidate>
         <h2 class="dialog-title">{t("settings.security.profile.dialog_title")}</h2>
         <div class="dialog-body">
@@ -82,11 +82,18 @@ export function ProfileDialog(props: {
             <span class="label" id="pd-label">
               {t("settings.security.profile.heading")}
             </span>
-            <div class="choices" role="radiogroup" aria-labelledby="pd-label">
+            <div class="choices" role="radiogroup" aria-labelledby="pd-label" data-testid="field-profile">
               <For each={PROFILES}>
                 {(p) => (
                   <label class="choice">
-                    <input type="radio" name="profile" value={p} checked={target() === p} onChange={() => select(p)} />
+                    <input
+                      type="radio"
+                      name="profile"
+                      value={p}
+                      checked={target() === p}
+                      onChange={() => select(p)}
+                      data-testid={`field-profile-${p}`}
+                    />
                     <span>
                       <strong>{t(`profile.${p}.name`)}</strong>
                       <Show when={p === current()}>
@@ -175,11 +182,12 @@ export function ProfileDialog(props: {
           </Show>
         </div>
         <div class="dialog-actions">
-          <button type="button" class="btn ghost" onClick={() => props.onClose()}>
+          <button type="button" class="btn ghost" onClick={() => props.onClose()} data-testid="form-cancel">
             {t("common.action.cancel")}
           </button>
           <button
             type="submit"
+            data-testid="form-submit"
             class={lab() && !same() ? "btn danger" : "btn primary"}
             disabled={busy() || nothing() || pinRefused() || (needsAck() && !acknowledged())}
           >

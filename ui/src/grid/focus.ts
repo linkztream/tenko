@@ -45,6 +45,21 @@ export function isMoveKey(key: string): key is MoveKey {
   return MOVE.has(key);
 }
 
+/** Whether `el` is laid out right to left: the nearest `dir` attribute decides, as in bidi.css. */
+export function isRtl(el: Element | null | undefined): boolean {
+  return el?.closest("[dir]")?.getAttribute("dir")?.toLowerCase() === "rtl";
+}
+
+/**
+ * The arrow key as the left-to-right keyboard map means it. In a right-to-left layout the
+ * column after the current one sits on the left, so ArrowLeft moves forward and ArrowRight
+ * back; the two swap there. Every other key is returned unchanged.
+ */
+export function logicalArrow(key: string, el: Element | null | undefined): string {
+  if ((key !== "ArrowLeft" && key !== "ArrowRight") || !isRtl(el)) return key;
+  return key === "ArrowLeft" ? "ArrowRight" : "ArrowLeft";
+}
+
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }

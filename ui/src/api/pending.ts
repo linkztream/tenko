@@ -112,6 +112,15 @@ export const pendingApi = {
 };
 
 /** The paths of pending lists: GET operations that answer a `Page`. */
+/**
+ * Reads the answer of an operation the document describes as the working model an area built
+ * before the route merged. A transitional cast: WP3.11c moves the last areas (the cluster
+ * queue, the audit export page and the backup page) to the generated types and removes it.
+ */
+export function asWorkingModel<T>(answer: Promise<unknown>): Promise<T> {
+  return answer as Promise<T>;
+}
+
 export type PendingListPaths = {
   [P in PendingPaths<"get">]: PendingResponse<"get", P> extends Page<unknown> ? P : never;
 }[PendingPaths<"get">];

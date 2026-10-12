@@ -43,6 +43,9 @@
 .job-group-tasks { display: grid; gap: var(--sp-4); max-height: 50vh; overflow: auto; padding-inline-end: var(--sp-2); }
 .job-group-tasks-head { display: flex; align-items: baseline; gap: var(--sp-4); }
 .job-group-tasks-head h3 { font-size: var(--fs-13); }
+.job-group-failed { display: grid; gap: var(--sp-4); }
+.job-group-failed .check-item { grid-template-columns: 1fr auto; }
+.check-text .l2-hint { margin-block-start: var(--sp-2); }
 .check-group { display: grid; gap: var(--sp-2); }
 .check-group h4 { font-size: var(--fs-12); font-weight: var(--fw-semibold); color: var(--ink-2); }
 .check-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--r-3); background: var(--surface); }

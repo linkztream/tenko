@@ -8,6 +8,7 @@ import { api } from "../../api/client";
 import { fetchAll } from "../../api/paginate";
 import type { Address, AddressRow, Prefix, Range, TreeNode, TreeResponse, Vrf } from "../../api/types";
 import { paths } from "../../app/paths";
+import { may } from "../../auth/gate";
 import { Addr } from "../../components/Addr";
 import { Icon } from "../../components/Icon";
 import { Kbd } from "../../components/Kbd";
@@ -70,6 +71,12 @@ export function PrefixPane(props: PrefixPaneProps) {
 
   const length = () => Number(props.prefix.cidr.split("/")[1] ?? 24);
   const deleted = () => !!props.prefix.meta.deleted;
+  // What the principal may change here (display gating; the server decides every request).
+  const writable = () => may.prefix(props.prefix.id);
+  const mayClaim = () => writable() && may.create("address");
+  /** An address row (not a free gap) the principal may change: judged by the address's own prefix. */
+  const rowWritable = (r: PrefixRow) => r.type === "address" && may.inPrefix(r.data.prefix);
+  const mayWriteAddress = (a: AddressRow) => may.inPrefix(a.prefix);
 
   // ---------------------------------------------------------------------------
   // Ranges (for the summary facts, the next free dialog and the ranges tab)
@@ -117,7 +124,7 @@ export function PrefixPane(props: PrefixPaneProps) {
   });
   const selectable = (r: PrefixRow) => r.type === "address" && !r.data.meta.deleted;
   const selection = createGridSelection(rows, addressRowId, selectable);
-  const columns = addressColumns<PrefixRow>(rowAddress, { prefixLength: untrack(length) });
+  const columns = addressColumns<PrefixRow>(rowAddress, { prefixLength: untrack(length), mayWrite: mayWriteAddress });
   const columnState = createColumnState("prefix-addresses", () => columns);
   const selectedAddresses = () => rows().filter((r) => selection.has(addressRowId(r))).map(rowAddress).filter((a): a is AddressRow => !!a);
 
@@ -153,6 +160,7 @@ export function PrefixPane(props: PrefixPaneProps) {
       id: "move",
       label: () => t("ipam.do.move"),
       disabled: (r) => !selectable(r),
+      hidden: (r) => !rowWritable(r),
       run: (r) => setDialog({ kind: "move", items: dragItems([r]) }),
     },
     {
@@ -160,11 +168,19 @@ export function PrefixPane(props: PrefixPaneProps) {
       label: () => t("ipam.do.delete"),
       danger: true,
       disabled: (r) => !selectable(r),
+      hidden: (r) => !rowWritable(r),
       run: (r) => r.type === "address" && setDialog({ kind: "delete_address", address: r.data }),
     },
   ];
 
+  /** The write actions of the bar: every selected address must be inside the principal's scope. */
+  const maySelection = () => {
+    const chosen = rows().filter((r) => selection.has(addressRowId(r)));
+    return chosen.length > 0 && chosen.every(rowWritable);
+  };
+
   const moveSelection = () => {
+    if (!maySelection()) return;
     const items = selection.count() > 0 ? dragItems(rows().filter((r) => selection.has(addressRowId(r)))) : [];
     if (items.length > 0) setDialog({ kind: "move", items });
   };
@@ -179,7 +195,7 @@ export function PrefixPane(props: PrefixPaneProps) {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || isTyping(e) || e.ctrlKey || e.metaKey || e.altKey || dialog()) return;
       if (document.querySelector("[aria-modal='true']")) return;
-      if (e.key === "n" && isNetwork() && !deleted()) {
+      if (e.key === "n" && isNetwork() && !deleted() && mayClaim()) {
         e.preventDefault();
         setDialog({ kind: "claim" });
       } else if ((e.key === "m" || e.key === "M") && !e.shiftKey && tab() === "addresses") {
@@ -249,7 +265,7 @@ export function PrefixPane(props: PrefixPaneProps) {
           </h1>
         </div>
         <div class="actions">
-          <Show when={!deleted()}>
+          <Show when={!deleted() && writable()}>
             <ScanNowLazy kind="prefix" value={props.prefix.id} label={props.prefix.cidr} />
             <button type="button" class="btn" data-testid="prefix-edit" onClick={() => setDialog({ kind: "edit" })}>
               <Icon name="settings" />
@@ -262,17 +278,21 @@ export function PrefixPane(props: PrefixPaneProps) {
             <Show
               when={isNetwork()}
               fallback={
-                <button type="button" class="btn primary" data-testid="prefix-next-free-prefix" onClick={() => setDialog({ kind: "next_prefix" })}>
-                  <Icon name="plus" />
-                  {t("ipam.do.next_free_prefix")}
-                </button>
+                <Show when={may.create("prefix")}>
+                  <button type="button" class="btn primary" data-testid="prefix-next-free-prefix" onClick={() => setDialog({ kind: "next_prefix" })}>
+                    <Icon name="plus" />
+                    {t("ipam.do.next_free_prefix")}
+                  </button>
+                </Show>
               }
             >
-              <button type="button" class="btn primary" data-testid="prefix-next-free-address" onClick={() => setDialog({ kind: "claim" })}>
-                <Icon name="plus" />
-                {t("ipam.do.next_free_address")}
-                <Kbd keys={["N"]} />
-              </button>
+              <Show when={mayClaim()}>
+                <button type="button" class="btn primary" data-testid="prefix-next-free-address" onClick={() => setDialog({ kind: "claim" })}>
+                  <Icon name="plus" />
+                  {t("ipam.do.next_free_address")}
+                  <Kbd keys={["N"]} />
+                </button>
+              </Show>
             </Show>
           </Show>
         </div>
@@ -392,7 +412,7 @@ export function PrefixPane(props: PrefixPaneProps) {
                       {" "}
                       <Count value={r.data.size} /> {t("ipam.addresses.free", { count: Number(r.data.size) || 0 })}
                     </span>
-                    <Show when={!deleted()}>
+                    <Show when={!deleted() && mayClaim()}>
                       <button
                         type="button"
                         class="btn sm ghost"
@@ -416,7 +436,9 @@ export function PrefixPane(props: PrefixPaneProps) {
               onOpen={(r) => r.type === "address" && navigate(paths.address(r.data.ip))}
               onOpenPage={(r) => r.type === "address" && navigate(paths.address(r.data.ip))}
               rowActions={rowActions}
+              draggable={rowWritable}
               dragItems={(list) => {
+                if (!list.every(rowWritable)) return null;
                 const items = dragItems(list);
                 return items.length ? items : null;
               }}
@@ -442,7 +464,9 @@ export function PrefixPane(props: PrefixPaneProps) {
               }
             />
             <ActionBar count={selection.count()} onClear={selection.clear}>
-              <ActionButton primary icon="move" label={t("ipam.do.move")} keys={["M"]} onClick={moveSelection} testid="action-move" />
+              <Show when={maySelection()}>
+                <ActionButton primary icon="move" label={t("ipam.do.move")} keys={["M"]} onClick={moveSelection} testid="action-move" />
+              </Show>
               <ActionButton icon="export" label={t("ipam.do.export_csv")} onClick={exportSelection} testid="action-export" />
             </ActionBar>
           </Match>
@@ -480,12 +504,14 @@ export function PrefixPane(props: PrefixPaneProps) {
             />
           </Match>
           <Match when={tab() === "ranges"}>
-            <div class="tab-tools">
-              <button type="button" class="btn sm" data-testid="range-add" disabled={deleted()} onClick={() => setDialog({ kind: "range" })}>
-                <Icon name="plus" size="sm" />
-                {t("ipam.range.add")}
-              </button>
-            </div>
+            <Show when={writable() && may.create("range")}>
+              <div class="tab-tools">
+                <button type="button" class="btn sm" data-testid="range-add" disabled={deleted()} onClick={() => setDialog({ kind: "range" })}>
+                  <Icon name="plus" size="sm" />
+                  {t("ipam.range.add")}
+                </button>
+              </div>
+            </Show>
             <DataGrid
               id="prefix-ranges"
               label={t("ipam.prefix.ranges_grid", { cidr: props.prefix.cidr })}
@@ -516,10 +542,10 @@ export function PrefixPane(props: PrefixPaneProps) {
               rows={ranges()}
               rowId={(r) => r.id}
               rowKey={(r) => `${r.first}-${r.last}`}
-              onOpen={(r) => setDialog({ kind: "range", range: r })}
+              onOpen={(r) => may.inPrefix(r.prefix) && setDialog({ kind: "range", range: r })}
               rowActions={[
-                { id: "edit", label: () => t("ipam.do.edit"), run: (r) => setDialog({ kind: "range", range: r }) },
-                { id: "delete", label: () => t("ipam.do.delete"), danger: true, run: (r) => setDialog({ kind: "delete_range", range: r }) },
+                { id: "edit", label: () => t("ipam.do.edit"), hidden: (r) => !may.inPrefix(r.prefix), run: (r) => setDialog({ kind: "range", range: r }) },
+                { id: "delete", label: () => t("ipam.do.delete"), danger: true, hidden: (r) => !may.inPrefix(r.prefix), run: (r) => setDialog({ kind: "delete_range", range: r }) },
               ]}
               empty={
                 <div class="empty">
@@ -536,6 +562,7 @@ export function PrefixPane(props: PrefixPaneProps) {
               collection="prefixes"
               id={props.prefix.id}
               deleted={deleted()}
+              mayRestore={writable()}
               revision={props.prefix.meta.revision}
               label={props.prefix.cidr}
               onRestored={props.onChanged}

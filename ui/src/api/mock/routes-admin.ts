@@ -13,6 +13,7 @@ import type {
   SessionLifetime,
 } from "../types";
 import { PROFILES } from "../types";
+import { forgetUser, isServiceAccount, problem, userInfoOf } from "./access-store";
 import { clearThrottle, requireAdmin, requireSession, revokeUserSessions } from "./auth";
 import {
   commit,
@@ -22,7 +23,6 @@ import {
   isAdmin,
   otherActiveAdmins,
   settingsView,
-  toUserInfo,
   userChange,
   type MockUser,
 } from "./db";
@@ -74,7 +74,7 @@ const listUsers = route("get", "/api/v1/users", (ctx) => {
   const users = [...db.users]
     .filter((u) => !q || u.name.toLowerCase().includes(q) || u.display_name.toLowerCase().includes(q))
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  return ok(paginate(users.map(toUserInfo), ctx.url, db.revision));
+  return ok(paginate(users.map((u) => userInfoOf(u)), ctx.url, db.revision));
 });
 
 const createUser = route("post", "/api/v1/users", async (ctx) => {
@@ -121,13 +121,13 @@ const createUser = route("post", "/api/v1/users", async (ctx) => {
   };
   db.users.push(user);
   commit("admin", userChange(user), [user]);
-  return created(toUserInfo(user), etag(user.revision));
+  return created(userInfoOf(user), etag(user.revision));
 });
 
 const getUser = route("get", "/api/v1/users/{id}", (ctx) => {
   requireAdmin();
   const user = userOr404(ctx.params.id);
-  return ok(toUserInfo(user), etag(user.revision));
+  return ok(userInfoOf(user), etag(user.revision));
 });
 
 const updateUser = route("patch", "/api/v1/users/{id}", async (ctx) => {
@@ -151,6 +151,11 @@ const updateUser = route("patch", "/api/v1/users/{id}", async (ctx) => {
   const password = optString(body, "password");
   if (password !== undefined) {
     if (user.break_glass) return fail("auth.break_glass.hardware_key_only");
+    if (isServiceAccount(user.id)) {
+      return problem("auth.service_account.no_login", 409, {
+        detail: "a service account has no password, second factor or session",
+      });
+    }
     const result = checkPassword(password, {
       policy: db.settings.password_policy,
       breach: db.settings.breach_check,
@@ -171,7 +176,7 @@ const updateUser = route("patch", "/api/v1/users/{id}", async (ctx) => {
   }
   if (disabled === true || password !== undefined) revokeUserSessions(user.id);
   commit("admin", userChange(user), [user]);
-  return ok(toUserInfo(user), etag(user.revision));
+  return ok(userInfoOf(user), etag(user.revision));
 });
 
 const deleteUser = route("delete", "/api/v1/users/{id}", (ctx) => {
@@ -184,6 +189,7 @@ const deleteUser = route("delete", "/api/v1/users/{id}", (ctx) => {
   }
   revokeUserSessions(user.id);
   db.users = db.users.filter((u) => u.id !== user.id);
+  forgetUser(user.id);
   db.tokens = db.tokens.filter((t) => t.user_id !== user.id);
   clearThrottle(user.name);
   commit("admin", { deleted: [{ kind: "user", id: user.id }], tables: ["auth.users"] });
@@ -202,7 +208,7 @@ const setUserRoles = route("put", "/api/v1/users/{id}/roles", async (ctx) => {
   }
   user.roles = roles;
   commit("admin", userChange(user), [user]);
-  return ok(toUserInfo(user), etag(user.revision));
+  return ok(userInfoOf(user), etag(user.revision));
 });
 
 const unlockUser = route("post", "/api/v1/users/{id}/unlock", (ctx) => {
@@ -213,7 +219,7 @@ const unlockUser = route("post", "/api/v1/users/{id}/unlock", (ctx) => {
     user.lock = null;
     commit("admin", userChange(user), [user]);
   }
-  return ok(toUserInfo(user), etag(user.revision));
+  return ok(userInfoOf(user), etag(user.revision));
 });
 
 const revokeSessionsOfUser = route("delete", "/api/v1/users/{id}/sessions", (ctx) => {

@@ -4,6 +4,7 @@ import { createResource, createSignal, For, Show, untrack } from "solid-js";
 import { api } from "../../api/client";
 import { fetchAll } from "../../api/paginate";
 import type { Tag, Tenant, TenantInput, TenantPatch, Vrf, VrfInput, VrfPatch } from "../../api/types";
+import { writesAll } from "../../auth/gate";
 import { Icon } from "../../components/Icon";
 import { Tags } from "../../grid/cells";
 import type { ListSource } from "../../grid/source";
@@ -138,14 +139,16 @@ export default function TenancyView() {
           <h1 tabIndex={-1}>{t("ipam.nav.tenancy")}</h1>
         </div>
         <div class="actions">
-          <button type="button" class="btn" data-testid="tenant-create" onClick={() => setCreating("tenant")}>
-            <Icon name="plus" />
-            {t("ipam.tenant.create")}
-          </button>
-          <button type="button" class="btn primary" data-testid="vrf-create" onClick={() => setCreating("vrf")}>
-            <Icon name="plus" />
-            {t("ipam.vrf.create")}
-          </button>
+          <Show when={writesAll()}>
+            <button type="button" class="btn" data-testid="tenant-create" onClick={() => setCreating("tenant")}>
+              <Icon name="plus" />
+              {t("ipam.tenant.create")}
+            </button>
+            <button type="button" class="btn primary" data-testid="vrf-create" onClick={() => setCreating("vrf")}>
+              <Icon name="plus" />
+              {t("ipam.vrf.create")}
+            </button>
+          </Show>
         </div>
       </div>
       <div class="tenancy-split">

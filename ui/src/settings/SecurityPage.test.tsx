@@ -235,6 +235,20 @@ describe("the security page", () => {
     expect(within(row("TGL-03")).getAllByText("Yes")).toHaveLength(2);
   });
 
+  it("carries the test ids of the profile dialog", async () => {
+    await signInAs();
+    await openPage();
+    fireEvent.click(screen.getByTestId("security-change-profile"));
+    const dialog = await screen.findByTestId("dialog-profile");
+    const group = within(dialog).getByTestId("field-profile");
+    expect(group.getAttribute("role")).toBe("radiogroup");
+    fireEvent.click(within(group).getByTestId("field-profile-hardened"));
+    expect((within(dialog).getByTestId("form-submit") as HTMLButtonElement).textContent).toBe("Switch to Hardened");
+    fireEvent.click(within(dialog).getByTestId("form-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("dialog-profile")).toBeNull());
+    expect(db.settings.profile).toBe("standard");
+  });
+
   it("needs an acknowledgement for Lab and shows what Lab turns off", async () => {
     await signInAs();
     await openPage();

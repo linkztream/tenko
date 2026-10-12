@@ -3,6 +3,7 @@ import { createResource, createSignal, For, Show, untrack } from "solid-js";
 import { api } from "../../api/client";
 import { fetchAll } from "../../api/paginate";
 import type { Site, SiteInput, SitePatch, Tag } from "../../api/types";
+import { may } from "../../auth/gate";
 import { Icon } from "../../components/Icon";
 import { Tags, TimeAgo } from "../../grid/cells";
 import type { ListSource } from "../../grid/source";
@@ -134,10 +135,12 @@ export default function SitesView() {
           <h1 tabIndex={-1}>{t("ipam.nav.sites")}</h1>
         </div>
         <div class="actions">
-          <button type="button" class="btn primary" data-testid="site-create" onClick={() => setCreating(true)}>
-            <Icon name="plus" />
-            {t("ipam.site.create")}
-          </button>
+          <Show when={may.create("site")}>
+            <button type="button" class="btn primary" data-testid="site-create" onClick={() => setCreating(true)}>
+              <Icon name="plus" />
+              {t("ipam.site.create")}
+            </button>
+          </Show>
         </div>
       </div>
       <CollectionPage<Site>
@@ -152,6 +155,7 @@ export default function SitesView() {
         columns={columns}
         rowLabel={(s) => s.name}
         sourceRef={(s) => setSource(() => s)}
+        mayWrite={(s) => may.site(s)}
         edit={(s, close) => (
           <SiteForm
             site={s}

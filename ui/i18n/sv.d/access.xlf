@@ -6,9 +6,447 @@
         <notes><note category="description">Title of the access page and its entry in the browser tab.</note></notes>
         <segment><source>Access</source><target>Åtkomst</target></segment>
       </unit>
-      <unit id="access.placeholder">
-        <notes><note category="description">Placeholder text of the access page until the page itself exists.</note></notes>
-        <segment><source>The access page arrives with a later update.</source><target>Åtkomstsidan kommer i en senare uppdatering.</target></segment>
+      <unit id="access.lede">
+        <segment><source>Who may do what: the roles, the sign-in each role needs, scoped grants over VRFs, sites and prefixes, and the service accounts that automation uses. The server checks every request.</source><target>Vem som får göra vad: rollerna, inloggningen som varje roll kräver, avgränsade behörigheter över VRF, platser och prefix samt de tjänstekonton som automatiseringen använder. Servern kontrollerar varje begäran.</target></segment>
+      </unit>
+      <unit id="access.col.actions">
+        <notes><note category="description">Hidden header of the column with the buttons of a row.</note></notes>
+        <segment><source>Actions</source><target>Åtgärder</target></segment>
+      </unit>
+      <unit id="access.role.admin">
+        <segment><source>Administrator</source><target>Administratör</target></segment>
+      </unit>
+      <unit id="access.role.operator">
+        <segment><source>Operator</source><target>Operatör</target></segment>
+      </unit>
+      <unit id="access.role.viewer">
+        <segment><source>Viewer</source><target>Läsare</target></segment>
+      </unit>
+      <unit id="access.role.auditor">
+        <segment><source>Auditor</source><target>Granskare</target></segment>
+      </unit>
+      <unit id="access.role.admin_description">
+        <segment><source>Everything, including users, security settings, secrets and the system.</source><target>Allt, även användare, säkerhetsinställningar, hemligheter och systemet.</target></segment>
+      </unit>
+      <unit id="access.role.operator_description">
+        <segment><source>Reads and changes the inventory, runs jobs and imports, approves proposals.</source><target>Läser och ändrar inventariet, kör jobb och importer och godkänner förslag.</target></segment>
+      </unit>
+      <unit id="access.role.viewer_description">
+        <segment><source>Reads the inventory, jobs and imports.</source><target>Läser inventariet, jobb och importer.</target></segment>
+      </unit>
+      <unit id="access.role.auditor_description">
+        <segment><source>Reads the audit log, the audit export status and the system status, nothing else.</source><target>Läser granskningsloggen, statusen för granskningsexporten och systemstatusen, men inget annat.</target></segment>
+      </unit>
+      <unit id="access.role.operator_grant">
+        <notes><note category="description">Help under the role choice of a grant.</note></notes>
+        <segment><source>Reads and changes what lies in the scope.</source><target>Läser och ändrar det som ligger i omfånget.</target></segment>
+      </unit>
+      <unit id="access.role.viewer_grant">
+        <notes><note category="description">Help under the role choice of a grant.</note></notes>
+        <segment><source>Reads what lies in the scope.</source><target>Läser det som ligger i omfånget.</target></segment>
+      </unit>
+      <unit id="access.mfa.optional">
+        <notes><note category="description">An MFA policy of a role: no second factor required.</note></notes>
+        <segment><source>Any sign-in</source><target>Valfri inloggning</target></segment>
+      </unit>
+      <unit id="access.mfa.totp_or_stronger">
+        <segment><source>Authenticator code or passkey</source><target>Kod från autentiseringsapp eller nyckel</target></segment>
+      </unit>
+      <unit id="access.mfa.passkey">
+        <segment><source>Passkey or security key</source><target>Nyckel eller säkerhetsnyckel</target></segment>
+      </unit>
+      <unit id="access.mfa.profile_help">
+        <segment><source>The role needs what the security profile asks.</source><target>Rollen kräver det som säkerhetsprofilen kräver.</target></segment>
+      </unit>
+      <unit id="access.mfa.optional_help">
+        <segment><source>A password is enough, unless the profile asks for more.</source><target>Ett lösenord räcker, om inte profilen kräver mer.</target></segment>
+      </unit>
+      <unit id="access.mfa.totp_or_stronger_help">
+        <segment><source>A password with an authenticator code or a recovery code, or a passkey.</source><target>Ett lösenord med en kod från autentiseringsappen eller en återställningskod, eller en nyckel.</target></segment>
+      </unit>
+      <unit id="access.mfa.passkey_help">
+        <segment><source>A passkey or a hardware security key.</source><target>En nyckel eller en säkerhetsnyckel i hårdvara.</target></segment>
+      </unit>
+      <unit id="access.roles.heading">
+        <segment><source>Roles and sign-in</source><target>Roller och inloggning</target></segment>
+      </unit>
+      <unit id="access.roles.lede">
+        <segment><source>A person needs the strictest sign-in of every role they hold, globally or through a grant. A requirement weaker than the profile has no effect beyond the profile.</source><target>En person behöver den strängaste inloggningen av alla roller som hen har, globalt eller via en behörighet. Ett krav som är svagare än profilen har ingen effekt utöver profilen.</target></segment>
+      </unit>
+      <unit id="access.roles.col.role">
+        <segment><source>Role</source><target>Roll</target></segment>
+      </unit>
+      <unit id="access.roles.col.may">
+        <segment><source>May</source><target>Får</target></segment>
+      </unit>
+      <unit id="access.roles.col.held">
+        <segment><source>Held</source><target>Tilldelas</target></segment>
+      </unit>
+      <unit id="access.roles.col.mfa">
+        <segment><source>Sign-in required</source><target>Inloggning som krävs</target></segment>
+      </unit>
+      <unit id="access.roles.global_only">
+        <segment><source>Globally only</source><target>Endast globalt</target></segment>
+      </unit>
+      <unit id="access.roles.global_or_grant">
+        <segment><source>Globally or through a grant</source><target>Globalt eller via en behörighet</target></segment>
+      </unit>
+      <unit id="access.roles.follows_profile">
+        <segment><source>Follows the profile</source><target>Följer profilen</target></segment>
+      </unit>
+      <unit id="access.roles.stored">
+        <notes><note category="description">The argument profile is the requirement of the security profile, e.g. Any sign-in.</note></notes>
+        <segment><source>Set for this role; the profile asks for: {profile}</source><target>Inställt för den här rollen. Profilen kräver: {profile}</target></segment>
+      </unit>
+      <unit id="access.roles.edit">
+        <segment><source>Change</source><target>Ändra</target></segment>
+      </unit>
+      <unit id="access.roles.edit_named">
+        <segment><source>Change the sign-in of the role {role}</source><target>Ändra inloggningen för rollen {role}</target></segment>
+      </unit>
+      <unit id="access.roles.dialog_title">
+        <segment><source>Sign-in for the role {role}</source><target>Inloggning för rollen {role}</target></segment>
+      </unit>
+      <unit id="access.roles.follow_profile">
+        <notes><note category="description">The argument profile is the requirement of the security profile.</note></notes>
+        <segment><source>Follow the profile ({profile})</source><target>Följ profilen ({profile})</target></segment>
+      </unit>
+      <unit id="access.roles.weaker">
+        <segment><source>This is weaker than the profile, which asks for {profile}; the profile wins.</source><target>Det här är svagare än profilen, som kräver {profile}. Profilen gäller.</target></segment>
+      </unit>
+      <unit id="access.roles.saved">
+        <segment><source>Sign-in of the role {role} saved</source><target>Inloggningen för rollen {role} har sparats</target></segment>
+      </unit>
+      <unit id="access.grants.heading">
+        <segment><source>Scoped grants</source><target>Avgränsade behörigheter</target></segment>
+      </unit>
+      <unit id="access.grants.lede">
+        <segment><source>A grant gives a person or a service account the operator or viewer role over a VRF, a site or a prefix. Revoking a delegable grant also revokes the grants issued under it.</source><target>En behörighet ger en person eller ett tjänstekonto rollen operatör eller läsare över en VRF, en plats eller ett prefix. När en delegerbar behörighet återkallas återkallas också de behörigheter som utfärdats under den.</target></segment>
+      </unit>
+      <unit id="access.grants.lede_user">
+        <segment><source>The roles this account holds over parts of the inventory, on top of its global roles.</source><target>De roller som det här kontot har över delar av inventariet, utöver sina globala roller.</target></segment>
+      </unit>
+      <unit id="access.grants.none">
+        <segment><source>No scoped grants.</source><target>Inga avgränsade behörigheter.</target></segment>
+      </unit>
+      <unit id="access.grants.add">
+        <segment><source>Add grant</source><target>Lägg till behörighet</target></segment>
+      </unit>
+      <unit id="access.grants.add_title">
+        <segment><source>Add a scoped grant</source><target>Lägg till en avgränsad behörighet</target></segment>
+      </unit>
+      <unit id="access.grants.add_confirm">
+        <segment><source>Add grant</source><target>Lägg till behörighet</target></segment>
+      </unit>
+      <unit id="access.grants.col.holder">
+        <segment><source>Holder</source><target>Innehavare</target></segment>
+      </unit>
+      <unit id="access.grants.col.role">
+        <segment><source>Role</source><target>Roll</target></segment>
+      </unit>
+      <unit id="access.grants.col.scope">
+        <segment><source>Scope</source><target>Omfång</target></segment>
+      </unit>
+      <unit id="access.grants.col.delegable">
+        <segment><source>Delegable</source><target>Delegerbar</target></segment>
+      </unit>
+      <unit id="access.grants.col.granted">
+        <segment><source>Granted</source><target>Beviljad</target></segment>
+      </unit>
+      <unit id="access.grants.delegated">
+        <notes><note category="description">Tag on a grant that the holder of a delegable grant issued.</note></notes>
+        <segment><source>Delegated</source><target>Delegerad</target></segment>
+      </unit>
+      <unit id="access.grants.field.subject">
+        <segment><source>Holder</source><target>Innehavare</target></segment>
+      </unit>
+      <unit id="access.grants.field.role">
+        <segment><source>Role</source><target>Roll</target></segment>
+      </unit>
+      <unit id="access.grants.field.delegable">
+        <segment><source>The holder may delegate it</source><target>Innehavaren får delegera den</target></segment>
+      </unit>
+      <unit id="access.grants.field.delegable_help">
+        <segment><source>They may then give others a role no higher over a scope inside this one.</source><target>Innehavaren kan då ge andra en lika hög eller lägre roll över ett omfång inom det här.</target></segment>
+      </unit>
+      <unit id="access.grants.error.subject">
+        <segment><source>Choose who receives the grant.</source><target>Välj vem som får behörigheten.</target></segment>
+      </unit>
+      <unit id="access.grants.error.scope">
+        <segment><source>Choose the VRF, site or prefix the grant applies to.</source><target>Välj den VRF, plats eller det prefix som behörigheten gäller.</target></segment>
+      </unit>
+      <unit id="access.grants.created">
+        <segment><source>Grant for {holder} added</source><target>Behörighet för {holder} har lagts till</target></segment>
+      </unit>
+      <unit id="access.grants.revoke_title">
+        <segment><source>Revoke a grant of {holder}?</source><target>Återkalla en behörighet för {holder}?</target></segment>
+      </unit>
+      <unit id="access.grants.revoke_body">
+        <notes><note category="description">The argument grant is a grant in words, e.g. Operator over prefix 203.0.113.0/24 and everything inside it.</note></notes>
+        <segment><source>{holder} loses: {grant}.</source><target>{holder} förlorar: {grant}.</target></segment>
+      </unit>
+      <unit id="access.grants.revoke_cascade">
+        <segment><source>{count, plural, =0 {No grant was issued under it so far.} one {The # grant issued under it goes too.} other {The # grants issued under it go too.}}</source><target>{count, plural, =0 {Hittills har ingen behörighet utfärdats under den.} one {Den # behörighet som utfärdats under den försvinner också.} other {De # behörigheter som utfärdats under den försvinner också.}}</target></segment>
+      </unit>
+      <unit id="access.grants.revoke_named">
+        <segment><source>Revoke {grant} of {holder}</source><target>Återkalla {grant} för {holder}</target></segment>
+      </unit>
+      <unit id="access.grants.revoked">
+        <segment><source>{count, plural, one {Grant of {holder} revoked} other {# grants revoked, starting with the one of {holder}}}</source><target>{count, plural, one {Behörigheten för {holder} har återkallats} other {# behörigheter har återkallats, med början i den för {holder}}}</target></segment>
+      </unit>
+      <unit id="access.grant.text">
+        <notes><note category="description">A grant in words. role is a role name, scope a scope in words, e.g. Operator over prefix 203.0.113.0/24 only.</note></notes>
+        <segment><source>{role} over {scope}</source><target>{role} över {scope}</target></segment>
+      </unit>
+      <unit id="access.scope.everything">
+        <notes><note category="description">A token grant without a scope; follows "over" in access.grant.text.</note></notes>
+        <segment><source>the whole installation</source><target>hela installationen</target></segment>
+      </unit>
+      <unit id="access.scope.vrf">
+        <segment><source>VRF {name}</source><target>VRF {name}</target></segment>
+      </unit>
+      <unit id="access.scope.site">
+        <segment><source>site {name} only</source><target>endast platsen {name}</target></segment>
+      </unit>
+      <unit id="access.scope.site_subtree">
+        <segment><source>site {name} and its child sites</source><target>platsen {name} och dess underplatser</target></segment>
+      </unit>
+      <unit id="access.scope.prefix">
+        <segment><source>prefix {cidr} only</source><target>endast prefixet {cidr}</target></segment>
+      </unit>
+      <unit id="access.scope.prefix_subtree">
+        <segment><source>prefix {cidr} and everything inside it</source><target>prefixet {cidr} och allt i det</target></segment>
+      </unit>
+      <unit id="access.scope.tenant">
+        <segment><source>tenant {id}</source><target>organisationen {id}</target></segment>
+      </unit>
+      <unit id="access.scope.object">
+        <segment><source>{kind} {id}</source><target>{kind} {id}</target></segment>
+      </unit>
+      <unit id="access.picker.kind">
+        <segment><source>Applies to</source><target>Gäller för</target></segment>
+      </unit>
+      <unit id="access.picker.kind_everything">
+        <segment><source>Whole installation</source><target>Hela installationen</target></segment>
+      </unit>
+      <unit id="access.picker.kind_vrf">
+        <segment><source>VRF</source><target>VRF</target></segment>
+      </unit>
+      <unit id="access.picker.kind_site">
+        <segment><source>Site</source><target>Plats</target></segment>
+      </unit>
+      <unit id="access.picker.kind_prefix">
+        <segment><source>Prefix</source><target>Prefix</target></segment>
+      </unit>
+      <unit id="access.picker.object_vrf">
+        <segment><source>VRF</source><target>VRF</target></segment>
+      </unit>
+      <unit id="access.picker.object_site">
+        <segment><source>Site</source><target>Plats</target></segment>
+      </unit>
+      <unit id="access.picker.object_prefix">
+        <segment><source>Prefix</source><target>Prefix</target></segment>
+      </unit>
+      <unit id="access.picker.choose">
+        <segment><source>Choose…</source><target>Välj …</target></segment>
+      </unit>
+      <unit id="access.picker.prefix_option">
+        <notes><note category="description">A prefix in the scope picker: the network and its VRF.</note></notes>
+        <segment><source>{cidr} ({vrf})</source><target>{cidr} ({vrf})</target></segment>
+      </unit>
+      <unit id="access.picker.subtree_site">
+        <segment><source>Include its child sites</source><target>Ta med underplatserna</target></segment>
+      </unit>
+      <unit id="access.picker.subtree_prefix">
+        <segment><source>Include everything inside it</source><target>Ta med allt som ligger i det</target></segment>
+      </unit>
+      <unit id="access.subject.service">
+        <segment><source>{name} (service account)</source><target>{name} (tjänstekonto)</target></segment>
+      </unit>
+      <unit id="access.subject.option">
+        <notes><note category="description">An account in the holder list: login name and display name.</note></notes>
+        <segment><source>{name}: {label}</source><target>{name}: {label}</target></segment>
+      </unit>
+      <unit id="access.sa.heading">
+        <segment><source>Service accounts</source><target>Tjänstekonton</target></segment>
+      </unit>
+      <unit id="access.sa.lede">
+        <segment><source>Accounts for automation. They have no password, second factor or session, and act only through scoped tokens.</source><target>Konton för automatisering. De har inget lösenord, ingen andra faktor och ingen session, och agerar bara via avgränsade token.</target></segment>
+      </unit>
+      <unit id="access.sa.none">
+        <segment><source>No service accounts.</source><target>Inga tjänstekonton.</target></segment>
+      </unit>
+      <unit id="access.sa.add">
+        <segment><source>Add service account</source><target>Lägg till tjänstekonto</target></segment>
+      </unit>
+      <unit id="access.sa.add_title">
+        <segment><source>Add a service account</source><target>Lägg till ett tjänstekonto</target></segment>
+      </unit>
+      <unit id="access.sa.add_lede">
+        <segment><source>You become its owner. Give it roles here or grants afterwards, then create a scoped token for it.</source><target>Du blir ägare till kontot. Ge det roller här eller behörigheter senare och skapa sedan ett avgränsat token för det.</target></segment>
+      </unit>
+      <unit id="access.sa.field.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="access.sa.field.name_help">
+        <segment><source>1 to 64 characters without spaces. Shares the names of users.</source><target>1 till 64 tecken utan blanksteg. Delar namnrymd med användarnamnen.</target></segment>
+      </unit>
+      <unit id="access.sa.field.display_name">
+        <segment><source>Display name</source><target>Visningsnamn</target></segment>
+      </unit>
+      <unit id="access.sa.field.roles">
+        <segment><source>Global roles</source><target>Globala roller</target></segment>
+      </unit>
+      <unit id="access.sa.field.roles_help">
+        <segment><source>Leave all unticked for an account that acts through scoped grants only.</source><target>Lämna alla omarkerade för ett konto som bara agerar via avgränsade behörigheter.</target></segment>
+      </unit>
+      <unit id="access.sa.error.name">
+        <segment><source>Enter 1 to 64 characters without spaces.</source><target>Ange 1 till 64 tecken utan blanksteg.</target></segment>
+      </unit>
+      <unit id="access.sa.created">
+        <segment><source>Service account {name} added</source><target>Tjänstekontot {name} har lagts till</target></segment>
+      </unit>
+      <unit id="access.sa.summary">
+        <segment><source>{display} · roles: {roles} · owner: {owner}</source><target>{display} · roller: {roles} · ägare: {owner}</target></segment>
+      </unit>
+      <unit id="access.sa.grants_only">
+        <segment><source>grants only</source><target>endast behörigheter</target></segment>
+      </unit>
+      <unit id="access.sa.tokens">
+        <segment><source>Tokens</source><target>Token</target></segment>
+      </unit>
+      <unit id="access.sa.tokens_of">
+        <segment><source>Tokens of {name}</source><target>Token för {name}</target></segment>
+      </unit>
+      <unit id="access.sa.no_tokens">
+        <segment><source>No tokens.</source><target>Inga token.</target></segment>
+      </unit>
+      <unit id="access.sa.token_revoked">
+        <segment><source>Token {name} revoked</source><target>Token {name} har återkallats</target></segment>
+      </unit>
+      <unit id="access.token.create">
+        <segment><source>Create token</source><target>Skapa token</target></segment>
+      </unit>
+      <unit id="access.token.create_title">
+        <segment><source>Create an API token</source><target>Skapa ett API-token</target></segment>
+      </unit>
+      <unit id="access.token.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="access.token.name_help">
+        <segment><source>What the token is for, such as the tool that uses it.</source><target>Vad token används till, till exempel verktyget som använder det.</target></segment>
+      </unit>
+      <unit id="access.token.error.name">
+        <segment><source>Enter a name.</source><target>Ange ett namn.</target></segment>
+      </unit>
+      <unit id="access.token.lifetime">
+        <segment><source>Lifetime</source><target>Giltighetstid</target></segment>
+      </unit>
+      <unit id="access.token.days">
+        <segment><source>{count, plural, one {# day} other {# days}}</source><target>{count, plural, one {# dag} other {# dagar}}</target></segment>
+      </unit>
+      <unit id="access.token.no_expiry">
+        <segment><source>No expiry</source><target>Ingen utgång</target></segment>
+      </unit>
+      <unit id="access.token.max_days">
+        <segment><source>The security profile allows at most {days} days.</source><target>Säkerhetsprofilen tillåter högst {days} dagar.</target></segment>
+      </unit>
+      <unit id="access.token.max_none">
+        <segment><source>The Lab profile allows tokens without expiry.</source><target>Profilen Lab tillåter token utan utgång.</target></segment>
+      </unit>
+      <unit id="access.token.kind">
+        <segment><source>Kind</source><target>Typ</target></segment>
+      </unit>
+      <unit id="access.token.kind_personal">
+        <segment><source>Personal</source><target>Personligt</target></segment>
+      </unit>
+      <unit id="access.token.kind_personal_help">
+        <segment><source>Acts with every role and grant you have.</source><target>Agerar med alla roller och behörigheter du har.</target></segment>
+      </unit>
+      <unit id="access.token.kind_scoped">
+        <segment><source>Scoped</source><target>Avgränsat</target></segment>
+      </unit>
+      <unit id="access.token.kind_scoped_help">
+        <segment><source>Acts with the grants and scopes you choose, never more than you have.</source><target>Agerar med de behörigheter och omfång du väljer, aldrig mer än du har.</target></segment>
+      </unit>
+      <unit id="access.token.grants">
+        <segment><source>Grants</source><target>Behörigheter</target></segment>
+      </unit>
+      <unit id="access.token.grants_help">
+        <segment><source>Each grant is a role over the whole installation or over a VRF, a site or a prefix. Over a scope only operator and viewer are possible.</source><target>Varje behörighet är en roll över hela installationen eller över en VRF, en plats eller ett prefix. Över ett omfång är bara operatör och läsare möjliga.</target></segment>
+      </unit>
+      <unit id="access.token.add_grant">
+        <segment><source>Add grant</source><target>Lägg till behörighet</target></segment>
+      </unit>
+      <unit id="access.token.remove_grant">
+        <segment><source>Remove grant {n}</source><target>Ta bort behörighet {n}</target></segment>
+      </unit>
+      <unit id="access.token.scopes">
+        <segment><source>Special scopes</source><target>Särskilda omfång</target></segment>
+      </unit>
+      <unit id="access.token.error.scope">
+        <segment><source>Choose a VRF, site or prefix for every grant, or the whole installation.</source><target>Välj en VRF, en plats eller ett prefix för varje behörighet, eller hela installationen.</target></segment>
+      </unit>
+      <unit id="access.token.error.empty">
+        <segment><source>A scoped token needs at least one grant or special scope.</source><target>Ett avgränsat token behöver minst en behörighet eller ett särskilt omfång.</target></segment>
+      </unit>
+      <unit id="access.token.created_title">
+        <segment><source>Copy the token now</source><target>Kopiera token nu</target></segment>
+      </unit>
+      <unit id="access.token.created_body">
+        <segment><source>This is the only time the token {name} is shown. Store it where the tool that uses it can read it.</source><target>Token {name} visas bara den här gången. Förvara det där verktyget som använder det kan läsa det.</target></segment>
+      </unit>
+      <unit id="access.token.stored">
+        <segment><source>I have stored the token</source><target>Jag har sparat token</target></segment>
+      </unit>
+      <unit id="access.token.personal">
+        <notes><note category="description">What a personal (not scoped) token may do.</note></notes>
+        <segment><source>Every right of its owner</source><target>Alla rättigheter som ägaren har</target></segment>
+      </unit>
+      <unit id="access.token.col.name">
+        <segment><source>Token</source><target>Token</target></segment>
+      </unit>
+      <unit id="access.token.col.reach">
+        <segment><source>May</source><target>Får</target></segment>
+      </unit>
+      <unit id="access.token.col.expires">
+        <segment><source>Expires</source><target>Går ut</target></segment>
+      </unit>
+      <unit id="access.token.col.last_used">
+        <segment><source>Last used</source><target>Senast använt</target></segment>
+      </unit>
+      <unit id="access.token.expired">
+        <segment><source>Expired</source><target>Utgånget</target></segment>
+      </unit>
+      <unit id="access.token.revoke_named">
+        <segment><source>Revoke the token {name}</source><target>Återkalla token {name}</target></segment>
+      </unit>
+      <unit id="access.token.revoke_title">
+        <segment><source>Revoke the token {name}?</source><target>Återkalla token {name}?</target></segment>
+      </unit>
+      <unit id="access.token.revoke_body">
+        <segment><source>Tools that use it lose the access of {account} at once.</source><target>Verktyg som använder det förlorar {account}s åtkomst direkt.</target></segment>
+      </unit>
+      <unit id="access.token_scope.metrics">
+        <notes><note category="description">A special token scope.</note></notes>
+        <segment><source>Read the metrics</source><target>Läsa mätvärdena</target></segment>
+      </unit>
+      <unit id="access.token_scope.audit_read">
+        <notes><note category="description">A special token scope.</note></notes>
+        <segment><source>Read the audit log</source><target>Läsa granskningsloggen</target></segment>
+      </unit>
+      <unit id="access.token_scope.metrics_help">
+        <segment><source>For a metrics scraper: /api/v1/metrics and nothing else.</source><target>För en insamlare av mätvärden: /api/v1/metrics och inget annat.</target></segment>
+      </unit>
+      <unit id="access.token_scope.audit_read_help">
+        <segment><source>For a log collector: the audit records and nothing else.</source><target>För en logginsamlare: granskningsposterna och inget annat.</target></segment>
+      </unit>
+      <unit id="access.user.kind">
+        <notes><note category="description">Label of the fact that a user record is a service account.</note></notes>
+        <segment><source>Kind</source><target>Typ</target></segment>
+      </unit>
+      <unit id="access.user.service">
+        <segment><source>Service account: no password, second factor or session; acts through scoped tokens.</source><target>Tjänstekonto: inget lösenord, ingen andra faktor och ingen session. Agerar via avgränsade token.</target></segment>
       </unit>
     </group>
   </file>

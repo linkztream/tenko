@@ -1,7 +1,7 @@
 // The settings sub-pages WP3.0 registers up front (access, audit export, vault, backup and
 // languages): each has a route of its own that ranks above the generic /settings/:section?/:id?
-// route, is for administrators, shows the settings navigation and says it arrives with a later
-// update. The generic route keeps serving security and users.
+// route, is for administrators and shows the settings navigation. The generic route keeps
+// serving security and users.
 import { createMemoryHistory, MemoryRouter } from "@solidjs/router";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
@@ -32,11 +32,12 @@ afterEach(() => setSessionForTest(null, "loading"));
 const TABS = ["security", "users", "updates", "secrets", "access", "audit-export", "vault", "backup", "languages"];
 const TAB_NAMES = ["Security", "Users", "Updates", "Secrets", "Access", "Audit export", "Vault", "Backup", "Languages"];
 
+/** The sub-pages of WP3.11b, each with a part only the page itself shows. */
 const PAGES = [
-  { key: "access", url: "/settings/access", title: "Access", sentence: "The access page arrives with a later update." },
-  { key: "audit-export", url: "/settings/audit-export", title: "Audit export", sentence: "The audit export page arrives with a later update." },
-  { key: "vault", url: "/settings/vault", title: "Vault", sentence: "The vault page arrives with a later update." },
-  { key: "backup", url: "/settings/backup", title: "Backup", sentence: "The backup page arrives with a later update." },
+  { key: "access", url: "/settings/access", title: "Access", marker: "access-roles" },
+  { key: "audit-export", url: "/settings/audit-export", title: "Audit export", marker: "audit-export-sinks" },
+  { key: "vault", url: "/settings/vault", title: "Vault", marker: "vault-key" },
+  { key: "backup", url: "/settings/backup", title: "Backup", marker: "backup-status" },
 ] as const;
 
 describe("the route table", () => {
@@ -61,7 +62,7 @@ describe("the settings sub-pages", () => {
       // The generic route would have redirected to the security section.
       expect(app.location()).toBe(page.url);
       expect(within(root).getByRole("heading", { level: 1 }).textContent).toBe(page.title);
-      expect(within(root).getByTestId(`${page.key}-placeholder`).textContent).toBe(page.sentence);
+      expect(await within(root).findByTestId(page.marker)).toBeTruthy();
       expect(screen.queryByTestId("deviation-count")).toBeNull();
       expect(document.title).toBe(`${page.title} - Tenko DDI`);
 

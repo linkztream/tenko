@@ -6,9 +6,195 @@
         <notes><note category="description">Title of the audit export page and its entry in the browser tab.</note></notes>
         <segment><source>Audit export</source></segment>
       </unit>
-      <unit id="audit_export.placeholder">
-        <notes><note category="description">Placeholder text of the audit export page until the page itself exists.</note></notes>
-        <segment><source>The audit export page arrives with a later update.</source></segment>
+      <unit id="audit_export.lede">
+        <segment><source>Every audit record goes to each sink as syslog or into a file, with its sequence number and chain hash, so a receiver can drop duplicates and see gaps. Checkpoints with the head of the chain follow every 100 records or 5 minutes.</source></segment>
+      </unit>
+      <unit id="audit_export.required.title">
+        <segment><source>The profile requires an audit export</source></segment>
+      </unit>
+      <unit id="audit_export.required.body">
+        <segment><source>The Hardened profile requires at least one sink that delivers (TGL-21). Add one, or repair the failing one.</source></segment>
+      </unit>
+      <unit id="audit_export.sinks.heading">
+        <segment><source>Sinks</source></segment>
+      </unit>
+      <unit id="audit_export.add">
+        <segment><source>Add sink</source></segment>
+      </unit>
+      <unit id="audit_export.add_title">
+        <segment><source>Add an audit export sink</source></segment>
+      </unit>
+      <unit id="audit_export.edit_title">
+        <segment><source>Change the audit export sink</source></segment>
+      </unit>
+      <unit id="audit_export.none">
+        <segment><source>No sinks. The audit log stays on this installation only.</source></segment>
+      </unit>
+      <unit id="audit_export.col.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="audit_export.col.target">
+        <segment><source>Target</source></segment>
+      </unit>
+      <unit id="audit_export.col.format">
+        <segment><source>Format</source></segment>
+      </unit>
+      <unit id="audit_export.col.state">
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="audit_export.col.lag">
+        <notes><note category="description">Column: how many audit records a sink still has to deliver.</note></notes>
+        <segment><source>Behind</source></segment>
+      </unit>
+      <unit id="audit_export.col.actions">
+        <notes><note category="description">Hidden header of the column with the buttons of a row.</note></notes>
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="audit_export.transport.tls">
+        <segment><source>Syslog over TLS</source></segment>
+      </unit>
+      <unit id="audit_export.transport.tcp">
+        <segment><source>Syslog over TCP</source></segment>
+      </unit>
+      <unit id="audit_export.transport.udp">
+        <segment><source>Syslog over UDP</source></segment>
+      </unit>
+      <unit id="audit_export.transport.file">
+        <segment><source>JSON lines file</source></segment>
+      </unit>
+      <unit id="audit_export.transport.tls_help">
+        <segment><source>RFC 5425: encrypted, the receiver's certificate is checked. The recommended choice.</source></segment>
+      </unit>
+      <unit id="audit_export.transport.tcp_help">
+        <segment><source>RFC 6587: reliable but readable on the network.</source></segment>
+      </unit>
+      <unit id="audit_export.transport.udp_help">
+        <segment><source>RFC 5426: records can be lost without notice.</source></segment>
+      </unit>
+      <unit id="audit_export.transport.file_help">
+        <segment><source>A file on every controller, rotated by size, for a log shipper.</source></segment>
+      </unit>
+      <unit id="audit_export.format.rfc5424">
+        <segment><source>RFC 5424 with the record as JSON</source></segment>
+      </unit>
+      <unit id="audit_export.format.cef">
+        <segment><source>CEF</source></segment>
+      </unit>
+      <unit id="audit_export.format.json">
+        <segment><source>JSON with the canonical bytes</source></segment>
+      </unit>
+      <unit id="audit_export.state.ok">
+        <segment><source>Delivering</source></segment>
+      </unit>
+      <unit id="audit_export.state.failing">
+        <segment><source>Failing</source></segment>
+      </unit>
+      <unit id="audit_export.state.idle">
+        <segment><source>Waiting</source></segment>
+      </unit>
+      <unit id="audit_export.state.disabled">
+        <segment><source>Paused</source></segment>
+      </unit>
+      <unit id="audit_export.failing_since">
+        <notes><note category="description">when is a relative time such as 6 minutes ago.</note></notes>
+        <segment><source>failing since {when}</source></segment>
+      </unit>
+      <unit id="audit_export.delivered">
+        <notes><note category="description">when is a relative time such as 4 seconds ago.</note></notes>
+        <segment><source>last record {when}</source></segment>
+      </unit>
+      <unit id="audit_export.pause">
+        <segment><source>Pause</source></segment>
+      </unit>
+      <unit id="audit_export.resume">
+        <segment><source>Resume</source></segment>
+      </unit>
+      <unit id="audit_export.paused">
+        <segment><source>Sink {name} paused</source></segment>
+      </unit>
+      <unit id="audit_export.resumed">
+        <segment><source>Sink {name} resumed</source></segment>
+      </unit>
+      <unit id="audit_export.saved">
+        <segment><source>Sink {name} saved</source></segment>
+      </unit>
+      <unit id="audit_export.removed">
+        <segment><source>Sink {name} removed</source></segment>
+      </unit>
+      <unit id="audit_export.remove_named">
+        <segment><source>Remove the sink {name}</source></segment>
+      </unit>
+      <unit id="audit_export.remove_title">
+        <segment><source>Remove the sink {name}?</source></segment>
+      </unit>
+      <unit id="audit_export.remove_body">
+        <segment><source>The sink receives no more records. Records already delivered stay where they are.</source></segment>
+      </unit>
+      <unit id="audit_export.remove_last">
+        <segment><source>This is the last sink, and the profile requires one: the server refuses to remove it.</source></segment>
+      </unit>
+      <unit id="audit_export.field.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="audit_export.field.transport">
+        <segment><source>Transport</source></segment>
+      </unit>
+      <unit id="audit_export.field.format">
+        <segment><source>Format</source></segment>
+      </unit>
+      <unit id="audit_export.field.host">
+        <segment><source>Receiver</source></segment>
+      </unit>
+      <unit id="audit_export.field.port">
+        <segment><source>Port</source></segment>
+      </unit>
+      <unit id="audit_export.field.ca_pem">
+        <segment><source>Certificate authority of the receiver (PEM)</source></segment>
+      </unit>
+      <unit id="audit_export.field.ca_pem_help">
+        <segment><source>Leave empty to trust the certificate authorities of the controller's system.</source></segment>
+      </unit>
+      <unit id="audit_export.field.client_certificate">
+        <segment><source>Present the controller's certificate to the receiver</source></segment>
+      </unit>
+      <unit id="audit_export.field.path">
+        <segment><source>File</source></segment>
+      </unit>
+      <unit id="audit_export.field.path_help">
+        <segment><source>An absolute path; the same on every controller.</source></segment>
+      </unit>
+      <unit id="audit_export.field.keep_files">
+        <segment><source>Rotated files to keep</source></segment>
+      </unit>
+      <unit id="audit_export.error.name">
+        <segment><source>Enter a name.</source></segment>
+      </unit>
+      <unit id="audit_export.error.host">
+        <segment><source>Enter the host name or address of the receiver.</source></segment>
+      </unit>
+      <unit id="audit_export.error.port">
+        <segment><source>Enter a port from 1 to 65535.</source></segment>
+      </unit>
+      <unit id="audit_export.error.path">
+        <segment><source>Enter the path of the file.</source></segment>
+      </unit>
+      <unit id="audit_export.udp_warning">
+        <segment><source>UDP has no delivery receipt: a record lost on the way is only visible as a gap in the sequence numbers.</source></segment>
+      </unit>
+      <unit id="audit_export.test">
+        <segment><source>Send test record</source></segment>
+      </unit>
+      <unit id="audit_export.test_ok">
+        <segment><source>The receiver accepted the test record.</source></segment>
+      </unit>
+      <unit id="audit_export.test_failed">
+        <segment><source>The test record was not delivered: {detail}</source></segment>
+      </unit>
+      <unit id="audit_export.verify.heading">
+        <segment><source>Check an export</source></segment>
+      </unit>
+      <unit id="audit_export.verify.body">
+        <segment><source>A JSON export carries the canonical bytes of every record. This command checks its chain offline:</source></segment>
       </unit>
     </group>
   </file>

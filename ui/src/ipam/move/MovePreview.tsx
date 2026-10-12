@@ -20,6 +20,7 @@ import { isApiError } from "../../api/problem";
 import { previewMove, submitMove, type MoveItem, type MovePreview as Preview } from "../../api/moves";
 import type { ObjectRef } from "../../api/types";
 import { paths } from "../../app/paths";
+import { may } from "../../auth/gate";
 import { Addr } from "../../components/Addr";
 import { Icon } from "../../components/Icon";
 import { Kbd } from "../../components/Kbd";
@@ -247,7 +248,11 @@ export default function MovePreview() {
   const manualCount = (item: MoveItem) => item.steps.filter((s) => !s.automatic).length;
   const l2Step = (item: MoveItem) => item.steps.find((s) => s.kind === "l2.move" || s.kind === "l2.controller");
   const blocking = () => (preview()?.unacknowledged ?? []).filter((c) => !acked().has(c));
-  const canStart = () => !!preview() && !loading() && !starting() && blocking().length === 0 && included().length > 0;
+  // The apply button is for a principal who may change every moved object and the target prefix;
+  // the preview itself stays readable for anybody who may read them.
+  const mayApply = () =>
+    may.job({ id: "move", targets: [...included(), { kind: "prefix", id: target() }] });
+  const canStart = () => mayApply() && !!preview() && !loading() && !starting() && blocking().length === 0 && included().length > 0;
 
   const start = async () => {
     if (!canStart()) return;
@@ -641,10 +646,12 @@ export default function MovePreview() {
             <button type="button" class="btn" data-testid="move-cancel" onClick={() => navigate(-1)}>
               {t("common.action.cancel")}
             </button>
-            <button type="button" class="btn primary" data-testid="move-start" disabled={!canStart()} onClick={() => void start()}>
-              {t("move.start", { count: included().length })}
-              <Kbd keys={["Ctrl", "Enter"]} />
-            </button>
+            <Show when={mayApply()}>
+              <button type="button" class="btn primary" data-testid="move-start" disabled={!canStart()} onClick={() => void start()}>
+                {t("move.start", { count: included().length })}
+                <Kbd keys={["Ctrl", "Enter"]} />
+              </button>
+            </Show>
           </div>
         </div>
       </div>

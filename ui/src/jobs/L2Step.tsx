@@ -24,6 +24,15 @@ export function plannedLine(preview: StepPreview | undefined): DiffEntry | undef
   return { path: args.path, before: args.before ?? null, after: args.after ?? null };
 }
 
+/**
+ * The setting a person puts back when the rollback of the L2 step asks for it: the first line of
+ * the controller's diff, or the planned line when an interrupted attempt left an empty diff. The
+ * step's page and the group checklist show it as the undo hint.
+ */
+export function undoLine(step: StepRecord, preview: StepPreview | undefined): DiffEntry | undefined {
+  return decodeMoveL2Output(step.output)?.diff?.[0] ?? plannedLine(preview);
+}
+
 /** Whether the controller was written to (or may have been): only then a rollback has anything to undo. */
 function wrote(output: MoveL2Output): boolean {
   if (output.unchanged) return false;

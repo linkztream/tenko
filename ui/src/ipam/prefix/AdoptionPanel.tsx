@@ -10,7 +10,7 @@ import { ApiError, isApiError } from "../../api/problem";
 import type { AssignmentMode, Prefix } from "../../api/types";
 import { ASSIGNMENT_MODES } from "../../api/types";
 import { paths } from "../../app/paths";
-import { hasRole, isAdmin } from "../../auth/session";
+import { may } from "../../auth/gate";
 import { Icon } from "../../components/Icon";
 import { ErrorNotice, Notice } from "../../components/Notice";
 import { PrincipalLabel } from "../../components/Principal";
@@ -63,8 +63,6 @@ function constraints(policy: AdoptionPolicy): string[] {
   out.push(t("ipam.adoption.host_mode_on", { mode: modeWord(policy.host_mode ?? "dynamic") }));
   return out;
 }
-
-const editor = (): boolean => isAdmin() || hasRole("operator");
 
 export function AdoptionPanel(props: { prefix: Prefix }) {
   const live = createLiveQuery<PolicyView>({
@@ -217,7 +215,8 @@ export function AdoptionPanel(props: { prefix: Prefix }) {
               </p>
             </div>
 
-            <Show when={editor() && !props.prefix.meta.deleted}>
+            {/* Changing or clearing a policy is an update of the prefix (docs/access.md section 3). */}
+            <Show when={may.prefix(props.prefix.id) && !props.prefix.meta.deleted}>
               <Show
                 when={editing()}
                 fallback={

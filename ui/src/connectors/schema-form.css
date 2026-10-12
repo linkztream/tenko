@@ -3,6 +3,7 @@
 .sf { display: grid; gap: var(--sp-5); min-width: 0; }
 .sf .field { min-width: 0; }
 .sf .input, .sf .select { width: 100%; }
+.sf textarea.input { resize: vertical; min-block-size: 6lh; }
 .sf .input:disabled, .sf .select:disabled { color: var(--ink-4); background: var(--surface-2); cursor: not-allowed; }
 .sf .field > label.sf-check { display: inline-flex; align-items: center; gap: var(--sp-4); justify-self: start; font-size: var(--fs-13); font-weight: var(--fw-regular); color: var(--ink); cursor: pointer; }
 .sf .field > label.sf-check:has(input:disabled) { color: var(--ink-3); cursor: not-allowed; }

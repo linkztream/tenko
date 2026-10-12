@@ -1,0 +1,15 @@
+/* The access page and the access parts of the user and account pages (WP3.11b). */
+.access-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); flex-wrap: wrap; }
+.access-head > h2, .access-head > h3 { font-size: var(--fs-14); }
+.access-help { display: block; }
+.scope-picker { display: grid; gap: var(--sp-4); }
+.segmented-choices { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.choice.compact { padding: var(--sp-2) var(--sp-4); align-items: center; }
+.token-grants { display: grid; gap: var(--sp-4); }
+.token-grant { display: grid; gap: var(--sp-4); padding: var(--sp-4); }
+.token-grant > button { justify-self: start; }
+.access-accounts { list-style: none; margin: 0; padding: 0; }
+.access-accounts > li { border-block-end: 1px solid var(--line); padding: var(--sp-4) var(--sp-5); }
+.access-accounts > li:last-child { border-block-end: 0; }
+.access-account { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); }
+.access-tokens { display: grid; gap: var(--sp-4); margin-block-start: var(--sp-4); }

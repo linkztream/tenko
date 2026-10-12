@@ -224,7 +224,7 @@ function ProfileSection(props: { view: SecuritySettingsView; onChange: () => voi
             {t("settings.security.profile.deviations", { count: deviations() })}
           </p>
         </div>
-        <button type="button" class="btn" onClick={() => props.onChange()}>
+        <button type="button" class="btn" data-testid="security-change-profile" onClick={() => props.onChange()}>
           {t("settings.security.profile.change")}
         </button>
       </div>

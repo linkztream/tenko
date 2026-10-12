@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="jobs">
+      <unit id="jobs.state.cancelled_rolled_back">
+        <notes><note category="description">State of a job that was cancelled after some of its steps had run: the cancellation undid those steps.</note></notes>
+        <segment><source>Rolled back (cancelled)</source><target>Återställt (avbrutet)</target></segment>
+      </unit>
+      <unit id="jobs.undo.step_named">
+        <notes><note category="description">Manual undo task for a step that cannot be undone automatically. The argument step is the step number, name the short name of the step, such as "Reserve in DHCP".</note></notes>
+        <segment><source>Undo step {step} ({name}) by hand, then mark this done.</source><target>Ångra steg {step} ({name}) för hand och markera sedan som klar.</target></segment>
+      </unit>
+      <unit id="jobs.group.not_moved.heading">
+        <notes><note category="description">Heading of the list of jobs in a job group that ended without their change (rolled back, failed or cancelled).</note></notes>
+        <segment><source>Not moved</source><target>Inte flyttade</target></segment>
+      </unit>
+      <unit id="jobs.group.not_moved.count">
+        <segment><source>{count, plural, one {# job} other {# jobs}}</source><target>{count, plural, one {# jobb} other {# jobb}}</target></segment>
+      </unit>
+      <unit id="jobs.group.not_moved.hint">
+        <notes><note category="description">Explains the "Not moved" list of a job group. move-failed is a tag value and stays as it is.</note></notes>
+        <segment><source>These jobs ended without their change. A moved object keeps its old address and carries the tag move-failed until its next successful move.</source><target>Dessa jobb avslutades utan sin ändring. Ett flyttat objekt behåller sin gamla adress och har taggen move-failed tills nästa lyckade flytt.</target></segment>
+      </unit>
+      <unit id="jobs.group.not_moved.no_reason">
+        <notes><note category="description">Shown in the "Not moved" list when the job recorded no error.</note></notes>
+        <segment><source>The job recorded no reason.</source><target>Jobbet registrerade ingen orsak.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

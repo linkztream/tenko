@@ -1,7 +1,148 @@
 // Message keys of ui/i18n/en.xlf. Regenerate with `npm run i18n`; do not edit.
 export type MessageKey =
-  | "access.placeholder"
+  | "access.col.actions"
+  | "access.grant.text"
+  | "access.grants.add"
+  | "access.grants.add_confirm"
+  | "access.grants.add_title"
+  | "access.grants.col.delegable"
+  | "access.grants.col.granted"
+  | "access.grants.col.holder"
+  | "access.grants.col.role"
+  | "access.grants.col.scope"
+  | "access.grants.created"
+  | "access.grants.delegated"
+  | "access.grants.error.scope"
+  | "access.grants.error.subject"
+  | "access.grants.field.delegable"
+  | "access.grants.field.delegable_help"
+  | "access.grants.field.role"
+  | "access.grants.field.subject"
+  | "access.grants.heading"
+  | "access.grants.lede"
+  | "access.grants.lede_user"
+  | "access.grants.none"
+  | "access.grants.revoke_body"
+  | "access.grants.revoke_cascade"
+  | "access.grants.revoke_named"
+  | "access.grants.revoke_title"
+  | "access.grants.revoked"
+  | "access.lede"
+  | "access.mfa.optional"
+  | "access.mfa.optional_help"
+  | "access.mfa.passkey"
+  | "access.mfa.passkey_help"
+  | "access.mfa.profile_help"
+  | "access.mfa.totp_or_stronger"
+  | "access.mfa.totp_or_stronger_help"
+  | "access.picker.choose"
+  | "access.picker.kind"
+  | "access.picker.kind_everything"
+  | "access.picker.kind_prefix"
+  | "access.picker.kind_site"
+  | "access.picker.kind_vrf"
+  | "access.picker.object_prefix"
+  | "access.picker.object_site"
+  | "access.picker.object_vrf"
+  | "access.picker.prefix_option"
+  | "access.picker.subtree_prefix"
+  | "access.picker.subtree_site"
+  | "access.role.admin"
+  | "access.role.admin_description"
+  | "access.role.auditor"
+  | "access.role.auditor_description"
+  | "access.role.operator"
+  | "access.role.operator_description"
+  | "access.role.operator_grant"
+  | "access.role.viewer"
+  | "access.role.viewer_description"
+  | "access.role.viewer_grant"
+  | "access.roles.col.held"
+  | "access.roles.col.may"
+  | "access.roles.col.mfa"
+  | "access.roles.col.role"
+  | "access.roles.dialog_title"
+  | "access.roles.edit"
+  | "access.roles.edit_named"
+  | "access.roles.follow_profile"
+  | "access.roles.follows_profile"
+  | "access.roles.global_only"
+  | "access.roles.global_or_grant"
+  | "access.roles.heading"
+  | "access.roles.lede"
+  | "access.roles.saved"
+  | "access.roles.stored"
+  | "access.roles.weaker"
+  | "access.sa.add"
+  | "access.sa.add_lede"
+  | "access.sa.add_title"
+  | "access.sa.created"
+  | "access.sa.error.name"
+  | "access.sa.field.display_name"
+  | "access.sa.field.name"
+  | "access.sa.field.name_help"
+  | "access.sa.field.roles"
+  | "access.sa.field.roles_help"
+  | "access.sa.grants_only"
+  | "access.sa.heading"
+  | "access.sa.lede"
+  | "access.sa.no_tokens"
+  | "access.sa.none"
+  | "access.sa.summary"
+  | "access.sa.token_revoked"
+  | "access.sa.tokens"
+  | "access.sa.tokens_of"
+  | "access.scope.everything"
+  | "access.scope.object"
+  | "access.scope.prefix"
+  | "access.scope.prefix_subtree"
+  | "access.scope.site"
+  | "access.scope.site_subtree"
+  | "access.scope.tenant"
+  | "access.scope.vrf"
+  | "access.subject.option"
+  | "access.subject.service"
   | "access.title"
+  | "access.token.add_grant"
+  | "access.token.col.expires"
+  | "access.token.col.last_used"
+  | "access.token.col.name"
+  | "access.token.col.reach"
+  | "access.token.create"
+  | "access.token.create_title"
+  | "access.token.created_body"
+  | "access.token.created_title"
+  | "access.token.days"
+  | "access.token.error.empty"
+  | "access.token.error.name"
+  | "access.token.error.scope"
+  | "access.token.expired"
+  | "access.token.grants"
+  | "access.token.grants_help"
+  | "access.token.kind"
+  | "access.token.kind_personal"
+  | "access.token.kind_personal_help"
+  | "access.token.kind_scoped"
+  | "access.token.kind_scoped_help"
+  | "access.token.lifetime"
+  | "access.token.max_days"
+  | "access.token.max_none"
+  | "access.token.name"
+  | "access.token.name_help"
+  | "access.token.no_expiry"
+  | "access.token.personal"
+  | "access.token.remove_grant"
+  | "access.token.revoke_body"
+  | "access.token.revoke_named"
+  | "access.token.revoke_title"
+  | "access.token.scopes"
+  | "access.token.stored"
+  | "access.token_scope.audit_read"
+  | "access.token_scope.audit_read_help"
+  | "access.token_scope.metrics"
+  | "access.token_scope.metrics_help"
+  | "access.user.kind"
+  | "access.user.service"
   | "account.codes.lede"
   | "account.codes.title"
   | "account.copy_failed"
@@ -276,8 +417,69 @@ export type MessageKey =
   | "audit.strength.pin"
   | "audit.sub"
   | "audit.title"
-  | "audit_export.placeholder"
+  | "audit_export.add"
+  | "audit_export.add_title"
+  | "audit_export.col.actions"
+  | "audit_export.col.format"
+  | "audit_export.col.lag"
+  | "audit_export.col.name"
+  | "audit_export.col.state"
+  | "audit_export.col.target"
+  | "audit_export.delivered"
+  | "audit_export.edit_title"
+  | "audit_export.error.host"
+  | "audit_export.error.name"
+  | "audit_export.error.path"
+  | "audit_export.error.port"
+  | "audit_export.failing_since"
+  | "audit_export.field.ca_pem"
+  | "audit_export.field.ca_pem_help"
+  | "audit_export.field.client_certificate"
+  | "audit_export.field.format"
+  | "audit_export.field.host"
+  | "audit_export.field.keep_files"
+  | "audit_export.field.name"
+  | "audit_export.field.path"
+  | "audit_export.field.path_help"
+  | "audit_export.field.port"
+  | "audit_export.field.transport"
+  | "audit_export.format.cef"
+  | "audit_export.format.json"
+  | "audit_export.format.rfc5424"
+  | "audit_export.lede"
+  | "audit_export.none"
+  | "audit_export.pause"
+  | "audit_export.paused"
+  | "audit_export.remove_body"
+  | "audit_export.remove_last"
+  | "audit_export.remove_named"
+  | "audit_export.remove_title"
+  | "audit_export.removed"
+  | "audit_export.required.body"
+  | "audit_export.required.title"
+  | "audit_export.resume"
+  | "audit_export.resumed"
+  | "audit_export.saved"
+  | "audit_export.sinks.heading"
+  | "audit_export.state.disabled"
+  | "audit_export.state.failing"
+  | "audit_export.state.idle"
+  | "audit_export.state.ok"
+  | "audit_export.test"
+  | "audit_export.test_failed"
+  | "audit_export.test_ok"
   | "audit_export.title"
+  | "audit_export.transport.file"
+  | "audit_export.transport.file_help"
+  | "audit_export.transport.tcp"
+  | "audit_export.transport.tcp_help"
+  | "audit_export.transport.tls"
+  | "audit_export.transport.tls_help"
+  | "audit_export.transport.udp"
+  | "audit_export.transport.udp_help"
+  | "audit_export.udp_warning"
+  | "audit_export.verify.body"
+  | "audit_export.verify.heading"
   | "auth.signin.back_to_sign_in"
   | "auth.signin.break_glass_button"
   | "auth.signin.break_glass_lead"
@@ -321,7 +523,76 @@ export type MessageKey =
   | "auth.strength.password"
   | "auth.strength.password_totp"
   | "auth.strength.pin"
-  | "backup.placeholder"
+  | "backup.create.again"
+  | "backup.create.body"
+  | "backup.create.error.mismatch"
+  | "backup.create.error.short"
+  | "backup.create.key"
+  | "backup.create.key_passphrase"
+  | "backup.create.key_recipient"
+  | "backup.create.passphrase"
+  | "backup.create.passphrase_help"
+  | "backup.create.started"
+  | "backup.create.title"
+  | "backup.files.col.actions"
+  | "backup.files.col.created"
+  | "backup.files.col.file"
+  | "backup.files.col.made"
+  | "backup.files.col.size"
+  | "backup.files.heading"
+  | "backup.files.manual"
+  | "backup.files.none"
+  | "backup.files.scheduled"
+  | "backup.job_link"
+  | "backup.lede"
+  | "backup.now"
+  | "backup.preview.audit_head"
+  | "backup.preview.ca"
+  | "backup.preview.col.part"
+  | "backup.preview.col.sha256"
+  | "backup.preview.created"
+  | "backup.preview.format"
+  | "backup.preview.key"
+  | "backup.preview.open"
+  | "backup.preview.open_named"
+  | "backup.preview.parts"
+  | "backup.preview.restore_body"
+  | "backup.preview.restore_note"
+  | "backup.preview.revision"
+  | "backup.preview.title"
+  | "backup.preview.version"
+  | "backup.running"
+  | "backup.schedule.daily"
+  | "backup.schedule.daily_at"
+  | "backup.schedule.error.keep"
+  | "backup.schedule.error.time"
+  | "backup.schedule.heading"
+  | "backup.schedule.keep"
+  | "backup.schedule.keep_help"
+  | "backup.schedule.needs_recipient"
+  | "backup.schedule.off"
+  | "backup.schedule.saved"
+  | "backup.schedule.time"
+  | "backup.schedule.time_help"
+  | "backup.schedule.weekday"
+  | "backup.schedule.weekly"
+  | "backup.schedule.weekly_at"
+  | "backup.schedule.when"
+  | "backup.stale.body"
+  | "backup.stale.title"
+  | "backup.state.heading"
+  | "backup.state.last_failed"
+  | "backup.state.last_good"
+  | "backup.state.never"
+  | "backup.state.next"
+  | "backup.state.not_scheduled"
+  | "backup.state.recipient"
+  | "backup.state.recipient_no"
+  | "backup.state.recipient_yes"
+  | "backup.state.target"
+  | "backup.step_up.body"
+  | "backup.step_up.sign_in"
+  | "backup.step_up.title"
   | "backup.title"
   | "cluster.action.add"
   | "cluster.action.check_digests"
@@ -2104,6 +2375,10 @@ export type MessageKey =
   | "jobs.flag.cancel_requested"
   | "jobs.group.heading"
   | "jobs.group.limit"
+  | "jobs.group.not_moved.count"
+  | "jobs.group.not_moved.heading"
+  | "jobs.group.not_moved.hint"
+  | "jobs.group.not_moved.no_reason"
   | "jobs.group.summary"
   | "jobs.kind.address"
   | "jobs.kind.custom_field"
@@ -2154,6 +2429,7 @@ export type MessageKey =
   | "jobs.problem.title"
   | "jobs.progress"
   | "jobs.state.cancelled"
+  | "jobs.state.cancelled_rolled_back"
   | "jobs.state.failed"
   | "jobs.state.queued"
   | "jobs.state.rolled_back"
@@ -2228,6 +2504,7 @@ export type MessageKey =
   | "jobs.title.move"
   | "jobs.title.update_install"
   | "jobs.undo.step"
+  | "jobs.undo.step_named"
   | "jobs.view.active"
   | "jobs.view.all"
   | "jobs.view.failed"
@@ -3911,10 +4188,102 @@ export type MessageKey =
   | "updates.whatsnew.lead"
   | "updates.whatsnew.lead_first"
   | "updates.whatsnew.title"
-  | "vault.placeholder"
-  | "vault.title";
+  | "vault.controllers.col.node"
+  | "vault.controllers.col.updated"
+  | "vault.controllers.heading"
+  | "vault.downgrade"
+  | "vault.generations.active"
+  | "vault.generations.col.created"
+  | "vault.generations.col.id"
+  | "vault.generations.col.state"
+  | "vault.generations.heading"
+  | "vault.generations.loaded"
+  | "vault.generations.missing"
+  | "vault.key.active"
+  | "vault.key.epoch"
+  | "vault.key.heading"
+  | "vault.key.protection"
+  | "vault.key.provider"
+  | "vault.key.strongest"
+  | "vault.lede"
+  | "vault.phase.distributing"
+  | "vault.phase.done"
+  | "vault.phase.failed"
+  | "vault.phase.requested"
+  | "vault.phase.rewrapping"
+  | "vault.protection.dpapi_machine"
+  | "vault.protection.dpapi_user"
+  | "vault.protection.memory"
+  | "vault.protection.plain_file"
+  | "vault.protection.systemd_creds_host"
+  | "vault.protection.systemd_creds_tpm2"
+  | "vault.provider.dpapi"
+  | "vault.provider.file"
+  | "vault.provider.systemd_credential"
+  | "vault.provider.systemd_creds"
+  | "vault.refused.title"
+  | "vault.rotation.confirm_body"
+  | "vault.rotation.confirm_note"
+  | "vault.rotation.confirm_title"
+  | "vault.rotation.error"
+  | "vault.rotation.finished_at"
+  | "vault.rotation.generation"
+  | "vault.rotation.heading"
+  | "vault.rotation.lede"
+  | "vault.rotation.never"
+  | "vault.rotation.phase"
+  | "vault.rotation.requested"
+  | "vault.rotation.requested_at"
+  | "vault.rotation.rewrapped"
+  | "vault.rotation.rotate"
+  | "vault.rotation.unreachable"
+  | "vault.rotation.unreachable_text"
+  | "vault.rotation.waiting_for"
+  | "vault.step_up.body"
+  | "vault.step_up.sign_in"
+  | "vault.step_up.title"
+  | "vault.title"
+  | "vault.warning.downgrade"
+  | "vault.warning.missing"
+  | "vault.warning.rotation_failed"
+  | "vault.warning.weak"
+  | "vault.weak";
 /** Arguments of the messages that take any. */
 export interface MessageArgs {
+  "access.grant.text": { role: string | number; scope: string | number };
+  "access.grants.created": { holder: string | number };
+  "access.grants.revoke_body": { grant: string | number; holder: string | number };
+  "access.grants.revoke_cascade": { count: number };
+  "access.grants.revoke_named": { grant: string | number; holder: string | number };
+  "access.grants.revoke_title": { holder: string | number };
+  "access.grants.revoked": { count: number; holder: string | number };
+  "access.picker.prefix_option": { cidr: string | number; vrf: string | number };
+  "access.roles.dialog_title": { role: string | number };
+  "access.roles.edit_named": { role: string | number };
+  "access.roles.follow_profile": { profile: string | number };
+  "access.roles.saved": { role: string | number };
+  "access.roles.stored": { profile: string | number };
+  "access.roles.weaker": { profile: string | number };
+  "access.sa.created": { name: string | number };
+  "access.sa.summary": { display: string | number; owner: string | number; roles: string | number };
+  "access.sa.token_revoked": { name: string | number };
+  "access.sa.tokens_of": { name: string | number };
+  "access.scope.object": { id: string | number; kind: string | number };
+  "access.scope.prefix": { cidr: string | number };
+  "access.scope.prefix_subtree": { cidr: string | number };
+  "access.scope.site": { name: string | number };
+  "access.scope.site_subtree": { name: string | number };
+  "access.scope.tenant": { id: string | number };
+  "access.scope.vrf": { name: string | number };
+  "access.subject.option": { label: string | number; name: string | number };
+  "access.subject.service": { name: string | number };
+  "access.token.created_body": { name: string | number };
+  "access.token.days": { count: number };
+  "access.token.max_days": { days: string | number };
+  "access.token.remove_grant": { n: string | number };
+  "access.token.revoke_body": { account: string | number };
+  "access.token.revoke_named": { name: string | number };
+  "access.token.revoke_title": { name: string | number };
   "account.methods.requires": { method: string | number; profile: string | number };
   "account.methods.signed_in_with": { method: string | number };
   "account.passkey.created": { date: string | number };
@@ -3954,7 +4323,23 @@ export interface MessageArgs {
   "audit.record.open_newest": { seq: string | number };
   "audit.record.title": { seq: string | number };
   "audit.row": { seq: string | number };
+  "audit_export.delivered": { when: string | number };
+  "audit_export.failing_since": { when: string | number };
+  "audit_export.paused": { name: string | number };
+  "audit_export.remove_named": { name: string | number };
+  "audit_export.remove_title": { name: string | number };
+  "audit_export.removed": { name: string | number };
+  "audit_export.resumed": { name: string | number };
+  "audit_export.saved": { name: string | number };
+  "audit_export.test_failed": { detail: string | number };
   "auth.signin.retry_in": { seconds: number };
+  "backup.create.error.short": { min: number };
+  "backup.create.passphrase_help": { min: number };
+  "backup.preview.open_named": { file: string | number };
+  "backup.preview.title": { file: string | number };
+  "backup.schedule.daily_at": { time: string | number };
+  "backup.schedule.saved": { schedule: string | number };
+  "backup.schedule.weekly_at": { day: string | number; time: string | number };
   "cluster.action.promote_named": { name: string | number };
   "cluster.action.remove_named": { name: string | number };
   "cluster.col.format": { format: string | number };
@@ -4329,6 +4714,7 @@ export interface MessageArgs {
   "jobs.filter.target": { target: string | number };
   "jobs.group.heading": { group: string | number };
   "jobs.group.limit": { limit: number };
+  "jobs.group.not_moved.count": { count: number };
   "jobs.group.summary": { count: number };
   "jobs.l2.receipt": { count: number; when: string | number };
   "jobs.l2.undo_hint": { before: string | number; path: string | number };
@@ -4358,6 +4744,7 @@ export interface MessageArgs {
   "jobs.task.dns_revert": { name: string | number; old_ip: string | number };
   "jobs.task.dns_update": { name: string | number; new_ip: string | number; old_ip: string | number };
   "jobs.undo.step": { kind: string | number; step: string | number };
+  "jobs.undo.step_named": { name: string | number; step: string | number };
   "languages.action.template_of": { name: string | number };
   "languages.confirm.activate.body": { name: string | number };
   "languages.confirm.activate.ok": { name: string | number };
@@ -4689,10 +5076,155 @@ export interface MessageArgs {
   "updates.whatsnew.empty": { version: string | number };
   "updates.whatsnew.lead": { last: string | number };
   "updates.whatsnew.title": { version: string | number };
+  "vault.key.heading": { node: string | number };
+  "vault.rotation.unreachable_text": { nodes: string | number };
+  "vault.warning.missing": { generations: string | number };
+  "vault.warning.rotation_failed": { error: string | number };
 }
 export const messageKeys: readonly MessageKey[] = [
-  "access.placeholder",
+  "access.col.actions",
+  "access.grant.text",
+  "access.grants.add",
+  "access.grants.add_confirm",
+  "access.grants.add_title",
+  "access.grants.col.delegable",
+  "access.grants.col.granted",
+  "access.grants.col.holder",
+  "access.grants.col.role",
+  "access.grants.col.scope",
+  "access.grants.created",
+  "access.grants.delegated",
+  "access.grants.error.scope",
+  "access.grants.error.subject",
+  "access.grants.field.delegable",
+  "access.grants.field.delegable_help",
+  "access.grants.field.role",
+  "access.grants.field.subject",
+  "access.grants.heading",
+  "access.grants.lede",
+  "access.grants.lede_user",
+  "access.grants.none",
+  "access.grants.revoke_body",
+  "access.grants.revoke_cascade",
+  "access.grants.revoke_named",
+  "access.grants.revoke_title",
+  "access.grants.revoked",
+  "access.lede",
+  "access.mfa.optional",
+  "access.mfa.optional_help",
+  "access.mfa.passkey",
+  "access.mfa.passkey_help",
+  "access.mfa.profile_help",
+  "access.mfa.totp_or_stronger",
+  "access.mfa.totp_or_stronger_help",
+  "access.picker.choose",
+  "access.picker.kind",
+  "access.picker.kind_everything",
+  "access.picker.kind_prefix",
+  "access.picker.kind_site",
+  "access.picker.kind_vrf",
+  "access.picker.object_prefix",
+  "access.picker.object_site",
+  "access.picker.object_vrf",
+  "access.picker.prefix_option",
+  "access.picker.subtree_prefix",
+  "access.picker.subtree_site",
+  "access.role.admin",
+  "access.role.admin_description",
+  "access.role.auditor",
+  "access.role.auditor_description",
+  "access.role.operator",
+  "access.role.operator_description",
+  "access.role.operator_grant",
+  "access.role.viewer",
+  "access.role.viewer_description",
+  "access.role.viewer_grant",
+  "access.roles.col.held",
+  "access.roles.col.may",
+  "access.roles.col.mfa",
+  "access.roles.col.role",
+  "access.roles.dialog_title",
+  "access.roles.edit",
+  "access.roles.edit_named",
+  "access.roles.follow_profile",
+  "access.roles.follows_profile",
+  "access.roles.global_only",
+  "access.roles.global_or_grant",
+  "access.roles.heading",
+  "access.roles.lede",
+  "access.roles.saved",
+  "access.roles.stored",
+  "access.roles.weaker",
+  "access.sa.add",
+  "access.sa.add_lede",
+  "access.sa.add_title",
+  "access.sa.created",
+  "access.sa.error.name",
+  "access.sa.field.display_name",
+  "access.sa.field.name",
+  "access.sa.field.name_help",
+  "access.sa.field.roles",
+  "access.sa.field.roles_help",
+  "access.sa.grants_only",
+  "access.sa.heading",
+  "access.sa.lede",
+  "access.sa.no_tokens",
+  "access.sa.none",
+  "access.sa.summary",
+  "access.sa.token_revoked",
+  "access.sa.tokens",
+  "access.sa.tokens_of",
+  "access.scope.everything",
+  "access.scope.object",
+  "access.scope.prefix",
+  "access.scope.prefix_subtree",
+  "access.scope.site",
+  "access.scope.site_subtree",
+  "access.scope.tenant",
+  "access.scope.vrf",
+  "access.subject.option",
+  "access.subject.service",
   "access.title",
+  "access.token.add_grant",
+  "access.token.col.expires",
+  "access.token.col.last_used",
+  "access.token.col.name",
+  "access.token.col.reach",
+  "access.token.create",
+  "access.token.create_title",
+  "access.token.created_body",
+  "access.token.created_title",
+  "access.token.days",
+  "access.token.error.empty",
+  "access.token.error.name",
+  "access.token.error.scope",
+  "access.token.expired",
+  "access.token.grants",
+  "access.token.grants_help",
+  "access.token.kind",
+  "access.token.kind_personal",
+  "access.token.kind_personal_help",
+  "access.token.kind_scoped",
+  "access.token.kind_scoped_help",
+  "access.token.lifetime",
+  "access.token.max_days",
+  "access.token.max_none",
+  "access.token.name",
+  "access.token.name_help",
+  "access.token.no_expiry",
+  "access.token.personal",
+  "access.token.remove_grant",
+  "access.token.revoke_body",
+  "access.token.revoke_named",
+  "access.token.revoke_title",
+  "access.token.scopes",
+  "access.token.stored",
+  "access.token_scope.audit_read",
+  "access.token_scope.audit_read_help",
+  "access.token_scope.metrics",
+  "access.token_scope.metrics_help",
+  "access.user.kind",
+  "access.user.service",
   "account.codes.lede",
   "account.codes.title",
   "account.copy_failed",
@@ -4967,8 +5499,69 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.strength.pin",
   "audit.sub",
   "audit.title",
-  "audit_export.placeholder",
+  "audit_export.add",
+  "audit_export.add_title",
+  "audit_export.col.actions",
+  "audit_export.col.format",
+  "audit_export.col.lag",
+  "audit_export.col.name",
+  "audit_export.col.state",
+  "audit_export.col.target",
+  "audit_export.delivered",
+  "audit_export.edit_title",
+  "audit_export.error.host",
+  "audit_export.error.name",
+  "audit_export.error.path",
+  "audit_export.error.port",
+  "audit_export.failing_since",
+  "audit_export.field.ca_pem",
+  "audit_export.field.ca_pem_help",
+  "audit_export.field.client_certificate",
+  "audit_export.field.format",
+  "audit_export.field.host",
+  "audit_export.field.keep_files",
+  "audit_export.field.name",
+  "audit_export.field.path",
+  "audit_export.field.path_help",
+  "audit_export.field.port",
+  "audit_export.field.transport",
+  "audit_export.format.cef",
+  "audit_export.format.json",
+  "audit_export.format.rfc5424",
+  "audit_export.lede",
+  "audit_export.none",
+  "audit_export.pause",
+  "audit_export.paused",
+  "audit_export.remove_body",
+  "audit_export.remove_last",
+  "audit_export.remove_named",
+  "audit_export.remove_title",
+  "audit_export.removed",
+  "audit_export.required.body",
+  "audit_export.required.title",
+  "audit_export.resume",
+  "audit_export.resumed",
+  "audit_export.saved",
+  "audit_export.sinks.heading",
+  "audit_export.state.disabled",
+  "audit_export.state.failing",
+  "audit_export.state.idle",
+  "audit_export.state.ok",
+  "audit_export.test",
+  "audit_export.test_failed",
+  "audit_export.test_ok",
   "audit_export.title",
+  "audit_export.transport.file",
+  "audit_export.transport.file_help",
+  "audit_export.transport.tcp",
+  "audit_export.transport.tcp_help",
+  "audit_export.transport.tls",
+  "audit_export.transport.tls_help",
+  "audit_export.transport.udp",
+  "audit_export.transport.udp_help",
+  "audit_export.udp_warning",
+  "audit_export.verify.body",
+  "audit_export.verify.heading",
   "auth.signin.back_to_sign_in",
   "auth.signin.break_glass_button",
   "auth.signin.break_glass_lead",
@@ -5012,7 +5605,76 @@ export const messageKeys: readonly MessageKey[] = [
   "auth.strength.password",
   "auth.strength.password_totp",
   "auth.strength.pin",
-  "backup.placeholder",
+  "backup.create.again",
+  "backup.create.body",
+  "backup.create.error.mismatch",
+  "backup.create.error.short",
+  "backup.create.key",
+  "backup.create.key_passphrase",
+  "backup.create.key_recipient",
+  "backup.create.passphrase",
+  "backup.create.passphrase_help",
+  "backup.create.started",
+  "backup.create.title",
+  "backup.files.col.actions",
+  "backup.files.col.created",
+  "backup.files.col.file",
+  "backup.files.col.made",
+  "backup.files.col.size",
+  "backup.files.heading",
+  "backup.files.manual",
+  "backup.files.none",
+  "backup.files.scheduled",
+  "backup.job_link",
+  "backup.lede",
+  "backup.now",
+  "backup.preview.audit_head",
+  "backup.preview.ca",
+  "backup.preview.col.part",
+  "backup.preview.col.sha256",
+  "backup.preview.created",
+  "backup.preview.format",
+  "backup.preview.key",
+  "backup.preview.open",
+  "backup.preview.open_named",
+  "backup.preview.parts",
+  "backup.preview.restore_body",
+  "backup.preview.restore_note",
+  "backup.preview.revision",
+  "backup.preview.title",
+  "backup.preview.version",
+  "backup.running",
+  "backup.schedule.daily",
+  "backup.schedule.daily_at",
+  "backup.schedule.error.keep",
+  "backup.schedule.error.time",
+  "backup.schedule.heading",
+  "backup.schedule.keep",
+  "backup.schedule.keep_help",
+  "backup.schedule.needs_recipient",
+  "backup.schedule.off",
+  "backup.schedule.saved",
+  "backup.schedule.time",
+  "backup.schedule.time_help",
+  "backup.schedule.weekday",
+  "backup.schedule.weekly",
+  "backup.schedule.weekly_at",
+  "backup.schedule.when",
+  "backup.stale.body",
+  "backup.stale.title",
+  "backup.state.heading",
+  "backup.state.last_failed",
+  "backup.state.last_good",
+  "backup.state.never",
+  "backup.state.next",
+  "backup.state.not_scheduled",
+  "backup.state.recipient",
+  "backup.state.recipient_no",
+  "backup.state.recipient_yes",
+  "backup.state.target",
+  "backup.step_up.body",
+  "backup.step_up.sign_in",
+  "backup.step_up.title",
   "backup.title",
   "cluster.action.add",
   "cluster.action.check_digests",
@@ -6795,6 +7457,10 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.flag.cancel_requested",
   "jobs.group.heading",
   "jobs.group.limit",
+  "jobs.group.not_moved.count",
+  "jobs.group.not_moved.heading",
+  "jobs.group.not_moved.hint",
+  "jobs.group.not_moved.no_reason",
   "jobs.group.summary",
   "jobs.kind.address",
   "jobs.kind.custom_field",
@@ -6845,6 +7511,7 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.problem.title",
   "jobs.progress",
   "jobs.state.cancelled",
+  "jobs.state.cancelled_rolled_back",
   "jobs.state.failed",
   "jobs.state.queued",
   "jobs.state.rolled_back",
@@ -6919,6 +7586,7 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.title.move",
   "jobs.title.update_install",
   "jobs.undo.step",
+  "jobs.undo.step_named",
   "jobs.view.active",
   "jobs.view.all",
   "jobs.view.failed",
@@ -8602,6 +9270,64 @@ export const messageKeys: readonly MessageKey[] = [
   "updates.whatsnew.lead",
   "updates.whatsnew.lead_first",
   "updates.whatsnew.title",
-  "vault.placeholder",
+  "vault.controllers.col.node",
+  "vault.controllers.col.updated",
+  "vault.controllers.heading",
+  "vault.downgrade",
+  "vault.generations.active",
+  "vault.generations.col.created",
+  "vault.generations.col.id",
+  "vault.generations.col.state",
+  "vault.generations.heading",
+  "vault.generations.loaded",
+  "vault.generations.missing",
+  "vault.key.active",
+  "vault.key.epoch",
+  "vault.key.heading",
+  "vault.key.protection",
+  "vault.key.provider",
+  "vault.key.strongest",
+  "vault.lede",
+  "vault.phase.distributing",
+  "vault.phase.done",
+  "vault.phase.failed",
+  "vault.phase.requested",
+  "vault.phase.rewrapping",
+  "vault.protection.dpapi_machine",
+  "vault.protection.dpapi_user",
+  "vault.protection.memory",
+  "vault.protection.plain_file",
+  "vault.protection.systemd_creds_host",
+  "vault.protection.systemd_creds_tpm2",
+  "vault.provider.dpapi",
+  "vault.provider.file",
+  "vault.provider.systemd_credential",
+  "vault.provider.systemd_creds",
+  "vault.refused.title",
+  "vault.rotation.confirm_body",
+  "vault.rotation.confirm_note",
+  "vault.rotation.confirm_title",
+  "vault.rotation.error",
+  "vault.rotation.finished_at",
+  "vault.rotation.generation",
+  "vault.rotation.heading",
+  "vault.rotation.lede",
+  "vault.rotation.never",
+  "vault.rotation.phase",
+  "vault.rotation.requested",
+  "vault.rotation.requested_at",
+  "vault.rotation.rewrapped",
+  "vault.rotation.rotate",
+  "vault.rotation.unreachable",
+  "vault.rotation.unreachable_text",
+  "vault.rotation.waiting_for",
+  "vault.step_up.body",
+  "vault.step_up.sign_in",
+  "vault.step_up.title",
   "vault.title",
+  "vault.warning.downgrade",
+  "vault.warning.missing",
+  "vault.warning.rotation_failed",
+  "vault.warning.weak",
+  "vault.weak",
 ];

@@ -6,9 +6,447 @@
         <notes><note category="description">Title of the access page and its entry in the browser tab.</note></notes>
         <segment><source>Access</source></segment>
       </unit>
-      <unit id="access.placeholder">
-        <notes><note category="description">Placeholder text of the access page until the page itself exists.</note></notes>
-        <segment><source>The access page arrives with a later update.</source></segment>
+      <unit id="access.lede">
+        <segment><source>Who may do what: the roles, the sign-in each role needs, scoped grants over VRFs, sites and prefixes, and the service accounts that automation uses. The server checks every request.</source></segment>
+      </unit>
+      <unit id="access.col.actions">
+        <notes><note category="description">Hidden header of the column with the buttons of a row.</note></notes>
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="access.role.admin">
+        <segment><source>Administrator</source></segment>
+      </unit>
+      <unit id="access.role.operator">
+        <segment><source>Operator</source></segment>
+      </unit>
+      <unit id="access.role.viewer">
+        <segment><source>Viewer</source></segment>
+      </unit>
+      <unit id="access.role.auditor">
+        <segment><source>Auditor</source></segment>
+      </unit>
+      <unit id="access.role.admin_description">
+        <segment><source>Everything, including users, security settings, secrets and the system.</source></segment>
+      </unit>
+      <unit id="access.role.operator_description">
+        <segment><source>Reads and changes the inventory, runs jobs and imports, approves proposals.</source></segment>
+      </unit>
+      <unit id="access.role.viewer_description">
+        <segment><source>Reads the inventory, jobs and imports.</source></segment>
+      </unit>
+      <unit id="access.role.auditor_description">
+        <segment><source>Reads the audit log, the audit export status and the system status, nothing else.</source></segment>
+      </unit>
+      <unit id="access.role.operator_grant">
+        <notes><note category="description">Help under the role choice of a grant.</note></notes>
+        <segment><source>Reads and changes what lies in the scope.</source></segment>
+      </unit>
+      <unit id="access.role.viewer_grant">
+        <notes><note category="description">Help under the role choice of a grant.</note></notes>
+        <segment><source>Reads what lies in the scope.</source></segment>
+      </unit>
+      <unit id="access.mfa.optional">
+        <notes><note category="description">An MFA policy of a role: no second factor required.</note></notes>
+        <segment><source>Any sign-in</source></segment>
+      </unit>
+      <unit id="access.mfa.totp_or_stronger">
+        <segment><source>Authenticator code or passkey</source></segment>
+      </unit>
+      <unit id="access.mfa.passkey">
+        <segment><source>Passkey or security key</source></segment>
+      </unit>
+      <unit id="access.mfa.profile_help">
+        <segment><source>The role needs what the security profile asks.</source></segment>
+      </unit>
+      <unit id="access.mfa.optional_help">
+        <segment><source>A password is enough, unless the profile asks for more.</source></segment>
+      </unit>
+      <unit id="access.mfa.totp_or_stronger_help">
+        <segment><source>A password with an authenticator code or a recovery code, or a passkey.</source></segment>
+      </unit>
+      <unit id="access.mfa.passkey_help">
+        <segment><source>A passkey or a hardware security key.</source></segment>
+      </unit>
+      <unit id="access.roles.heading">
+        <segment><source>Roles and sign-in</source></segment>
+      </unit>
+      <unit id="access.roles.lede">
+        <segment><source>A person needs the strictest sign-in of every role they hold, globally or through a grant. A requirement weaker than the profile has no effect beyond the profile.</source></segment>
+      </unit>
+      <unit id="access.roles.col.role">
+        <segment><source>Role</source></segment>
+      </unit>
+      <unit id="access.roles.col.may">
+        <segment><source>May</source></segment>
+      </unit>
+      <unit id="access.roles.col.held">
+        <segment><source>Held</source></segment>
+      </unit>
+      <unit id="access.roles.col.mfa">
+        <segment><source>Sign-in required</source></segment>
+      </unit>
+      <unit id="access.roles.global_only">
+        <segment><source>Globally only</source></segment>
+      </unit>
+      <unit id="access.roles.global_or_grant">
+        <segment><source>Globally or through a grant</source></segment>
+      </unit>
+      <unit id="access.roles.follows_profile">
+        <segment><source>Follows the profile</source></segment>
+      </unit>
+      <unit id="access.roles.stored">
+        <notes><note category="description">The argument profile is the requirement of the security profile, e.g. Any sign-in.</note></notes>
+        <segment><source>Set for this role; the profile asks for: {profile}</source></segment>
+      </unit>
+      <unit id="access.roles.edit">
+        <segment><source>Change</source></segment>
+      </unit>
+      <unit id="access.roles.edit_named">
+        <segment><source>Change the sign-in of the role {role}</source></segment>
+      </unit>
+      <unit id="access.roles.dialog_title">
+        <segment><source>Sign-in for the role {role}</source></segment>
+      </unit>
+      <unit id="access.roles.follow_profile">
+        <notes><note category="description">The argument profile is the requirement of the security profile.</note></notes>
+        <segment><source>Follow the profile ({profile})</source></segment>
+      </unit>
+      <unit id="access.roles.weaker">
+        <segment><source>This is weaker than the profile, which asks for {profile}; the profile wins.</source></segment>
+      </unit>
+      <unit id="access.roles.saved">
+        <segment><source>Sign-in of the role {role} saved</source></segment>
+      </unit>
+      <unit id="access.grants.heading">
+        <segment><source>Scoped grants</source></segment>
+      </unit>
+      <unit id="access.grants.lede">
+        <segment><source>A grant gives a person or a service account the operator or viewer role over a VRF, a site or a prefix. Revoking a delegable grant also revokes the grants issued under it.</source></segment>
+      </unit>
+      <unit id="access.grants.lede_user">
+        <segment><source>The roles this account holds over parts of the inventory, on top of its global roles.</source></segment>
+      </unit>
+      <unit id="access.grants.none">
+        <segment><source>No scoped grants.</source></segment>
+      </unit>
+      <unit id="access.grants.add">
+        <segment><source>Add grant</source></segment>
+      </unit>
+      <unit id="access.grants.add_title">
+        <segment><source>Add a scoped grant</source></segment>
+      </unit>
+      <unit id="access.grants.add_confirm">
+        <segment><source>Add grant</source></segment>
+      </unit>
+      <unit id="access.grants.col.holder">
+        <segment><source>Holder</source></segment>
+      </unit>
+      <unit id="access.grants.col.role">
+        <segment><source>Role</source></segment>
+      </unit>
+      <unit id="access.grants.col.scope">
+        <segment><source>Scope</source></segment>
+      </unit>
+      <unit id="access.grants.col.delegable">
+        <segment><source>Delegable</source></segment>
+      </unit>
+      <unit id="access.grants.col.granted">
+        <segment><source>Granted</source></segment>
+      </unit>
+      <unit id="access.grants.delegated">
+        <notes><note category="description">Tag on a grant that the holder of a delegable grant issued.</note></notes>
+        <segment><source>Delegated</source></segment>
+      </unit>
+      <unit id="access.grants.field.subject">
+        <segment><source>Holder</source></segment>
+      </unit>
+      <unit id="access.grants.field.role">
+        <segment><source>Role</source></segment>
+      </unit>
+      <unit id="access.grants.field.delegable">
+        <segment><source>The holder may delegate it</source></segment>
+      </unit>
+      <unit id="access.grants.field.delegable_help">
+        <segment><source>They may then give others a role no higher over a scope inside this one.</source></segment>
+      </unit>
+      <unit id="access.grants.error.subject">
+        <segment><source>Choose who receives the grant.</source></segment>
+      </unit>
+      <unit id="access.grants.error.scope">
+        <segment><source>Choose the VRF, site or prefix the grant applies to.</source></segment>
+      </unit>
+      <unit id="access.grants.created">
+        <segment><source>Grant for {holder} added</source></segment>
+      </unit>
+      <unit id="access.grants.revoke_title">
+        <segment><source>Revoke a grant of {holder}?</source></segment>
+      </unit>
+      <unit id="access.grants.revoke_body">
+        <notes><note category="description">The argument grant is a grant in words, e.g. Operator over prefix 203.0.113.0/24 and everything inside it.</note></notes>
+        <segment><source>{holder} loses: {grant}.</source></segment>
+      </unit>
+      <unit id="access.grants.revoke_cascade">
+        <segment><source>{count, plural, =0 {No grant was issued under it so far.} one {The # grant issued under it goes too.} other {The # grants issued under it go too.}}</source></segment>
+      </unit>
+      <unit id="access.grants.revoke_named">
+        <segment><source>Revoke {grant} of {holder}</source></segment>
+      </unit>
+      <unit id="access.grants.revoked">
+        <segment><source>{count, plural, one {Grant of {holder} revoked} other {# grants revoked, starting with the one of {holder}}}</source></segment>
+      </unit>
+      <unit id="access.grant.text">
+        <notes><note category="description">A grant in words. role is a role name, scope a scope in words, e.g. Operator over prefix 203.0.113.0/24 only.</note></notes>
+        <segment><source>{role} over {scope}</source></segment>
+      </unit>
+      <unit id="access.scope.everything">
+        <notes><note category="description">A token grant without a scope; follows "over" in access.grant.text.</note></notes>
+        <segment><source>the whole installation</source></segment>
+      </unit>
+      <unit id="access.scope.vrf">
+        <segment><source>VRF {name}</source></segment>
+      </unit>
+      <unit id="access.scope.site">
+        <segment><source>site {name} only</source></segment>
+      </unit>
+      <unit id="access.scope.site_subtree">
+        <segment><source>site {name} and its child sites</source></segment>
+      </unit>
+      <unit id="access.scope.prefix">
+        <segment><source>prefix {cidr} only</source></segment>
+      </unit>
+      <unit id="access.scope.prefix_subtree">
+        <segment><source>prefix {cidr} and everything inside it</source></segment>
+      </unit>
+      <unit id="access.scope.tenant">
+        <segment><source>tenant {id}</source></segment>
+      </unit>
+      <unit id="access.scope.object">
+        <segment><source>{kind} {id}</source></segment>
+      </unit>
+      <unit id="access.picker.kind">
+        <segment><source>Applies to</source></segment>
+      </unit>
+      <unit id="access.picker.kind_everything">
+        <segment><source>Whole installation</source></segment>
+      </unit>
+      <unit id="access.picker.kind_vrf">
+        <segment><source>VRF</source></segment>
+      </unit>
+      <unit id="access.picker.kind_site">
+        <segment><source>Site</source></segment>
+      </unit>
+      <unit id="access.picker.kind_prefix">
+        <segment><source>Prefix</source></segment>
+      </unit>
+      <unit id="access.picker.object_vrf">
+        <segment><source>VRF</source></segment>
+      </unit>
+      <unit id="access.picker.object_site">
+        <segment><source>Site</source></segment>
+      </unit>
+      <unit id="access.picker.object_prefix">
+        <segment><source>Prefix</source></segment>
+      </unit>
+      <unit id="access.picker.choose">
+        <segment><source>Choose…</source></segment>
+      </unit>
+      <unit id="access.picker.prefix_option">
+        <notes><note category="description">A prefix in the scope picker: the network and its VRF.</note></notes>
+        <segment><source>{cidr} ({vrf})</source></segment>
+      </unit>
+      <unit id="access.picker.subtree_site">
+        <segment><source>Include its child sites</source></segment>
+      </unit>
+      <unit id="access.picker.subtree_prefix">
+        <segment><source>Include everything inside it</source></segment>
+      </unit>
+      <unit id="access.subject.service">
+        <segment><source>{name} (service account)</source></segment>
+      </unit>
+      <unit id="access.subject.option">
+        <notes><note category="description">An account in the holder list: login name and display name.</note></notes>
+        <segment><source>{name}: {label}</source></segment>
+      </unit>
+      <unit id="access.sa.heading">
+        <segment><source>Service accounts</source></segment>
+      </unit>
+      <unit id="access.sa.lede">
+        <segment><source>Accounts for automation. They have no password, second factor or session, and act only through scoped tokens.</source></segment>
+      </unit>
+      <unit id="access.sa.none">
+        <segment><source>No service accounts.</source></segment>
+      </unit>
+      <unit id="access.sa.add">
+        <segment><source>Add service account</source></segment>
+      </unit>
+      <unit id="access.sa.add_title">
+        <segment><source>Add a service account</source></segment>
+      </unit>
+      <unit id="access.sa.add_lede">
+        <segment><source>You become its owner. Give it roles here or grants afterwards, then create a scoped token for it.</source></segment>
+      </unit>
+      <unit id="access.sa.field.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="access.sa.field.name_help">
+        <segment><source>1 to 64 characters without spaces. Shares the names of users.</source></segment>
+      </unit>
+      <unit id="access.sa.field.display_name">
+        <segment><source>Display name</source></segment>
+      </unit>
+      <unit id="access.sa.field.roles">
+        <segment><source>Global roles</source></segment>
+      </unit>
+      <unit id="access.sa.field.roles_help">
+        <segment><source>Leave all unticked for an account that acts through scoped grants only.</source></segment>
+      </unit>
+      <unit id="access.sa.error.name">
+        <segment><source>Enter 1 to 64 characters without spaces.</source></segment>
+      </unit>
+      <unit id="access.sa.created">
+        <segment><source>Service account {name} added</source></segment>
+      </unit>
+      <unit id="access.sa.summary">
+        <segment><source>{display} · roles: {roles} · owner: {owner}</source></segment>
+      </unit>
+      <unit id="access.sa.grants_only">
+        <segment><source>grants only</source></segment>
+      </unit>
+      <unit id="access.sa.tokens">
+        <segment><source>Tokens</source></segment>
+      </unit>
+      <unit id="access.sa.tokens_of">
+        <segment><source>Tokens of {name}</source></segment>
+      </unit>
+      <unit id="access.sa.no_tokens">
+        <segment><source>No tokens.</source></segment>
+      </unit>
+      <unit id="access.sa.token_revoked">
+        <segment><source>Token {name} revoked</source></segment>
+      </unit>
+      <unit id="access.token.create">
+        <segment><source>Create token</source></segment>
+      </unit>
+      <unit id="access.token.create_title">
+        <segment><source>Create an API token</source></segment>
+      </unit>
+      <unit id="access.token.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="access.token.name_help">
+        <segment><source>What the token is for, such as the tool that uses it.</source></segment>
+      </unit>
+      <unit id="access.token.error.name">
+        <segment><source>Enter a name.</source></segment>
+      </unit>
+      <unit id="access.token.lifetime">
+        <segment><source>Lifetime</source></segment>
+      </unit>
+      <unit id="access.token.days">
+        <segment><source>{count, plural, one {# day} other {# days}}</source></segment>
+      </unit>
+      <unit id="access.token.no_expiry">
+        <segment><source>No expiry</source></segment>
+      </unit>
+      <unit id="access.token.max_days">
+        <segment><source>The security profile allows at most {days} days.</source></segment>
+      </unit>
+      <unit id="access.token.max_none">
+        <segment><source>The Lab profile allows tokens without expiry.</source></segment>
+      </unit>
+      <unit id="access.token.kind">
+        <segment><source>Kind</source></segment>
+      </unit>
+      <unit id="access.token.kind_personal">
+        <segment><source>Personal</source></segment>
+      </unit>
+      <unit id="access.token.kind_personal_help">
+        <segment><source>Acts with every role and grant you have.</source></segment>
+      </unit>
+      <unit id="access.token.kind_scoped">
+        <segment><source>Scoped</source></segment>
+      </unit>
+      <unit id="access.token.kind_scoped_help">
+        <segment><source>Acts with the grants and scopes you choose, never more than you have.</source></segment>
+      </unit>
+      <unit id="access.token.grants">
+        <segment><source>Grants</source></segment>
+      </unit>
+      <unit id="access.token.grants_help">
+        <segment><source>Each grant is a role over the whole installation or over a VRF, a site or a prefix. Over a scope only operator and viewer are possible.</source></segment>
+      </unit>
+      <unit id="access.token.add_grant">
+        <segment><source>Add grant</source></segment>
+      </unit>
+      <unit id="access.token.remove_grant">
+        <segment><source>Remove grant {n}</source></segment>
+      </unit>
+      <unit id="access.token.scopes">
+        <segment><source>Special scopes</source></segment>
+      </unit>
+      <unit id="access.token.error.scope">
+        <segment><source>Choose a VRF, site or prefix for every grant, or the whole installation.</source></segment>
+      </unit>
+      <unit id="access.token.error.empty">
+        <segment><source>A scoped token needs at least one grant or special scope.</source></segment>
+      </unit>
+      <unit id="access.token.created_title">
+        <segment><source>Copy the token now</source></segment>
+      </unit>
+      <unit id="access.token.created_body">
+        <segment><source>This is the only time the token {name} is shown. Store it where the tool that uses it can read it.</source></segment>
+      </unit>
+      <unit id="access.token.stored">
+        <segment><source>I have stored the token</source></segment>
+      </unit>
+      <unit id="access.token.personal">
+        <notes><note category="description">What a personal (not scoped) token may do.</note></notes>
+        <segment><source>Every right of its owner</source></segment>
+      </unit>
+      <unit id="access.token.col.name">
+        <segment><source>Token</source></segment>
+      </unit>
+      <unit id="access.token.col.reach">
+        <segment><source>May</source></segment>
+      </unit>
+      <unit id="access.token.col.expires">
+        <segment><source>Expires</source></segment>
+      </unit>
+      <unit id="access.token.col.last_used">
+        <segment><source>Last used</source></segment>
+      </unit>
+      <unit id="access.token.expired">
+        <segment><source>Expired</source></segment>
+      </unit>
+      <unit id="access.token.revoke_named">
+        <segment><source>Revoke the token {name}</source></segment>
+      </unit>
+      <unit id="access.token.revoke_title">
+        <segment><source>Revoke the token {name}?</source></segment>
+      </unit>
+      <unit id="access.token.revoke_body">
+        <segment><source>Tools that use it lose the access of {account} at once.</source></segment>
+      </unit>
+      <unit id="access.token_scope.metrics">
+        <notes><note category="description">A special token scope.</note></notes>
+        <segment><source>Read the metrics</source></segment>
+      </unit>
+      <unit id="access.token_scope.audit_read">
+        <notes><note category="description">A special token scope.</note></notes>
+        <segment><source>Read the audit log</source></segment>
+      </unit>
+      <unit id="access.token_scope.metrics_help">
+        <segment><source>For a metrics scraper: /api/v1/metrics and nothing else.</source></segment>
+      </unit>
+      <unit id="access.token_scope.audit_read_help">
+        <segment><source>For a log collector: the audit records and nothing else.</source></segment>
+      </unit>
+      <unit id="access.user.kind">
+        <notes><note category="description">Label of the fact that a user record is a service account.</note></notes>
+        <segment><source>Kind</source></segment>
+      </unit>
+      <unit id="access.user.service">
+        <segment><source>Service account: no password, second factor or session; acts through scoped tokens.</source></segment>
       </unit>
     </group>
   </file>

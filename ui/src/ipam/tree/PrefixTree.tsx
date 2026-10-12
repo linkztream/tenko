@@ -12,11 +12,13 @@ import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js"
 import { api } from "../../api/client";
 import { createLiveQuery } from "../../api/live";
 import type { TreeNode, TreeResponse } from "../../api/types";
+import { may } from "../../auth/gate";
 import { Addr } from "../../components/Addr";
 import { Icon } from "../../components/Icon";
 import { ErrorNotice } from "../../components/Notice";
 import { AlarmFlag, StatusBadge, UtilizationMeter } from "../../grid/cells";
 import { dragged, type DragItem } from "../../grid/dnd";
+import { logicalArrow } from "../../grid/focus";
 import { t } from "../../i18n";
 import { VlanChip } from "../vlan/VlanChip";
 import type { VlanStyle } from "../vlan/palette";
@@ -147,7 +149,8 @@ export function PrefixTree(props: PrefixTreeProps) {
     const i = activeIndex();
     const n = list[i];
     if (!n) return;
-    switch (e.key) {
+    // In a right-to-left layout ArrowLeft opens and ArrowRight closes (grid/focus.ts).
+    switch (logicalArrow(e.key, e.currentTarget as Element)) {
       case "ArrowDown":
         e.preventDefault();
         moveTo(i + 1);
@@ -185,7 +188,8 @@ export function PrefixTree(props: PrefixTreeProps) {
     }
   };
 
-  const accepts = (n: TreeNode) => n.role === "network";
+  // Only a network the principal may write takes a drop; the preview is read-only otherwise.
+  const accepts = (n: TreeNode) => n.role === "network" && may.prefix(n.id);
   const onDragOver = (e: DragEvent, n: TreeNode) => {
     if (!dragged()) return;
     if (!accepts(n)) {

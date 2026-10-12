@@ -50,4 +50,6 @@ export interface RowAction<T> {
   run: (row: T) => void;
   danger?: boolean;
   disabled?: (row: T) => boolean;
+  /** Leaves the action out of the row's menu (an action the principal may not use on this row). */
+  hidden?: (row: T) => boolean;
 }

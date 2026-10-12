@@ -39,7 +39,7 @@ import { t } from "../i18n";
 import { setSelectionStatus } from "../shell/status";
 import { isTyping } from "../shell/keyboard";
 import { DRAG_MIME, endDrag, startDrag, type DragItem } from "./dnd";
-import { isMoveKey, moveFocus, ROW_HEIGHT, scrollToShow, visibleWindow, type CellFocus } from "./focus";
+import { isMoveKey, logicalArrow, moveFocus, ROW_HEIGHT, scrollToShow, visibleWindow, type CellFocus } from "./focus";
 import { Menu } from "./Menu";
 import { createColumnState, type ColumnState } from "./prefs";
 import { createSelection, type Selection } from "./selection";
@@ -107,6 +107,8 @@ export interface DataGridProps<T> {
   flashed?: (id: string) => boolean;
   /** Enables dragging rows: the objects a drag of these rows carries, or null to refuse. */
   dragItems?: (rows: T[]) => DragItem[] | null;
+  /** Whether a row may be dragged at all (default: every selectable row when `dragItems` is set). */
+  draggable?: (row: T) => boolean;
   /** The text of the drag ghost ("Moving 3 hosts"). */
   dragLabel?: (items: readonly DragItem[]) => string;
   /** Reports the selection count to the status bar (default true). */
@@ -292,11 +294,13 @@ export function DataGrid<T>(props: DataGridProps<T>) {
     const row = f.row >= 0 ? rows[f.row] : undefined;
     const ctrl = e.ctrlKey || e.metaKey;
 
-    if (isMoveKey(e.key) && !e.altKey && !(ctrl && (e.key === "j" || e.key === "k"))) {
-      if ((e.key === "j" || e.key === "k") && e.shiftKey) return;
+    // In a right-to-left layout the arrows move along the reading order (focus.ts).
+    const key = logicalArrow(e.key, table);
+    if (isMoveKey(key) && !e.altKey && !(ctrl && (key === "j" || key === "k"))) {
+      if ((key === "j" || key === "k") && e.shiftKey) return;
       e.preventDefault();
       const page = Math.max(1, Math.floor((viewport() - HEADER_HEIGHT) / rowHeight()) - 1);
-      const next = moveFocus(f, e.key, { rows: rows.length, cols: colCount(), page }, ctrl);
+      const next = moveFocus(f, key, { rows: rows.length, cols: colCount(), page }, ctrl);
       setFocusTo(next);
       const target = next.row >= 0 ? rows[next.row] : undefined;
       if (e.shiftKey && target && (e.key === "ArrowDown" || e.key === "ArrowUp") && selectableRow(target)) {
@@ -379,7 +383,7 @@ export function DataGrid<T>(props: DataGridProps<T>) {
   };
 
   const onDragStart = (e: DragEvent, row: T) => {
-    if (!props.dragItems || !selectableRow(row)) {
+    if (!props.dragItems || !selectableRow(row) || !(props.draggable?.(row) ?? true)) {
       e.preventDefault();
       return;
     }
@@ -546,7 +550,7 @@ export function DataGrid<T>(props: DataGridProps<T>) {
                     aria-selected={selectable ? selection.has(id) : undefined}
                     class={props.rowClass?.(row)}
                     classList={{ flash: props.flashed?.(id) ?? false }}
-                    draggable={!!props.dragItems && selectable}
+                    draggable={!!props.dragItems && selectable && (props.draggable?.(row) ?? true)}
                     onClick={(e) => onRowClick(e, row, i)}
                     onDblClick={(e) => {
                       if ((e.target as HTMLElement).closest("a, button, input, select")) return;
@@ -688,7 +692,7 @@ export function DataGrid<T>(props: DataGridProps<T>) {
               label={t("grid.row_actions", { row: label(row) })}
               testid="row-menu"
               onClose={() => setMenu(null)}
-              items={(props.rowActions ?? []).map((a) => ({
+              items={(props.rowActions ?? []).filter((a) => !a.hidden?.(row)).map((a) => ({
                 id: a.id,
                 label: a.label(),
                 danger: a.danger,

@@ -30,6 +30,8 @@ import {
   stepStateWord,
   stepSummary,
   summaryArgs,
+  cancelRolledBack,
+  jobStateText,
   taskText,
 } from "./words";
 
@@ -334,8 +336,12 @@ describe("titles, step summaries and tasks", () => {
     expect(taskText(task)).toBe("Change the DNS record a.example.test from 192.0.2.5 to 198.51.100.5.");
     expect(taskText(task, true)).toBe("Change the DNS record a.example.test back to 192.0.2.5.");
     expect(taskText({ instruction: "vendor.task", args: {} })).toBe("vendor.task");
+    // The generic undo text names the step in words, not by its raw kind.
     expect(taskText({ instruction: "jobs.undo.step", args: { step: "3", kind: "dns.manual" } })).toBe(
-      "Undo step 3 (dns.manual) by hand, then mark this done.",
+      "Undo step 3 (Update DNS) by hand, then mark this done.",
+    );
+    expect(taskText({ instruction: "jobs.undo.step", args: { step: "2", kind: "vendor.unknown" } })).toBe(
+      "Undo step 2 (vendor.unknown) by hand, then mark this done.",
     );
   });
 
@@ -472,5 +478,24 @@ describe("rules of the views", () => {
     expect(countdownParts(20)).toEqual([{ unit: "s", value: 20 }]);
     expect(countdownParts(0)).toEqual([{ unit: "s", value: 0 }]);
     expect(countdownParts(-5)).toEqual([{ unit: "s", value: 0 }]);
+  });
+});
+
+describe("a cancelled job that its cancellation rolled back", () => {
+  const step = (state: StepStateKind): StepRecord => ({ index: 0, kind: "ipam.move.intent", state: { state } }) as unknown as StepRecord;
+
+  it("is told from the current step of a summary or the steps of a job", () => {
+    expect(cancelRolledBack({ state: "cancelled", current_step_state: "compensated" })).toBe(true);
+    expect(cancelRolledBack({ state: "cancelled", current_step_state: "pending" })).toBe(false);
+    expect(cancelRolledBack({ state: "cancelled" })).toBe(false);
+    expect(cancelRolledBack({ state: "rolled_back", current_step_state: "compensated" })).toBe(false);
+    expect(cancelRolledBack({ state: "cancelled", steps: [step("compensated"), step("pending")] })).toBe(true);
+    expect(cancelRolledBack({ state: "cancelled", steps: [step("pending")] })).toBe(false);
+  });
+
+  it("says so in words, and only for a cancelled job", () => {
+    expect(jobStateText("cancelled", "cancel")).toBe("Rolled back (cancelled)");
+    expect(jobStateText("cancelled")).toBe("Cancelled");
+    expect(jobStateText("failed", "cancel")).toBe("Failed");
   });
 });

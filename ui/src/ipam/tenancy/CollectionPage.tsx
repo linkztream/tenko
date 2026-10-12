@@ -5,6 +5,7 @@ import { useSearchParams } from "@solidjs/router";
 import { createMemo, createSignal, onCleanup, Show, untrack, type JSX } from "solid-js";
 import type { PathsWith } from "../../api/client";
 import type { Meta } from "../../api/types";
+import { writesAll } from "../../auth/gate";
 import { DataGrid } from "../../grid/DataGrid";
 import { FilterBar, type DeletedFilter } from "../../grid/FilterBar";
 import { createColumnState } from "../../grid/prefs";
@@ -43,6 +44,12 @@ export interface CollectionPageProps<T extends CollectionRow> {
   sourceRef?: (source: ListSource<T>) => void;
   /** Row actions of the view, after the built-in ones (edit, history, restore, delete). */
   actions?: RowAction<T>[];
+  /**
+   * Whether the principal may change a row (display gating, IAM-01): edit, restore and delete are
+   * left out for the others. Without it only a global writer may, which is right for the kinds
+   * a scoped grant does not reach (tenants, VRFs).
+   */
+  mayWrite?: (row: T) => boolean;
   /** Where the grid lives inside the page (default: fills the page). */
   class?: string;
 }
@@ -86,11 +93,12 @@ export function CollectionPage<T extends CollectionRow>(props: CollectionPagePro
   sourceRef?.(source);
   const columnState = createColumnState(id, () => props.columns);
 
+  const mayRow = (r: T) => props.mayWrite?.(r) ?? writesAll();
   const actions: RowAction<T>[] = [
-    { id: "edit", label: () => t("ipam.do.edit"), disabled: (r) => !!r.meta.deleted, run: (r) => setDialog({ kind: "edit", row: r }) },
+    { id: "edit", label: () => t("ipam.do.edit"), disabled: (r) => !!r.meta.deleted, hidden: (r) => !mayRow(r), run: (r) => setDialog({ kind: "edit", row: r }) },
     { id: "history", label: () => t("ipam.do.history"), run: (r) => setDialog({ kind: "history", row: r }) },
-    { id: "restore", label: () => t("ipam.do.restore"), disabled: (r) => !r.meta.deleted, run: (r) => setDialog({ kind: "restore", row: r }) },
-    { id: "delete", label: () => t("ipam.do.delete"), danger: true, disabled: (r) => !!r.meta.deleted, run: (r) => setDialog({ kind: "delete", row: r }) },
+    { id: "restore", label: () => t("ipam.do.restore"), disabled: (r) => !r.meta.deleted, hidden: (r) => !mayRow(r), run: (r) => setDialog({ kind: "restore", row: r }) },
+    { id: "delete", label: () => t("ipam.do.delete"), danger: true, disabled: (r) => !!r.meta.deleted, hidden: (r) => !mayRow(r), run: (r) => setDialog({ kind: "delete", row: r }) },
     // The view's own actions come after the built-in ones; the list is fixed for the life of the page.
     ...untrack(() => props.actions ?? []),
   ];
@@ -134,7 +142,7 @@ export function CollectionPage<T extends CollectionRow>(props: CollectionPagePro
           error={source.error()}
           onRetry={source.reload}
           flashed={source.flashed}
-          onOpen={(r) => setDialog({ kind: r.meta.deleted ? "history" : "edit", row: r })}
+          onOpen={(r) => setDialog({ kind: r.meta.deleted || !mayRow(r) ? "history" : "edit", row: r })}
           rowActions={actions}
           empty={applied() ? <div class="empty"><h3>{t("grid.empty.filtered")}</h3></div> : props.empty}
         />
@@ -175,6 +183,7 @@ export function CollectionPage<T extends CollectionRow>(props: CollectionPagePro
                   id={d.row.id}
                   label={props.rowLabel(d.row)}
                   deleted={!!d.row.meta.deleted}
+                  mayRestore={mayRow(d.row)}
                   revision={d.row.meta.revision}
                   onClose={() => close(false)}
                 />

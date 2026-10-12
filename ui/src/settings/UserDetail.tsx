@@ -4,7 +4,7 @@
 import { A, useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, For, Show, type JSX } from "solid-js";
 import { api } from "../api/client";
-import { createLiveQuery } from "../api/live";
+import { createLiveQuery, latest } from "../api/live";
 import { fetchAll } from "../api/paginate";
 import { isApiError } from "../api/problem";
 import type { RoleInfo, UserInfo } from "../api/types";
@@ -14,6 +14,11 @@ import { Icon } from "../components/Icon";
 import { ErrorNotice, Notice } from "../components/Notice";
 import { toast } from "../components/toast";
 import { formatDateTime, formatRelative, t, tx } from "../i18n";
+import { createScopeCatalog } from "./access/data";
+import { GrantsSection } from "./access/Grants";
+import { isServiceAccount } from "./access/model";
+import { ServiceAccountTokens } from "./access/ServiceAccounts";
+import "./access/access.css";
 import { EditUserDialog, PasswordDialog, RolesDialog, RunDialog } from "./UserDialogs";
 import { languageName, methodParts, rolesText, UserStatus } from "./userModel";
 import "./settings.css";
@@ -80,6 +85,8 @@ export default function UserDetail(props: { id: string }) {
     }
   };
 
+  // The VRFs, sites and prefixes the grants of the account name.
+  const catalog = createScopeCatalog();
   const mine = () => session()?.user.id;
   const gone = () => live.value.error && isApiError(live.value.error, "users.not_found");
 
@@ -195,6 +202,10 @@ export default function UserDetail(props: { id: string }) {
                     <dd>{user().display_name}</dd>
                     <dt>{t("settings.users.col.roles")}</dt>
                     <dd>{rolesText(user().roles)}</dd>
+                    <Show when={isServiceAccount(user())}>
+                      <dt>{t("access.user.kind")}</dt>
+                      <dd data-testid="user-kind">{t("access.user.service")}</dd>
+                    </Show>
                     <dt>{t("settings.users.col.status")}</dt>
                     <dd>
                       <UserStatus user={user()} />
@@ -300,6 +311,7 @@ export default function UserDetail(props: { id: string }) {
                         : t("settings.users.action.disable_help", { name: name() })}
                   </ActionRow>
 
+                  <Show when={!isServiceAccount(user())}>
                   <ActionRow
                     title={t("settings.users.action.sessions")}
                     action={
@@ -338,6 +350,7 @@ export default function UserDetail(props: { id: string }) {
                       ? t("settings.users.action.break_glass_on")
                       : t("settings.users.action.break_glass_off")}
                   </ActionRow>
+                  </Show>
 
                   <ActionRow
                     title={t("settings.users.action.remove")}
@@ -351,6 +364,19 @@ export default function UserDetail(props: { id: string }) {
                   </ActionRow>
                 </ul>
               </section>
+
+              <Show when={!user().break_glass}>
+                <GrantsSection
+                  subject={{ id: user().id, name: user().name, display_name: user().display_name, kind: user().kind ?? "person" }}
+                  catalog={latest(catalog)}
+                  headingId="ud-grants"
+                />
+              </Show>
+              <Show when={isServiceAccount(user())}>
+                <section class="page-section" aria-label={t("access.sa.tokens_of", { name: name() })}>
+                  <ServiceAccountTokens account={user()} catalog={latest(catalog)} />
+                </section>
+              </Show>
 
               <Show when={dialog() === "edit"}>
                 <EditUserDialog user={user()} onSaved={setUser} onStale={stale} onClose={() => setDialog(undefined)} />

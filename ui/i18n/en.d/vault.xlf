@@ -6,9 +6,186 @@
         <notes><note category="description">Title of the vault page and its entry in the browser tab.</note></notes>
         <segment><source>Vault</source></segment>
       </unit>
-      <unit id="vault.placeholder">
-        <notes><note category="description">Placeholder text of the vault page until the page itself exists.</note></notes>
-        <segment><source>The vault page arrives with a later update.</source></segment>
+      <unit id="vault.lede">
+        <segment><source>The key-encryption key protects every secret in the store. Each controller keeps it sealed by the operating system; a rotation creates a new key on every controller and re-encrypts the data keys under it.</source></segment>
+      </unit>
+      <unit id="vault.weak">
+        <notes><note category="description">Tag on a key protection that has no protection by the operating system.</note></notes>
+        <segment><source>Weak</source></segment>
+      </unit>
+      <unit id="vault.downgrade">
+        <notes><note category="description">Tag on a controller whose key is protected less well than it was.</note></notes>
+        <segment><source>Weaker than before</source></segment>
+      </unit>
+      <unit id="vault.key.heading">
+        <notes><note category="description">The argument node is the number of the controller that answers.</note></notes>
+        <segment><source>Key of controller {node}</source></segment>
+      </unit>
+      <unit id="vault.key.provider">
+        <segment><source>Provider</source></segment>
+      </unit>
+      <unit id="vault.key.protection">
+        <segment><source>Protection</source></segment>
+      </unit>
+      <unit id="vault.key.strongest">
+        <segment><source>Strongest so far</source></segment>
+      </unit>
+      <unit id="vault.key.active">
+        <segment><source>Active generation</source></segment>
+      </unit>
+      <unit id="vault.key.epoch">
+        <notes><note category="description">A counter that grows with every rotation of the key.</note></notes>
+        <segment><source>Key epoch</source></segment>
+      </unit>
+      <unit id="vault.provider.dpapi">
+        <segment><source>Windows DPAPI</source></segment>
+      </unit>
+      <unit id="vault.provider.systemd_creds">
+        <segment><source>systemd-creds directory</source></segment>
+      </unit>
+      <unit id="vault.provider.systemd_credential">
+        <segment><source>systemd credential</source></segment>
+      </unit>
+      <unit id="vault.provider.file">
+        <segment><source>Key file</source></segment>
+      </unit>
+      <unit id="vault.protection.dpapi_user">
+        <segment><source>DPAPI, bound to the service account</source></segment>
+      </unit>
+      <unit id="vault.protection.dpapi_machine">
+        <segment><source>DPAPI, bound to the machine</source></segment>
+      </unit>
+      <unit id="vault.protection.systemd_creds_host">
+        <segment><source>systemd-creds with the host key</source></segment>
+      </unit>
+      <unit id="vault.protection.systemd_creds_tpm2">
+        <segment><source>systemd-creds with the TPM</source></segment>
+      </unit>
+      <unit id="vault.protection.plain_file">
+        <segment><source>Plain key file</source></segment>
+      </unit>
+      <unit id="vault.protection.memory">
+        <segment><source>Memory only</source></segment>
+      </unit>
+      <unit id="vault.warning.weak">
+        <segment><source>The key of this controller has no protection by the operating system.</source></segment>
+      </unit>
+      <unit id="vault.warning.downgrade">
+        <segment><source>The key of this controller is protected less well than before, or a plain key file beside sealed ones was refused.</source></segment>
+      </unit>
+      <unit id="vault.warning.missing">
+        <segment><source>This controller lacks the key generations {generations}; it fetches them from another controller.</source></segment>
+      </unit>
+      <unit id="vault.warning.rotation_failed">
+        <segment><source>The last key rotation failed: {error}</source></segment>
+      </unit>
+      <unit id="vault.rotation.heading">
+        <segment><source>Rotation</source></segment>
+      </unit>
+      <unit id="vault.rotation.lede">
+        <segment><source>Rotate the key after a suspected leak or by policy. The new key reaches every controller first, then the data keys are re-encrypted in the background; secrets stay readable throughout.</source></segment>
+      </unit>
+      <unit id="vault.rotation.rotate">
+        <segment><source>Rotate key</source></segment>
+      </unit>
+      <unit id="vault.rotation.never">
+        <segment><source>The key was never rotated online.</source></segment>
+      </unit>
+      <unit id="vault.rotation.requested">
+        <segment><source>Key rotation requested</source></segment>
+      </unit>
+      <unit id="vault.rotation.phase">
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="vault.rotation.generation">
+        <segment><source>New generation</source></segment>
+      </unit>
+      <unit id="vault.rotation.requested_at">
+        <segment><source>Requested</source></segment>
+      </unit>
+      <unit id="vault.rotation.rewrapped">
+        <segment><source>Data keys re-encrypted</source></segment>
+      </unit>
+      <unit id="vault.rotation.waiting_for">
+        <segment><source>Waiting for controllers</source></segment>
+      </unit>
+      <unit id="vault.rotation.unreachable">
+        <segment><source>Unreachable</source></segment>
+      </unit>
+      <unit id="vault.rotation.unreachable_text">
+        <segment><source>Controllers {nodes} fetch the new key when they start.</source></segment>
+      </unit>
+      <unit id="vault.rotation.finished_at">
+        <segment><source>Finished</source></segment>
+      </unit>
+      <unit id="vault.rotation.error">
+        <segment><source>Error</source></segment>
+      </unit>
+      <unit id="vault.rotation.confirm_title">
+        <segment><source>Rotate the key-encryption key?</source></segment>
+      </unit>
+      <unit id="vault.rotation.confirm_body">
+        <segment><source>Every controller receives a new key, and the data keys of all secrets are re-encrypted under it. The rotation runs on the leading controller and is audited.</source></segment>
+      </unit>
+      <unit id="vault.rotation.confirm_note">
+        <segment><source>It needs a sign-in within the last five minutes.</source></segment>
+      </unit>
+      <unit id="vault.phase.requested">
+        <segment><source>Requested</source></segment>
+      </unit>
+      <unit id="vault.phase.distributing">
+        <segment><source>Distributing the new key</source></segment>
+      </unit>
+      <unit id="vault.phase.rewrapping">
+        <segment><source>Re-encrypting</source></segment>
+      </unit>
+      <unit id="vault.phase.done">
+        <segment><source>Done</source></segment>
+      </unit>
+      <unit id="vault.phase.failed">
+        <segment><source>Failed</source></segment>
+      </unit>
+      <unit id="vault.step_up.title">
+        <segment><source>Sign in again to rotate</source></segment>
+      </unit>
+      <unit id="vault.step_up.body">
+        <segment><source>A rotation needs a sign-in within the last five minutes. Sign in again, then come back to this page.</source></segment>
+      </unit>
+      <unit id="vault.step_up.sign_in">
+        <segment><source>Sign in again</source></segment>
+      </unit>
+      <unit id="vault.controllers.heading">
+        <segment><source>Controllers</source></segment>
+      </unit>
+      <unit id="vault.controllers.col.node">
+        <segment><source>Controller</source></segment>
+      </unit>
+      <unit id="vault.controllers.col.updated">
+        <segment><source>Last start</source></segment>
+      </unit>
+      <unit id="vault.generations.heading">
+        <segment><source>Generations</source></segment>
+      </unit>
+      <unit id="vault.generations.col.id">
+        <segment><source>Generation</source></segment>
+      </unit>
+      <unit id="vault.generations.col.state">
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="vault.generations.col.created">
+        <segment><source>Created</source></segment>
+      </unit>
+      <unit id="vault.generations.active">
+        <segment><source>Active</source></segment>
+      </unit>
+      <unit id="vault.generations.loaded">
+        <segment><source>Kept for older data</source></segment>
+      </unit>
+      <unit id="vault.generations.missing">
+        <segment><source>Missing here</source></segment>
+      </unit>
+      <unit id="vault.refused.title">
+        <segment><source>Refused key files</source></segment>
       </unit>
     </group>
   </file>

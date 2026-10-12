@@ -18,7 +18,6 @@ import { FilterBar, ToggleChip } from "../grid/FilterBar";
 import { createColumnState } from "../grid/prefs";
 import { createListSource } from "../grid/source";
 import { t } from "../i18n";
-import { canExecuteJobs } from "./access";
 import { jobColumns } from "./columns";
 import { GroupPanel } from "./GroupPanel";
 import { groupLabel, matchesView, parseView, VIEWS, viewStates, type JobView } from "./model";
@@ -125,7 +124,6 @@ export default function JobsView() {
             group={g}
             jobs={groupRows()}
             loading={source.hasMore() || source.loading()}
-            canExecute={canExecuteJobs()}
             onChanged={() => source.reload()}
           />
         )}

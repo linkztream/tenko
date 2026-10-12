@@ -6,9 +6,186 @@
         <notes><note category="description">Title of the vault page and its entry in the browser tab.</note></notes>
         <segment><source>Vault</source><target>Valv</target></segment>
       </unit>
-      <unit id="vault.placeholder">
-        <notes><note category="description">Placeholder text of the vault page until the page itself exists.</note></notes>
-        <segment><source>The vault page arrives with a later update.</source><target>Valvsidan kommer i en senare uppdatering.</target></segment>
+      <unit id="vault.lede">
+        <segment><source>The key-encryption key protects every secret in the store. Each controller keeps it sealed by the operating system; a rotation creates a new key on every controller and re-encrypts the data keys under it.</source><target>Nyckelkrypteringsnyckeln skyddar alla hemligheter i lagret. Varje controller håller den förseglad av operativsystemet. En rotation skapar en ny nyckel på varje controller och krypterar om datanycklarna med den.</target></segment>
+      </unit>
+      <unit id="vault.weak">
+        <notes><note category="description">Tag on a key protection that has no protection by the operating system.</note></notes>
+        <segment><source>Weak</source><target>Svag</target></segment>
+      </unit>
+      <unit id="vault.downgrade">
+        <notes><note category="description">Tag on a controller whose key is protected less well than it was.</note></notes>
+        <segment><source>Weaker than before</source><target>Svagare än tidigare</target></segment>
+      </unit>
+      <unit id="vault.key.heading">
+        <notes><note category="description">The argument node is the number of the controller that answers.</note></notes>
+        <segment><source>Key of controller {node}</source><target>Nyckel för controller {node}</target></segment>
+      </unit>
+      <unit id="vault.key.provider">
+        <segment><source>Provider</source><target>Leverantör</target></segment>
+      </unit>
+      <unit id="vault.key.protection">
+        <segment><source>Protection</source><target>Skydd</target></segment>
+      </unit>
+      <unit id="vault.key.strongest">
+        <segment><source>Strongest so far</source><target>Starkaste hittills</target></segment>
+      </unit>
+      <unit id="vault.key.active">
+        <segment><source>Active generation</source><target>Aktiv generation</target></segment>
+      </unit>
+      <unit id="vault.key.epoch">
+        <notes><note category="description">A counter that grows with every rotation of the key.</note></notes>
+        <segment><source>Key epoch</source><target>Nyckelepok</target></segment>
+      </unit>
+      <unit id="vault.provider.dpapi">
+        <segment><source>Windows DPAPI</source><target>Windows DPAPI</target></segment>
+      </unit>
+      <unit id="vault.provider.systemd_creds">
+        <segment><source>systemd-creds directory</source><target>Katalog för systemd-creds</target></segment>
+      </unit>
+      <unit id="vault.provider.systemd_credential">
+        <segment><source>systemd credential</source><target>systemd-credential</target></segment>
+      </unit>
+      <unit id="vault.provider.file">
+        <segment><source>Key file</source><target>Nyckelfil</target></segment>
+      </unit>
+      <unit id="vault.protection.dpapi_user">
+        <segment><source>DPAPI, bound to the service account</source><target>DPAPI, knuten till tjänstekontot</target></segment>
+      </unit>
+      <unit id="vault.protection.dpapi_machine">
+        <segment><source>DPAPI, bound to the machine</source><target>DPAPI, knuten till maskinen</target></segment>
+      </unit>
+      <unit id="vault.protection.systemd_creds_host">
+        <segment><source>systemd-creds with the host key</source><target>systemd-creds med värdnyckeln</target></segment>
+      </unit>
+      <unit id="vault.protection.systemd_creds_tpm2">
+        <segment><source>systemd-creds with the TPM</source><target>systemd-creds med TPM</target></segment>
+      </unit>
+      <unit id="vault.protection.plain_file">
+        <segment><source>Plain key file</source><target>Okrypterad nyckelfil</target></segment>
+      </unit>
+      <unit id="vault.protection.memory">
+        <segment><source>Memory only</source><target>Endast minne</target></segment>
+      </unit>
+      <unit id="vault.warning.weak">
+        <segment><source>The key of this controller has no protection by the operating system.</source><target>Nyckeln för den här controllern saknar skydd från operativsystemet.</target></segment>
+      </unit>
+      <unit id="vault.warning.downgrade">
+        <segment><source>The key of this controller is protected less well than before, or a plain key file beside sealed ones was refused.</source><target>Nyckeln för den här controllern är sämre skyddad än tidigare, eller så avvisades en okrypterad nyckelfil bredvid förseglade.</target></segment>
+      </unit>
+      <unit id="vault.warning.missing">
+        <segment><source>This controller lacks the key generations {generations}; it fetches them from another controller.</source><target>Den här controllern saknar nyckelgenerationerna {generations} och hämtar dem från en annan controller.</target></segment>
+      </unit>
+      <unit id="vault.warning.rotation_failed">
+        <segment><source>The last key rotation failed: {error}</source><target>Den senaste nyckelrotationen misslyckades: {error}</target></segment>
+      </unit>
+      <unit id="vault.rotation.heading">
+        <segment><source>Rotation</source><target>Rotation</target></segment>
+      </unit>
+      <unit id="vault.rotation.lede">
+        <segment><source>Rotate the key after a suspected leak or by policy. The new key reaches every controller first, then the data keys are re-encrypted in the background; secrets stay readable throughout.</source><target>Rotera nyckeln efter ett misstänkt läckage eller enligt policy. Den nya nyckeln når först alla controllers, sedan krypteras datanycklarna om i bakgrunden. Hemligheterna förblir läsbara hela tiden.</target></segment>
+      </unit>
+      <unit id="vault.rotation.rotate">
+        <segment><source>Rotate key</source><target>Rotera nyckel</target></segment>
+      </unit>
+      <unit id="vault.rotation.never">
+        <segment><source>The key was never rotated online.</source><target>Nyckeln har aldrig roterats online.</target></segment>
+      </unit>
+      <unit id="vault.rotation.requested">
+        <segment><source>Key rotation requested</source><target>Nyckelrotation begärd</target></segment>
+      </unit>
+      <unit id="vault.rotation.phase">
+        <segment><source>State</source><target>Status</target></segment>
+      </unit>
+      <unit id="vault.rotation.generation">
+        <segment><source>New generation</source><target>Ny generation</target></segment>
+      </unit>
+      <unit id="vault.rotation.requested_at">
+        <segment><source>Requested</source><target>Begärd</target></segment>
+      </unit>
+      <unit id="vault.rotation.rewrapped">
+        <segment><source>Data keys re-encrypted</source><target>Omkrypterade datanycklar</target></segment>
+      </unit>
+      <unit id="vault.rotation.waiting_for">
+        <segment><source>Waiting for controllers</source><target>Väntar på controllers</target></segment>
+      </unit>
+      <unit id="vault.rotation.unreachable">
+        <segment><source>Unreachable</source><target>Onåbara</target></segment>
+      </unit>
+      <unit id="vault.rotation.unreachable_text">
+        <segment><source>Controllers {nodes} fetch the new key when they start.</source><target>Controllers {nodes} hämtar den nya nyckeln när de startar.</target></segment>
+      </unit>
+      <unit id="vault.rotation.finished_at">
+        <segment><source>Finished</source><target>Slutförd</target></segment>
+      </unit>
+      <unit id="vault.rotation.error">
+        <segment><source>Error</source><target>Fel</target></segment>
+      </unit>
+      <unit id="vault.rotation.confirm_title">
+        <segment><source>Rotate the key-encryption key?</source><target>Rotera nyckelkrypteringsnyckeln?</target></segment>
+      </unit>
+      <unit id="vault.rotation.confirm_body">
+        <segment><source>Every controller receives a new key, and the data keys of all secrets are re-encrypted under it. The rotation runs on the leading controller and is audited.</source><target>Varje controller får en ny nyckel, och datanycklarna för alla hemligheter krypteras om med den. Rotationen körs på den ledande controllern och granskningsloggas.</target></segment>
+      </unit>
+      <unit id="vault.rotation.confirm_note">
+        <segment><source>It needs a sign-in within the last five minutes.</source><target>Det kräver en inloggning inom de senaste fem minuterna.</target></segment>
+      </unit>
+      <unit id="vault.phase.requested">
+        <segment><source>Requested</source><target>Begärd</target></segment>
+      </unit>
+      <unit id="vault.phase.distributing">
+        <segment><source>Distributing the new key</source><target>Distribuerar den nya nyckeln</target></segment>
+      </unit>
+      <unit id="vault.phase.rewrapping">
+        <segment><source>Re-encrypting</source><target>Krypterar om</target></segment>
+      </unit>
+      <unit id="vault.phase.done">
+        <segment><source>Done</source><target>Klar</target></segment>
+      </unit>
+      <unit id="vault.phase.failed">
+        <segment><source>Failed</source><target>Misslyckades</target></segment>
+      </unit>
+      <unit id="vault.step_up.title">
+        <segment><source>Sign in again to rotate</source><target>Logga in igen för att rotera</target></segment>
+      </unit>
+      <unit id="vault.step_up.body">
+        <segment><source>A rotation needs a sign-in within the last five minutes. Sign in again, then come back to this page.</source><target>En rotation kräver en inloggning inom de senaste fem minuterna. Logga in igen och kom sedan tillbaka till den här sidan.</target></segment>
+      </unit>
+      <unit id="vault.step_up.sign_in">
+        <segment><source>Sign in again</source><target>Logga in igen</target></segment>
+      </unit>
+      <unit id="vault.controllers.heading">
+        <segment><source>Controllers</source><target>Controllers</target></segment>
+      </unit>
+      <unit id="vault.controllers.col.node">
+        <segment><source>Controller</source><target>Controller</target></segment>
+      </unit>
+      <unit id="vault.controllers.col.updated">
+        <segment><source>Last start</source><target>Senaste start</target></segment>
+      </unit>
+      <unit id="vault.generations.heading">
+        <segment><source>Generations</source><target>Generationer</target></segment>
+      </unit>
+      <unit id="vault.generations.col.id">
+        <segment><source>Generation</source><target>Generation</target></segment>
+      </unit>
+      <unit id="vault.generations.col.state">
+        <segment><source>State</source><target>Status</target></segment>
+      </unit>
+      <unit id="vault.generations.col.created">
+        <segment><source>Created</source><target>Skapad</target></segment>
+      </unit>
+      <unit id="vault.generations.active">
+        <segment><source>Active</source><target>Aktiv</target></segment>
+      </unit>
+      <unit id="vault.generations.loaded">
+        <segment><source>Kept for older data</source><target>Behålls för äldre data</target></segment>
+      </unit>
+      <unit id="vault.generations.missing">
+        <segment><source>Missing here</source><target>Saknas här</target></segment>
+      </unit>
+      <unit id="vault.refused.title">
+        <segment><source>Refused key files</source><target>Avvisade nyckelfiler</target></segment>
       </unit>
     </group>
   </file>
