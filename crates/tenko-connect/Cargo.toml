@@ -35,6 +35,7 @@ tenko-store = { workspace = true }
 tenko-vault = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 tonic = { workspace = true }
 tonic-prost = { workspace = true }
 tower = { workspace = true, features = ["util"] }

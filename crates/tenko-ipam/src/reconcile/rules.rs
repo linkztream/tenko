@@ -1112,7 +1112,9 @@ fn outside(snapshot: &Snapshot) -> Vec<Candidate> {
 
 // ----- orphaned intent --------------------------------------------------------------
 
-/// Active addresses of intent that sources saw before but not for the orphan age.
+/// Active addresses of intent that sources saw before but not for the orphan age. When
+/// probes report scopes, only addresses a probe covers can be orphaned: one outside every
+/// scope is not scanned, so not seeing it says nothing.
 fn orphans(
     snapshot: &Snapshot,
     sightings: &BTreeMap<ObjectRef, IntentSighting>,
@@ -1131,6 +1133,10 @@ fn orphans(
         let Some(sighting) = sightings.get(&ObjectRef::from(address.id)) else {
             continue;
         };
+        // Unseen outside every probe scope means "not scanned", not "gone".
+        if !snapshot.scanned(address.vrf, address.ip) {
+            continue;
+        }
         if snapshot.now.saturating_since(sighting.at) < config.orphan_after {
             continue;
         }

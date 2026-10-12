@@ -9,13 +9,17 @@
 //! The server wires it once the connector service runs:
 //!
 //! ```ignore
-//! controllers.set(HostControllers::new(Arc::clone(connector_host)));
+//! controllers.set(HostControllers::following(Arc::clone(connector_host), guardrails));
 //! ```
 
 // The port reports `CodedError`s, so the conversions that produce them return it as well.
 #![allow(clippy::result_large_err)]
 
-use std::{net::IpAddr, sync::Arc};
+use std::{
+    collections::HashMap,
+    net::IpAddr,
+    sync::{Arc, Mutex, PoisonError},
+};
 
 use tenko_connect::{
     Capability, ClientAttachment, ControllerDhcp, DeviceKind, DevicePort, DeviceRef, Guardrails,
@@ -34,27 +38,128 @@ use tenko_ipam::vlan::controllers::{
     ControllerPortState, ControllerProfile, ControllerTopology, ControllerWlan, DiffEntry,
     NetworkControllers, NetworkPlan, NetworkReceipt, NetworkSpec, PortFuture,
 };
+use tokio::sync::{Notify, watch};
 
 /// [`NetworkControllers`] over the connector host.
+///
+/// The guardrails are the ones in force (`connect.guardrails`, followed through a watch
+/// channel when the server builds it with [`HostControllers::following`]), read at every
+/// call. `max_parallel` bounds the concurrent real writes (applies and reverts, not dry
+/// runs) through one controller instance; further writes wait for a free slot.
 #[derive(Debug, Clone)]
 pub struct HostControllers {
     host: Arc<ConnectorHost>,
-    guardrails: Guardrails,
+    guardrails: watch::Receiver<Guardrails>,
+    writes: Arc<WriteLimit>,
 }
 
 impl HostControllers {
     /// The controllers of `host` with the default guardrails: uplinks and management
     /// networks of the topology are always protected by the host.
     pub fn new(host: Arc<ConnectorHost>) -> Self {
-        Self {
-            host,
-            guardrails: Guardrails::default(),
-        }
+        Self::with_guardrails(host, Guardrails::default())
     }
 
     /// The controllers of `host` with configured protected paths on top.
     pub fn with_guardrails(host: Arc<ConnectorHost>, guardrails: Guardrails) -> Self {
-        Self { host, guardrails }
+        Self::following(host, watch::channel(guardrails).1)
+    }
+
+    /// The controllers of `host` with the guardrails `guardrails` holds now, at every call
+    /// (the server follows the settings in the store with it).
+    pub fn following(host: Arc<ConnectorHost>, guardrails: watch::Receiver<Guardrails>) -> Self {
+        Self {
+            host,
+            guardrails,
+            writes: Arc::new(WriteLimit::default()),
+        }
+    }
+
+    /// The guardrails in force.
+    fn guardrails(&self) -> Guardrails {
+        self.guardrails.borrow().clone()
+    }
+
+    /// The concurrent writes allowed through one controller.
+    fn max_parallel(&self) -> usize {
+        self.guardrails.borrow().max_parallel.max(1)
+    }
+
+    /// A slot for a real write through `connector`; none for a dry run.
+    async fn write_slot(&self, connector: ConnectorId, dry_run: bool) -> Option<WriteSlot> {
+        if dry_run {
+            return None;
+        }
+        Some(self.writes.acquire(connector, self.max_parallel()).await)
+    }
+}
+
+/// The writes in flight per controller instance.
+#[derive(Debug, Default)]
+struct WriteLimit {
+    in_flight: Mutex<HashMap<ConnectorId, usize>>,
+    released: Notify,
+}
+
+impl WriteLimit {
+    /// Waits until fewer than `limit` writes run through `connector` and takes a slot.
+    async fn acquire(self: &Arc<Self>, connector: ConnectorId, limit: usize) -> WriteSlot {
+        loop {
+            let released = self.released.notified();
+            tokio::pin!(released);
+            released.as_mut().enable();
+            {
+                let mut in_flight = self
+                    .in_flight
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                let count = in_flight.entry(connector).or_default();
+                if *count < limit {
+                    *count += 1;
+                    return WriteSlot {
+                        limit: Arc::clone(self),
+                        connector,
+                    };
+                }
+            }
+            released.await;
+        }
+    }
+
+    /// The writes running through `connector` now.
+    #[cfg(test)]
+    fn running(&self, connector: ConnectorId) -> usize {
+        self.in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&connector)
+            .copied()
+            .unwrap_or_default()
+    }
+}
+
+/// A slot of [`WriteLimit`], given back when dropped.
+struct WriteSlot {
+    limit: Arc<WriteLimit>,
+    connector: ConnectorId,
+}
+
+impl Drop for WriteSlot {
+    fn drop(&mut self) {
+        {
+            let mut in_flight = self
+                .limit
+                .in_flight
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if let Some(count) = in_flight.get_mut(&self.connector) {
+                *count = count.saturating_sub(1);
+                if *count == 0 {
+                    in_flight.remove(&self.connector);
+                }
+            }
+        }
+        self.limit.released.notify_waiters();
     }
 }
 
@@ -401,7 +506,12 @@ impl NetworkControllers for HostControllers {
         Box::pin(async move {
             let plan = self
                 .host
-                .plan_l2(connector, &change_of(spec), &self.guardrails, on_behalf_of)
+                .plan_l2(
+                    connector,
+                    &change_of(spec),
+                    &self.guardrails(),
+                    on_behalf_of,
+                )
                 .await
                 .map_err(coded)?;
             plan_of(connector, spec, &plan)
@@ -421,9 +531,10 @@ impl NetworkControllers for HostControllers {
             } else {
                 WriteMode::Apply
             };
+            let _slot = self.write_slot(plan.connector, dry_run).await;
             let receipt = self
                 .host
-                .apply_l2(plan.connector, &l2, mode, &self.guardrails, on_behalf_of)
+                .apply_l2(plan.connector, &l2, mode, &self.guardrails(), on_behalf_of)
                 .await
                 .map_err(coded)?;
             receipt_of(plan.connector, &receipt)
@@ -437,22 +548,11 @@ impl NetworkControllers for HostControllers {
     ) -> PortFuture<'a, ()> {
         Box::pin(async move {
             let l2: L2Receipt = from_cbor(&receipt.token.0).map_err(|e| codec(&e))?;
-            // The host does not check the guardrails for an undo; the undo steps are writes
-            // like any other, so they are checked here against a fresh topology (CONN-09).
-            if l2.mode == WriteMode::Apply && !l2.undo.is_empty() {
-                let snapshot = self
-                    .host
-                    .topology(receipt.connector, on_behalf_of)
-                    .await
-                    .map_err(coded)?;
-                for step in &l2.undo {
-                    self.guardrails
-                        .check(step, &snapshot)
-                        .map_err(|error| coded(error.into()))?;
-                }
-            }
+            // The host checks the undo steps against the guardrails in force and a fresh
+            // topology before it writes (CONN-09).
+            let _slot = self.write_slot(receipt.connector, false).await;
             self.host
-                .revert_l2(receipt.connector, &l2, on_behalf_of)
+                .revert_l2(receipt.connector, &l2, &self.guardrails(), on_behalf_of)
                 .await
                 .map_err(coded)
         })
@@ -493,7 +593,7 @@ impl NetworkControllers for HostControllers {
         state: &ControllerAttachments,
         change: &AttachmentChange,
     ) -> Result<(), CodedError> {
-        self.guardrails
+        self.guardrails()
             .check(&attachment_change_of(change), &guardrail_view_of(state))
             .map_err(|error| coded(error.into()))
     }
@@ -510,7 +610,7 @@ impl NetworkControllers for HostControllers {
                 .plan_l2(
                     connector,
                     &attachment_change_of(change),
-                    &self.guardrails,
+                    &self.guardrails(),
                     on_behalf_of,
                 )
                 .await
@@ -532,9 +632,10 @@ impl NetworkControllers for HostControllers {
             } else {
                 WriteMode::Apply
             };
+            let _slot = self.write_slot(plan.connector, dry_run).await;
             let receipt = self
                 .host
-                .apply_l2(plan.connector, &l2, mode, &self.guardrails, on_behalf_of)
+                .apply_l2(plan.connector, &l2, mode, &self.guardrails(), on_behalf_of)
                 .await
                 .map_err(coded)?;
             receipt_of(plan.connector, &receipt)
@@ -1252,6 +1353,84 @@ mod tests {
             .expect_err("uplink");
         assert_eq!(error.code, "connect.guardrail.uplink");
         assert_eq!(error.status, 409);
+    }
+
+    #[tokio::test]
+    async fn a_port_protected_in_the_settings_is_refused_to_the_next_move() {
+        let state = state_of_snapshot();
+        let (settings, guardrails) = tokio::sync::watch::channel(Guardrails::default());
+        let controllers = HostControllers::following(host(), guardrails);
+        // The move job checks its port change with `check_attachment` before it plans.
+        assert_eq!(
+            controllers.check_attachment(&state, &set_profile(1)),
+            Ok(())
+        );
+        settings
+            .send(Guardrails {
+                protected: vec![ProtectedPath::Port {
+                    device: DeviceRef("sw-1".to_owned()),
+                    port: 1,
+                }],
+                max_parallel: 10,
+            })
+            .expect("settings");
+        let error = controllers
+            .check_attachment(&state, &set_profile(1))
+            .expect_err("protected port");
+        assert_eq!(error.code, "connect.guardrail.protected_port");
+        assert_eq!(error.status, 409);
+        assert_eq!(
+            controllers.check_attachment(&state, &set_profile(2)),
+            Ok(())
+        );
+    }
+
+    #[tokio::test]
+    async fn max_parallel_bounds_the_writes_through_one_controller() {
+        let (settings, guardrails) = tokio::sync::watch::channel(Guardrails {
+            protected: Vec::new(),
+            max_parallel: 2,
+        });
+        let controllers = HostControllers::following(host(), guardrails);
+        let (one, other) = (ConnectorId::generate(), ConnectorId::generate());
+        let first = controllers.write_slot(one, false).await;
+        let second = controllers.write_slot(one, false).await;
+        assert!(
+            controllers.write_slot(one, true).await.is_none(),
+            "a dry run takes no slot"
+        );
+        assert_eq!(controllers.writes.running(one), 2);
+        // Another controller has slots of its own.
+        let elsewhere = controllers.write_slot(other, false).await;
+        assert_eq!(controllers.writes.running(other), 1);
+        // A third write through the same controller waits for a free slot.
+        let waiting = {
+            let controllers = controllers.clone();
+            tokio::spawn(async move { controllers.write_slot(one, false).await })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!waiting.is_finished());
+        drop(first);
+        let third = tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("a slot was freed")
+            .expect("task");
+        assert_eq!(controllers.writes.running(one), 2);
+        // A higher limit in the settings applies to the next write at once.
+        settings
+            .send(Guardrails {
+                protected: Vec::new(),
+                max_parallel: 3,
+            })
+            .expect("settings");
+        let fourth =
+            tokio::time::timeout(Duration::from_secs(5), controllers.write_slot(one, false))
+                .await
+                .expect("the third slot");
+        assert_eq!(controllers.writes.running(one), 3);
+        drop((second, third, fourth, elsewhere));
+        assert_eq!(controllers.writes.running(one), 0);
+        assert_eq!(controllers.writes.running(other), 0);
     }
 
     #[test]

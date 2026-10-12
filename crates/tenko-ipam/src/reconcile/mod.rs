@@ -17,12 +17,21 @@
 //!
 //! # When it runs
 //!
-//! [`Reconciler::run`] runs on an interval (five minutes by default), shortly after every
-//! ingest, after changes to the intent tables and adoption policies (debounced), and
-//! purges old facts every hour. [`Reconciler::reconcile`] runs once on demand
-//! (`POST /proposals/reconcile`). Runs never overlap on one controller; in a cluster
-//! every controller runs its own loop and the preconditions keep their writes apart
-//! (leader-only scheduling is a Slice 3 item).
+//! On the controller that leads, the leader service `ipam.reconcile`
+//! ([`Reconciler::leader_service`]) runs it right after taking office and then on an
+//! interval (five minutes by default), shortly after every ingest and every new fact
+//! (debounced: an ingest on another controller reaches the leader as a write to
+//! `ipam.obs.facts`), after changes to the intent tables and adoption policies, and purges
+//! old facts on its own timer (hourly by default). Its writes are fenced with the leader
+//! epoch, so a deposed leader's late run commits nothing. [`Reconciler::reconcile`] runs
+//! once on demand (`POST /proposals/reconcile`) on any controller. Runs never overlap on
+//! one controller.
+//!
+//! # Settings
+//!
+//! The intervals, the orphan age, the retention, the refresh and adoption are settings in
+//! the store ([`settings`], `ipam.reconciler_settings`), read at every run, so a change
+//! applies at the next run without a restart; `max_attempts` is a code constant.
 //!
 //! # Observations and waiting jobs
 //!
@@ -32,6 +41,8 @@
 
 pub mod moves;
 pub(crate) mod rules;
+pub mod scopes;
+pub mod settings;
 pub(crate) mod snapshot;
 
 use std::{
@@ -43,10 +54,12 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tenko_core::{
     ObjectRef, Principal, RequestCtx, Revision, SystemComponent, Timestamp,
+    cluster::{LEADER_EPOCH, LeaderService},
     observe::{Observation, Observed},
 };
-use tenko_store::{ReadConsistency, StoreError, WatchFilter, WriteBatch};
+use tenko_store::{ReadConsistency, StoreError, WatchFilter, WriteBatch, fence};
 use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
 pub use self::rules::{DISCOVERED_TAG, rule};
@@ -60,7 +73,7 @@ use crate::{
     observe::{
         self, IngestBatch, IngestReport, ObserveConfig,
         model::{IntentSighting, observed_ips, observed_macs},
-        tables::LAST_SEEN,
+        tables::{FACTS, LAST_SEEN},
     },
     plan::PlanOptions,
     proposals::{
@@ -73,7 +86,11 @@ use crate::{
     tables,
 };
 
-/// Settings of the reconciler.
+/// The name of the leader service that runs the reconciler.
+pub const LEADER_SERVICE: &str = "ipam.reconcile";
+
+/// Settings of the reconciler: the code defaults, which the settings in the store
+/// ([`settings`]) override at every run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReconcilerConfig {
     /// The observation layer.
@@ -169,7 +186,8 @@ pub struct Reconciler {
 }
 
 /// A derived index that only signals: the store calls it on its apply path for every
-/// change set touching the intent tables or the adoption policies.
+/// change set touching the intent tables, the adoption policies or the facts (an ingest on
+/// any controller), on every controller.
 struct ChangeSignal {
     notify: Arc<Notify>,
 }
@@ -195,6 +213,7 @@ impl tenko_store::DerivedIndex for ChangeSignal {
                 tables::HOSTS.name(),
                 tables::INTERFACES.name(),
                 ADOPTION.name(),
+                FACTS.name(),
             ]
             .into_iter()
             .cloned(),
@@ -256,9 +275,23 @@ impl Reconciler {
         &self.ipam
     }
 
-    /// The settings.
+    /// The settings it was built with (the code defaults in the server); the settings in
+    /// the store override them ([`Self::effective`]).
     pub fn config(&self) -> &ReconcilerConfig {
         &self.config
+    }
+
+    /// The settings in force now: the stored settings over [`Self::config`], or
+    /// [`Self::config`] while none are stored or the store cannot be read.
+    pub async fn effective(&self) -> ReconcilerConfig {
+        match settings::read_stored(self.ipam.store().as_ref()).await {
+            Ok(Some(stored)) => stored.apply(self.config),
+            Ok(None) => self.config,
+            Err(error) => {
+                tracing::warn!(error = %error.code_str(), "the reconciler settings could not be read; the defaults apply");
+                self.config
+            }
+        }
     }
 
     /// The report of the last run on this controller.
@@ -282,7 +315,8 @@ impl Reconciler {
     ///
     /// The ingest's errors; failures to wake jobs are logged.
     pub async fn ingest(&self, batch: IngestBatch) -> IpamResult<IngestReport> {
-        let report = observe::ingest(self.ipam.store(), &batch, &self.config.observe).await?;
+        let config = self.effective().await;
+        let report = observe::ingest(self.ipam.store(), &batch, &config.observe).await?;
         if let Err(error) = self.wake_jobs(&batch.observations, report.revision).await {
             tracing::warn!(error = %error.code_str(), "observations did not reach waiting jobs");
         }
@@ -367,7 +401,12 @@ impl Reconciler {
     ///
     /// Store errors.
     pub async fn purge(&self, now: Timestamp) -> IpamResult<usize> {
-        observe::retention::purge(self.ipam.store(), &self.config.observe, now).await
+        self.purge_fenced(now, None).await
+    }
+
+    async fn purge_fenced(&self, now: Timestamp, epoch: Option<u64>) -> IpamResult<usize> {
+        let config = self.effective().await;
+        observe::retention::purge_fenced(self.ipam.store(), &config.observe, now, epoch).await
     }
 
     /// One run at `now` (see the module documentation).
@@ -377,9 +416,20 @@ impl Reconciler {
     /// Store errors, or `ipam.contended` when concurrent writers kept invalidating the
     /// proposal write. Failed adoptions are recorded on their proposals, not returned.
     pub async fn reconcile(&self, now: Timestamp) -> IpamResult<ReconcileReport> {
+        self.reconcile_fenced(now, None).await
+    }
+
+    /// [`reconcile`](Self::reconcile), with the proposal write fenced with the leader
+    /// `epoch` when given; a deposed leader's run ends with `ipam.reconcile.deposed`.
+    async fn reconcile_fenced(
+        &self,
+        now: Timestamp,
+        epoch: Option<u64>,
+    ) -> IpamResult<ReconcileReport> {
         let _guard = self.run_lock.lock().await;
+        let config = self.effective().await;
         let mut report = ReconcileReport::empty(now);
-        let attempts = self.config.max_attempts.max(1);
+        let attempts = config.max_attempts.max(1);
         let mut committed = None;
         for attempt in 0..attempts {
             let consistency = if attempt == 0 {
@@ -388,22 +438,30 @@ impl Reconciler {
                 ReadConsistency::Linearizable
             };
             let view = self.ipam.store().read(consistency).await?;
+            if let Some(epoch) = epoch
+                && view.counter(&LEADER_EPOCH)? != epoch
+            {
+                return Err(deposed());
+            }
             let snapshot = Snapshot::load(view.as_ref(), now)?;
             drop(view);
             let mut batch = WriteBatch::new(Principal::system(SystemComponent::Reconciler), now);
-            let sightings = self.sightings(&snapshot, &mut batch, &mut report)?;
+            if let Some(epoch) = epoch {
+                batch.preconditions.push(fence(epoch));
+            }
+            let sightings = Self::sightings(&snapshot, &mut batch, &mut report, &config)?;
             let candidates = rules::candidates(
                 &snapshot,
                 &sightings,
                 RuleConfig {
-                    orphan_after: self.config.orphan_after,
+                    orphan_after: config.orphan_after,
                 },
             );
             let counts = sync::sync(
                 &snapshot,
                 &candidates,
                 &SyncConfig {
-                    refresh: self.config.observe.refresh,
+                    refresh: config.observe.refresh,
                 },
                 &mut batch,
             )?;
@@ -424,17 +482,22 @@ impl Reconciler {
                     committed = Some(done.revision);
                     break;
                 }
-                Err(StoreError::PreconditionFailed(_)) if attempt + 1 < attempts => {
+                Err(StoreError::PreconditionFailed(_)) => {
+                    if let Some(epoch) = epoch
+                        && self.deposed(epoch).await
+                    {
+                        return Err(deposed());
+                    }
+                    if attempt + 1 >= attempts {
+                        return Err(IpamError::contended(attempts));
+                    }
                     report.sightings = 0;
                     tracing::debug!(attempt, "reconcile write stale; running again");
-                }
-                Err(StoreError::PreconditionFailed(_)) => {
-                    return Err(IpamError::contended(attempts));
                 }
                 Err(error) => return Err(error.into()),
             }
         }
-        if self.config.adopt {
+        if config.adopt {
             self.adopt(committed, now, &mut report).await?;
         }
         report.moves_confirmed = self.confirm_moves(now).await?;
@@ -445,10 +508,10 @@ impl Reconciler {
     /// Brings the last sightings of addresses and interfaces up to date in `batch` and
     /// returns them as they will be.
     fn sightings(
-        &self,
         snapshot: &Snapshot,
         batch: &mut WriteBatch,
         report: &mut ReconcileReport,
+        config: &ReconcilerConfig,
     ) -> IpamResult<BTreeMap<ObjectRef, IntentSighting>> {
         let intent = &snapshot.intent;
         let mut newest: BTreeMap<ObjectRef, IntentSighting> = BTreeMap::new();
@@ -489,7 +552,7 @@ impl Reconciler {
         for (object, sighting) in newest {
             let stored = snapshot.sightings.get(&object);
             let due = stored.is_none_or(|(current, _)| {
-                sighting.at.saturating_since(current.at) >= self.config.observe.refresh
+                sighting.at.saturating_since(current.at) >= config.observe.refresh
             });
             if !due {
                 continue;
@@ -526,9 +589,12 @@ impl Reconciler {
         drop(view);
         let cx = reconciler_cx(now);
         for (proposal, _) in snapshot.open.values() {
-            let Some((prefix, host_mode)) =
-                adoption::adopter(&snapshot.intent, &snapshot.policies, proposal)
-            else {
+            let Some((prefix, host_mode)) = adoption::adopter(
+                &snapshot.intent,
+                &snapshot.policies,
+                &snapshot.vendors,
+                proposal,
+            ) else {
                 continue;
             };
             let applier = Applier::Policy { prefix, host_mode };
@@ -592,26 +658,52 @@ impl Reconciler {
         Ok(confirmed)
     }
 
-    /// Runs until `shutdown` completes: periodic runs, runs shortly after ingests and
-    /// intent changes, and hourly purges. Errors are logged; the loop goes on.
-    pub async fn run(self: Arc<Self>, shutdown: impl std::future::Future<Output = ()>) {
-        tokio::pin!(shutdown);
-        let mut tick = tokio::time::interval(self.config.interval);
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut purge = tokio::time::interval(self.config.purge_interval);
-        purge.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    /// Whether the leader epoch moved past `epoch` (another controller took office).
+    async fn deposed(&self, epoch: u64) -> bool {
+        match self.ipam.store().read(ReadConsistency::Local).await {
+            Ok(view) => view
+                .counter(&LEADER_EPOCH)
+                .is_ok_and(|current| current != epoch),
+            Err(_) => false,
+        }
+    }
+
+    /// The leader service `ipam.reconcile` (see the module documentation).
+    pub fn leader_service(self: &Arc<Self>) -> Arc<dyn LeaderService> {
+        Arc::new(ReconcileService(Arc::clone(self)))
+    }
+
+    /// The loop of the leader service until `stop` fires: a run right away and then every
+    /// interval, a run shortly after every ingest and intent change, and purges on their
+    /// own timer. The settings are read again before every wait, so a changed interval
+    /// applies from the next wait. Errors are logged; the loop goes on, except when the
+    /// controller was deposed.
+    async fn serve(&self, epoch: u64, stop: CancellationToken) -> Result<(), String> {
+        use tokio::time::{Instant, sleep, sleep_until};
+        let mut last_run: Option<Instant> = None;
+        let mut last_purge = Instant::now();
         loop {
+            let config = self.effective().await;
+            let next_run = last_run.map_or_else(Instant::now, |at| at + config.interval);
+            let next_purge = last_purge + config.purge_interval;
             tokio::select! {
-                () = &mut shutdown => return,
-                _ = tick.tick() => {}
+                () = stop.cancelled() => return Ok(()),
+                () = sleep_until(next_run) => {}
                 () = self.wake.notified() => {
-                    tokio::time::sleep(self.config.debounce).await;
+                    tokio::select! {
+                        () = stop.cancelled() => return Ok(()),
+                        () = sleep(config.debounce) => {}
+                    }
                 }
                 () = self.changed.notified() => {
-                    tokio::time::sleep(self.config.debounce).await;
+                    tokio::select! {
+                        () = stop.cancelled() => return Ok(()),
+                        () = sleep(config.debounce) => {}
+                    }
                 }
-                _ = purge.tick() => {
-                    match self.purge(Timestamp::now()).await {
+                () = sleep_until(next_purge) => {
+                    last_purge = Instant::now();
+                    match self.purge_fenced(Timestamp::now(), Some(epoch)).await {
                         Ok(0) => {}
                         Ok(count) => tracing::info!(count, "observation facts purged"),
                         Err(error) => tracing::warn!(error = %error.code_str(), "observation purge failed"),
@@ -619,11 +711,40 @@ impl Reconciler {
                     continue;
                 }
             }
-            match self.reconcile(Timestamp::now()).await {
+            last_run = Some(Instant::now());
+            match self.reconcile_fenced(Timestamp::now(), Some(epoch)).await {
                 Ok(report) => tracing::debug!(?report, "reconcile run"),
+                Err(error) if error.code_str() == DEPOSED => {
+                    return Err("this controller no longer leads".to_owned());
+                }
                 Err(error) => tracing::warn!(error = %error.code_str(), "reconcile run failed"),
             }
         }
+    }
+}
+
+/// The code of a run of a deposed leader.
+const DEPOSED: &str = "ipam.reconcile.deposed";
+
+fn deposed() -> IpamError {
+    IpamError::new(
+        DEPOSED,
+        409,
+        "this controller no longer leads; the run was not committed",
+    )
+}
+
+/// The leader service `ipam.reconcile`.
+struct ReconcileService(Arc<Reconciler>);
+
+#[async_trait::async_trait]
+impl LeaderService for ReconcileService {
+    fn name(&self) -> &'static str {
+        LEADER_SERVICE
+    }
+
+    async fn run(&self, epoch: u64, stop: CancellationToken) -> Result<(), String> {
+        self.0.serve(epoch, stop).await
     }
 }
 

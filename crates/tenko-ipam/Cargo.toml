@@ -28,6 +28,7 @@ tenko-store = { workspace = true }
 tenko-vault = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 utoipa = { workspace = true }
 uuid = { workspace = true }
@@ -40,6 +41,8 @@ tenko-core = { workspace = true, features = ["testing"] }
 rust_xlsxwriter = { workspace = true }
 zip = { workspace = true }
 tenko-jobs = { workspace = true, features = ["testing"] }
+# The three-member in-process cluster of the leader service test.
+tenko-store = { workspace = true, features = ["raft", "testing"] }
 tenko-vault = { workspace = true, features = ["testing"] }
 
 [lints]

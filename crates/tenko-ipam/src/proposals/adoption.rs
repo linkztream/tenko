@@ -16,7 +16,10 @@
 //! anything that touches a locked or `unmanaged` host; the planner refuses a locked host
 //! to the reconciler anyway (IPAM-16).
 
-use std::{collections::BTreeMap, net::IpAddr};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    net::IpAddr,
+};
 
 use serde::{Deserialize, Serialize};
 use tenko_core::{
@@ -111,18 +114,21 @@ fn oui(entry: &str) -> Option<[u8; 3]> {
 }
 
 /// Whether the vendor constraint holds for a device: no entries, or an OUI entry the MAC
-/// address starts with, or a text entry contained in the vendor a source reports.
-pub fn vendor_matches(policy: &AdoptionPolicy, mac: Option<MacAddr>, vendor: Option<&str>) -> bool {
+/// address starts with, or a text entry contained (ignoring case) in a vendor that a source
+/// reports for the device (`vendors`: the vendor facts of probes, network controllers and
+/// inventories).
+pub fn vendor_matches(policy: &AdoptionPolicy, mac: Option<MacAddr>, vendors: &[&str]) -> bool {
     if policy.vendors.is_empty() {
         return true;
     }
-    policy.vendors.iter().any(|entry| match oui(entry) {
-        Some(prefix) => mac.is_some_and(|mac| mac.octets()[..3] == prefix),
-        None => vendor.is_some_and(|vendor| {
-            vendor
-                .to_ascii_lowercase()
-                .contains(&entry.trim().to_ascii_lowercase())
-        }),
+    policy.vendors.iter().any(|entry| {
+        if let Some(prefix) = oui(entry) {
+            return mac.is_some_and(|mac| mac.octets()[..3] == prefix);
+        }
+        let entry = entry.trim().to_lowercase();
+        vendors
+            .iter()
+            .any(|vendor| vendor.to_lowercase().contains(&entry))
     })
 }
 
@@ -166,6 +172,7 @@ fn target_addresses(intent: &Intent, commands: &[IpamCommand]) -> Vec<(tenko_cor
 pub(crate) fn adopter(
     intent: &Intent,
     policies: &BTreeMap<PrefixId, StoredPolicy>,
+    vendors: &BTreeMap<MacAddr, BTreeSet<String>>,
     proposal: &IntentProposal,
 ) -> Option<(PrefixId, AssignmentMode)> {
     if !proposal.is_open() || proposal.adoption_error.is_some() || proposal.commands.is_empty() {
@@ -220,7 +227,15 @@ pub(crate) fn adopter(
             return None;
         }
     }
-    if !vendor_matches(&policy, proposal.subject.mac, None) {
+    let reported: Vec<&str> = proposal
+        .subject
+        .mac
+        .and_then(|mac| vendors.get(&mac))
+        .into_iter()
+        .flatten()
+        .map(String::as_str)
+        .collect();
+    if !vendor_matches(&policy, proposal.subject.mac, &reported) {
         return None;
     }
     if proposal.sightings() < policy.min_sightings {
@@ -408,14 +423,15 @@ mod tests {
         };
         let mac: MacAddr = "00:00:5e:00:53:01".parse().expect("mac");
         let other: MacAddr = "02:00:5e:00:53:01".parse().expect("mac");
-        assert!(vendor_matches(&policy, Some(mac), None));
-        assert!(!vendor_matches(&policy, Some(other), None));
+        assert!(vendor_matches(&policy, Some(mac), &[]));
+        assert!(!vendor_matches(&policy, Some(other), &[]));
         assert!(vendor_matches(
             &policy,
             Some(other),
-            Some("example devices inc.")
+            &["Other Corp", "example devices inc."]
         ));
-        assert!(vendor_matches(&AdoptionPolicy::default(), None, None));
+        assert!(!vendor_matches(&policy, Some(other), &["Other Corp"]));
+        assert!(vendor_matches(&AdoptionPolicy::default(), None, &[]));
     }
 
     #[test]

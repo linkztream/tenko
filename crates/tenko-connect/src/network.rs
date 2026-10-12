@@ -61,7 +61,7 @@ pub trait NetworkController: Send + Sync + 'static {
 macro_rules! controller_ref {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
-        #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+        #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, utoipa::ToSchema)]
         #[serde(transparent)]
         pub struct $name(pub String);
 
@@ -378,7 +378,7 @@ pub struct WirelessNetwork {
 }
 
 /// Paths a connector never touches (CONN-09).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProtectedPath {
     /// A switch port, such as the port Tenko or the controller is reached through.
@@ -406,7 +406,7 @@ pub enum ProtectedPath {
 }
 
 /// Guardrails for network-controller writes (CONN-09), enforced by the host.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Guardrails {
     /// Configured and derived protected paths. Uplinks and management networks from the
     /// topology are protected on top of these.

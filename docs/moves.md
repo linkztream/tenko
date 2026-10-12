@@ -87,7 +87,7 @@ With writes off for the connector (TGL-20, the instance's `writes_enabled`), the
 
 ### 3.5 Guardrails (CONN-09)
 
-Tenko never touches the port or VLAN through which Tenko or the controller is reached, and never touches uplinks. The preview checks the change against the same rules as the connector host, from the read it made, before anything is planned on the controller. The connector host checks them again at every plan and every write.
+Tenko never touches the port or VLAN through which Tenko or the controller is reached, and never touches uplinks, nor the ports, clients, networks and VLANs an administrator protected in the guardrail settings (`GET` and `PUT /api/v1/settings/guardrails`, see [connectors-unifi.md](connectors-unifi.md) section 6). The preview checks the change against the same rules as the connector host, from the read it made, before anything is planned on the controller. The connector host checks them again at every plan, every write and every revert. A change of the protected paths applies to the next check without a restart.
 
 | Refused when | Code |
 |---|---|
@@ -148,7 +148,7 @@ The job ends `rolled_back` with the reason in its error, or `cancelled` when a c
 
 ## 7 Bulk moves
 
-The jobs of one move form one job group whose limit is the move's parallelism: 4 by default, 1 to 64 per request. A job holds its slot from its start until it ends, while it waits for people or for the observation included. A bulk move of 60 IoT devices with the default therefore has at most four devices between "moved" and "confirmed", and its other jobs start as slots free up (CONN-09). The connector host also lets at most four calls per controller instance run at the same time. The preview's parallelism selector offers 1, 2, 4 and 8.
+The jobs of one move form one job group whose limit is the move's parallelism: 4 by default, 1 to 64 per request. A job holds its slot from its start until it ends, while it waits for people or for the observation included. A bulk move of 60 IoT devices with the default therefore has at most four devices between "moved" and "confirmed", and its other jobs start as slots free up (CONN-09). The connector host also lets at most four calls per controller instance run at the same time, and the guardrail setting `max_parallel` (default 10, 1 to 64) bounds the real layer-2 writes and reverts through one controller instance across every move and VLAN job; a write over the limit waits for a free slot. The preview's parallelism selector offers 1, 2, 4 and 8.
 
 ## 8 What stays manual in this phase
 
@@ -184,4 +184,4 @@ A submit needs `Update` on every named object, `Execute` on jobs and `Execute` o
 - Tenko picks an existing port profile and never creates one; the contract has no change for it yet.
 - Whether an access point carries a VLAN is inferred from its SSIDs and its uplink port's profile. A controller that places VLANs some other way, for example per-client VLANs from RADIUS, is not modeled.
 - Two addresses of one interface in one move share the first address's L2 step. A rollback of that job puts the device back for both.
-- The parallelism default (4) is a constant of the IPAM service; there is no `tenko.toml` key yet. `tenko serve` does not load configured protected paths, so the derived guardrails (uplinks and the management path) are what applies today. There is no association between sites and controllers: every enabled controller is read, and a device seen by several of them is left to a person.
+- The parallelism default (4) is a constant of the IPAM service; there is no `tenko.toml` key yet. There is no association between sites and controllers: every enabled controller is read, and a device seen by several of them is left to a person.

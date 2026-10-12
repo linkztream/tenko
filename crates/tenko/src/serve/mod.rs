@@ -23,7 +23,9 @@
 //! (`tenko_core::cluster::LeaderService`) once this controller has taken office; on a single
 //! controller that is at once. The steps register their services in the
 //! [`leader::LeaderRegistry`] that the start sequence hands around: the online KEK rotation
-//! (`vault.kek_rotation`, step `vault`), the job runner (`jobs.runner`, step `jobs`), the
+//! (`vault.kek_rotation`, step `vault`), the reconciler with its purge (`ipam.reconcile`,
+//! step `ipam`, which also seeds its settings in the store), the job runner (`jobs.runner`,
+//! step `jobs`), the poll schedule of the connectors (`connect.poll`, step `connectors`), the
 //! prune of the node registry (`cluster.prune`, step `nodes`), the purge of expired
 //! idempotency records (`api.idempotency_purge`, step `api`) and the scheduled backups
 //! (`backup.schedule`, step `api`, which also records a restore at the first start after it).
@@ -1197,12 +1199,17 @@ async fn start(
         None => None,
     };
     if let Some(reconciler) = &reconciler {
-        let mut stop = running.stop.subscribe();
-        running
-            .tasks
-            .push(tokio::spawn(Arc::clone(reconciler).run(async move {
-                let _ = stop.wait_for(|stopped| *stopped).await;
-            })));
+        // The settings live in the store (plan 2.6): seeded from the code defaults once, then
+        // read by every run. The loop and the purge run on the leader.
+        let defaults = tenko_ipam::reconcile::settings::ReconcilerSettings::of(reconciler.config());
+        match tenko_ipam::reconcile::settings::seed(store_dyn.as_ref(), defaults).await {
+            Ok(true) => tracing::info!("reconciler settings seeded with the defaults"),
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(error = %error.code_str(), "the reconciler settings could not be seeded; the defaults apply");
+            }
+        }
+        leaders.register(reconciler.leader_service());
     }
     let sink: Arc<dyn tenko_connect::host::normalize::ObservationSink> = match &reconciler {
         Some(reconciler) => {
@@ -1313,12 +1320,40 @@ async fn start(
                 &resolved.data_dir,
                 running.stop.subscribe(),
                 sink,
+                resolved.config.profile.name,
             ),
         )
         .await?;
     running.tasks.push(connectors.task());
-    vlan_controllers.set(tenko_api::routes::vlans::host::HostControllers::new(
+    leaders.register(connectors.leader_service());
+    // The guardrails of network-controller writes are settings in the store (plan 2.6):
+    // seeded from the defaults once, then followed on every controller.
+    let defaults = tenko_connect::Guardrails::default();
+    match tenko_connect::host::guardrails::seed(store_dyn.as_ref(), &defaults).await {
+        Ok(true) => tracing::info!("guardrails seeded with the defaults"),
+        Ok(false) => {}
+        Err(error) => {
+            tracing::warn!(%error, "the guardrails could not be seeded; the defaults apply");
+        }
+    }
+    let guardrails = match tenko_connect::host::guardrails::follow(
+        Arc::clone(&store_dyn),
+        running.stop.subscribe(),
+    )
+    .await
+    {
+        Ok((guardrails, task)) => {
+            running.tasks.push(task);
+            guardrails
+        }
+        Err(error) => {
+            tracing::warn!(%error, "the guardrails could not be read; the defaults apply");
+            tokio::sync::watch::channel(defaults).1
+        }
+    };
+    vlan_controllers.set(tenko_api::routes::vlans::host::HostControllers::following(
         Arc::clone(connectors.host()),
+        guardrails,
     ));
     let mut cluster = steps
         .run(

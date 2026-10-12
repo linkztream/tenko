@@ -36,6 +36,24 @@
 //! outcome is the instance's last run (`connect.runs`). The remote system is also checked
 //! every [`HostConfig::check_interval`]; the result is kept in memory and shown as health.
 //!
+//! # Leadership
+//!
+//! Plugin processes, remote checks, on-demand runs and every other call run on each
+//! controller. The poll schedule does not: only the controller that holds the leader
+//! service `connect.poll` ([`ConnectorHost::poll_service`]) starts scheduled runs, and it
+//! records them fenced with its leader epoch, so a deposed leader's late record fails. A
+//! controller that takes office starts the runs that fell due while it followed at once,
+//! so polling resumes within one poll interval.
+//!
+//! # Certificate checks off
+//!
+//! `tls = insecure` is accepted under the Lab profile only ([`HostConfig::insecure_tls`]).
+//! Elsewhere creating or changing an instance to it is refused with
+//! `connect.tls.insecure_refused` (422), and an instance stored before the profile changed
+//! is degraded with that code: no call reaches its plugin, its remote check and its
+//! scheduled runs are skipped, and the refusal is logged once until the instance or the
+//! profile changes.
+//!
 //! # Health changes
 //!
 //! The process state and the remote health live in memory on this node, not in the store,
@@ -47,6 +65,7 @@
 
 mod calls;
 pub mod model;
+mod poll;
 mod steps;
 
 use std::{
@@ -78,6 +97,7 @@ pub use self::model::{
     ConnectorHealth, ConnectorInstance, ConnectorPatch, ConnectorView, HostError, LastRun,
     NewConnector, RunOutcome, RunTrigger, actions, bounds, kinds, tables,
 };
+pub use self::poll::{INSECURE_REFUSED, POLL_SERVICE};
 use super::{
     normalize::{self, ObservationSink},
     registry::{PluginInfo, PluginRegistry},
@@ -107,7 +127,12 @@ pub struct HostConfig {
     /// How old a network-controller plan may be when it is applied.
     pub plan_max_age: Duration,
     /// Whether the host reads instances on their schedule (off in tests that drive runs).
+    /// Scheduled runs start only while this controller holds the leader service
+    /// `connect.poll`.
     pub schedule: bool,
+    /// Whether `tls = insecure` is allowed (the Lab profile); followed while the host runs.
+    /// The default refuses it.
+    pub insecure_tls: watch::Receiver<bool>,
 }
 
 impl Default for HostConfig {
@@ -121,6 +146,7 @@ impl Default for HostConfig {
             full_poll_interval: Duration::from_secs(3600),
             plan_max_age: Duration::from_secs(600),
             schedule: true,
+            insecure_tls: watch::channel(false).1,
         }
     }
 }
@@ -214,6 +240,11 @@ pub struct ConnectorHost {
     sync_lock: tokio::sync::Mutex<()>,
     /// The instances whose process state or health changed ([`Self::health_changes`]).
     health: broadcast::Sender<ConnectorId>,
+    /// The leader epoch while this controller holds `connect.poll`.
+    poll_epoch: Mutex<Option<u64>>,
+    /// The instances refused for `tls = insecure`, with the change time of the instance
+    /// when the refusal was logged (logged once per change).
+    refused: Mutex<HashMap<ConnectorId, Timestamp>>,
 }
 
 /// How many health changes a slow receiver may fall behind before it lags.
@@ -248,6 +279,8 @@ impl ConnectorHost {
             runtimes: Mutex::new(HashMap::new()),
             sync_lock: tokio::sync::Mutex::new(()),
             health: broadcast::channel(HEALTH_CHANGES).0,
+            poll_epoch: Mutex::new(None),
+            refused: Mutex::new(HashMap::new()),
         })
     }
 
@@ -419,7 +452,9 @@ impl ConnectorHost {
     /// # Errors
     ///
     /// `connect.plugin.unknown` or `connect.plugin.unusable`, `connect.instance.name`,
-    /// `connect.instance.name_taken`, `connect.settings.invalid`, the secret errors of
+    /// `connect.instance.name_taken`, `connect.settings.invalid`,
+    /// `connect.tls.insecure_refused` (`tls = insecure` outside the Lab profile), the secret
+    /// errors of
     /// [`validate_secrets`](Self::validate_secrets), `connect.instance.poll_interval`,
     /// `connect.instance.call_timeout`, or the store's error.
     pub async fn create(
@@ -430,6 +465,7 @@ impl ConnectorHost {
         let manifest = self.usable_manifest(&new.plugin)?;
         let name = valid_name(&new.name)?;
         let settings = manifest.validate_settings(&new.settings)?;
+        self.refuse_insecure_tls(&settings)?;
         self.validate_secrets(&manifest, &new.secrets).await?;
         let poll_interval_secs = valid_poll(new.poll_interval_secs)?;
         let call_timeout_secs = valid_timeout(new.call_timeout_secs)?;
@@ -500,6 +536,7 @@ impl ConnectorHost {
             let manifest = self.usable_manifest(&current.plugin)?;
             if let Some(settings) = &patch.settings {
                 next.settings = manifest.validate_settings(settings)?;
+                self.refuse_insecure_tls(&next.settings)?;
             }
             if let Some(secrets) = &patch.secrets {
                 self.validate_secrets(&manifest, secrets).await?;
@@ -977,12 +1014,13 @@ impl ConnectorHost {
             .cloned()
             .collect();
         let now = Instant::now();
+        let epoch = self.poll_epoch();
         for runtime in runtimes {
             let running = runtime
                 .supervisor
                 .as_ref()
                 .is_some_and(|supervisor| supervisor.status().is_running());
-            if !running {
+            if !running || self.refused_at_run_time(&runtime) {
                 continue;
             }
             let check_due = {
@@ -1006,6 +1044,9 @@ impl ConnectorHost {
                     let _ = host.check(id, None).await;
                 });
             }
+            let Some(epoch) = epoch else {
+                continue;
+            };
             if !self.config.schedule
                 || !(runtime.has(Capability::Inventory)
                     || runtime.has(Capability::NetworkController))
@@ -1029,7 +1070,10 @@ impl ConnectorHost {
                 let host = Arc::clone(self);
                 let id = runtime.id;
                 tasks.spawn(async move {
-                    if let Err(error) = host.run(id, RunTrigger::Schedule, None, None).await {
+                    if let Err(error) = host
+                        .run_fenced(id, RunTrigger::Schedule, None, None, Some(epoch))
+                        .await
+                    {
                         tracing::warn!(connector = %id, %error, "scheduled run did not start");
                     }
                 });
@@ -1120,6 +1164,18 @@ impl ConnectorHost {
         job: Option<JobId>,
         on_behalf_of: Option<UserId>,
     ) -> Result<LastRun, HostError> {
+        self.run_fenced(id, trigger, job, on_behalf_of, None).await
+    }
+
+    /// [`run`](Self::run), with the record fenced with the leader epoch `epoch` when given.
+    async fn run_fenced(
+        &self,
+        id: ConnectorId,
+        trigger: RunTrigger,
+        job: Option<JobId>,
+        on_behalf_of: Option<UserId>,
+        epoch: Option<u64>,
+    ) -> Result<LastRun, HostError> {
         let runtime = self.runtime(id).ok_or_else(|| {
             HostError::new(
                 "connect.instance.disabled",
@@ -1182,7 +1238,8 @@ impl ConnectorHost {
             component: SystemComponent::Connector,
             on_behalf_of,
         };
-        self.record_run(id, &run, principal, finished_at).await?;
+        self.record_run(id, &run, principal, finished_at, epoch)
+            .await?;
         *runtime
             .next_run
             .lock()
@@ -1192,20 +1249,31 @@ impl ConnectorHost {
     }
 
     /// Records a run, only while its instance exists: a run that ends after the instance
-    /// was deleted leaves no record behind.
+    /// was deleted leaves no record behind. A scheduled run is fenced with the leader
+    /// `epoch` it started in; once another controller took office it is not recorded.
     async fn record_run(
         &self,
         id: ConnectorId,
         run: &LastRun,
         principal: Principal,
         at: Timestamp,
+        epoch: Option<u64>,
     ) -> Result<(), HostError> {
         for _ in 0..3 {
             let view = self.store.read(ReadConsistency::Local).await?;
             let Some((_, revision)) = view.get_typed(&tables::INSTANCES, &id)? else {
                 return Ok(());
             };
+            if let Some(epoch) = epoch
+                && view.counter(&tenko_core::cluster::LEADER_EPOCH)? != epoch
+            {
+                tracing::info!(connector = %id, "the scheduled run is not recorded: this controller no longer leads");
+                return Ok(());
+            }
             let mut batch = WriteBatch::new(principal.clone(), at);
+            if let Some(epoch) = epoch {
+                batch.preconditions.push(tenko_store::fence(epoch));
+            }
             batch.expect_typed(&tables::INSTANCES, &id, Some(revision));
             batch.put_typed(&tables::RUNS, &id, run)?;
             match self.store.propose(batch).await {
@@ -1233,6 +1301,7 @@ impl ConnectorHost {
         on_behalf_of: Option<UserId>,
     ) -> Result<CallContext, HostError> {
         let instance = runtime.instance();
+        self.refuse_insecure_tls(&instance.settings)?;
         let mut secrets = Secrets::new();
         let declared: Vec<(&String, &SecretRef)> = instance
             .secrets

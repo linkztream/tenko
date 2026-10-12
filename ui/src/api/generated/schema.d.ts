@@ -2557,6 +2557,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/guardrails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the guardrails
+         * @description The protected paths (ports, networks, VLANs, clients) are paths network-controller writes
+         *     and moves never touch, on top of the uplinks and management networks the topology always
+         *     protects. `max_parallel` (1 to 64, default 10) bounds the concurrent layer-2 writes of
+         *     move jobs through one controller instance. Administrators only.
+         */
+        get: operations["get_guardrails"];
+        /**
+         * Change the guardrails
+         * @description The protected paths (ports, networks, VLANs, clients) are paths network-controller writes
+         *     and moves never touch, on top of the uplinks and management networks the topology always
+         *     protects. `max_parallel` (1 to 64, default 10) bounds the concurrent layer-2 writes of
+         *     move jobs through one controller instance. Limits: at most 256 paths, VLAN ids 1 to 4094,
+         *     references 1 to 128 characters, no duplicates; a violation is refused with 422
+         *     `connect.guardrails.invalid`, parameter `field`. A change applies to the next plan, write
+         *     or revert without a restart and is audited as `connect.guardrails.update`. Administrators
+         *     only.
+         */
+        put: operations["update_guardrails"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/reconciler": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the reconciler settings
+         * @description Limits and defaults: interval between periodic runs 30 to 86,400 seconds (default 300);
+         *     debounce after an ingest or an intent change 0 to 300 seconds (default 2); orphan age
+         *     3,600 to 31,536,000 seconds (default 604,800); retention of facts 86,400 to 31,536,000
+         *     seconds (default 2,592,000); refresh of an unchanged fact 60 to 86,400 seconds and
+         *     shorter than the retention (default 900); interval between retention purges 300 to
+         *     86,400 seconds (default 3,600); adoption policies applied (default true). Administrators
+         *     only.
+         */
+        get: operations["get_reconciler_settings"];
+        /**
+         * Change the reconciler settings
+         * @description Limits (seconds unless noted) and defaults: `interval_secs` 30 to 86,400 (default 300);
+         *     `debounce_secs` 0 to 300 (default 2); `orphan_after_secs` 3,600 to 31,536,000 (default
+         *     604,800); `retention_secs` 86,400 to 31,536,000 (default 2,592,000); `refresh_secs` 60 to
+         *     86,400 and shorter than `retention_secs` (default 900); `purge_interval_secs` 300 to
+         *     86,400 (default 3,600); `adopt` (default true). A value outside its limits is refused with
+         *     422 `ipam.reconciler.settings.invalid`, parameter `field`. Administrators only.
+         */
+        put: operations["update_reconciler_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/security": {
         parameters: {
             query?: never;
@@ -4795,6 +4864,8 @@ export interface components {
          * @enum {string}
          */
         Deleted: "exclude" | "include" | "only";
+        /** @description A device as the controller identifies it (for UniFi the device MAC or `_id`). */
+        DeviceRef: string;
         /** @description The counts of one fact type. */
         DiffCounts: {
             /**
@@ -5271,6 +5342,16 @@ export interface components {
          *     network controller (CONN-09): 1 to 128 visible ASCII characters.
          */
         GroupKey: string;
+        /** @description Guardrails for network-controller writes (CONN-09), enforced by the host. */
+        Guardrails: {
+            /** @description Concurrent writes allowed through one controller. */
+            max_parallel: number;
+            /**
+             * @description Configured and derived protected paths. Uplinks and management networks from the
+             *     topology are protected on top of these.
+             */
+            protected: components["schemas"]["ProtectedPath"][];
+        };
         /** @description Body of `GET /health` (liveness): the process answers. */
         Health: {
             /** @description Always `ok`. */
@@ -7190,6 +7271,11 @@ export interface components {
             /** @description The controller. */
             connector: components["schemas"]["ConnectorId"];
         };
+        /**
+         * @description A network as the controller identifies it (for UniFi the network `_id`, not the
+         *     VLAN number).
+         */
+        NetworkRef: string;
         /**
          * @description The network Tenko asks a controller to have for a VLAN: the controller's DHCP off, or
          *     relaying to the given servers (Tenko serves DHCP).
@@ -9659,6 +9745,36 @@ export interface components {
             prefix?: components["schemas"]["PrefixId"] | null;
             vrf?: components["schemas"]["VrfId"] | null;
         };
+        /** @description Paths a connector never touches (CONN-09). */
+        ProtectedPath: {
+            /** @description The switch. */
+            device: components["schemas"]["DeviceRef"];
+            /**
+             * Format: int32
+             * @description The port index.
+             */
+            port: number;
+            /** @enum {string} */
+            type: "port";
+        } | {
+            /** @description The network. */
+            network: components["schemas"]["NetworkRef"];
+            /** @enum {string} */
+            type: "network";
+        } | {
+            /** @enum {string} */
+            type: "vlan";
+            /**
+             * Format: int32
+             * @description The VLAN id.
+             */
+            vid: number;
+        } | {
+            /** @description The client. */
+            mac: components["schemas"]["MacAddr"];
+            /** @enum {string} */
+            type: "client";
+        };
         /** @description The protocol state of a node: what it offered and what was agreed. */
         ProtocolState: {
             /**
@@ -9937,6 +10053,56 @@ export interface components {
              * @description Open proposals left as they were.
              */
             unchanged: number;
+        };
+        /** @description The settings of the reconciler, the same on every controller. */
+        ReconcilerSettings: {
+            /**
+             * @description Whether adoption policies are applied; off, every proposal waits for a person
+             *     (default on).
+             * @default true
+             */
+            adopt: boolean;
+            /**
+             * Format: int64
+             * @description Seconds a run waits after an ingest or an intent change to collect what follows,
+             *     0 to 300 (default 2).
+             * @default 2
+             */
+            debounce_secs: number;
+            /**
+             * Format: int64
+             * @description Seconds between periodic runs, 30 to 86,400 (default 300).
+             * @default 300
+             */
+            interval_secs: number;
+            /**
+             * Format: int64
+             * @description Seconds an intended address may go unseen (after it was seen) before it is
+             *     proposed as orphaned, 3,600 to 31,536,000 (default 604,800: seven days).
+             * @default 604800
+             */
+            orphan_after_secs: number;
+            /**
+             * Format: int64
+             * @description Seconds between retention purges, 300 to 86,400 (default 3,600).
+             * @default 3600
+             */
+            purge_interval_secs: number;
+            /**
+             * Format: int64
+             * @description Seconds after which an unchanged fact is written again with a new last sighting,
+             *     and the shortest interval between two counted sightings, 60 to 86,400 and shorter
+             *     than the retention (default 900).
+             * @default 900
+             */
+            refresh_secs: number;
+            /**
+             * Format: int64
+             * @description Seconds a fact is kept after its last sighting, 86,400 to 31,536,000 (default
+             *     2,592,000: 30 days).
+             * @default 2592000
+             */
+            retention_secs: number;
         };
         /** @description New recovery codes, shown once. */
         RecoveryCodes: {
@@ -25381,6 +25547,270 @@ export interface operations {
                 };
             };
             /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_guardrails: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The guardrails in force */
+            200: {
+                headers: {
+                    /** @description The revision of the stored guardrails, for `If-Match` of `PUT /settings/guardrails`; absent while none are stored */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Guardrails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_guardrails: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The revision the client read, as in the `ETag` of `GET /settings/guardrails`; a stale revision is refused with 409 */
+                "If-Match"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Guardrails"];
+            };
+        };
+        responses: {
+            /** @description The guardrails now in force */
+            200: {
+                headers: {
+                    /** @description The new revision of the guardrails */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Guardrails"];
+                };
+            };
+            /** @description The body is malformed (`sys.invalid_request`) or `If-Match` is malformed (`ipam.validation`, parameter `field`: `If-Match`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `If-Match` is stale or a concurrent change won (`sys.store.precondition_failed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A value is outside its limits (`connect.guardrails.invalid`, parameter `field`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_reconciler_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings in force */
+            200: {
+                headers: {
+                    /** @description The revision of the stored settings, for `If-Match` of `PUT /settings/reconciler`; absent while none are stored */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconcilerSettings"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_reconciler_settings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The revision the client read, as in the `ETag` of `GET /settings/reconciler`; a stale revision is refused with 409 */
+                "If-Match"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReconcilerSettings"];
+            };
+        };
+        responses: {
+            /** @description The settings now in force */
+            200: {
+                headers: {
+                    /** @description The new revision of the settings */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconcilerSettings"];
+                };
+            };
+            /** @description The body is malformed (`sys.invalid_request`) or `If-Match` is malformed (`ipam.validation`, parameter `field`: `If-Match`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `If-Match` is stale or a concurrent change won (`sys.store.precondition_failed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A value is outside its limits (`ipam.reconciler.settings.invalid`, parameter `field`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`) */
             503: {
                 headers: {
                     [name: string]: unknown;

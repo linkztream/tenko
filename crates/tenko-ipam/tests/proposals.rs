@@ -632,3 +632,118 @@ async fn the_list_filters_sorts_and_pages() {
     .expect_err("cursor");
     assert_eq!(error.code_str(), tenko_ipam::codes::INVALID_CURSOR);
 }
+
+/// Vendor facts for MAC addresses from `source` at `when`.
+async fn vendors(
+    world: &World,
+    source: tenko_core::observe::ObservationSource,
+    pairs: &[(&str, &str)],
+    when: tenko_core::Timestamp,
+) {
+    let observations = pairs
+        .iter()
+        .map(|(device, vendor)| tenko_core::observe::Observation {
+            id: tenko_core::ObservationId::generate(),
+            source: source.clone(),
+            subject: tenko_core::observe::Observed::Vendor {
+                mac: mac(device),
+                vendor: (*vendor).to_owned(),
+            },
+            observed_at: when,
+            received_at: when,
+            expires_at: when.checked_add(std::time::Duration::from_secs(3600)),
+        })
+        .collect();
+    world
+        .reconciler
+        .ingest(tenko_ipam::observe::IngestBatch {
+            source,
+            observations,
+            complete: false,
+            received_at: when,
+        })
+        .await
+        .expect("vendor ingest");
+}
+
+#[tokio::test]
+async fn the_vendors_constraint_reads_the_vendors_that_sources_report() {
+    let world = World::new();
+    let (outer, _) = lab(&world).await;
+    let policy = AdoptionPolicy {
+        vendors: vec!["Example Devices".to_owned()],
+        ..adopt(AdoptionMode::AdoptHosts)
+    };
+    proposals::set_policy(
+        &world.service,
+        outer,
+        Some(policy),
+        &person(),
+        Some(tenko_core::Revision::ZERO),
+    )
+    .await
+    .expect("set");
+    world
+        .poll(
+            vec![
+                vm(
+                    "probe",
+                    Some("camera"),
+                    Some("02:00:5e:00:53:70"),
+                    &["192.0.2.70"],
+                ),
+                vm(
+                    "hass",
+                    Some("plug"),
+                    Some("02:00:5e:00:53:72"),
+                    &["192.0.2.72"],
+                ),
+                vm(
+                    "other",
+                    Some("tv"),
+                    Some("02:00:5e:00:53:71"),
+                    &["192.0.2.71"],
+                ),
+            ],
+            at("10:00"),
+        )
+        .await;
+    // A probe's OUI lookup names one device; an inventory (Home Assistant) the second; the
+    // third has a vendor that does not match. None of the MAC addresses has a listed OUI.
+    vendors(
+        &world,
+        tenko_core::observe::ObservationSource::Probe {
+            node: tenko_core::NodeId(7),
+            method: tenko_core::observe::ProbeMethod::Arp,
+        },
+        &[
+            ("02:00:5e:00:53:70", "Example Devices Inc."),
+            ("02:00:5e:00:53:71", "Other Corp"),
+        ],
+        at("10:00"),
+    )
+    .await;
+    vendors(
+        &world,
+        tenko_core::observe::ObservationSource::Inventory {
+            connector: tenko_core::ConnectorId::generate(),
+        },
+        &[("02:00:5e:00:53:72", "EXAMPLE DEVICES")],
+        at("10:00"),
+    )
+    .await;
+    let report = world.reconcile(at("10:01")).await;
+    assert_eq!(report.adopted, 2, "{report:?}");
+    let accepted: Vec<_> = world
+        .proposals(Some(IntentProposalState::Accepted))
+        .await
+        .into_iter()
+        .filter_map(|proposal| proposal.subject.mac)
+        .collect();
+    assert!(accepted.contains(&mac("02:00:5e:00:53:70")));
+    assert!(accepted.contains(&mac("02:00:5e:00:53:72")));
+    assert_eq!(
+        world.open(IntentProposalKind::DiscoveredHost).await.len(),
+        1
+    );
+}

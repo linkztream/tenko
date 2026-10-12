@@ -165,15 +165,19 @@ impl ConnectorHost {
         Ok(receipt)
     }
 
-    /// Undoes an applied L2 change.
+    /// Undoes an applied L2 change. The undo steps are writes like any other: before the
+    /// revert, each is checked against the guardrails in force and a fresh topology, so a
+    /// path that became protected since the change is never written (CONN-09).
     ///
     /// # Errors
     ///
-    /// `connect.writes_disabled`, or the errors of [`topology`](Self::topology).
+    /// `connect.writes_disabled`, `connect.guardrail.*`, or the errors of
+    /// [`topology`](Self::topology).
     pub async fn revert_l2(
         &self,
         id: ConnectorId,
         receipt: &L2Receipt,
+        guardrails: &Guardrails,
         on_behalf_of: Option<UserId>,
     ) -> Result<(), HostError> {
         capability(self, id, Capability::NetworkController)?;
@@ -182,8 +186,13 @@ impl ConnectorHost {
             return Err(ConnectorError::WritesDisabled.into());
         }
         let _slot = runtime.calls.acquire().await;
+        let timeout = runtime.call_timeout();
         let ctx = self.context(&runtime, "revert", on_behalf_of).await?;
-        Ok(client.revert(&ctx, receipt, runtime.call_timeout()).await?)
+        if receipt.mode == WriteMode::Apply && !receipt.undo.is_empty() {
+            let topology = client.topology(&ctx, timeout).await?;
+            crate::host::guardrails::check_undo(guardrails, receipt, &topology)?;
+        }
+        Ok(client.revert(&ctx, receipt, timeout).await?)
     }
 
     /// Plans an actuation (no write).

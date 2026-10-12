@@ -40,6 +40,22 @@ pub async fn purge(
     config: &ObserveConfig,
     now: Timestamp,
 ) -> IpamResult<usize> {
+    purge_fenced(store, config, now, None).await
+}
+
+/// [`purge`], with every batch fenced with the leader `epoch` when given (the purge of the
+/// leader service `ipam.reconcile`): once another controller took office, a batch of the
+/// deposed one fails and the purge stops.
+///
+/// # Errors
+///
+/// As [`purge`].
+pub async fn purge_fenced(
+    store: &Arc<dyn Store>,
+    config: &ObserveConfig,
+    now: Timestamp,
+    epoch: Option<u64>,
+) -> IpamResult<usize> {
     let Some(cutoff) = now
         .unix_nanos()
         .checked_sub(i128::try_from(config.retention.as_nanos()).unwrap_or(i128::MAX))
@@ -75,6 +91,9 @@ pub async fn purge(
     let mut purged = 0;
     for chunk in old.chunks(PURGE_CHUNK) {
         let mut batch = WriteBatch::new(Principal::system(SystemComponent::Reconciler), now);
+        if let Some(epoch) = epoch {
+            batch.preconditions.push(tenko_store::fence(epoch));
+        }
         for fact in chunk {
             delete_fact(fact, &mut batch);
         }
@@ -93,6 +112,9 @@ pub async fn purge(
     }
     for chunk in stale_sightings.chunks(PURGE_CHUNK) {
         let mut batch = WriteBatch::new(Principal::system(SystemComponent::Reconciler), now);
+        if let Some(epoch) = epoch {
+            batch.preconditions.push(tenko_store::fence(epoch));
+        }
         for (object, revision) in chunk {
             batch.delete_typed(&LAST_SEEN, object);
             batch.expect_typed(&LAST_SEEN, object, Some(*revision));

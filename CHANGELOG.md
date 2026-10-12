@@ -128,6 +128,13 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - A start that migrates the data directory first checks that the disk has room for the copy of the store, and `tenko upgrade check` checks it too (`upgrade.no_space`).
 - The systemd smoke test (`deploy/systemd/smoke.sh`), the Windows service smoke test (`deploy/windows/smoke.ps1`) and a smoke test of the macvlan Compose example, run weekly in CI.
 - A drop-in for the systemd unit that lets the probe role open raw sockets, a Compose example with host networking, a probe service in the macvlan example, and notes on LXC containers.
+- The reconciler settings (interval, debounce, orphan age, retention, refresh, purge interval and adoption) are the same on every controller and change without a restart, through the API (`GET` and `PUT /api/v1/settings/reconciler`, administrators only, audited); the settings page follows in a later release.
+- The guardrails of network-controller writes, protected ports, networks, VLANs and clients and the number of layer-2 writes a controller takes at once, are set through the API (`GET` and `PUT /api/v1/settings/guardrails`, administrators only, audited) and apply to moves, VLAN changes and their undo; the settings page follows in a later release.
+- In a controller cluster the reconciler and its purge run on the leader only and move with the leadership; an observation that reaches any controller starts a run on the leader shortly after.
+- With probe scopes, an address no probe scans is no longer proposed as orphaned: only an address inside a scope a probe applies counts as gone when it goes unseen.
+- The vendor entries of adoption policies match the vendor names that probes, network controllers and Home Assistant report, not only MAC address prefixes.
+- Undoing a layer-2 change checks the guardrails again, so a path protected since the change is never written back.
+
 ### Changed
 
 - Switching to the Hardened profile, or setting the audit export to `required`, is refused with 409 `audit.export.required` until at least one export sink is enabled; the refusal is audited like the PIN coupling rule.
@@ -152,6 +159,8 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - While a start migrates the data directory, `tenko serve` asks systemd for more time, so a long migration no longer hits the start timeout of the unit.
 - The Linux release binary is statically linked (musl) and runs on any distribution; every release is started once in Debian 12 and in a RHEL 9 compatible container before it is published.
 - The container image and the Compose examples publish the cluster port 8444.
+- `tls = insecure` on a connector is accepted under the Lab profile only: elsewhere it is refused (`connect.tls.insecure_refused`), and an instance stored with it before the profile changed is shown degraded and is not called until its TLS settings change.
+- In a controller cluster the connectors are polled on schedule by the leader only; every controller still runs the plugins, their health checks and the runs a person asks for.
 
 ### Fixed
 

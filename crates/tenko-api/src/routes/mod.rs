@@ -39,6 +39,8 @@
 //! | [`audit_export`] | audit export sinks, status and test | WP3.3 |
 //! | [`kek`] | key-encryption keys: status and online rotation | WP3.4a |
 //! | [`backup`] | backups: create, status, schedule | WP3.4b |
+//! | [`reconciler`] | reconciler settings (IPAM module) | WP3.12a |
+//! | [`guardrails`] | guardrails of network-controller writes | WP3.12a |
 //! | [`i18n`] | language packs (partly public) | WP3.7 |
 //! | [`queue`] | changes queued on an isolated controller (IPAM module) | WP3.9 |
 //! | [`scans`] | scan jobs, probe scan configuration, kill switch (Discovery module) | WP3.10 |
@@ -74,6 +76,7 @@ pub mod common;
 pub mod connectors;
 pub mod events;
 pub mod export;
+pub mod guardrails;
 pub mod hosts;
 pub mod i18n;
 pub mod import;
@@ -86,6 +89,7 @@ pub mod observations;
 pub mod prefixes;
 pub mod proposals;
 pub mod queue;
+pub mod reconciler;
 pub mod remote;
 pub mod scans;
 pub mod secrets;
@@ -123,8 +127,10 @@ pub mod vlans;
         (name = "system", description = "Health, status and the OpenAPI document"),
         (name = "metrics", description = "Metrics in the OpenMetrics text format"),
         (name = "connectors", description = "Connector plugins and connector instances"),
+        (name = "guardrails", description = "Guardrails of network-controller writes: protected paths and move parallelism"),
         (name = "observations", description = "Observations of connectors and probes, per source and across sources"),
         (name = "proposals", description = "Proposals of the reconciler, their decisions and adoption policies"),
+        (name = "reconciler", description = "Settings of the reconciler: intervals, retention and adoption"),
         (name = "nodes", description = "Cluster nodes: enrolment tokens, enrolment, the node registry and revocation"),
         (name = "secrets", description = "Operator secrets, their reveal, host credentials and the remote access hand-off"),
         (name = "topology", description = "The topology map: nodes, edges, ports and neighbours"),
@@ -201,6 +207,7 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
         .merge(system::routes())
         .merge(metrics::routes())
         .merge(connectors::routes())
+        .merge(guardrails::routes())
         .merge(secrets::routes())
         .merge(nodes::routes())
         .merge(cluster::routes())
@@ -221,6 +228,7 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
             .merge(moves::routes())
             .merge(observations::routes())
             .merge(proposals::routes())
+            .merge(reconciler::routes())
             .merge(secrets::host_routes())
             .merge(remote::routes())
             .merge(vlans::routes())

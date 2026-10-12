@@ -15,7 +15,7 @@ use tenko_ipam::{
     IpamCommand,
     proposals::{IntentProposalKind, IntentProposalState, ProposalSeverity},
     query,
-    reconcile::rule,
+    reconcile::{rule, scopes},
 };
 
 /// A world with the network 192.0.2.0/24 in the default VRF.
@@ -560,5 +560,64 @@ async fn a_name_from_a_probe_names_a_discovered_host_but_is_no_sighting() {
     assert_eq!(
         open[0].subject.name.as_deref(),
         Some("printer.example.test")
+    );
+}
+
+#[tokio::test]
+async fn with_probe_scopes_only_a_scanned_address_is_orphaned() {
+    let world = lab().await;
+    let scanned = intended(
+        &world,
+        "nas01",
+        AssignmentMode::Static,
+        "00:00:5e:00:53:01",
+        "192.0.2.10",
+    )
+    .await;
+    let unscanned = intended(
+        &world,
+        "nas02",
+        AssignmentMode::Static,
+        "00:00:5e:00:53:02",
+        "192.0.2.200",
+    )
+    .await;
+    let start = at("08:00");
+    world
+        .poll(
+            vec![
+                vm("a", None, Some("00:00:5e:00:53:01"), &["192.0.2.10"]),
+                vm("b", None, Some("00:00:5e:00:53:02"), &["192.0.2.200"]),
+            ],
+            start,
+        )
+        .await;
+    world.reconcile(start).await;
+    world.poll(Vec::new(), at("08:30")).await;
+    // A probe scans the lower half of the network only.
+    let mut batch = tenko_store::WriteBatch::for_request(&tenko_core::RequestCtx::system(
+        tenko_core::SystemComponent::Cluster,
+    ));
+    batch
+        .put_typed(
+            &scopes::SCOPES,
+            &7,
+            &scopes::ScanScope {
+                prefixes: vec!["192.0.2.0/25".parse().expect("net")],
+                ..scopes::ScanScope::default()
+            },
+        )
+        .expect("scope");
+    world.store.propose(batch).await.expect("write the scope");
+
+    world.reconcile(days_after(start, 8)).await;
+    let orphans = world.open(IntentProposalKind::OrphanedIntent).await;
+    assert_eq!(orphans.len(), 1, "{orphans:#?}");
+    assert!(orphans[0].subject.objects.contains(&scanned.id.into()));
+    assert!(
+        !orphans
+            .iter()
+            .any(|orphan| orphan.subject.objects.contains(&unscanned.id.into())),
+        "an address outside every probe scope is not scanned, not gone"
     );
 }

@@ -16541,6 +16541,360 @@
         ]
       }
     },
+    "/api/v1/settings/guardrails": {
+      "get": {
+        "tags": [
+          "guardrails"
+        ],
+        "summary": "Get the guardrails",
+        "description": "The protected paths (ports, networks, VLANs, clients) are paths network-controller writes\nand moves never touch, on top of the uplinks and management networks the topology always\nprotects. `max_parallel` (1 to 64, default 10) bounds the concurrent layer-2 writes of\nmove jobs through one controller instance. Administrators only.",
+        "operationId": "get_guardrails",
+        "responses": {
+          "200": {
+            "description": "The guardrails in force",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The revision of the stored guardrails, for `If-Match` of `PUT /settings/guardrails`; absent while none are stored"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Guardrails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "guardrails"
+        ],
+        "summary": "Change the guardrails",
+        "description": "The protected paths (ports, networks, VLANs, clients) are paths network-controller writes\nand moves never touch, on top of the uplinks and management networks the topology always\nprotects. `max_parallel` (1 to 64, default 10) bounds the concurrent layer-2 writes of\nmove jobs through one controller instance. Limits: at most 256 paths, VLAN ids 1 to 4094,\nreferences 1 to 128 characters, no duplicates; a violation is refused with 422\n`connect.guardrails.invalid`, parameter `field`. A change applies to the next plan, write\nor revert without a restart and is audited as `connect.guardrails.update`. Administrators\nonly.",
+        "operationId": "update_guardrails",
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as in the `ETag` of `GET /settings/guardrails`; a stale revision is refused with 409",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Guardrails"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The guardrails now in force",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The new revision of the guardrails"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Guardrails"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is malformed (`sys.invalid_request`) or `If-Match` is malformed (`ipam.validation`, parameter `field`: `If-Match`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`If-Match` is stale or a concurrent change won (`sys.store.precondition_failed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A value is outside its limits (`connect.guardrails.invalid`, parameter `field`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/settings/reconciler": {
+      "get": {
+        "tags": [
+          "reconciler"
+        ],
+        "summary": "Get the reconciler settings",
+        "description": "Limits and defaults: interval between periodic runs 30 to 86,400 seconds (default 300);\ndebounce after an ingest or an intent change 0 to 300 seconds (default 2); orphan age\n3,600 to 31,536,000 seconds (default 604,800); retention of facts 86,400 to 31,536,000\nseconds (default 2,592,000); refresh of an unchanged fact 60 to 86,400 seconds and\nshorter than the retention (default 900); interval between retention purges 300 to\n86,400 seconds (default 3,600); adoption policies applied (default true). Administrators\nonly.",
+        "operationId": "get_reconciler_settings",
+        "responses": {
+          "200": {
+            "description": "The settings in force",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The revision of the stored settings, for `If-Match` of `PUT /settings/reconciler`; absent while none are stored"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconcilerSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "reconciler"
+        ],
+        "summary": "Change the reconciler settings",
+        "description": "Limits (seconds unless noted) and defaults: `interval_secs` 30 to 86,400 (default 300);\n`debounce_secs` 0 to 300 (default 2); `orphan_after_secs` 3,600 to 31,536,000 (default\n604,800); `retention_secs` 86,400 to 31,536,000 (default 2,592,000); `refresh_secs` 60 to\n86,400 and shorter than `retention_secs` (default 900); `purge_interval_secs` 300 to\n86,400 (default 3,600); `adopt` (default true). A value outside its limits is refused with\n422 `ipam.reconciler.settings.invalid`, parameter `field`. Administrators only.",
+        "operationId": "update_reconciler_settings",
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as in the `ETag` of `GET /settings/reconciler`; a stale revision is refused with 409",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconcilerSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The settings now in force",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The new revision of the settings"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconcilerSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is malformed (`sys.invalid_request`) or `If-Match` is malformed (`ipam.validation`, parameter `field`: `If-Match`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`If-Match` is stale or a concurrent change won (`sys.store.precondition_failed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A value is outside its limits (`ipam.reconciler.settings.invalid`, parameter `field`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/settings/security": {
       "get": {
         "tags": [
@@ -26753,6 +27107,10 @@
           "only"
         ]
       },
+      "DeviceRef": {
+        "type": "string",
+        "description": "A device as the controller identifies it (for UniFi the device MAC or `_id`)."
+      },
       "DiffCounts": {
         "type": "object",
         "description": "The counts of one fact type.",
@@ -27964,6 +28322,28 @@
       "GroupKey": {
         "type": "string",
         "description": "Groups jobs that share a parallelism limit, for example every write through one\nnetwork controller (CONN-09): 1 to 128 visible ASCII characters."
+      },
+      "Guardrails": {
+        "type": "object",
+        "description": "Guardrails for network-controller writes (CONN-09), enforced by the host.",
+        "required": [
+          "protected",
+          "max_parallel"
+        ],
+        "properties": {
+          "max_parallel": {
+            "type": "integer",
+            "description": "Concurrent writes allowed through one controller.",
+            "minimum": 0
+          },
+          "protected": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProtectedPath"
+            },
+            "description": "Configured and derived protected paths. Uplinks and management networks from the\ntopology are protected on top of these."
+          }
+        }
       },
       "Health": {
         "type": "object",
@@ -33297,6 +33677,10 @@
           }
         ],
         "description": "A network of a controller with the VLAN it carries."
+      },
+      "NetworkRef": {
+        "type": "string",
+        "description": "A network as the controller identifies it (for UniFi the network `_id`, not the\nVLAN number)."
       },
       "NetworkSpec": {
         "type": "object",
@@ -40025,6 +40409,100 @@
           }
         }
       },
+      "ProtectedPath": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A switch port, such as the port Tenko or the controller is reached through.",
+            "required": [
+              "device",
+              "port",
+              "type"
+            ],
+            "properties": {
+              "device": {
+                "$ref": "#/components/schemas/DeviceRef",
+                "description": "The switch."
+              },
+              "port": {
+                "type": "integer",
+                "format": "int32",
+                "description": "The port index.",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "port"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A network, such as the management network.",
+            "required": [
+              "network",
+              "type"
+            ],
+            "properties": {
+              "network": {
+                "$ref": "#/components/schemas/NetworkRef",
+                "description": "The network."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "network"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A VLAN.",
+            "required": [
+              "vid",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vlan"
+                ]
+              },
+              "vid": {
+                "type": "integer",
+                "format": "int32",
+                "description": "The VLAN id.",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A client, such as the Tenko host itself.",
+            "required": [
+              "mac",
+              "type"
+            ],
+            "properties": {
+              "mac": {
+                "$ref": "#/components/schemas/MacAddr",
+                "description": "The client."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "client"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Paths a connector never touches (CONN-09)."
+      },
       "ProtocolState": {
         "type": "object",
         "description": "The protocol state of a node: what it offered and what was agreed.",
@@ -40721,6 +41199,59 @@
             "type": "integer",
             "format": "int32",
             "description": "Open proposals left as they were.",
+            "minimum": 0
+          }
+        }
+      },
+      "ReconcilerSettings": {
+        "type": "object",
+        "description": "The settings of the reconciler, the same on every controller.",
+        "properties": {
+          "adopt": {
+            "type": "boolean",
+            "description": "Whether adoption policies are applied; off, every proposal waits for a person\n(default on).",
+            "default": true
+          },
+          "debounce_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds a run waits after an ingest or an intent change to collect what follows,\n0 to 300 (default 2).",
+            "default": 2,
+            "minimum": 0
+          },
+          "interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between periodic runs, 30 to 86,400 (default 300).",
+            "default": 300,
+            "minimum": 0
+          },
+          "orphan_after_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds an intended address may go unseen (after it was seen) before it is\nproposed as orphaned, 3,600 to 31,536,000 (default 604,800: seven days).",
+            "default": 604800,
+            "minimum": 0
+          },
+          "purge_interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between retention purges, 300 to 86,400 (default 3,600).",
+            "default": 3600,
+            "minimum": 0
+          },
+          "refresh_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds after which an unchanged fact is written again with a new last sighting,\nand the shortest interval between two counted sightings, 60 to 86,400 and shorter\nthan the retention (default 900).",
+            "default": 900,
+            "minimum": 0
+          },
+          "retention_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds a fact is kept after its last sighting, 86,400 to 31,536,000 (default\n2,592,000: 30 days).",
+            "default": 2592000,
             "minimum": 0
           }
         }
@@ -49173,12 +49704,20 @@
       "description": "Connector plugins and connector instances"
     },
     {
+      "name": "guardrails",
+      "description": "Guardrails of network-controller writes: protected paths and move parallelism"
+    },
+    {
       "name": "observations",
       "description": "Observations of connectors and probes, per source and across sources"
     },
     {
       "name": "proposals",
       "description": "Proposals of the reconciler, their decisions and adoption policies"
+    },
+    {
+      "name": "reconciler",
+      "description": "Settings of the reconciler: intervals, retention and adoption"
     },
     {
       "name": "nodes",

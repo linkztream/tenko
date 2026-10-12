@@ -19,7 +19,10 @@ use tenko_connect::{
         launch::LaunchSpec,
         normalize::{ObservationBatch, ObservationSink},
         registry::{Bundled, PluginRegistry},
-        service::{ConnectorPatch, NewConnector, RunOutcome, RunTrigger, tables},
+        service::{
+            ConnectorPatch, INSECURE_REFUSED, NewConnector, POLL_SERVICE, RunOutcome, RunTrigger,
+            tables,
+        },
         supervisor::{ProcessState, SupervisorConfig},
     },
     sample::{self, CREDENTIAL_TAG},
@@ -32,6 +35,7 @@ use tenko_jobs::{EngineConfig, JobEngine, JobState};
 use tenko_store::{KeyRange, MemStore, ReadConsistency, ReadViewExt, Store};
 use tenko_vault::{MemVault, SecretBytes, SecretPurpose, SecretSpec, Vault};
 use tokio::sync::watch;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
 struct RecordingSink {
@@ -56,12 +60,27 @@ struct Fixture {
 }
 
 fn sample_registry(mode: &str) -> PluginRegistry {
-    let manifest = sample::manifest();
+    registry_of(sample::manifest(), mode)
+}
+
+/// The sample plugin with the `tls` setting of the HTTP helper in its schema.
+fn tls_registry() -> PluginRegistry {
+    let mut manifest = sample::manifest();
+    manifest.settings["properties"]["tls"] = serde_json::json!({
+        "type": "string",
+        "enum": ["system", "ca", "fingerprint", "insecure"],
+        "default": "system"
+    });
+    registry_of(manifest, "normal")
+}
+
+fn registry_of(manifest: tenko_connect::manifest::Manifest, mode: &str) -> PluginRegistry {
     PluginRegistry::new(
         vec![Bundled {
-            manifest: manifest.clone(),
+            manifest,
             launch: LaunchSpec {
-                expected: Some(manifest),
+                // The plugin reports the sample manifest; the host validates against this one.
+                expected: Some(sample::manifest()),
                 program: PathBuf::from(env!("CARGO_BIN_EXE_tenko-plugin-sample")),
                 args: vec![OsString::from("--mode"), OsString::from(mode)],
                 cwd: None,
@@ -93,6 +112,10 @@ fn config(schedule: bool) -> HostConfig {
 }
 
 fn fixture(mode: &str, schedule: bool) -> Fixture {
+    fixture_with(sample_registry(mode), config(schedule))
+}
+
+fn fixture_with(registry: PluginRegistry, config: HostConfig) -> Fixture {
     let store = Arc::new(MemStore::default());
     let vault = Arc::new(MemVault::with_store(Arc::clone(&store)));
     let dyn_store: Arc<dyn Store> = Arc::clone(&store) as Arc<dyn Store>;
@@ -100,8 +123,8 @@ fn fixture(mode: &str, schedule: bool) -> Fixture {
     let host = ConnectorHost::new(
         Arc::clone(&dyn_store),
         Some(Arc::clone(&vault) as Arc<dyn Vault>),
-        sample_registry(mode),
-        config(schedule),
+        registry,
+        config,
         Arc::clone(&sink) as Arc<dyn ObservationSink>,
     );
     let engine = JobEngine::new(dyn_store, EngineConfig::default());
@@ -426,11 +449,32 @@ async fn invalid_requests_are_refused_with_precise_codes() {
     fx.host.shutdown().await;
 }
 
+/// Runs the leader service `connect.poll` of `host` with `epoch` until the token fires.
+fn take_office(host: &Arc<ConnectorHost>, epoch: u64) -> CancellationToken {
+    let service = host.poll_service();
+    assert_eq!(service.name(), POLL_SERVICE);
+    let stop = CancellationToken::new();
+    let token = stop.clone();
+    tokio::spawn(async move { service.run(epoch, token).await });
+    stop
+}
+
+async fn wait_for(mut done: impl FnMut() -> bool) {
+    for _ in 0..100 {
+        if done() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("the condition did not hold in time");
+}
+
 #[tokio::test]
 async fn the_schedule_reads_running_instances() {
     let fx = fixture("normal", true);
     let (stop_tx, stop) = watch::channel(false);
     let task = fx.host.start(stop);
+    let office = take_office(&fx.host, 0);
     let view = fx
         .host
         .create(&admin(), new_sample("Scheduled"))
@@ -467,6 +511,7 @@ async fn the_schedule_reads_running_instances() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert!(checked);
+    office.cancel();
     stop_tx.send(true).expect("stop");
     tokio::time::timeout(Duration::from_secs(10), task)
         .await
@@ -604,4 +649,182 @@ async fn health_changes_name_the_instance_whose_process_or_remote_health_changed
     assert_eq!(view.health.process.state, ProcessState::Stopped);
     assert_eq!(fx.host.supervised(), Vec::<ConnectorId>::new());
     fx.host.shutdown().await;
+}
+
+#[tokio::test]
+async fn only_the_controller_that_holds_connect_poll_polls() {
+    let fx = fixture("normal", true);
+    let (stop_tx, stop) = watch::channel(false);
+    let task = fx.host.start(stop);
+    let id = fx
+        .host
+        .create(&admin(), new_sample("Follower"))
+        .await
+        .expect("create")
+        .instance
+        .id;
+    wait_running(&fx.host, id).await;
+    // A follower keeps the plugin running and checks it, but never polls.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(!fx.host.polls());
+    assert!(
+        fx.host
+            .get(id, None)
+            .await
+            .expect("view")
+            .last_run
+            .is_none(),
+        "a follower started a scheduled run"
+    );
+    assert!(fx.sink.batches.lock().expect("lock").is_empty());
+
+    // Taking office: the run that fell due while following starts at once.
+    let office = take_office(&fx.host, 0);
+    let mut run = None;
+    for _ in 0..100 {
+        run = fx.host.get(id, None).await.expect("view").last_run;
+        if run.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let run = run.expect("the leader polls");
+    assert_eq!(run.trigger, RunTrigger::Schedule);
+    assert_eq!(run.outcome, RunOutcome::Succeeded);
+
+    // Leaving office stops the schedule.
+    office.cancel();
+    wait_for(|| !fx.host.polls()).await;
+
+    // A deposed leader's term (an epoch the store has moved past) reads but records nothing.
+    let polled = fx.sink.batches.lock().expect("lock").len();
+    let late = fx
+        .host
+        .create(&admin(), new_sample("Deposed"))
+        .await
+        .expect("create")
+        .instance
+        .id;
+    wait_running(&fx.host, late).await;
+    let stale = take_office(&fx.host, 7);
+    wait_for(|| fx.sink.batches.lock().expect("lock").len() > polled).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        fx.host
+            .get(late, None)
+            .await
+            .expect("view")
+            .last_run
+            .is_none()
+    );
+    stale.cancel();
+    wait_for(|| !fx.host.polls()).await;
+    stop_tx.send(true).expect("stop");
+    tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .expect("stops in time")
+        .expect("task");
+}
+
+fn insecure_sample(name: &str) -> NewConnector {
+    let mut new = new_sample(name);
+    new.settings["tls"] = serde_json::json!("insecure");
+    new
+}
+
+#[tokio::test]
+async fn tls_insecure_is_refused_outside_the_lab_profile() {
+    let fx = fixture_with(tls_registry(), config(false));
+    let error = fx
+        .host
+        .create(&admin(), insecure_sample("Unchecked"))
+        .await
+        .expect_err("refused");
+    assert_eq!(error.code(), INSECURE_REFUSED);
+    assert_eq!(error.0.status, 422);
+    // Another TLS mode is accepted, and a patch to insecure is refused.
+    let mut checked = new_sample("Checked");
+    checked.settings["tls"] = serde_json::json!("system");
+    let id = fx
+        .host
+        .create(&admin(), checked)
+        .await
+        .expect("create")
+        .instance
+        .id;
+    let patch = ConnectorPatch {
+        settings: Some(insecure_sample("Checked").settings),
+        ..ConnectorPatch::default()
+    };
+    let error = fx
+        .host
+        .update(&admin(), id, patch, None)
+        .await
+        .expect_err("refused");
+    assert_eq!(error.code(), INSECURE_REFUSED);
+}
+
+#[tokio::test]
+async fn the_lab_profile_accepts_tls_insecure_and_a_profile_change_degrades_the_instance() {
+    let (lab, insecure_tls) = watch::channel(true);
+    let fx = fixture_with(
+        tls_registry(),
+        HostConfig {
+            insecure_tls,
+            ..config(true)
+        },
+    );
+    let (stop_tx, stop) = watch::channel(false);
+    let task = fx.host.start(stop);
+    let id = fx
+        .host
+        .create(&admin(), insecure_sample("Lab only"))
+        .await
+        .expect("the Lab profile accepts tls = insecure")
+        .instance
+        .id;
+    wait_running(&fx.host, id).await;
+
+    // The profile changes while the instance is stored: no call, no check, no poll.
+    lab.send(false).expect("profile");
+    let mut degraded = None;
+    for _ in 0..100 {
+        let health = fx.host.get(id, None).await.expect("view").health;
+        if health
+            .remote_error
+            .as_ref()
+            .is_some_and(|error| error.code == INSECURE_REFUSED)
+        {
+            degraded = Some(health);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let health = degraded.expect("the instance is degraded with the refusal");
+    assert_eq!(health.remote.expect("report").health, Health::Degraded);
+    let office = take_office(&fx.host, 0);
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(
+        fx.host
+            .get(id, None)
+            .await
+            .expect("view")
+            .last_run
+            .is_none(),
+        "a refused instance was polled"
+    );
+    let error = fx
+        .host
+        .run(id, RunTrigger::Manual, None, None)
+        .await
+        .expect("a run is recorded")
+        .error
+        .expect("the run failed");
+    assert_eq!(error.code, INSECURE_REFUSED);
+    office.cancel();
+    stop_tx.send(true).expect("stop");
+    tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .expect("stops in time")
+        .expect("task");
 }

@@ -74,7 +74,7 @@ The report of an ingest counts `new`, `changed`, `refreshed`, `unchanged`, `gone
 
 ### 2.4 Retention
 
-Facts whose last sighting is older than the retention (30 days) are deleted together with their index rows, at most 2,000 per batch, with the audit action `ipam.observation.purge`. The same pass deletes the last sightings of intent objects that no longer exist (section 2.6). A batch that loses a race with an ingest is skipped, and the next pass takes what is still old. The reconciler runs the purge every hour. Because expiry and deletion are separate, a device that vanished stays visible as an expired fact for 30 days after its last sighting.
+Facts whose last sighting is older than the retention (30 days by default, section 3.1.1) are deleted together with their index rows, at most 2,000 per batch, with the audit action `ipam.observation.purge`. The same pass deletes the last sightings of intent objects that no longer exist (section 2.6). A batch that loses a race with an ingest is skipped, and the next pass takes what is still old. The leader runs the purge every hour by default. Because expiry and deletion are separate, a device that vanished stays visible as an expired fact for 30 days after its last sighting.
 
 ### 2.5 The computed view
 
@@ -108,25 +108,32 @@ The server hands the batches to the reconciler through a function sink (`sink_fn
 
 ### 3.1 When it runs
 
-`Reconciler::run` is the loop of a controller. A run starts:
+The loop and the purge are the leader service `ipam.reconcile`: they run on the controller that leads and nowhere else (on a single controller, at once). A run starts:
 
-- on an interval, every 5 minutes;
-- 2 seconds after an ingest that wrote something (the delay collects what follows);
+- right after the controller takes office, and then on an interval (every 5 minutes by default);
+- 2 seconds (the debounce) after an ingest that wrote something, on whichever controller it happened: an ingest on a follower reaches the leader as a write to `ipam.obs.facts`, and the leader watches that table;
 - 2 seconds after a change to the intent tables or to an adoption policy, including a change a person just made by approving a proposal;
-- on demand with `POST /api/v1/proposals/reconcile` (section 5.3).
+- on demand with `POST /api/v1/proposals/reconcile` (section 5.3), on the controller that answers.
 
-The loop also purges old facts every hour. The settings are fields of `ReconcilerConfig` and `ObserveConfig` in `tenko-ipam`. `tenko.toml` has no section for them yet, so a server uses the defaults:
+The service also purges old facts on its own timer (every hour by default). Its writes carry the leader epoch as a precondition, so a controller that lost the leadership commits nothing more; it stops when the leadership moves, and the new leader runs at once. Ingest stays on every controller.
 
-| Setting | Default | Meaning |
-|---|---|---|
-| `interval` | 300 s | Interval of periodic runs |
-| `debounce` | 2 s | Delay of a run after an ingest or an intent change |
-| `orphan_after` | 7 days | How long an address that was seen may go unseen before it is proposed as orphaned |
-| `observe.refresh` | 15 minutes | Refresh interval of an unchanged fact, and the shortest interval between two counted sightings |
-| `observe.retention` | 30 days | How long a fact is kept after its last sighting |
-| `purge_interval` | 1 hour | Interval of retention purges |
-| `max_attempts` | 8 | Repeats of a run or an ingest that loses races with other writers |
-| `adopt` | on | Whether adoption policies are applied; off means every proposal waits for a person |
+### 3.1.1 Settings
+
+The settings are the same on every controller: they live in the store (`ipam.reconciler_settings`), replicate, and are changed through the API with audit. There is no `[reconciler]` section in `tenko.toml`. The `ipam` start step seeds the table from the defaults when it is empty, and the reconciler reads the settings at every run, so a change applies at the next run (a new interval from the next wait) without a restart.
+
+| Setting | Default | Limits | Meaning |
+|---|---|---|---|
+| `interval_secs` | 300 (5 minutes) | 30 to 86,400 | Interval of periodic runs |
+| `debounce_secs` | 2 | 0 to 300 | Delay of a run after an ingest or an intent change |
+| `orphan_after_secs` | 604,800 (7 days) | 3,600 to 31,536,000 | How long an address that was seen may go unseen before it is proposed as orphaned |
+| `retention_secs` | 2,592,000 (30 days) | 86,400 to 31,536,000 | How long a fact is kept after its last sighting (section 2.4) |
+| `refresh_secs` | 900 (15 minutes) | 60 to 86,400, and shorter than the retention | Refresh interval of an unchanged fact, and the shortest interval between two counted sightings |
+| `purge_interval_secs` | 3,600 (1 hour) | 300 to 86,400 | Interval of retention purges |
+| `adopt` | on | | Whether adoption policies are applied; off means every proposal waits for a person |
+
+`max_attempts` (8 repeats of a run or an ingest that loses races with other writers) is a constant of the code, not a setting.
+
+`GET /api/v1/settings/reconciler` (`get_reconciler_settings`) returns the settings with an `ETag`; `PUT /api/v1/settings/reconciler` (`update_reconciler_settings`) replaces all of them, honours `If-Match` (409 when stale), refuses a value outside its limits with 422 `ipam.reconciler.settings.invalid` (parameter `field`), and is audited as `ipam.reconciler.settings.update` with one change per field. Both are for administrators only. The settings page in the web UI comes with a later release; until then the API is the way to change them.
 
 ### 3.2 What a run does
 
@@ -154,7 +161,7 @@ The VRF comes from the source when the source names one, as probe `address` fact
 
 - Runs never overlap on one controller; a run waits for the one before it.
 - Every row a run reads carries its revision as a precondition of the write: the proposals, the open-key rows, the remembered rejections and the sightings. When a concurrent writer invalidates the batch, the run reads again with linearizable consistency and repeats, up to `max_attempts`, then fails with `ipam.contended`. At most one proposal per subject key is open, because opening one expects the open-key row to be absent or unchanged.
-- In a cluster every controller runs its own loop and the preconditions keep their writes apart. Leader-only scheduling is a Slice 3 item.
+- In a cluster only the leader runs the loop (section 3.1). A run on demand on another controller and the leader's run are kept apart by the same preconditions; the leader's writes also carry its epoch.
 
 ## 4. Proposals
 
@@ -240,7 +247,7 @@ When several addresses are seen, the proposal names the first in address order.
 
 `ipam.reconcile.orphaned_address` proposes to deprecate an active address that a source saw before and that no source has seen for the orphan age (7 days). It needs a recorded sighting, so an address that was never seen is never proposed. The address must be `active`, and its host, if it has one, must be neither locked nor `unmanaged`; an address without a host qualifies. The severity is `info`. The proposal has no evidence, since the evidence is an absence; `params` hold the last sighting, its time and its source, and the suggested command sets the status of the address to `deprecated`.
 
-Today the rule measures time since the last sighting by any source. It does not know which networks a source covers, so a source that stops reporting, such as a disabled connector or a probe that went away, ages the addresses it alone saw into orphans. The scan scope of WP2.3 is meant to let the rule skip addresses that no active source covers (section 8).
+The rule measures time since the last sighting by any source, and it tells "gone" from "not scanned" with the scopes the probes apply (`scan.scopes`, see [scanning.md](scanning.md)): an address is proposed only when a probe scope covers it, that is a probe that is not stopped, whose VRF is the address's VRF or that names none, with a prefix that contains the address and no exclusion that does. An address outside every applied scope is "not scanned" and gets no proposal, however long it went unseen. With no probe scope at all, every address counts as scanned, as before probes reported scopes. A connector that stops reporting still ages the addresses it alone saw into orphans when a probe covers them.
 
 ### 4.8 Conflicts
 
@@ -333,7 +340,7 @@ The policy that decides is the one in force for the proposal's prefix, the most 
 All constraints must hold.
 
 - **`only_dhcp_pools`:** the proposal must have address commands, and each of their addresses must lie in a range with the role DHCP pool in its network.
-- **`vendors`:** an entry that is an OUI (`00:00:5e`, `00-00-5E` or `00005e`) matches the first three octets of the device's MAC address. Any other entry is text, compared without case with a vendor name that a source reports. Probes, network controllers and the Home Assistant connector report vendor facts, but the constraint does not read them yet, so today only OUI entries can match, and a policy with only text entries adopts nothing (section 8).
+- **`vendors`:** an entry that is an OUI (`00:00:5e`, `00-00-5E` or `00005e`) matches the first three octets of the device's MAC address. Any other entry is text, compared without case with a vendor name that a source reports. The vendors come from the current `vendor` facts of the device's MAC address, from any source: the OUI table of a probe, the vendor a network controller reports for a client, and the manufacturer an inventory such as Home Assistant reports for a device. One matching entry and one matching vendor are enough.
 - **`min_sightings`:** the most counted sightings among the evidence. A sighting counts at most once per refresh interval, so three sightings take at least 30 minutes.
 
 ### 6.3 Inheritance
@@ -369,10 +376,9 @@ Independently of moves, `Reconciler::ingest` hands the addresses of the ingested
 
 | Source | Phase | What it adds |
 |---|---|---|
-| Probes (WP2.3) | 1 | Delivered, see [scanning.md](scanning.md). `address` facts from the neighbor tables, ICMP, mDNS, LLMNR and SNMP (SCAN-02 to SCAN-05), each with the VRF of the probe, so the placement of section 3.3 needs no guess. `services` facts from the TCP connect scan and mDNS, and `os` facts from mDNS and SNMP (SCAN-04, SCAN-08), which fill the open ports and OS of the computed view. `name` facts from reverse DNS, mDNS, LLMNR and SNMP, `vendor` facts from the OUI table of the probe, and `attachment` and `link` facts from SNMP polling (SCAN-05). A `name` or `vendor` fact is never a sighting of an address: it neither wakes a waiting job nor confirms a move, at ingest or in a run, does not refresh the last sighting of section 2.6, and does not by itself make a discovered host, a suggested network or a conflict. A discovered host takes the name a probe found for one of its addresses when no inventory source names it. The `vendors` constraint of adoption policies does not use probe `vendor` facts yet. On-demand scans (SCAN-09) ingest like scheduled ones. Open: the scan scope, the networks a probe covers, is not used by the orphan rule yet, so the rule cannot tell "gone" from "not scanned". The raw-socket methods (`arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp`) are declared and do not run yet |
+| Probes (WP2.3) | 1 | Delivered, see [scanning.md](scanning.md). `address` facts from the neighbor tables, ICMP, mDNS, LLMNR and SNMP (SCAN-02 to SCAN-05), each with the VRF of the probe, so the placement of section 3.3 needs no guess. `services` facts from the TCP connect scan and mDNS, and `os` facts from mDNS and SNMP (SCAN-04, SCAN-08), which fill the open ports and OS of the computed view. `name` facts from reverse DNS, mDNS, LLMNR and SNMP, `vendor` facts from the OUI table of the probe, and `attachment` and `link` facts from SNMP polling (SCAN-05). A `name` or `vendor` fact is never a sighting of an address: it neither wakes a waiting job nor confirms a move, at ingest or in a run, does not refresh the last sighting of section 2.6, and does not by itself make a discovered host, a suggested network or a conflict. A discovered host takes the name a probe found for one of its addresses when no inventory source names it. The `vendors` constraint of adoption policies reads the `vendor` facts (section 6.2). On-demand scans (SCAN-09) ingest like scheduled ones. The scan scopes tell the orphan rule "gone" from "not scanned" (section 4.7). The raw-socket methods (`arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp`) are declared and do not run yet |
 | DNS records | 2 | `dns:<zone>` facts, and orphaned-record proposals: a record without a host (IPAM-15) |
 | DHCP leases | 3 | `dhcp:<node>` lease facts without polling (DHCP-16), `LeaseInPrefix` wake-ups for move steps, and reservations as intent |
-| Vendor names | When a source reports them | A vendor or manufacturer name from a source, such as the device registry of Home Assistant (CONN-04), lets the text entries of `vendors` match |
 
 Phase 3 also adds the reconciliation views across the four truths (IPAM-21): ghost, rogue, orphan and PTR-mismatch views with "who wins" rules, built on the same facts and proposals.
 
@@ -391,6 +397,7 @@ Phase 3 also adds the reconciliation views across the four truths (IPAM-21): gho
 | `ipam.proposal_keys` | Subject key | The id of the open proposal of that key |
 | `ipam.proposal_rejections` | Subject key | `Rejection`: fingerprint, proposal, who and when, reason |
 | `ipam.adoption` | Prefix id | `StoredPolicy`: policy, who set it and when |
+| `ipam.reconciler_settings` | None (one row) | `ReconcilerSettings` (section 3.1.1) |
 
 The index tables follow their fact in the same batch.
 
@@ -408,6 +415,8 @@ The index tables follow their fact in the same batch.
 | `GET /api/v1/prefixes/{id}/adoption` | `get_adoption_policy` | `read` on the prefix |
 | `PUT /api/v1/prefixes/{id}/adoption` | `set_adoption_policy` | `update` on the prefix |
 | `DELETE /api/v1/prefixes/{id}/adoption` | `clear_adoption_policy` | `update` on the prefix |
+| `GET /api/v1/settings/reconciler` | `get_reconciler_settings` | administrators; returns an `ETag` |
+| `PUT /api/v1/settings/reconciler` | `update_reconciler_settings` | administrators; `If-Match` |
 
 `GET /api/v1/proposals` takes the filters `kind`, `state` and `severity` (each repeatable or comma-separated), `prefix` (proposals about the prefix, its addresses and its networks), `subject` (a MAC address, an IP address, an object identifier, or text of the subject name or key) and `sort` (`created`, `updated`, `severity`, `kind`, `state`, `last_seen`; `-created` by default), with the usual paging. A list is empty for a principal who may not read the kind.
 

@@ -15,6 +15,7 @@ use tenko_core::{
 };
 use tenko_store::{KeyRange, ReadView, ReadViewExt};
 
+use super::scopes::ScanScope;
 use crate::{
     error::IpamResult,
     net::{Family, contains_ip, contains_net, ip_to_u128},
@@ -326,6 +327,20 @@ pub(crate) struct Snapshot {
     pub policies: BTreeMap<PrefixId, StoredPolicy>,
     /// Last sightings of intent objects, with their revision.
     pub sightings: BTreeMap<ObjectRef, (IntentSighting, Revision)>,
+    /// The vendors current facts report for MAC addresses, from any source (probes,
+    /// network controllers, inventories such as Home Assistant), for the `vendors`
+    /// constraint of adoption policies.
+    pub vendors: BTreeMap<MacAddr, BTreeSet<String>>,
+    /// The scopes the probes apply (`scan.scopes`); empty when no probe reported one.
+    pub scopes: Vec<ScanScope>,
+}
+
+impl Snapshot {
+    /// Whether the address is scanned: no probe scope is known (every address counts as
+    /// scanned, as before scopes existed), or a probe covers it.
+    pub(crate) fn scanned(&self, vrf: VrfId, ip: IpAddr) -> bool {
+        self.scopes.is_empty() || self.scopes.iter().any(|scope| scope.covers(vrf, ip))
+    }
 }
 
 impl Snapshot {
@@ -341,8 +356,16 @@ impl Snapshot {
             .collect();
         let mut seen = Vec::new();
         let mut names: BTreeMap<IpAddr, BTreeSet<String>> = BTreeMap::new();
+        let mut vendors: BTreeMap<MacAddr, BTreeSet<String>> = BTreeMap::new();
         for (index, fact) in facts.iter().enumerate() {
             if !fact.is_current(now) {
+                continue;
+            }
+            if let Observed::Vendor { mac, vendor } = &fact.observed {
+                let vendor = vendor.trim();
+                if !vendor.is_empty() {
+                    vendors.entry(*mac).or_default().insert(vendor.to_owned());
+                }
                 continue;
             }
             if let Observed::Name { ip, name } = &fact.observed {
@@ -394,6 +417,8 @@ impl Snapshot {
             rejections,
             policies,
             sightings,
+            vendors,
+            scopes: super::scopes::load(view)?,
         })
     }
 }

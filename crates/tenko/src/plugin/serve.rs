@@ -1,19 +1,27 @@
 //! The connector service of `tenko serve`: the plugin registry (bundled and
 //! `<data_dir>/plugins`), the connector host with its job steps, its supervisor task, the
 //! request extension of the API, and the `connectors` events of process and health changes.
+//!
+//! The plugin processes run on every controller; the poll schedule is the leader service
+//! `connect.poll` ([`Connectors::leader_service`]). The host follows the security profile
+//! in force (the stored one after setup, else the bootstrap profile of the configuration
+//! file, as the `tls` step reads it): `tls = insecure` is allowed under the Lab profile only.
 
-use std::{path::Path, sync::Arc};
+use std::{path::Path, sync::Arc, time::Duration};
+
+use futures::StreamExt as _;
 
 use tenko_api::{
     sse::{EventData, EventHub, Topic},
     state::AppState,
 };
+use tenko_auth::{model::SETTINGS, settings::Profile};
 use tenko_connect::host::{
     ConnectorHost, HostConfig, normalize::ObservationSink, registry::PluginRegistry,
 };
-use tenko_core::{ConnectorId, ObjectRef};
+use tenko_core::{ConnectorId, ObjectRef, cluster::LeaderService};
 use tenko_jobs::JobEngine;
-use tenko_store::Store;
+use tenko_store::{ReadConsistency, ReadViewExt as _, Store, WatchFilter};
 use tenko_vault::{StoreVault, Vault};
 use tokio::{
     sync::{broadcast::error::RecvError, watch},
@@ -61,11 +69,13 @@ pub fn registry(plugins_dir: Option<std::path::PathBuf>) -> Result<PluginRegistr
 /// Builds the connector service, registers its job steps and starts its supervisor task,
 /// which stops every plugin when `stop` turns true. Observations go to `sink`: the
 /// reconciler's ingest when the IPAM module runs, else a sink that keeps nothing (each run
-/// still records its counts).
+/// still records its counts). `bootstrap` is the profile of the configuration file, which
+/// applies until setup stores one.
 ///
 /// # Errors
 ///
-/// A [`StartError`] of the step `connectors` when the registry cannot be built.
+/// A [`StartError`] of the step `connectors` when the registry cannot be built or the
+/// stored profile cannot be read.
 pub async fn start(
     store: &Arc<dyn Store>,
     vault: &Arc<StoreVault>,
@@ -73,6 +83,7 @@ pub async fn start(
     data_dir: &Path,
     stop: watch::Receiver<bool>,
     sink: Arc<dyn ObservationSink>,
+    bootstrap: Profile,
 ) -> Result<(Connectors, String), StartError> {
     let plugins_dir = data_dir.join(PLUGINS_DIR);
     let registry = registry(Some(plugins_dir.clone()))
@@ -92,11 +103,30 @@ pub async fn start(
                 .join("; ")
         );
     }
+    // The stream opens before the first read, so no change falls between the two.
+    let changes = store
+        .watch(None, WatchFilter::tables([SETTINGS.name().clone()]))
+        .ok();
+    let lab = profile(store.as_ref(), bootstrap)
+        .await
+        .map_err(|error| StartError::coded("connectors", &error))?
+        == Profile::Lab;
+    let (insecure_tls, insecure_rx) = watch::channel(lab);
+    tokio::spawn(follow_profile(
+        Arc::clone(store),
+        changes,
+        bootstrap,
+        insecure_tls,
+        stop.clone(),
+    ));
     let host = ConnectorHost::new(
         Arc::clone(store),
         Some(Arc::clone(vault) as Arc<dyn Vault>),
         registry,
-        HostConfig::default(),
+        HostConfig {
+            insecure_tls: insecure_rx,
+            ..HostConfig::default()
+        },
         sink,
     );
     host.register_steps(engine);
@@ -131,6 +161,11 @@ impl Connectors {
     /// The connector host.
     pub fn host(&self) -> &Arc<ConnectorHost> {
         &self.host
+    }
+
+    /// The leader service `connect.poll` that runs the poll schedule.
+    pub fn leader_service(&self) -> Arc<dyn LeaderService> {
+        self.host.poll_service()
     }
 
     /// Publishes a `connectors` event on the event hub of `state` whenever the plugin
@@ -172,4 +207,56 @@ fn publish(events: &EventHub, ids: &[ConnectorId]) {
     data.objects = ids.iter().copied().map(ObjectRef::from).collect();
     data.kind = Some(HEALTH_EVENT.to_owned());
     events.publish_system(&data);
+}
+
+/// The profile in force: the stored one after setup, else `bootstrap`.
+async fn profile(
+    store: &dyn Store,
+    bootstrap: Profile,
+) -> Result<Profile, tenko_store::StoreError> {
+    let view = store.read(ReadConsistency::Local).await?;
+    Ok(view
+        .get_typed(&SETTINGS, &())?
+        .map_or(bootstrap, |(settings, _)| settings.profile))
+}
+
+/// Follows the security settings and tells the host whether `tls = insecure` is allowed,
+/// until `stop` turns true.
+async fn follow_profile(
+    store: Arc<dyn Store>,
+    mut stream: Option<tenko_store::ChangeStream>,
+    bootstrap: Profile,
+    allowed: watch::Sender<bool>,
+    mut stop: watch::Receiver<bool>,
+) {
+    let filter = || WatchFilter::tables([SETTINGS.name().clone()]);
+    loop {
+        let alive = tokio::select! {
+            () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
+            alive = next_change(&mut stream) => alive,
+        };
+        if !alive {
+            stream = store.watch(None, filter()).ok();
+        }
+        match profile(store.as_ref(), bootstrap).await {
+            Ok(profile) => {
+                allowed.send_if_modified(|lab| {
+                    let next = profile == Profile::Lab;
+                    std::mem::replace(lab, next) != next
+                });
+            }
+            Err(error) => tracing::warn!(%error, "the security profile could not be read"),
+        }
+    }
+}
+
+/// Waits for the next change set; `false` when the stream ended or failed (it is opened
+/// again).
+async fn next_change(stream: &mut Option<tenko_store::ChangeStream>) -> bool {
+    if let Some(stream) = stream {
+        matches!(stream.next().await, Some(Ok(_)))
+    } else {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        false
+    }
 }

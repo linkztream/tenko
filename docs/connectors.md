@@ -15,7 +15,7 @@ Contents:
 
 ## 1. Inventory connectors in Tenko
 
-An inventory connector is a plugin with the `inventory` capability (CONN-02). The host calls it on a schedule. The plugin reads one remote system and answers with the hosts it observes: for each an identifier of the source's own (`qemu/101`, `device/<id>`), a name, MAC addresses, IP addresses, an operating system, a platform, a parent host and tags, and optionally the vendor of a MAC address (see [plugins.md](plugins.md#inventory)). What the host does with the answer:
+An inventory connector is a plugin with the `inventory` capability (CONN-02). The host calls it on a schedule. In a cluster every controller runs the plugin processes, the health checks and the runs a person asks for, but only the leader runs the schedule (the leader service `connect.poll`); a controller that takes over as leader starts the reads that fell due at once, so scheduled reads continue within one poll interval. The plugin reads one remote system and answers with the hosts it observes: for each an identifier of the source's own (`qemu/101`, `device/<id>`), a name, MAC addresses, IP addresses, an operating system, a platform, a parent host and tags, and optionally the vendor of a MAC address (see [plugins.md](plugins.md#inventory)). What the host does with the answer:
 
 - Each host becomes a `host` fact under the source `inventory:<connector id>`, and each vendor becomes a `vendor` fact of its MAC address ([reconciliation.md](reconciliation.md#22-facts)).
 - The facts are observations and never intent. They change nothing in IPAM by themselves. The reconciler compares them with IPAM and derives proposals, which a person, or the adoption policy of a prefix, decides (section 5).
@@ -125,7 +125,9 @@ When the server renews its certificate, calls fail with `TLS: the server certifi
 
 ### 2.3 Insecure mode and plain HTTP
 
-`insecure` switches the check off. Anyone on the path can then read the token and answer with invented data, so use it for a lab only. It is loud on purpose: for an `https` URL the instance reports `degraded` with the note `certificate checks are off (tls = insecure); use this in a lab only`, and the plugin writes a `WARN` line to the log of the host on every call of the instance. It does not show a fingerprint; pin the certificate as in section 2.2 instead.
+`insecure` switches the check off. Anyone on the path can then read the token and answer with invented data, so Tenko accepts it under the Lab security profile only. Under any other profile, creating an instance with `tls = insecure` or changing an instance to it is refused with 422 `connect.tls.insecure_refused` (field `settings.tls`). An instance stored with `insecure` before the profile changed away from Lab stays in the list but does not run: it shows as `degraded` with the code `connect.tls.insecure_refused`, no call reaches its plugin (scheduled and requested runs, the health check), and the host logs the refusal once, until the instance or the profile changes. Choose `system`, `ca` or `fingerprint` to bring it back.
+
+Under the Lab profile it is loud on purpose: for an `https` URL the instance reports `degraded` with the note `certificate checks are off (tls = insecure); use this in a lab only`, and the plugin writes a `WARN` line to the log of the host on every call of the instance. It does not show a fingerprint; pin the certificate as in section 2.2 instead.
 
 A plain `http://` URL is accepted, and it is the normal address of a default Home Assistant (port 8123). The token then travels in clear text on every call. The health detail says so: `the connection is not encrypted (http); credentials travel in clear text`. That note does not change the health of a working instance by itself. Use `http` only on a network you trust, or put TLS in front of the system.
 

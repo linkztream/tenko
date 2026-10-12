@@ -5,6 +5,7 @@ pub use service::{ConnectorHost, HostConfig, HostError};
 
 pub mod backoff;
 pub mod client;
+pub mod guardrails;
 pub mod launch;
 pub mod normalize;
 pub mod registry;

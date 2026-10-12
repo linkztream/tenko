@@ -335,6 +335,12 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/prefixes/{id}/adoption", "get_adoption_policy"),
     ("PUT", "/prefixes/{id}/adoption", "set_adoption_policy"),
     ("DELETE", "/prefixes/{id}/adoption", "clear_adoption_policy"),
+    // reconciler settings
+    ("GET", "/settings/reconciler", "get_reconciler_settings"),
+    ("PUT", "/settings/reconciler", "update_reconciler_settings"),
+    // guardrails
+    ("GET", "/settings/guardrails", "get_guardrails"),
+    ("PUT", "/settings/guardrails", "update_guardrails"),
     // connectors
     ("GET", "/connectors/plugins", "list_connector_plugins"),
     ("GET", "/connectors", "list_connectors"),
@@ -570,8 +576,8 @@ fn operations_have_a_declared_tag_and_a_summary() {
         .collect();
     // 22 areas of Slices 1 and 2, nine Slice 3 areas (metrics split from system; cluster,
     // kek, scans, audit_export, backup and queue with their operations; two that start
-    // empty: access, i18n).
-    assert_eq!(tags.len(), 31, "one tag per area");
+    // empty: access, i18n), reconciler and guardrails (WP3.12a).
+    assert_eq!(tags.len(), 33, "one tag per area");
     for (path, item) in &document.paths.paths {
         for (method, operation) in operations(item) {
             let operation_tags = operation.tags.as_deref().unwrap_or_default();
