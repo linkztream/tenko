@@ -14,6 +14,7 @@
 //! | [`lockout`] | progressive delays and locks, in memory before any store write |
 //! | [`webauthn`] | the relying party of ADR 0010 |
 //! | [`service`] | [`AuthService`]: login, sessions, factors, tokens, users, settings, setup |
+//! | [`audit_export`] | the audit export: sinks, formats, the exporter leader service and its status (WP3.3) |
 //! | [`authz`] | the [`Authorizer`](tenko_core::Authorizer) over a derived index: roles, grants, scoped tokens, MFA per role |
 //! | [`roles`] | `admin`, `operator`, `viewer`, `auditor`, their order and the strength rules |
 //! | [`grants`] | scoped grants: grantable roles and rules, containment of rules |
@@ -27,6 +28,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod audit_export;
 pub mod authz;
 pub mod challenge;
 pub mod clock;

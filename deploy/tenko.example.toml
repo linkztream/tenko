@@ -316,6 +316,13 @@ gauge_interval_secs = 30
 # encrypted.
 # target_dir = "/srv/backup/tenko"
 
+[audit_export]
+# An absolute directory for the files of audit export file sinks (IAM-18). Not set:
+# audit-export/ in the data directory. The sinks themselves (syslog over UDP, TCP or TLS,
+# or a file, in RFC 5424, CEF or JSON) are settings of the installation (the API and the
+# UI), the same on every controller; a file sink writes on the controller that leads.
+# file_dir = "/var/log/tenko-audit"
+
 [scan]
 # The scanner of the probe role (SCAN-01 to SCAN-09). A probe reads this section of its own
 # tenko.toml until the controller hands out scan configuration (a later release).

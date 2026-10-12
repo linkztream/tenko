@@ -281,6 +281,11 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/system/kek", "get_kek_status"),
     ("POST", "/system/kek/rotate", "rotate_kek"),
     ("POST", "/nodes/enrol", "enrol_node"),
+    // audit_export
+    ("GET", "/settings/audit-export", "get_audit_export"),
+    ("PUT", "/settings/audit-export", "put_audit_export"),
+    ("POST", "/settings/audit-export/test", "test_audit_export"),
+    ("GET", "/audit/export", "export_audit"),
     // i18n (WP3.7)
     ("GET", "/i18n/languages", "get_languages"),
     ("GET", "/i18n/packs", "list_packs"),
@@ -549,7 +554,7 @@ fn operations_have_a_declared_tag_and_a_summary() {
         .map(|tag| tag.name.as_str())
         .collect();
     // 22 areas of Slices 1 and 2, nine Slice 3 areas (metrics split from system; cluster,
-    // kek and scans with their operations; five that start empty: access, audit_export,
+    // kek and scans with their operations; four that start empty: access,
     // backup, i18n, queue).
     assert_eq!(tags.len(), 31, "one tag per area");
     for (path, item) in &document.paths.paths {

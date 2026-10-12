@@ -2114,6 +2114,82 @@
         }
       }
     },
+    "/api/v1/audit/export": {
+      "get": {
+        "tags": [
+          "audit_export"
+        ],
+        "summary": "Read the audit log in sequence order for an export",
+        "description": "Every record from `from` in sequence order with the anchor before it, for `tenko audit export`. Needs the global read permission on the audit log, as `GET /audit/verify`; a principal with scoped grants only is refused, because an export is only verifiable whole.",
+        "operationId": "export_audit",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "The first sequence number (default 1).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Records per page, 1 to 5,000 (default 1,000).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of records",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditExportPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`from` or `limit` is out of range or malformed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/audit/verify": {
       "get": {
         "tags": [
@@ -15682,6 +15758,250 @@
         ]
       }
     },
+    "/api/v1/settings/audit-export": {
+      "get": {
+        "tags": [
+          "audit_export"
+        ],
+        "summary": "Get the audit export sinks with their status",
+        "description": "The sinks in their order, each with its state (`disabled`, `pending`, `ok`, `behind`, `failing`, `alarm`), the last record delivered and the lag behind the log; `policy` says whether TGL-21 requires an export and whether the settings satisfy it; `warnings` are those `/system/status` shows (`audit.export.failing`, `audit.export.required`).",
+        "operationId": "get_audit_export",
+        "responses": {
+          "200": {
+            "description": "The settings and their status",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The revision of the settings, for `If-Match`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditExportView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "The server runs without the audit export",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "audit_export"
+        ],
+        "summary": "Replace the audit export sinks",
+        "description": "The body is the complete list of sinks: a sink with the `id` of a stored sink keeps its position, a sink without `id` is new and exports the log from record 1, and a stored sink left out is removed. While TGL-21 requires an export (the Hardened profile), at least one sink must stay enabled (409 `audit.export.required`). The change is audited as `sys.audit_export.update`.",
+        "operationId": "put_audit_export",
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as in the `ETag`; a stale revision is refused with 409",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuditExportUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The new settings and their status",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The new revision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditExportView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A value is invalid (`audit.export.invalid` with one entry per field in `errors`), the body is malformed, or `If-Match` is malformed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "TGL-21 requires an enabled sink (`audit.export.required`), or `If-Match` is stale (`audit.export.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "The server runs without the audit export",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/audit-export/test": {
+      "post": {
+        "tags": [
+          "audit_export"
+        ],
+        "summary": "Send a test message to a sink",
+        "description": "Sends one test message (MSGID `test`, not part of the chain) to a stored sink (`sink`) or to a sink as the form holds it before saving (`spec`), from the controller that serves the request: a file sink writes into this controller's export directory. A failed delivery answers 200 with `delivered: false` and the failure. Audited as `sys.audit_export.test`.",
+        "operationId": "test_audit_export",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuditExportTest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The outcome of the attempt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditExportTestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Neither or both of `sink` and `spec`, or an invalid `spec` (`audit.export.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No sink has this id (`audit.export.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "The server runs without the audit export",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/settings/default-language": {
       "put": {
         "tags": [
@@ -22881,6 +23201,166 @@
           "required"
         ]
       },
+      "AuditExportPage": {
+        "type": "object",
+        "description": "A page of the audit log in sequence order, for an export.",
+        "required": [
+          "anchor",
+          "records",
+          "store_head"
+        ],
+        "properties": {
+          "anchor": {
+            "$ref": "#/components/schemas/ChainHead",
+            "description": "The position before the first record: the record `from - 1` (sequence 0 and the\nzero hash for `from = 1`). An export starts with it as a checkpoint, so it verifies\non its own."
+          },
+          "next": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AuditSeq",
+                "description": "The `from` of the next page; null at the end of the log."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditRecord"
+            },
+            "description": "The records from `from` in sequence order."
+          },
+          "store_head": {
+            "$ref": "#/components/schemas/AuditSeq",
+            "description": "The newest record of the log."
+          }
+        }
+      },
+      "AuditExportTest": {
+        "type": "object",
+        "description": "What `POST /settings/audit-export/test` sends to: a stored sink by id, or a sink as\nthe form holds it before it is saved. Exactly one of the two.",
+        "properties": {
+          "sink": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The id of a stored sink."
+          },
+          "spec": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SinkSpec",
+                "description": "An unsaved sink."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AuditExportTestResult": {
+        "type": "object",
+        "description": "The result of a test message.",
+        "required": [
+          "delivered",
+          "elapsed_ms"
+        ],
+        "properties": {
+          "delivered": {
+            "type": "boolean",
+            "description": "Whether the message was handed to the sink (for UDP: sent; nothing confirms\nreceipt)."
+          },
+          "elapsed_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long the attempt took.",
+            "minimum": 0
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SinkFailure",
+                "description": "The failure, when it was not."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AuditExportUpdate": {
+        "type": "object",
+        "description": "The settings as a client writes them (`PUT /settings/audit-export`).",
+        "properties": {
+          "alert_after_secs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds a sink may fail before the alarm (default 300, from 10 to 86,400).",
+            "minimum": 0
+          },
+          "sinks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SinkSpec"
+            },
+            "description": "The complete list of sinks: sinks left out are removed with their cursors."
+          }
+        }
+      },
+      "AuditExportView": {
+        "type": "object",
+        "description": "The settings with the status of every sink (`GET /settings/audit-export`).",
+        "required": [
+          "revision",
+          "alert_after_secs",
+          "sinks",
+          "policy",
+          "store_head",
+          "warnings"
+        ],
+        "properties": {
+          "alert_after_secs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds a sink may fail before the alarm.",
+            "minimum": 0
+          },
+          "policy": {
+            "$ref": "#/components/schemas/ExportPolicy",
+            "description": "What TGL-21 asks."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The revision of the settings (0 before they were first stored), for `If-Match`.",
+            "minimum": 0
+          },
+          "sinks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SinkView"
+            },
+            "description": "The sinks in their order, with their status."
+          },
+          "store_head": {
+            "$ref": "#/components/schemas/AuditSeq",
+            "description": "The newest record of the audit log."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportWarning"
+            },
+            "description": "The warnings the status shows."
+          }
+        }
+      },
       "AuditOutcome": {
         "oneOf": [
           {
@@ -23384,6 +23864,24 @@
           "air_gapped",
           "setting"
         ]
+      },
+      "CheckpointMark": {
+        "type": "object",
+        "description": "A checkpoint a sink has sent.",
+        "required": [
+          "head",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it was sent."
+          },
+          "head": {
+            "$ref": "#/components/schemas/ChainHead",
+            "description": "The chain position the checkpoint names: the last record sent before it."
+          }
+        }
       },
       "ClusterStatus": {
         "type": "object",
@@ -25473,6 +25971,85 @@
           }
         }
       },
+      "ExportFormat": {
+        "type": "string",
+        "description": "How an exported record is written (S3-Q6).",
+        "enum": [
+          "rfc5424",
+          "cef",
+          "json"
+        ]
+      },
+      "ExportPolicy": {
+        "type": "object",
+        "description": "What TGL-21 asks of the export.",
+        "required": [
+          "audit_export",
+          "required",
+          "satisfied"
+        ],
+        "properties": {
+          "audit_export": {
+            "$ref": "#/components/schemas/AuditExport",
+            "description": "The effective value of TGL-21."
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Whether an export is required (`required`, the Hardened profile)."
+          },
+          "satisfied": {
+            "type": "boolean",
+            "description": "Whether the settings satisfy the toggle: not required, or at least one sink enabled."
+          }
+        }
+      },
+      "ExportWarning": {
+        "type": "object",
+        "description": "A warning for `/system/status`.",
+        "required": [
+          "code",
+          "detail"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "`audit.export.failing` or `audit.export.required`."
+          },
+          "detail": {
+            "type": "string",
+            "description": "An English description."
+          },
+          "params": {
+            "type": "object",
+            "description": "Parameters for the translated message.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Facility": {
+        "type": "string",
+        "description": "The syslog facility of the messages (RFC 5424 section 6.2.1).",
+        "enum": [
+          "user",
+          "daemon",
+          "auth",
+          "authpriv",
+          "log_audit",
+          "local0",
+          "local1",
+          "local2",
+          "local3",
+          "local4",
+          "local5",
+          "local6",
+          "local7"
+        ]
+      },
       "FactChange": {
         "type": "string",
         "description": "How a fact changed in a scan.",
@@ -25873,6 +26450,31 @@
       "FieldKey": {
         "type": "string",
         "description": "Key of a custom field (IPAM-08): `[a-z][a-z0-9_]{0,63}`."
+      },
+      "FileTarget": {
+        "type": "object",
+        "description": "A JSON lines (or other format) file on the controller that exports, rotated by size.",
+        "required": [
+          "file"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "The file name inside the export directory of the controller (`[audit_export]\nfile_dir`, by default `<data_dir>/audit-export`); no directories."
+          },
+          "keep": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many rotated files (`<file>.1` to `<file>.<keep>`) are kept.",
+            "minimum": 0
+          },
+          "max_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The size in bytes at which the file rotates.",
+            "minimum": 0
+          }
+        }
       },
       "FileView": {
         "type": "object",
@@ -40898,6 +41500,261 @@
           }
         }
       },
+      "Sink": {
+        "type": "object",
+        "description": "A sink as stored.",
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "format",
+          "target"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the sink exports; a disabled sink keeps its cursor."
+          },
+          "format": {
+            "$ref": "#/components/schemas/ExportFormat",
+            "description": "How records are written."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The stable id; the cursor of the sink is kept under it."
+          },
+          "name": {
+            "type": "string",
+            "description": "A name for people."
+          },
+          "target": {
+            "$ref": "#/components/schemas/SinkTarget",
+            "description": "Where they go."
+          }
+        }
+      },
+      "SinkFailure": {
+        "type": "object",
+        "description": "A failure of a sink, as the status shows it.",
+        "required": [
+          "code",
+          "detail",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it happened."
+          },
+          "code": {
+            "type": "string",
+            "description": "The stable code, such as `audit.export.connect`."
+          },
+          "detail": {
+            "type": "string",
+            "description": "An English description (never a secret)."
+          }
+        }
+      },
+      "SinkSpec": {
+        "type": "object",
+        "description": "A sink as a client writes it: the id is optional for a new sink.",
+        "required": [
+          "name",
+          "target"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the sink exports (default true)."
+          },
+          "format": {
+            "$ref": "#/components/schemas/ExportFormat",
+            "description": "How records are written (default `rfc5424`)."
+          },
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The id of an existing sink; empty for a new one."
+          },
+          "name": {
+            "type": "string",
+            "description": "A name for people."
+          },
+          "target": {
+            "$ref": "#/components/schemas/SinkTarget",
+            "description": "Where they go."
+          }
+        }
+      },
+      "SinkState": {
+        "type": "string",
+        "description": "The state of a sink.",
+        "enum": [
+          "disabled",
+          "pending",
+          "ok",
+          "behind",
+          "failing",
+          "alarm"
+        ]
+      },
+      "SinkStatus": {
+        "type": "object",
+        "description": "The status of one sink.",
+        "required": [
+          "state",
+          "delivered",
+          "lag"
+        ],
+        "properties": {
+          "checkpoint": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CheckpointMark",
+                "description": "The last checkpoint sent."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delivered": {
+            "$ref": "#/components/schemas/ChainHead",
+            "description": "The last record handed to the sink."
+          },
+          "failing_since": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "Since when it fails."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lag": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Records of the log after `delivered`.",
+            "minimum": 0
+          },
+          "last_error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SinkFailure",
+                "description": "The last failure (kept after a recovery)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_success_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the sink last delivered."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/SinkState",
+            "description": "The state."
+          },
+          "updated_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the exporter last wrote the cursor."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SinkTarget": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SyslogTarget",
+                "description": "A syslog receiver over UDP, TCP or TLS."
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "syslog"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "A syslog receiver over UDP, TCP or TLS."
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FileTarget",
+                "description": "A file on the exporting controller."
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "file"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "A file on the exporting controller."
+          }
+        ],
+        "description": "Where a sink sends the records."
+      },
+      "SinkView": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Sink",
+            "description": "The sink."
+          },
+          {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "$ref": "#/components/schemas/SinkStatus",
+                "description": "Its status."
+              }
+            }
+          }
+        ],
+        "description": "A sink with its status."
+      },
       "Site": {
         "type": "object",
         "description": "A site, optionally nested (IPAM-04).",
@@ -42113,6 +42970,49 @@
         ],
         "description": "What the supervisor publishes."
       },
+      "SyslogTarget": {
+        "type": "object",
+        "description": "A syslog receiver.",
+        "required": [
+          "host"
+        ],
+        "properties": {
+          "facility": {
+            "$ref": "#/components/schemas/Facility",
+            "description": "The facility of the messages."
+          },
+          "host": {
+            "type": "string",
+            "description": "The receiver's host name or address."
+          },
+          "port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The receiver's port; empty: 514 for UDP and TCP, 6514 for TLS.",
+            "minimum": 0
+          },
+          "tls": {
+            "$ref": "#/components/schemas/TlsOptions",
+            "description": "TLS options; used with the TLS transport only."
+          },
+          "transport": {
+            "$ref": "#/components/schemas/SyslogTransport",
+            "description": "UDP, TCP or TLS."
+          }
+        }
+      },
+      "SyslogTransport": {
+        "type": "string",
+        "description": "The transport of a syslog sink.",
+        "enum": [
+          "udp",
+          "tcp",
+          "tls"
+        ]
+      },
       "SystemComponent": {
         "type": "string",
         "description": "Components that act as [`Principal::System`].",
@@ -42543,6 +43443,41 @@
           "reverse_proxy",
           "plain"
         ]
+      },
+      "TlsOptions": {
+        "type": "object",
+        "description": "TLS options of a syslog sink over TLS (RFC 5425).",
+        "properties": {
+          "ca_pem": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The certificate authorities that sign the receiver's certificate, in PEM. Empty: the\noperating system's roots."
+          },
+          "client_cert_pem": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client certificate chain in PEM, leaf first, when the receiver asks for one."
+          },
+          "client_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The operator secret that holds the client certificate's private key in PEM\n(PKCS #8, SEC1 or PKCS #1). Required with `client_cert_pem`."
+          },
+          "server_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name the receiver's certificate must carry. Empty: the sink's host."
+          }
+        }
       },
       "TlsStatus": {
         "type": "object",

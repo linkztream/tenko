@@ -53,7 +53,8 @@ pub const ENV_SEPARATOR: &str = "__";
 pub const DEFAULT_LISTEN: &str = "0.0.0.0:8443";
 
 /// The top-level keys of the file; environment variables are matched against them.
-const TOP_LEVEL_KEYS: [&str; 22] = [
+const TOP_LEVEL_KEYS: [&str; 23] = [
+    "audit_export",
     "cluster",
     "scan",
     "telemetry",
@@ -135,6 +136,8 @@ pub struct Config {
     pub metrics: MetricsSection,
     /// Where backups of this node are written (OPS-07).
     pub backup: BackupSection,
+    /// Where file sinks of the audit export write on this node (IAM-18).
+    pub audit_export: AuditExportSection,
 }
 
 impl Default for Config {
@@ -162,6 +165,7 @@ impl Default for Config {
             telemetry: TelemetrySection::default(),
             metrics: MetricsSection::default(),
             backup: BackupSection::default(),
+            audit_export: AuditExportSection::default(),
         }
     }
 }
@@ -460,6 +464,33 @@ impl BackupSection {
             }
             Some(dir) if !dir.is_absolute() => Err(ConfigError::invalid(format!(
                 "backup.target_dir: `{}` is not an absolute path",
+                dir.display()
+            ))),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// `[audit_export]`: the directory of the audit export's file sinks on this node (IAM-18,
+/// S3-Q6). The sinks themselves are settings in the store, the same on every controller; a
+/// file sink names a file inside this directory and writes on the controller that leads.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AuditExportSection {
+    /// An absolute directory for the files of file sinks. Not set (the default):
+    /// `audit-export/` in the data directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_dir: Option<PathBuf>,
+}
+
+impl AuditExportSection {
+    fn validate(&self) -> Result<(), ConfigError> {
+        match &self.file_dir {
+            Some(dir) if dir.as_os_str().is_empty() => {
+                Err(ConfigError::invalid("audit_export.file_dir is empty"))
+            }
+            Some(dir) if !dir.is_absolute() => Err(ConfigError::invalid(format!(
+                "audit_export.file_dir: `{}` is not an absolute path",
                 dir.display()
             ))),
             _ => Ok(()),
@@ -1374,6 +1405,12 @@ impl DataLayout {
         self.root.join("backups")
     }
 
+    /// The default directory of the audit export's file sinks (`[audit_export] file_dir`
+    /// overrides it).
+    pub fn audit_export(&self) -> PathBuf {
+        self.root.join("audit-export")
+    }
+
     /// The one-time setup token of a first start, readable by the service account only,
     /// while first-run setup is open (`tenko setup token` prints it).
     pub fn setup_token(&self) -> PathBuf {
@@ -1408,6 +1445,16 @@ impl Resolved {
             .target_dir
             .clone()
             .unwrap_or_else(|| self.layout().backups())
+    }
+
+    /// Where the audit export's file sinks write: `[audit_export] file_dir`, else
+    /// `audit-export/` in the data directory.
+    pub fn audit_export_dir(&self) -> PathBuf {
+        self.config
+            .audit_export
+            .file_dir
+            .clone()
+            .unwrap_or_else(|| self.layout().audit_export())
     }
 }
 
@@ -1456,6 +1503,7 @@ impl Config {
         self.telemetry.validate()?;
         self.metrics.validate()?;
         self.backup.validate()?;
+        self.audit_export.validate()?;
         self.scan
             .validate()
             .map_err(|error| ConfigError::invalid(error.detail().to_owned()))?;
@@ -2148,11 +2196,18 @@ retired = [\"tenko_kek_old\"]
         assert_eq!(default.config.metrics.gauge_interval_secs, 30);
         let resolved = default.config.resolve().expect("valid");
         assert_eq!(resolved.backup_dir(), resolved.layout().backups());
+        assert_eq!(
+            resolved.audit_export_dir(),
+            resolved.layout().audit_export()
+        );
 
         let loaded = from_text(
             "data_dir = \"/d\"\n[telemetry]\notlp_endpoint = \"http://127.0.0.1:4317\"\n\
              sampling_ratio = 0.25\n[metrics]\nlisten = \"127.0.0.1:9464\"\n",
-            &[("TENKO_BACKUP__TARGET_DIR", "/mnt/backup/tenko")],
+            &[
+                ("TENKO_BACKUP__TARGET_DIR", "/mnt/backup/tenko"),
+                ("TENKO_AUDIT_EXPORT__FILE_DIR", "/var/log/tenko-audit"),
+            ],
         )
         .expect("loads");
         assert_eq!(
@@ -2162,6 +2217,10 @@ retired = [\"tenko_kek_old\"]
         if cfg!(unix) {
             let resolved = loaded.config.resolve().expect("valid");
             assert_eq!(resolved.backup_dir(), Path::new("/mnt/backup/tenko"));
+            assert_eq!(
+                resolved.audit_export_dir(),
+                Path::new("/var/log/tenko-audit")
+            );
         }
 
         for (section, bad) in [
@@ -2173,6 +2232,8 @@ retired = [\"tenko_kek_old\"]
             ("metrics", "gauge_interval_secs = 1"),
             ("backup", "target_dir = \"relative/backups\""),
             ("backup", "target_dir = \"\""),
+            ("audit_export", "file_dir = \"relative/audit\""),
+            ("audit_export", "file_dir = \"\""),
         ] {
             let loaded =
                 from_text(&format!("data_dir = \"/d\"\n[{section}]\n{bad}\n"), &[]).expect("loads");

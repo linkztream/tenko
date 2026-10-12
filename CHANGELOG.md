@@ -106,6 +106,8 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - The sign-in requirement per role (IAM-06): each role can require a second factor or a passkey (`/api/v1/access/role-policies`); a person must meet the strictest requirement of every role held, globally or through a grant, and the profile's requirement stays the floor.
 - The auditor role: reads the audit log, the audit export status and the system status, and nothing else.
 - An account that must change its password can use nothing else until it has: every other request answers 403 `auth.password_change_required`.
+- Audit export (IAM-18): the audit log goes to syslog receivers over UDP, TCP or TLS and to rotated files, as RFC 5424 with the sequence number and hash in structured data, as CEF or as JSON lines that carry the bytes each hash covers. Checkpoints in the stream make gaps and truncation visible, delivery resumes from a stored position after a restart or a leader change (records may repeat, none is skipped), and a sink that fails for five minutes raises the alarm `audit.export.failing` in the system status. Sinks are managed under `/api/v1/settings/audit-export` with a test message; the Hardened profile (TGL-21) requires at least one.
+- `tenko audit export` writes the audit log as a file in any of the three formats, and `tenko audit verify --file` checks a JSON export offline.
 ### Changed
 
 - The API rate limiter and the login throttle count per controller: behind a load balancer over several controllers a client gets that many times the configured rate and free sign-in attempts before the replicated account lock takes over.

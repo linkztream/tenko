@@ -250,6 +250,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audit/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the audit log in sequence order for an export
+         * @description Every record from `from` in sequence order with the anchor before it, for `tenko audit export`. Needs the global read permission on the audit log, as `GET /audit/verify`; a principal with scoped grants only is refused, because an export is only verifiable whole.
+         */
+        get: operations["export_audit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit/verify": {
         parameters: {
             query?: never;
@@ -2390,6 +2410,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/audit-export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the audit export sinks with their status
+         * @description The sinks in their order, each with its state (`disabled`, `pending`, `ok`, `behind`, `failing`, `alarm`), the last record delivered and the lag behind the log; `policy` says whether TGL-21 requires an export and whether the settings satisfy it; `warnings` are those `/system/status` shows (`audit.export.failing`, `audit.export.required`).
+         */
+        get: operations["get_audit_export"];
+        /**
+         * Replace the audit export sinks
+         * @description The body is the complete list of sinks: a sink with the `id` of a stored sink keeps its position, a sink without `id` is new and exports the log from record 1, and a stored sink left out is removed. While TGL-21 requires an export (the Hardened profile), at least one sink must stay enabled (409 `audit.export.required`). The change is audited as `sys.audit_export.update`.
+         */
+        put: operations["put_audit_export"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/audit-export/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a test message to a sink
+         * @description Sends one test message (MSGID `test`, not part of the chain) to a stored sink (`sink`) or to a sink as the form holds it before saving (`spec`), from the controller that serves the request: a file sink writes into this controller's export directory. A failed delivery answers 200 with `delivered: false` and the failure. Audited as `sys.audit_export.test`.
+         */
+        post: operations["test_audit_export"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/default-language": {
         parameters: {
             query?: never;
@@ -3537,6 +3601,77 @@ export interface components {
          * @enum {string}
          */
         AuditExport: "local" | "optional" | "required";
+        /** @description A page of the audit log in sequence order, for an export. */
+        AuditExportPage: {
+            /**
+             * @description The position before the first record: the record `from - 1` (sequence 0 and the
+             *     zero hash for `from = 1`). An export starts with it as a checkpoint, so it verifies
+             *     on its own.
+             */
+            anchor: components["schemas"]["ChainHead"];
+            next?: components["schemas"]["AuditSeq"] | null;
+            /** @description The records from `from` in sequence order. */
+            records: components["schemas"]["AuditRecord"][];
+            /** @description The newest record of the log. */
+            store_head: components["schemas"]["AuditSeq"];
+        };
+        /**
+         * @description What `POST /settings/audit-export/test` sends to: a stored sink by id, or a sink as
+         *     the form holds it before it is saved. Exactly one of the two.
+         */
+        AuditExportTest: {
+            /**
+             * Format: uuid
+             * @description The id of a stored sink.
+             */
+            sink?: string | null;
+            spec?: components["schemas"]["SinkSpec"] | null;
+        };
+        /** @description The result of a test message. */
+        AuditExportTestResult: {
+            /**
+             * @description Whether the message was handed to the sink (for UDP: sent; nothing confirms
+             *     receipt).
+             */
+            delivered: boolean;
+            /**
+             * Format: int64
+             * @description How long the attempt took.
+             */
+            elapsed_ms: number;
+            error?: components["schemas"]["SinkFailure"] | null;
+        };
+        /** @description The settings as a client writes them (`PUT /settings/audit-export`). */
+        AuditExportUpdate: {
+            /**
+             * Format: int32
+             * @description Seconds a sink may fail before the alarm (default 300, from 10 to 86,400).
+             */
+            alert_after_secs?: number;
+            /** @description The complete list of sinks: sinks left out are removed with their cursors. */
+            sinks?: components["schemas"]["SinkSpec"][];
+        };
+        /** @description The settings with the status of every sink (`GET /settings/audit-export`). */
+        AuditExportView: {
+            /**
+             * Format: int32
+             * @description Seconds a sink may fail before the alarm.
+             */
+            alert_after_secs: number;
+            /** @description What TGL-21 asks. */
+            policy: components["schemas"]["ExportPolicy"];
+            /**
+             * Format: int64
+             * @description The revision of the settings (0 before they were first stored), for `If-Match`.
+             */
+            revision: number;
+            /** @description The sinks in their order, with their status. */
+            sinks: components["schemas"]["SinkView"][];
+            /** @description The newest record of the audit log. */
+            store_head: components["schemas"]["AuditSeq"];
+            /** @description The warnings the status shows. */
+            warnings: components["schemas"]["ExportWarning"][];
+        };
         /** @description The outcome of an audited action. */
         AuditOutcome: {
             /** @enum {string} */
@@ -3717,6 +3852,13 @@ export interface components {
          * @enum {string}
          */
         CheckOff: "air_gapped" | "setting";
+        /** @description A checkpoint a sink has sent. */
+        CheckpointMark: {
+            /** @description When it was sent. */
+            at: components["schemas"]["Timestamp"];
+            /** @description The chain position the checkpoint names: the last record sent before it. */
+            head: components["schemas"]["ChainHead"];
+        };
         /** @description The node transport of a controller, for `GET /system/status`. */
         ClusterStatus: {
             /**
@@ -4548,6 +4690,36 @@ export interface components {
             topic: components["schemas"]["Topic"];
         };
         /**
+         * @description How an exported record is written (S3-Q6).
+         * @enum {string}
+         */
+        ExportFormat: "rfc5424" | "cef" | "json";
+        /** @description What TGL-21 asks of the export. */
+        ExportPolicy: {
+            /** @description The effective value of TGL-21. */
+            audit_export: components["schemas"]["AuditExport"];
+            /** @description Whether an export is required (`required`, the Hardened profile). */
+            required: boolean;
+            /** @description Whether the settings satisfy the toggle: not required, or at least one sink enabled. */
+            satisfied: boolean;
+        };
+        /** @description A warning for `/system/status`. */
+        ExportWarning: {
+            /** @description `audit.export.failing` or `audit.export.required`. */
+            code: string;
+            /** @description An English description. */
+            detail: string;
+            /** @description Parameters for the translated message. */
+            params?: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * @description The syslog facility of the messages (RFC 5424 section 6.2.1).
+         * @enum {string}
+         */
+        Facility: "user" | "daemon" | "auth" | "authpriv" | "log_audit" | "local0" | "local1" | "local2" | "local3" | "local4" | "local5" | "local6" | "local7";
+        /**
          * @description How a fact changed in a scan.
          * @enum {string}
          */
@@ -4678,6 +4850,24 @@ export interface components {
         };
         /** @description Key of a custom field (IPAM-08): `[a-z][a-z0-9_]{0,63}`. */
         FieldKey: string;
+        /** @description A JSON lines (or other format) file on the controller that exports, rotated by size. */
+        FileTarget: {
+            /**
+             * @description The file name inside the export directory of the controller (`[audit_export]
+             *     file_dir`, by default `<data_dir>/audit-export`); no directories.
+             */
+            file: string;
+            /**
+             * Format: int32
+             * @description How many rotated files (`<file>.1` to `<file>.<keep>`) are kept.
+             */
+            keep?: number;
+            /**
+             * Format: int64
+             * @description The size in bytes at which the file rotates.
+             */
+            max_bytes?: number;
+        };
         /** @description An uploaded file. */
         FileView: {
             /** @description The detected format. */
@@ -10383,6 +10573,82 @@ export interface components {
             /** @description Rows left out (see the loss report). */
             skipped: number;
         };
+        /** @description A sink as stored. */
+        Sink: {
+            /** @description Whether the sink exports; a disabled sink keeps its cursor. */
+            enabled: boolean;
+            /** @description How records are written. */
+            format: components["schemas"]["ExportFormat"];
+            /**
+             * Format: uuid
+             * @description The stable id; the cursor of the sink is kept under it.
+             */
+            id: string;
+            /** @description A name for people. */
+            name: string;
+            /** @description Where they go. */
+            target: components["schemas"]["SinkTarget"];
+        };
+        /** @description A failure of a sink, as the status shows it. */
+        SinkFailure: {
+            /** @description When it happened. */
+            at: components["schemas"]["Timestamp"];
+            /** @description The stable code, such as `audit.export.connect`. */
+            code: string;
+            /** @description An English description (never a secret). */
+            detail: string;
+        };
+        /** @description A sink as a client writes it: the id is optional for a new sink. */
+        SinkSpec: {
+            /** @description Whether the sink exports (default true). */
+            enabled?: boolean;
+            /** @description How records are written (default `rfc5424`). */
+            format?: components["schemas"]["ExportFormat"];
+            /**
+             * Format: uuid
+             * @description The id of an existing sink; empty for a new one.
+             */
+            id?: string | null;
+            /** @description A name for people. */
+            name: string;
+            /** @description Where they go. */
+            target: components["schemas"]["SinkTarget"];
+        };
+        /**
+         * @description The state of a sink.
+         * @enum {string}
+         */
+        SinkState: "disabled" | "pending" | "ok" | "behind" | "failing" | "alarm";
+        /** @description The status of one sink. */
+        SinkStatus: {
+            checkpoint?: components["schemas"]["CheckpointMark"] | null;
+            /** @description The last record handed to the sink. */
+            delivered: components["schemas"]["ChainHead"];
+            failing_since?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: int64
+             * @description Records of the log after `delivered`.
+             */
+            lag: number;
+            last_error?: components["schemas"]["SinkFailure"] | null;
+            last_success_at?: components["schemas"]["Timestamp"] | null;
+            /** @description The state. */
+            state: components["schemas"]["SinkState"];
+            updated_at?: components["schemas"]["Timestamp"] | null;
+        };
+        /** @description Where a sink sends the records. */
+        SinkTarget: (components["schemas"]["SyslogTarget"] & {
+            /** @enum {string} */
+            kind: "syslog";
+        }) | (components["schemas"]["FileTarget"] & {
+            /** @enum {string} */
+            kind: "file";
+        });
+        /** @description A sink with its status. */
+        SinkView: components["schemas"]["Sink"] & {
+            /** @description Its status. */
+            status: components["schemas"]["SinkStatus"];
+        };
         /** @description A site, optionally nested (IPAM-04). */
         Site: {
             /** @description Matching Active Directory site name, for migration and DNS later. */
@@ -10834,6 +11100,27 @@ export interface components {
              */
             restarts: number;
         };
+        /** @description A syslog receiver. */
+        SyslogTarget: {
+            /** @description The facility of the messages. */
+            facility?: components["schemas"]["Facility"];
+            /** @description The receiver's host name or address. */
+            host: string;
+            /**
+             * Format: int32
+             * @description The receiver's port; empty: 514 for UDP and TCP, 6514 for TLS.
+             */
+            port?: number | null;
+            /** @description TLS options; used with the TLS transport only. */
+            tls?: components["schemas"]["TlsOptions"];
+            /** @description UDP, TCP or TLS. */
+            transport?: components["schemas"]["SyslogTransport"];
+        };
+        /**
+         * @description The transport of a syslog sink.
+         * @enum {string}
+         */
+        SyslogTransport: "udp" | "tcp" | "tls";
         /**
          * @description Components that act as [`Principal::System`].
          * @enum {string}
@@ -11032,6 +11319,24 @@ export interface components {
          * @enum {string}
          */
         TlsMode: "internal_ca" | "imported" | "reverse_proxy" | "plain";
+        /** @description TLS options of a syslog sink over TLS (RFC 5425). */
+        TlsOptions: {
+            /**
+             * @description The certificate authorities that sign the receiver's certificate, in PEM. Empty: the
+             *     operating system's roots.
+             */
+            ca_pem?: string | null;
+            /** @description The client certificate chain in PEM, leaf first, when the receiver asks for one. */
+            client_cert_pem?: string | null;
+            /**
+             * Format: uuid
+             * @description The operator secret that holds the client certificate's private key in PEM
+             *     (PKCS #8, SEC1 or PKCS #1). Required with `client_cert_pem`.
+             */
+            client_key?: string | null;
+            /** @description The name the receiver's certificate must carry. Empty: the sink's host. */
+            server_name?: string | null;
+        };
         /** @description TLS status of the listener. */
         TlsStatus: {
             certificate?: components["schemas"]["CertificateStatus"] | null;
@@ -13859,6 +14164,58 @@ export interface operations {
                 };
             };
             /** @description Malformed filter, limit or cursor */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    export_audit: {
+        parameters: {
+            query?: {
+                /** @description The first sequence number (default 1). */
+                from?: number;
+                /** @description Records per page, 1 to 5,000 (default 1,000). */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of records */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditExportPage"];
+                };
+            };
+            /** @description `from` or `limit` is out of range or malformed */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23879,6 +24236,198 @@ export interface operations {
             };
             /** @description Too many reveals (`vault.reveal.rate_limited`), with `Retry-After` */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_audit_export: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings and their status */
+            200: {
+                headers: {
+                    /** @description The revision of the settings, for `If-Match` */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditExportView"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The server runs without the audit export */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    put_audit_export: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The revision the client read, as in the `ETag`; a stale revision is refused with 409 */
+                "If-Match"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuditExportUpdate"];
+            };
+        };
+        responses: {
+            /** @description The new settings and their status */
+            200: {
+                headers: {
+                    /** @description The new revision */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditExportView"];
+                };
+            };
+            /** @description A value is invalid (`audit.export.invalid` with one entry per field in `errors`), the body is malformed, or `If-Match` is malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description TGL-21 requires an enabled sink (`audit.export.required`), or `If-Match` is stale (`audit.export.conflict`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The server runs without the audit export */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    test_audit_export: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuditExportTest"];
+            };
+        };
+        responses: {
+            /** @description The outcome of the attempt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditExportTestResult"];
+                };
+            };
+            /** @description Neither or both of `sink` and `spec`, or an invalid `spec` (`audit.export.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No sink has this id (`audit.export.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The server runs without the audit export */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };

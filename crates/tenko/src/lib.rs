@@ -293,9 +293,6 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
         Command::Node { action } => node::command(action, out, err),
         Command::Cluster { action } => cluster::run(action, out, err),
         Command::Backup { action } => backup::command(action, err),
-        Command::Audit {
-            action: client::audit::AuditCommand::Export(_),
-        } => not_available(name, err),
         Command::Openapi => {
             let _ = write!(out, "{}", tenko_api::openapi_json());
             exit::OK
@@ -354,17 +351,34 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
             logging::init_client();
             client::block_on(name, args.client.json, out, err, client::export::run(args))
         }
-        Command::Audit {
-            action: client::audit::AuditCommand::Verify(args),
-        } => {
+        Command::Audit { action } => audit(action, name, out, err),
+    }
+}
+
+/// `tenko audit verify|export`. `verify --file` checks a file on this machine and needs no
+/// server, so it does not set up the client logging.
+fn audit(
+    action: &client::audit::AuditCommand,
+    name: &str,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> u8 {
+    use client::audit::{AuditCommand, export, verify, verify_file};
+    match action {
+        AuditCommand::Verify(args) => {
+            if let Some(file) = &args.file {
+                let json = args.client.json;
+                client::block_on(name, json, out, err, async {
+                    verify_file(file, args.from, json)
+                })
+            } else {
+                logging::init_client();
+                client::block_on(name, args.client.json, out, err, verify(args))
+            }
+        }
+        AuditCommand::Export(args) => {
             logging::init_client();
-            client::block_on(
-                name,
-                args.client.json,
-                out,
-                err,
-                client::audit::verify(args),
-            )
+            client::block_on(name, args.client.json, out, err, export(args))
         }
     }
 }
@@ -564,9 +578,14 @@ mod tests {
 
     #[test]
     fn command_names_match_the_command_line() {
-        let cases: [(&[&str], &str); 33] = [
+        let cases: [(&[&str], &str); 35] = [
             (&["audit", "export"], "audit export"),
             (&["audit", "export", "--from", "7"], "audit export"),
+            (
+                &["audit", "export", "--format", "cef", "-o", "f", "--force"],
+                "audit export",
+            ),
+            (&["audit", "verify", "--file", "f.jsonl"], "audit verify"),
             (&["cluster", "status"], "cluster status"),
             (&["cluster", "members"], "cluster members"),
             (
@@ -613,7 +632,6 @@ mod tests {
         for args in [
             &["cluster", "upgrade-check"][..],
             &["backup", "create", "--data-dir", "d"],
-            &["audit", "export", "--from", "1"],
         ] {
             let (status, output, err) = run(args);
             assert_eq!(status, exit::USAGE, "{args:?}");

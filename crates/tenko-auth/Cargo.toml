@@ -27,6 +27,12 @@ futures = { workspace = true }
 # Unicode classes (`\p{L}`) in Custom presets, whatever other crates enable.
 regex = { workspace = true, features = ["unicode"] }
 reqwest = { workspace = true, optional = true }
+# The TLS transport of the audit export (RFC 5425): already in the graph through
+# tenko-api and tenko-cluster, with the same features.
+rustls = { workspace = true }
+rustls-native-certs = "0.8.4"
+rustls-pki-types = { version = "1.15.1", features = ["std"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "logging", "tls12"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -36,6 +42,8 @@ tenko-vault = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
+# `CancellationToken` of the audit export's leader service.
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 unicode-normalization = { workspace = true }
 utoipa = { workspace = true }
@@ -43,6 +51,9 @@ uuid = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+# A test certificate authority for the TLS sink (already in the graph through tenko-api).
+rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "crypto", "pem"] }
+tempfile = { workspace = true }
 tenko-auth = { path = ".", features = ["testing"] }
 # The production store, for the scope matrix that runs against both stores.
 tenko-store = { workspace = true, features = ["raft", "testing"] }

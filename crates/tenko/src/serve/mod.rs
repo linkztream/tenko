@@ -1315,7 +1315,7 @@ async fn start(
 
     let lab_plain_http = tls.lab_plain_http;
     let https = tls.https;
-    let (server, events) = steps
+    let (server, events, warnings_state) = steps
         .run("api", async {
             let mut state = AppState::with_options(
                 Arc::clone(&store_dyn),
@@ -1410,6 +1410,11 @@ async fn start(
                 server.extensions.insert(Arc::clone(reconciler));
             }
             server.extensions.insert(Arc::clone(&operator_secrets));
+            // The audit export (WP3.3): the settings service for the API on every
+            // controller, the exporter as a leader service.
+            let (export_admin, exporter) = audit_export(resolved, &store_dyn, &vault);
+            server.extensions.insert(export_admin);
+            leaders.register(exporter);
             server.extensions.insert(Arc::clone(&kek_admin));
             state.set_kek(Arc::clone(&kek_admin));
             server.extensions.insert(leader_view.source());
@@ -1422,6 +1427,7 @@ async fn start(
             ));
             leaders.register(leader::used_challenges_purge(Arc::clone(&store_dyn)));
             let events = state.events().clone();
+            let warnings_state = state.clone();
             let running = tenko_api::start(server, state).await.map_err(|error| {
                 let code = match &error {
                     tenko_api::ServeError::Bind { .. } => "start.api.bind",
@@ -1440,7 +1446,7 @@ async fn start(
                     .collect::<Vec<_>>()
                     .join(", ")
             );
-            Ok(((running, events), summary))
+            Ok(((running, events, warnings_state), summary))
         })
         .await?;
     leaders.register(leader::clock::beat_service(
@@ -1453,6 +1459,15 @@ async fn start(
         running.stop.subscribe(),
     ) {
         running.tasks.push(task);
+    }
+    {
+        let stop = running.stop.subscribe();
+        running
+            .tasks
+            .push(tenko_api::routes::audit_export::follow_warnings(
+                warnings_state,
+                stop,
+            ));
     }
     running.leader = Some(leader::spawn(
         Arc::clone(&store_dyn),
@@ -1760,6 +1775,43 @@ fn publish_setup_token(
             ),
         )
     })
+}
+
+/// The audit export's settings service and its exporter (WP3.3): file sinks write into
+/// `[audit_export] file_dir`, TLS client keys come from the vault, and the syslog
+/// HOSTNAME is this controller's TLS host name (`-` when it has none).
+fn audit_export(
+    resolved: &Resolved,
+    store: &Arc<dyn Store>,
+    vault: &Arc<StoreVault>,
+) -> (
+    Arc<tenko_auth::audit_export::admin::AuditExportAdmin>,
+    Arc<dyn tenko_core::cluster::LeaderService>,
+) {
+    use tenko_auth::audit_export::{
+        admin::AuditExportAdmin,
+        exporter::AuditExporter,
+        sink::{Opener, Timeouts},
+    };
+    let opener = Opener {
+        file_dir: Some(resolved.audit_export_dir()),
+        vault: Some(Arc::clone(vault) as Arc<dyn tenko_vault::Vault>),
+        timeouts: Timeouts::default(),
+    };
+    let hostname = match &resolved.tls {
+        TlsSpec::InternalCa { host_name, .. } => host_name.clone(),
+        TlsSpec::ReverseProxy { public_host, .. } => public_host.clone(),
+        _ => "-".to_owned(),
+    };
+    let version = crate::upgrade::running_version().to_string();
+    let admin = AuditExportAdmin::new(
+        Arc::clone(store),
+        opener.clone(),
+        hostname.clone(),
+        version.clone(),
+    );
+    let exporter = AuditExporter::new(Arc::clone(store), opener, hostname, version);
+    (Arc::new(admin), Arc::new(exporter))
 }
 
 /// The URL clients use: the public host behind a proxy, else the first bound address.

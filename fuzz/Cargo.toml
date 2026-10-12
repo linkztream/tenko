@@ -15,6 +15,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 serde_json = "1"
 tenko-api = { path = "../crates/tenko-api", default-features = false }
+tenko-auth = { path = "../crates/tenko-auth" }
 tenko-connect-hass = { path = "../crates/tenko-connect-hass" }
 tenko-connect-proxmox = { path = "../crates/tenko-connect-proxmox" }
 tenko-connect-unifi = { path = "../crates/tenko-connect-unifi" }
@@ -96,6 +97,27 @@ bench = false
 [[bin]]
 name = "node_config_payloads"
 path = "fuzz_targets/node_config_payloads.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "audit_export_jsonl"
+path = "fuzz_targets/audit_export_jsonl.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "audit_export_syslog"
+path = "fuzz_targets/audit_export_syslog.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "audit_export_cef"
+path = "fuzz_targets/audit_export_cef.rs"
 test = false
 doc = false
 bench = false
