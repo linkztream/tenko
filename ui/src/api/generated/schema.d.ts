@@ -2595,6 +2595,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/system/backups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the backup status and settings */
+        get: operations["get_backups"];
+        put?: never;
+        /** Write a backup now */
+        post: operations["create_backup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/backups/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Change the backup schedule, target and recipient */
+        put: operations["update_backup_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system/break-glass": {
         parameters: {
             query?: never;
@@ -3756,6 +3791,155 @@ export interface components {
             residentKey: string;
             /** @description `required`, `preferred` or `discouraged`. */
             userVerification: string;
+        };
+        /** @description A request to write a backup now. */
+        BackupCreateRequest: {
+            /**
+             * Format: password
+             * @description A passphrase of at least 12 characters that opens this backup, in addition to the
+             *     configured recipient. It is used once and never stored.
+             */
+            passphrase?: string | null;
+        };
+        /** @description Why a backup failed. */
+        BackupFailure: {
+            /** @description The error code, such as `backup.io`. */
+            code: string;
+            /** @description What went wrong, in English. */
+            detail: string;
+        };
+        /**
+         * @description Whether a backup was written.
+         * @enum {string}
+         */
+        BackupOutcome: "succeeded" | "failed";
+        /**
+         * @description Why a backup was written.
+         * @enum {string}
+         */
+        BackupReason: "manual" | "scheduled";
+        /** @description One backup a controller wrote, or tried to. */
+        BackupRunView: {
+            /** @description Who asked: a principal subject such as `user:<id>`, or `system`. */
+            by: string;
+            /**
+             * Format: int64
+             * @description The size of the file in bytes.
+             */
+            bytes?: number | null;
+            error?: components["schemas"]["BackupFailure"] | null;
+            /** @description The file name, for a good backup. */
+            file?: string | null;
+            /** @description When it ended. */
+            finished_at: components["schemas"]["Timestamp"];
+            /**
+             * Format: uuid
+             * @description The record.
+             */
+            id: string;
+            job?: components["schemas"]["JobId"] | null;
+            /**
+             * Format: int64
+             * @description The controller that wrote it.
+             */
+            node: number;
+            /** @description The outcome. */
+            outcome: components["schemas"]["BackupOutcome"];
+            /** @description Why it was made. */
+            reason: components["schemas"]["BackupReason"];
+            revision?: components["schemas"]["Revision"] | null;
+            /** @description What opens it: `passphrase`, `recipient`. */
+            slots: string[];
+            /** @description When it started. */
+            started_at: components["schemas"]["Timestamp"];
+            /** @description The directory on that controller. */
+            target_dir: string;
+        };
+        /** @description New backup settings (all fields; the stored settings are replaced). */
+        BackupSettingsUpdate: {
+            /** @description Whether scheduled backups run; turning them on needs a recipient. */
+            enabled: boolean;
+            /** @description Whether backups include the configuration file. */
+            include_config: boolean;
+            /**
+             * Format: int32
+             * @description Hours between scheduled backups, 1 to 168.
+             */
+            interval_hours: number;
+            /**
+             * Format: int32
+             * @description Backup files the schedule keeps, 1 to 365.
+             */
+            keep: number;
+            /** @description The recipient key, or absent. */
+            recipient?: string | null;
+            /** @description An absolute directory, or absent for each controller's default. */
+            target_dir?: string | null;
+        };
+        /** @description The backup settings of the installation, the same on every controller. */
+        BackupSettingsView: {
+            /** @description The directory the controller that answers writes to. */
+            effective_target_dir: string;
+            /** @description Whether scheduled backups run (off until an administrator turns them on). */
+            enabled: boolean;
+            /** @description Whether backups include the configuration file of the controller that writes them. */
+            include_config: boolean;
+            /**
+             * Format: int32
+             * @description Hours between scheduled backups, 1 to 168.
+             */
+            interval_hours: number;
+            /**
+             * Format: int32
+             * @description Backup files the schedule keeps in the target directory, 1 to 365; older ones are
+             *     deleted after each scheduled backup.
+             */
+            keep: number;
+            /**
+             * @description The recipient key (`tkbr1:` and 43 base64url characters) that every backup is
+             *     encrypted to; `tenko backup keygen` creates the key file that opens them. Scheduled
+             *     backups need one.
+             */
+            recipient?: string | null;
+            revision?: components["schemas"]["Revision"] | null;
+            /**
+             * @description An absolute directory for backup files on every controller; absent: each
+             *     controller's `[backup] target_dir`, else `backups/` in its data directory.
+             */
+            target_dir?: string | null;
+        };
+        /** @description Backups: the settings, the last backups and the conditions to look at. */
+        BackupStatusView: {
+            /**
+             * Format: int64
+             * @description Seconds since the last good backup was written.
+             */
+            age_seconds?: number | null;
+            last_failed?: components["schemas"]["BackupRunView"] | null;
+            last_good?: components["schemas"]["BackupRunView"] | null;
+            next_due_at?: components["schemas"]["Timestamp"] | null;
+            /** @description The newest backups, newest first (at most 20). */
+            recent: components["schemas"]["BackupRunView"][];
+            restored?: components["schemas"]["RestoreNoticeView"] | null;
+            /** @description Whether a backup runs on the controller that answers. */
+            running: boolean;
+            /** @description The settings. */
+            settings: components["schemas"]["BackupSettingsView"];
+            /** @description Conditions to look at: `backup.stale`, `backup.failed`, `backup.restored`. */
+            warnings: components["schemas"]["StatusWarning"][];
+        };
+        /** @description The backup fragment of `GET /system/status`. */
+        BackupSummaryView: {
+            /**
+             * Format: int64
+             * @description Seconds since then.
+             */
+            age_seconds?: number | null;
+            last_failed_at?: components["schemas"]["Timestamp"] | null;
+            last_good_at?: components["schemas"]["Timestamp"] | null;
+            restored_at?: components["schemas"]["Timestamp"] | null;
+            /** @description Whether scheduled backups run. */
+            schedule_enabled: boolean;
         };
         /** @description What the UI needs for its warning banner (API-10: insecure settings are loud). */
         Banner: {
@@ -9618,6 +9802,29 @@ export interface components {
          * @enum {string}
          */
         ResetReason: "lagged" | "gap" | "journal";
+        /** @description The restore this installation was started from. */
+        RestoreNoticeView: {
+            /** @description When the backup was made. */
+            backup_created_at: components["schemas"]["Timestamp"];
+            /** @description The backup file name. */
+            file: string;
+            /**
+             * Format: int64
+             * @description The controller it was restored as.
+             */
+            node: number;
+            /** @description When the restore ran. */
+            restored_at: components["schemas"]["Timestamp"];
+            /** @description The store revision of the backup. */
+            revision: components["schemas"]["Revision"];
+            /**
+             * Format: int64
+             * @description The controller the backup was made on.
+             */
+            source_node: number;
+            /** @description When the server first started from it. */
+            started_at: components["schemas"]["Timestamp"];
+        };
         /**
          * @description TGL-24: what revealing an operator secret takes (IAM-16, API-11). The PIN coupling rule
          *     (IAM-07) holds in every profile on top of it: a PIN-strength session never reveals, and
@@ -11128,6 +11335,7 @@ export interface components {
         SystemComponent: "setup" | "api" | "auth" | "vault" | "store" | "ipam" | "import" | "jobs" | "reconciler" | "connector" | "scan" | "cluster" | "audit_export" | "backup" | "languages" | "leader";
         /** @description Body of `GET /system/status`. */
         SystemStatus: {
+            backup?: components["schemas"]["BackupSummaryView"] | null;
             cluster?: components["schemas"]["ClusterStatus"] | null;
             kek?: components["schemas"]["KekSummaryView"] | null;
             leader?: components["schemas"]["LeaderStatus"] | null;
@@ -25339,6 +25547,252 @@ export interface operations {
                 };
             };
             /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_backups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The backup status */
+            200: {
+                headers: {
+                    /** @description The revision of the settings, for `If-Match` of `PUT /system/backups/settings` */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupStatusView"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description This server has no backup service (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_backup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackupCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The backup is written */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupRunView"];
+                };
+            };
+            /** @description The body is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`), or the session was not signed in within the last five minutes (`auth.step_up_required`, parameter `required`: `fresh`); personal tokens are refused with `auth.forbidden` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A backup is running on this controller (`backup.running`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No recipient is configured and no passphrase given (`backup.key.missing`), the passphrase is shorter than 12 characters (`backup.passphrase.weak`, parameter `min`), or the configured recipient is invalid (`backup.key.invalid`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The backup could not be written (`backup.io`, `backup.internal`); the failure is recorded */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description This server has no backup service (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_backup_settings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The revision the client read, as in the `ETag` of `GET /system/backups`; a stale revision is refused with 409 */
+                "If-Match"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackupSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description The settings now in force */
+            200: {
+                headers: {
+                    /** @description The new revision of the settings */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupSettingsView"];
+                };
+            };
+            /** @description The body is malformed (`sys.invalid_request`) or `If-Match` is malformed (`sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`), or the session was not signed in within the last five minutes (`auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `If-Match` is stale or a concurrent change won (`sys.store.precondition_failed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A value is out of range or the target directory is not absolute (`backup.settings.invalid`), the schedule is turned on without a recipient (`backup.key.missing`), or the recipient does not parse (`backup.key.invalid`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description This server has no backup service (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`) */
             503: {
                 headers: {
                     [name: string]: unknown;

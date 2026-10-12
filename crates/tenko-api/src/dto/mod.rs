@@ -10,6 +10,7 @@ use tenko_core::Revision;
 use utoipa::ToSchema;
 
 pub mod audit;
+pub mod backup;
 pub mod events;
 pub mod kek;
 pub mod release;

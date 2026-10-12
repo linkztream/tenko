@@ -24,8 +24,9 @@
 //! controller that is at once. The steps register their services in the
 //! [`leader::LeaderRegistry`] that the start sequence hands around: the online KEK rotation
 //! (`vault.kek_rotation`, step `vault`), the job runner (`jobs.runner`, step `jobs`), the
-//! prune of the node registry (`cluster.prune`, step `nodes`) and the purge of expired
-//! idempotency records (`api.idempotency_purge`, step `api`).
+//! prune of the node registry (`cluster.prune`, step `nodes`), the purge of expired
+//! idempotency records (`api.idempotency_purge`, step `api`) and the scheduled backups
+//! (`backup.schedule`, step `api`, which also records a restore at the first start after it).
 //!
 //! The cluster step comes before the vault because a controller that was offline during an
 //! online KEK rotation fetches the new key generation from its peers before the vault opens
@@ -302,6 +303,7 @@ pub fn command(args: &ServeArgs, err: &mut impl Write) -> u8 {
         let _ = writeln!(err, "tenko serve: {error}");
         return exit::FAILURE;
     }
+    crate::backup::service::remember_config_file(args.config.clone());
     let stop_on_eof = args.stop_on_eof;
     let shutdown = move || -> Shutdown {
         Box::pin(async move {
@@ -1417,6 +1419,19 @@ async fn start(
             leaders.register(exporter);
             server.extensions.insert(Arc::clone(&kek_admin));
             state.set_kek(Arc::clone(&kek_admin));
+            let backups = crate::backup::service::BackupService::new(
+                store.clone(),
+                Arc::clone(&vault),
+                &engine,
+                crate::backup::service::Config::of(resolved),
+            );
+            if let Err(error) = backups.record_restore().await {
+                tracing::warn!(%error, "the restore could not be recorded; it is recorded at the next start");
+            }
+            leaders.register(backups.schedule());
+            server.extensions.insert(
+                backups as Arc<dyn tenko_api::routes::backup::BackupService>,
+            );
             server.extensions.insert(leader_view.source());
             server.fingerprint_key = cluster_key
                 .as_ref()

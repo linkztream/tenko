@@ -292,7 +292,7 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
         Command::Plugin { action } => plugin::command(action, out, err),
         Command::Node { action } => node::command(action, out, err),
         Command::Cluster { action } => cluster::run(action, out, err),
-        Command::Backup { action } => backup::command(action, err),
+        Command::Backup { action } => backup::command(action, out, err),
         Command::Openapi => {
             let _ = write!(out, "{}", tenko_api::openapi_json());
             exit::OK
@@ -578,7 +578,7 @@ mod tests {
 
     #[test]
     fn command_names_match_the_command_line() {
-        let cases: [(&[&str], &str); 35] = [
+        let cases: [(&[&str], &str); 36] = [
             (&["audit", "export"], "audit export"),
             (&["audit", "export", "--from", "7"], "audit export"),
             (
@@ -597,6 +597,7 @@ mod tests {
             (&["cluster", "step-down"], "cluster step-down"),
             (&["cluster", "verify"], "cluster verify"),
             (&["cluster", "upgrade-check"], "cluster upgrade-check"),
+            (&["backup", "keygen", "--out", "k"], "backup keygen"),
             (&["backup", "create"], "backup create"),
             (&["backup", "verify", "file.tkbk"], "backup verify"),
             (&["backup", "restore", "file.tkbk"], "backup restore"),
@@ -629,19 +630,16 @@ mod tests {
 
     #[test]
     fn declared_commands_that_are_not_built_yet_exit_with_status_2() {
-        for args in [
-            &["cluster", "upgrade-check"][..],
-            &["backup", "create", "--data-dir", "d"],
-        ] {
-            let (status, output, err) = run(args);
-            assert_eq!(status, exit::USAGE, "{args:?}");
-            assert_eq!(output, "", "{args:?}");
-            assert!(err.contains("not available in this build yet"), "{err}");
-            assert!(
-                err.starts_with(&format!("tenko {} {}", args[0], args[1])),
-                "{err}"
-            );
-        }
+        // `cluster upgrade-check` is the last stub; WP3.6 builds it.
+        let args = &["cluster", "upgrade-check"][..];
+        let (status, output, err) = run(args);
+        assert_eq!(status, exit::USAGE);
+        assert_eq!(output, "");
+        assert!(err.contains("not available in this build yet"), "{err}");
+        assert!(
+            err.starts_with(&format!("tenko {} {}", args[0], args[1])),
+            "{err}"
+        );
     }
 
     #[test]

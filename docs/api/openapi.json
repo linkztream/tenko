@@ -17280,6 +17280,317 @@
         }
       }
     },
+    "/api/v1/system/backups": {
+      "get": {
+        "tags": [
+          "backup"
+        ],
+        "summary": "Get the backup status and settings",
+        "operationId": "get_backups",
+        "responses": {
+          "200": {
+            "description": "The backup status",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The revision of the settings, for `If-Match` of `PUT /system/backups/settings`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupStatusView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "This server has no backup service (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "backup"
+        ],
+        "summary": "Write a backup now",
+        "operationId": "create_backup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The backup is written",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupRunView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`), or the session was not signed in within the last five minutes (`auth.step_up_required`, parameter `required`: `fresh`); personal tokens are refused with `auth.forbidden`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A backup is running on this controller (`backup.running`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No recipient is configured and no passphrase given (`backup.key.missing`), the passphrase is shorter than 12 characters (`backup.passphrase.weak`, parameter `min`), or the configured recipient is invalid (`backup.key.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The backup could not be written (`backup.io`, `backup.internal`); the failure is recorded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "This server has no backup service (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/system/backups/settings": {
+      "put": {
+        "tags": [
+          "backup"
+        ],
+        "summary": "Change the backup schedule, target and recipient",
+        "operationId": "update_backup_settings",
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as in the `ETag` of `GET /system/backups`; a stale revision is refused with 409",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The settings now in force",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The new revision of the settings"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupSettingsView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is malformed (`sys.invalid_request`) or `If-Match` is malformed (`sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`), or the session was not signed in within the last five minutes (`auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`If-Match` is stale or a concurrent change won (`sys.store.precondition_failed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A value is out of range or the target directory is not absolute (`backup.settings.invalid`), the schedule is turned on without a recipient (`backup.key.missing`), or the recipient does not parse (`backup.key.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "This server has no backup service (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/system/break-glass": {
       "put": {
         "tags": [
@@ -23599,6 +23910,412 @@
           "userVerification": {
             "type": "string",
             "description": "`required`, `preferred` or `discouraged`."
+          }
+        }
+      },
+      "BackupCreateRequest": {
+        "type": "object",
+        "description": "A request to write a backup now.",
+        "properties": {
+          "passphrase": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "password",
+            "description": "A passphrase of at least 12 characters that opens this backup, in addition to the\nconfigured recipient. It is used once and never stored."
+          }
+        }
+      },
+      "BackupFailure": {
+        "type": "object",
+        "description": "Why a backup failed.",
+        "required": [
+          "code",
+          "detail"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The error code, such as `backup.io`."
+          },
+          "detail": {
+            "type": "string",
+            "description": "What went wrong, in English."
+          }
+        }
+      },
+      "BackupOutcome": {
+        "type": "string",
+        "description": "Whether a backup was written.",
+        "enum": [
+          "succeeded",
+          "failed"
+        ]
+      },
+      "BackupReason": {
+        "type": "string",
+        "description": "Why a backup was written.",
+        "enum": [
+          "manual",
+          "scheduled"
+        ]
+      },
+      "BackupRunView": {
+        "type": "object",
+        "description": "One backup a controller wrote, or tried to.",
+        "required": [
+          "id",
+          "outcome",
+          "reason",
+          "node",
+          "target_dir",
+          "slots",
+          "started_at",
+          "finished_at",
+          "by"
+        ],
+        "properties": {
+          "by": {
+            "type": "string",
+            "description": "Who asked: a principal subject such as `user:<id>`, or `system`."
+          },
+          "bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The size of the file in bytes.",
+            "minimum": 0
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BackupFailure",
+                "description": "Why it failed."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "file": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The file name, for a good backup."
+          },
+          "finished_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it ended."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The record."
+          },
+          "job": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobId",
+                "description": "The inline job `backup.create` that recorded it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "node": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The controller that wrote it.",
+            "minimum": 0
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/BackupOutcome",
+            "description": "The outcome."
+          },
+          "reason": {
+            "$ref": "#/components/schemas/BackupReason",
+            "description": "Why it was made."
+          },
+          "revision": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Revision",
+                "description": "The store revision the backup holds."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "slots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What opens it: `passphrase`, `recipient`."
+          },
+          "started_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it started."
+          },
+          "target_dir": {
+            "type": "string",
+            "description": "The directory on that controller."
+          }
+        }
+      },
+      "BackupSettingsUpdate": {
+        "type": "object",
+        "description": "New backup settings (all fields; the stored settings are replaced).",
+        "required": [
+          "enabled",
+          "interval_hours",
+          "keep",
+          "include_config"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether scheduled backups run; turning them on needs a recipient."
+          },
+          "include_config": {
+            "type": "boolean",
+            "description": "Whether backups include the configuration file."
+          },
+          "interval_hours": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Hours between scheduled backups, 1 to 168.",
+            "minimum": 0
+          },
+          "keep": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Backup files the schedule keeps, 1 to 365.",
+            "minimum": 0
+          },
+          "recipient": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The recipient key, or absent."
+          },
+          "target_dir": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An absolute directory, or absent for each controller's default."
+          }
+        }
+      },
+      "BackupSettingsView": {
+        "type": "object",
+        "description": "The backup settings of the installation, the same on every controller.",
+        "required": [
+          "enabled",
+          "interval_hours",
+          "keep",
+          "include_config",
+          "effective_target_dir"
+        ],
+        "properties": {
+          "effective_target_dir": {
+            "type": "string",
+            "description": "The directory the controller that answers writes to."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether scheduled backups run (off until an administrator turns them on)."
+          },
+          "include_config": {
+            "type": "boolean",
+            "description": "Whether backups include the configuration file of the controller that writes them."
+          },
+          "interval_hours": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Hours between scheduled backups, 1 to 168.",
+            "minimum": 0
+          },
+          "keep": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Backup files the schedule keeps in the target directory, 1 to 365; older ones are\ndeleted after each scheduled backup.",
+            "minimum": 0
+          },
+          "recipient": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The recipient key (`tkbr1:` and 43 base64url characters) that every backup is\nencrypted to; `tenko backup keygen` creates the key file that opens them. Scheduled\nbackups need one."
+          },
+          "revision": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Revision",
+                "description": "The store revision of the settings, for `If-Match`; absent while they were never\nsaved."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target_dir": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An absolute directory for backup files on every controller; absent: each\ncontroller's `[backup] target_dir`, else `backups/` in its data directory."
+          }
+        }
+      },
+      "BackupStatusView": {
+        "type": "object",
+        "description": "Backups: the settings, the last backups and the conditions to look at.",
+        "required": [
+          "settings",
+          "running",
+          "recent",
+          "warnings"
+        ],
+        "properties": {
+          "age_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds since the last good backup was written.",
+            "minimum": 0
+          },
+          "last_failed": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BackupRunView",
+                "description": "The newest failed backup, when it is newer than the last good one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_good": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BackupRunView",
+                "description": "The newest good backup of any controller."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next_due_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the next scheduled backup is due; absent while the schedule is off."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recent": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackupRunView"
+            },
+            "description": "The newest backups, newest first (at most 20)."
+          },
+          "restored": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RestoreNoticeView",
+                "description": "The restore this installation started from; shown until the next good backup."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "running": {
+            "type": "boolean",
+            "description": "Whether a backup runs on the controller that answers."
+          },
+          "settings": {
+            "$ref": "#/components/schemas/BackupSettingsView",
+            "description": "The settings."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatusWarning"
+            },
+            "description": "Conditions to look at: `backup.stale`, `backup.failed`, `backup.restored`."
+          }
+        }
+      },
+      "BackupSummaryView": {
+        "type": "object",
+        "description": "The backup fragment of `GET /system/status`.",
+        "required": [
+          "schedule_enabled"
+        ],
+        "properties": {
+          "age_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds since then.",
+            "minimum": 0
+          },
+          "last_failed_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the last backup failed, if that is newer than the last good one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_good_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the last good backup was written."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "restored_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the restore this installation started from ran, until the next good backup."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schedule_enabled": {
+            "type": "boolean",
+            "description": "Whether scheduled backups run."
           }
         }
       },
@@ -39400,6 +40117,53 @@
           "journal"
         ]
       },
+      "RestoreNoticeView": {
+        "type": "object",
+        "description": "The restore this installation was started from.",
+        "required": [
+          "restored_at",
+          "started_at",
+          "backup_created_at",
+          "file",
+          "source_node",
+          "revision",
+          "node"
+        ],
+        "properties": {
+          "backup_created_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the backup was made."
+          },
+          "file": {
+            "type": "string",
+            "description": "The backup file name."
+          },
+          "node": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The controller it was restored as.",
+            "minimum": 0
+          },
+          "restored_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the restore ran."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "The store revision of the backup."
+          },
+          "source_node": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The controller the backup was made on.",
+            "minimum": 0
+          },
+          "started_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the server first started from it."
+          }
+        }
+      },
       "RevealPolicy": {
         "type": "object",
         "description": "TGL-24: what revealing an operator secret takes (IAM-16, API-11). The PIN coupling rule\n(IAM-07) holds in every profile on top of it: a PIN-strength session never reveals, and\npersonal API tokens never reveal.",
@@ -43048,6 +43812,17 @@
           "warnings"
         ],
         "properties": {
+          "backup": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BackupSummaryView",
+                "description": "Backups (OPS-07): the schedule, the last good and the last failed backup and the\nrestore this installation started from; absent on servers without the backup\nservice. Its warnings (`backup.stale`, `backup.failed`, `backup.restored`) are in\n`warnings`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "cluster": {
             "oneOf": [
               {

@@ -1,34 +1,57 @@
 //! Backups and restores (OPS-07, owner decision S3-Q11, WP3.4b): the command
 //! `tenko backup`.
 //!
-//! WP3.0 created this module with the command line in its final place; the backup package
-//! (WP3.4b) fills it: an encrypted `TKBK1` container with the store snapshot, the key
+//! A backup is one encrypted `TKBK1` file (ADR 0016) with the store snapshot, the key
 //! generations wrapped under the backup key, the imported TLS files and optionally the
-//! configuration; `create` online through the API or offline with `--data-dir`, `verify`
-//! and `restore` onto a new data directory.
+//! configuration.
+//!
+//! | Module | What |
+//! |---|---|
+//! | [`archive`] | the container: header, key slots, chunk stream, manifest, parts |
+//! | [`keys`] | recipient key files and the passphrase rule |
+//! | [`create`] | writing a backup from a running or a stopped store |
+//! | [`restore`] | checking a backup and restoring it as a single controller |
+//! | [`model`] | the replicated settings, backup records and restore record |
+//! | [`service`] | the backups of `tenko serve`: API, schedule, status, the restore record |
+//! | [`cli`] | `tenko backup keygen`, `create`, `verify` and `restore` |
+
+pub mod archive;
+pub mod cli;
+pub mod create;
+mod error;
+pub mod keys;
+pub mod model;
+pub mod restore;
+pub mod service;
+#[cfg(test)]
+mod tests;
 
 use std::io::Write;
 
 use clap::Subcommand;
 
-use crate::Pending;
+pub use self::error::BackupError;
 
-/// Subcommands of `tenko backup`. Each one is a stub until WP3.4b implements it: it prints
-/// that it is not available in this build and exits with status 2.
+/// Subcommands of `tenko backup`.
 #[derive(Debug, Clone, Subcommand)]
 pub enum BackupCommand {
-    /// Write an encrypted backup of the installation.
-    Create(Pending),
-    /// Check a backup file: decrypt, verify every part and the audit chain.
-    Verify(Pending),
-    /// Restore a backup into a new data directory.
-    Restore(Pending),
+    /// Create a recipient key file; the recipient it prints goes into the backup settings.
+    Keygen(cli::KeygenArgs),
+    /// Write an encrypted backup: online through the controller at `--url`, or of a
+    /// stopped node with `--config` or `--data-dir`.
+    Create(Box<cli::CreateArgs>),
+    /// Check a backup file: decrypt it, verify every part, the store digest, the audit
+    /// chain and every secret.
+    Verify(cli::VerifyArgs),
+    /// Restore a backup into a data directory without a store (`--dry-run` checks only).
+    Restore(cli::RestoreArgs),
 }
 
 impl BackupCommand {
     /// The command as typed, such as `backup create`.
     pub fn name(&self) -> &'static str {
         match self {
+            Self::Keygen(_) => "backup keygen",
             Self::Create(_) => "backup create",
             Self::Verify(_) => "backup verify",
             Self::Restore(_) => "backup restore",
@@ -37,6 +60,14 @@ impl BackupCommand {
 }
 
 /// Runs `tenko backup …`.
-pub fn command(action: &BackupCommand, err: &mut impl Write) -> u8 {
-    crate::not_available(action.name(), err)
+pub fn command(action: &BackupCommand, out: &mut impl Write, err: &mut impl Write) -> u8 {
+    let name = action.name();
+    match action {
+        BackupCommand::Keygen(args) => cli::finish(name, false, cli::keygen(args), out, err),
+        BackupCommand::Create(args) => {
+            cli::finish(name, args.client.json, cli::create(args), out, err)
+        }
+        BackupCommand::Verify(args) => cli::finish(name, args.json, cli::verify(args), out, err),
+        BackupCommand::Restore(args) => cli::finish(name, args.json, cli::restore(args), out, err),
+    }
 }

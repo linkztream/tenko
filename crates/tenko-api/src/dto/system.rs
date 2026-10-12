@@ -61,6 +61,12 @@ pub struct SystemStatus {
     /// on servers without the leader supervisor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub leader: Option<LeaderStatus>,
+    /// Backups (OPS-07): the schedule, the last good and the last failed backup and the
+    /// restore this installation started from; absent on servers without the backup
+    /// service. Its warnings (`backup.stale`, `backup.failed`, `backup.restored`) are in
+    /// `warnings`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup: Option<super::backup::BackupSummaryView>,
 }
 
 /// The leader-only work of a controller, for `GET /system/status`. In a cluster exactly

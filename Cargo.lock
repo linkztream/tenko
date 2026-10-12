@@ -2868,12 +2868,16 @@ name = "tenko"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "argon2",
  "async-trait",
+ "aws-lc-rs",
  "clap",
  "futures",
  "ipnet",
+ "openraft",
  "reqwest",
  "rpassword",
+ "rustls",
  "sd-notify",
  "serde",
  "serde_json",
@@ -2892,6 +2896,7 @@ dependencies = [
  "tenko-scan",
  "tenko-store",
  "tenko-vault",
+ "thiserror 2.0.21",
  "time",
  "tokio",
  "tokio-util",
@@ -2900,6 +2905,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "windows-service",
+ "zeroize",
 ]
 
 [[package]]

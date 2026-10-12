@@ -304,6 +304,7 @@ async fn system_status(
     State(state): State<AppState>,
     running: Option<Extension<RunningVersion>>,
     leader: Option<Extension<LeaderSource>>,
+    backup: Option<Extension<Arc<dyn super::backup::BackupService>>>,
     Ctx(ctx): Ctx,
 ) -> Result<Json<SystemStatus>, ApiError> {
     state.authorize(&ctx.principal, Action::Read, &system_object())?;
@@ -314,6 +315,10 @@ async fn system_status(
         status.warnings.extend(leader_warnings(&leader));
         status.leader = Some(leader);
     }
+    let (backup, backup_warnings) =
+        super::backup::summary_of(backup.as_ref().map(|Extension(service)| service)).await;
+    status.backup = backup;
+    status.warnings.extend(backup_warnings);
     Ok(Json(status))
 }
 
@@ -421,6 +426,7 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
         cluster: state.cluster_status(),
         kek,
         leader: None,
+        backup: None,
     }
 }
 
