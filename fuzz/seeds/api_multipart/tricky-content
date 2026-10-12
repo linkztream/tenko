@@ -1,0 +1,12 @@
+multipart/form-data; boundary=tenko-test-boundary-7f3a
+--tenko-test-boundary-7f3a
+Content-Disposition: form-data; name="file"; filename="odd.csv"
+
+a,b
+-- not a delimiter
+--tenko-test-boundary-7f3aEXTRA still content
+
+
+x--
+last line
+--tenko-test-boundary-7f3a--

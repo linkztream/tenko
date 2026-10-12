@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "project": "tenko",
+  "releases": [
+    {
+      "version": "1.0.0",
+      "date": "2026-10-09",
+      "notes": "### Changed\n\n- Stable.",
+      "assets": [
+        {
+          "platform": "linux-aarch64",
+          "name": "tenko-1.0.0-linux-aarch64",
+          "url": "https://releases.example.test/tenko/1.0.0/tenko-1.0.0-linux-aarch64",
+          "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "size": 12345678
+        }
+      ]
+    },
+    {
+      "version": "1.0.0-rc.1",
+      "date": "2026-09-20",
+      "notes": "### Added\n\n- Release candidate."
+    },
+    {
+      "version": "v0.10.0+build.5",
+      "date": "2026-08-01",
+      "notes": "- Build metadata kept."
+    },
+    {
+      "version": "0.9.0-alpha-1.x.0a+meta-1.007",
+      "date": "2026-07-01",
+      "notes": "- Odd identifiers."
+    },
+    {
+      "version": "0.9.0",
+      "date": "2026-06-30",
+      "notes": "- Older."
+    }
+  ]
+}

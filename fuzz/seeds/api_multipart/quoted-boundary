@@ -1,0 +1,8 @@
+multipart/form-data; charset=utf-8; boundary="quoted boundary:1"
+--quoted boundary:1
+Content-Disposition: form-data; name="file"; filename="hosts.csv"
+
+address,hostname
+192.0.2.10,printer.example.test
+
+--quoted boundary:1--

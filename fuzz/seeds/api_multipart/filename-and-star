@@ -1,0 +1,8 @@
+multipart/form-data; boundary=tenko-test-boundary-7f3a
+--tenko-test-boundary-7f3a
+Content-Disposition: form-data; name="file"; filename="plain.csv"; filename*=UTF-8''star%20wins.csv
+
+address,hostname
+192.0.2.10,printer.example.test
+
+--tenko-test-boundary-7f3a--

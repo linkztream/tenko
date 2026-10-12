@@ -1,0 +1,12 @@
+multipart/form-data; boundary=tenko-test-boundary-7f3a
+This is the preamble.
+Ignored text with --tenko-test-boundary-7f3aX
+--tenko-test-boundary-7f3a
+Content-Disposition: form-data; name="file"; filename="hosts.csv"
+
+address,hostname
+192.0.2.10,printer.example.test
+
+--tenko-test-boundary-7f3a--
+Epilogue text.
+--tenko-test-boundary-7f3a

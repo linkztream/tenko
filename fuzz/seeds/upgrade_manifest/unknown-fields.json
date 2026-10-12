@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "project": "tenko",
+  "generated_by": "release pipeline",
+  "releases": [
+    {
+      "version": "v0.1.0",
+      "date": "2026-01-02",
+      "notes": "First release.",
+      "channel": "stable",
+      "assets": [
+        {
+          "platform": "linux-x86_64",
+          "name": "tenko-0.1.0-linux-x86_64",
+          "url": "/downloads/tenko-0.1.0-linux-x86_64",
+          "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "size": 10,
+          "mirrors": [
+            "https://mirror.example.test/x"
+          ]
+        }
+      ]
+    }
+  ]
+}

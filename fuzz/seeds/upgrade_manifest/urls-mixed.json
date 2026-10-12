@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "project": "tenko",
+  "releases": [
+    {
+      "version": "0.3.0",
+      "date": "2026-10-09",
+      "notes": "### Added\n\n- An entry.",
+      "assets": [
+        {
+          "platform": "linux-x86_64",
+          "name": "tenko-0.3.0-linux-x86_64",
+          "url": "https://releases.example.test/tenko/0.3.0/tenko-0.3.0-linux-x86_64",
+          "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "size": 12345678
+        },
+        {
+          "platform": "linux-aarch64",
+          "name": "tenko-0.3.0-linux-aarch64",
+          "url": "/tenko/0.3.0/tenko-0.3.0-linux-aarch64",
+          "sha256": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+          "size": 12345678
+        },
+        {
+          "platform": "windows-x86_64",
+          "name": "tenko-0.3.0-windows-x86_64.exe",
+          "url": "tenko-0.3.0-windows-x86_64.tar.gz",
+          "sha256": "a1b2c3d4e5f60718a1b2c3d4e5f60718a1b2c3d4e5f60718a1b2c3d4e5f60718",
+          "size": 12345678
+        },
+        {
+          "platform": "macos-aarch64",
+          "name": "tenko-0.3.0-macos-aarch64",
+          "url": "../0.2.0/tenko.tar.gz?token=a:b",
+          "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "size": 1
+        },
+        {
+          "platform": "a-b",
+          "name": "tenko.exe",
+          "url": "sub/dir/file.tar.gz#frag",
+          "sha256": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+          "size": 536870912
+        }
+      ]
+    }
+  ]
+}

@@ -570,3 +570,263 @@ async fn accept_loop(
         });
     }
 }
+
+/// Runs the decoding and the checks the services of the cluster port apply to a request
+/// before it reaches the registry or the store, beyond the Raft payloads of
+/// [`wire::fuzz_payload`](crate::wire::fuzz_payload) and the node-sync payloads of
+/// [`node_sync::payload::fuzz_payload`](crate::node_sync::payload::fuzz_payload): the first
+/// byte picks the request, the rest is the input. Kind 6 reads the rest as the DER
+/// certificate a caller presented. The entry point of the fuzz target `cluster_messages`;
+/// it never panics on any input.
+pub fn fuzz_request(data: &[u8]) {
+    use prost::Message as _;
+
+    use crate::{
+        ca::csr_public_key,
+        identity::split_host_port,
+        mtls::PeerIdentity,
+        probe::{ProbeBatch, run_of, timestamp_from_proto},
+        proto::v1,
+        version,
+    };
+
+    let Some((&kind, input)) = data.split_first() else {
+        return;
+    };
+    match kind % 7 {
+        0 => {
+            if let Ok(hello) = v1::HelloRequest::decode(input) {
+                for ours in [&[1][..], &[1, 2, 4]] {
+                    if let Err(mismatch) = version::negotiate(ours, &hello.majors) {
+                        drop(mismatch.detail("the controller", "the node"));
+                        let _ = mismatch.newer();
+                    }
+                }
+                drop(version::format_majors(&hello.majors));
+            }
+        }
+        1 => {
+            if let Ok(beat) = v1::Beat::decode(input) {
+                let _ = beat
+                    .certificate_not_after
+                    .as_ref()
+                    .and_then(timestamp_from_proto);
+            }
+        }
+        2 => {
+            if let Ok(renew) = v1::RenewRequest::decode(input) {
+                drop(csr_public_key(&renew.csr));
+            }
+        }
+        3 => {
+            if let Ok(join) = v1::JoinRequest::decode(input) {
+                drop(split_host_port(&join.address));
+            }
+        }
+        4 => {
+            if let Ok(ingest) = v1::IngestRequest::decode(input) {
+                let _ = run_of(&ingest);
+                drop(ProbeBatch::from_request(ingest));
+            }
+        }
+        5 => {
+            if let Ok(subscribe) = v1::SubscribeRequest::decode(input) {
+                drop(subscribe.after.parse::<uuid::Uuid>());
+            }
+            drop(v1::SecretsRequest::decode(input));
+            drop(v1::DigestRequest::decode(input));
+            drop(v1::MembersRequest::decode(input));
+            drop(v1::CampaignRequest::decode(input));
+            drop(v1::ReadIndexRequest::decode(input));
+            drop(v1::SnapshotRequest::decode(input));
+        }
+        _ => drop(PeerIdentity::from_der(input)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use prost::Message as _;
+    use tenko_core::{NodeId, Role};
+
+    use super::fuzz_request;
+    use crate::{
+        ca::{self, csr_public_key},
+        identity::split_host_port,
+        mtls::PeerIdentity,
+        probe::ProbeBatch,
+        proto::v1,
+        version,
+    };
+
+    /// A certificate of node 1001 with the role `probe`, as a caller presents it.
+    fn peer_certificate() -> Vec<u8> {
+        let mut params = rcgen::CertificateParams::new(Vec::<String>::new()).expect("params");
+        params.subject_alt_names = vec![
+            rcgen::SanType::URI(ca::node_uri(NodeId(1001)).try_into().expect("uri")),
+            rcgen::SanType::URI(ca::role_uri(Role::Probe).try_into().expect("uri")),
+        ];
+        let key = rcgen::KeyPair::generate().expect("key");
+        params
+            .self_signed(&key)
+            .expect("certificate")
+            .der()
+            .to_vec()
+    }
+
+    fn timestamp(seconds: i64) -> prost_types::Timestamp {
+        prost_types::Timestamp { seconds, nanos: 0 }
+    }
+
+    /// One request of every kind `fuzz_request` reads, each behind its selector, that
+    /// passes the checks the selector runs.
+    fn seeds() -> Vec<(&'static str, u8, Vec<u8>)> {
+        let hello = |majors: Vec<u32>| {
+            v1::HelloRequest {
+                majors,
+                version: "1.4.0".to_owned(),
+                roles: vec!["dns".to_owned(), "dhcp".to_owned()],
+                capabilities: Vec::new(),
+            }
+            .encode_to_vec()
+        };
+        let batch: ProbeBatch = serde_json::from_str(
+            r#"{
+                "method": "arp",
+                "complete": true,
+                "collected_at": "2026-10-10T08:00:05Z",
+                "sightings": [
+                    {"observed_at": "2026-10-10T08:00:01Z", "ttl_secs": 600,
+                     "subject": {"type": "address", "data": {"ip": "192.0.2.30", "mac": "00:00:5e:00:53:30"}}},
+                    {"observed_at": "2026-10-10T08:00:02Z",
+                     "subject": {"type": "address", "data": {"ip": "2001:db8::30"}}}
+                ]
+            }"#,
+        )
+        .expect("batch");
+        let mut ingest = batch.to_request();
+        ingest.epoch = "0b6f2c1e-55c3-4f0e-9a51-2f1d3c4b5a69".to_owned();
+        ingest.sequence = 12;
+        ingest.run = Some("6a1f0b9e-3c2d-4e5f-8a7b-9c0d1e2f3a4b".to_owned());
+        let (_, csr) = ca::generate_csr().expect("csr");
+        vec![
+            ("hello", 0, hello(vec![1])),
+            ("hello-newer", 0, hello(vec![1, 2, 3])),
+            (
+                "beat",
+                1,
+                v1::Beat {
+                    sequence: 7,
+                    version: "1.4.0".to_owned(),
+                    roles: vec!["probe".to_owned()],
+                    major: 1,
+                    buffered_batches: 2,
+                    buffered_bytes: 4096,
+                    dropped_batches: 0,
+                    certificate_not_after: Some(timestamp(1_790_000_000)),
+                    sent_at: Some(timestamp(1_760_000_000)),
+                }
+                .encode_to_vec(),
+            ),
+            ("renew", 2, v1::RenewRequest { csr }.encode_to_vec()),
+            (
+                "join",
+                3,
+                v1::JoinRequest {
+                    node_id: 1002,
+                    address: "ctl-2.example.test:8444".to_owned(),
+                    version: "1.4.0".to_owned(),
+                    capabilities: Vec::new(),
+                    data_format: 1,
+                }
+                .encode_to_vec(),
+            ),
+            (
+                "join-ipv6",
+                3,
+                v1::JoinRequest {
+                    node_id: 1003,
+                    address: "[2001:db8::3]:8444".to_owned(),
+                    ..v1::JoinRequest::default()
+                }
+                .encode_to_vec(),
+            ),
+            ("ingest", 4, ingest.encode_to_vec()),
+            (
+                "subscribe",
+                5,
+                v1::SubscribeRequest {
+                    after: "6a1f0b9e-3c2d-4e5f-8a7b-9c0d1e2f3a4b".to_owned(),
+                }
+                .encode_to_vec(),
+            ),
+            (
+                "secrets",
+                5,
+                v1::SecretsRequest {
+                    purposes: vec!["dns.tsig".to_owned()],
+                }
+                .encode_to_vec(),
+            ),
+            ("peer-certificate", 6, peer_certificate()),
+        ]
+    }
+
+    /// The check a seed is meant to pass.
+    fn passes(kind: u8, input: &[u8]) -> bool {
+        match kind {
+            0 => v1::HelloRequest::decode(input)
+                .is_ok_and(|hello| version::negotiate(&[1], &hello.majors).is_ok()),
+            1 => v1::Beat::decode(input).is_ok_and(|beat| beat.certificate_not_after.is_some()),
+            2 => v1::RenewRequest::decode(input)
+                .is_ok_and(|renew| csr_public_key(&renew.csr).is_ok()),
+            3 => v1::JoinRequest::decode(input)
+                .is_ok_and(|join| join.node_id != 0 && split_host_port(&join.address).is_ok()),
+            4 => v1::IngestRequest::decode(input).is_ok_and(|ingest| {
+                ProbeBatch::from_request(ingest).is_ok_and(|(_, skipped)| skipped == 0)
+            }),
+            5 => v1::SubscribeRequest::decode(input).is_ok(),
+            6 => PeerIdentity::from_der(input)
+                .is_ok_and(|peer| peer.node == NodeId(1001) && peer.roles.contains(Role::Probe)),
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn the_fuzz_entry_point_survives_garbage() {
+        fuzz_request(&[]);
+        for kind in 0..7_u8 {
+            for data in [
+                &b""[..],
+                b"\x00",
+                b"\xff\xff\xff\xff",
+                b"\x0a\x80\x80\x80\x80\x10",
+            ] {
+                let mut input = vec![kind];
+                input.extend_from_slice(data);
+                fuzz_request(&input);
+            }
+        }
+    }
+
+    /// The seeds of the fuzz target `cluster_messages` pass their checks; with
+    /// `TENKO_FUZZ_SEEDS` set to a directory they are written there
+    /// (`fuzz/seeds/cluster_messages/`), one file each.
+    #[test]
+    fn fuzz_seeds_pass() {
+        let seeds = seeds();
+        let kinds: std::collections::BTreeSet<u8> = seeds.iter().map(|seed| seed.1).collect();
+        assert_eq!(kinds.len(), 7, "every selector has a seed");
+        let out = std::env::var_os("TENKO_FUZZ_SEEDS").map(std::path::PathBuf::from);
+        for (name, kind, payload) in seeds {
+            assert!(passes(kind, &payload), "the seed {name} does not pass");
+            let mut data = vec![kind];
+            data.extend_from_slice(&payload);
+            fuzz_request(&data);
+            if let Some(dir) = &out {
+                std::fs::create_dir_all(dir).expect("seed directory");
+                std::fs::write(dir.join(name), &data).expect("seed");
+            }
+        }
+    }
+}

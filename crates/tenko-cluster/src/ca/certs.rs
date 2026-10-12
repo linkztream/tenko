@@ -392,7 +392,7 @@ fn sign_leaf(
 /// too but also rejects requests carrying extensions it does not know. A node certificate
 /// takes nothing from the request but the key, so the request is read with `x509-parser`
 /// directly and its extensions are left alone.
-fn csr_public_key(csr_der: &[u8]) -> Result<SubjectPublicKeyInfo, CaError> {
+pub(crate) fn csr_public_key(csr_der: &[u8]) -> Result<SubjectPublicKeyInfo, CaError> {
     let invalid = |reason: String| CaError::InvalidCsr { reason };
     let (rest, csr) = X509CertificationRequest::from_der(csr_der)
         .map_err(|e| invalid(format!("it cannot be parsed: {e}")))?;

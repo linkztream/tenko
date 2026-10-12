@@ -28,6 +28,7 @@ pub use authority::{
     CA_CREATE, CA_KEY_PURPOSE, CaPolicy, CaRecord, InternalCa, IssuedCert, NodeCert,
     SERVER_CERT_ISSUE, ServerCertRecord, ServerIdentity, TLS_KEY_PURPOSE, tables,
 };
+pub(crate) use certs::csr_public_key;
 pub use certs::{generate_csr, node_id_of, node_uri, role_uri, roles_in, roles_of};
 pub use error::{CaError, TlsError};
 pub use proxy::TrustedProxies;

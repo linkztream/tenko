@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "project": "tenko",
+  "releases": [
+    {
+      "version": "0.2.0",
+      "date": "2026-10-09",
+      "notes": "### Added\n\n- An entry.",
+      "security": true,
+      "requires_action": true,
+      "action": "Run `tenko migrate` before starting.\n\n1. Back up the data directory.\n2. Restart the service.",
+      "format": 2,
+      "assets": [
+        {
+          "platform": "linux-x86_64",
+          "name": "tenko-0.2.0-linux-x86_64",
+          "url": "tenko-0.2.0-linux-x86_64",
+          "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "size": 12345678
+        },
+        {
+          "platform": "windows-x86_64",
+          "name": "tenko-0.2.0-windows-x86_64.exe",
+          "url": "https://releases.example.test/tenko/0.2.0/tenko-0.2.0-windows-x86_64.exe",
+          "sha256": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+          "size": 23456789,
+          "signature": "c2lnbmF0dXJl"
+        }
+      ],
+      "image": "ghcr.io/example/tenko:0.2.0"
+    },
+    {
+      "version": "0.1.0",
+      "date": "2026-01-02",
+      "notes": "### Added\n\n- First release.",
+      "format": 1,
+      "assets": [
+        {
+          "platform": "linux-x86_64",
+          "name": "tenko-0.1.0-linux-x86_64",
+          "url": "/downloads/tenko-0.1.0-linux-x86_64",
+          "sha256": "a1b2c3d4e5f60718a1b2c3d4e5f60718a1b2c3d4e5f60718a1b2c3d4e5f60718",
+          "size": 10
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "project": "tenko",
+  "releases": [
+    {
+      "version": "1.0.0",
+      "date": "2026-10-09",
+      "notes": "### Added\n\n- An entry.",
+      "assets": [
+        {
+          "platform": "linux-x86_64",
+          "name": "tenko-1.0.0-linux-x86_64",
+          "url": "tenko-1.0.0-linux-x86_64",
+          "sha256": "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
+          "size": 12345678
+        }
+      ]
+    }
+  ]
+}

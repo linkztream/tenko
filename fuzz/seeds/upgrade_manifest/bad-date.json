@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "project": "tenko",
+  "releases": [
+    {
+      "version": "1.0.0",
+      "date": "2026-13-01",
+      "notes": "### Added\n\n- An entry."
+    }
+  ]
+}

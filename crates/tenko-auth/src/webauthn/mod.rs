@@ -564,6 +564,48 @@ fn parse_attestation_object(bytes: &[u8]) -> Result<(String, Value, Vec<u8>), We
     }
 }
 
+/// Entry points for the fuzz target `webauthn_attestation` (not part of the API).
+#[doc(hidden)]
+pub mod fuzzing {
+    use super::{
+        AttestationKind, AuthenticatorData, WebAuthnError, attestation, parse_attestation_object,
+    };
+
+    /// 2026-01-01T00:00:00Z: a fixed clock, so an input verifies the same way on every run.
+    const NOW_UNIX: i64 = 1_767_225_600;
+
+    /// Reads an attestation object as a registration does after the client data checked
+    /// out: the object, its authenticator data and the attestation statement, verified
+    /// against `client_data_hash` without trust anchors.
+    ///
+    /// # Errors
+    ///
+    /// As the registration ceremony.
+    pub fn attestation_object(
+        object: &[u8],
+        client_data_hash: &[u8; 32],
+    ) -> Result<AttestationKind, WebAuthnError> {
+        let (format, statement, auth_data_raw) = parse_attestation_object(object)?;
+        let auth_data = AuthenticatorData::parse(&auth_data_raw)?;
+        let attested = auth_data
+            .attested
+            .as_ref()
+            .ok_or(WebAuthnError::Malformed("attested credential data"))?;
+        attestation::verify(
+            &attestation::Statement {
+                format: &format,
+                body: &statement,
+                auth_data: &auth_data_raw,
+                client_data_hash,
+                credential_key: &attested.public_key,
+                aaguid: &attested.aaguid,
+            },
+            &[],
+            NOW_UNIX,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::origin_matches;
@@ -582,5 +624,185 @@ mod tests {
         assert!(!origin_matches("https://a.test:*", "http://a.test"));
         assert!(!origin_matches("https://a.test:*", "https://a.test:"));
         assert!(!origin_matches("https://a.test:*", "https://a.test:84/x"));
+    }
+
+    /// The seeds of the fuzz targets `webauthn_attestation` and `webauthn_authdata` from the
+    /// software authenticator. With `TENKO_FUZZ_SEEDS` set to the seed root (`fuzz/seeds/`)
+    /// they are written to `webauthn_attestation/` (SHA-256 of the client data, then the
+    /// attestation object) and `webauthn_authdata/`.
+    mod fuzz_seeds {
+        use sha2::{Digest as _, Sha256};
+
+        use super::super::{
+            AssertionPolicy, AttestationKind, AuthenticatorData, Flags, RegistrationPolicy,
+            RelyingParty, RpConfig, decode, fuzzing, parse_attestation_object,
+        };
+        use crate::testing::authenticator::{
+            SoftAttestation, SoftAuthenticator, SoftKeyAlg, Tweaks,
+        };
+
+        const ORIGIN: &str = "https://tenko.example.test";
+
+        fn rp() -> RelyingParty {
+            RelyingParty::new(RpConfig::for_host("tenko.example.test")).expect("rp")
+        }
+
+        fn write(target: &str, name: &str, bytes: &[u8]) {
+            if let Some(root) = std::env::var_os("TENKO_FUZZ_SEEDS") {
+                let dir = std::path::Path::new(&root).join(target);
+                std::fs::create_dir_all(&dir).expect("seed directory");
+                std::fs::write(dir.join(name), bytes).expect("seed");
+            }
+        }
+
+        /// A registered authenticator and its registration seed: the client data hash and
+        /// the attestation object.
+        fn register(
+            rp: &RelyingParty,
+            alg: SoftKeyAlg,
+            kind: SoftAttestation,
+            tweaks: &Tweaks,
+        ) -> (SoftAuthenticator, [u8; 32], Vec<u8>) {
+            let mut authenticator = SoftAuthenticator::new(alg, kind).backup(true, false);
+            let options = rp.creation_options(
+                b"tenko-user-00001",
+                "alice",
+                "Alice Example",
+                &[0xa5; 32],
+                Vec::new(),
+                &RegistrationPolicy::default(),
+            );
+            let response = authenticator.register_with(&options, ORIGIN, tweaks);
+            let client_data =
+                decode(&response.response.client_data_json, "clientDataJSON").expect("base64url");
+            let object = decode(&response.response.attestation_object, "attestationObject")
+                .expect("base64url");
+            (authenticator, Sha256::digest(&client_data).into(), object)
+        }
+
+        fn assertion_data(
+            rp: &RelyingParty,
+            authenticator: &mut SoftAuthenticator,
+            tweaks: &Tweaks,
+        ) -> Vec<u8> {
+            let request = rp.request_options(&[0x5a; 32], Vec::new(), &AssertionPolicy::default());
+            let assertion = authenticator.assert_with(&request, ORIGIN, tweaks);
+            decode(&assertion.response.authenticator_data, "authenticatorData").expect("base64url")
+        }
+
+        #[test]
+        fn registrations_and_assertions_verify() {
+            let rp = rp();
+            let cases = [
+                (
+                    "soft-es256-none",
+                    SoftKeyAlg::Es256,
+                    SoftAttestation::None,
+                    false,
+                ),
+                (
+                    "soft-es256-self",
+                    SoftKeyAlg::Es256,
+                    SoftAttestation::PackedSelf,
+                    false,
+                ),
+                (
+                    "soft-ed25519-self",
+                    SoftKeyAlg::Ed25519,
+                    SoftAttestation::PackedSelf,
+                    false,
+                ),
+                (
+                    "soft-rs256-self",
+                    SoftKeyAlg::Rs256,
+                    SoftAttestation::PackedSelf,
+                    false,
+                ),
+                (
+                    "soft-es256-x5c",
+                    SoftKeyAlg::Es256,
+                    SoftAttestation::PackedCertificate,
+                    false,
+                ),
+                (
+                    "soft-es256-x5c-bad-signature",
+                    SoftKeyAlg::Es256,
+                    SoftAttestation::PackedCertificate,
+                    true,
+                ),
+            ];
+            for (name, alg, kind, corrupt) in cases {
+                let tweaks = Tweaks {
+                    corrupt_signature: corrupt,
+                    ..Tweaks::default()
+                };
+                let (mut authenticator, hash, object) = register(&rp, alg, kind, &tweaks);
+                let verified = fuzzing::attestation_object(&object, &hash);
+                match kind {
+                    _ if corrupt => assert!(verified.is_err(), "{name} verifies"),
+                    SoftAttestation::None => assert_eq!(verified, Ok(AttestationKind::None)),
+                    SoftAttestation::PackedSelf => {
+                        assert_eq!(verified, Ok(AttestationKind::SelfAttestation));
+                    }
+                    SoftAttestation::PackedCertificate => assert!(
+                        matches!(
+                            verified,
+                            Ok(AttestationKind::Certificate {
+                                anchored: false,
+                                ..
+                            })
+                        ),
+                        "{name}: {verified:?}"
+                    ),
+                }
+                let mut seed = hash.to_vec();
+                seed.extend_from_slice(&object);
+                write("webauthn_attestation", name, &seed);
+
+                let (_, _, auth_data) = parse_attestation_object(&object).expect("object");
+                let parsed = AuthenticatorData::parse(&auth_data).expect("authenticator data");
+                assert!(parsed.attested.is_some());
+                write(
+                    "webauthn_authdata",
+                    &format!("{name}-registration"),
+                    &auth_data,
+                );
+
+                let auth_data = assertion_data(&rp, &mut authenticator, &Tweaks::default());
+                let parsed = AuthenticatorData::parse(&auth_data).expect("authenticator data");
+                assert!(parsed.attested.is_none());
+                write(
+                    "webauthn_authdata",
+                    &format!("{name}-assertion"),
+                    &auth_data,
+                );
+            }
+        }
+
+        /// An assertion with extension data: the ED flag and a CBOR map after the counter.
+        #[test]
+        fn an_assertion_with_extensions_parses() {
+            let rp = rp();
+            let (mut authenticator, _, _) = register(
+                &rp,
+                SoftKeyAlg::Es256,
+                SoftAttestation::None,
+                &Tweaks::default(),
+            );
+            let tweaks = Tweaks {
+                set_flags: Flags::EXTENSIONS,
+                ..Tweaks::default()
+            };
+            let mut auth_data = assertion_data(&rp, &mut authenticator, &tweaks);
+            // {"credProtect": 2}
+            auth_data.extend_from_slice(b"\xa1\x6bcredProtect\x02");
+            let parsed = AuthenticatorData::parse(&auth_data).expect("authenticator data");
+            assert!(parsed.flags.extensions());
+            write(
+                "webauthn_authdata",
+                "soft-es256-extensions-assertion",
+                &auth_data,
+            );
+        }
     }
 }

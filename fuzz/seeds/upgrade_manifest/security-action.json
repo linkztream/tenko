@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "project": "tenko",
+  "releases": [
+    {
+      "version": "2.1.1",
+      "date": "2026-10-09",
+      "notes": "### Security\n\n- Fixes a flaw.",
+      "security": true,
+      "assets": [
+        {
+          "platform": "linux-x86_64",
+          "name": "tenko-2.1.1-linux-x86_64",
+          "url": "tenko-2.1.1-linux-x86_64",
+          "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "size": 12345678
+        }
+      ]
+    },
+    {
+      "version": "2.1.0",
+      "date": "2026-10-09",
+      "notes": "### Action required\n\n- See below.",
+      "requires_action": true,
+      "action": "Set `TENKO_LISTEN=203.0.113.10:8443` in the unit file.",
+      "format": 3,
+      "image": "ghcr.io/example/tenko@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  ]
+}
