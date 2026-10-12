@@ -1,6 +1,6 @@
 // The queued changes (WP3.11a, WP3.9): the local queue of an isolated controller with its cancel,
 // and the changes after the heal with re-apply (a dry run first, then the apply with the
-// acknowledged warnings and the revision) and discard. It runs against the mock queue of
+// acknowledged warnings), discard, and dismiss for an applied change. It runs against the mock queue of
 // src/api/mock/routes-cluster.ts; a server without the queue is played with 404 and 501.
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { http, HttpResponse } from "msw";
@@ -16,7 +16,7 @@ import { queueChange } from "./api";
 import { partition } from "./partition";
 import QueueView, { conflictText, summaryText } from "./QueueView";
 
-const ADDRESS_PATH = `/api/v1/addresses/${CLUSTER_IDS.address}`;
+const ADDRESS_PATH = `/addresses/${CLUSTER_IDS.address}`;
 const toastTitles = () => screen.queryAllByTestId("toast").map((el) => el.querySelector(".t")?.textContent);
 
 let stopBridge: (() => void) | undefined;
@@ -43,8 +43,8 @@ function openQueue() {
 /** Isolates the controller and queues a change of an address and the creation of a prefix. */
 async function isolateWithTwoQueued() {
   mockCluster.setQuorum("isolated");
-  const address = await queueChange({ method: "patch", path: ADDRESS_PATH, body: { address: "192.0.2.50" } });
-  const prefix = await queueChange({ method: "post", path: "/api/v1/prefixes", body: { cidr: "198.51.100.0/24" } });
+  const address = await queueChange({ method: "PATCH", path: ADDRESS_PATH, body: { address: "192.0.2.50" } });
+  const prefix = await queueChange({ method: "POST", path: "/prefixes", body: { cidr: "198.51.100.0/24" } });
   return { address, prefix };
 }
 
@@ -65,11 +65,6 @@ async function previewed(dialog: HTMLElement): Promise<HTMLButtonElement> {
   return confirm;
 }
 
-/** The revision of a queued change as the mock holds it now; a write moves it on. */
-function revisionOf(id: string): number | undefined {
-  return clusterState().changes.find((c) => c.change.id === id)?.change.revision;
-}
-
 function notFound(path: string, status: 404 | 501) {
   return http.get(path, () =>
     HttpResponse.json({ status, code: status === 404 ? "sys.not_found" : "sys.not_implemented", title: "No", detail: "" }, { status }),
@@ -82,16 +77,17 @@ describe("the words of a queued change", () => {
     expect(summaryText({ action: "create", kind: "prefix" })).toBe("Create prefix");
     expect(summaryText({ action: "delete", kind: "host" })).toBe("Delete host");
     expect(summaryText({ action: "bulk", kind: "vlan" })).toBe("Bulk change of VLAN");
-    expect(summaryText({ action: "create", kind: "widget" })).toBe("Create widget");
-    expect(summaryText({ action: "merge", kind: "site" })).toBe("Change site");
+    expect(summaryText({ action: "restore", kind: "interface" })).toBe("Restore interface");
+    expect(summaryText({ action: "create", kind: "custom_field" })).toBe("Create custom_field");
     expect(summaryText(null)).toBe("Change");
   });
 
   it("explains a conflict in words, from the UI's texts, the server's detail or a general line", () => {
-    expect(conflictText({ code: "ipam.plan.stale" })).toBe("The data changed while the change was queued.");
-    expect(conflictText({ code: "ipam.address.duplicate", params: { ip: "192.0.2.50" } })).toBe("192.0.2.50 already exists in this VRF.");
-    expect(conflictText({ code: "ipam.something.new", detail: "the host is gone" })).toBe("the host is gone");
-    expect(conflictText({ code: "ipam.something.new" })).toBe("The change no longer fits the data.");
+    expect(conflictText({ code: "queue.plan_changed", status: 409, detail: "" })).toBe("The data changed while the change was queued.");
+    expect(conflictText({ code: "queue.expired", status: 409, detail: "" })).toBe("The change waited too long in the queue.");
+    expect(conflictText({ code: "ipam.address.duplicate", status: 409, detail: "", params: { ip: "192.0.2.50" } })).toBe("192.0.2.50 already exists in this VRF.");
+    expect(conflictText({ code: "ipam.something.new", status: 409, detail: "the host is gone" })).toBe("the host is gone");
+    expect(conflictText({ code: "ipam.something.new", status: 409, detail: "" })).toBe("The change no longer fits the data.");
   });
 });
 
@@ -120,7 +116,7 @@ describe("on this controller", () => {
     const second = within(item(prefix.id));
     expect(second.getByTestId("queue-item-summary").textContent).toBe("Create prefix");
     expect(item(prefix.id).textContent).toContain("198.51.100.0/24");
-    expect(item(prefix.id).textContent).toContain("POST /api/v1/prefixes");
+    expect(item(prefix.id).textContent).toContain("POST /prefixes");
     expect(screen.queryByTestId("queue-local-empty")).toBeNull();
   });
 
@@ -152,7 +148,7 @@ describe("on this controller", () => {
     const { address } = await isolateWithTwoQueued();
     server.use(
       http.delete(`/api/v1/queue/${address.id}`, () =>
-        HttpResponse.json({ status: 404, code: "queue.unknown", title: "Not found", detail: "", params: {} }, { status: 404 }),
+        HttpResponse.json({ status: 404, code: "queue.not_found", title: "Not found", detail: "", params: {} }, { status: 404 }),
       ),
     );
     openQueue();
@@ -164,7 +160,7 @@ describe("on this controller", () => {
 });
 
 describe("after the heal", () => {
-  it("lists the applied change with its job and the conflict first, with the problem code", async () => {
+  it("lists the conflict first, with the problem code, and the applied change to dismiss", async () => {
     const { address, prefix } = await healWithConflict();
     openQueue();
     await screen.findByTestId(`queued-change-${address.id}`);
@@ -175,18 +171,50 @@ describe("after the heal", () => {
     const conflict = within(change(prefix.id));
     expect(change(prefix.id).dataset.state).toBe("conflict");
     expect(conflict.getByTestId("queued-change-state").textContent).toBe("Needs a decision");
-    expect(conflict.getByTestId("queued-change-conflict").dataset.code).toBe("ipam.plan.stale");
+    expect(conflict.getByTestId("queued-change-conflict").dataset.code).toBe("queue.plan_changed");
     expect(conflict.getByTestId("queued-change-conflict").textContent).toContain("The data changed while the change was queued.");
-    expect(conflict.getByTestId("queued-change-conflict").textContent).toContain("ipam.plan.stale");
+    expect(conflict.getByTestId("queued-change-conflict").textContent).toContain("queue.plan_changed");
     expect(screen.getByTestId(`queued-reapply-${prefix.id}`).getAttribute("aria-label")).toBe("Re-apply: Create prefix");
     expect(screen.getByTestId(`queued-discard-${prefix.id}`)).toBeTruthy();
 
     const applied = within(change(address.id));
     expect(change(address.id).dataset.state).toBe("applied");
     expect(applied.getByTestId("queued-change-state").textContent).toBe("Applied");
-    expect(applied.getByTestId("queued-change-job").getAttribute("href")).toMatch(/^\/jobs\/[0-9a-f-]{36}$/);
+    expect(applied.queryByTestId("queued-change-conflict")).toBeNull();
     expect(screen.queryByTestId(`queued-reapply-${address.id}`)).toBeNull();
     expect(screen.queryByTestId(`queued-discard-${address.id}`)).toBeNull();
+    expect(screen.getByTestId(`queued-dismiss-${address.id}`).getAttribute("aria-label")).toBe("Dismiss: Update address");
+  });
+
+  it("shows a change that expired before the heal as one to decide on", async () => {
+    mockCluster.setQuorum("isolated");
+    const expired = await queueChange({ method: "DELETE", path: ADDRESS_PATH });
+    const stored = clusterState().queue.find((s) => s.item.id === expired.id);
+    if (stored) stored.item.state = "expired";
+    mockCluster.heal({ conflicts: false });
+    openQueue();
+    const row = await screen.findByTestId(`queued-change-${expired.id}`);
+    expect(row.dataset.state).toBe("expired");
+    expect(within(row).getByTestId("queued-change-state").textContent).toBe("Expired");
+    expect(within(row).getByTestId("queued-change-conflict").dataset.code).toBe("queue.expired");
+    expect(screen.getByTestId(`queued-reapply-${expired.id}`)).toBeTruthy();
+    expect(screen.getByTestId(`queued-discard-${expired.id}`)).toBeTruthy();
+  });
+
+  it("dismisses an applied change without asking", async () => {
+    const { address } = await healWithConflict();
+    openQueue();
+    fireEvent.click(await screen.findByTestId(`queued-dismiss-${address.id}`));
+    await waitFor(() => expect(screen.queryByTestId(`queued-change-${address.id}`)).toBeNull());
+    expect(clusterState().changes.some((c) => c.change.id === address.id)).toBe(false);
+    expect(toastTitles()).toContain("The applied change was removed from the list.");
+  });
+
+  it("refuses to re-apply an applied change", async () => {
+    const { address } = await healWithConflict();
+    const answer = await fetch(`/api/v1/queue/conflicts/${address.id}/reapply?dry_run=true`, { method: "POST" });
+    expect(answer.status).toBe(409);
+    expect(((await answer.json()) as { code: string }).code).toBe("queue.changed");
   });
 
   it("follows the heal live", async () => {
@@ -200,7 +228,7 @@ describe("after the heal", () => {
     expect(screen.getByTestId("queue-local-empty")).toBeTruthy();
   });
 
-  it("previews a re-apply, applies it with the revision of the change and updates the banner count", async () => {
+  it("previews a re-apply, applies it without If-Match, drops the record and updates the banner count", async () => {
     const { prefix } = await healWithConflict();
     const calls: { dryRun: boolean; ifMatch: string | null; acknowledge: string[] }[] = [];
     server.use(
@@ -211,7 +239,6 @@ describe("after the heal", () => {
       }),
     );
     partition.setConflicts(1);
-    const revision = revisionOf(prefix.id);
     openQueue();
     fireEvent.click(await screen.findByTestId(`queued-reapply-${prefix.id}`));
     const dialog = await screen.findByTestId("dialog-reapply");
@@ -226,12 +253,9 @@ describe("after the heal", () => {
     fireEvent.click(confirm);
     await waitFor(() => expect(screen.queryByTestId("dialog-reapply")).toBeNull());
     expect(calls).toHaveLength(2);
-    expect(calls[1]).toEqual({ dryRun: false, ifMatch: `"${revision}"`, acknowledge: [] });
+    expect(calls[1]).toEqual({ dryRun: false, ifMatch: null, acknowledge: [] });
     expect(toastTitles()).toContain("The change was applied.");
-    await waitFor(() => expect(change(prefix.id).dataset.state).toBe("reapplied"));
-    expect(within(change(prefix.id)).getByTestId("queued-change-state").textContent).toBe("Applied again");
-    expect(within(change(prefix.id)).getByTestId("queued-change-job")).toBeTruthy();
-    expect(screen.queryByTestId(`queued-reapply-${prefix.id}`)).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId(`queued-change-${prefix.id}`)).toBeNull());
     await waitFor(() => expect(partition.conflicts()).toBe(0));
   });
 
@@ -281,19 +305,19 @@ describe("after the heal", () => {
     server.use(
       http.post(`/api/v1/queue/conflicts/${prefix.id}/reapply`, ({ request }) => {
         if (new URL(request.url).searchParams.get("dry_run") === "true") return undefined;
-        return HttpResponse.json({ status: 409, code: "queue.not_conflict", title: "Conflict", detail: "", params: {} }, { status: 409 });
+        return HttpResponse.json({ status: 409, code: "queue.changed", title: "Conflict", detail: "", params: {} }, { status: 409 });
       }),
     );
     openQueue();
     fireEvent.click(await screen.findByTestId(`queued-reapply-${prefix.id}`));
     const dialog = await screen.findByTestId("dialog-reapply");
     fireEvent.click(await previewed(dialog));
-    expect((await within(dialog).findByTestId("error-notice")).textContent).toBe("The change is not waiting for a decision.");
+    expect((await within(dialog).findByTestId("error-notice")).textContent).toBe("The queued change was applied or changed meanwhile. Reload the list.");
     expect(screen.getByTestId("dialog-reapply")).toBeTruthy();
     expect(change(prefix.id).dataset.state).toBe("conflict");
   });
 
-  it("asks before discarding, then drops the decision and updates the banner count", async () => {
+  it("asks before discarding, then drops the record without If-Match and updates the banner count", async () => {
     const { prefix } = await healWithConflict();
     const calls: (string | null)[] = [];
     server.use(
@@ -303,7 +327,6 @@ describe("after the heal", () => {
       }),
     );
     partition.setConflicts(1);
-    const revision = revisionOf(prefix.id);
     openQueue();
     fireEvent.click(await screen.findByTestId(`queued-discard-${prefix.id}`));
     const dialog = await screen.findByTestId("dialog-discard-queued");
@@ -318,10 +341,8 @@ describe("after the heal", () => {
 
     fireEvent.click(screen.getByTestId(`queued-discard-${prefix.id}`));
     fireEvent.click(within(await screen.findByTestId("dialog-discard-queued")).getByTestId("confirm-ok"));
-    await waitFor(() => expect(change(prefix.id).dataset.state).toBe("discarded"));
-    expect(calls).toEqual([`"${revision}"`]);
-    expect(within(change(prefix.id)).getByTestId("queued-change-state").textContent).toBe("Discarded");
-    expect(screen.queryByTestId(`queued-discard-${prefix.id}`)).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId(`queued-change-${prefix.id}`)).toBeNull());
+    expect(calls).toEqual([null]);
     expect(toastTitles()).toContain("The queued change was discarded.");
     await waitFor(() => expect(partition.conflicts()).toBe(0));
   });
@@ -371,7 +392,7 @@ describe("the keyboard", () => {
     mockCluster.heal({ conflicts: true });
     // The heal drained the queue: queue again for the local list.
     mockCluster.setQuorum("isolated");
-    const local = await queueChange({ method: "delete", path: ADDRESS_PATH });
+    const local = await queueChange({ method: "DELETE", path: ADDRESS_PATH });
     openQueue();
 
     const cancel = await screen.findByTestId(`queue-cancel-${local.id}`);
@@ -404,10 +425,10 @@ describe("the keyboard", () => {
     await waitFor(() => expect(screen.queryByTestId("dialog-discard-queued")).toBeNull());
     expect(document.activeElement).toBe(discard);
 
-    // The job link of the applied change is a link the keyboard reaches.
-    const job = within(change(address.id)).getByTestId("queued-change-job");
-    expect(job.tagName).toBe("A");
-    expect(job.tabIndex).toBeGreaterThanOrEqual(0);
+    // The dismiss button of the applied change is a button the keyboard reaches.
+    const dismiss = screen.getByTestId(`queued-dismiss-${address.id}`);
+    expect(dismiss.tagName).toBe("BUTTON");
+    expect(dismiss.tabIndex).toBeGreaterThanOrEqual(0);
   });
 
   it("links back to the cluster page", async () => {

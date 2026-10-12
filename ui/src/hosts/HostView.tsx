@@ -37,6 +37,7 @@ import { HostObservations } from "../discovery/HostObservations";
 import { JobStateChip } from "../jobs/StateChip";
 import { cancelRolledBack, jobTitle } from "../jobs/words";
 import { isTyping } from "../shell/keyboard";
+import { ScanNowLazy } from "../scans/ScanNowLazy";
 import { Connect } from "./Connect";
 import { HostCredentialsSection } from "./credentials";
 import { HostForm, InterfaceForm } from "./HostForm";
@@ -243,6 +244,7 @@ export default function HostView() {
                     </button>
                   }
                 >
+                  <ScanNowLazy kind="host" value={h().id} label={h().name} />
                   <button type="button" class="btn" data-testid="host-edit" onClick={() => setDialog({ kind: "edit" })}>
                     <Icon name="settings" />
                     {t("ipam.do.edit")}

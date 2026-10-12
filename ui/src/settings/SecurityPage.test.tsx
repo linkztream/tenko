@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
+import { http, HttpResponse } from "msw";
 import { api } from "../api/client";
 import { db } from "../api/mock/db";
 import { PROFILE_MATRIX as MOCK_PROFILE_MATRIX, profileSettings } from "../api/mock/profiles";
@@ -349,6 +350,27 @@ describe("the security page", () => {
       await within(dialog).findByText(/A PIN alone is not allowed while the vault holds secrets/),
     ).toBeTruthy();
     expect((within(dialog).getByRole("button", { name: "Switch to Home" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("explains a switch refused because the profile requires an audit export (TGL-21)", async () => {
+    await signInAs();
+    server.use(
+      http.patch("/api/v1/settings/security", () =>
+        HttpResponse.json(
+          { status: 409, code: "audit.export.required", title: "Conflict", detail: "the profile requires an audit export and no sink is enabled", params: {} },
+          { status: 409 },
+        ),
+      ),
+    );
+    await openPage();
+    fireEvent.click(screen.getByRole("button", { name: "Change profile" }));
+    const dialog = await screen.findByRole("dialog", { name: "Change security profile" });
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Hardened/ }));
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Switch to Hardened" }));
+    expect((await within(dialog).findByTestId("error-notice")).textContent).toBe(
+      "The profile requires an audit export. Enable an export sink first, then switch the profile.",
+    );
+    expect(db.settings.profile).toBe("standard");
   });
 
   it("explains a failed load and offers a retry", async () => {

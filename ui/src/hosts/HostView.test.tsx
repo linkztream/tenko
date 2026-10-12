@@ -137,6 +137,38 @@ describe("the host page", () => {
   });
 });
 
+describe("scan now", () => {
+  it("offers a scan of the host that names it", async () => {
+    await openHost("gw");
+    fireEvent.click(await screen.findByTestId("scan-now"));
+    const dialog = await screen.findByTestId("dialog-scan-now");
+    expect(dialog.textContent).toContain("gw");
+    fireEvent.click(within(dialog).getByTestId("scan-now-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("dialog-scan-now")).toBeNull());
+  });
+
+  it("starts the scan with the host as its target", async () => {
+    const targets: unknown[] = [];
+    server.use(
+      http.post("/api/v1/scans", async ({ request }) => {
+        targets.push(((await request.clone().json()) as { target: unknown }).target);
+        return undefined;
+      }),
+    );
+    await openHost("gw");
+    fireEvent.click(await screen.findByTestId("scan-now"));
+    fireEvent.click(within(await screen.findByTestId("dialog-scan-now")).getByTestId("scan-now-start"));
+    await waitFor(() => expect(targets).toEqual([{ kind: "host", value: HOST_IDS.gw }]));
+  });
+
+  it("is not offered to a viewer", async () => {
+    await signInAlex({ prepare: (user) => void (user.roles = ["viewer"] as never) });
+    await openHost("gw");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByTestId("scan-now")).toBeNull();
+  });
+});
+
 describe("the warning for a reserved host without MAC address or DUID (IPAM-18)", () => {
   it("is shown for a reserved host whose interface has neither", async () => {
     await createHost({ name: "kiosk.example.test", mode: "reserved", interfaces: [{ name: "eth0" }] });

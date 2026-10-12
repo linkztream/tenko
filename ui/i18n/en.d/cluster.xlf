@@ -556,17 +556,17 @@
       </unit>
       <unit id="cluster.queue.kind">
         <notes><note category="description">The kind of object a queued change touches, as a lower-case noun; kind is the kind code.</note></notes>
-        <segment><source>{kind, select, tenant {tenant} vrf {VRF} site {site} vlan {VLAN} prefix {prefix} range {range} address {address} host {host} other {{kind}}}</source></segment>
+        <segment><source>{kind, select, tenant {tenant} vrf {VRF} site {site} vlan {VLAN} prefix {prefix} range {range} address {address} host {host} interface {interface} other {{kind}}}</source></segment>
       </unit>
       <unit id="cluster.queue.action">
-        <notes><note category="description">What a queued change does; action is create, update, delete or bulk, kind the noun for the object.</note></notes>
-        <segment><source>{action, select, create {Create {kind}} update {Update {kind}} delete {Delete {kind}} bulk {Bulk change of {kind}} other {Change {kind}}}</source></segment>
+        <notes><note category="description">What a queued change does; action is create, update, delete, restore or bulk, kind the noun for the object.</note></notes>
+        <segment><source>{action, select, create {Create {kind}} update {Update {kind}} delete {Delete {kind}} restore {Restore {kind}} bulk {Bulk change of {kind}} other {Change {kind}}}</source></segment>
       </unit>
       <unit id="cluster.queue.state.queued">
         <notes><note category="description">State of a change in the local queue: waiting for the cluster to heal.</note></notes>
         <segment><source>Queued</source></segment>
       </unit>
-      <unit id="cluster.queue.state.draining">
+      <unit id="cluster.queue.state.applying">
         <notes><note category="description">State of a change in the local queue: being applied after the heal.</note></notes>
         <segment><source>Applying</source></segment>
       </unit>
@@ -582,17 +582,17 @@
         <notes><note category="description">State of a queued change that was applied by itself after the heal.</note></notes>
         <segment><source>Applied</source></segment>
       </unit>
-      <unit id="cluster.queue.change_state.reapplied">
-        <notes><note category="description">State of a queued change that the person applied again.</note></notes>
-        <segment><source>Applied again</source></segment>
-      </unit>
-      <unit id="cluster.queue.change_state.discarded">
-        <notes><note category="description">State of a queued change that the person discarded.</note></notes>
-        <segment><source>Discarded</source></segment>
+      <unit id="cluster.queue.change_state.expired">
+        <notes><note category="description">State of a queued change that expired before the heal and waits for the person.</note></notes>
+        <segment><source>Expired</source></segment>
       </unit>
       <unit id="cluster.queue.conflict.stale">
         <notes><note category="description">Why a queued change did not apply: the data changed while it waited.</note></notes>
         <segment><source>The data changed while the change was queued.</source></segment>
+      </unit>
+      <unit id="cluster.queue.conflict.expired">
+        <notes><note category="description">Why a queued change did not apply: it waited longer than the queue keeps changes.</note></notes>
+        <segment><source>The change waited too long in the queue.</source></segment>
       </unit>
       <unit id="cluster.queue.conflict.other">
         <notes><note category="description">Why a queued change did not apply when the UI has no words for the problem.</note></notes>
@@ -658,6 +658,14 @@
         <notes><note category="description">Accessible name of the discard button of one queued change; what is the change.</note></notes>
         <segment><source>Discard: {what}</source></segment>
       </unit>
+      <unit id="cluster.queue.dismiss">
+        <notes><note category="description">Button that removes an applied queued change from the list once the person has seen it.</note></notes>
+        <segment><source>Dismiss</source></segment>
+      </unit>
+      <unit id="cluster.queue.dismiss_named">
+        <notes><note category="description">Accessible name of the dismiss button of an applied change; what is the change.</note></notes>
+        <segment><source>Dismiss: {what}</source></segment>
+      </unit>
       <unit id="cluster.queue.discard_title">
         <notes><note category="description">Title of the dialog that discards a queued change.</note></notes>
         <segment><source>Discard the queued change?</source></segment>
@@ -669,6 +677,10 @@
       <unit id="cluster.queue.discarded">
         <notes><note category="description">Toast after a queued change was discarded.</note></notes>
         <segment><source>The queued change was discarded.</source></segment>
+      </unit>
+      <unit id="cluster.queue.dismissed">
+        <notes><note category="description">Toast after an applied queued change was dismissed.</note></notes>
+        <segment><source>The applied change was removed from the list.</source></segment>
       </unit>
       <unit id="cluster.queue.discard_failed">
         <notes><note category="description">Toast title when a queued change could not be discarded.</note></notes>
@@ -706,14 +718,6 @@
         <notes><note category="description">Error: leadership cannot be handed over because no other voter has caught up.</note></notes>
         <segment><source>No other voter has caught up to take over.</source></segment>
       </unit>
-      <unit id="errors.queue.unknown">
-        <notes><note category="description">Error: no queued change of the person has the id.</note></notes>
-        <segment><source>No queued change of yours has this id.</source></segment>
-      </unit>
-      <unit id="errors.queue.not_conflict">
-        <notes><note category="description">Error: the queued change does not wait for a decision.</note></notes>
-        <segment><source>The change is not waiting for a decision.</source></segment>
-      </unit>
       <unit id="errors.queue.not_isolated">
         <notes><note category="description">Error: a change was queued on a controller that has a quorum.</note></notes>
         <segment><source>This controller is in contact with a quorum. Make the change directly.</source></segment>
@@ -721,6 +725,34 @@
       <unit id="errors.queue.not_queueable">
         <notes><note category="description">Error: a change that cannot be queued was queued.</note></notes>
         <segment><source>Only changes to IPAM objects can be queued.</source></segment>
+      </unit>
+      <unit id="errors.queue.not_found">
+        <notes><note category="description">Error: the person has no queued change with the id.</note></notes>
+        <segment><source>No queued change of yours has this id.</source></segment>
+      </unit>
+      <unit id="errors.queue.changed">
+        <notes><note category="description">Error: the queued change is being applied, was applied already, or changed meanwhile.</note></notes>
+        <segment><source>The queued change was applied or changed meanwhile. Reload the list.</source></segment>
+      </unit>
+      <unit id="errors.queue.not_a_person">
+        <notes><note category="description">Error: a service account tried to queue a change.</note></notes>
+        <segment><source>Only people can queue changes.</source></segment>
+      </unit>
+      <unit id="errors.queue.full">
+        <notes><note category="description">Error: the local queue of the controller is full.</note></notes>
+        <segment><source>The queue of this controller is full.</source></segment>
+      </unit>
+      <unit id="errors.queue.too_large">
+        <notes><note category="description">Error: the change is larger than the queue takes.</note></notes>
+        <segment><source>The change is too large to queue (at most 4 MiB).</source></segment>
+      </unit>
+      <unit id="errors.queue.unavailable">
+        <notes><note category="description">Error: the server keeps no queue because IPAM is off.</note></notes>
+        <segment><source>This server keeps no queue.</source></segment>
+      </unit>
+      <unit id="errors.queue.io">
+        <notes><note category="description">Error: the queue directory cannot be read or written.</note></notes>
+        <segment><source>The queue of this controller cannot be read or written.</source></segment>
       </unit>
     </group>
   </file>

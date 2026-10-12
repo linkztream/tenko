@@ -5,7 +5,8 @@
 // member and no quorum to lose. The state is built when it is first read and again after every
 // reset. `mockCluster` moves the quorum from the dev console (`window.tenkoMockCluster`) and
 // from tests.
-import type { ClusterView, MemberView, QuorumKind, QuorumView, QueueItem, QueuedChange } from "../../cluster/model";
+import type { ClusterView, MemberView, QuorumKind, QuorumView, QueuedChangeView, QueuedRequest, QueueItemView } from "../../cluster/model";
+import type { PlanView } from "../types";
 import { commit, db, onMockReset, recordAlarm } from "./db";
 import { MOCK_USER_IDS, MOCK_VERSION } from "./fixtures";
 import { currentPrincipal } from "./auth";
@@ -30,16 +31,51 @@ export const CLUSTER_IDS = {
   address: "0190d1c2-0000-7000-8000-00000c100001",
 } as const;
 
-/** A queued item with the user who queued it (the wire shape does not name the author). */
+/** A queued item with the user who queued it and the request (the wire shape names neither). */
 export interface StoredItem {
-  item: QueueItem;
+  item: QueueItemView;
   author: string;
+  request: QueuedRequest;
 }
 
 /** A queued change after the heal, with its author. */
 export interface StoredChange {
-  change: QueuedChange;
+  change: QueuedChangeView;
   author: string;
+}
+
+/** A plan without changes: the mock plans queued changes against nothing. */
+export function emptyPlan(): PlanView {
+  return {
+    base_revision: db.revision,
+    changes: [],
+    results: [],
+    summary: { counts: [], lines: [], mutations: 0, preconditions: 0, unacknowledged: [], warnings: {} },
+    warnings: [],
+  };
+}
+
+/** The conflict of a change whose plan after the heal differs from the queued plan. */
+const PLAN_CHANGED = { code: "queue.plan_changed", status: 409, detail: "the plan after the heal differs from the queued plan", params: {} };
+/** The conflict of a change that expired before the heal. */
+const EXPIRED = { code: "queue.expired", status: 409, detail: "the change expired before the heal", params: {} };
+
+/** The record of a settled change as the drain writes it. */
+function settled(item: QueueItemView, request: QueuedRequest, author: string, at: string): QueuedChangeView {
+  return {
+    id: item.id,
+    author,
+    principal: { kind: "user", id: author, session: "mock-session", strength: "password" },
+    commands: [],
+    queued_at: item.queued_at,
+    queued_on: item.queued_on,
+    queued_plan: item.plan,
+    request,
+    settled_at: at,
+    state: "applied",
+    summary: item.summary,
+    revision: db.revision,
+  };
 }
 
 export interface ClusterState {
@@ -180,49 +216,43 @@ function setQuorum(kind: QuorumKind): void {
 
 /**
  * The partition heals: the quorum is back and the queue drains. With `conflicts` the first
- * item applies and the others conflict; an empty queue gets one conflict so the views have
- * something to show.
+ * item applies and the others conflict; an expired item becomes an expired record; an empty
+ * queue gets one conflict so the views have something to show.
  */
 function heal(options: { conflicts: boolean }): void {
   setQuorum("healthy");
   const st = clusterState();
   const now = iso(Date.now());
-  const drained: StoredChange[] = st.queue.map(({ item, author }, index) => {
-    const change: QueuedChange = {
-      id: item.id,
-      state: "applied",
-      queued_at: item.queued_at,
-      queued_on: item.queued_on,
-      method: item.method,
-      path: item.path,
-      summary: item.summary ?? null,
-      resolved_at: now,
-      revision: db.revision,
-    };
-    if (options.conflicts && index > 0) {
+  const drained: StoredChange[] = st.queue.map(({ item, author, request }, index) => {
+    const change = settled(item, request, author, now);
+    if (item.state === "expired") {
+      change.state = "expired";
+      change.conflict = EXPIRED;
+    } else if (options.conflicts && index > 0) {
       change.state = "conflict";
-      change.conflict = { code: "ipam.plan.stale", params: {} };
-      change.resolved_at = null;
-    } else {
-      change.job_id = randomId();
+      change.conflict = PLAN_CHANGED;
+      change.current_plan = emptyPlan();
     }
     return { change, author };
   });
   if (options.conflicts && drained.length === 0) {
-    drained.push({
-      author: currentUserId(),
-      change: {
-        id: randomId(),
-        state: "conflict",
-        queued_at: iso(Date.now() - 20 * 60_000),
-        queued_on: st.node,
-        method: "patch",
-        path: `/api/v1/addresses/${CLUSTER_IDS.address}`,
-        summary: { action: "update", kind: "address", key: "192.0.2.50" },
-        conflict: { code: "ipam.plan.stale", params: {} },
-        revision: db.revision,
-      },
-    });
+    const author = currentUserId();
+    const path = `/addresses/${CLUSTER_IDS.address}`;
+    const item: QueueItemView = {
+      id: randomId(),
+      queued_at: iso(Date.now() - 20 * 60_000),
+      queued_on: st.node,
+      method: "PATCH",
+      path,
+      plan: emptyPlan(),
+      summary: { action: "update", kind: "address", key: "192.0.2.50" },
+      expires_at: iso(Date.now() + QUEUE_LIFETIME_MS),
+      state: "queued",
+    };
+    const change = settled(item, { method: "PATCH", path, body: { address: "192.0.2.50" } as unknown as QueuedRequest["body"] }, author, now);
+    change.state = "conflict";
+    change.conflict = PLAN_CHANGED;
+    drained.push({ author, change });
   }
   st.queue = [];
   st.changes.push(...drained);

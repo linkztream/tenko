@@ -7,7 +7,7 @@
         <segment><source>Backup</source><target>Säkerhetskopiering</target></segment>
       </unit>
       <unit id="backup.lede">
-        <segment><source>A backup is one encrypted file with the store, the keys of the vault and the TLS files, so the installation can be restored on a new host with that file and its passphrase or key file. Backups are always encrypted.</source><target>En säkerhetskopia är en krypterad fil med lagret, valvets nycklar och TLS-filerna, så att installationen kan återställas på en ny värd med den filen och dess lösenfras eller nyckelfil. Säkerhetskopior är alltid krypterade.</target></segment>
+        <segment><source>A backup is one encrypted file with the store, the keys of the vault and the TLS files, so the installation can be restored on a new host with that file and the key that opens it: a passphrase or the backup key file. Backups are always encrypted.</source><target>En säkerhetskopia är en krypterad fil med lagret, valvets nycklar och TLS-filerna, så att installationen kan återställas på en ny värd med den filen och nyckeln som öppnar den: en lösenfras eller nyckelfilen för säkerhetskopior. Säkerhetskopior är alltid krypterade.</target></segment>
       </unit>
       <unit id="backup.now">
         <segment><source>Back up now</source><target>Säkerhetskopiera nu</target></segment>
@@ -18,17 +18,29 @@
       <unit id="backup.job_link">
         <segment><source>Follow the backup job</source><target>Följ säkerhetskopieringsjobbet</target></segment>
       </unit>
-      <unit id="backup.stale.title">
-        <segment><source>No recent backup</source><target>Ingen färsk säkerhetskopia</target></segment>
+      <unit id="backup.warning.stale">
+        <segment><source>No good backup for more than {days, number} days. Back up now, or switch the schedule on.</source><target>Ingen lyckad säkerhetskopia på mer än {days, number} dagar. Säkerhetskopiera nu eller slå på schemat.</target></segment>
       </unit>
-      <unit id="backup.stale.body">
-        <segment><source>The last good backup is older than 7 days. Back up now, or switch the schedule on.</source><target>Den senaste lyckade säkerhetskopian är äldre än 7 dagar. Säkerhetskopiera nu eller slå på schemat.</target></segment>
+      <unit id="backup.warning.failed">
+        <segment><source>The newest backup failed ({error}). See the list of backups below.</source><target>Den senaste säkerhetskopian misslyckades ({error}). Se listan över säkerhetskopior nedan.</target></segment>
+      </unit>
+      <unit id="backup.warning.restored">
+        <segment><source>This installation was started from a restore and no good backup has been made since. Take a backup now.</source><target>Den här installationen startades från en återställning och ingen lyckad säkerhetskopia har gjorts sedan dess. Säkerhetskopiera nu.</target></segment>
+      </unit>
+      <unit id="backup.restored.title">
+        <segment><source>Restored from a backup</source><target>Återställd från en säkerhetskopia</target></segment>
+      </unit>
+      <unit id="backup.restored.body">
+        <segment><source>This installation was started from the backup {file}, made {created} and restored {at}.</source><target>Den här installationen startades från säkerhetskopian {file}, gjord {created} och återställd {at}.</target></segment>
+      </unit>
+      <unit id="backup.restored.nodes">
+        <segment><source>Made on controller {source}, restored as controller {node}, at store revision {revision, number}.</source><target>Gjord på kontrollern {source}, återställd som kontroller {node}, vid lagerrevision {revision, number}.</target></segment>
       </unit>
       <unit id="backup.step_up.title">
-        <segment><source>Sign in again to back up</source><target>Logga in igen för att säkerhetskopiera</target></segment>
+        <segment><source>Sign in again to continue</source><target>Logga in igen för att fortsätta</target></segment>
       </unit>
       <unit id="backup.step_up.body">
-        <segment><source>A backup copies every secret, so it needs a sign-in within the last five minutes. Sign in again, then come back to this page.</source><target>En säkerhetskopia innehåller alla hemligheter, så det krävs en inloggning de senaste fem minuterna. Logga in igen och kom sedan tillbaka till den här sidan.</target></segment>
+        <segment><source>A backup copies every secret, and its settings decide where it goes, so both need a sign-in within the last five minutes. Sign in again, then come back to this page.</source><target>En säkerhetskopia innehåller alla hemligheter och inställningarna avgör vart den går, så båda kräver en inloggning inom de senaste fem minuterna. Logga in igen och kom sedan tillbaka till den här sidan.</target></segment>
       </unit>
       <unit id="backup.step_up.sign_in">
         <segment><source>Sign in again</source><target>Logga in igen</target></segment>
@@ -37,6 +49,7 @@
         <segment><source>State</source><target>Status</target></segment>
       </unit>
       <unit id="backup.state.target">
+        <notes><note category="description">The directory the controller that answers writes to.</note></notes>
         <segment><source>Target directory</source><target>Målkatalog</target></segment>
       </unit>
       <unit id="backup.state.last_good">
@@ -45,8 +58,11 @@
       <unit id="backup.state.never">
         <segment><source>Never</source><target>Aldrig</target></segment>
       </unit>
+      <unit id="backup.state.age_label">
+        <segment><source>Age</source><target>Ålder</target></segment>
+      </unit>
       <unit id="backup.state.last_failed">
-        <segment><source>Last attempt failed</source><target>Senaste försöket misslyckades</target></segment>
+        <segment><source>Last failed backup</source><target>Senaste misslyckade säkerhetskopia</target></segment>
       </unit>
       <unit id="backup.state.next">
         <segment><source>Next scheduled backup</source><target>Nästa schemalagda säkerhetskopia</target></segment>
@@ -54,112 +70,149 @@
       <unit id="backup.state.not_scheduled">
         <segment><source>Not scheduled</source><target>Inte schemalagd</target></segment>
       </unit>
+      <unit id="backup.state.running">
+        <segment><source>Running on this controller</source><target>Pågår på den här kontrollern</target></segment>
+      </unit>
+      <unit id="backup.state.running_yes">
+        <segment><source>Yes</source><target>Ja</target></segment>
+      </unit>
+      <unit id="backup.state.running_no">
+        <segment><source>No</source><target>Nej</target></segment>
+      </unit>
       <unit id="backup.state.recipient">
-        <segment><source>Recipient key file</source><target>Mottagarnyckelfil</target></segment>
+        <segment><source>Recipient key</source><target>Mottagarnyckel</target></segment>
       </unit>
       <unit id="backup.state.recipient_yes">
-        <segment><source>Configured: backups can run without a passphrase</source><target>Konfigurerad: säkerhetskopior kan köras utan lösenfras</target></segment>
+        <segment><source>Configured: every backup is encrypted to it</source><target>Inställd: varje säkerhetskopia krypteras till den</target></segment>
       </unit>
       <unit id="backup.state.recipient_no">
-        <segment><source>Not configured: each backup needs a passphrase</source><target>Inte konfigurerad: varje säkerhetskopia kräver en lösenfras</target></segment>
+        <segment><source>Not configured: each backup needs a passphrase</source><target>Inte inställd: varje säkerhetskopia kräver en lösenfras</target></segment>
       </unit>
       <unit id="backup.schedule.heading">
         <segment><source>Schedule</source><target>Schema</target></segment>
       </unit>
-      <unit id="backup.schedule.when">
-        <segment><source>Scheduled backups</source><target>Schemalagda säkerhetskopior</target></segment>
+      <unit id="backup.schedule.enabled">
+        <segment><source>Run scheduled backups</source><target>Kör schemalagda säkerhetskopior</target></segment>
+      </unit>
+      <unit id="backup.schedule.enabled_help">
+        <segment><source>Off until an administrator turns it on. Scheduled backups need a recipient key.</source><target>Av tills en administratör slår på det. Schemalagda säkerhetskopior kräver en mottagarnyckel.</target></segment>
       </unit>
       <unit id="backup.schedule.off">
         <segment><source>Off</source><target>Av</target></segment>
       </unit>
-      <unit id="backup.schedule.daily">
-        <segment><source>Every day</source><target>Varje dag</target></segment>
+      <unit id="backup.schedule.every">
+        <segment><source>Every {interval}</source><target>Var {interval}</target></segment>
       </unit>
-      <unit id="backup.schedule.weekly">
-        <segment><source>Every week</source><target>Varje vecka</target></segment>
+      <unit id="backup.schedule.interval">
+        <segment><source>Hours between backups</source><target>Timmar mellan säkerhetskopior</target></segment>
       </unit>
-      <unit id="backup.schedule.daily_at">
-        <segment><source>Every day at {time}</source><target>Varje dag kl. {time}</target></segment>
-      </unit>
-      <unit id="backup.schedule.weekly_at">
-        <notes><note category="description">day is a weekday name such as Sunday.</note></notes>
-        <segment><source>Every {day} at {time}</source><target>Varje {day} kl. {time}</target></segment>
-      </unit>
-      <unit id="backup.schedule.weekday">
-        <segment><source>Day</source><target>Dag</target></segment>
-      </unit>
-      <unit id="backup.schedule.time">
-        <segment><source>Time</source><target>Tid</target></segment>
-      </unit>
-      <unit id="backup.schedule.time_help">
-        <segment><source>The local time of the leading controller.</source><target>Lokal tid för den ledande controllern.</target></segment>
+      <unit id="backup.schedule.interval_help">
+        <segment><source>1 to 168 hours. Now: every {every}.</source><target>1 till 168 timmar. Nu: var {every}.</target></segment>
       </unit>
       <unit id="backup.schedule.keep">
-        <segment><source>Backups to keep</source><target>Antal säkerhetskopior att behålla</target></segment>
+        <segment><source>Backups to keep</source><target>Säkerhetskopior att behålla</target></segment>
       </unit>
       <unit id="backup.schedule.keep_help">
-        <segment><source>Older backups in the target directory are removed after a new one is written.</source><target>Äldre säkerhetskopior i målkatalogen tas bort när en ny har skrivits.</target></segment>
+        <segment><source>Older backups in the target directory are removed after a scheduled backup is written.</source><target>Äldre säkerhetskopior i målkatalogen tas bort när en schemalagd säkerhetskopia har skrivits.</target></segment>
+      </unit>
+      <unit id="backup.schedule.recipient">
+        <segment><source>Recipient key</source><target>Mottagarnyckel</target></segment>
+      </unit>
+      <unit id="backup.schedule.recipient_help">
+        <segment><source>The public key that every backup is encrypted to. Create the key file with tenko backup keygen and paste the recipient it prints.</source><target>Den publika nyckel som varje säkerhetskopia krypteras till. Skapa nyckelfilen med tenko backup keygen och klistra in mottagaren som kommandot skriver ut.</target></segment>
+      </unit>
+      <unit id="backup.schedule.target_dir">
+        <segment><source>Target directory</source><target>Målkatalog</target></segment>
+      </unit>
+      <unit id="backup.schedule.target_dir_help">
+        <segment><source>An absolute directory on every controller. Empty: the default of each controller, here {dir}.</source><target>En absolut katalog på varje kontroller. Tomt: standardkatalogen för varje kontroller, här {dir}.</target></segment>
+      </unit>
+      <unit id="backup.schedule.include_config">
+        <segment><source>Include the configuration file of the controller</source><target>Ta med kontrollerns konfigurationsfil</target></segment>
       </unit>
       <unit id="backup.schedule.needs_recipient">
-        <segment><source>Scheduled backups need a recipient key file in the configuration of the controllers; without one they fail.</source><target>Schemalagda säkerhetskopior kräver en mottagarnyckelfil i controllernas konfiguration. Utan den misslyckas de.</target></segment>
+        <segment><source>Scheduled backups need a recipient key. Enter one below or switch the schedule off.</source><target>Schemalagda säkerhetskopior kräver en mottagarnyckel. Ange en nedan eller slå av schemat.</target></segment>
       </unit>
-      <unit id="backup.schedule.error.time">
-        <segment><source>Enter a time such as 02:30.</source><target>Ange en tid som 02:30.</target></segment>
+      <unit id="backup.schedule.error.interval">
+        <segment><source>Enter a whole number from {min, number} to {max, number}.</source><target>Ange ett heltal från {min, number} till {max, number}.</target></segment>
       </unit>
       <unit id="backup.schedule.error.keep">
-        <segment><source>Enter a number from 1 to 365.</source><target>Ange ett tal från 1 till 365.</target></segment>
+        <segment><source>Enter a whole number from {min, number} to {max, number}.</source><target>Ange ett heltal från {min, number} till {max, number}.</target></segment>
+      </unit>
+      <unit id="backup.schedule.error.recipient">
+        <segment><source>A recipient is tkbr1: followed by 43 characters.</source><target>En mottagare är tkbr1: följt av 43 tecken.</target></segment>
+      </unit>
+      <unit id="backup.schedule.error.target_dir">
+        <segment><source>Enter an absolute directory, such as /var/backups/tenko.</source><target>Ange en absolut katalog, till exempel /var/backups/tenko.</target></segment>
       </unit>
       <unit id="backup.schedule.saved">
         <segment><source>Backup schedule saved: {schedule}</source><target>Schemat för säkerhetskopiering sparades: {schedule}</target></segment>
       </unit>
-      <unit id="backup.files.heading">
-        <segment><source>Backups in the target directory</source><target>Säkerhetskopior i målkatalogen</target></segment>
+      <unit id="backup.runs.heading">
+        <segment><source>Recent backups</source><target>Senaste säkerhetskopior</target></segment>
       </unit>
-      <unit id="backup.files.none">
-        <segment><source>No backups yet.</source><target>Inga säkerhetskopior ännu.</target></segment>
+      <unit id="backup.runs.none">
+        <segment><source>No backups yet.</source><target>Inga säkerhetskopior än.</target></segment>
       </unit>
-      <unit id="backup.files.col.file">
+      <unit id="backup.runs.col.finished">
+        <segment><source>Finished</source><target>Klar</target></segment>
+      </unit>
+      <unit id="backup.runs.col.outcome">
+        <segment><source>Outcome</source><target>Resultat</target></segment>
+      </unit>
+      <unit id="backup.runs.col.reason">
+        <segment><source>Made</source><target>Gjord</target></segment>
+      </unit>
+      <unit id="backup.runs.col.file">
         <segment><source>File</source><target>Fil</target></segment>
       </unit>
-      <unit id="backup.files.col.created">
-        <segment><source>Created</source><target>Skapad</target></segment>
-      </unit>
-      <unit id="backup.files.col.size">
+      <unit id="backup.runs.col.size">
         <segment><source>Size</source><target>Storlek</target></segment>
       </unit>
-      <unit id="backup.files.col.made">
-        <segment><source>Made</source><target>Skapad</target></segment>
+      <unit id="backup.runs.col.node">
+        <segment><source>Controller</source><target>Kontroller</target></segment>
       </unit>
-      <unit id="backup.files.col.actions">
-        <notes><note category="description">Hidden header of the column with the buttons of a row.</note></notes>
+      <unit id="backup.runs.col.actions">
         <segment><source>Actions</source><target>Åtgärder</target></segment>
       </unit>
-      <unit id="backup.files.scheduled">
-        <segment><source>By the schedule</source><target>Enligt schemat</target></segment>
+      <unit id="backup.run.succeeded">
+        <segment><source>Succeeded</source><target>Lyckades</target></segment>
       </unit>
-      <unit id="backup.files.manual">
-        <segment><source>By hand</source><target>Manuellt</target></segment>
+      <unit id="backup.run.failed">
+        <segment><source>Failed</source><target>Misslyckades</target></segment>
+      </unit>
+      <unit id="backup.run.scheduled">
+        <segment><source>By the schedule</source><target>Av schemat</target></segment>
+      </unit>
+      <unit id="backup.run.manual">
+        <segment><source>By hand</source><target>För hand</target></segment>
+      </unit>
+      <unit id="backup.slot.passphrase">
+        <segment><source>a passphrase</source><target>en lösenfras</target></segment>
+      </unit>
+      <unit id="backup.slot.recipient">
+        <segment><source>the backup key file</source><target>nyckelfilen för säkerhetskopior</target></segment>
       </unit>
       <unit id="backup.create.title">
         <segment><source>Back up now</source><target>Säkerhetskopiera nu</target></segment>
       </unit>
       <unit id="backup.create.body">
-        <segment><source>The backup is written to the target directory of the leading controller and audited.</source><target>Säkerhetskopian skrivs till den ledande controllerns målkatalog och granskningsloggas.</target></segment>
+        <segment><source>The backup is written to the target directory of the controller you are connected to, and audited.</source><target>Säkerhetskopian skrivs till målkatalogen på kontrollern du är ansluten till och granskningsloggas.</target></segment>
       </unit>
-      <unit id="backup.create.key">
-        <segment><source>Encrypt with</source><target>Kryptera med</target></segment>
+      <unit id="backup.create.with_recipient">
+        <segment><source>It is encrypted to the recipient key of the settings. You may add a passphrase that opens it as well.</source><target>Den krypteras till mottagarnyckeln i inställningarna. Du kan lägga till en lösenfras som också öppnar den.</target></segment>
       </unit>
-      <unit id="backup.create.key_recipient">
-        <segment><source>The recipient key file</source><target>Mottagarnyckelfilen</target></segment>
-      </unit>
-      <unit id="backup.create.key_passphrase">
-        <segment><source>A passphrase</source><target>En lösenfras</target></segment>
+      <unit id="backup.create.passphrase_only">
+        <segment><source>No recipient key is set, so the backup needs a passphrase.</source><target>Ingen mottagarnyckel är inställd, så säkerhetskopian kräver en lösenfras.</target></segment>
       </unit>
       <unit id="backup.create.passphrase">
         <segment><source>Passphrase</source><target>Lösenfras</target></segment>
       </unit>
+      <unit id="backup.create.passphrase_optional">
+        <segment><source>Passphrase (optional)</source><target>Lösenfras (valfri)</target></segment>
+      </unit>
       <unit id="backup.create.passphrase_help">
-        <segment><source>At least {min, number} characters. Keep it apart from the backup: without it the backup cannot be restored.</source><target>Minst {min, number} tecken. Förvara den skild från säkerhetskopian: utan den går säkerhetskopian inte att återställa.</target></segment>
+        <segment><source>At least {min, number} characters. It is used once and never stored: keep it apart from the backup, without it the backup may not open.</source><target>Minst {min, number} tecken. Den används en gång och sparas aldrig: förvara den skilt från säkerhetskopian, utan den kanske säkerhetskopian inte går att öppna.</target></segment>
       </unit>
       <unit id="backup.create.again">
         <segment><source>Passphrase again</source><target>Lösenfras igen</target></segment>
@@ -170,53 +223,26 @@
       <unit id="backup.create.error.mismatch">
         <segment><source>The two passphrases differ.</source><target>De två lösenfraserna skiljer sig åt.</target></segment>
       </unit>
-      <unit id="backup.create.started">
-        <segment><source>Backup started</source><target>Säkerhetskopieringen har startat</target></segment>
+      <unit id="backup.create.done">
+        <segment><source>Backup written: {file}</source><target>Säkerhetskopian skrevs: {file}</target></segment>
       </unit>
-      <unit id="backup.preview.open">
-        <segment><source>Restore preview</source><target>Förhandsgranska återställning</target></segment>
+      <unit id="backup.restore.open">
+        <segment><source>Restore command</source><target>Återställningskommando</target></segment>
       </unit>
-      <unit id="backup.preview.open_named">
-        <segment><source>Restore preview of {file}</source><target>Förhandsgranska återställning av {file}</target></segment>
+      <unit id="backup.restore.open_named">
+        <segment><source>Restore command for {file}</source><target>Återställningskommando för {file}</target></segment>
       </unit>
-      <unit id="backup.preview.title">
-        <segment><source>Restore preview: {file}</source><target>Förhandsgranskning av återställning: {file}</target></segment>
+      <unit id="backup.restore.title">
+        <segment><source>Restore {file}</source><target>Återställ {file}</target></segment>
       </unit>
-      <unit id="backup.preview.created">
-        <segment><source>Created</source><target>Skapad</target></segment>
+      <unit id="backup.restore.body">
+        <segment><source>Restore it on a new host with this command, then start Tenko there. Copy the file from the controller that wrote it first; the page cannot download it.</source><target>Återställ den på en ny värd med det här kommandot och starta sedan Tenko där. Kopiera först filen från kontrollern som skrev den; sidan kan inte ladda ned den.</target></segment>
       </unit>
-      <unit id="backup.preview.version">
-        <segment><source>Tenko version</source><target>Tenko-version</target></segment>
+      <unit id="backup.restore.slots">
+        <segment><source>The backup opens with: {slots}. Check it first with tenko backup verify.</source><target>Säkerhetskopian öppnas med: {slots}. Kontrollera den först med tenko backup verify.</target></segment>
       </unit>
-      <unit id="backup.preview.format">
-        <segment><source>Data format</source><target>Dataformat</target></segment>
-      </unit>
-      <unit id="backup.preview.revision">
-        <segment><source>Store revision</source><target>Lagrets revision</target></segment>
-      </unit>
-      <unit id="backup.preview.audit_head">
-        <segment><source>Audit chain head</source><target>Granskningskedjans topp</target></segment>
-      </unit>
-      <unit id="backup.preview.ca">
-        <segment><source>Certificate authority</source><target>Certifikatutfärdare</target></segment>
-      </unit>
-      <unit id="backup.preview.key">
-        <segment><source>Encrypted with</source><target>Krypterad med</target></segment>
-      </unit>
-      <unit id="backup.preview.parts">
-        <segment><source>Parts</source><target>Delar</target></segment>
-      </unit>
-      <unit id="backup.preview.col.part">
-        <segment><source>Part</source><target>Del</target></segment>
-      </unit>
-      <unit id="backup.preview.col.sha256">
-        <segment><source>SHA-256</source><target>SHA-256</target></segment>
-      </unit>
-      <unit id="backup.preview.restore_body">
-        <segment><source>Restore it on a new host with this command, then start Tenko there:</source><target>Återställ den på en ny värd med det här kommandot och starta sedan Tenko där:</target></segment>
-      </unit>
-      <unit id="backup.preview.restore_note">
-        <segment><source>A restore creates a single controller with the same sign-ins and certificate authority, so enrolled nodes keep trusting it; further controllers join it afterwards.</source><target>En återställning skapar en enda controller med samma inloggningar och certifikatutfärdare, så anslutna noder fortsätter att lita på den. Fler controllers ansluter till den efteråt.</target></segment>
+      <unit id="backup.restore.note">
+        <segment><source>A restore creates a single controller with the same sign-ins and certificate authority, so enrolled nodes keep trusting it; further controllers join it afterwards.</source><target>En återställning skapar en enda kontroller med samma inloggningar och certifikatutfärdare, så att registrerade noder fortsätter lita på den; fler kontroller ansluts efteråt.</target></segment>
       </unit>
     </group>
   </file>

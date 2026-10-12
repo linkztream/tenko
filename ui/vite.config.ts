@@ -45,7 +45,8 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   import: ["import."],
   // The areas of WP1.9 that only their own lazy routes show.
   setup: ["setup."],
-  settings: ["settings."],
+  // The security page shows the refusal of a profile switch that needs an audit export (TGL-21).
+  settings: ["settings.", "errors.audit.export."],
   account: ["account."],
   // The updates page, the release notes dialog and the page of a module that is switched off
   // (OPS-24, OPS-25), and the error texts of the update endpoints.

@@ -50,5 +50,5 @@
 /* The queue. */
 .tag.queue-state.conflict { background: var(--conflict-wash); color: var(--conflict); }
 .tag.queue-state.expired { background: var(--discrepancy-wash); color: var(--discrepancy); }
-.tag.queue-state.applied, .tag.queue-state.reapplied { background: var(--ok-wash); color: var(--ok-ink); }
-.tag.queue-state.draining { background: var(--accent-wash); color: var(--accent); }
+.tag.queue-state.applied { background: var(--ok-wash); color: var(--ok-ink); }
+.tag.queue-state.applying { background: var(--accent-wash); color: var(--accent); }

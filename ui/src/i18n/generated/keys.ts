@@ -419,7 +419,10 @@ export type MessageKey =
   | "audit.title"
   | "audit_export.add"
   | "audit_export.add_title"
+  | "audit_export.alert_after_saved"
+  | "audit_export.checkpoint"
   | "audit_export.col.actions"
+  | "audit_export.col.delivered"
   | "audit_export.col.format"
   | "audit_export.col.lag"
   | "audit_export.col.name"
@@ -427,21 +430,35 @@ export type MessageKey =
   | "audit_export.col.target"
   | "audit_export.delivered"
   | "audit_export.edit_title"
+  | "audit_export.error.alert_after"
+  | "audit_export.error.client_key"
+  | "audit_export.error.file"
   | "audit_export.error.host"
+  | "audit_export.error.keep"
+  | "audit_export.error.max_mib"
   | "audit_export.error.name"
-  | "audit_export.error.path"
   | "audit_export.error.port"
+  | "audit_export.failing.title"
   | "audit_export.failing_since"
+  | "audit_export.field.alert_after"
+  | "audit_export.field.alert_after_help"
   | "audit_export.field.ca_pem"
   | "audit_export.field.ca_pem_help"
-  | "audit_export.field.client_certificate"
+  | "audit_export.field.client_cert_pem"
+  | "audit_export.field.client_cert_pem_help"
+  | "audit_export.field.client_key"
+  | "audit_export.field.client_key_help"
+  | "audit_export.field.facility"
+  | "audit_export.field.file"
+  | "audit_export.field.file_help"
   | "audit_export.field.format"
   | "audit_export.field.host"
-  | "audit_export.field.keep_files"
+  | "audit_export.field.keep"
+  | "audit_export.field.max_mib"
   | "audit_export.field.name"
-  | "audit_export.field.path"
-  | "audit_export.field.path_help"
   | "audit_export.field.port"
+  | "audit_export.field.server_name"
+  | "audit_export.field.server_name_help"
   | "audit_export.field.transport"
   | "audit_export.format.cef"
   | "audit_export.format.json"
@@ -450,21 +467,26 @@ export type MessageKey =
   | "audit_export.none"
   | "audit_export.pause"
   | "audit_export.paused"
+  | "audit_export.policy.heading"
+  | "audit_export.policy.met"
+  | "audit_export.policy.unmet"
+  | "audit_export.policy.value"
   | "audit_export.remove_body"
   | "audit_export.remove_last"
   | "audit_export.remove_named"
   | "audit_export.remove_title"
   | "audit_export.removed"
-  | "audit_export.required.body"
   | "audit_export.required.title"
   | "audit_export.resume"
   | "audit_export.resumed"
   | "audit_export.saved"
   | "audit_export.sinks.heading"
+  | "audit_export.state.alarm"
+  | "audit_export.state.behind"
   | "audit_export.state.disabled"
   | "audit_export.state.failing"
-  | "audit_export.state.idle"
   | "audit_export.state.ok"
+  | "audit_export.state.pending"
   | "audit_export.test"
   | "audit_export.test_failed"
   | "audit_export.test_ok"
@@ -480,6 +502,8 @@ export type MessageKey =
   | "audit_export.udp_warning"
   | "audit_export.verify.body"
   | "audit_export.verify.heading"
+  | "audit_export.warning.failing"
+  | "audit_export.warning.required"
   | "auth.signin.back_to_sign_in"
   | "auth.signin.break_glass_button"
   | "auth.signin.break_glass_lead"
@@ -525,61 +549,64 @@ export type MessageKey =
   | "auth.strength.pin"
   | "backup.create.again"
   | "backup.create.body"
+  | "backup.create.done"
   | "backup.create.error.mismatch"
   | "backup.create.error.short"
-  | "backup.create.key"
-  | "backup.create.key_passphrase"
-  | "backup.create.key_recipient"
   | "backup.create.passphrase"
   | "backup.create.passphrase_help"
-  | "backup.create.started"
+  | "backup.create.passphrase_only"
+  | "backup.create.passphrase_optional"
   | "backup.create.title"
-  | "backup.files.col.actions"
-  | "backup.files.col.created"
-  | "backup.files.col.file"
-  | "backup.files.col.made"
-  | "backup.files.col.size"
-  | "backup.files.heading"
-  | "backup.files.manual"
-  | "backup.files.none"
-  | "backup.files.scheduled"
+  | "backup.create.with_recipient"
   | "backup.job_link"
   | "backup.lede"
   | "backup.now"
-  | "backup.preview.audit_head"
-  | "backup.preview.ca"
-  | "backup.preview.col.part"
-  | "backup.preview.col.sha256"
-  | "backup.preview.created"
-  | "backup.preview.format"
-  | "backup.preview.key"
-  | "backup.preview.open"
-  | "backup.preview.open_named"
-  | "backup.preview.parts"
-  | "backup.preview.restore_body"
-  | "backup.preview.restore_note"
-  | "backup.preview.revision"
-  | "backup.preview.title"
-  | "backup.preview.version"
+  | "backup.restore.body"
+  | "backup.restore.note"
+  | "backup.restore.open"
+  | "backup.restore.open_named"
+  | "backup.restore.slots"
+  | "backup.restore.title"
+  | "backup.restored.body"
+  | "backup.restored.nodes"
+  | "backup.restored.title"
+  | "backup.run.failed"
+  | "backup.run.manual"
+  | "backup.run.scheduled"
+  | "backup.run.succeeded"
   | "backup.running"
-  | "backup.schedule.daily"
-  | "backup.schedule.daily_at"
+  | "backup.runs.col.actions"
+  | "backup.runs.col.file"
+  | "backup.runs.col.finished"
+  | "backup.runs.col.node"
+  | "backup.runs.col.outcome"
+  | "backup.runs.col.reason"
+  | "backup.runs.col.size"
+  | "backup.runs.heading"
+  | "backup.runs.none"
+  | "backup.schedule.enabled"
+  | "backup.schedule.enabled_help"
+  | "backup.schedule.error.interval"
   | "backup.schedule.error.keep"
-  | "backup.schedule.error.time"
+  | "backup.schedule.error.recipient"
+  | "backup.schedule.error.target_dir"
+  | "backup.schedule.every"
   | "backup.schedule.heading"
+  | "backup.schedule.include_config"
+  | "backup.schedule.interval"
+  | "backup.schedule.interval_help"
   | "backup.schedule.keep"
   | "backup.schedule.keep_help"
   | "backup.schedule.needs_recipient"
   | "backup.schedule.off"
+  | "backup.schedule.recipient"
+  | "backup.schedule.recipient_help"
   | "backup.schedule.saved"
-  | "backup.schedule.time"
-  | "backup.schedule.time_help"
-  | "backup.schedule.weekday"
-  | "backup.schedule.weekly"
-  | "backup.schedule.weekly_at"
-  | "backup.schedule.when"
-  | "backup.stale.body"
-  | "backup.stale.title"
+  | "backup.schedule.target_dir"
+  | "backup.schedule.target_dir_help"
+  | "backup.slot.passphrase"
+  | "backup.slot.recipient"
+  | "backup.state.age_label"
   | "backup.state.heading"
   | "backup.state.last_failed"
   | "backup.state.last_good"
@@ -589,11 +616,17 @@ export type MessageKey =
   | "backup.state.recipient"
   | "backup.state.recipient_no"
   | "backup.state.recipient_yes"
+  | "backup.state.running"
+  | "backup.state.running_no"
+  | "backup.state.running_yes"
   | "backup.state.target"
   | "backup.step_up.body"
   | "backup.step_up.sign_in"
   | "backup.step_up.title"
   | "backup.title"
+  | "backup.warning.failed"
+  | "backup.warning.restored"
+  | "backup.warning.stale"
   | "cluster.action.add"
   | "cluster.action.check_digests"
   | "cluster.action.promote"
@@ -701,8 +734,7 @@ export type MessageKey =
   | "cluster.queue.cancelled"
   | "cluster.queue.change_state.applied"
   | "cluster.queue.change_state.conflict"
-  | "cluster.queue.change_state.discarded"
-  | "cluster.queue.change_state.reapplied"
+  | "cluster.queue.change_state.expired"
   | "cluster.queue.changes.empty"
   | "cluster.queue.changes.intro"
   | "cluster.queue.changes.title"
@@ -713,6 +745,7 @@ export type MessageKey =
   | "cluster.queue.col.request"
   | "cluster.queue.col.result"
   | "cluster.queue.col.state"
+  | "cluster.queue.conflict.expired"
   | "cluster.queue.conflict.other"
   | "cluster.queue.conflict.stale"
   | "cluster.queue.count"
@@ -722,6 +755,9 @@ export type MessageKey =
   | "cluster.queue.discard_named"
   | "cluster.queue.discard_title"
   | "cluster.queue.discarded"
+  | "cluster.queue.dismiss"
+  | "cluster.queue.dismiss_named"
+  | "cluster.queue.dismissed"
   | "cluster.queue.keep"
   | "cluster.queue.kind"
   | "cluster.queue.local.empty"
@@ -733,7 +769,7 @@ export type MessageKey =
   | "cluster.queue.reapply_intro"
   | "cluster.queue.reapply_named"
   | "cluster.queue.reapply_title"
-  | "cluster.queue.state.draining"
+  | "cluster.queue.state.applying"
   | "cluster.queue.state.expired"
   | "cluster.queue.state.queued"
   | "cluster.queue.title"
@@ -1217,6 +1253,22 @@ export type MessageKey =
   | "discovery.toast.approved"
   | "discovery.toast.dismissed"
   | "discovery.toast.rejected"
+  | "errors.audit.export.client_key"
+  | "errors.audit.export.conflict"
+  | "errors.audit.export.duplicate"
+  | "errors.audit.export.file"
+  | "errors.audit.export.host"
+  | "errors.audit.export.invalid"
+  | "errors.audit.export.name"
+  | "errors.audit.export.not_found"
+  | "errors.audit.export.pem"
+  | "errors.audit.export.port"
+  | "errors.audit.export.range"
+  | "errors.audit.export.required"
+  | "errors.audit.export.test_target"
+  | "errors.audit.export.tls_unused"
+  | "errors.audit.export.too_many"
+  | "errors.audit.export.unknown_sink"
   | "errors.auth.break_glass.hardware_key_only"
   | "errors.auth.challenge_invalid"
   | "errors.auth.conflict"
@@ -1420,10 +1472,15 @@ export type MessageKey =
   | "errors.node.config.revision_mismatch"
   | "errors.node.config.secret"
   | "errors.node.config.vault_unavailable"
-  | "errors.queue.not_conflict"
+  | "errors.queue.changed"
+  | "errors.queue.full"
+  | "errors.queue.io"
+  | "errors.queue.not_a_person"
+  | "errors.queue.not_found"
   | "errors.queue.not_isolated"
   | "errors.queue.not_queueable"
-  | "errors.queue.unknown"
+  | "errors.queue.too_large"
+  | "errors.queue.unavailable"
   | "errors.remote.address_unknown"
   | "errors.remote.interface_unknown"
   | "errors.scan.job.invalid"
@@ -4323,23 +4380,36 @@ export interface MessageArgs {
   "audit.record.open_newest": { seq: string | number };
   "audit.record.title": { seq: string | number };
   "audit.row": { seq: string | number };
+  "audit_export.checkpoint": { seq: string | number; when: string | number };
   "audit_export.delivered": { when: string | number };
   "audit_export.failing_since": { when: string | number };
   "audit_export.paused": { name: string | number };
+  "audit_export.policy.value": { value: string | number };
   "audit_export.remove_named": { name: string | number };
   "audit_export.remove_title": { name: string | number };
   "audit_export.removed": { name: string | number };
   "audit_export.resumed": { name: string | number };
   "audit_export.saved": { name: string | number };
-  "audit_export.test_failed": { detail: string | number };
+  "audit_export.test_failed": { detail: string | number; ms: string | number };
+  "audit_export.test_ok": { ms: string | number };
+  "audit_export.warning.failing": { sinks: string | number };
   "auth.signin.retry_in": { seconds: number };
+  "backup.create.done": { file: string | number };
   "backup.create.error.short": { min: number };
   "backup.create.passphrase_help": { min: number };
-  "backup.preview.open_named": { file: string | number };
-  "backup.preview.title": { file: string | number };
-  "backup.schedule.daily_at": { time: string | number };
+  "backup.restore.open_named": { file: string | number };
+  "backup.restore.slots": { slots: string | number };
+  "backup.restore.title": { file: string | number };
+  "backup.restored.body": { at: string | number; created: string | number; file: string | number };
+  "backup.restored.nodes": { node: string | number; revision: number; source: string | number };
+  "backup.schedule.error.interval": { max: number; min: number };
+  "backup.schedule.error.keep": { max: number; min: number };
+  "backup.schedule.every": { interval: string | number };
+  "backup.schedule.interval_help": { every: string | number };
   "backup.schedule.saved": { schedule: string | number };
-  "backup.schedule.weekly_at": { day: string | number; time: string | number };
+  "backup.schedule.target_dir_help": { dir: string | number };
+  "backup.warning.failed": { error: string | number };
+  "backup.warning.stale": { days: number };
   "cluster.action.promote_named": { name: string | number };
   "cluster.action.remove_named": { name: string | number };
   "cluster.col.format": { format: string | number };
@@ -4366,6 +4436,7 @@ export interface MessageArgs {
   "cluster.queue.count": { count: number };
   "cluster.queue.discard_body": { what: string | number };
   "cluster.queue.discard_named": { what: string | number };
+  "cluster.queue.dismiss_named": { what: string | number };
   "cluster.queue.kind": { kind: string };
   "cluster.queue.reapply_intro": { what: string | number };
   "cluster.queue.reapply_named": { what: string | number };
@@ -5501,7 +5572,10 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.title",
   "audit_export.add",
   "audit_export.add_title",
+  "audit_export.alert_after_saved",
+  "audit_export.checkpoint",
   "audit_export.col.actions",
+  "audit_export.col.delivered",
   "audit_export.col.format",
   "audit_export.col.lag",
   "audit_export.col.name",
@@ -5509,21 +5583,35 @@ export const messageKeys: readonly MessageKey[] = [
   "audit_export.col.target",
   "audit_export.delivered",
   "audit_export.edit_title",
+  "audit_export.error.alert_after",
+  "audit_export.error.client_key",
+  "audit_export.error.file",
   "audit_export.error.host",
+  "audit_export.error.keep",
+  "audit_export.error.max_mib",
   "audit_export.error.name",
-  "audit_export.error.path",
   "audit_export.error.port",
+  "audit_export.failing.title",
   "audit_export.failing_since",
+  "audit_export.field.alert_after",
+  "audit_export.field.alert_after_help",
   "audit_export.field.ca_pem",
   "audit_export.field.ca_pem_help",
-  "audit_export.field.client_certificate",
+  "audit_export.field.client_cert_pem",
+  "audit_export.field.client_cert_pem_help",
+  "audit_export.field.client_key",
+  "audit_export.field.client_key_help",
+  "audit_export.field.facility",
+  "audit_export.field.file",
+  "audit_export.field.file_help",
   "audit_export.field.format",
   "audit_export.field.host",
-  "audit_export.field.keep_files",
+  "audit_export.field.keep",
+  "audit_export.field.max_mib",
   "audit_export.field.name",
-  "audit_export.field.path",
-  "audit_export.field.path_help",
   "audit_export.field.port",
+  "audit_export.field.server_name",
+  "audit_export.field.server_name_help",
   "audit_export.field.transport",
   "audit_export.format.cef",
   "audit_export.format.json",
@@ -5532,21 +5620,26 @@ export const messageKeys: readonly MessageKey[] = [
   "audit_export.none",
   "audit_export.pause",
   "audit_export.paused",
+  "audit_export.policy.heading",
+  "audit_export.policy.met",
+  "audit_export.policy.unmet",
+  "audit_export.policy.value",
   "audit_export.remove_body",
   "audit_export.remove_last",
   "audit_export.remove_named",
   "audit_export.remove_title",
   "audit_export.removed",
-  "audit_export.required.body",
   "audit_export.required.title",
   "audit_export.resume",
   "audit_export.resumed",
   "audit_export.saved",
   "audit_export.sinks.heading",
+  "audit_export.state.alarm",
+  "audit_export.state.behind",
   "audit_export.state.disabled",
   "audit_export.state.failing",
-  "audit_export.state.idle",
   "audit_export.state.ok",
+  "audit_export.state.pending",
   "audit_export.test",
   "audit_export.test_failed",
   "audit_export.test_ok",
@@ -5562,6 +5655,8 @@ export const messageKeys: readonly MessageKey[] = [
   "audit_export.udp_warning",
   "audit_export.verify.body",
   "audit_export.verify.heading",
+  "audit_export.warning.failing",
+  "audit_export.warning.required",
   "auth.signin.back_to_sign_in",
   "auth.signin.break_glass_button",
   "auth.signin.break_glass_lead",
@@ -5607,61 +5702,64 @@ export const messageKeys: readonly MessageKey[] = [
   "auth.strength.pin",
   "backup.create.again",
   "backup.create.body",
+  "backup.create.done",
   "backup.create.error.mismatch",
   "backup.create.error.short",
-  "backup.create.key",
-  "backup.create.key_passphrase",
-  "backup.create.key_recipient",
   "backup.create.passphrase",
   "backup.create.passphrase_help",
-  "backup.create.started",
+  "backup.create.passphrase_only",
+  "backup.create.passphrase_optional",
   "backup.create.title",
-  "backup.files.col.actions",
-  "backup.files.col.created",
-  "backup.files.col.file",
-  "backup.files.col.made",
-  "backup.files.col.size",
-  "backup.files.heading",
-  "backup.files.manual",
-  "backup.files.none",
-  "backup.files.scheduled",
+  "backup.create.with_recipient",
   "backup.job_link",
   "backup.lede",
   "backup.now",
-  "backup.preview.audit_head",
-  "backup.preview.ca",
-  "backup.preview.col.part",
-  "backup.preview.col.sha256",
-  "backup.preview.created",
-  "backup.preview.format",
-  "backup.preview.key",
-  "backup.preview.open",
-  "backup.preview.open_named",
-  "backup.preview.parts",
-  "backup.preview.restore_body",
-  "backup.preview.restore_note",
-  "backup.preview.revision",
-  "backup.preview.title",
-  "backup.preview.version",
+  "backup.restore.body",
+  "backup.restore.note",
+  "backup.restore.open",
+  "backup.restore.open_named",
+  "backup.restore.slots",
+  "backup.restore.title",
+  "backup.restored.body",
+  "backup.restored.nodes",
+  "backup.restored.title",
+  "backup.run.failed",
+  "backup.run.manual",
+  "backup.run.scheduled",
+  "backup.run.succeeded",
   "backup.running",
-  "backup.schedule.daily",
-  "backup.schedule.daily_at",
+  "backup.runs.col.actions",
+  "backup.runs.col.file",
+  "backup.runs.col.finished",
+  "backup.runs.col.node",
+  "backup.runs.col.outcome",
+  "backup.runs.col.reason",
+  "backup.runs.col.size",
+  "backup.runs.heading",
+  "backup.runs.none",
+  "backup.schedule.enabled",
+  "backup.schedule.enabled_help",
+  "backup.schedule.error.interval",
   "backup.schedule.error.keep",
-  "backup.schedule.error.time",
+  "backup.schedule.error.recipient",
+  "backup.schedule.error.target_dir",
+  "backup.schedule.every",
   "backup.schedule.heading",
+  "backup.schedule.include_config",
+  "backup.schedule.interval",
+  "backup.schedule.interval_help",
   "backup.schedule.keep",
   "backup.schedule.keep_help",
   "backup.schedule.needs_recipient",
   "backup.schedule.off",
+  "backup.schedule.recipient",
+  "backup.schedule.recipient_help",
   "backup.schedule.saved",
-  "backup.schedule.time",
-  "backup.schedule.time_help",
-  "backup.schedule.weekday",
-  "backup.schedule.weekly",
-  "backup.schedule.weekly_at",
-  "backup.schedule.when",
-  "backup.stale.body",
-  "backup.stale.title",
+  "backup.schedule.target_dir",
+  "backup.schedule.target_dir_help",
+  "backup.slot.passphrase",
+  "backup.slot.recipient",
+  "backup.state.age_label",
   "backup.state.heading",
   "backup.state.last_failed",
   "backup.state.last_good",
@@ -5671,11 +5769,17 @@ export const messageKeys: readonly MessageKey[] = [
   "backup.state.recipient",
   "backup.state.recipient_no",
   "backup.state.recipient_yes",
+  "backup.state.running",
+  "backup.state.running_no",
+  "backup.state.running_yes",
   "backup.state.target",
   "backup.step_up.body",
   "backup.step_up.sign_in",
   "backup.step_up.title",
   "backup.title",
+  "backup.warning.failed",
+  "backup.warning.restored",
+  "backup.warning.stale",
   "cluster.action.add",
   "cluster.action.check_digests",
   "cluster.action.promote",
@@ -5783,8 +5887,7 @@ export const messageKeys: readonly MessageKey[] = [
   "cluster.queue.cancelled",
   "cluster.queue.change_state.applied",
   "cluster.queue.change_state.conflict",
-  "cluster.queue.change_state.discarded",
-  "cluster.queue.change_state.reapplied",
+  "cluster.queue.change_state.expired",
   "cluster.queue.changes.empty",
   "cluster.queue.changes.intro",
   "cluster.queue.changes.title",
@@ -5795,6 +5898,7 @@ export const messageKeys: readonly MessageKey[] = [
   "cluster.queue.col.request",
   "cluster.queue.col.result",
   "cluster.queue.col.state",
+  "cluster.queue.conflict.expired",
   "cluster.queue.conflict.other",
   "cluster.queue.conflict.stale",
   "cluster.queue.count",
@@ -5804,6 +5908,9 @@ export const messageKeys: readonly MessageKey[] = [
   "cluster.queue.discard_named",
   "cluster.queue.discard_title",
   "cluster.queue.discarded",
+  "cluster.queue.dismiss",
+  "cluster.queue.dismiss_named",
+  "cluster.queue.dismissed",
   "cluster.queue.keep",
   "cluster.queue.kind",
   "cluster.queue.local.empty",
@@ -5815,7 +5922,7 @@ export const messageKeys: readonly MessageKey[] = [
   "cluster.queue.reapply_intro",
   "cluster.queue.reapply_named",
   "cluster.queue.reapply_title",
-  "cluster.queue.state.draining",
+  "cluster.queue.state.applying",
   "cluster.queue.state.expired",
   "cluster.queue.state.queued",
   "cluster.queue.title",
@@ -6299,6 +6406,22 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.toast.approved",
   "discovery.toast.dismissed",
   "discovery.toast.rejected",
+  "errors.audit.export.client_key",
+  "errors.audit.export.conflict",
+  "errors.audit.export.duplicate",
+  "errors.audit.export.file",
+  "errors.audit.export.host",
+  "errors.audit.export.invalid",
+  "errors.audit.export.name",
+  "errors.audit.export.not_found",
+  "errors.audit.export.pem",
+  "errors.audit.export.port",
+  "errors.audit.export.range",
+  "errors.audit.export.required",
+  "errors.audit.export.test_target",
+  "errors.audit.export.tls_unused",
+  "errors.audit.export.too_many",
+  "errors.audit.export.unknown_sink",
   "errors.auth.break_glass.hardware_key_only",
   "errors.auth.challenge_invalid",
   "errors.auth.conflict",
@@ -6502,10 +6625,15 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.node.config.revision_mismatch",
   "errors.node.config.secret",
   "errors.node.config.vault_unavailable",
-  "errors.queue.not_conflict",
+  "errors.queue.changed",
+  "errors.queue.full",
+  "errors.queue.io",
+  "errors.queue.not_a_person",
+  "errors.queue.not_found",
   "errors.queue.not_isolated",
   "errors.queue.not_queueable",
-  "errors.queue.unknown",
+  "errors.queue.too_large",
+  "errors.queue.unavailable",
   "errors.remote.address_unknown",
   "errors.remote.interface_unknown",
   "errors.scan.job.invalid",

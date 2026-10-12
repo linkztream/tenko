@@ -38,16 +38,16 @@ describe("quorumOfEvent", () => {
 });
 
 describe("queueRequestOf", () => {
-  it("keeps the path, the query without dry_run, the body and the revision", () => {
+  it("keeps the path below the API base, the raw query without dry_run, the body and the revision", () => {
     const body = { hostname: "web.example.test" };
-    const request = queueRequestOf({ method: "patch", url: "/api/v1/addresses/a1?dry_run=true&acknowledge=x", body, ifMatch: 41 });
-    expect(request).toEqual({ method: "patch", path: "/api/v1/addresses/a1", query: { acknowledge: "x" }, body, if_match: "41" });
+    const request = queueRequestOf({ method: "patch", url: "/api/v1/addresses/a1?dry_run=true&acknowledge=x,y", body, ifMatch: 41 });
+    expect(request).toEqual({ method: "PATCH", path: "/addresses/a1", query: "acknowledge=x%2Cy", body, if_match: "41" });
   });
 
   it("sends nulls for what the write did not have", () => {
     expect(queueRequestOf({ method: "delete", url: "/api/v1/hosts/h1", body: undefined, ifMatch: undefined })).toEqual({
-      method: "delete",
-      path: "/api/v1/hosts/h1",
+      method: "DELETE",
+      path: "/hosts/h1",
       query: null,
       body: null,
       if_match: null,

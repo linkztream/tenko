@@ -11,7 +11,7 @@ import { ErrorNotice } from "../components/Notice";
 import { formatDateTime, formatDuration, t } from "../i18n";
 import { now } from "../shell/status";
 import { listQueuedChanges, queueChange, queueRequestOf } from "./api";
-import { type QueueItem, CLUSTER_QUEUE_PATH } from "./model";
+import { type QueueItemView, CLUSTER_QUEUE_PATH, needsDecision } from "./model";
 import { partition, refusesWrites, type RefusedWrite } from "./partition";
 
 /** What `Tenko-Staleness: since=<RFC 3339>; revision=<n>` says. */
@@ -50,7 +50,7 @@ export function sinceText(since: string | null | undefined, at: number): string 
 export async function loadConflicts(): Promise<void> {
   try {
     const { items } = await listQueuedChanges();
-    partition.setConflicts(items.filter((c) => c.state === "conflict").length);
+    partition.setConflicts(items.filter(needsDecision).length);
   } catch {
     // No queue on this server yet, or no access: nothing to show.
   }
@@ -180,7 +180,7 @@ export function NoQuorumDialog(props: { refused: RefusedWrite; onClose: () => vo
   const since = () => props.refused.error.params.since;
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<unknown>(null);
-  const [queued, setQueued] = createSignal<QueueItem | null>(null);
+  const [queued, setQueued] = createSignal<QueueItemView | null>(null);
 
   const queue = async () => {
     if (busy()) return;

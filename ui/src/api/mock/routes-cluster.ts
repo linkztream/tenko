@@ -1,7 +1,7 @@
 // Mock routes of the `cluster` API area (OPS-03, OPS-26, WP3.1a and WP3.9): the members of the
 // controller cluster and their changes, the state digests, the quorum gate that refuses writes
-// while the controller is isolated, and the local queue of writes held back until the heal
-// (pending operations, see cluster/model.ts). The state is cluster-store.ts.
+// while the controller is isolated, and the local queue of writes held back until the heal. The
+// state is cluster-store.ts.
 //
 // Simplifications: a membership change completes at once (the answer carries a job id, no job
 // exists); a queued change is planned against nothing (its plan is empty); `Idempotency-Key`
@@ -16,41 +16,22 @@ import {
   type ClusterView,
   type DigestReport,
   type MemberDigest,
-  type QueueItem,
-  type QueuedChange,
+  type ChangeSummary,
+  type QueuedRequest,
+  type QueueItemView,
   type ReapplyResult,
-  type WriteMethod,
 } from "../../cluster/model";
 import { requireAdmin, requireSession } from "./auth";
-import { clusterState, clusterView, noQuorum, QUEUE_LIFETIME_MS, type StoredChange } from "./cluster-store";
+import { clusterState, clusterView, emptyPlan, noQuorum, QUEUE_LIFETIME_MS, type StoredChange } from "./cluster-store";
 import { commit, db } from "./db";
 import { nodeRef } from "./nodes-store";
-import { Problem, created, fail, noContent, ok, type ProblemBody, type Reply } from "./reply";
-import { paginate, route, type MockContext } from "./route";
+import { Problem, created, fail, noContent, ok, type ProblemBody } from "./reply";
+import { route } from "./route";
 import { iso, isUuid, randomId } from "./util";
 
-type Awaitable<T> = T | Promise<T>;
-type QueueMethod = "get" | "post" | "delete";
-interface QueueMockContext extends Omit<MockContext<QueueMethod, never>, "params" | "body" | "optionalBody"> {
-  readonly params: Record<"id", string>;
-  body(): Promise<Record<string, unknown>>;
-  optionalBody(): Promise<Record<string, unknown>>;
-}
-
-/**
- * The queue routes of WP3.9, typed by the UI's working model in `cluster/model.ts` rather than by
- * the document, until WP3.11c moves the views and this mock to the generated types.
- */
-function queueRoute(
-  method: QueueMethod,
-  path: string,
-  resolver: (ctx: QueueMockContext) => Awaitable<Reply<unknown> | Response>,
-): HttpHandler {
-  return route(method as never, path as never, resolver as never);
-}
-
-const WRITE_METHODS: readonly WriteMethod[] = ["post", "put", "patch", "delete"];
-const API_PREFIX = "/api/v1/";
+/** The methods the queue takes, as the server spells them. */
+const WRITE_METHODS: readonly string[] = ["POST", "PUT", "PATCH", "DELETE"];
+const API_BASE = "/api/v1";
 
 function invalidRequest(detail: string, field?: string): Problem {
   return new Problem("sys.invalid_request", { status: 400, detail, params: field ? { field } : {} });
@@ -245,7 +226,12 @@ const noQuorumGate = http.all("/api/v1/*", ({ request }) => {
   if (url.searchParams.get("dry_run") === "true" || exempt(url.pathname)) return undefined;
   if (!db.sessions.some((s) => s.id === db.currentSessionId)) return undefined;
   const quorum = clusterState().quorum;
-  const params = { since: quorum.since ?? iso(Date.now()), queueable: String(queueable(url.pathname)) };
+  const params = {
+    since: quorum.since ?? iso(Date.now()),
+    state: quorum.state,
+    revision: String(quorum.applied ?? db.revision),
+    queueable: String(queueable(url.pathname)),
+  };
   const body: ProblemBody = {
     type: "about:blank",
     status: 503,
@@ -256,7 +242,8 @@ const noQuorumGate = http.all("/api/v1/*", ({ request }) => {
   };
   return new Response(JSON.stringify(body), {
     status: 503,
-    headers: { "content-type": "application/problem+json", "Retry-After": "5" },
+    // The server asks to retry sooner while an election runs than while the controller is isolated.
+    headers: { "content-type": "application/problem+json", "Retry-After": quorum.state === "electing" ? "5" : "15" },
   });
 });
 
@@ -277,12 +264,13 @@ const KINDS: Record<string, string> = {
   hosts: "host",
 };
 
-function summaryOf(method: WriteMethod, path: string, body: unknown): NonNullable<QueueItem["summary"]> {
-  const segments = path.slice(API_PREFIX.length).split("/");
+function summaryOf(method: string, path: string, body: unknown): ChangeSummary {
+  const segments = path.slice(1).split("/");
   const collection = segments[0] ?? "";
-  const bulk = segments[segments.length - 1] === "bulk";
-  const action = bulk ? "bulk" : method === "post" ? "create" : method === "delete" ? "delete" : "update";
-  const kind = KINDS[collection] ?? collection.replace(/s$/, "");
+  const last = segments[segments.length - 1] ?? "";
+  const bulk = last === "bulk";
+  const action = bulk ? "bulk" : last === "restore" ? "restore" : method === "POST" ? "create" : method === "DELETE" ? "delete" : "update";
+  const kind = (KINDS[collection] ?? "address") as ChangeSummary["kind"];
   const fields = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   let key: string | undefined;
   for (const name of ["address", "cidr", "fqdn", "name"]) {
@@ -292,134 +280,108 @@ function summaryOf(method: WriteMethod, path: string, body: unknown): NonNullabl
       break;
     }
   }
-  const last = segments[segments.length - 1] ?? "";
-  if (key === undefined && !bulk && segments.length > 1 && !isUuid(last)) key = last;
+  if (key === undefined && !bulk && segments.length > 1 && !isUuid(last) && last !== "restore") key = last;
   return key === undefined ? { action, kind } : { action, kind, key };
 }
 
-function readRequest(body: Record<string, unknown>): { method: WriteMethod; path: string; query: Record<string, string> | null; payload: unknown; ifMatch: string | null } {
-  const method = typeof body.method === "string" ? (body.method.toLowerCase() as WriteMethod) : undefined;
-  if (!method || !WRITE_METHODS.includes(method)) throw invalidRequest("method must be post, put, patch or delete", "method");
-  if (typeof body.path !== "string" || !body.path.startsWith(API_PREFIX)) {
-    throw invalidRequest("path must be an API path below /api/v1/", "path");
+/** Checks a `QueuedRequest` as the server does; the path comes back relative to the API base. */
+function readRequest(body: QueuedRequest): QueuedRequest {
+  const method = typeof body.method === "string" ? body.method.trim().toUpperCase() : "";
+  if (!WRITE_METHODS.includes(method)) {
+    throw clusterProblem("queue.not_queueable", 422, `\`${body.method}\` cannot be queued`, { method: String(body.method) });
   }
-  const path = body.path.split("?")[0] ?? body.path;
-  let query: Record<string, string> | null = null;
-  if (body.query !== undefined && body.query !== null) {
-    if (typeof body.query !== "object" || Array.isArray(body.query)) throw invalidRequest("query must be an object of text values", "query");
-    query = {};
-    for (const [name, value] of Object.entries(body.query)) {
-      if (typeof value !== "string") throw invalidRequest("query must be an object of text values", "query");
-      query[name] = value;
-    }
-  }
+  if (typeof body.path !== "string" || !body.path.startsWith("/")) throw invalidRequest("path must be an API path", "path");
+  const raw = body.path.startsWith(`${API_BASE}/`) ? body.path.slice(API_BASE.length) : body.path;
+  const path = raw.split("?")[0] ?? raw;
+  if (body.query != null && typeof body.query !== "string") throw invalidRequest("query must be the query string", "query");
+  const query = body.query?.replace(/^\?/, "") || null;
   const ifMatch = typeof body.if_match === "string" ? body.if_match : null;
-  return { method, path, query, payload: body.body, ifMatch };
+  return { method, path, query, body: body.body ?? null, if_match: ifMatch };
 }
 
-const postQueue = queueRoute("post", "/api/v1/queue", async (ctx) => {
+const postQueue = route("post", "/api/v1/queue", async (ctx) => {
   const { user } = requireSession();
-  const request = readRequest((await ctx.body()) as Record<string, unknown>);
+  const request = readRequest(await ctx.body() as QueuedRequest);
   const st = clusterState();
   if (!noQuorum()) {
     throw clusterProblem("queue.not_isolated", 409, "the controller is in contact with a quorum; send the write itself", {
       state: st.quorum.state,
     });
   }
-  if (!queueable(request.path)) {
+  if (!queueable(`${API_BASE}${request.path}`)) {
     throw clusterProblem("queue.not_queueable", 422, "the queue takes only writes to IPAM objects", { path: request.path });
   }
   const now = Date.now();
-  const item: QueueItem = {
+  const item: QueueItemView = {
     id: randomId(),
     queued_at: iso(now),
     queued_on: st.node,
     method: request.method,
     path: request.path,
-    summary: summaryOf(request.method, request.path, request.payload),
-    plan: { changes: [], warnings: [] },
+    summary: summaryOf(request.method, request.path, request.body),
+    plan: emptyPlan(),
     expires_at: iso(now + QUEUE_LIFETIME_MS),
     state: "queued",
   };
-  st.queue.push({ item, author: user.id });
+  st.queue.push({ item, author: user.id, request });
   commit("ipam", { tables: ["ipam.queued_changes"] });
   return created(item);
 });
 
-const listQueue = queueRoute("get", "/api/v1/queue", (ctx) => {
-  requireSession();
-  return ok(paginate(clusterState().queue.map((s) => s.item), ctx.url, db.revision));
+const listQueue = route("get", "/api/v1/queue", () => {
+  const { user } = requireSession();
+  return ok({ items: clusterState().queue.filter((s) => s.author === user.id).map((s) => s.item) });
 });
 
-const cancelQueued = queueRoute("delete", "/api/v1/queue/{id}", (ctx) => {
-  requireSession();
+const cancelQueued = route("delete", "/api/v1/queue/{id}", (ctx) => {
+  const { user } = requireSession();
   const st = clusterState();
-  const index = st.queue.findIndex((s) => s.item.id === ctx.params.id);
-  if (index < 0) throw clusterProblem("queue.unknown", 404, "no queued write has this id", { id: ctx.params.id });
+  const index = st.queue.findIndex((s) => s.item.id === ctx.params.id && s.author === user.id);
+  if (index < 0) throw clusterProblem("queue.not_found", 404, "no queued change of yours has this id", { id: ctx.params.id });
+  if (st.queue[index]?.item.state === "applying") throw clusterProblem("queue.changed", 409, "the change is being applied");
   st.queue.splice(index, 1);
   commit("ipam", { tables: ["ipam.queued_changes"] });
   return noContent();
 });
 
-/** The queued change of the caller; 404 `queue.unknown` for another person's or an unknown id. */
+/** The settled change of the caller; 404 `queue.not_found` for another person's or an unknown id. */
 function ownChange(id: string, userId: string): StoredChange {
   const found = clusterState().changes.find((c) => c.change.id === id && c.author === userId);
-  if (!found) throw clusterProblem("queue.unknown", 404, "no queued change of yours has this id", { id });
+  if (!found) throw clusterProblem("queue.not_found", 404, "no queued change of yours has this id", { id });
   return found;
 }
 
-function requireConflict(change: QueuedChange): void {
-  if (change.state !== "conflict") {
-    throw clusterProblem("queue.not_conflict", 409, "the change is not in conflict", { state: change.state });
-  }
+/** Removes the record of a settled change, as a re-apply or a discard does. */
+function removeRecord(found: StoredChange): void {
+  const st = clusterState();
+  st.changes = st.changes.filter((c) => c !== found);
+  commit("ipam", { tables: ["ipam.queued_changes"] }, [found.change]);
 }
 
-const listConflicts = queueRoute("get", "/api/v1/queue/conflicts", (ctx) => {
+const listConflicts = route("get", "/api/v1/queue/conflicts", () => {
   const { user } = requireSession();
-  const own = clusterState()
+  const items = clusterState()
     .changes.filter((c) => c.author === user.id)
     .map((c) => c.change);
-  return ok(paginate(own, ctx.url, db.revision));
+  return ok({ items, revision: db.revision });
 });
 
-const reapply = queueRoute("post", "/api/v1/queue/conflicts/{id}/reapply", (ctx) => {
+const reapply = route("post", "/api/v1/queue/conflicts/{id}/reapply", (ctx) => {
   const { user } = requireSession();
   const found = ownChange(ctx.params.id, user.id);
-  const change = found.change;
+  if (found.change.state === "applied") throw clusterProblem("queue.changed", 409, "this change was applied already");
   if (ctx.query("dry_run") === "true") {
-    const answer: ReapplyResult = {
-      dry_run: true,
-      plan: {
-        base_revision: db.revision,
-        changes: [],
-        results: [],
-        summary: { counts: [], lines: [], mutations: 0, preconditions: 0, unacknowledged: [], warnings: {} },
-        warnings: [],
-      },
-      warnings: [],
-      revision: db.revision,
-    };
-    return ok(answer);
+    const answer: ReapplyResult = { dry_run: true, plan: emptyPlan(), warnings: [], revision: null };
+    return ok(answer as never);
   }
-  requireConflict(change);
-  const expected = ctx.ifMatch();
-  if (typeof expected === "number" && expected !== change.revision) fail("sys.store.precondition_failed");
-  change.state = "reapplied";
-  change.conflict = null;
-  change.job_id = randomId();
-  change.resolved_at = iso(Date.now());
-  commit("ipam", { tables: ["ipam.queued_changes"] }, [change]);
-  const answer: ReapplyResult = { dry_run: false, warnings: [], job_id: change.job_id, revision: change.revision };
-  return ok(answer);
+  removeRecord(found);
+  const answer: ReapplyResult = { dry_run: false, warnings: [], job_id: randomId(), revision: db.revision };
+  return ok(answer as never);
 });
 
-const discard = queueRoute("delete", "/api/v1/queue/conflicts/{id}", (ctx) => {
+const discard = route("delete", "/api/v1/queue/conflicts/{id}", (ctx) => {
   const { user } = requireSession();
-  const change = ownChange(ctx.params.id, user.id).change;
-  requireConflict(change);
-  change.state = "discarded";
-  change.resolved_at = iso(Date.now());
-  commit("ipam", { tables: ["ipam.queued_changes"] }, [change]);
+  removeRecord(ownChange(ctx.params.id, user.id));
   return noContent();
 });
 

@@ -12,11 +12,43 @@
       <unit id="audit_export.required.title">
         <segment><source>The profile requires an audit export</source></segment>
       </unit>
-      <unit id="audit_export.required.body">
-        <segment><source>The Hardened profile requires at least one sink that delivers (TGL-21). Add one, or repair the failing one.</source></segment>
+      <unit id="audit_export.failing.title">
+        <segment><source>Audit export is not keeping up</source></segment>
+      </unit>
+      <unit id="audit_export.warning.failing">
+        <notes><note category="description">sinks is a comma-separated list of sink names.</note></notes>
+        <segment><source>Sinks that fail or fall behind: {sinks}. Records wait on this installation until they deliver again.</source></segment>
+      </unit>
+      <unit id="audit_export.warning.required">
+        <segment><source>The profile requires an audit export (TGL-21) and no sink is enabled. Add a sink or switch one on.</source></segment>
       </unit>
       <unit id="audit_export.sinks.heading">
         <segment><source>Sinks</source></segment>
+      </unit>
+      <unit id="audit_export.policy.heading">
+        <segment><source>Policy</source></segment>
+      </unit>
+      <unit id="audit_export.policy.value">
+        <notes><note category="description">value is the name of the setting value, such as Required.</note></notes>
+        <segment><source>The security profile sets the audit export (TGL-21) to {value}.</source></segment>
+      </unit>
+      <unit id="audit_export.policy.met">
+        <segment><source>The requirement is met: a sink is enabled.</source></segment>
+      </unit>
+      <unit id="audit_export.policy.unmet">
+        <segment><source>The requirement is not met: no sink is enabled.</source></segment>
+      </unit>
+      <unit id="audit_export.field.alert_after">
+        <segment><source>Alarm after (seconds)</source></segment>
+      </unit>
+      <unit id="audit_export.field.alert_after_help">
+        <segment><source>How long a sink may fail before the alarm audit.export.failing is raised, from 10 to 86,400 seconds.</source></segment>
+      </unit>
+      <unit id="audit_export.error.alert_after">
+        <segment><source>Enter a whole number of seconds from 10 to 86,400.</source></segment>
+      </unit>
+      <unit id="audit_export.alert_after_saved">
+        <segment><source>Alarm delay saved</source></segment>
       </unit>
       <unit id="audit_export.add">
         <segment><source>Add sink</source></segment>
@@ -38,6 +70,10 @@
       </unit>
       <unit id="audit_export.col.format">
         <segment><source>Format</source></segment>
+      </unit>
+      <unit id="audit_export.col.delivered">
+        <notes><note category="description">Column: the sequence number of the last audit record handed to the sink.</note></notes>
+        <segment><source>Delivered</source></segment>
       </unit>
       <unit id="audit_export.col.state">
         <segment><source>State</source></segment>
@@ -86,11 +122,20 @@
       <unit id="audit_export.state.ok">
         <segment><source>Delivering</source></segment>
       </unit>
+      <unit id="audit_export.state.pending">
+        <notes><note category="description">State of a sink that has not delivered anything yet.</note></notes>
+        <segment><source>Not started</source></segment>
+      </unit>
+      <unit id="audit_export.state.behind">
+        <notes><note category="description">State of a sink with waiting records whose position has not moved for the alarm delay.</note></notes>
+        <segment><source>Falling behind</source></segment>
+      </unit>
       <unit id="audit_export.state.failing">
         <segment><source>Failing</source></segment>
       </unit>
-      <unit id="audit_export.state.idle">
-        <segment><source>Waiting</source></segment>
+      <unit id="audit_export.state.alarm">
+        <notes><note category="description">State of a sink that has failed for at least the alarm delay.</note></notes>
+        <segment><source>Alarm</source></segment>
       </unit>
       <unit id="audit_export.state.disabled">
         <segment><source>Paused</source></segment>
@@ -102,6 +147,10 @@
       <unit id="audit_export.delivered">
         <notes><note category="description">when is a relative time such as 4 seconds ago.</note></notes>
         <segment><source>last record {when}</source></segment>
+      </unit>
+      <unit id="audit_export.checkpoint">
+        <notes><note category="description">seq is a sequence number; when is a relative time such as 90 seconds ago.</note></notes>
+        <segment><source>checkpoint at record {seq}, {when}</source></segment>
       </unit>
       <unit id="audit_export.pause">
         <segment><source>Pause</source></segment>
@@ -148,22 +197,44 @@
       <unit id="audit_export.field.port">
         <segment><source>Port</source></segment>
       </unit>
+      <unit id="audit_export.field.facility">
+        <notes><note category="description">The syslog facility of the messages; the values are the protocol names and stay as they are.</note></notes>
+        <segment><source>Facility</source></segment>
+      </unit>
+      <unit id="audit_export.field.server_name">
+        <segment><source>Name in the receiver's certificate</source></segment>
+      </unit>
+      <unit id="audit_export.field.server_name_help">
+        <segment><source>Leave empty to expect the receiver name above.</source></segment>
+      </unit>
       <unit id="audit_export.field.ca_pem">
         <segment><source>Certificate authority of the receiver (PEM)</source></segment>
       </unit>
       <unit id="audit_export.field.ca_pem_help">
         <segment><source>Leave empty to trust the certificate authorities of the controller's system.</source></segment>
       </unit>
-      <unit id="audit_export.field.client_certificate">
-        <segment><source>Present the controller's certificate to the receiver</source></segment>
+      <unit id="audit_export.field.client_cert_pem">
+        <segment><source>Client certificate chain (PEM)</source></segment>
       </unit>
-      <unit id="audit_export.field.path">
-        <segment><source>File</source></segment>
+      <unit id="audit_export.field.client_cert_pem_help">
+        <segment><source>For receivers that require client authentication; leaf first. Needs the secret below.</source></segment>
       </unit>
-      <unit id="audit_export.field.path_help">
-        <segment><source>An absolute path; the same on every controller.</source></segment>
+      <unit id="audit_export.field.client_key">
+        <segment><source>Secret with the client key</source></segment>
       </unit>
-      <unit id="audit_export.field.keep_files">
+      <unit id="audit_export.field.client_key_help">
+        <segment><source>The id of the operator secret that holds the private key in PEM. It is read from the vault each time the sink connects.</source></segment>
+      </unit>
+      <unit id="audit_export.field.file">
+        <segment><source>File name</source></segment>
+      </unit>
+      <unit id="audit_export.field.file_help">
+        <segment><source>A plain file name in the export directory of the controller; letters, digits, hyphen, underscore and dot.</source></segment>
+      </unit>
+      <unit id="audit_export.field.max_mib">
+        <segment><source>Rotate at (MiB)</source></segment>
+      </unit>
+      <unit id="audit_export.field.keep">
         <segment><source>Rotated files to keep</source></segment>
       </unit>
       <unit id="audit_export.error.name">
@@ -175,8 +246,17 @@
       <unit id="audit_export.error.port">
         <segment><source>Enter a port from 1 to 65535.</source></segment>
       </unit>
-      <unit id="audit_export.error.path">
-        <segment><source>Enter the path of the file.</source></segment>
+      <unit id="audit_export.error.client_key">
+        <segment><source>Give the client certificate and the id of the secret with its key together, or neither.</source></segment>
+      </unit>
+      <unit id="audit_export.error.file">
+        <segment><source>Enter a plain file name: letters, digits, hyphen, underscore and dot, not starting with a dot.</source></segment>
+      </unit>
+      <unit id="audit_export.error.max_mib">
+        <segment><source>Enter a size from 0.0625 MiB (64 KiB) to 1,048,576 MiB (1 TiB).</source></segment>
+      </unit>
+      <unit id="audit_export.error.keep">
+        <segment><source>Enter a whole number from 0 to 1000.</source></segment>
       </unit>
       <unit id="audit_export.udp_warning">
         <segment><source>UDP has no delivery receipt: a record lost on the way is only visible as a gap in the sequence numbers.</source></segment>
@@ -185,10 +265,10 @@
         <segment><source>Send test record</source></segment>
       </unit>
       <unit id="audit_export.test_ok">
-        <segment><source>The receiver accepted the test record.</source></segment>
+        <segment><source>The test record was handed to the sink in {ms} ms.</source></segment>
       </unit>
       <unit id="audit_export.test_failed">
-        <segment><source>The test record was not delivered: {detail}</source></segment>
+        <segment><source>The test record was not delivered ({ms} ms): {detail}</source></segment>
       </unit>
       <unit id="audit_export.verify.heading">
         <segment><source>Check an export</source></segment>
@@ -196,6 +276,56 @@
       <unit id="audit_export.verify.body">
         <segment><source>A JSON export carries the canonical bytes of every record. This command checks its chain offline:</source></segment>
       </unit>
+      <unit id="errors.audit.export.required">
+        <notes><note category="description">Also shown when a change would leave no enabled sink while the profile requires one.</note></notes>
+        <segment><source>The profile requires an audit export. Enable an export sink first, then switch the profile.</source></segment>
+      </unit>
+      <unit id="errors.audit.export.conflict">
+        <segment><source>The audit export settings changed in the meantime. The page shows the current ones; check them and try again.</source></segment>
+      </unit>
+      <unit id="errors.audit.export.invalid">
+        <segment><source>The audit export settings are not valid. Check the marked fields.</source></segment>
+      </unit>
+      <unit id="errors.audit.export.not_found">
+        <segment><source>The sink no longer exists. Reload the page.</source></segment>
+      </unit>
+      <unit id="errors.audit.export.name">
+        <segment><source>Enter a name of 1 to 64 characters without control characters.</source></segment>
+      </unit>
+      <unit id="errors.audit.export.duplicate">
+        <segment><source>Two sinks have the same name or id. Names are compared without regard to case.</source></segment>
+      </unit>
+      <unit id="errors.audit.export.unknown_sink">
+        <segment><source>The sink is not known to the server. Reload the page.</source></segment>
+      </unit>
+      <unit id="errors.audit.export.too_many">
+        <segment><source>At most 8 sinks are allowed.</source></segment>
+      </unit>
+      <unit id="errors.audit.export.host">
+        <segment><source>Enter a host name or an IPv4 or IPv6 address.</source></segment>
+      </unit>
+      <unit id="errors.audit.export.port">
+        <segment><source>Enter a port from 1 to 65535.</source></segment>
+      </unit>
+      <unit id="errors.audit.export.pem">
+        <segment><source>Enter one or more certificates in PEM, each starting with -----BEGIN CERTIFICATE-----.</source></segment>
+      </unit>
+      <unit id="errors.audit.export.client_key">
+        <segment><source>Give the client certificate and the secret with its key together, or neither.</source></segment>
+      </unit>
+      <unit id="errors.audit.export.tls_unused">
+        <segment><source>TLS options only apply to the TLS transport. Clear them or choose TLS.</source></segment>
+      </unit>
+      <unit id="errors.audit.export.file">
+        <segment><source>Enter a plain file name: letters, digits, hyphen, underscore and dot, not starting with a dot.</source></segment>
+      </unit>
+      <unit id="errors.audit.export.range">
+        <segment><source>The value is out of range.</source></segment>
+      </unit>
+      <unit id="errors.audit.export.test_target">
+        <segment><source>A test needs either a stored sink or a sink from the form.</source></segment>
+      </unit>
+
     </group>
   </file>
 </xliff>

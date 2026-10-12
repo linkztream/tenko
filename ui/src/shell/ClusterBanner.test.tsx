@@ -60,8 +60,7 @@ describe("ClusterBanner", () => {
     server.use(
       http.get("/api/v1/queue/conflicts", () =>
         HttpResponse.json({
-          items: [{ id: "c1", state: "conflict", queued_at: SINCE, queued_on: 1, method: "patch", path: "/api/v1/addresses/a1", revision: 3 }],
-          next_cursor: null,
+          items: [{ id: "c1", state: "conflict", queued_at: SINCE, queued_on: 1, summary: { action: "update", kind: "address" }, revision: 3 }],
           revision: 3,
         }),
       ),
@@ -94,8 +93,8 @@ describe("ClusterBanner", () => {
             id: "0190d1c2-0000-7000-8000-0000000000q1",
             queued_at: SINCE,
             queued_on: 1,
-            method: "patch",
-            path: "/api/v1/addresses/a1",
+            method: "PATCH",
+            path: "/addresses/a1",
             expires_at: "2026-10-18T08:00:00Z",
             state: "queued",
           },
@@ -113,7 +112,7 @@ describe("ClusterBanner", () => {
     expect(await axeViolations()).toEqual([]);
     fireEvent.click(screen.getByTestId("no-quorum-queue"));
     await screen.findByTestId("no-quorum-queued");
-    expect(posted).toEqual({ method: "patch", path: "/api/v1/addresses/a1", query: null, body: { hostname: "web.example.test" }, if_match: "41" });
+    expect(posted).toEqual({ method: "PATCH", path: "/addresses/a1", query: null, body: { hostname: "web.example.test" }, if_match: "41" });
     fireEvent.click(screen.getByTestId("no-quorum-close"));
     await waitFor(() => expect(dialog.isConnected).toBe(false));
     expect(partition.refused()).toBeNull();

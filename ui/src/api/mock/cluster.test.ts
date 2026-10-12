@@ -1,13 +1,12 @@
 // The controller cluster, the quorum gate and the local queue of the mock API, through `fetch`
 // against the msw server, with the seed of cluster-store.ts (documentation ranges only).
 import { beforeEach, describe, expect, it } from "vitest";
-import type { ClusterView, DigestReport, QueueItem, QueuedChange, ReapplyResult, StepDown } from "../../cluster/model";
+import type { ClusterView, DigestReport, QueuedChangeList, QueueItemView, QueueList, ReapplyResult, StepDown } from "../../cluster/model";
 import { startSession } from "./auth";
 import { CLUSTER_IDS, clusterState, mockCluster } from "./cluster-store";
 import { findUserByName, resetMockDb, subscribeEvents, type MockEvent } from "./db";
 import { MOCK_VERSION } from "./fixtures";
 
-type Page<T> = { items: T[]; next_cursor?: string | null; revision: number };
 interface Problem {
   code: string;
   status: number;
@@ -32,7 +31,7 @@ const del = <T>(path: string) => call<T>("DELETE", path);
 
 const V = "/api/v1";
 const { leader: LEADER, voterA, voterB, learner } = CLUSTER_IDS;
-const ADDRESS = `${V}/addresses/${CLUSTER_IDS.address}`;
+const ADDRESS = `/addresses/${CLUSTER_IDS.address}`;
 
 /** Signs sam in with the given role instead of alex. */
 function signInSamAs(role: "viewer" | "operator"): void {
@@ -51,8 +50,8 @@ function listen(): { events: MockEvent[]; stop: () => void } {
 }
 
 /** Queues a patch of an address; the quorum must be lost already. */
-function queueAddress(body: unknown = { address: "192.0.2.50", comment: "moved" }): Promise<Answer<QueueItem>> {
-  return post<QueueItem>(`${V}/queue`, { method: "patch", path: ADDRESS, body });
+function queueAddress(body: unknown = { address: "192.0.2.50", comment: "moved" }): Promise<Answer<QueueItemView>> {
+  return post<QueueItemView>(`${V}/queue`, { method: "PATCH", path: ADDRESS, body });
 }
 
 beforeEach(() => {
@@ -203,11 +202,13 @@ describe("the quorum gate", () => {
     const answer = await post<Problem>(`${V}/prefixes`, { cidr: "192.0.2.0/25" });
     expect(answer.status).toBe(503);
     expect(answer.headers.get("content-type")).toContain("application/problem+json");
-    expect(answer.headers.get("retry-after")).toBe("5");
+    expect(answer.headers.get("retry-after")).toBe("15");
     expect(answer.body.code).toBe("cluster.no_quorum");
     expect(answer.body.params.queueable).toBe("true");
+    expect(answer.body.params.state).toBe("isolated");
+    expect(Number(answer.body.params.revision)).toBeGreaterThan(0);
     expect(Date.parse(answer.body.params.since ?? "")).not.toBeNaN();
-    const item = await call<Problem>("PATCH", ADDRESS, { json: {} });
+    const item = await call<Problem>("PATCH", `${V}${ADDRESS}`, { json: {} });
     expect([item.status, item.body.params.queueable]).toEqual([503, "true"]);
     const bulk = await post<Problem>(`${V}/hosts/bulk`, {});
     expect([bulk.status, bulk.body.params.queueable]).toEqual([503, "true"]);
@@ -218,6 +219,7 @@ describe("the quorum gate", () => {
     for (const path of [`${V}/cluster/step-down`, `${V}/imports`, `${V}/vlans/provision`]) {
       const answer = await post<Problem>(path, {});
       expect([answer.status, answer.body.params.queueable], path).toEqual([503, "false"]);
+      expect([answer.headers.get("retry-after"), answer.body.params.state], path).toEqual(["5", "electing"]);
     }
   });
 
@@ -226,7 +228,7 @@ describe("the quorum gate", () => {
     expect((await get<ClusterView>(`${V}/cluster/members`)).status).toBe(200);
     const dry = await post<Problem>(`${V}/prefixes?dry_run=true`, { cidr: "192.0.2.0/25" });
     expect(dry.status).not.toBe(503);
-    expect((await get<Page<QueueItem>>(`${V}/queue`)).status).toBe(200);
+    expect((await get<QueueList>(`${V}/queue`)).status).toBe(200);
     const login = await post<Problem>(`${V}/auth/login/password`, {});
     expect(login.status).not.toBe(503);
   });
@@ -245,25 +247,29 @@ describe("the local queue", () => {
     const queued = await queueAddress();
     expect(queued.status).toBe(201);
     expect(queued.body).toMatchObject({
-      method: "patch",
+      method: "PATCH",
       path: ADDRESS,
       queued_on: LEADER,
       state: "queued",
       summary: { action: "update", kind: "address", key: "192.0.2.50" },
       plan: { changes: [], warnings: [] },
     });
+    // The API base in front of the path is accepted and dropped; the method in any case.
+    const prefixed = await post<QueueItemView>(`${V}/queue`, { method: "patch", path: `${V}${ADDRESS}`, query: "acknowledge=x", body: {} });
+    expect([prefixed.body.method, prefixed.body.path]).toEqual(["PATCH", ADDRESS]);
+    expect((await del(`${V}/queue/${prefixed.body.id}`)).status).toBe(204);
     expect(queued.body.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(Date.parse(queued.body.expires_at) - Date.parse(queued.body.queued_at)).toBe(7 * 86_400_000);
-    const created = await post<QueueItem>(`${V}/queue`, { method: "post", path: `${V}/prefixes`, body: { cidr: "198.51.100.0/24" } });
+    const created = await post<QueueItemView>(`${V}/queue`, { method: "POST", path: "/prefixes", body: { cidr: "198.51.100.0/24" } });
     expect(created.body.summary).toEqual({ action: "create", kind: "prefix", key: "198.51.100.0/24" });
-    const bulk = await post<QueueItem>(`${V}/queue`, { method: "post", path: `${V}/vlans/bulk`, body: {} });
+    const bulk = await post<QueueItemView>(`${V}/queue`, { method: "POST", path: "/vlans/bulk", body: {} });
     expect(bulk.body.summary).toEqual({ action: "bulk", kind: "vlan" });
-    const list = await get<Page<QueueItem>>(`${V}/queue`);
+    const list = await get<QueueList>(`${V}/queue`);
     expect(list.body.items.map((i) => i.id)).toEqual([queued.body.id, created.body.id, bulk.body.id]);
     expect((await del(`${V}/queue/${created.body.id}`)).status).toBe(204);
     const missing = await del<Problem>(`${V}/queue/${created.body.id}`);
-    expect([missing.status, missing.body.code]).toEqual([404, "queue.unknown"]);
-    expect((await get<Page<QueueItem>>(`${V}/queue`)).body.items).toHaveLength(2);
+    expect([missing.status, missing.body.code]).toEqual([404, "queue.not_found"]);
+    expect((await get<QueueList>(`${V}/queue`)).body.items).toHaveLength(2);
   });
 
   it("refuses to queue while the quorum holds", async () => {
@@ -274,11 +280,11 @@ describe("the local queue", () => {
 
   it("refuses what the queue does not take", async () => {
     mockCluster.setQuorum("isolated");
-    const other = await post<Problem>(`${V}/queue`, { method: "post", path: `${V}/imports`, body: {} });
+    const other = await post<Problem>(`${V}/queue`, { method: "POST", path: "/imports", body: {} });
     expect([other.status, other.body.code]).toEqual([422, "queue.not_queueable"]);
-    const method = await post<Problem>(`${V}/queue`, { method: "get", path: `${V}/prefixes` });
-    expect(method.status).toBe(400);
-    const path = await post<Problem>(`${V}/queue`, { method: "post", path: "/elsewhere" });
+    const method = await post<Problem>(`${V}/queue`, { method: "GET", path: "/prefixes" });
+    expect([method.status, method.body.code]).toEqual([422, "queue.not_queueable"]);
+    const path = await post<Problem>(`${V}/queue`, { method: "POST", path: "elsewhere" });
     expect(path.status).toBe(400);
   });
 });
@@ -290,10 +296,11 @@ describe("the heal", () => {
     await queueAddress({ comment: "again" });
     mockCluster.heal({ conflicts: false });
     expect((await get<ClusterView>(`${V}/cluster/members`)).body.quorum.state).toBe("healthy");
-    expect((await get<Page<QueueItem>>(`${V}/queue`)).body.items).toEqual([]);
-    const changes = (await get<Page<QueuedChange>>(`${V}/queue/conflicts`)).body.items;
-    expect(changes.map((c) => c.state)).toEqual(["applied", "applied"]);
-    expect(changes.every((c) => c.job_id && c.resolved_at)).toBe(true);
+    expect((await get<QueueList>(`${V}/queue`)).body.items).toEqual([]);
+    const list = (await get<QueuedChangeList>(`${V}/queue/conflicts`)).body;
+    expect(list.revision).toBeGreaterThan(0);
+    expect(list.items.map((c) => c.state)).toEqual(["applied", "applied"]);
+    expect(list.items.every((c) => c.settled_at && c.request.method === "PATCH" && !c.conflict)).toBe(true);
   });
 
   it("applies the first item and conflicts the others", async () => {
@@ -301,16 +308,26 @@ describe("the heal", () => {
     await queueAddress();
     await queueAddress({ comment: "again" });
     mockCluster.heal({ conflicts: true });
-    const changes = (await get<Page<QueuedChange>>(`${V}/queue/conflicts`)).body.items;
+    const changes = (await get<QueuedChangeList>(`${V}/queue/conflicts`)).body.items;
     expect(changes.map((c) => c.state)).toEqual(["applied", "conflict"]);
-    expect(changes[0]?.job_id).toBeTruthy();
-    expect(changes[1]?.conflict).toEqual({ code: "ipam.plan.stale", params: {} });
+    expect(changes[1]?.conflict).toMatchObject({ code: "queue.plan_changed", status: 409 });
+    expect(changes[1]?.current_plan).toBeTruthy();
+  });
+
+  it("settles an expired item as an expired record", async () => {
+    mockCluster.setQuorum("isolated");
+    const queued = await queueAddress();
+    const stored = clusterState().queue.find((s) => s.item.id === queued.body.id);
+    if (stored) stored.item.state = "expired";
+    mockCluster.heal({ conflicts: false });
+    const changes = (await get<QueuedChangeList>(`${V}/queue/conflicts`)).body.items;
+    expect(changes.map((c) => [c.state, c.conflict?.code])).toEqual([["expired", "queue.expired"]]);
   });
 
   it("seeds one conflict when the queue was empty", async () => {
     mockCluster.setQuorum("isolated");
     mockCluster.heal({ conflicts: true });
-    const changes = (await get<Page<QueuedChange>>(`${V}/queue/conflicts`)).body.items;
+    const changes = (await get<QueuedChangeList>(`${V}/queue/conflicts`)).body.items;
     expect(changes).toHaveLength(1);
     expect(changes[0]).toMatchObject({ state: "conflict", summary: { action: "update", kind: "address", key: "192.0.2.50" } });
   });
@@ -320,17 +337,17 @@ describe("the heal", () => {
     await queueAddress();
     mockCluster.heal({ conflicts: true });
     signInSamAs("operator");
-    expect((await get<Page<QueuedChange>>(`${V}/queue/conflicts`)).body.items).toEqual([]);
+    expect((await get<QueuedChangeList>(`${V}/queue/conflicts`)).body.items).toEqual([]);
     const id = clusterState().changes[0]?.change.id;
     expect((await del<Problem>(`${V}/queue/conflicts/${id}`)).status).toBe(404);
   });
 });
 
 describe("resolving a conflict", () => {
-  async function conflict(): Promise<QueuedChange> {
+  async function conflict(): Promise<QueuedChangeList["items"][number]> {
     mockCluster.setQuorum("isolated");
     mockCluster.heal({ conflicts: true });
-    const first = (await get<Page<QueuedChange>>(`${V}/queue/conflicts`)).body.items[0];
+    const first = (await get<QueuedChangeList>(`${V}/queue/conflicts`)).body.items[0];
     if (!first) throw new Error("no conflict");
     return first;
   }
@@ -342,28 +359,30 @@ describe("resolving a conflict", () => {
     expect(dry.status).toBe(200);
     expect(dry.body).toMatchObject({ dry_run: true, warnings: [], plan: { changes: [], warnings: [] } });
     expect(clusterState().changes[0]?.change.state).toBe("conflict");
-    const stale = await call<Problem>("POST", path, { headers: { "If-Match": `"${change.revision + 100}"` } });
-    expect(stale.status).toBe(412);
-    const applied = await call<ReapplyResult>("POST", path, { headers: { "If-Match": `"${change.revision}"` } });
+    const applied = await post<ReapplyResult>(path);
     expect(applied.status).toBe(200);
     expect(applied.body).toMatchObject({ dry_run: false, warnings: [] });
-    expect(applied.body.job_id).toBeTruthy();
-    const after = (await get<Page<QueuedChange>>(`${V}/queue/conflicts`)).body.items[0];
-    expect(after).toMatchObject({ state: "reapplied", job_id: applied.body.job_id });
-    expect(after?.resolved_at).toBeTruthy();
-    expect(after?.revision).toBeGreaterThan(change.revision);
+    // A re-applied change leaves the list: its record is gone.
+    expect((await get<QueuedChangeList>(`${V}/queue/conflicts`)).body.items).toEqual([]);
     const again = await post<Problem>(path);
-    expect([again.status, again.body.code]).toEqual([409, "queue.not_conflict"]);
+    expect([again.status, again.body.code]).toEqual([404, "queue.not_found"]);
   });
 
   it("discards", async () => {
     const change = await conflict();
     expect((await del(`${V}/queue/conflicts/${change.id}`)).status).toBe(204);
-    const after = (await get<Page<QueuedChange>>(`${V}/queue/conflicts`)).body.items[0];
-    expect(after?.state).toBe("discarded");
-    expect(after?.resolved_at).toBeTruthy();
-    expect((await del<Problem>(`${V}/queue/conflicts/${change.id}`)).status).toBe(409);
-    expect((await del<Problem>(`${V}/queue/conflicts/0190d1c2-0000-7000-8000-00000c1000ff`)).body.code).toBe("queue.unknown");
+    expect((await get<QueuedChangeList>(`${V}/queue/conflicts`)).body.items).toEqual([]);
+    expect((await del<Problem>(`${V}/queue/conflicts/${change.id}`)).status).toBe(404);
+    expect((await del<Problem>(`${V}/queue/conflicts/0190d1c2-0000-7000-8000-00000c1000ff`)).body.code).toBe("queue.not_found");
+  });
+
+  it("refuses to re-apply an applied change", async () => {
+    mockCluster.setQuorum("isolated");
+    await queueAddress();
+    mockCluster.heal({ conflicts: false });
+    const applied = clusterState().changes[0]?.change;
+    const again = await post<Problem>(`${V}/queue/conflicts/${applied?.id}/reapply`);
+    expect([again.status, again.body.code]).toEqual([409, "queue.changed"]);
   });
 });
 

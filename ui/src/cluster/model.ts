@@ -3,11 +3,10 @@
 // cluster page and the partition views follow (role and health words, the previews of a
 // promotion, a removal and a step-down, the digest comparison).
 //
-// The cluster shapes are the generated ones of the OpenAPI document (WP3.1a). The queue shapes
-// are the working contract of WP3.9: until the document describes those routes they are
-// pending operations (api/pending.ts); the type check names each entry to delete once it does.
+// The shapes are the generated ones of the OpenAPI document: the cluster of WP3.1a and the
+// queue of WP3.9.
 import type { components } from "../api/generated/schema";
-import type { PlanView, PlanWarning } from "../api/types";
+import type { WriteResponse } from "../api/types";
 import { formatDuration, formatNumber, t } from "../i18n";
 
 // ---------------------------------------------------------------------------------
@@ -34,93 +33,43 @@ export type MemberDigest = S["MemberDigest"];
 export type DigestReport = S["DigestReport"];
 
 // ---------------------------------------------------------------------------------
-// Wire shapes: queued changes (WP3.9 working contract)
+// Wire shapes: queued changes (WP3.9, generated from the OpenAPI document)
 
-// The queue shapes below are the UI's working model of WP3.9's contract. The document describes
-// the routes now (`list_queue`, `queue_change`, `withdraw_queued_change`, `list_queued_changes`,
-// `reapply_queued_change`, `discard_queued_change`); WP3.11c moves the views to the generated types.
-export type WriteMethod = "post" | "put" | "patch" | "delete";
-
-/** Body of `POST /queue`: the refused write as the person sent it. */
-export interface QueueRequest {
-  method: WriteMethod;
-  /** The API path without the query, parameters filled in (`/api/v1/addresses/<id>`). */
-  path: string;
-  /** The query of the request without `dry_run` (`acknowledge` stays). */
-  query?: Record<string, string> | null;
-  body?: unknown;
-  /** The revision of `If-Match`, `*`, or none. */
-  if_match?: string | null;
-}
-
+/** Body of `POST /queue` as the document spells it; its `body` is any JSON. */
+export type QueuedRequest = S["QueuedRequest"];
+/** The refused write as the person sent it, with the JSON body of the request as it is. */
+export type QueueRequest = Omit<QueuedRequest, "body"> & { body?: unknown };
 /** What a queued change does, for its line in the lists. */
-export interface QueueSummary {
-  /** `create`, `update`, `delete` or `bulk`. */
-  action: string;
-  /** The object kind (`address`, `prefix`, `host`, ...). */
-  kind: string;
-  /** Its readable key (an address, a CIDR, a name), when there is one. */
-  key?: string | null;
-}
+export type ChangeSummary = S["ChangeSummary"];
+/** `create`, `update`, `delete`, `restore` or `bulk`. */
+export type SummaryAction = S["SummaryAction"];
+/** `queued` (waits for the heal), `applying` (the heal applies it) or `expired`. */
+export type ItemState = S["ItemState"];
+export const ITEM_STATES: readonly ItemState[] = ["queued", "applying", "expired"];
+/** An item of the local queue of an isolated controller (`GET /queue`, the answer of `POST /queue`). */
+export type QueueItemView = S["QueueItemView"];
+/** `GET /queue`: the caller's items on this controller, oldest first. */
+export type QueueList = S["QueueList"];
+/** What became of a queued change after the heal: `applied`, `conflict` or `expired`. */
+export type ChangeState = S["ChangeState"];
+export const CHANGE_STATES: readonly ChangeState[] = ["applied", "conflict", "expired"];
+/** Why a queued change did not apply by itself (`queue.plan_changed`, a planner or authorization error). */
+export type Conflict = S["Conflict"];
+/** One settled queued change of the caller, with the revision of its record (`GET /queue/conflicts`). */
+export type QueuedChangeView = S["QueuedChangeView"];
+/** `GET /queue/conflicts`. */
+export type QueuedChangeList = S["QueuedChangeList"];
 
-/** The plan of a queued change against the local copy: the members the plan preview shows. */
-export interface QueuePlan {
-  changes?: unknown[];
-  warnings?: { code: string; params?: Record<string, string> }[];
-}
+/**
+ * The answer of a re-apply: the document leaves it open because it is the answer of the endpoint
+ * the change re-applies (`WriteResponse` of the object, or `BulkResponse`). The members the views
+ * read are the ones both have.
+ */
+export type ReapplyResult = Pick<WriteResponse<unknown>, "dry_run" | "plan" | "warnings" | "job_id" | "revision">;
 
-export type QueueItemState = "queued" | "draining" | "expired";
-
-/** An item of the local queue of an isolated controller (`GET /queue`). */
-export interface QueueItem {
-  id: string;
-  queued_at: string;
-  /** The controller that holds the queue. */
-  queued_on: number;
-  method: WriteMethod;
-  path: string;
-  summary?: QueueSummary | null;
-  plan?: QueuePlan | null;
-  expires_at: string;
-  state: QueueItemState;
-}
-
-/** What became of a queued change after the heal (`ipam.queued_changes`). */
-export type QueuedChangeState = "conflict" | "applied" | "reapplied" | "discarded";
-export const QUEUED_CHANGE_STATES: readonly QueuedChangeState[] = ["conflict", "applied", "reapplied", "discarded"];
-
-/** Why a queued change did not apply by itself. */
-export interface QueueConflict {
-  /** The problem code of the re-plan (`ipam.plan.stale`, `ipam.address.taken`, ...). */
-  code: string;
-  detail?: string | null;
-  params?: Record<string, string> | null;
-}
-
-/** One queued change after the heal, shown to its author (`GET /queue/conflicts`). */
-export interface QueuedChange {
-  id: string;
-  state: QueuedChangeState;
-  queued_at: string;
-  queued_on: number;
-  method: WriteMethod;
-  path: string;
-  summary?: QueueSummary | null;
-  /** Set while `conflict`. */
-  conflict?: QueueConflict | null;
-  /** The job that applied it (`applied`, `reapplied`). */
-  job_id?: string | null;
-  resolved_at?: string | null;
-  revision: number;
-}
-
-/** Answer of a re-apply: an IPAM write answer (dry run first, then with the acknowledged codes). */
-export interface ReapplyResult {
-  dry_run: boolean;
-  plan?: PlanView | null;
-  warnings: PlanWarning[];
-  job_id?: string | null;
-  revision?: number | null;
+/** Whether a settled change waits for the person: a conflict, or a change that expired before the heal. */
+export function needsDecision(change: Pick<QueuedChangeView, "state">): boolean {
+  return change.state !== "applied";
 }
 
 // ---------------------------------------------------------------------------------

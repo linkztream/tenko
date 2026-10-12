@@ -12,11 +12,43 @@
       <unit id="audit_export.required.title">
         <segment><source>The profile requires an audit export</source><target>Profilen kräver granskningsexport</target></segment>
       </unit>
-      <unit id="audit_export.required.body">
-        <segment><source>The Hardened profile requires at least one sink that delivers (TGL-21). Add one, or repair the failing one.</source><target>Profilen Hardened kräver minst ett exportmål som levererar (TGL-21). Lägg till ett eller åtgärda det som misslyckas.</target></segment>
+      <unit id="audit_export.failing.title">
+        <segment><source>Audit export is not keeping up</source><target>Granskningsexporten hänger inte med</target></segment>
+      </unit>
+      <unit id="audit_export.warning.failing">
+        <notes><note category="description">sinks is a comma-separated list of sink names.</note></notes>
+        <segment><source>Sinks that fail or fall behind: {sinks}. Records wait on this installation until they deliver again.</source><target>Exportmål som misslyckas eller ligger efter: {sinks}. Posterna väntar på den här installationen tills de levereras igen.</target></segment>
+      </unit>
+      <unit id="audit_export.warning.required">
+        <segment><source>The profile requires an audit export (TGL-21) and no sink is enabled. Add a sink or switch one on.</source><target>Profilen kräver granskningsexport (TGL-21) och inget exportmål är aktiverat. Lägg till ett exportmål eller aktivera ett.</target></segment>
       </unit>
       <unit id="audit_export.sinks.heading">
         <segment><source>Sinks</source><target>Exportmål</target></segment>
+      </unit>
+      <unit id="audit_export.policy.heading">
+        <segment><source>Policy</source><target>Policy</target></segment>
+      </unit>
+      <unit id="audit_export.policy.value">
+        <notes><note category="description">value is the name of the setting value, such as Required.</note></notes>
+        <segment><source>The security profile sets the audit export (TGL-21) to {value}.</source><target>Säkerhetsprofilen ställer in granskningsexporten (TGL-21) på {value}.</target></segment>
+      </unit>
+      <unit id="audit_export.policy.met">
+        <segment><source>The requirement is met: a sink is enabled.</source><target>Kravet är uppfyllt: ett exportmål är aktiverat.</target></segment>
+      </unit>
+      <unit id="audit_export.policy.unmet">
+        <segment><source>The requirement is not met: no sink is enabled.</source><target>Kravet är inte uppfyllt: inget exportmål är aktiverat.</target></segment>
+      </unit>
+      <unit id="audit_export.field.alert_after">
+        <segment><source>Alarm after (seconds)</source><target>Larm efter (sekunder)</target></segment>
+      </unit>
+      <unit id="audit_export.field.alert_after_help">
+        <segment><source>How long a sink may fail before the alarm audit.export.failing is raised, from 10 to 86,400 seconds.</source><target>Hur länge ett exportmål får misslyckas innan larmet audit.export.failing utlöses, från 10 till 86 400 sekunder.</target></segment>
+      </unit>
+      <unit id="audit_export.error.alert_after">
+        <segment><source>Enter a whole number of seconds from 10 to 86,400.</source><target>Ange ett helt antal sekunder från 10 till 86 400.</target></segment>
+      </unit>
+      <unit id="audit_export.alert_after_saved">
+        <segment><source>Alarm delay saved</source><target>Larmfördröjningen sparades</target></segment>
       </unit>
       <unit id="audit_export.add">
         <segment><source>Add sink</source><target>Lägg till exportmål</target></segment>
@@ -38,6 +70,10 @@
       </unit>
       <unit id="audit_export.col.format">
         <segment><source>Format</source><target>Format</target></segment>
+      </unit>
+      <unit id="audit_export.col.delivered">
+        <notes><note category="description">Column: the sequence number of the last audit record handed to the sink.</note></notes>
+        <segment><source>Delivered</source><target>Levererat</target></segment>
       </unit>
       <unit id="audit_export.col.state">
         <segment><source>State</source><target>Status</target></segment>
@@ -86,11 +122,20 @@
       <unit id="audit_export.state.ok">
         <segment><source>Delivering</source><target>Levererar</target></segment>
       </unit>
+      <unit id="audit_export.state.pending">
+        <notes><note category="description">State of a sink that has not delivered anything yet.</note></notes>
+        <segment><source>Not started</source><target>Ej påbörjad</target></segment>
+      </unit>
+      <unit id="audit_export.state.behind">
+        <notes><note category="description">State of a sink with waiting records whose position has not moved for the alarm delay.</note></notes>
+        <segment><source>Falling behind</source><target>Backlog</target></segment>
+      </unit>
       <unit id="audit_export.state.failing">
         <segment><source>Failing</source><target>Misslyckas</target></segment>
       </unit>
-      <unit id="audit_export.state.idle">
-        <segment><source>Waiting</source><target>Väntar</target></segment>
+      <unit id="audit_export.state.alarm">
+        <notes><note category="description">State of a sink that has failed for at least the alarm delay.</note></notes>
+        <segment><source>Alarm</source><target>Larm</target></segment>
       </unit>
       <unit id="audit_export.state.disabled">
         <segment><source>Paused</source><target>Pausad</target></segment>
@@ -102,6 +147,10 @@
       <unit id="audit_export.delivered">
         <notes><note category="description">when is a relative time such as 4 seconds ago.</note></notes>
         <segment><source>last record {when}</source><target>senaste post {when}</target></segment>
+      </unit>
+      <unit id="audit_export.checkpoint">
+        <notes><note category="description">seq is a sequence number; when is a relative time such as 90 seconds ago.</note></notes>
+        <segment><source>checkpoint at record {seq}, {when}</source><target>kontrollpunkt vid post {seq}, {when}</target></segment>
       </unit>
       <unit id="audit_export.pause">
         <segment><source>Pause</source><target>Pausa</target></segment>
@@ -148,22 +197,44 @@
       <unit id="audit_export.field.port">
         <segment><source>Port</source><target>Port</target></segment>
       </unit>
+      <unit id="audit_export.field.facility">
+        <notes><note category="description">The syslog facility of the messages; the values are the protocol names and stay as they are.</note></notes>
+        <segment><source>Facility</source><target>Facility</target></segment>
+      </unit>
+      <unit id="audit_export.field.server_name">
+        <segment><source>Name in the receiver's certificate</source><target>Namn i mottagarens certifikat</target></segment>
+      </unit>
+      <unit id="audit_export.field.server_name_help">
+        <segment><source>Leave empty to expect the receiver name above.</source><target>Lämna tomt för att förvänta sig mottagarnamnet ovan.</target></segment>
+      </unit>
       <unit id="audit_export.field.ca_pem">
         <segment><source>Certificate authority of the receiver (PEM)</source><target>Mottagarens certifikatutfärdare (PEM)</target></segment>
       </unit>
       <unit id="audit_export.field.ca_pem_help">
         <segment><source>Leave empty to trust the certificate authorities of the controller's system.</source><target>Lämna tomt för att lita på certifikatutfärdarna i controllerns system.</target></segment>
       </unit>
-      <unit id="audit_export.field.client_certificate">
-        <segment><source>Present the controller's certificate to the receiver</source><target>Visa controllerns certifikat för mottagaren</target></segment>
+      <unit id="audit_export.field.client_cert_pem">
+        <segment><source>Client certificate chain (PEM)</source><target>Klientcertifikatkedja (PEM)</target></segment>
       </unit>
-      <unit id="audit_export.field.path">
-        <segment><source>File</source><target>Fil</target></segment>
+      <unit id="audit_export.field.client_cert_pem_help">
+        <segment><source>For receivers that require client authentication; leaf first. Needs the secret below.</source><target>För mottagare som kräver klientautentisering; löpande certifikat först. Kräver hemligheten nedan.</target></segment>
       </unit>
-      <unit id="audit_export.field.path_help">
-        <segment><source>An absolute path; the same on every controller.</source><target>En absolut sökväg; samma på varje controller.</target></segment>
+      <unit id="audit_export.field.client_key">
+        <segment><source>Secret with the client key</source><target>Hemlighet med klientnyckeln</target></segment>
       </unit>
-      <unit id="audit_export.field.keep_files">
+      <unit id="audit_export.field.client_key_help">
+        <segment><source>The id of the operator secret that holds the private key in PEM. It is read from the vault each time the sink connects.</source><target>Id för den operatörshemlighet som innehåller den privata nyckeln i PEM. Den läses från valvet varje gång exportmålet ansluter.</target></segment>
+      </unit>
+      <unit id="audit_export.field.file">
+        <segment><source>File name</source><target>Filnamn</target></segment>
+      </unit>
+      <unit id="audit_export.field.file_help">
+        <segment><source>A plain file name in the export directory of the controller; letters, digits, hyphen, underscore and dot.</source><target>Ett vanligt filnamn i controllerns exportkatalog; bokstäver, siffror, bindestreck, understreck och punkt.</target></segment>
+      </unit>
+      <unit id="audit_export.field.max_mib">
+        <segment><source>Rotate at (MiB)</source><target>Rotera vid (MiB)</target></segment>
+      </unit>
+      <unit id="audit_export.field.keep">
         <segment><source>Rotated files to keep</source><target>Roterade filer att behålla</target></segment>
       </unit>
       <unit id="audit_export.error.name">
@@ -175,8 +246,17 @@
       <unit id="audit_export.error.port">
         <segment><source>Enter a port from 1 to 65535.</source><target>Ange en port från 1 till 65535.</target></segment>
       </unit>
-      <unit id="audit_export.error.path">
-        <segment><source>Enter the path of the file.</source><target>Ange filens sökväg.</target></segment>
+      <unit id="audit_export.error.client_key">
+        <segment><source>Give the client certificate and the id of the secret with its key together, or neither.</source><target>Ange klientcertifikatet och id för hemligheten med dess nyckel tillsammans, eller inget av dem.</target></segment>
+      </unit>
+      <unit id="audit_export.error.file">
+        <segment><source>Enter a plain file name: letters, digits, hyphen, underscore and dot, not starting with a dot.</source><target>Ange ett vanligt filnamn: bokstäver, siffror, bindestreck, understreck och punkt, utan inledande punkt.</target></segment>
+      </unit>
+      <unit id="audit_export.error.max_mib">
+        <segment><source>Enter a size from 0.0625 MiB (64 KiB) to 1,048,576 MiB (1 TiB).</source><target>Ange en storlek från 0,0625 MiB (64 KiB) till 1 048 576 MiB (1 TiB).</target></segment>
+      </unit>
+      <unit id="audit_export.error.keep">
+        <segment><source>Enter a whole number from 0 to 1000.</source><target>Ange ett helt tal från 0 till 1000.</target></segment>
       </unit>
       <unit id="audit_export.udp_warning">
         <segment><source>UDP has no delivery receipt: a record lost on the way is only visible as a gap in the sequence numbers.</source><target>UDP har ingen leveranskvittens: en post som försvinner på vägen syns bara som en lucka i sekvensnumren.</target></segment>
@@ -185,10 +265,10 @@
         <segment><source>Send test record</source><target>Skicka testpost</target></segment>
       </unit>
       <unit id="audit_export.test_ok">
-        <segment><source>The receiver accepted the test record.</source><target>Mottagaren tog emot testposten.</target></segment>
+        <segment><source>The test record was handed to the sink in {ms} ms.</source><target>Testposten lämnades till exportmålet på {ms} ms.</target></segment>
       </unit>
       <unit id="audit_export.test_failed">
-        <segment><source>The test record was not delivered: {detail}</source><target>Testposten levererades inte: {detail}</target></segment>
+        <segment><source>The test record was not delivered ({ms} ms): {detail}</source><target>Testposten levererades inte ({ms} ms): {detail}</target></segment>
       </unit>
       <unit id="audit_export.verify.heading">
         <segment><source>Check an export</source><target>Kontrollera en export</target></segment>
@@ -196,6 +276,56 @@
       <unit id="audit_export.verify.body">
         <segment><source>A JSON export carries the canonical bytes of every record. This command checks its chain offline:</source><target>En JSON-export innehåller de kanoniska byten för varje post. Det här kommandot kontrollerar kedjan offline:</target></segment>
       </unit>
+      <unit id="errors.audit.export.required">
+        <notes><note category="description">Also shown when a change would leave no enabled sink while the profile requires one.</note></notes>
+        <segment><source>The profile requires an audit export. Enable an export sink first, then switch the profile.</source><target>Profilen kräver granskningsexport. Aktivera först ett exportmål och byt sedan profil.</target></segment>
+      </unit>
+      <unit id="errors.audit.export.conflict">
+        <segment><source>The audit export settings changed in the meantime. The page shows the current ones; check them and try again.</source><target>Inställningarna för granskningsexport ändrades under tiden. Sidan visar de aktuella; kontrollera dem och försök igen.</target></segment>
+      </unit>
+      <unit id="errors.audit.export.invalid">
+        <segment><source>The audit export settings are not valid. Check the marked fields.</source><target>Inställningarna för granskningsexport är inte giltiga. Kontrollera de markerade fälten.</target></segment>
+      </unit>
+      <unit id="errors.audit.export.not_found">
+        <segment><source>The sink no longer exists. Reload the page.</source><target>Exportmålet finns inte längre. Ladda om sidan.</target></segment>
+      </unit>
+      <unit id="errors.audit.export.name">
+        <segment><source>Enter a name of 1 to 64 characters without control characters.</source><target>Ange ett namn på 1 till 64 tecken utan styrtecken.</target></segment>
+      </unit>
+      <unit id="errors.audit.export.duplicate">
+        <segment><source>Two sinks have the same name or id. Names are compared without regard to case.</source><target>Två exportmål har samma namn eller id. Namn jämförs utan hänsyn till versaler och gemener.</target></segment>
+      </unit>
+      <unit id="errors.audit.export.unknown_sink">
+        <segment><source>The sink is not known to the server. Reload the page.</source><target>Servern känner inte till exportmålet. Ladda om sidan.</target></segment>
+      </unit>
+      <unit id="errors.audit.export.too_many">
+        <segment><source>At most 8 sinks are allowed.</source><target>Högst 8 exportmål är tillåtna.</target></segment>
+      </unit>
+      <unit id="errors.audit.export.host">
+        <segment><source>Enter a host name or an IPv4 or IPv6 address.</source><target>Ange ett värdnamn eller en IPv4- eller IPv6-adress.</target></segment>
+      </unit>
+      <unit id="errors.audit.export.port">
+        <segment><source>Enter a port from 1 to 65535.</source><target>Ange en port från 1 till 65535.</target></segment>
+      </unit>
+      <unit id="errors.audit.export.pem">
+        <segment><source>Enter one or more certificates in PEM, each starting with -----BEGIN CERTIFICATE-----.</source><target>Ange ett eller flera certifikat i PEM, var och ett med inledningen -----BEGIN CERTIFICATE-----.</target></segment>
+      </unit>
+      <unit id="errors.audit.export.client_key">
+        <segment><source>Give the client certificate and the secret with its key together, or neither.</source><target>Ange klientcertifikatet och hemligheten med dess nyckel tillsammans, eller inget av dem.</target></segment>
+      </unit>
+      <unit id="errors.audit.export.tls_unused">
+        <segment><source>TLS options only apply to the TLS transport. Clear them or choose TLS.</source><target>TLS-alternativ gäller bara för transporten TLS. Rensa dem eller välj TLS.</target></segment>
+      </unit>
+      <unit id="errors.audit.export.file">
+        <segment><source>Enter a plain file name: letters, digits, hyphen, underscore and dot, not starting with a dot.</source><target>Ange ett vanligt filnamn: bokstäver, siffror, bindestreck, understreck och punkt, utan inledande punkt.</target></segment>
+      </unit>
+      <unit id="errors.audit.export.range">
+        <segment><source>The value is out of range.</source><target>Värdet är utanför tillåtet intervall.</target></segment>
+      </unit>
+      <unit id="errors.audit.export.test_target">
+        <segment><source>A test needs either a stored sink or a sink from the form.</source><target>Ett test behöver antingen ett sparat exportmål eller ett exportmål från formuläret.</target></segment>
+      </unit>
+
     </group>
   </file>
 </xliff>

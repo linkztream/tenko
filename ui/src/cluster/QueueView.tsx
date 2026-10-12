@@ -1,8 +1,9 @@
 // The queued changes (/cluster/queue; OPS-26, WP3.9). While a controller has no quorum it
 // refuses writes; an IPAM write can be queued on it. This view lists what this controller holds
 // ("On this controller": cancel a change before the heal) and what became of the person's
-// queued changes after the heal ("After the heal": applied ones with their job, and the ones
-// that no longer fit the data, which the person re-applies after a new preview or discards).
+// queued changes after the heal ("After the heal": applied ones, which the person dismisses once
+// seen, and the ones that no longer fit the data or expired, which the person re-applies after a
+// new preview or discards).
 // A server without WP3.9 has no queue; the view says so calmly instead of showing an error.
 import { A, useNavigate } from "@solidjs/router";
 import { createSignal, For, Show } from "solid-js";
@@ -17,7 +18,7 @@ import { TimeAgo } from "../grid/cells";
 import { loadPacks, t } from "../i18n";
 import { PlanDialog } from "../ipam/plan/PlanDialog";
 import { cancelQueued, discardQueued, listQueue, listQueuedChanges, reapplyQueued } from "./api";
-import { type QueueConflict, type QueuedChange, type QueueItem, type QueueSummary, CLUSTER_PATH } from "./model";
+import { type ChangeSummary, type Conflict, type QueuedChangeView, type QueueItemView, CLUSTER_PATH, needsDecision } from "./model";
 import { loadConflicts } from "./PartitionStatus";
 import "./cluster.css";
 
@@ -38,16 +39,17 @@ async function load<T>(read: () => Promise<{ items: T[] }>): Promise<Loaded<T>> 
 }
 
 /** "Update address", "Delete prefix": what a queued change does, in words. */
-export function summaryText(summary: QueueSummary | null | undefined): string {
+export function summaryText(summary: ChangeSummary | null | undefined): string {
   if (!summary) return t("cluster.queue.what_unknown");
   return t("cluster.queue.action", { action: summary.action, kind: t("cluster.queue.kind", { kind: summary.kind }) });
 }
 
 /** Why a change did not apply by itself, in words; the problem code stays visible beside it. */
-export function conflictText(conflict: QueueConflict): string {
-  if (conflict.code === "ipam.plan.stale") return t("cluster.queue.conflict.stale");
+export function conflictText(conflict: Conflict): string {
+  if (conflict.code === "queue.plan_changed") return t("cluster.queue.conflict.stale");
+  if (conflict.code === "queue.expired") return t("cluster.queue.conflict.expired");
   if (hasErrorMessage(conflict.code)) {
-    return errorMessage(new ApiError({ status: 409, code: conflict.code, title: "", detail: conflict.detail ?? "", params: conflict.params ?? {} }));
+    return errorMessage(new ApiError({ status: conflict.status, code: conflict.code, title: conflict.title ?? "", detail: conflict.detail, params: conflict.params ?? {} }));
   }
   return conflict.detail || t("cluster.queue.conflict.other");
 }
@@ -55,24 +57,24 @@ export function conflictText(conflict: QueueConflict): string {
 export default function QueueView() {
   const navigate = useNavigate();
   const topics = ["ipam", "cluster"] as const;
-  const local = createLiveQuery<Loaded<QueueItem>>({
+  const local = createLiveQuery<Loaded<QueueItemView>>({
     topics,
     fetch: async (signal) => ({ value: await load(() => listQueue(signal)) }),
   });
-  const changes = createLiveQuery<Loaded<QueuedChange>>({
+  const changes = createLiveQuery<Loaded<QueuedChangeView>>({
     topics,
     fetch: async (signal) => ({ value: await load(() => listQueuedChanges(signal)) }),
   });
 
-  const [cancelling, setCancelling] = createSignal<QueueItem | null>(null);
-  const [reapplying, setReapplying] = createSignal<QueuedChange | null>(null);
-  const [discarding, setDiscarding] = createSignal<QueuedChange | null>(null);
+  const [cancelling, setCancelling] = createSignal<QueueItemView | null>(null);
+  const [reapplying, setReapplying] = createSignal<QueuedChangeView | null>(null);
+  const [discarding, setDiscarding] = createSignal<QueuedChangeView | null>(null);
 
   const localItems = () => local.latest()?.items ?? [];
-  // Conflicts first: they are the ones that wait for the person.
+  // Conflicts and expired changes first: they are the ones that wait for the person.
   const changeItems = () => {
     const items = changes.latest()?.items ?? [];
-    return [...items].sort((a, b) => Number(b.state === "conflict") - Number(a.state === "conflict"));
+    return [...items].sort((a, b) => Number(needsDecision(b)) - Number(needsDecision(a)));
   };
   // Both lists come with the same package; either one missing means no queue on this server.
   const unavailable = () => local.latest()?.available === false || changes.latest()?.available === false;
@@ -85,7 +87,7 @@ export default function QueueView() {
     void loadConflicts();
   };
 
-  const cancel = async (item: QueueItem) => {
+  const cancel = async (item: QueueItemView) => {
     setCancelling(null);
     try {
       await cancelQueued(item.id);
@@ -96,11 +98,12 @@ export default function QueueView() {
     }
   };
 
-  const discard = async (change: QueuedChange) => {
+  // Discards a change that waits for a decision, or dismisses an applied one the person has seen.
+  const discard = async (change: QueuedChangeView) => {
     setDiscarding(null);
     try {
-      await discardQueued(change.id, change.revision);
-      toast({ kind: "ok", title: t("cluster.queue.discarded") });
+      await discardQueued(change.id);
+      toast({ kind: "ok", title: needsDecision(change) ? t("cluster.queue.discarded") : t("cluster.queue.dismissed") });
       refresh();
     } catch (err) {
       toast({ kind: "bad", title: t("cluster.queue.discard_failed"), body: errorMessage(err) });
@@ -108,7 +111,7 @@ export default function QueueView() {
   };
 
   // The preview of a re-apply is the plan dialog of IPAM, whose strings are the ipam pack's.
-  const openReapply = async (change: QueuedChange) => {
+  const openReapply = async (change: QueuedChangeView) => {
     await loadPacks(["ipam"]);
     setReapplying(change);
   };
@@ -227,23 +230,29 @@ export default function QueueView() {
                             </span>
                           </td>
                           <td>
-                            <Show when={change.state === "conflict" && change.conflict}>
+                            <Show when={needsDecision(change) && change.conflict}>
                               {(conflict) => (
                                 <span data-testid="queued-change-conflict" data-code={conflict().code}>
                                   {conflictText(conflict())} <code class="mono muted">{conflict().code}</code>
                                 </span>
                               )}
                             </Show>
-                            <Show when={change.job_id}>
-                              {(job) => (
-                                <A href={paths.job(job())} data-testid="queued-change-job">
-                                  {t("cluster.done.open_job")}
-                                </A>
-                              )}
-                            </Show>
                           </td>
                           <td class="r">
-                            <Show when={change.state === "conflict"}>
+                            <Show
+                              when={needsDecision(change)}
+                              fallback={
+                                <button
+                                  type="button"
+                                  class="btn sm"
+                                  data-testid={`queued-dismiss-${change.id}`}
+                                  aria-label={t("cluster.queue.dismiss_named", { what: summaryText(change.summary) })}
+                                  onClick={() => void discard(change)}
+                                >
+                                  {t("cluster.queue.dismiss")}
+                                </button>
+                              }
+                            >
                               <div class="cluster-actions end">
                                 <button
                                   type="button"
@@ -316,7 +325,6 @@ export default function QueueView() {
               reapplyQueued(change.id, {
                 dryRun: options.dryRun,
                 acknowledge: options.acknowledge,
-                ifMatch: options.dryRun ? undefined : change.revision,
               })
             }
             onDone={(result) => {
