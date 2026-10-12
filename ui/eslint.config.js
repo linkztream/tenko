@@ -20,7 +20,7 @@ const NETWORK_OUTSIDE_API = [
 ];
 
 export default defineConfig(
-  { ignores: ["dist/**", "node_modules/**", "public/**", "src/api/generated/**", "src/i18n/generated/**"] },
+  { ignores: ["dist/**", "node_modules/**", "public/**", "e2e/.artifacts/**", "src/api/generated/**", "src/i18n/generated/**"] },
   js.configs.recommended,
   tseslint.configs.recommended,
   {
