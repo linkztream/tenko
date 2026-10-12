@@ -526,7 +526,9 @@ fn install_service(args: &InstallArgs, out: &mut impl Write, err: &mut impl Writ
 fn register(info: &ServiceInfo, out: &mut impl Write, err: &mut impl Write) -> Outcome {
     let name = info.name.to_string_lossy();
     let manager = connect(ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE)?;
-    let access = ServiceAccess::QUERY_STATUS | ServiceAccess::CHANGE_CONFIG;
+    // Failure actions with a restart need the start right on the handle besides the
+    // right to change the configuration; without it `ChangeServiceConfig2` refuses them.
+    let access = ServiceAccess::QUERY_STATUS | ServiceAccess::CHANGE_CONFIG | ServiceAccess::START;
     let service = manager
         .create_service(info, access)
         .map_err(|error| Failure::scm(&format!("cannot register service `{name}`"), &error))?;
@@ -565,7 +567,7 @@ fn configure(service: &Service, out: &mut impl Write, err: &mut impl Write) {
         Err(error) => {
             let _ = writeln!(
                 err,
-                "tenko service install: warning: cannot set the failure actions: {}",
+                "tenko service install: warning: cannot set the failure actions: {}; the \n                 service will not be started again after a failure or an update",
                 error_text(&error)
             );
         }
