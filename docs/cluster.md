@@ -531,6 +531,8 @@ Work that must happen once for the whole installation runs on the leader only, u
 | Service | What it does |
 |---|---|
 | `jobs.runner` | Drives every job of the installation. A new leader takes the running and waiting jobs over at once; a step that was running when the old leader went away is run again when it is idempotent and otherwise fails and is rolled back. Before each step that is not idempotent the runner confirms with the cluster that it still leads. Group limits and `[jobs] workers` hold for the whole cluster, because only one runner drives jobs |
+| `ipam.reconcile` | The reconciler: its interval runs, the debounced run after an observation reached any controller (the leader watches `ipam.obs.facts`) and the purge of old observations on its own timer. Its settings are read from the store at every run (`PUT /api/v1/settings/reconciler`, [reconciliation.md](reconciliation.md)) |
+| `connect.poll` | The poll schedule of every connector instance. The plugin processes, the health checks and the runs a person asks for stay on every controller ([connectors.md](connectors.md)) |
 | `vault.kek_rotation` | The online rotation of the key-encryption key |
 | `cluster.prune` | The hourly prune of expired revocations and old enrolment tokens |
 | `api.idempotency_purge` | The hourly purge of expired idempotency records |
@@ -563,5 +565,5 @@ A wrong second-factor code keeps its ceremony open on the controller that checke
 
 ## 13. What comes next
 
-- **Slice 3.** Configuration flows from the controllers to `dns` and `dhcp` nodes as resumable deltas with a bandwidth cap (OPS-28). The reconciler loop, the connector polling schedule and the update check join the leader services of section 12.8.
+- **Slice 3.** Configuration flows from the controllers to `dns` and `dhcp` nodes as resumable deltas with a bandwidth cap (OPS-28). The update check joins the leader services of section 12.8, where the reconciler loop and the connector polling schedule run since the Slice 2 follow-ups.
 - **The probe.** What comes next for the scanner of the probe is in [scanning.md](scanning.md#14-what-comes-next).
