@@ -5,17 +5,22 @@
 
 use std::{sync::Arc, time::Duration};
 
-use tenko_core::{AuthStrength, HostId, ImportId, JobId, Principal, RequestCtx, SessionId, UserId};
+use tenko_core::{
+    AuthStrength, ConnectorId, HostId, ImportId, JobId, Principal, RequestCtx, SessionId, UserId,
+    secret::SecretRef,
+};
 use tenko_ipam::{
     IpamConfig, IpamService,
     import::{
-        ApplyRequest, CredentialGate, ImportConfig, ImportService, Upload, job::host_credential,
+        ApplyRequest, CredentialGate, ImportConfig, ImportService, Upload, codes,
+        connectors::{self, ConnectorSecrets},
+        job::host_credential,
     },
     jobs::register_steps,
     tables::HOSTS,
 };
 use tenko_jobs::{EngineConfig, JobEngine, JobState, RunnerHandle};
-use tenko_store::{KeyRange, MemStore, ReadConsistency, ReadView, ReadViewExt, Store};
+use tenko_store::{KeyRange, MemStore, ReadConsistency, ReadView, ReadViewExt, Store, WriteBatch};
 use tenko_vault::{
     MemVault, Vault,
     operator::{
@@ -248,4 +253,147 @@ async fn a_replaced_credential_bound_to_another_host_is_kept() {
     let gateway_credentials = env.secrets.host_credentials(gateway).await.expect("host");
     assert_eq!(gateway_credentials.items.len(), 1);
     assert_ne!(gateway_credentials.items[0].secret.record.id, old.secret);
+}
+
+/// Writes a connector instance row whose secrets map holds `secret` under `purpose`.
+async fn reference(env: &Env, cx: &RequestCtx, secret: tenko_core::SecretId) {
+    let mut batch = WriteBatch::for_request(cx);
+    batch
+        .put_typed(
+            &connectors::INSTANCES,
+            &ConnectorId::generate(),
+            &ConnectorSecrets {
+                secrets: [("api_key".to_owned(), SecretRef { secret })].into(),
+            },
+        )
+        .expect("instance");
+    env.store.propose(batch).await.expect("write the instance");
+}
+
+#[tokio::test]
+async fn a_replaced_credential_a_connector_references_is_kept() {
+    let env = env();
+    let cx = person();
+    import(&env, &cx, FIRST).await;
+    let view = view(&env.store).await;
+    let gateway = host_id(view.as_ref(), "gateway");
+    let old = host_credential(view.as_ref(), gateway)
+        .expect("read")
+        .expect("credential")
+        .secret;
+    reference(&env, &cx, old.secret).await;
+
+    import(&env, &cx, SECOND).await;
+    let revealed = env
+        .secrets
+        .reveal(&cx, old.secret, RevealRequest::default())
+        .await
+        .expect("still revealable");
+    assert_eq!(revealed.value.as_str(), "example-one");
+    let view = env.store.read(ReadConsistency::Local).await.expect("view");
+    let new = host_credential(view.as_ref(), gateway)
+        .expect("read")
+        .expect("credential")
+        .secret;
+    assert_ne!(new, old);
+    let credentials = env.secrets.host_credentials(gateway).await.expect("host");
+    let bound: Vec<_> = credentials
+        .items
+        .iter()
+        .map(|item| item.secret.record.id)
+        .collect();
+    assert_eq!(
+        bound,
+        vec![new.secret],
+        "the host is bound to the new secret"
+    );
+}
+
+#[tokio::test]
+async fn a_reference_to_another_secret_keeps_nothing() {
+    let env = env();
+    let cx = person();
+    import(&env, &cx, FIRST).await;
+    let view = view(&env.store).await;
+    let gateway = host_id(view.as_ref(), "gateway");
+    let old = host_credential(view.as_ref(), gateway)
+        .expect("read")
+        .expect("credential")
+        .secret;
+    reference(&env, &cx, tenko_core::SecretId::generate()).await;
+
+    import(&env, &cx, SECOND).await;
+    assert!(
+        env.secrets.get(old.secret).await.is_err(),
+        "the old secret is gone"
+    );
+    assert_eq!(env.vault.meta(old).await.expect("meta"), None);
+}
+
+fn pin_coupling() -> CredentialGate {
+    CredentialGate::Denied {
+        reason: "pin_coupling",
+        required: None,
+        accounts: vec!["pat".to_owned()],
+        detail: "the vault takes operator secrets only when every account that may reveal them has more than a PIN (IAM-07): pat sign in with a PIN alone".to_owned(),
+    }
+}
+
+#[tokio::test]
+async fn the_preview_names_the_accounts_that_sign_in_with_a_pin_alone() {
+    let env = env();
+    let cx = person();
+    let upload = env
+        .imports
+        .upload(&cx, vec![csv(FIRST)])
+        .await
+        .expect("upload");
+    let preview = env
+        .imports
+        .preview(&cx, upload.id, None, &pin_coupling())
+        .await
+        .expect("preview");
+    assert!(!preview.credentials.allowed);
+    assert_eq!(preview.credentials.reason.as_deref(), Some("pin_coupling"));
+    assert!(
+        preview
+            .credentials
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("pat"))
+    );
+    assert!(
+        preview
+            .blockers
+            .contains(&codes::CREDENTIALS_VAULT_REQUIRED.to_owned())
+    );
+}
+
+#[tokio::test]
+async fn an_apply_while_a_pin_only_account_may_reveal_is_refused_with_the_accounts() {
+    let env = env();
+    let cx = person();
+    let upload = env
+        .imports
+        .upload(&cx, vec![csv(FIRST)])
+        .await
+        .expect("upload");
+    env.imports
+        .preview(&cx, upload.id, None, &pin_coupling())
+        .await
+        .expect("preview");
+    let error = env
+        .imports
+        .apply(&cx, upload.id, &ApplyRequest::default(), &pin_coupling())
+        .await
+        .expect_err("refused");
+    assert!(error.is(codes::CREDENTIALS_VAULT_REQUIRED));
+    assert_eq!(error.coded().status, 403);
+    let params = &error.coded().params;
+    assert_eq!(
+        params.get("reason").map(String::as_str),
+        Some("pin_coupling")
+    );
+    assert_eq!(params.get("accounts").map(String::as_str), Some("pat"));
+    assert_eq!(params.get("required"), None);
 }

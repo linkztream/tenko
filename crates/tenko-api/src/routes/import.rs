@@ -29,7 +29,10 @@
 //!   service additionally shows an import only to the person (or token) that uploaded it.
 //!   Credential columns need more than that (IAM-07): `preview` and `apply` pass the
 //!   outcome of [`credential_gate`] to the service, which refuses to store operator secrets
-//!   (403 `import.credentials.vault_required`) for an account that may not hold them.
+//!   (403 `import.credentials.vault_required`) for an account that may not hold them. The
+//!   gate also applies the cluster-wide rule of `POST /secrets`: while another enabled
+//!   account that may reveal secrets signs in with a PIN alone, the credential columns are
+//!   refused with the reason `pin_coupling` (IAM-07).
 //! - **Idempotency.** `POST /imports/{id}/apply` takes `Idempotency-Key`; the job engine
 //!   returns the first job again for a repeated key.
 //!
@@ -41,8 +44,10 @@
 //! passes both [`Action::Create`] and [`Action::Reveal`] on [`ObjectKind::Secret`]; in
 //! practice that is an administrator with a session of password strength or stronger (the
 //! IAM-07 threshold). The problem carries the parameter `reason`, one of `vault_unavailable`
-//! (the server has no vault), `step_up_required`, `forbidden` or `unauthenticated`, and for
-//! a step-up the parameter `required`, the weakest session strength that would do. Setting
+//! (the server has no vault), `step_up_required`, `forbidden`, `unauthenticated` or
+//! `pin_coupling`, for a step-up the parameter `required`, the weakest session strength that
+//! would do, and for `pin_coupling` the parameter `accounts`, the names of the accounts that
+//! may reveal but sign in with a PIN alone. Setting
 //! `options.credentials` to `skip` in the mapping leaves the credential columns out, and
 //! the rest of the import goes ahead. The preview says in plain words what would happen to
 //! the credentials (`credentials.statement`, `credentials.allowed` and `credentials.reason`)
@@ -79,7 +84,7 @@
 use std::sync::Arc;
 
 use axum::{
-    Json,
+    Extension, Json,
     body::Body,
     extract::{DefaultBodyLimit, FromRequest, FromRequestParts, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, header, request::Parts},
@@ -87,10 +92,11 @@ use axum::{
 };
 use futures::StreamExt;
 use serde::{Serialize, de::DeserializeOwned};
-use tenko_core::{Action, CodedError, ImportId, ObjectKind, ObjectRef};
+use tenko_auth::AuthService;
+use tenko_core::{Action, CodedError, ImportId, ObjectKind, ObjectRef, Principal};
 use tenko_ipam::import::{
-    ApplyAccepted, ApplyRequest, ImportPreview, ImportService, ImportView, Mapping, Upload,
-    codes as import_codes, credential_gate, dto::PreviewRow,
+    ApplyAccepted, ApplyRequest, CredentialGate, ImportPreview, ImportService, ImportView, Mapping,
+    Upload, codes as import_codes, credential_gate, dto::PreviewRow,
 };
 use utoipa::ToSchema;
 use utoipa_axum::{
@@ -98,8 +104,10 @@ use utoipa_axum::{
     routes,
 };
 
-use super::common::IdempotencyKeyHeader;
-use super::common::{IpamJson, IpamPath};
+use super::{
+    auth::RouteError,
+    common::{IdempotencyKeyHeader, IpamJson, IpamPath},
+};
 use crate::{
     API_BASE,
     extract::Ctx,
@@ -107,6 +115,8 @@ use crate::{
     problem::{ApiError, ProblemDetails, codes as api_codes},
     state::AppState,
 };
+
+type Auth = Option<Extension<Arc<AuthService>>>;
 
 /// Room for the multipart framing (boundaries, part headers, form fields) on top of the
 /// file bytes that `max_upload` limits.
@@ -335,8 +345,9 @@ async fn set_import_mapping(
 /// account may store them (`allowed`) and, when it may not, why (`reason`); then
 /// `import.credentials.vault_required` is among the `blockers`. Storing them needs a vault
 /// on the server and a principal that passes both create and reveal on secrets, in practice
-/// an administrator with a password-or-stronger session (IAM-07). Setting
-/// `options.credentials` to `skip` in the mapping leaves them out.
+/// an administrator with a password-or-stronger session (IAM-07), and no other account that
+/// may reveal secrets signing in with a PIN alone (`reason` `pin_coupling`, as for
+/// `POST /secrets`). Setting `options.credentials` to `skip` in the mapping leaves them out.
 #[utoipa::path(
     get,
     path = "/imports/{id}/preview",
@@ -362,11 +373,12 @@ async fn preview_import(
     Imports(imports): Imports,
     IpamPath(id): IpamPath<ImportId>,
     filters: Filters,
-) -> Result<Json<ImportPreview>, ApiError> {
+    auth: Auth,
+) -> Result<Json<ImportPreview>, RouteError> {
     reject_unknown_query(&filters, &["rows"])?;
     let rows = preview_rows(&filters)?;
     app.authorize(&cx.principal, Action::Read, &ObjectRef::from(id))?;
-    let gate = credential_gate(app.authorizer.as_deref(), &cx.principal);
+    let gate = gate(&app, &auth, &cx.principal).await?;
     Ok(Json(imports.preview(&cx, id, rows, &gate).await?))
 }
 
@@ -458,8 +470,9 @@ async fn list_import_rows(
 /// passes both `Action::Create` and `Action::Reveal` on `ObjectKind::Secret` (in practice
 /// an administrator with a password-or-stronger session, the IAM-07 threshold). The problem
 /// carries the parameter `reason`, one of `vault_unavailable`, `step_up_required`,
-/// `forbidden` or `unauthenticated`, and for a step-up `required`, the weakest session
-/// strength that would do. Setting `options.credentials` to `skip` in the mapping leaves the
+/// `forbidden`, `unauthenticated` or `pin_coupling`, for a step-up `required`, the weakest
+/// session strength that would do, and for `pin_coupling` `accounts`, the accounts that may
+/// reveal but sign in with a PIN alone (the rule of `POST /secrets`). Setting `options.credentials` to `skip` in the mapping leaves the
 /// credential columns out and the rest of the import is applied.
 #[utoipa::path(
     post,
@@ -473,7 +486,7 @@ async fn list_import_rows(
         (status = 202, description = "The apply job was accepted; follow it at `/jobs/{id}`", body = ApplyAccepted,
             headers(("Location" = String, description = "The URL of the job"))),
         (status = 400, description = "The identifier is not a UUID, or the body is not valid JSON for an apply request (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "Not allowed (`auth.forbidden`), or the credential columns cannot be stored (`import.credentials.vault_required`, parameter `reason`: `vault_unavailable`, `step_up_required`, `forbidden` or `unauthenticated`; parameter `required`: the weakest session strength for a step-up)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Not allowed (`auth.forbidden`), or the credential columns cannot be stored (`import.credentials.vault_required`, parameter `reason`: `vault_unavailable`, `step_up_required`, `forbidden`, `unauthenticated` or `pin_coupling`; parameter `required`: the weakest session strength for a step-up; parameter `accounts`: the accounts that sign in with a PIN alone, for `pin_coupling`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such import (`import.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The plan has warnings that need an acknowledgement or conflicts, or the import is busy (`import.plan.blocked`, `import.state.conflict`, or the plan's own error)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 410, description = "The upload expired or was lost in a restart (`import.expired`, `import.upload.lost`)", body = ProblemDetails, content_type = "application/problem+json"),
@@ -487,16 +500,44 @@ async fn apply_import(
     Ctx(cx): Ctx,
     Imports(imports): Imports,
     IpamPath(id): IpamPath<ImportId>,
+    auth: Auth,
     OptionalJson(request): OptionalJson<ApplyRequest>,
-) -> Result<Response, ApiError> {
+) -> Result<Response, RouteError> {
     app.authorize(&cx.principal, Action::Execute, &ObjectRef::from(id))?;
-    let gate = credential_gate(app.authorizer.as_deref(), &cx.principal);
+    let gate = gate(&app, &auth, &cx.principal).await?;
     let job_id = imports.apply(&cx, id, &request, &gate).await?;
     Ok(located(
         StatusCode::ACCEPTED,
         &format!("{API_BASE}/jobs/{job_id}"),
         &ApplyAccepted { job_id },
     ))
+}
+
+/// The credential gate of the request: the importing account's own check first (so a PIN
+/// session still gets `step_up_required`), then, with the auth service present, the
+/// cluster-wide rule of `POST /secrets` (`pin_coupling`).
+async fn gate(
+    app: &AppState,
+    auth: &Auth,
+    principal: &Principal,
+) -> Result<CredentialGate, RouteError> {
+    let gate = credential_gate(app.authorizer.as_deref(), principal);
+    let (CredentialGate::Allowed, Some(Extension(auth))) = (&gate, auth) else {
+        return Ok(gate);
+    };
+    let accounts = auth.pin_only_revealers().await?;
+    if accounts.is_empty() {
+        return Ok(gate);
+    }
+    Ok(CredentialGate::Denied {
+        reason: "pin_coupling",
+        required: None,
+        detail: format!(
+            "the vault takes operator secrets only when every account that may reveal them has more than a PIN (IAM-07): {} sign in with a PIN alone; add a passkey or TOTP to them, give them a password, change their roles, or leave the credential columns out",
+            accounts.join(", ")
+        ),
+        accounts,
+    })
 }
 
 // ===== request plumbing ==============================================================

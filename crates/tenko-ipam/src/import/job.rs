@@ -46,7 +46,7 @@ use tenko_vault::{
 };
 
 use super::{
-    codes,
+    codes, connectors,
     model::ImportModel,
     reconcile::{self, CredentialOp, HOST_CREDENTIALS, HostCredential, WorkItem},
     service::{ImportService, Prepared},
@@ -399,11 +399,19 @@ impl StepHandler for ChunkStep {
         };
         if let Some(vault) = service.vault() {
             for stored in output.credentials.iter().rev() {
-                vault.stage_delete(&mut batch, &cx.request, stored.secret);
                 // The secrets model (WP2.1): the new secret's record and binding go, the
-                // previous credential is bound to the host again.
+                // previous credential is bound to the host again. A secret that a
+                // connector instance references already stays, with its record.
+                let referenced = !connectors::referencing(view.as_ref(), stored.secret.secret)
+                    .map_err(ipam_error)?
+                    .is_empty();
+                if !referenced {
+                    vault.stage_delete(&mut batch, &cx.request, stored.secret);
+                }
                 operator::stage_unbind(&mut batch, stored.host, stored.secret.secret);
-                operator::stage_forget(&mut batch, stored.secret.secret);
+                if !referenced {
+                    operator::stage_forget(&mut batch, stored.secret.secret);
+                }
                 match &stored.previous {
                     Some(previous) => {
                         batch
@@ -748,6 +756,17 @@ impl StepHandler for FinishStep {
                         .map_err(StepError::Store)?
                         .is_empty()
                     {
+                        continue;
+                    }
+                    // Nor does one that a connector instance references.
+                    let instances = connectors::referencing(view.as_ref(), secret.secret)
+                        .map_err(ipam_error)?;
+                    if !instances.is_empty() {
+                        tracing::info!(
+                            secret = %secret.secret,
+                            instances = instances.len(),
+                            "a replaced credential is kept: connector instances reference it"
+                        );
                         continue;
                     }
                     vault.stage_delete(&mut batch, &cx.request, secret);

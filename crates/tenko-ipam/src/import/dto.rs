@@ -212,7 +212,8 @@ pub struct CredentialNotice {
     /// Whether this account may store them now.
     pub allowed: bool,
     /// Why not, when not allowed, as a code the UI translates: `forbidden`,
-    /// `step_up_required`, `unauthenticated` or `vault_unavailable`.
+    /// `step_up_required`, `unauthenticated`, `pin_coupling` (another account that may
+    /// reveal secrets signs in with a PIN alone) or `vault_unavailable`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// The same in English, for logs and clients without translations.

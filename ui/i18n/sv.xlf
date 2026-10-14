@@ -6373,6 +6373,9 @@
       <unit id="import.credentials.reason.vault_unavailable">
         <segment><source>The vault cannot store secrets now. Leave the credentials out or try again later.</source><target>Valvet kan inte lagra hemligheter just nu. Utelämna inloggningsuppgifterna eller försök igen senare.</target></segment>
       </unit>
+      <unit id="import.credentials.reason.pin_coupling">
+        <segment><source>Another account that may reveal secrets still signs in with a PIN alone. Add a second factor or a password to it first, or leave the credential columns out.</source><target>Ett annat konto som får visa hemligheter loggar fortfarande in enbart med PIN-kod. Lägg först till en andra faktor eller ett lösenord på det, eller utelämna inloggningsuppgifterna.</target></segment>
+      </unit>
       <unit id="import.sheets.title">
         <segment><source>Outcome per sheet</source><target>Utfall per blad</target></segment>
       </unit>

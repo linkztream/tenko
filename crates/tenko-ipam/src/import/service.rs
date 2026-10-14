@@ -129,14 +129,25 @@ pub enum CredentialGate {
     Allowed,
     /// It may not.
     Denied {
-        /// Machine-readable reason: `forbidden`, `step_up_required` or
-        /// `unauthenticated`.
+        /// Machine-readable reason: `forbidden`, `step_up_required`, `unauthenticated` or
+        /// `pin_coupling` (another account that may reveal secrets signs in with a PIN
+        /// alone, the rule of `POST /secrets`).
         reason: &'static str,
         /// The weakest session strength that would do, for `step_up_required`.
         required: Option<String>,
+        /// The accounts that sign in with a PIN alone, for `pin_coupling`; empty otherwise.
+        accounts: Vec<String>,
         /// English explanation.
         detail: String,
     },
+}
+
+/// Why credentials cannot be stored now.
+struct CredentialBlock {
+    reason: &'static str,
+    required: Option<String>,
+    accounts: Vec<String>,
+    detail: String,
 }
 
 /// Decides whether `principal` may store credentials of an import as operator secrets:
@@ -157,6 +168,7 @@ pub fn credential_gate(
                 DenyReason::StepUpRequired { required } => CredentialGate::Denied {
                     reason: "step_up_required",
                     required: Some(required.as_str().to_owned()),
+                    accounts: Vec::new(),
                     detail: format!(
                         "storing operator secrets needs a session of at least `{}` (IAM-07); sign in with a stronger method or leave the credential columns out",
                         required.as_str()
@@ -165,11 +177,13 @@ pub fn credential_gate(
                 DenyReason::Unauthenticated => CredentialGate::Denied {
                     reason: "unauthenticated",
                     required: None,
+                    accounts: Vec::new(),
                     detail: "storing operator secrets needs a signed-in person".to_owned(),
                 },
                 _ => CredentialGate::Denied {
                     reason: "forbidden",
                     required: None,
+                    accounts: Vec::new(),
                     detail: "this account may not store or reveal operator secrets; leave the credential columns out or ask an administrator".to_owned(),
                 },
             };
@@ -821,24 +835,28 @@ impl ImportService {
     }
 
     /// Why credentials cannot be stored now, if they cannot.
-    fn credential_block(
-        &self,
-        gate: &CredentialGate,
-    ) -> Option<(&'static str, Option<String>, String)> {
+    fn credential_block(&self, gate: &CredentialGate) -> Option<CredentialBlock> {
         if self.vault.is_none() {
-            return Some((
-                "vault_unavailable",
-                None,
-                "this server has no vault for operator secrets".to_owned(),
-            ));
+            return Some(CredentialBlock {
+                reason: "vault_unavailable",
+                required: None,
+                accounts: Vec::new(),
+                detail: "this server has no vault for operator secrets".to_owned(),
+            });
         }
         match gate {
             CredentialGate::Allowed => None,
             CredentialGate::Denied {
                 reason,
                 required,
+                accounts,
                 detail,
-            } => Some((reason, required.clone(), detail.clone())),
+            } => Some(CredentialBlock {
+                reason,
+                required: required.clone(),
+                accounts: accounts.clone(),
+                detail: detail.clone(),
+            }),
         }
     }
 
@@ -1207,8 +1225,8 @@ impl ImportService {
                 unchanged,
                 statement,
                 allowed: block.is_none(),
-                reason: block.as_ref().map(|(reason, _, _)| (*reason).to_owned()),
-                detail: block.map(|(_, _, detail)| detail),
+                reason: block.as_ref().map(|b| b.reason.to_owned()),
+                detail: block.map(|b| b.detail),
             },
             warnings,
             plan_error,
@@ -1230,7 +1248,12 @@ impl ImportService {
         let model = &evaluation.translation.model;
         if mapping.options.credentials == CredentialPolicy::Import
             && !model.credentials.is_empty()
-            && let Some((reason, required, detail)) = self.credential_block(gate)
+            && let Some(CredentialBlock {
+                reason,
+                required,
+                accounts,
+                detail,
+            }) = self.credential_block(gate)
         {
             let mut error = IpamError::new(
                 codes::CREDENTIALS_VAULT_REQUIRED,
@@ -1245,6 +1268,9 @@ impl ImportService {
             .param("hosts", model.credentials.len());
             if let Some(required) = required {
                 error = error.param("required", required);
+            }
+            if !accounts.is_empty() {
+                error = error.param("accounts", accounts.join(","));
             }
             return Err(error);
         }

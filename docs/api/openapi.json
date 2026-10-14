@@ -8357,7 +8357,7 @@
           "import"
         ],
         "summary": "Apply an import as a job",
-        "description": "Credential columns (login, password) are never IPAM fields: each host's login and\npassword become one operator secret of that host in the vault. Apply refuses them with\n403 `import.credentials.vault_required` unless the server has a vault and the principal\npasses both `Action::Create` and `Action::Reveal` on `ObjectKind::Secret` (in practice\nan administrator with a password-or-stronger session, the IAM-07 threshold). The problem\ncarries the parameter `reason`, one of `vault_unavailable`, `step_up_required`,\n`forbidden` or `unauthenticated`, and for a step-up `required`, the weakest session\nstrength that would do. Setting `options.credentials` to `skip` in the mapping leaves the\ncredential columns out and the rest of the import is applied.",
+        "description": "Credential columns (login, password) are never IPAM fields: each host's login and\npassword become one operator secret of that host in the vault. Apply refuses them with\n403 `import.credentials.vault_required` unless the server has a vault and the principal\npasses both `Action::Create` and `Action::Reveal` on `ObjectKind::Secret` (in practice\nan administrator with a password-or-stronger session, the IAM-07 threshold). The problem\ncarries the parameter `reason`, one of `vault_unavailable`, `step_up_required`,\n`forbidden`, `unauthenticated` or `pin_coupling`, for a step-up `required`, the weakest\nsession strength that would do, and for `pin_coupling` `accounts`, the accounts that may\nreveal but sign in with a PIN alone (the rule of `POST /secrets`). Setting `options.credentials` to `skip` in the mapping leaves the\ncredential columns out and the rest of the import is applied.",
         "operationId": "apply_import",
         "parameters": [
           {
@@ -8429,7 +8429,7 @@
             }
           },
           "403": {
-            "description": "Not allowed (`auth.forbidden`), or the credential columns cannot be stored (`import.credentials.vault_required`, parameter `reason`: `vault_unavailable`, `step_up_required`, `forbidden` or `unauthenticated`; parameter `required`: the weakest session strength for a step-up)",
+            "description": "Not allowed (`auth.forbidden`), or the credential columns cannot be stored (`import.credentials.vault_required`, parameter `reason`: `vault_unavailable`, `step_up_required`, `forbidden`, `unauthenticated` or `pin_coupling`; parameter `required`: the weakest session strength for a step-up; parameter `accounts`: the accounts that sign in with a PIN alone, for `pin_coupling`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8629,7 +8629,7 @@
           "import"
         ],
         "summary": "Preview the changes of an import: summary, rows and loss report",
-        "description": "Credential columns (login, password) are never IPAM fields: each host's login and\npassword would become one operator secret of that host in the vault. `credentials`\nsays how many secrets would be created, replaced or left as they are, whether this\naccount may store them (`allowed`) and, when it may not, why (`reason`); then\n`import.credentials.vault_required` is among the `blockers`. Storing them needs a vault\non the server and a principal that passes both create and reveal on secrets, in practice\nan administrator with a password-or-stronger session (IAM-07). Setting\n`options.credentials` to `skip` in the mapping leaves them out.",
+        "description": "Credential columns (login, password) are never IPAM fields: each host's login and\npassword would become one operator secret of that host in the vault. `credentials`\nsays how many secrets would be created, replaced or left as they are, whether this\naccount may store them (`allowed`) and, when it may not, why (`reason`); then\n`import.credentials.vault_required` is among the `blockers`. Storing them needs a vault\non the server and a principal that passes both create and reveal on secrets, in practice\nan administrator with a password-or-stronger session (IAM-07), and no other account that\nmay reveal secrets signing in with a PIN alone (`reason` `pin_coupling`, as for\n`POST /secrets`). Setting `options.credentials` to `skip` in the mapping leaves them out.",
         "operationId": "preview_import",
         "parameters": [
           {
@@ -26540,7 +26540,7 @@
               "string",
               "null"
             ],
-            "description": "Why not, when not allowed, as a code the UI translates: `forbidden`,\n`step_up_required`, `unauthenticated` or `vault_unavailable`."
+            "description": "Why not, when not allowed, as a code the UI translates: `forbidden`,\n`step_up_required`, `unauthenticated`, `pin_coupling` (another account that may\nreveal secrets signs in with a PIN alone) or `vault_unavailable`."
           },
           "statement": {
             "type": "string",

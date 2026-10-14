@@ -1715,6 +1715,7 @@ export type MessageKey =
   | "import.conflict.update"
   | "import.credentials.not_allowed"
   | "import.credentials.reason.forbidden"
+  | "import.credentials.reason.pin_coupling"
   | "import.credentials.reason.step_up_required"
   | "import.credentials.reason.unauthenticated"
   | "import.credentials.reason.vault_unavailable"
@@ -6868,6 +6869,7 @@ export const messageKeys: readonly MessageKey[] = [
   "import.conflict.update",
   "import.credentials.not_allowed",
   "import.credentials.reason.forbidden",
+  "import.credentials.reason.pin_coupling",
   "import.credentials.reason.step_up_required",
   "import.credentials.reason.unauthenticated",
   "import.credentials.reason.vault_unavailable",

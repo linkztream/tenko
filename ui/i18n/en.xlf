@@ -6373,6 +6373,9 @@
       <unit id="import.credentials.reason.vault_unavailable">
         <segment><source>The vault cannot store secrets now. Leave the credentials out or try again later.</source></segment>
       </unit>
+      <unit id="import.credentials.reason.pin_coupling">
+        <segment><source>Another account that may reveal secrets still signs in with a PIN alone. Add a second factor or a password to it first, or leave the credential columns out.</source></segment>
+      </unit>
       <unit id="import.sheets.title">
         <segment><source>Outcome per sheet</source></segment>
       </unit>

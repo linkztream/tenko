@@ -27,6 +27,7 @@
 //! ```
 
 pub mod codes;
+pub mod connectors;
 pub mod dto;
 pub mod job;
 pub mod mapping;

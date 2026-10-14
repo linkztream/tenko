@@ -161,6 +161,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - The container image and the Compose examples publish the cluster port 8444.
 - `tls = insecure` on a connector is accepted under the Lab profile only: elsewhere it is refused (`connect.tls.insecure_refused`), and an instance stored with it before the profile changed is shown degraded and is not called until its TLS settings change.
 - In a controller cluster the connectors are polled on schedule by the leader only; every controller still runs the plugins, their health checks and the runs a person asks for.
+- An import with credential columns is refused, like storing a secret by hand, while another account that may reveal secrets signs in with a PIN alone; the preview names the accounts.
 
 ### Fixed
 
@@ -169,6 +170,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - With an operator secret in the vault, the security settings of the Home and Lab profiles can be changed again, for example the reveal policy (TGL-24). Only a change of the password policy or of the MFA requirement that would let a PIN be the only factor is refused, and the settings page says so before anything is sent.
 - After an update installed from the web UI, the health check and the start-up line name the version that runs, so the update page sees the restart into the new version.
 - Revoking a node no longer fails with a conflict when the node's heartbeat changes its record at the same moment, for example right after it connects: the controller plans the revocation again, and does the same for a certificate renewal.
+- A re-import no longer deletes a replaced credential that a connector instance still references.
 
 ### Security
 

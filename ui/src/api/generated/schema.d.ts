@@ -1346,8 +1346,9 @@ export interface paths {
          *     passes both `Action::Create` and `Action::Reveal` on `ObjectKind::Secret` (in practice
          *     an administrator with a password-or-stronger session, the IAM-07 threshold). The problem
          *     carries the parameter `reason`, one of `vault_unavailable`, `step_up_required`,
-         *     `forbidden` or `unauthenticated`, and for a step-up `required`, the weakest session
-         *     strength that would do. Setting `options.credentials` to `skip` in the mapping leaves the
+         *     `forbidden`, `unauthenticated` or `pin_coupling`, for a step-up `required`, the weakest
+         *     session strength that would do, and for `pin_coupling` `accounts`, the accounts that may
+         *     reveal but sign in with a PIN alone (the rule of `POST /secrets`). Setting `options.credentials` to `skip` in the mapping leaves the
          *     credential columns out and the rest of the import is applied.
          */
         post: operations["apply_import"];
@@ -1389,8 +1390,9 @@ export interface paths {
          *     account may store them (`allowed`) and, when it may not, why (`reason`); then
          *     `import.credentials.vault_required` is among the `blockers`. Storing them needs a vault
          *     on the server and a principal that passes both create and reveal on secrets, in practice
-         *     an administrator with a password-or-stronger session (IAM-07). Setting
-         *     `options.credentials` to `skip` in the mapping leaves them out.
+         *     an administrator with a password-or-stronger session (IAM-07), and no other account that
+         *     may reveal secrets signing in with a PIN alone (`reason` `pin_coupling`, as for
+         *     `POST /secrets`). Setting `options.credentials` to `skip` in the mapping leaves them out.
          */
         get: operations["preview_import"];
         put?: never;
@@ -4665,7 +4667,8 @@ export interface components {
             new: number;
             /**
              * @description Why not, when not allowed, as a code the UI translates: `forbidden`,
-             *     `step_up_required`, `unauthenticated` or `vault_unavailable`.
+             *     `step_up_required`, `unauthenticated`, `pin_coupling` (another account that may
+             *     reveal secrets signs in with a PIN alone) or `vault_unavailable`.
              */
             reason?: string | null;
             /** @description The statement shown to the user (English; the UI translates by the counts). */
@@ -19661,7 +19664,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not allowed (`auth.forbidden`), or the credential columns cannot be stored (`import.credentials.vault_required`, parameter `reason`: `vault_unavailable`, `step_up_required`, `forbidden` or `unauthenticated`; parameter `required`: the weakest session strength for a step-up) */
+            /** @description Not allowed (`auth.forbidden`), or the credential columns cannot be stored (`import.credentials.vault_required`, parameter `reason`: `vault_unavailable`, `step_up_required`, `forbidden`, `unauthenticated` or `pin_coupling`; parameter `required`: the weakest session strength for a step-up; parameter `accounts`: the accounts that sign in with a PIN alone, for `pin_coupling`) */
             403: {
                 headers: {
                     [name: string]: unknown;
