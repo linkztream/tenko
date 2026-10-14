@@ -754,6 +754,52 @@
         <notes><note category="description">Error: the queue directory cannot be read or written.</note></notes>
         <segment><source>The queue of this controller cannot be read or written.</source><target>Kön på den här kontrollern kan inte läsas eller skrivas.</target></segment>
       </unit>
+      <unit id="cluster.col.compat">
+        <notes><note category="description">Column of the member table: protocol majors, Raft wire version and data formats the member can open.</note></notes>
+        <segment><source>Compatibility</source><target>Kompatibilitet</target></segment>
+      </unit>
+      <unit id="cluster.compat.format_one">
+        <segment><source>format {format, number}</source><target>format {format, number}</target></segment>
+      </unit>
+      <unit id="cluster.compat.format_range">
+        <segment><source>formats {from, number} to {to, number}</source><target>format {from, number} till {to, number}</target></segment>
+      </unit>
+      <unit id="cluster.compat.tooltip">
+        <segment><source>Protocol majors: {majors}. Raft wire: {wire}. Data formats it can open: {formats}.</source><target>Protokollversioner: {majors}. Raft-protokoll: {wire}. Dataformat den kan öppna: {formats}.</target></segment>
+      </unit>
+      <unit id="cluster.format.title">
+        <segment><source>Data format</source><target>Dataformat</target></segment>
+      </unit>
+      <unit id="cluster.format.stored">
+        <segment><source>Stored</source><target>Lagrat</target></segment>
+      </unit>
+      <unit id="cluster.format.binary">
+        <segment><source>This controller can open up to</source><target>Den här kontrollern kan öppna upp till</target></segment>
+      </unit>
+      <unit id="cluster.format.target">
+        <segment><source>Migration waits for format</source><target>Migreringen väntar på format</target></segment>
+      </unit>
+      <unit id="cluster.format.current">
+        <segment><source>The data is in the newest format this controller knows. No migration waits.</source><target>Datan är i det nyaste formatet som den här kontrollern känner till. Ingen migrering väntar.</target></segment>
+      </unit>
+      <unit id="cluster.format.blocked">
+        <segment><source>The data stays in its old format until every voter runs a binary that knows the new one. These voters do not yet:</source><target>Datan behåller sitt gamla format tills varje röstande medlem kör en binär som känner till det nya. De här gör det inte ännu:</target></segment>
+      </unit>
+      <unit id="cluster.format.waiting">
+        <segment><source>The migration waits and starts as soon as the leader is ready.</source><target>Migreringen väntar och startar så snart ledaren är redo.</target></segment>
+      </unit>
+      <unit id="cluster.format.not_reported">
+        <segment><source>format not reported</source><target>format inte rapporterat</target></segment>
+      </unit>
+      <unit id="cluster.format.knows">
+        <segment><source>knows format {format, number}</source><target>känner till format {format, number}</target></segment>
+      </unit>
+      <unit id="cluster.format.advice">
+        <segment><source>Update the listed controllers first (docs/upgrades.md, section 7.7).</source><target>Uppdatera de listade kontrollrarna först (docs/upgrades.md, avsnitt 7.7).</target></segment>
+      </unit>
+      <unit id="cluster.warning.migration_blocked">
+        <segment><source>The data stays in format {stored} until every voter can open format {target}. Update controller {nodes} first.</source><target>Datan stannar i format {stored} tills varje röstande medlem kan öppna format {target}. Uppdatera kontroller {nodes} först.</target></segment>
+      </unit>
     </group>
   </file>
 </xliff>

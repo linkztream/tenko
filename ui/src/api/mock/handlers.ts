@@ -9,6 +9,8 @@ import { auditRoutes } from "./routes-audit";
 import { auditExportRoutes } from "./routes-audit-export";
 import { authRoutes } from "./routes-auth";
 import { backupRoutes } from "./routes-backup";
+import { guardrailsRoutes } from "./routes-guardrails";
+import { reconcilerRoutes } from "./routes-reconciler";
 import { clusterRoutes, quorumGate } from "./routes-cluster";
 import { i18nRoutes } from "./routes-i18n";
 import { importRoutes } from "./routes-import";
@@ -67,6 +69,8 @@ export const happyPaths: HttpHandler[] = [
   ...auditExportRoutes,
   ...kekRoutes,
   ...backupRoutes,
+  ...reconcilerRoutes,
+  ...guardrailsRoutes,
   ...i18nRoutes,
 ];
 

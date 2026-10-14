@@ -134,6 +134,9 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - With probe scopes, an address no probe scans is no longer proposed as orphaned: only an address inside a scope a probe applies counts as gone when it goes unseen.
 - The vendor entries of adoption policies match the vendor names that probes, network controllers and Home Assistant report, not only MAC address prefixes.
 - Undoing a layer-2 change checks the guardrails again, so a path protected since the change is never written back.
+- A reconciler settings page (Settings, Reconciler): how often the reconciler runs, how long it waits after a change, how long facts and unseen addresses are kept and whether adoption policies apply, in seconds, minutes, hours and days, with the limits under each field and a notice when someone else saved first.
+- A guardrails page (Settings, Guardrails): the most parallel layer 2 writes and the list of protected ports, networks, VLANs and clients that connector writes and moves never touch, added in a dialog and removed in the list.
+- The cluster page shows the compatibility of every member (protocol versions, Raft wire version and the data formats it can open) and a data format panel that names the controllers blocking a pending migration, with the warning to update them first.
 
 ### Changed
 

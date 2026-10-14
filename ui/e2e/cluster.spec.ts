@@ -80,6 +80,30 @@ test("a single controller is the leader and the only voter, offers nothing to pr
     await expect(row.getByTestId("member-health")).toHaveAttribute("data-state", "leader");
   });
 
+  await test.step("the compatibility cell and the data format agree with the server", async () => {
+    const full = (await members(api)).members[0] as { protocol_majors?: number[]; raft_wire?: string | null; formats?: number[] };
+    const cell = page.getByTestId(`member-compat-${self.node}`);
+    const majors = full.protocol_majors ?? [];
+    await expect(cell.getByTestId("compat-majors")).toHaveText(majors.length > 0 ? majors.map((m) => `v${m}`).join(", ") : "–");
+    await expect(cell.getByTestId("compat-wire")).toHaveText(full.raft_wire ?? "–");
+    const formats = full.formats ?? [];
+    if (formats.length === 0) await expect(cell.getByTestId("compat-formats")).toHaveText("–");
+    else await expect(cell.getByTestId("compat-formats")).toContainText(String(formats[0]));
+
+    const status = await api.get<{ data_format?: { stored: number; binary: number; pending?: unknown } | null }>("/system/status");
+    const panel = page.getByTestId("cluster-format");
+    if (status.data_format) {
+      await expect(panel).toBeVisible();
+      await expect(panel).toHaveAttribute("data-state", "current");
+      await expect(panel.getByTestId("format-stored")).toHaveText(String(status.data_format.stored));
+      await expect(panel.getByTestId("format-binary")).toHaveText(String(status.data_format.binary));
+      expect(status.data_format.stored).toBe(status.data_format.binary);
+      expect(status.data_format.pending ?? null).toBeNull();
+      await expect(panel.getByTestId("format-blockers")).toHaveCount(0);
+    }
+    await expect(page.getByTestId("cluster-warning")).toHaveCount(0);
+  });
+
   await test.step("no promotion and no step-down; the removal is refused with the reasons of a single member", async () => {
     await expect(page.getByTestId(`member-promote-${self.node}`)).toHaveCount(0);
     await expect(page.getByTestId("cluster-step-down")).toHaveCount(0);

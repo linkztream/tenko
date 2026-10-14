@@ -6,11 +6,13 @@ import { A } from "@solidjs/router";
 import { For } from "solid-js";
 import { paths } from "../app/paths";
 import { t, type MessageKey } from "../i18n";
+import { GUARDRAILS_PATH } from "./guardrails/paths";
+import { RECONCILER_PATH } from "./reconciler/paths";
 import { SECRETS_PATH } from "../secrets/paths";
 import { UPDATES_PATH } from "../updates/paths";
 
 interface Tab {
-  id: "security" | "users" | "updates" | "secrets" | "access" | "audit-export" | "vault" | "backup" | "languages";
+  id: "security" | "users" | "updates" | "secrets" | "access" | "audit-export" | "vault" | "backup" | "reconciler" | "guardrails" | "languages";
   href: string;
   label: MessageKey;
 }
@@ -24,6 +26,8 @@ const TABS: readonly Tab[] = [
   { id: "audit-export", href: paths.settings("audit-export"), label: "settings.nav.audit_export" },
   { id: "vault", href: paths.settings("vault"), label: "settings.nav.vault" },
   { id: "backup", href: paths.settings("backup"), label: "settings.nav.backup" },
+  { id: "reconciler", href: RECONCILER_PATH, label: "settings.nav.reconciler" },
+  { id: "guardrails", href: GUARDRAILS_PATH, label: "settings.nav.guardrails" },
   { id: "languages", href: paths.settings("languages"), label: "settings.nav.languages" },
 ];
 

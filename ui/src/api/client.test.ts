@@ -69,6 +69,18 @@ describe("requests", () => {
     expect(JSON.parse(String(call?.init.body))).toEqual({ user_name: "sam", password: "x" });
   });
 
+  it("getWithEtag returns the body and the ETag without its quotes, null when absent", async () => {
+    const calls = stubFetch((c) =>
+      json({ max_parallel: 10, protected: [] }, 200, c.url.includes("guardrails") ? { etag: '"7"' } : {}),
+    );
+    const read = await api.getWithEtag("/api/v1/settings/guardrails");
+    expect(read.value).toEqual({ max_parallel: 10, protected: [] });
+    expect(read.etag).toBe("7");
+    expect(header(calls[0], "Idempotency-Key")).toBeUndefined();
+    const none = await api.getWithEtag("/api/v1/settings/reconciler");
+    expect(none.etag).toBeNull();
+  });
+
   it("reuses a given Idempotency-Key and makes a new one otherwise", async () => {
     const calls = stubFetch(() => new Response(null, { status: 204 }));
     await api.post("/api/v1/auth/logout", { idempotencyKey: "retry-1" });

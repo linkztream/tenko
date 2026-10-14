@@ -34,6 +34,11 @@ export function stepDown(): Promise<StepDown> {
   return api.post("/api/v1/cluster/step-down");
 }
 
+/** The status of this node: the data format and the warnings the cluster page shows. */
+export function systemStatus(signal?: AbortSignal) {
+  return api.get("/api/v1/system/status", { signal });
+}
+
 /** The digests of every member at `revision` (default: the leader's applied revision). */
 export function digests(revision?: number, signal?: AbortSignal): Promise<DigestReport> {
   return api.get("/api/v1/cluster/digests", { query: { revision }, signal });

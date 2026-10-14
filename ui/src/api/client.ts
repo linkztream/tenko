@@ -205,6 +205,15 @@ export interface RawOptions extends CommonOptions {
 }
 
 export async function rawRequest<T>(method: Method, template: string, options: RawOptions = {}): Promise<T> {
+  return (await rawExchange<T>(method, template, options)).value;
+}
+
+/** `rawRequest` that also returns the `ETag` header of the answer, quotes removed, `null` when absent. */
+export async function rawExchange<T>(
+  method: Method,
+  template: string,
+  options: RawOptions = {},
+): Promise<{ value: T; etag: Revision | null }> {
   const url = buildPath(template, options.path, options.query);
   const headers: Record<string, string> = { Accept: "application/json", ...options.headers };
   let body: BodyInit | undefined;
@@ -260,13 +269,21 @@ export async function rawRequest<T>(method: Method, template: string, options: R
     }
     throw err;
   }
-  return parsed as T;
+  const etag = res.headers.get("etag");
+  return { value: parsed as T, etag: etag === null ? null : etag.replace(/^W\//, "").replace(/^"(.*)"$/, "$1") };
 }
 
 /** The API, one method per HTTP verb. */
 export const api = {
   get<P extends PathsWith<"get">>(path: P, ...[options]: Optional<P, GetOptions<P>>): Promise<ResponseOf<"get", P>> {
     return rawRequest("get", path, options as never);
+  },
+  /** `get` plus the `ETag` of the answer without its quotes (the revision to send back as `ifMatch`), `null` when absent. */
+  getWithEtag<P extends PathsWith<"get">>(
+    path: P,
+    ...[options]: Optional<P, GetOptions<P>>
+  ): Promise<{ value: ResponseOf<"get", P>; etag: Revision | null }> {
+    return rawExchange("get", path, options as never);
   },
   post<P extends PathsWith<"post">>(
     path: P,

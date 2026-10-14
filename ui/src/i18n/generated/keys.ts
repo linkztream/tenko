@@ -657,6 +657,7 @@ export type MessageKey =
   | "cluster.changing"
   | "cluster.col.actions"
   | "cluster.col.address"
+  | "cluster.col.compat"
   | "cluster.col.contact"
   | "cluster.col.format"
   | "cluster.col.health"
@@ -665,6 +666,9 @@ export type MessageKey =
   | "cluster.col.name"
   | "cluster.col.role"
   | "cluster.col.version"
+  | "cluster.compat.format_one"
+  | "cluster.compat.format_range"
+  | "cluster.compat.tooltip"
   | "cluster.digests.agree"
   | "cluster.digests.col.digest"
   | "cluster.digests.col.entries"
@@ -682,6 +686,16 @@ export type MessageKey =
   | "cluster.done.promoted"
   | "cluster.done.removed"
   | "cluster.done.stepped_down"
+  | "cluster.format.advice"
+  | "cluster.format.binary"
+  | "cluster.format.blocked"
+  | "cluster.format.current"
+  | "cluster.format.knows"
+  | "cluster.format.not_reported"
+  | "cluster.format.stored"
+  | "cluster.format.target"
+  | "cluster.format.title"
+  | "cluster.format.waiting"
   | "cluster.health.catching_up"
   | "cluster.health.caught_up"
   | "cluster.health.leader"
@@ -799,6 +813,7 @@ export type MessageKey =
   | "cluster.summary.voters_value"
   | "cluster.title"
   | "cluster.tolerance"
+  | "cluster.warning.migration_blocked"
   | "common.action.add"
   | "common.action.back"
   | "common.action.cancel"
@@ -1585,6 +1600,49 @@ export type MessageKey =
   | "grid.select_row"
   | "grid.selected"
   | "grid.selection.clear"
+  | "guardrails.add"
+  | "guardrails.col.actions"
+  | "guardrails.col.kind"
+  | "guardrails.col.path"
+  | "guardrails.dialog.body"
+  | "guardrails.dialog.submit"
+  | "guardrails.dialog.title"
+  | "guardrails.error.duplicate"
+  | "guardrails.error.invalid"
+  | "guardrails.error.mac"
+  | "guardrails.error.parallel"
+  | "guardrails.error.port"
+  | "guardrails.error.reference"
+  | "guardrails.error.vid"
+  | "guardrails.field.device"
+  | "guardrails.field.kind"
+  | "guardrails.field.mac"
+  | "guardrails.field.network"
+  | "guardrails.field.port"
+  | "guardrails.field.vid"
+  | "guardrails.help.device"
+  | "guardrails.help.mac"
+  | "guardrails.help.network"
+  | "guardrails.help.port"
+  | "guardrails.help.vid"
+  | "guardrails.kind.client"
+  | "guardrails.kind.network"
+  | "guardrails.kind.port"
+  | "guardrails.kind.vlan"
+  | "guardrails.lede"
+  | "guardrails.note"
+  | "guardrails.parallel.help"
+  | "guardrails.parallel.label"
+  | "guardrails.parallel.limits"
+  | "guardrails.path.port"
+  | "guardrails.path.vlan"
+  | "guardrails.paths.heading"
+  | "guardrails.paths.none"
+  | "guardrails.reloaded"
+  | "guardrails.remove"
+  | "guardrails.remove_label"
+  | "guardrails.saved"
+  | "guardrails.title"
   | "hosts.addresses.none"
   | "hosts.addresses.title"
   | "hosts.bulk.lock_title"
@@ -3045,6 +3103,32 @@ export type MessageKey =
   | "profile.lab.name"
   | "profile.standard.description"
   | "profile.standard.name"
+  | "reconciler.error.invalid"
+  | "reconciler.error.range"
+  | "reconciler.error.refresh"
+  | "reconciler.field.adopt"
+  | "reconciler.field.debounce"
+  | "reconciler.field.interval"
+  | "reconciler.field.orphan"
+  | "reconciler.field.purge"
+  | "reconciler.field.refresh"
+  | "reconciler.field.retention"
+  | "reconciler.help.adopt"
+  | "reconciler.help.debounce"
+  | "reconciler.help.interval"
+  | "reconciler.help.orphan"
+  | "reconciler.help.purge"
+  | "reconciler.help.refresh"
+  | "reconciler.help.retention"
+  | "reconciler.lede"
+  | "reconciler.limits"
+  | "reconciler.reloaded"
+  | "reconciler.saved"
+  | "reconciler.title"
+  | "reconciler.unit.day"
+  | "reconciler.unit.hour"
+  | "reconciler.unit.minute"
+  | "reconciler.unit.second"
   | "recovery.copied"
   | "recovery.copy_failed"
   | "recovery.download"
@@ -3310,8 +3394,10 @@ export type MessageKey =
   | "settings.nav.access"
   | "settings.nav.audit_export"
   | "settings.nav.backup"
+  | "settings.nav.guardrails"
   | "settings.nav.label"
   | "settings.nav.languages"
+  | "settings.nav.reconciler"
   | "settings.nav.secrets"
   | "settings.nav.security"
   | "settings.nav.updates"
@@ -4414,11 +4500,15 @@ export interface MessageArgs {
   "cluster.action.promote_named": { name: string | number };
   "cluster.action.remove_named": { name: string | number };
   "cluster.col.format": { format: string | number };
+  "cluster.compat.format_one": { format: number };
+  "cluster.compat.format_range": { from: number; to: number };
+  "cluster.compat.tooltip": { formats: string | number; majors: string | number; wire: string | number };
   "cluster.digests.agree": { count: number; revision: string | number };
   "cluster.digests.differ": { revision: string | number };
   "cluster.done.promoted": { name: string | number };
   "cluster.done.removed": { name: string | number };
   "cluster.done.stepped_down": { name: string | number; term: string | number };
+  "cluster.format.knows": { format: number };
   "cluster.member.unnamed": { id: string | number };
   "cluster.members.count": { count: number };
   "cluster.no_quorum.body_since": { since: string | number };
@@ -4446,6 +4536,7 @@ export interface MessageArgs {
   "cluster.summary.since": { since: string | number };
   "cluster.summary.voters_value": { count: number; tolerance: string | number };
   "cluster.tolerance": { count: number };
+  "cluster.warning.migration_blocked": { nodes: string | number; stored: string | number; target: string | number };
   "common.count.items": { count: number };
   "common.greeting": { name: string | number };
   "connectors.delete.title": { name: string | number };
@@ -4598,6 +4689,14 @@ export interface MessageArgs {
   "grid.rows": { count: number };
   "grid.select_row": { row: string | number };
   "grid.selected": { count: number };
+  "guardrails.error.invalid": { field: string | number };
+  "guardrails.error.parallel": { max: number; min: number };
+  "guardrails.error.reference": { max: number };
+  "guardrails.error.vid": { max: number; min: number };
+  "guardrails.parallel.limits": { default: number; max: number; min: number };
+  "guardrails.path.port": { device: string | number; port: string | number };
+  "guardrails.path.vlan": { vid: string | number };
+  "guardrails.remove_label": { path: string | number };
   "hosts.bulk.lock_title": { count: number };
   "hosts.bulk.mode_title": { count: number; mode: string | number };
   "hosts.bulk.unlock_title": { count: number };
@@ -4937,6 +5036,10 @@ export interface MessageArgs {
   "principal.token": { id: string | number };
   "principal.user": { id: string | number };
   "principal.you": { name: string | number };
+  "reconciler.error.invalid": { field: string | number };
+  "reconciler.error.range": { max: string | number; min: string | number };
+  "reconciler.error.refresh": { retention: string | number };
+  "reconciler.limits": { default: string | number; max: string | number; min: string | number };
   "scans.count": { count: number };
   "scans.diff.summary": { changed: string | number; gone: string | number; new: string | number };
   "scans.fact.address": { ip: string | number; mac: string | number };
@@ -5811,6 +5914,7 @@ export const messageKeys: readonly MessageKey[] = [
   "cluster.changing",
   "cluster.col.actions",
   "cluster.col.address",
+  "cluster.col.compat",
   "cluster.col.contact",
   "cluster.col.format",
   "cluster.col.health",
@@ -5819,6 +5923,9 @@ export const messageKeys: readonly MessageKey[] = [
   "cluster.col.name",
   "cluster.col.role",
   "cluster.col.version",
+  "cluster.compat.format_one",
+  "cluster.compat.format_range",
+  "cluster.compat.tooltip",
   "cluster.digests.agree",
   "cluster.digests.col.digest",
   "cluster.digests.col.entries",
@@ -5836,6 +5943,16 @@ export const messageKeys: readonly MessageKey[] = [
   "cluster.done.promoted",
   "cluster.done.removed",
   "cluster.done.stepped_down",
+  "cluster.format.advice",
+  "cluster.format.binary",
+  "cluster.format.blocked",
+  "cluster.format.current",
+  "cluster.format.knows",
+  "cluster.format.not_reported",
+  "cluster.format.stored",
+  "cluster.format.target",
+  "cluster.format.title",
+  "cluster.format.waiting",
   "cluster.health.catching_up",
   "cluster.health.caught_up",
   "cluster.health.leader",
@@ -5953,6 +6070,7 @@ export const messageKeys: readonly MessageKey[] = [
   "cluster.summary.voters_value",
   "cluster.title",
   "cluster.tolerance",
+  "cluster.warning.migration_blocked",
   "common.action.add",
   "common.action.back",
   "common.action.cancel",
@@ -6739,6 +6857,49 @@ export const messageKeys: readonly MessageKey[] = [
   "grid.select_row",
   "grid.selected",
   "grid.selection.clear",
+  "guardrails.add",
+  "guardrails.col.actions",
+  "guardrails.col.kind",
+  "guardrails.col.path",
+  "guardrails.dialog.body",
+  "guardrails.dialog.submit",
+  "guardrails.dialog.title",
+  "guardrails.error.duplicate",
+  "guardrails.error.invalid",
+  "guardrails.error.mac",
+  "guardrails.error.parallel",
+  "guardrails.error.port",
+  "guardrails.error.reference",
+  "guardrails.error.vid",
+  "guardrails.field.device",
+  "guardrails.field.kind",
+  "guardrails.field.mac",
+  "guardrails.field.network",
+  "guardrails.field.port",
+  "guardrails.field.vid",
+  "guardrails.help.device",
+  "guardrails.help.mac",
+  "guardrails.help.network",
+  "guardrails.help.port",
+  "guardrails.help.vid",
+  "guardrails.kind.client",
+  "guardrails.kind.network",
+  "guardrails.kind.port",
+  "guardrails.kind.vlan",
+  "guardrails.lede",
+  "guardrails.note",
+  "guardrails.parallel.help",
+  "guardrails.parallel.label",
+  "guardrails.parallel.limits",
+  "guardrails.path.port",
+  "guardrails.path.vlan",
+  "guardrails.paths.heading",
+  "guardrails.paths.none",
+  "guardrails.reloaded",
+  "guardrails.remove",
+  "guardrails.remove_label",
+  "guardrails.saved",
+  "guardrails.title",
   "hosts.addresses.none",
   "hosts.addresses.title",
   "hosts.bulk.lock_title",
@@ -8199,6 +8360,32 @@ export const messageKeys: readonly MessageKey[] = [
   "profile.lab.name",
   "profile.standard.description",
   "profile.standard.name",
+  "reconciler.error.invalid",
+  "reconciler.error.range",
+  "reconciler.error.refresh",
+  "reconciler.field.adopt",
+  "reconciler.field.debounce",
+  "reconciler.field.interval",
+  "reconciler.field.orphan",
+  "reconciler.field.purge",
+  "reconciler.field.refresh",
+  "reconciler.field.retention",
+  "reconciler.help.adopt",
+  "reconciler.help.debounce",
+  "reconciler.help.interval",
+  "reconciler.help.orphan",
+  "reconciler.help.purge",
+  "reconciler.help.refresh",
+  "reconciler.help.retention",
+  "reconciler.lede",
+  "reconciler.limits",
+  "reconciler.reloaded",
+  "reconciler.saved",
+  "reconciler.title",
+  "reconciler.unit.day",
+  "reconciler.unit.hour",
+  "reconciler.unit.minute",
+  "reconciler.unit.second",
   "recovery.copied",
   "recovery.copy_failed",
   "recovery.download",
@@ -8464,8 +8651,10 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.nav.access",
   "settings.nav.audit_export",
   "settings.nav.backup",
+  "settings.nav.guardrails",
   "settings.nav.label",
   "settings.nav.languages",
+  "settings.nav.reconciler",
   "settings.nav.secrets",
   "settings.nav.security",
   "settings.nav.updates",

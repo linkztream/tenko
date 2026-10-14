@@ -754,6 +754,52 @@
         <notes><note category="description">Error: the queue directory cannot be read or written.</note></notes>
         <segment><source>The queue of this controller cannot be read or written.</source></segment>
       </unit>
+      <unit id="cluster.col.compat">
+        <notes><note category="description">Column of the member table: protocol majors, Raft wire version and data formats the member can open.</note></notes>
+        <segment><source>Compatibility</source></segment>
+      </unit>
+      <unit id="cluster.compat.format_one">
+        <segment><source>format {format, number}</source></segment>
+      </unit>
+      <unit id="cluster.compat.format_range">
+        <segment><source>formats {from, number} to {to, number}</source></segment>
+      </unit>
+      <unit id="cluster.compat.tooltip">
+        <segment><source>Protocol majors: {majors}. Raft wire: {wire}. Data formats it can open: {formats}.</source></segment>
+      </unit>
+      <unit id="cluster.format.title">
+        <segment><source>Data format</source></segment>
+      </unit>
+      <unit id="cluster.format.stored">
+        <segment><source>Stored</source></segment>
+      </unit>
+      <unit id="cluster.format.binary">
+        <segment><source>This controller can open up to</source></segment>
+      </unit>
+      <unit id="cluster.format.target">
+        <segment><source>Migration waits for format</source></segment>
+      </unit>
+      <unit id="cluster.format.current">
+        <segment><source>The data is in the newest format this controller knows. No migration waits.</source></segment>
+      </unit>
+      <unit id="cluster.format.blocked">
+        <segment><source>The data stays in its old format until every voter runs a binary that knows the new one. These voters do not yet:</source></segment>
+      </unit>
+      <unit id="cluster.format.waiting">
+        <segment><source>The migration waits and starts as soon as the leader is ready.</source></segment>
+      </unit>
+      <unit id="cluster.format.not_reported">
+        <segment><source>format not reported</source></segment>
+      </unit>
+      <unit id="cluster.format.knows">
+        <segment><source>knows format {format, number}</source></segment>
+      </unit>
+      <unit id="cluster.format.advice">
+        <segment><source>Update the listed controllers first (docs/upgrades.md, section 7.7).</source></segment>
+      </unit>
+      <unit id="cluster.warning.migration_blocked">
+        <segment><source>The data stays in format {stored} until every voter can open format {target}. Update controller {nodes} first.</source></segment>
+      </unit>
     </group>
   </file>
 </xliff>

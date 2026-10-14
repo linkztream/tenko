@@ -24,6 +24,10 @@ export type MemberRole = S["MemberRole"];
 export type MemberView = S["MemberView"];
 /** `GET /cluster/members` and the answer of a membership change. */
 export type ClusterView = S["ClusterView"];
+/** The data format of the replicated data and of this binary, and a migration that waits (`GET /system/status`). */
+export type DataFormatStatus = S["DataFormatStatus"];
+/** A voter whose binary does not know the format a pending migration targets. */
+export type FormatBlocker = S["FormatBlocker"];
 /** Body of `POST /cluster/members/{id}/promote`. */
 export type PromoteRequest = S["PromoteRequest"];
 /** Answer of `POST /cluster/step-down`. */
@@ -286,3 +290,34 @@ export const CLUSTER_PATH = "/cluster";
 
 /** The queued changes of this controller and the ones that wait for a decision after a heal. */
 export const CLUSTER_QUEUE_PATH = "/cluster/queue";
+
+// ---------------------------------------------------------------------------------
+// Compatibility and data format (docs/upgrades.md, sections 3 and 7.7)
+
+/** The status warning of a migration that waits for voters with an older binary. */
+export const MIGRATION_BLOCKED = "upgrade.migration_blocked";
+
+/** Protocol majors as "v1, v2"; "–" when the member has not reported them. */
+export function majorsText(member: Pick<MemberView, "protocol_majors">): string {
+  const majors = member.protocol_majors ?? [];
+  return majors.length > 0 ? majors.map((m) => `v${m}`).join(", ") : "–";
+}
+
+/** The data formats a binary can open, oldest first: "formats 3 to 5", "format 3"; "–" when not reported. */
+export function formatsText(member: Pick<MemberView, "formats">): string {
+  const formats = member.formats ?? [];
+  if (formats.length === 0) return "–";
+  const first = formats[0] ?? 0;
+  const last = formats[formats.length - 1] ?? first;
+  return first === last ? t("cluster.compat.format_one", { format: first }) : t("cluster.compat.format_range", { from: first, to: last });
+}
+
+/** The three parts of the compatibility cell, each "–" when not reported. */
+export function compatParts(member: Pick<MemberView, "protocol_majors" | "raft_wire" | "formats">): { majors: string; wire: string; formats: string } {
+  return { majors: majorsText(member), wire: member.raft_wire ?? "–", formats: formatsText(member) };
+}
+
+/** The migration warning of a status, if the status carries it. */
+export function migrationWarning(warnings: readonly { code: string; params?: Record<string, string> }[] | undefined) {
+  return warnings?.find((w) => w.code === MIGRATION_BLOCKED);
+}

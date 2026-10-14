@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="guardrails">
+      <unit id="settings.nav.guardrails">
+        <notes><note category="description">Link in the settings navigation to the guardrails page.</note></notes>
+        <segment><source>Guardrails</source><target>Skyddsräcken</target></segment>
+      </unit>
+      <unit id="guardrails.title">
+        <notes><note category="description">Title of the guardrails settings page and its entry in the browser tab.</note></notes>
+        <segment><source>Guardrails</source><target>Skyddsräcken</target></segment>
+      </unit>
+      <unit id="guardrails.lede">
+        <segment><source>Guardrails keep Tenko away from the paths a network must not lose: protected ports, networks, VLANs and clients. They apply to every write of a connector and to moves, and take effect at the next plan without a restart.</source><target>Skyddsräcken håller Tenko borta från de vägar ett nätverk inte får förlora: skyddade portar, nätverk, VLAN och klienter. De gäller varje skrivning från en koppling och varje flytt, och träder i kraft vid nästa plan utan omstart.</target></segment>
+      </unit>
+      <unit id="guardrails.saved">
+        <segment><source>Guardrails saved.</source><target>Skyddsräckena sparades.</target></segment>
+      </unit>
+      <unit id="guardrails.reloaded">
+        <segment><source>The guardrails were changed by someone else in the meantime. The form shows the current values. Check them and save again.</source><target>Skyddsräckena ändrades av någon annan under tiden. Formuläret visar de aktuella värdena. Kontrollera dem och spara igen.</target></segment>
+      </unit>
+      <unit id="guardrails.parallel.label">
+        <segment><source>Parallel writes</source><target>Parallella skrivningar</target></segment>
+      </unit>
+      <unit id="guardrails.parallel.help">
+        <segment><source>The most layer 2 writes that run through one controller at a time. Further writes wait for a free slot.</source><target>Det högsta antalet skrivningar på lager 2 som körs samtidigt genom en kontroller. Fler skrivningar väntar på en ledig plats.</target></segment>
+      </unit>
+      <unit id="guardrails.parallel.limits">
+        <segment><source>{min, number} to {max, number}, default {default, number}</source><target>{min, number} till {max, number}, standard {default, number}</target></segment>
+      </unit>
+      <unit id="guardrails.error.parallel">
+        <segment><source>Use a whole number from {min, number} to {max, number}.</source><target>Ange ett heltal från {min, number} till {max, number}.</target></segment>
+      </unit>
+      <unit id="guardrails.error.invalid">
+        <notes><note category="description">Shown for the problem code connect.guardrails.invalid; the key lives here because the page does not load the connectors message pack.</note></notes>
+        <segment><source>The server refused {field}. Check the value and try again.</source><target>Servern avvisade {field}. Kontrollera värdet och försök igen.</target></segment>
+      </unit>
+      <unit id="guardrails.paths.heading">
+        <segment><source>Protected paths</source><target>Skyddade vägar</target></segment>
+      </unit>
+      <unit id="guardrails.paths.none">
+        <segment><source>No paths are protected beyond the uplinks and the management path.</source><target>Inga vägar är skyddade utöver upplänkarna och hanteringsvägen.</target></segment>
+      </unit>
+      <unit id="guardrails.note">
+        <segment><source>Uplinks and the management path are always protected, on top of this list: the ports, clients, networks and VLANs through which the controller and Tenko are reached.</source><target>Upplänkar och hanteringsvägen är alltid skyddade utöver den här listan: de portar, klienter, nätverk och VLAN som kontrollern och Tenko nås genom.</target></segment>
+      </unit>
+      <unit id="guardrails.col.kind">
+        <segment><source>Kind</source><target>Slag</target></segment>
+      </unit>
+      <unit id="guardrails.col.path">
+        <segment><source>Path</source><target>Väg</target></segment>
+      </unit>
+      <unit id="guardrails.col.actions">
+        <segment><source>Actions</source><target>Åtgärder</target></segment>
+      </unit>
+      <unit id="guardrails.kind.port">
+        <segment><source>Port</source><target>Port</target></segment>
+      </unit>
+      <unit id="guardrails.kind.network">
+        <segment><source>Network</source><target>Nätverk</target></segment>
+      </unit>
+      <unit id="guardrails.kind.vlan">
+        <segment><source>VLAN</source><target>VLAN</target></segment>
+      </unit>
+      <unit id="guardrails.kind.client">
+        <segment><source>Client</source><target>Klient</target></segment>
+      </unit>
+      <unit id="guardrails.path.port">
+        <segment><source>{device}, port {port}</source><target>{device}, port {port}</target></segment>
+      </unit>
+      <unit id="guardrails.path.vlan">
+        <segment><source>VLAN {vid}</source><target>VLAN {vid}</target></segment>
+      </unit>
+      <unit id="guardrails.add">
+        <segment><source>Add path</source><target>Lägg till väg</target></segment>
+      </unit>
+      <unit id="guardrails.remove">
+        <segment><source>Remove</source><target>Ta bort</target></segment>
+      </unit>
+      <unit id="guardrails.remove_label">
+        <segment><source>Remove {path} from the list</source><target>Ta bort {path} från listan</target></segment>
+      </unit>
+      <unit id="guardrails.dialog.title">
+        <segment><source>Add a protected path</source><target>Lägg till en skyddad väg</target></segment>
+      </unit>
+      <unit id="guardrails.dialog.body">
+        <segment><source>Choose what Tenko must never change. The path is added to the list and takes effect when you save the page.</source><target>Välj vad Tenko aldrig får ändra. Vägen läggs till i listan och gäller när du sparar sidan.</target></segment>
+      </unit>
+      <unit id="guardrails.dialog.submit">
+        <segment><source>Add</source><target>Lägg till</target></segment>
+      </unit>
+      <unit id="guardrails.field.kind">
+        <segment><source>Kind of path</source><target>Typ av väg</target></segment>
+      </unit>
+      <unit id="guardrails.field.device">
+        <segment><source>Device</source><target>Enhet</target></segment>
+      </unit>
+      <unit id="guardrails.field.port">
+        <segment><source>Port number</source><target>Portnummer</target></segment>
+      </unit>
+      <unit id="guardrails.field.network">
+        <segment><source>Network</source><target>Nätverk</target></segment>
+      </unit>
+      <unit id="guardrails.field.vid">
+        <segment><source>VLAN id</source><target>VLAN-id</target></segment>
+      </unit>
+      <unit id="guardrails.field.mac">
+        <segment><source>MAC address of the client</source><target>Klientens MAC-adress</target></segment>
+      </unit>
+      <unit id="guardrails.help.device">
+        <segment><source>The identifier of the switch, as the topology shows it.</source><target>Switchens identifierare, som topologin visar den.</target></segment>
+      </unit>
+      <unit id="guardrails.help.port">
+        <segment><source>The index of the port on that device.</source><target>Portens index på enheten.</target></segment>
+      </unit>
+      <unit id="guardrails.help.network">
+        <segment><source>The identifier of the network, as the topology shows it.</source><target>Nätverkets identifierare, som topologin visar den.</target></segment>
+      </unit>
+      <unit id="guardrails.help.vid">
+        <segment><source>The VLAN is protected on every controller.</source><target>VLAN skyddas på varje kontroller.</target></segment>
+      </unit>
+      <unit id="guardrails.help.mac">
+        <segment><source>Six pairs of hexadecimal digits, for example 00:00:5e:00:53:01.</source><target>Sex par hexadecimala siffror, till exempel 00:00:5e:00:53:01.</target></segment>
+      </unit>
+      <unit id="guardrails.error.reference">
+        <segment><source>Enter 1 to {max, number} characters.</source><target>Ange 1 till {max, number} tecken.</target></segment>
+      </unit>
+      <unit id="guardrails.error.port">
+        <segment><source>Enter a whole number, 0 or more.</source><target>Ange ett heltal, 0 eller större.</target></segment>
+      </unit>
+      <unit id="guardrails.error.vid">
+        <segment><source>Enter a VLAN id from {min, number} to {max, number}.</source><target>Ange ett VLAN-id från {min, number} till {max, number}.</target></segment>
+      </unit>
+      <unit id="guardrails.error.mac">
+        <segment><source>Enter six pairs of hexadecimal digits, for example 00:00:5e:00:53:01.</source><target>Ange sex par hexadecimala siffror, till exempel 00:00:5e:00:53:01.</target></segment>
+      </unit>
+      <unit id="guardrails.error.duplicate">
+        <segment><source>This path is already in the list.</source><target>Den här vägen finns redan i listan.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

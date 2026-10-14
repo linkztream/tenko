@@ -703,6 +703,8 @@ describe("roles", () => {
       "Audit export",
       "Vault",
       "Backup",
+      "Reconciler",
+      "Guardrails",
       "Languages",
     ]);
     const current = within(nav).getByRole("link", { name: "Secrets" });

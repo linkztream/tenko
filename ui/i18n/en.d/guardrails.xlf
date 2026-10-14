@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="guardrails">
+      <unit id="settings.nav.guardrails">
+        <notes><note category="description">Link in the settings navigation to the guardrails page.</note></notes>
+        <segment><source>Guardrails</source></segment>
+      </unit>
+      <unit id="guardrails.title">
+        <notes><note category="description">Title of the guardrails settings page and its entry in the browser tab.</note></notes>
+        <segment><source>Guardrails</source></segment>
+      </unit>
+      <unit id="guardrails.lede">
+        <segment><source>Guardrails keep Tenko away from the paths a network must not lose: protected ports, networks, VLANs and clients. They apply to every write of a connector and to moves, and take effect at the next plan without a restart.</source></segment>
+      </unit>
+      <unit id="guardrails.saved">
+        <segment><source>Guardrails saved.</source></segment>
+      </unit>
+      <unit id="guardrails.reloaded">
+        <segment><source>The guardrails were changed by someone else in the meantime. The form shows the current values. Check them and save again.</source></segment>
+      </unit>
+      <unit id="guardrails.parallel.label">
+        <segment><source>Parallel writes</source></segment>
+      </unit>
+      <unit id="guardrails.parallel.help">
+        <segment><source>The most layer 2 writes that run through one controller at a time. Further writes wait for a free slot.</source></segment>
+      </unit>
+      <unit id="guardrails.parallel.limits">
+        <segment><source>{min, number} to {max, number}, default {default, number}</source></segment>
+      </unit>
+      <unit id="guardrails.error.parallel">
+        <segment><source>Use a whole number from {min, number} to {max, number}.</source></segment>
+      </unit>
+      <unit id="guardrails.error.invalid">
+        <notes><note category="description">Shown for the problem code connect.guardrails.invalid; the key lives here because the page does not load the connectors message pack.</note></notes>
+        <segment><source>The server refused {field}. Check the value and try again.</source></segment>
+      </unit>
+      <unit id="guardrails.paths.heading">
+        <segment><source>Protected paths</source></segment>
+      </unit>
+      <unit id="guardrails.paths.none">
+        <segment><source>No paths are protected beyond the uplinks and the management path.</source></segment>
+      </unit>
+      <unit id="guardrails.note">
+        <segment><source>Uplinks and the management path are always protected, on top of this list: the ports, clients, networks and VLANs through which the controller and Tenko are reached.</source></segment>
+      </unit>
+      <unit id="guardrails.col.kind">
+        <segment><source>Kind</source></segment>
+      </unit>
+      <unit id="guardrails.col.path">
+        <segment><source>Path</source></segment>
+      </unit>
+      <unit id="guardrails.col.actions">
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="guardrails.kind.port">
+        <segment><source>Port</source></segment>
+      </unit>
+      <unit id="guardrails.kind.network">
+        <segment><source>Network</source></segment>
+      </unit>
+      <unit id="guardrails.kind.vlan">
+        <segment><source>VLAN</source></segment>
+      </unit>
+      <unit id="guardrails.kind.client">
+        <segment><source>Client</source></segment>
+      </unit>
+      <unit id="guardrails.path.port">
+        <segment><source>{device}, port {port}</source></segment>
+      </unit>
+      <unit id="guardrails.path.vlan">
+        <segment><source>VLAN {vid}</source></segment>
+      </unit>
+      <unit id="guardrails.add">
+        <segment><source>Add path</source></segment>
+      </unit>
+      <unit id="guardrails.remove">
+        <segment><source>Remove</source></segment>
+      </unit>
+      <unit id="guardrails.remove_label">
+        <segment><source>Remove {path} from the list</source></segment>
+      </unit>
+      <unit id="guardrails.dialog.title">
+        <segment><source>Add a protected path</source></segment>
+      </unit>
+      <unit id="guardrails.dialog.body">
+        <segment><source>Choose what Tenko must never change. The path is added to the list and takes effect when you save the page.</source></segment>
+      </unit>
+      <unit id="guardrails.dialog.submit">
+        <segment><source>Add</source></segment>
+      </unit>
+      <unit id="guardrails.field.kind">
+        <segment><source>Kind of path</source></segment>
+      </unit>
+      <unit id="guardrails.field.device">
+        <segment><source>Device</source></segment>
+      </unit>
+      <unit id="guardrails.field.port">
+        <segment><source>Port number</source></segment>
+      </unit>
+      <unit id="guardrails.field.network">
+        <segment><source>Network</source></segment>
+      </unit>
+      <unit id="guardrails.field.vid">
+        <segment><source>VLAN id</source></segment>
+      </unit>
+      <unit id="guardrails.field.mac">
+        <segment><source>MAC address of the client</source></segment>
+      </unit>
+      <unit id="guardrails.help.device">
+        <segment><source>The identifier of the switch, as the topology shows it.</source></segment>
+      </unit>
+      <unit id="guardrails.help.port">
+        <segment><source>The index of the port on that device.</source></segment>
+      </unit>
+      <unit id="guardrails.help.network">
+        <segment><source>The identifier of the network, as the topology shows it.</source></segment>
+      </unit>
+      <unit id="guardrails.help.vid">
+        <segment><source>The VLAN is protected on every controller.</source></segment>
+      </unit>
+      <unit id="guardrails.help.mac">
+        <segment><source>Six pairs of hexadecimal digits, for example 00:00:5e:00:53:01.</source></segment>
+      </unit>
+      <unit id="guardrails.error.reference">
+        <segment><source>Enter 1 to {max, number} characters.</source></segment>
+      </unit>
+      <unit id="guardrails.error.port">
+        <segment><source>Enter a whole number, 0 or more.</source></segment>
+      </unit>
+      <unit id="guardrails.error.vid">
+        <segment><source>Enter a VLAN id from {min, number} to {max, number}.</source></segment>
+      </unit>
+      <unit id="guardrails.error.mac">
+        <segment><source>Enter six pairs of hexadecimal digits, for example 00:00:5e:00:53:01.</source></segment>
+      </unit>
+      <unit id="guardrails.error.duplicate">
+        <segment><source>This path is already in the list.</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

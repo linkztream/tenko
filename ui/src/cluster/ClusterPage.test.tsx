@@ -652,3 +652,89 @@ describe("the keyboard", () => {
     expect(nodesListed()).toEqual([LEADER, voterA, learner]);
   });
 });
+
+describe("compatibility and the data format (WP3.11d)", () => {
+  it("shows the protocol majors, the Raft wire version and the formats of a member in one cell", async () => {
+    await openLoaded();
+    const cell = screen.getByTestId(`member-compat-${LEADER}`);
+    expect(within(cell).getByTestId("compat-majors").textContent).toBe("v1, v2");
+    expect(within(cell).getByTestId("compat-wire").textContent).toBe("openraft-0.9/cbor-1");
+    expect(within(cell).getByTestId("compat-formats").textContent).toBe("formats 2 to 3");
+    expect(cell.querySelector("[title]")?.getAttribute("title")).toBe(
+      "Protocol majors: v1, v2. Raft wire: openraft-0.9/cbor-1. Data formats it can open: formats 2 to 3.",
+    );
+  });
+
+  it("shows a dash for what a member has not reported and the single format as it is", async () => {
+    const learnerView = member(learner);
+    learnerView.protocol_majors = [];
+    learnerView.raft_wire = null;
+    learnerView.formats = [];
+    member(voterA).formats = [3];
+    await openLoaded();
+    const cell = screen.getByTestId(`member-compat-${learner}`);
+    expect(within(cell).getByTestId("compat-majors").textContent).toBe("–");
+    expect(within(cell).getByTestId("compat-wire").textContent).toBe("–");
+    expect(within(cell).getByTestId("compat-formats").textContent).toBe("–");
+    expect(within(screen.getByTestId(`member-compat-${voterA}`)).getByTestId("compat-formats").textContent).toBe("format 3");
+  });
+
+  it("says the data is in the newest format and shows no warning when nothing waits", async () => {
+    await openLoaded();
+    const panel = await screen.findByTestId("cluster-format");
+    expect(panel.dataset.state).toBe("current");
+    expect(within(panel).getByTestId("format-stored").textContent).toBe("3");
+    expect(within(panel).getByTestId("format-binary").textContent).toBe("3");
+    expect(within(panel).getByTestId("format-current")).toBeTruthy();
+    expect(within(panel).queryByTestId("format-blockers")).toBeNull();
+    expect(screen.queryByTestId("cluster-warning")).toBeNull();
+  });
+
+  it("shows no panel when the status carries no data format", async () => {
+    server.use(
+      http.get("/api/v1/system/status", () => HttpResponse.json({ warnings: [] })),
+    );
+    await openLoaded();
+    expect(screen.queryByTestId("cluster-format")).toBeNull();
+  });
+
+  it("names the voters that block a pending migration, with the warning as the banner", async () => {
+    mockCluster.setMigrationPending(true);
+    await openLoaded();
+    const panel = await screen.findByTestId("cluster-format");
+    expect(panel.dataset.state).toBe("pending");
+    expect(within(panel).getByTestId("format-stored").textContent).toBe("2");
+    expect(within(panel).getByTestId("format-target").textContent).toBe("3");
+    const blockers = within(panel).getAllByTestId("format-blocker");
+    expect(blockers).toHaveLength(1);
+    expect(blockers[0]?.dataset.node).toBe(String(voterB));
+    expect(blockers[0]?.textContent).toContain("ctl-3.example.test");
+    expect(blockers[0]?.textContent).toContain("knows format 2");
+    expect(within(panel).getByTestId("format-advice").textContent).toContain("docs/upgrades.md, section 7.7");
+    const warning = within(panel).getByTestId("cluster-warning");
+    expect(warning.dataset.code).toBe("upgrade.migration_blocked");
+    expect(warning.textContent).toBe("The data stays in format 2 until every voter can open format 3. Update controller 1102 first.");
+  });
+
+  it("says when a blocking voter has not reported its format", async () => {
+    mockCluster.setMigrationPending(true);
+    server.use(
+      http.get("/api/v1/system/status", () =>
+        HttpResponse.json({
+          warnings: [],
+          data_format: { stored: 2, binary: 3, pending: { target: 3, blocked_by: [{ node: voterA, data_format: null }] } },
+        }),
+      ),
+    );
+    await openLoaded();
+    const blocker = await screen.findByTestId("format-blocker");
+    expect(blocker.textContent).toContain("format not reported");
+  });
+
+  it("has no accessibility violations with a pending migration", async () => {
+    mockCluster.setMigrationPending(true);
+    const view = await openLoaded();
+    await screen.findByTestId("cluster-format");
+    expect(await axeViolations(view.container, { disable: ["region"] })).toEqual([]);
+  });
+});

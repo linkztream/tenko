@@ -15,10 +15,11 @@ import { toast } from "../components/toast";
 import { TimeAgo } from "../grid/cells";
 import { formatDateTime, formatNumber, t } from "../i18n";
 import { EnrolDialog } from "../nodes/EnrolDialog";
-import { listMembers } from "./api";
+import { listMembers, systemStatus } from "./api";
 import { DigestPanel } from "./DigestPanel";
+import { FormatPanel } from "./FormatPanel";
 import { PromoteDialog, RemoveDialog, StepDownDialog } from "./MemberDialogs";
-import { contactText, healthWord, memberHealth, memberName, quorumWord, roleWord, sortMembers, toleranceText, voters, type ClusterView, type MemberHealth, type MemberView, type StepDown, CLUSTER_QUEUE_PATH } from "./model";
+import { compatParts, contactText, healthWord, memberHealth, memberName, quorumWord, roleWord, sortMembers, toleranceText, voters, type ClusterView, type MemberHealth, type MemberView, type StepDown, CLUSTER_QUEUE_PATH } from "./model";
 import "./cluster.css";
 
 const HEALTH_ICON: Record<MemberHealth, IconName> = {
@@ -36,6 +37,11 @@ export default function ClusterPage() {
   const live = createLiveQuery<ClusterView>({
     topics: ["cluster"],
     fetch: async (signal) => ({ value: await listMembers(signal) }),
+  });
+  // The data format and the warnings come from the status of this node.
+  const status = createLiveQuery({
+    topics: ["system", "cluster"],
+    fetch: async (signal) => ({ value: await systemStatus(signal) }),
   });
   // The answer of a membership change is the new view; it stands until the next live read.
   const [answered, setAnswered] = createSignal<ClusterView | null>(null);
@@ -145,6 +151,8 @@ export default function ClusterPage() {
                 </Show>
               </section>
 
+              <Show when={status.latest()}>{(st) => <FormatPanel status={st()} members={v().members} />}</Show>
+
               <section class="page-section" aria-labelledby="cluster-members-title">
                 <h2 id="cluster-members-title">
                   {t("cluster.members.title")}
@@ -163,6 +171,7 @@ export default function ClusterPage() {
                         </th>
                         <th scope="col">{t("cluster.col.contact")}</th>
                         <th scope="col">{t("cluster.col.version")}</th>
+                        <th scope="col">{t("cluster.col.compat")}</th>
                         <th scope="col">{t("cluster.col.joined")}</th>
                         <Show when={admin()}>
                           <th scope="col" class="r">
@@ -203,6 +212,20 @@ export default function ClusterPage() {
                                 <Show when={m.data_format != null}>
                                   <span class="muted"> · {t("cluster.col.format", { format: m.data_format ?? 0 })}</span>
                                 </Show>
+                              </td>
+                              <td data-testid={`member-compat-${m.node}`}>
+                                {(() => {
+                                  const c = compatParts(m);
+                                  return (
+                                    <span class="member-compat" title={t("cluster.compat.tooltip", c)}>
+                                      <span data-testid="compat-majors">{c.majors}</span>
+                                      <span class="muted"> · </span>
+                                      <span class="mono" data-testid="compat-wire">{c.wire}</span>
+                                      <span class="muted"> · </span>
+                                      <span data-testid="compat-formats">{c.formats}</span>
+                                    </span>
+                                  );
+                                })()}
                               </td>
                               <td>
                                 <TimeAgo at={m.joined_at} />

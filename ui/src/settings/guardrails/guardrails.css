@@ -1,0 +1,5 @@
+/* The guardrails page (WP3.11d). */
+.gr-form { display: grid; gap: var(--sp-5); padding: var(--sp-5); max-width: 720px; }
+.gr-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); flex-wrap: wrap; }
+.gr-notices { display: grid; gap: var(--sp-3); margin-block-end: var(--sp-4); }
+.gr-path { overflow-wrap: anywhere; }

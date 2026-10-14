@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="reconciler">
+      <unit id="settings.nav.reconciler">
+        <notes><note category="description">Link in the settings navigation to the reconciler settings page.</note></notes>
+        <segment><source>Reconciler</source><target>Avstämning</target></segment>
+      </unit>
+      <unit id="reconciler.title">
+        <notes><note category="description">Title of the reconciler settings page and its entry in the browser tab.</note></notes>
+        <segment><source>Reconciler</source><target>Avstämning</target></segment>
+      </unit>
+      <unit id="reconciler.lede">
+        <segment><source>The reconciler compares what connectors and probes see with the intended addresses and proposes the differences. These settings are the same on every controller and apply at the next run, without a restart.</source><target>Avstämningen jämför det som kopplingar och sonder ser med de avsedda adresserna och föreslår skillnaderna. Inställningarna är desamma på alla kontrollrar och gäller från nästa körning, utan omstart.</target></segment>
+      </unit>
+      <unit id="reconciler.saved">
+        <segment><source>Reconciler settings saved.</source><target>Inställningarna för avstämning sparades.</target></segment>
+      </unit>
+      <unit id="reconciler.reloaded">
+        <segment><source>The settings were changed by someone else in the meantime. The form shows the current values. Check them and save again.</source><target>Inställningarna ändrades av någon annan under tiden. Formuläret visar de aktuella värdena. Kontrollera dem och spara igen.</target></segment>
+      </unit>
+      <unit id="reconciler.limits">
+        <notes><note category="description">The limits under a field; the values come with their unit, for example 30 s to 1 d.</note></notes>
+        <segment><source>{min} to {max}, default {default}</source><target>{min} till {max}, standard {default}</target></segment>
+      </unit>
+      <unit id="reconciler.error.range">
+        <segment><source>Use a value from {min} to {max}.</source><target>Ange ett värde från {min} till {max}.</target></segment>
+      </unit>
+      <unit id="reconciler.error.refresh">
+        <segment><source>The refresh interval must be shorter than the retention ({retention}).</source><target>Uppdateringsintervallet måste vara kortare än lagringstiden ({retention}).</target></segment>
+      </unit>
+      <unit id="reconciler.error.invalid">
+        <notes><note category="description">Shown for the problem code ipam.reconciler.settings.invalid; the key lives here because the page does not load the discovery message pack.</note></notes>
+        <segment><source>The server refused the value of {field}. Check the limits under the field.</source><target>Servern avvisade värdet för {field}. Kontrollera gränserna under fältet.</target></segment>
+      </unit>
+      <unit id="reconciler.field.adopt">
+        <segment><source>Apply adoption policies</source><target>Tillämpa adoptionsregler</target></segment>
+      </unit>
+      <unit id="reconciler.field.interval">
+        <segment><source>Run interval</source><target>Körintervall</target></segment>
+      </unit>
+      <unit id="reconciler.field.debounce">
+        <segment><source>Delay after a change</source><target>Fördröjning efter en ändring</target></segment>
+      </unit>
+      <unit id="reconciler.field.refresh">
+        <segment><source>Refresh interval of a fact</source><target>Uppdateringsintervall för ett faktum</target></segment>
+      </unit>
+      <unit id="reconciler.field.purge">
+        <segment><source>Purge interval</source><target>Rensningsintervall</target></segment>
+      </unit>
+      <unit id="reconciler.field.orphan">
+        <segment><source>Orphan age</source><target>Ålder för föräldralösa adresser</target></segment>
+      </unit>
+      <unit id="reconciler.field.retention">
+        <segment><source>Retention of facts</source><target>Lagringstid för fakta</target></segment>
+      </unit>
+      <unit id="reconciler.unit.second">
+        <segment><source>seconds</source><target>sekunder</target></segment>
+      </unit>
+      <unit id="reconciler.unit.minute">
+        <segment><source>minutes</source><target>minuter</target></segment>
+      </unit>
+      <unit id="reconciler.unit.hour">
+        <segment><source>hours</source><target>timmar</target></segment>
+      </unit>
+      <unit id="reconciler.unit.day">
+        <segment><source>days</source><target>dagar</target></segment>
+      </unit>
+      <unit id="reconciler.help.adopt">
+        <segment><source>When on, the adoption policies of the prefixes approve matching proposals by themselves. When off, every proposal waits for a person.</source><target>När den är på godkänner prefixens adoptionsregler matchande förslag av sig själva. När den är av väntar varje förslag på en person.</target></segment>
+      </unit>
+      <unit id="reconciler.help.interval">
+        <segment><source>How often the reconciler runs on its own. A run also starts after an ingest or a change to the intent.</source><target>Hur ofta avstämningen körs av sig själv. En körning startar också efter en inläsning eller en ändring av avsikten.</target></segment>
+      </unit>
+      <unit id="reconciler.help.debounce">
+        <segment><source>How long a run waits after an ingest or a change to collect what follows. 0 starts it at once.</source><target>Hur länge en körning väntar efter en inläsning eller en ändring för att samla det som följer. 0 startar den direkt.</target></segment>
+      </unit>
+      <unit id="reconciler.help.refresh">
+        <segment><source>How often an unchanged fact is written again with a new last sighting. It must be shorter than the retention.</source><target>Hur ofta ett oförändrat faktum skrivs om med en ny senaste observation. Det måste vara kortare än lagringstiden.</target></segment>
+      </unit>
+      <unit id="reconciler.help.purge">
+        <segment><source>How often facts past their retention are removed.</source><target>Hur ofta fakta som har passerat sin lagringstid tas bort.</target></segment>
+      </unit>
+      <unit id="reconciler.help.orphan">
+        <segment><source>How long an address that was seen may go unseen before it is proposed as orphaned.</source><target>Hur länge en adress som har setts får vara osedd innan den föreslås som föräldralös.</target></segment>
+      </unit>
+      <unit id="reconciler.help.retention">
+        <segment><source>How long a fact is kept after its last sighting.</source><target>Hur länge ett faktum sparas efter sin senaste observation.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

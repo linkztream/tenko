@@ -5,8 +5,8 @@
 // member and no quorum to lose. The state is built when it is first read and again after every
 // reset. `mockCluster` moves the quorum from the dev console (`window.tenkoMockCluster`) and
 // from tests.
-import type { ClusterView, MemberView, QuorumKind, QuorumView, QueuedChangeView, QueuedRequest, QueueItemView } from "../../cluster/model";
-import type { PlanView } from "../types";
+import type { ClusterView, DataFormatStatus, MemberView, QuorumKind, QuorumView, QueuedChangeView, QueuedRequest, QueueItemView } from "../../cluster/model";
+import type { PlanView, SystemStatus } from "../types";
 import { commit, db, onMockReset, recordAlarm } from "./db";
 import { MOCK_USER_IDS, MOCK_VERSION } from "./fixtures";
 import { currentPrincipal } from "./auth";
@@ -14,6 +14,11 @@ import { DAY_MS, iso, randomId } from "./util";
 
 /** The data format the mock binaries know. */
 export const MOCK_DATA_FORMAT = 3;
+
+/** What every mock binary reports of its compatibility (docs/upgrades.md, section 3). */
+const compat = () => ({ protocol_majors: [1, 2], raft_wire: "openraft-0.9/cbor-1", formats: [2, 3] });
+
+type StatusWarning = SystemStatus["warnings"][number];
 
 /** The controller that answers. */
 export const ANSWERING_NODE = 1;
@@ -90,6 +95,8 @@ export interface ClusterState {
   changes: StoredChange[];
   /** The member that reports another digest, if any. */
   digestMismatch: number | null;
+  /** A format migration waits for the voter that runs an older binary. */
+  migrationPending: boolean;
 }
 
 let state: ClusterState | null = null;
@@ -138,6 +145,7 @@ function buildSeed(now: number): ClusterState {
     leader: true,
     version: MOCK_VERSION,
     data_format: MOCK_DATA_FORMAT,
+    ...compat(),
     joined_at: joined,
     matched: db.revision,
     lag_entries: null,
@@ -153,6 +161,7 @@ function buildSeed(now: number): ClusterState {
       leader: false,
       version: MOCK_VERSION,
       data_format: MOCK_DATA_FORMAT,
+      ...compat(),
       joined_at: iso(now - (role === "voter" ? 4 : 1) * DAY_MS),
       matched: Math.max(0, db.revision - lag),
       lag_entries: lag,
@@ -176,6 +185,7 @@ function buildSeed(now: number): ClusterState {
     queue: [],
     changes: [],
     digestMismatch: null,
+    migrationPending: false,
   };
 }
 
@@ -265,14 +275,51 @@ function setDigestMismatch(node: number | null): void {
   clusterState().digestMismatch = node;
 }
 
+/** Plays a migration that waits for the last voter (true) or the finished one (false). */
+function setMigrationPending(pending: boolean): void {
+  const st = clusterState();
+  st.migrationPending = pending;
+  const voter = st.members.get(CLUSTER_IDS.voterB);
+  if (voter) {
+    voter.data_format = pending ? MOCK_DATA_FORMAT - 1 : MOCK_DATA_FORMAT;
+    voter.formats = pending ? [1, 2] : [2, 3];
+  }
+}
+
+/** The `data_format` member of `GET /system/status`. */
+export function dataFormatStatus(): DataFormatStatus {
+  const st = clusterState();
+  if (!st.migrationPending) return { stored: MOCK_DATA_FORMAT, binary: MOCK_DATA_FORMAT };
+  return {
+    stored: MOCK_DATA_FORMAT - 1,
+    binary: MOCK_DATA_FORMAT,
+    pending: { target: MOCK_DATA_FORMAT, blocked_by: [{ node: CLUSTER_IDS.voterB, data_format: MOCK_DATA_FORMAT - 1 }] },
+  };
+}
+
+/** The warning that goes with a pending migration. */
+export function dataFormatWarnings(): StatusWarning[] {
+  const format = dataFormatStatus();
+  if (!format.pending || format.pending.blocked_by.length === 0) return [];
+  const nodes = format.pending.blocked_by.map((b) => String(b.node)).join(", ");
+  return [
+    {
+      code: "upgrade.migration_blocked",
+      detail: `the data stays in format ${format.stored} until every voter runs a binary that knows format ${format.pending.target}; upgrade controller(s) ${nodes}`,
+      params: { stored: String(format.stored), target: String(format.pending.target), nodes },
+    },
+  ];
+}
+
 /** What the dev console and the tests use to play a partition. */
 export interface MockCluster {
+  setMigrationPending(pending: boolean): void;
   setQuorum(state: QuorumKind): void;
   heal(options: { conflicts: boolean }): void;
   setDigestMismatch(node: number | null): void;
 }
 
-export const mockCluster: MockCluster = { setQuorum, heal, setDigestMismatch };
+export const mockCluster: MockCluster = { setQuorum, heal, setDigestMismatch, setMigrationPending };
 
 declare global {
   interface Window {

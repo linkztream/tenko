@@ -6,6 +6,7 @@ import { NODE_ROLES, PROFILES } from "../types";
 import { passwordStrength, requireSession, sessionInfo, startSession } from "./auth";
 import { commit, db, isAdmin, type MockUser } from "./db";
 import { MOCK_CA_FINGERPRINT, MOCK_VERSION } from "./fixtures";
+import { dataFormatStatus, dataFormatWarnings } from "./cluster-store";
 import { clusterStatus, clusterWarnings } from "./nodes-store";
 import { checkPassword } from "./policy";
 import { banner, profileSettings } from "./profiles";
@@ -155,7 +156,7 @@ const systemStatus = route("get", "/api/v1/system/status", () => {
   const admin = isAdmin(user);
   if (admin) warnings.push(...modulesWarnings());
   // Nodes that share no protocol major with this controller (docs/cluster.md, section 5).
-  warnings.push(...clusterWarnings());
+  warnings.push(...clusterWarnings(), ...dataFormatWarnings());
   return ok<SystemStatus>({
     ...(admin ? { modules: statusModules() } : {}),
     version: MOCK_VERSION,
@@ -183,6 +184,7 @@ const systemStatus = route("get", "/api/v1/system/status", () => {
     },
     ui: { stub: false, from_directory: false },
     cluster: clusterStatus(),
+    data_format: dataFormatStatus(),
     warnings,
   });
 });
