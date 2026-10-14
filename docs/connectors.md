@@ -129,7 +129,7 @@ When the server renews its certificate, calls fail with `TLS: the server certifi
 
 Under the Lab profile it is loud on purpose: for an `https` URL the instance reports `degraded` with the note `certificate checks are off (tls = insecure); use this in a lab only`, and the plugin writes a `WARN` line to the log of the host on every call of the instance. It does not show a fingerprint; pin the certificate as in section 2.2 instead.
 
-A plain `http://` URL is accepted, and it is the normal address of a default Home Assistant (port 8123). The token then travels in clear text on every call. The health detail says so: `the connection is not encrypted (http); credentials travel in clear text`. That note does not change the health of a working instance by itself. Use `http` only on a network you trust, or put TLS in front of the system.
+A plain `http://` URL is accepted, and it is the normal address of a default Home Assistant (port 8123). The token then travels in clear text on every call. The health detail says so: `the connection is not encrypted (http); credentials travel in clear text`. Whether the note also lowers the health is the plugin's call. The UniFi plugin reports `degraded` for an `http` URL, because a controller speaks `https` by default and `http` means a proxy in between or a mistake. The Home Assistant and Proxmox plugins keep the health of a working instance and show the note, because `http` on port 8123 is the normal address of a Home Assistant and the Proxmox API does not answer on `http` at all. Use `http` only on a network you trust, or put TLS in front of the system.
 
 ### 2.4 What the failure texts say
 

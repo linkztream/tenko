@@ -388,7 +388,7 @@ UniFi OS console, Integration API, site `default`; read-only: devices, uplinks a
 
 The report is `DEGRADED`, with the notes in the detail, when:
 
-- the URL is `http` ("the connection is not encrypted (http); credentials travel in clear text");
+- the URL is `http` ("the connection is not encrypted (http); credentials travel in clear text"), unlike the Home Assistant and Proxmox plugins, which keep the health and show the note ([connectors.md](connectors.md) section 2.3);
 - `tls = insecure` ("certificate checks are off (tls = insecure); use this in a lab only"), together with the fingerprint the controller presents and the advice to pin it;
 - `tls = fingerprint` and no fingerprint has been set yet.
 

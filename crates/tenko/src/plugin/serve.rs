@@ -24,7 +24,10 @@ use tenko_jobs::JobEngine;
 use tenko_store::{ReadConsistency, ReadViewExt as _, Store, WatchFilter};
 use tenko_vault::{StoreVault, Vault};
 use tokio::{
-    sync::{broadcast::error::RecvError, watch},
+    sync::{
+        broadcast::{self, error::RecvError},
+        watch,
+    },
     task::JoinHandle,
 };
 
@@ -178,35 +181,53 @@ impl Connectors {
     /// events of the instance (objects: the instance), as system events: no revision and no
     /// SSE id, so they are not replayed.
     pub fn publish_health(&self, state: &AppState) {
-        let mut changes = self.host.health_changes();
         let host = Arc::clone(&self.host);
-        let events = state.events().clone();
-        let mut stop = self.stop.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
-                    received = changes.recv() => match received {
-                        Ok(id) => publish(&events, &[id]),
-                        // Some changes were missed: every instance may have changed.
-                        Err(RecvError::Lagged(_)) => publish(&events, &host.supervised()),
-                        Err(RecvError::Closed) => return,
-                    },
-                }
-            }
-        });
+        tokio::spawn(forward(
+            self.host.health_changes(),
+            move || host.supervised(),
+            state.events().clone(),
+            self.stop.clone(),
+        ));
+    }
+}
+
+/// Publishes a health event per received id, one event naming every id of `supervised`
+/// after missed changes, until `stop` turns true or `changes` closes.
+async fn forward(
+    mut changes: broadcast::Receiver<ConnectorId>,
+    supervised: impl Fn() -> Vec<ConnectorId> + Send + 'static,
+    events: EventHub,
+    mut stop: watch::Receiver<bool>,
+) {
+    loop {
+        tokio::select! {
+            () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
+            received = changes.recv() => match received {
+                Ok(id) => publish(&events, &[id]),
+                // Some changes were missed: every instance may have changed.
+                Err(RecvError::Lagged(_)) => publish(&events, &supervised()),
+                Err(RecvError::Closed) => return,
+            },
+        }
     }
 }
 
 /// Publishes one `connectors` health event naming `ids` (none: nothing to publish).
 fn publish(events: &EventHub, ids: &[ConnectorId]) {
+    if let Some(data) = health_event(ids) {
+        events.publish_system(&data);
+    }
+}
+
+/// The `connectors` health event naming `ids` in order (none: no event).
+fn health_event(ids: &[ConnectorId]) -> Option<EventData> {
     if ids.is_empty() {
-        return;
+        return None;
     }
     let mut data = EventData::new(Topic::Connectors, None);
     data.objects = ids.iter().copied().map(ObjectRef::from).collect();
     data.kind = Some(HEALTH_EVENT.to_owned());
-    events.publish_system(&data);
+    Some(data)
 }
 
 /// The profile in force: the stored one after setup, else `bootstrap`.
@@ -258,5 +279,111 @@ async fn next_change(stream: &mut Option<tenko_store::ChangeStream>) -> bool {
     } else {
         tokio::time::sleep(Duration::from_secs(5)).await;
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        sync::atomic::{AtomicUsize, Ordering},
+        time::Duration,
+    };
+
+    use tenko_api::sse::{EventRoutes, SseConfig};
+    use tenko_core::Revision;
+
+    use super::*;
+
+    fn hub() -> EventHub {
+        EventHub::new(SseConfig::default(), EventRoutes::empty(), Revision(0))
+    }
+
+    /// Waits until `events` has published `count` events.
+    async fn published(events: &EventHub, count: u64) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while events.published() < count {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the event is published");
+    }
+
+    #[test]
+    fn no_ids_make_no_event() {
+        assert!(health_event(&[]).is_none());
+    }
+
+    #[test]
+    fn the_event_names_the_ids_in_order() {
+        let (a, b) = (ConnectorId::generate(), ConnectorId::generate());
+        let data = health_event(&[a, b]).expect("an event");
+        assert_eq!(data.topic, Topic::Connectors);
+        assert_eq!(data.objects, vec![ObjectRef::from(a), ObjectRef::from(b)]);
+        assert_eq!(data.kind.as_deref(), Some(HEALTH_EVENT));
+        assert!(data.revision.is_none());
+        assert_eq!(data.deleted.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_change_is_published() {
+        let events = hub();
+        let (tx, rx) = broadcast::channel(2);
+        let (_stop_tx, stop) = watch::channel(false);
+        let handle = tokio::spawn(forward(rx, Vec::new, events.clone(), stop));
+        tx.send(ConnectorId::generate()).expect("a receiver");
+        published(&events, 1).await;
+        assert_eq!(events.published(), 1);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn missed_changes_publish_the_supervised_instances() {
+        let events = hub();
+        let (tx, rx) = broadcast::channel(2);
+        let (_stop_tx, stop) = watch::channel(false);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let ids = vec![ConnectorId::generate(), ConnectorId::generate()];
+        let supervised = {
+            let calls = Arc::clone(&calls);
+            move || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                ids.clone()
+            }
+        };
+        // Three ids before the task first receives overflow the capacity of two.
+        for _ in 0..3 {
+            tx.send(ConnectorId::generate()).expect("a receiver");
+        }
+        let handle = tokio::spawn(forward(rx, supervised, events.clone(), stop));
+        published(&events, 1).await;
+        assert!(calls.load(Ordering::SeqCst) >= 1);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn stopping_ends_the_task() {
+        let events = hub();
+        let (_tx, rx) = broadcast::channel(2);
+        let (stop_tx, stop) = watch::channel(false);
+        let handle = tokio::spawn(forward(rx, Vec::new, events, stop));
+        stop_tx.send(true).expect("a receiver");
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("the task ends")
+            .expect("no panic");
+    }
+
+    #[tokio::test]
+    async fn a_closed_channel_ends_the_task() {
+        let events = hub();
+        let (tx, rx) = broadcast::channel(2);
+        let (_stop_tx, stop) = watch::channel(false);
+        let handle = tokio::spawn(forward(rx, Vec::new, events, stop));
+        drop(tx);
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("the task ends")
+            .expect("no panic");
     }
 }

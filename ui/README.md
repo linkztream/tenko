@@ -32,7 +32,7 @@ ui/
                         <lang>.d/<area>.xlf beside them: each package adds its keys only in its own
                         fragment, and the lead folds the fragments into the main files at the end
                         of the slice
-  public/               favicon, theme-init.js, fonts/ (JetBrains Mono + OFL.txt), licenses/
+  public/               favicon, theme-init.js, licenses/ (including the font's OFL.txt)
   scripts/              i18n compiler, Vite i18n plugin, API type generator, size report,
                         the ESLint plugin with the project rules
   src/
@@ -381,7 +381,7 @@ support modules and the server options.
 | solid-js, @solidjs/router | MIT | UI framework and router |
 | intl-messageformat | BSD-3-Clause | ICU messages |
 | uqr | MIT | QR code of the TOTP enrolment, encoded in the browser (`public/licenses/uqr.txt`) |
-| JetBrains Mono | SIL Open Font License 1.1 | Monospace font (`public/fonts/OFL.txt`) |
+| JetBrains Mono | SIL Open Font License 1.1 | Monospace font (`public/licenses/OFL.txt`; the font is `src/app/fonts/`) |
 
 Development dependencies (Vite, vitest, msw, ESLint, axe-core and others) are listed in
 `package.json` and are not part of the build.

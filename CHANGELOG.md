@@ -162,6 +162,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - `tls = insecure` on a connector is accepted under the Lab profile only: elsewhere it is refused (`connect.tls.insecure_refused`), and an instance stored with it before the profile changed is shown degraded and is not called until its TLS settings change.
 - In a controller cluster the connectors are polled on schedule by the leader only; every controller still runs the plugins, their health checks and the runs a person asks for.
 - An import with credential columns is refused, like storing a secret by hand, while another account that may reveal secrets signs in with a PIN alone; the preview names the accounts.
+- The monospace font is served with a content-hashed name and cached for a year, like the other build output; it was revalidated on every page load before.
 
 ### Fixed
 

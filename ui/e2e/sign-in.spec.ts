@@ -93,6 +93,14 @@ test("a TOTP code cannot be used twice", async ({ api, signedIn }) => {
   expect(replayed.status()).toBe(401);
 });
 
+test("the monospace font is served hashed with a long-lived cache header", async ({ page }) => {
+  const font = page.waitForResponse((r) => /\/assets\/jetbrains-mono-latin-[\w-]+\.woff2$/.test(r.url()));
+  await page.goto("/");
+  const response = await font;
+  expect(response.status()).toBe(200);
+  expect(response.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
+});
+
 test.describe("over HTTPS with the internal CA", () => {
   test.use({ transport: "internal_ca" });
 

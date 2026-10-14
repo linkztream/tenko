@@ -39,6 +39,8 @@ try {
 const html = readFileSync(join(dist, "index.html"), "utf8");
 const initial = new Set(["index.html"]);
 for (const m of html.matchAll(/(?:src|href)="\/(assets\/[^"]+|theme-init\.js)"/g)) if (m[1]) initial.add(m[1]);
+/** The preloaded font is reported on its own line, not in the first-load figure. */
+const isFont = (/** @type {string} */ name) => name.endsWith(".woff2");
 
 const rows = files.map((f) => ({ name: relative(dist, f).split(sep).join("/"), ...sizes(readFileSync(f)) }));
 rows.sort((a, b) => b.raw - a.raw);
@@ -46,7 +48,9 @@ console.log(`${"file".padEnd(44)}${"raw".padStart(9)}${"gzip".padStart(9)}${"bro
 for (const r of rows) console.log(`${(initial.has(r.name) ? "* " : "  ") + r.name.padEnd(42)}${kb(r.raw)}${kb(r.gzip)}${kb(r.brotli)}`);
 /** @param {typeof rows} list */
 const sum = (list) => list.reduce((a, r) => ({ raw: a.raw + r.raw, gzip: a.gzip + r.gzip, brotli: a.brotli + r.brotli }), { raw: 0, gzip: 0, brotli: 0 });
-const first = sum(rows.filter((r) => initial.has(r.name)));
-const all = sum(rows.filter((r) => !r.name.endsWith(".woff2")));
+const first = sum(rows.filter((r) => initial.has(r.name) && !isFont(r.name)));
+const font = sum(rows.filter((r) => initial.has(r.name) && isFont(r.name)));
+const all = sum(rows.filter((r) => !isFont(r.name)));
 console.log(`\n* first load (entry, preloads, stylesheet)    ${kb(first.raw)}${kb(first.gzip)}${kb(first.brotli)}`);
+console.log(`  preloaded font (hashed, cached a year)      ${kb(font.raw)}${kb(font.gzip)}${kb(font.brotli)}`);
 console.log(`  all scripts, styles and markup              ${kb(all.raw)}${kb(all.gzip)}${kb(all.brotli)}`);
