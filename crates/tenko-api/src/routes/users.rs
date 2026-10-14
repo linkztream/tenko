@@ -395,6 +395,16 @@ mod tests {
         user["revision"].as_u64().expect("a revision")
     }
 
+    /// Whether any string in `value` equals `needle`.
+    fn holds_string(value: &Value, needle: &str) -> bool {
+        match value {
+            Value::String(text) => text == needle,
+            Value::Array(items) => items.iter().any(|item| holds_string(item, needle)),
+            Value::Object(members) => members.values().any(|member| holds_string(member, needle)),
+            _ => false,
+        }
+    }
+
     fn etag(revision: u64) -> String {
         format!("\"{revision}\"")
     }
@@ -451,8 +461,10 @@ mod tests {
         assert_eq!(user["factors"]["password"], true);
         assert_eq!(user["password_change_required"], true);
         assert!(user.get("lock").is_none());
-        // The password is not part of any answer.
-        assert!(!created.body.to_string().contains("7391"));
+        // The password is not part of any answer: no `password` member and no string equal to
+        // it (a substring of the whole body could match a random id).
+        assert!(user.get("password").is_none());
+        assert!(!holds_string(&created.body, "7391"));
 
         let got = harness
             .call("GET", &format!("/users/{ada}"), Cookie(&admin), None)

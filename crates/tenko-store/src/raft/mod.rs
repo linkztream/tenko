@@ -892,6 +892,14 @@ impl RaftStore {
         }
     }
 
+    /// Write batches queued for the coalescer and not taken yet (0 once the store closed),
+    /// for the metrics gauge of the queue depth.
+    pub fn coalescer_queue_depth(&self) -> usize {
+        lock(&self.inner.queue)
+            .as_ref()
+            .map_or(0, |queue| queue.max_capacity() - queue.capacity())
+    }
+
     /// Bytes on disk and the state file ratio, from the size cache.
     pub fn disk_usage(&self) -> DiskUsage {
         let inner = &self.inner;

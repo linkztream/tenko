@@ -1,0 +1,3 @@
+# Raw output of the runs (also covered by the repository-wide bench rule).
+results/raw/
+target/

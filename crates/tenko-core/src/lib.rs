@@ -28,6 +28,7 @@
 //! | [`net`] | [`MacAddr`], [`Fqdn`](net::Fqdn), [`HostName`](net::HostName), [`Duid`](net::Duid) |
 //! | [`ipam`] | the IPAM model |
 //! | [`ir`] | migration IR and loss reports |
+//! | [`metrics`] | counters, histograms and gauges on striped atomics, the registry, the `OpenMetrics` encoder |
 //! | [`observe`] | observations and proposals |
 //! | [`audit`] | audit drafts, records, the hash chain and its verifier |
 //! | [`secret`] | [`SecretRef`](secret::SecretRef) and the vault envelope marker |
@@ -51,6 +52,7 @@ pub mod i18n;
 pub mod id;
 pub mod ipam;
 pub mod ir;
+pub mod metrics;
 pub mod names;
 pub mod net;
 pub mod object;

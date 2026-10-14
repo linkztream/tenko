@@ -179,7 +179,9 @@ try {
         $null = Read-Mem $serverPid 'start'
         if (Test-Path -LiteralPath $outLog) {
             $text = Get-Content -LiteralPath $outLog -Raw -ErrorAction SilentlyContinue
-            if ($text -match 'Setup token:\s+(\S+)') { $token = $Matches[1] }
+            # The console shows the token itself only to a terminal; otherwise it names the
+            # file (`Setup token: in <data_dir>\setup-token; ...`), read below.
+            if ($text -match 'Setup token:\s+(?!in\s)(\S+)') { $token = $Matches[1] }
             if ($text -match ' ready at ' -and $text -match '={20,}\s*$') { $ready = $true }
         }
         if (-not $ready) { Start-Sleep -Milliseconds 100 }
@@ -188,7 +190,9 @@ try {
     $readyAfter = ($clock.Elapsed - $startedAt).TotalSeconds
     $r = Read-Mem $serverPid 'ready'
     Add-Summary ("ready after {0:N1} s; working set {1} MiB, private {2} MiB, peak working set {3} MiB" -f $readyAfter, $r.ws_mib, $r.private_mib, $r.peak_ws_mib)
-    if (-not $token) { throw 'no setup token found on the server console' }
+    $tokenFile = Join-Path $dataDir 'setup-token'
+    if (Test-Path -LiteralPath $tokenFile) { $token = (Get-Content -LiteralPath $tokenFile -Raw).Trim() }
+    if (-not $token) { throw 'no setup token in the token file or on the server console' }
 
     # ---- setup and login -----------------------------------------------------------------
     $env:TENKO_CREDENTIALS = $credFile

@@ -17,7 +17,7 @@
 //! | 10 | `connectors` | connector plugins and their supervisor (ADR 0012) |
 //! | 11 | `nodes` | the node transport: internal CA node certificate, node registry, the mutual TLS listener for enrolled nodes (OPS-04), configuration sync and commands to nodes |
 //! | 12 | `scans` | the scan control (probe configuration, scans on demand, the kill switch) and the probe role in process |
-//! | 13 | `api` | the HTTP API, the web UI and server-sent events |
+//! | 13 | `api` | the HTTP API, the web UI and server-sent events; the metrics timer and the optional loopback metrics listener (`[metrics]`, [`metrics`]) |
 //!
 //! After the last step the leader supervisor ([`leader`]) starts the leader-only services
 //! (`tenko_core::cluster::LeaderService`) once this controller has taken office; on a single
@@ -49,6 +49,7 @@ pub mod cluster_key;
 mod imports;
 pub(crate) mod leader;
 mod maintenance;
+mod metrics;
 pub mod queue;
 pub mod setup_token;
 mod tls;
@@ -632,7 +633,7 @@ async fn serve(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> Result<(
     // A newly installed version is on probation (OPS-24): read before anything else, so a
     // switched-back previous version restores its store before the format check.
     let probation = probation_at_start(&resolved, &restart)?;
-    let started = start(&resolved, &mut running, &restart, probation.as_ref()).await;
+    let started = Box::pin(start(&resolved, &mut running, &restart, probation.as_ref())).await;
     let services = match started {
         Ok(services) => services,
         Err(error) => {
@@ -1411,7 +1412,8 @@ async fn start(
 
     let lab_plain_http = tls.lab_plain_http;
     let https = tls.https;
-    let (server, events, warnings_state) = steps
+    let metrics_stop = running.stop.subscribe();
+    let (server, events, warnings_state, metrics_tasks) = steps
         .run("api", async {
             let mut state = AppState::with_options(
                 Arc::clone(&store_dyn),
@@ -1526,9 +1528,8 @@ async fn start(
                 tracing::warn!(%error, "the restore could not be recorded; it is recorded at the next start");
             }
             leaders.register(backups.schedule());
-            server.extensions.insert(
-                backups as Arc<dyn tenko_api::routes::backup::BackupService>,
-            );
+            let backup_status: Arc<dyn tenko_api::routes::backup::BackupService> = backups;
+            server.extensions.insert(Arc::clone(&backup_status));
             server.extensions.insert(leader_view.source());
             server.extensions.insert(format_follower.source());
             server.fingerprint_key = cluster_key
@@ -1539,6 +1540,28 @@ async fn start(
                 server.http.idempotency.ttl,
             ));
             leaders.register(leader::used_challenges_purge(Arc::clone(&store_dyn)));
+            // The metrics timer (gauges from the status interfaces of the services) and the
+            // optional loopback listener; both stop with the server.
+            let mut gauges = metrics::Sources::of(state.clone());
+            gauges.store = Some(store.clone());
+            gauges.engine = Some(engine.clone());
+            gauges.connectors = Some(Arc::clone(connectors.host()));
+            gauges.sessions = Some(Arc::clone(cluster.registry().sessions()));
+            gauges.leader = Some(leader_view.source());
+            gauges.kek = Some(Arc::clone(&kek_admin));
+            gauges.backups = Some(backup_status);
+            let metrics_listen = config
+                .metrics
+                .listen_addr()
+                .map_err(|error| StartError::new("api", "config.invalid", error.to_string()))?;
+            let (metrics_tasks, metrics_summary) = Box::pin(metrics::start(
+                gauges,
+                Duration::from_secs(config.metrics.gauge_interval_secs),
+                metrics_listen,
+                &metrics_stop,
+            ))
+            .await
+            .map_err(|error| StartError::new("api", "start.metrics.bind", error.to_string()))?;
             let events = state.events().clone();
             let warnings_state = state.clone();
             let running = tenko_api::start(server, state).await.map_err(|error| {
@@ -1551,7 +1574,7 @@ async fn start(
                 StartError::new("api", code, error.to_string())
             })?;
             let summary = format!(
-                "listening on {}",
+                "listening on {}; metrics: {metrics_summary}",
                 running
                     .local_addrs()
                     .iter()
@@ -1559,9 +1582,10 @@ async fn start(
                     .collect::<Vec<_>>()
                     .join(", ")
             );
-            Ok(((running, events, warnings_state), summary))
+            Ok(((running, events, warnings_state, metrics_tasks), summary))
         })
         .await?;
+    running.tasks.extend(metrics_tasks);
     leaders.register(leader::clock::beat_service(
         Arc::clone(&store_dyn),
         resolved.node_id,

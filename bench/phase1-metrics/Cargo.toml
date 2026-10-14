@@ -1,0 +1,32 @@
+[package]
+name = "phase1-metrics"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Phase 1 metrics benchmark (M8): the cost of the tenko-core metrics on the hot path of a UDP DNS responder, and the zero-allocation check of the update path"
+license = "Apache-2.0"
+
+# Standalone crate: not part of the main workspace.
+[workspace]
+
+[dependencies]
+tenko-core = { path = "../../crates/tenko-core" }
+spike-b-udp = { path = "../spike-b-udp", default-features = false, features = ["backend-domain"] }
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+humantime = "2.4.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+socket2 = "0.6.5"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+
+# The profile of Spike B, whose responder this package measures.
+[profile.release]
+debug = false
+lto = "fat"
+codegen-units = 1
+panic = "abort"

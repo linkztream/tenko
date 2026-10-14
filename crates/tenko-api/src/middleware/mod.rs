@@ -45,7 +45,8 @@ use crate::{
     server::forwarded::{ConnInfo, client_info},
     state::AppState,
 };
-use metrics::{Event, UI_ROUTE, UNMATCHED_ROUTE};
+pub(crate) use metrics::RouteTable;
+use metrics::{Event, RouteRow};
 
 /// Header that carries the request id back to the client.
 pub const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
@@ -80,16 +81,19 @@ impl Default for HttpConfig {
 pub(crate) struct Layers {
     pub(crate) state: AppState,
     pub(crate) limiter: RateLimiter,
+    /// The series of the request metrics, sealed at the first server start.
+    routes: &'static RouteTable,
     allowed_origins: Vec<String>,
     idempotency: IdempotencyConfig,
     hsts: bool,
 }
 
 impl Layers {
-    pub(crate) fn new(state: AppState, config: &HttpConfig) -> Self {
+    pub(crate) fn new(state: AppState, config: &HttpConfig, routes: &'static RouteTable) -> Self {
         Self {
             state,
             limiter: RateLimiter::new(config.rate_limit.clone()),
+            routes,
             allowed_origins: config
                 .allowed_origins
                 .iter()
@@ -101,9 +105,9 @@ impl Layers {
     }
 }
 
-/// The route label of an API response, for the request counters.
-#[derive(Debug, Clone)]
-struct RouteLabel(String);
+/// The route and method row of an API response, for the request metrics.
+#[derive(Debug, Clone, Copy)]
+struct RouteLabel(RouteRow);
 
 /// Middleware of every request: request id, client info, counters, security headers.
 pub(crate) async fn outer(
@@ -117,6 +121,7 @@ pub(crate) async fn outer(
         request.headers(),
         request.uri(),
     );
+    let started = Instant::now();
     let method = request.method().clone();
     let api_path = is_api_path(request.uri().path());
     let https = client.https;
@@ -125,16 +130,14 @@ pub(crate) async fn outer(
 
     let mut response = next.run(request).await;
 
-    let route = match response.extensions().get::<RouteLabel>() {
-        Some(RouteLabel(route)) => route.as_str(),
-        None if api_path => UNMATCHED_ROUTE,
-        None => UI_ROUTE,
+    let row = match response.extensions().get::<RouteLabel>() {
+        Some(RouteLabel(row)) => *row,
+        None if api_path => layers.routes.other_row(&method),
+        None => layers.routes.ui_row(&method),
     };
     layers
-        .state
-        .platform
-        .metrics
-        .request(route, &method, response.status().as_u16());
+        .routes
+        .record(row, response.status().as_u16(), started.elapsed());
     headers::apply(response.headers_mut(), https && layers.hsts);
     if let Ok(value) = HeaderValue::from_str(&id.to_string()) {
         response.headers_mut().insert(REQUEST_ID_HEADER, value);
@@ -153,9 +156,12 @@ pub(crate) async fn api(
     mut request: Request,
     next: Next,
 ) -> Response {
-    let route = request.extensions().get::<MatchedPath>().map_or_else(
-        || UNMATCHED_ROUTE.to_owned(),
-        |path| path.as_str().to_owned(),
+    let route = layers.routes.row(
+        request
+            .extensions()
+            .get::<MatchedPath>()
+            .map(MatchedPath::as_str),
+        request.method(),
     );
     let quorum = quorum::Quorum::read(&layers.state);
     let refusal = match guard(&layers, &mut request).await {
@@ -184,6 +190,12 @@ pub(crate) async fn api(
         )
         .await
     };
+    if response
+        .headers()
+        .contains_key(idempotency::REPLAYED_HEADER)
+    {
+        layers.state.platform.metrics.count(Event::IdempotentReplay);
+    }
     response.extensions_mut().insert(RouteLabel(route));
     quorum.stamp(&mut response);
     response

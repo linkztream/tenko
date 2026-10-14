@@ -309,8 +309,11 @@ fn build_app(
     ui_source: &UiSource,
     extensions: axum::http::Extensions,
 ) -> Result<(Router, Arc<Layers>), UiError> {
-    let layers = Arc::new(Layers::new(state.clone(), http));
-    let (api, _) = crate::api(state);
+    let (api, document) = crate::api(state.clone());
+    // The request metrics are sealed from the document of this router, which is dropped.
+    let route_table = middleware::RouteTable::get_or_seal(&document);
+    drop(document);
+    let layers = Arc::new(Layers::new(state, http, route_table));
     let ui = ui::router(ui_source)?;
     let api = api
         .method_not_allowed_fallback(method_not_allowed)

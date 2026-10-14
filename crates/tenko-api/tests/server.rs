@@ -327,7 +327,7 @@ async fn serves_the_api_and_the_ui_with_security_headers() {
         ),
         "{text}"
     );
-    assert!(text.contains("route=\"unmatched\""), "{text}");
+    assert!(text.contains("route=\"other\""), "{text}");
     assert!(text.ends_with("# EOF\n"));
 
     stop(server).await;

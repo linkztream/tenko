@@ -153,8 +153,16 @@ for _ in $(seq 1 1200); do
 done
 [ "$ready" -eq 1 ] || die "the server did not become ready in 120 s"
 READY_AFTER=$(awk -v a="$(date +%s.%N)" -v b="$START" 'BEGIN { printf "%.1f", a - b }')
-TOKEN=$(sed -n 's/^Setup token: *\([^ ]*\).*$/\1/p' "$OUTLOG" | head -n 1)
-[ -n "$TOKEN" ] || die "no setup token on the server console"
+# The server writes the setup token to <data_dir>/setup-token; its console shows the token
+# itself only to a terminal and otherwise names the file.
+TOKEN=""
+if [ -f "$DATA/setup-token" ]; then
+  TOKEN=$(tr -d ' \r\n' < "$DATA/setup-token")
+fi
+if [ -z "$TOKEN" ]; then
+  TOKEN=$(sed -n 's/^Setup token: *\([^ ]*\).*$/\1/p' "$OUTLOG" | grep -v '^in$' | head -n 1)
+fi
+[ -n "$TOKEN" ] || die "no setup token in the token file or on the server console"
 sample ready
 note "ready after $READY_AFTER s; RSS $LAST_RSS MiB, HWM $LAST_HWM MiB, anon $LAST_ANON MiB, file $LAST_FILE MiB"
 

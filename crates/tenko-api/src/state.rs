@@ -73,7 +73,8 @@ pub struct AppState {
 pub(crate) struct Platform {
     /// The event hub of `GET /events`.
     pub(crate) events: EventHub,
-    /// Request counters of `GET /metrics`.
+    /// The metrics registry of `GET /metrics`: the request metrics, the process counters
+    /// and the platform gauges.
     pub(crate) metrics: Metrics,
     /// Requests with an idempotency key that are being processed.
     pub(crate) in_flight: InFlight,
@@ -172,6 +173,12 @@ impl AppState {
     /// The product modules this installation runs (OPS-25).
     pub fn modules(&self) -> ModuleSet {
         self.platform.modules
+    }
+
+    /// The metrics registry that `GET /metrics` encodes. The server binary registers its own
+    /// gauge families here and sets them on its timer.
+    pub fn metrics(&self) -> &tenko_core::metrics::Registry {
+        self.platform.metrics.registry()
     }
 
     /// Adds or replaces a condition that `GET /system/status` lists among its warnings
