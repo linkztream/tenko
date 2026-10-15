@@ -1,0 +1,2 @@
+Name             Type     Status           Total            Used       Available        %
+local             dir     active        98497780        12345678        86152102   12.53%

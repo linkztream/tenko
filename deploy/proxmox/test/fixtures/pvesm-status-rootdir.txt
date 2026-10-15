@@ -1,0 +1,4 @@
+Name             Type     Status           Total            Used       Available        %
+local-lvm     lvmthin     active       365760512        42314752       323445760   11.57%
+nvme-thin     lvmthin     active       975175680       102400000       872775680   10.50%
+old-disk          dir   inactive               0               0               0    0.00%

@@ -453,6 +453,10 @@ capability. To check on a given host, from inside the container, in this order:
 Upgrades in LXC are binary upgrades with `tenko upgrade` as on any Linux host
 ([../docs/upgrades.md](../docs/upgrades.md)); take a snapshot of the container first.
 
+The Proxmox VE scripts in [proxmox/](proxmox/README.md) create the container of the
+self-hosted CI runner in one command; that container is a build machine, not a Tenko
+installation.
+
 ### Smoke test of the macvlan example
 
 `compose/smoke-macvlan.sh` creates a dummy link `tenkosmoke0`, builds the image (or uses

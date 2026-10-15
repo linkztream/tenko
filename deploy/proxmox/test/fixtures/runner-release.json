@@ -1,0 +1,14 @@
+{
+  "url": "https://api.github.com/repos/actions/runner/releases/0",
+  "tag_name": "v2.338.0",
+  "name": "v2.338.0",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+    {
+      "name": "actions-runner-linux-x64-2.338.0.tar.gz",
+      "browser_download_url": "https://github.com/actions/runner/releases/download/v2.338.0/actions-runner-linux-x64-2.338.0.tar.gz"
+    }
+  ],
+  "body": "## What's Changed\r\n* Release notes trimmed for this fixture; the sections below are as the API returned them for v2.338.0.\r\n\r\n## Linux x64\r\n\r\n```bash\r\n# Create a folder\r\nmkdir actions-runner && cd actions-runner\r\n# Download the latest runner package\r\ncurl -O -L https://github.com/actions/runner/releases/download/v2.338.0/actions-runner-linux-x64-2.338.0.tar.gz\r\n# Extract the installer\r\ntar xzf ./actions-runner-linux-x64-2.338.0.tar.gz\r\n```\r\n\r\n## Linux arm64\r\n\r\n```bash\r\n# Create a folder\r\nmkdir actions-runner && cd actions-runner\r\n# Download the latest runner package\r\ncurl -O -L https://github.com/actions/runner/releases/download/v2.338.0/actions-runner-linux-arm64-2.338.0.tar.gz\r\n# Extract the installer\r\ntar xzf ./actions-runner-linux-arm64-2.338.0.tar.gz\r\n```\r\n\r\n## SHA-256 Checksums\r\n\r\nThe SHA-256 checksums for the packages included in this build are shown below:\r\n\r\n- actions-runner-win-x64-2.338.0.zip <!-- BEGIN SHA win-x64 -->f48e0750a21812bca5f82de5f7f5aeae71abee647fab5a582f1742d07eba455f<!-- END SHA win-x64 -->\r\n- actions-runner-win-arm64-2.338.0.zip <!-- BEGIN SHA win-arm64 -->a57a4d29c0dcf02210a16b01906ed76cb8091b26d728c41232736c0f627a557e<!-- END SHA win-arm64 -->\r\n- actions-runner-osx-x64-2.338.0.tar.gz <!-- BEGIN SHA osx-x64 -->dea7a58796ce215fc424a8b27c0fdd9b813fa5fc03d109a4a1d38131d6bfa1a3<!-- END SHA osx-x64 -->\r\n- actions-runner-osx-arm64-2.338.0.tar.gz <!-- BEGIN SHA osx-arm64 -->df4cebda25c86a886ed204e49fee63f5c2e7cec5f447b5c98440a826bbdf9df2<!-- END SHA osx-arm64 -->\r\n- actions-runner-linux-x64-2.338.0.tar.gz <!-- BEGIN SHA linux-x64 -->af4b794c1bc41d73d40535e3fe092a39f9679cd8d965954c2aca25a05ca41d32<!-- END SHA linux-x64 -->\r\n- actions-runner-linux-arm64-2.338.0.tar.gz <!-- BEGIN SHA linux-arm64 -->628b4a7258487b80c1d3c221095a7ded349f5ae0175fd3dfab708d07428f041b<!-- END SHA linux-arm64 -->\r\n- actions-runner-linux-arm-2.338.0.tar.gz <!-- BEGIN SHA linux-arm -->1d6a7688d2aca1a1fecd4df5d473e4aa4226c1f1785ff915cf84049665a3483f<!-- END SHA linux-arm -->"
+}
