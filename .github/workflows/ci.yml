@@ -17,6 +17,11 @@ on:
     # run them by hand (workflow_dispatch) when a change needs them sooner.
     - cron: "17 3 * * 0"
   workflow_dispatch:
+    inputs:
+      windows:
+        description: "Also run the Windows jobs (hosted minutes; otherwise they run on the weekly schedule only)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -63,7 +68,8 @@ jobs:
 
   rust-windows:
     name: Rust (windows-latest, weekly schedule)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # Hosted minutes: on the weekly schedule, and by hand only with the `windows` input.
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.windows)
     runs-on: windows-latest
     env:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
@@ -311,7 +317,8 @@ jobs:
   # code, which are all that exists.
   windows-service-smoke:
     name: Windows service smoke (windows-latest, weekly schedule)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # Hosted minutes: on the weekly schedule, and by hand only with the `windows` input.
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.windows)
     runs-on: windows-latest
     timeout-minutes: 60
     env:
