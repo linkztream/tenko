@@ -310,6 +310,7 @@ The `[cluster]` section of `tenko.toml`, with the example in `deploy/tenko.examp
 | `catch_up_timeout_secs` | `TENKO_CLUSTER__CATCH_UP_TIMEOUT_SECS` | Controller | 120 | Seconds a starting member waits to catch up with the leader before it starts isolated, 5 to 3,600 (section 12.2) |
 | `auto_promote` | `TENKO_CLUSTER__AUTO_PROMOTE` | Controller | `true` | The leader promotes caught-up learners to voters (section 12.3) |
 | `promote_lag_entries` | `TENKO_CLUSTER__PROMOTE_LAG_ENTRIES` | Controller | 100 | How many log entries a learner may lag and still count as caught up, 1 to 1,000,000 |
+| `peer_address_map` | `TENKO_CLUSTER__PEER_ADDRESS_MAP` | Controller | Empty | A table from the cluster port a peer advertises (`host:port`, its `[node] address`) to the `host:port` this controller dials instead, for split-horizon setups and labs (section 12.2); as a variable an inline table, `'{ "controller-2.example.test:8444" = "192.0.2.12:8444" }'`. Both sides are `host:port`, and an entry may not map an address to itself |
 
 An invalid value stops the start with `config.invalid`. A node reads `buffer_mib` from its own configuration, like the data directory.
 
@@ -464,7 +465,7 @@ The first controller is an ordinary installation. Each further controller joins 
 
 Nothing in the first controller's data directory changes format: the cluster is state in the store (the Raft membership and the member records). When the first peer joins, the first controller records itself as a member and moves its cluster identity from the vault to `<data_dir>/node/`, like the identity of a joined controller.
 
-A join refuses a cluster whose data is in a format the joining binary does not know (`cluster.join.format_newer`, exit status 11): upgrade the joining host first. A store directory remembers its node id (the file `node-id` in it); a configuration with another `[node] id` does not start. A store directory that a join prepared is never initialized as a cluster of its own: run the join again, or start over with an empty directory.
+A join refuses a cluster whose data is in a format the joining binary does not know (`cluster.join.format_newer`, exit status 11): upgrade the joining host first. A store directory remembers its node id (the file `node-id` in it); a configuration with another `[node] id` does not start. A store directory that a join prepared is never initialized as a cluster of its own: run the join again, or start over with an empty directory. With the `file` key provider the key file must exist before the join, as a container's mounted secret does: the join seals the received keys under the generation directory (`[kek] dir`, default `<data_dir>/kek`) with it, and unlike `tenko serve` it does not create a missing key file.
 
 ### 12.2 Starting a member
 
@@ -474,6 +475,8 @@ A join refuses a cluster whose data is in a format the joining binary does not k
 - A member opens its cluster port at once with the identity under `<data_dir>/node/`, so its peers replicate to it while it starts. The node services answer `UNAVAILABLE` (`cluster.port.starting`) until step 10; a node retries.
 - The member waits until it has applied what the leader committed (a linearizable read through the leader), at most `[cluster] catch_up_timeout_secs` (default 120). After that it starts isolated and catches up in the background.
 - It fetches key generations it lacks (an online rotation while it was stopped) from another member, before the vault opens them.
+
+A controller dials each peer at the cluster port of the peer's member record, its `[node] address`. Where that address does not work from every controller, for example a name that resolves to an inside address at one site and is unreachable from another, or the fault proxy of the cluster lab (section 12.10), `[cluster] peer_address_map` names the address this controller dials instead: `peer_address_map = { "controller-2.example.test:8444" = "192.0.2.12:8444" }`. The map applies to the controllers this one dials, after the member record is read; the advertised address in the record stays the same for everyone else, and nodes never use the map. The mutual TLS is the same either way: the certificate of the peer is checked against the installation's CA, not against the address dialled.
 
 ### 12.3 Membership
 
@@ -563,7 +566,30 @@ Two limits count on each controller separately and are not shared across the clu
 
 A wrong second-factor code keeps its ceremony open on the controller that checked it, with the attempt counted; another controller counts the attempts of the same challenge afresh, so the attempts per challenge are bounded per controller in the same way.
 
+### 12.10 The cluster lab
+
+The cluster lab runs real controllers against each other: separate `tenko serve` processes that join with `tenko cluster join`, as an administrator would, and faults that a test can switch on and off. It has three parts.
+
+**The harness and the scenarios.** `crates/tenko/tests/cluster_support/` starts one to five controllers on one machine, each with its own data directory under the operating system's temporary directory, its own loopback ports, the internal CA on `localhost`, `heartbeat_secs = 1`, `isolation_after_ms = 1000` and `catch_up_timeout_secs = 30`. The first controller runs first-run setup; every further one joins with a controller token from the API. Every directed link between two controllers runs through a TCP relay of the harness, which `[cluster] peer_address_map` puts in the path (section 12.2), so a test can cut, delay or drop one link, and partition the controllers into sets. Probes are enrolled as in section 1 and are not relayed. The harness also kills, stops, restarts and wipes controllers, runs a steady write load through the API with an `Idempotency-Key` on every write, reads the event stream as the web UI does (resuming from `Last-Event-ID` on another controller), and compares the state digests of every member through its own API (section 12.7). Every wait has a limit and fails with the last log lines of every process.
+
+| File | What it checks | When it runs |
+|---|---|---|
+| `cluster_smoke_grow.rs` | One controller grows to three: two joins, both learners promoted together, a write on a follower read on every member, equal digests; the relay's own tests | Every push (CI job `cluster-smoke`) |
+| `cluster_failover.rs` | The leader killed at 100 writes per second: writes resume within 15 seconds, the survivors agree at the last committed revision and hold every committed address, the event stream resumes elsewhere without a gap, the probe reconnects and its buffer drains; a follower killed under load (no write fails, the follower catches up); all three restarted with their data | Weekly (`cluster-lab`) |
+| `cluster_partition.rs` | Two against one through the relays: the minority isolated after about a second, reads with `Tenko-Staleness`, writes refused with 503 `cluster.no_quorum`, IPAM changes queued; the majority commits; after the heal the queue drains (one change applied, one conflict), the digests agree and the `cluster.quorum` events arrive ([partitions.md](partitions.md)) | Weekly |
+| `cluster_membership.rs` | A rejoin with an empty data directory (M6), a dead voter replaced with `tenko cluster promote --replace`, a controller removed with `tenko cluster remove` (it is cut off and does not come back with its old identity), a step-down under load | Weekly |
+| `cluster_observability.rs` | The `metrics` topic of a follower shows a sample of every controller and their sum; a write through a follower is one trace whose request span on the follower is an ancestor of the `tenko.store.propose` span on the leader ([observability.md](observability.md)) | Weekly |
+| `cluster_mixed_versions.rs` | A rolling upgrade from an older binary, named by `TENKO_OLD_BIN` (followers first, then the leader after a step-down), with writes between the steps; without the variable it says so and passes | Weekly, and by hand with an older release |
+| `cluster_measure.rs` | The measurements below; they run only with `TENKO_LAB_RESULTS` set | By hand, `bench/phase1-cluster/run.ps1` or `run.sh` |
+
+**The measurements.** `bench/phase1-cluster/` runs M3 (failover, 20 runs), M12 (forwarded write latency), M4 on one host (1,000 writes per second, then the catch-up of an empty fourth controller), M1 on one host (reads on a follower during the snapshot install of a joining learner) and M6 (the state file after a rejoin), and writes the results in the house format. On one machine the links are the loopback and every controller shares one disk, so M4 and M1 are stand-ins: the 6 M record set catch-up over 1 Gbit and the test index of Spike A need the DNS module and three machines.
+
+**The compose lab.** `deploy/compose/lab-cluster/` runs three controllers, two probes and HAProxy in front on one Docker host, with the controllers in TLS mode `reverse_proxy` behind HAProxy and the cluster port on the lab network; a partition there is `docker network disconnect`. Its `smoke.sh` brings the lab up from the repository root, joins the controllers, kills the leader under 100 writes per second, partitions a follower and tears everything down; the weekly CI job runs it. Its README says how to keep the lab up for hand tests and how to run it with two images.
+
+What the lab shows is the behaviour of the software: elections, forwarding, catch-up from the log and from a snapshot, the quorum gate, the queue, the event stream and the probes across real processes and a real proxy. What it cannot show waits for three VMs in WP3.8: a power cut (M2), a 1 Gbit link and separate disks (M4), and the UI over two hosts (M7).
+
 ## 13. What comes next
 
 - **Slice 3.** Configuration flows from the controllers to `dns` and `dhcp` nodes as resumable deltas with a bandwidth cap (OPS-28). The update check joins the leader services of section 12.8, where the reconciler loop and the connector polling schedule run since the Slice 2 follow-ups.
+- **The cluster on three machines.** The measurements of section 12.10 move to three VMs (WP3.8): M2 power cuts, M4 with 6 M record sets over 1 Gbit, M7 over two hosts, and the final runs of M1, M3 and M12.
 - **The probe.** What comes next for the scanner of the probe is in [scanning.md](scanning.md#14-what-comes-next).

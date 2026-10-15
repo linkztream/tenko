@@ -646,7 +646,11 @@ fn raft_config(config: &RaftStoreConfig) -> Result<openraft::Config, StoreError>
         snapshot_policy: openraft::SnapshotPolicy::Never,
         max_in_snapshot_log_to_keep: config.snapshot.keep_entries,
         purge_batch_size: 1,
-        max_payload_entries: 64,
+        // openraft 0.9 abandons an append-entries call after `heartbeat_interval`: a
+        // payload that takes longer to send and apply never replicates, so a lagging member
+        // would never catch up. Coalesced entries carry many writes each; eight keep a call
+        // short (the cluster lab's M4 catch-up stalled with 64).
+        max_payload_entries: 8,
         install_snapshot_timeout: 30 * 60 * 1_000,
         ..openraft::Config::default()
     };

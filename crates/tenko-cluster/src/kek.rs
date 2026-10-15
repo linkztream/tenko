@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use tenko_core::NodeId;
 use tenko_vault::{
-    KekConfig, StoreVault, VaultError,
+    KekConfig, KekOptions, StoreVault, VaultError,
     distribution::KekPeers,
     transfer::{self, TransferKey},
 };
@@ -123,8 +123,9 @@ impl TransferSink {
         self.key.public_key()
     }
 
-    /// Opens the answer and seals the generations with `config`'s provider; returns the
-    /// generation ids.
+    /// Opens the answer and seals the generations with `config`'s provider, under the
+    /// generation directory of `options` for the `file` provider; returns the generation
+    /// ids.
     ///
     /// # Errors
     ///
@@ -134,9 +135,10 @@ impl TransferSink {
         answer: &v1::TransferKekResponse,
         context: &[u8],
         config: &KekConfig,
+        options: &KekOptions,
     ) -> Result<Vec<String>, ClusterError> {
         let generations = self.key.open(&answer.format, &answer.sealed, context)?;
-        let ring = config.import(&generations)?;
+        let ring = config.import_with(&generations, options)?;
         Ok(ring.ids().map(str::to_owned).collect())
     }
 }

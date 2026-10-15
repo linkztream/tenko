@@ -301,6 +301,11 @@ data volume protects nothing.
   host's network (`network_mode: host`).
 - `compose/smoke-macvlan.sh`: starts the macvlan example on a dummy parent interface and
   checks it; the CI runs it (below).
+- `compose/lab-cluster/`: the cluster lab, not an example to deploy: three controllers
+  joined with `tenko cluster join`, two probes and HAProxy in front (`reverse_proxy` mode,
+  health checks on `/api/v1/health/ready`, cookie stickiness), with `smoke.sh` for failover
+  and a partition. Its README has the commands; `docs/cluster.md` section 12.10 says what
+  the lab covers.
 
 The image is distroless (no shell, no curl). Its `HEALTHCHECK` runs `tenko health`, which
 asks `/api/v1/health/ready` over `https://localhost:8443` with the internal CA root and exits

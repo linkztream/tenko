@@ -233,7 +233,7 @@ fn write_config(
         }
         let data_dir = toml::Value::String(data_dir.display().to_string()).to_string();
         let text = format!(
-            "# Written by `tenko cluster join`.\ndata_dir = {data_dir}\nroles = [\"controller\"]\n\n{lines}"
+            "# Written by `tenko cluster join`.\ndata_dir = {data_dir}\nroles = \"controller\"\n\n{lines}"
         );
         std::fs::write(target, text).map_err(failed)?;
     }
@@ -354,7 +354,12 @@ pub async fn run(args: &JoinArgs) -> Result<Output, Failure> {
         Ok(answer) => {
             let answer = answer.into_inner();
             let ids = sink
-                .import(&answer, &join_context(node, token_id), &resolved.kek)
+                .import(
+                    &answer,
+                    &join_context(node, token_id),
+                    &resolved.kek,
+                    &resolved.kek_options,
+                )
                 .map_err(|error| cluster_failure(exit::FAILURE, &error))?;
             notes.push(format!(
                 "received {} key generation(s): {}",
@@ -601,6 +606,10 @@ mod tests {
         let parsed: toml::Value = toml::from_str(&text).expect("valid TOML");
         assert_eq!(parsed["node"]["id"].as_integer(), Some(1001));
         assert!(parsed["data_dir"].as_str().is_some());
+        // `tenko serve --config` reads the new file as it is.
+        let config: crate::config::Config =
+            toml::from_str(&text).expect("a configuration tenko serve reads");
+        assert_eq!(config.roles, "controller");
         let again = write_config(&file, &dir, NodeId(1001), "192.0.2.12:8444", "0.0.0.0:8444")
             .expect_err("a second time");
         assert_eq!(again.status, exit::USAGE);

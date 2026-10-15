@@ -303,6 +303,10 @@ promote_lag_entries = 100
 # Controller: the bandwidth cap of each node's configuration stream in kilobits per second
 # (OPS-28); 0 is no cap.
 sync_kbps = 0
+# Controller in a cluster: dial a peer at another address than the cluster port it
+# advertises, from the advertised host:port to the host:port this controller uses
+# (split-horizon setups and labs). Default: empty, every peer at its advertised address.
+# peer_address_map = { "controller-2.example.test:8444" = "192.0.2.12:8444" }
 
 [telemetry]
 # OpenTelemetry traces over OTLP/gRPC (OPS-05), see docs/observability.md section 8. Off

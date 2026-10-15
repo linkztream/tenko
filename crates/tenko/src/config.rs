@@ -26,6 +26,7 @@
 //! configuration; it holds no secrets (the KEK file is named by its path only).
 
 use std::{
+    collections::BTreeMap,
     fmt,
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
@@ -229,6 +230,12 @@ pub struct ClusterSection {
     /// Controller: the bandwidth cap per node configuration stream in kilobits per second;
     /// 0 is no cap (default 0, at most 10000000; OPS-28).
     pub sync_kbps: u64,
+    /// Controller in a cluster: the address this controller dials instead of the cluster
+    /// port a peer advertises, from the advertised `host:port` to the `host:port` to use
+    /// (split-horizon setups and labs). Empty: every peer is dialled at the address of its
+    /// member record.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub peer_address_map: BTreeMap<String, String>,
 }
 
 impl Default for ClusterSection {
@@ -244,6 +251,7 @@ impl Default for ClusterSection {
             auto_promote: true,
             promote_lag_entries: 100,
             sync_kbps: 0,
+            peer_address_map: BTreeMap::new(),
         }
     }
 }
@@ -289,10 +297,7 @@ impl ClusterSection {
     fn validate(&self) -> Result<(), ConfigError> {
         self.listen_mode()?;
         for endpoint in &self.advertise {
-            let valid = endpoint.rsplit_once(':').is_some_and(|(host, port)| {
-                !host.is_empty() && port.parse::<u16>().is_ok_and(|port| port > 0)
-            });
-            if !valid {
+            if !is_host_port(endpoint) {
                 return Err(ConfigError::invalid(format!(
                     "cluster.advertise: `{endpoint}` is not a host and port, such as ddi.example.net:8444"
                 )));
@@ -333,8 +338,29 @@ impl ClusterSection {
                 "cluster.sync_kbps must be at most 10000000 (0 is no cap)",
             ));
         }
+        for (advertised, dialled) in &self.peer_address_map {
+            for endpoint in [advertised, dialled] {
+                if !is_host_port(endpoint) {
+                    return Err(ConfigError::invalid(format!(
+                        "cluster.peer_address_map: `{endpoint}` is not a host and port, such as ddi.example.net:8444"
+                    )));
+                }
+            }
+            if advertised == dialled {
+                return Err(ConfigError::invalid(format!(
+                    "cluster.peer_address_map: `{advertised}` maps to itself"
+                )));
+            }
+        }
         Ok(())
     }
+}
+
+/// Whether `endpoint` is a host and a port above 0, such as `ddi.example.net:8444`.
+fn is_host_port(endpoint: &str) -> bool {
+    endpoint.rsplit_once(':').is_some_and(|(host, port)| {
+        !host.is_empty() && port.parse::<u16>().is_ok_and(|port| port > 0)
+    })
 }
 
 /// `[telemetry]`: OpenTelemetry traces exported over OTLP (OPS-05, owner decision S3-Q7).
@@ -2202,6 +2228,10 @@ retired = [\"tenko_kek_old\"]
             "catch_up_timeout_secs = 0",
             "promote_lag_entries = 0",
             "sync_kbps = 20000000",
+            "peer_address_map = { \"127.0.0.1:9002\" = \"127.0.0.1\" }",
+            "peer_address_map = { \"9002\" = \"127.0.0.1:9102\" }",
+            "peer_address_map = { \"127.0.0.1:9002\" = \"127.0.0.1:0\" }",
+            "peer_address_map = { \"127.0.0.1:9002\" = \"127.0.0.1:9002\" }",
         ] {
             let loaded =
                 from_text(&format!("data_dir = \"/d\"\n[cluster]\n{bad}\n"), &[]).expect("loads");
@@ -2229,6 +2259,47 @@ retired = [\"tenko_kek_old\"]
         assert!(!loaded.config.cluster.auto_promote);
         assert_eq!(loaded.config.cluster.sync_kbps, 512);
         loaded.config.resolve().expect("valid");
+    }
+
+    #[test]
+    fn the_peer_address_map_is_read_from_the_file_and_the_environment() {
+        let default = from_text("data_dir = \"/d\"\n", &[]).expect("loads");
+        assert!(default.config.cluster.peer_address_map.is_empty());
+        let loaded = from_text(
+            "data_dir = \"/d\"\n[cluster]\npeer_address_map = { \"controller-2.example.test:8444\" = \"192.0.2.12:8444\", \"127.0.0.1:9002\" = \"127.0.0.1:9102\" }\n",
+            &[],
+        )
+        .expect("loads");
+        let map = &loaded.config.cluster.peer_address_map;
+        assert_eq!(map.len(), 2);
+        assert_eq!(
+            map.get("controller-2.example.test:8444")
+                .map(String::as_str),
+            Some("192.0.2.12:8444")
+        );
+        assert_eq!(
+            map.get("127.0.0.1:9002").map(String::as_str),
+            Some("127.0.0.1:9102")
+        );
+        loaded.config.resolve().expect("valid");
+        let from_env = from_text(
+            "data_dir = \"/d\"\n",
+            &[(
+                "TENKO_CLUSTER__PEER_ADDRESS_MAP",
+                "{ \"[2001:db8::2]:8444\" = \"[2001:db8::12]:8444\" }",
+            )],
+        )
+        .expect("loads");
+        assert_eq!(
+            from_env
+                .config
+                .cluster
+                .peer_address_map
+                .get("[2001:db8::2]:8444")
+                .map(String::as_str),
+            Some("[2001:db8::12]:8444")
+        );
+        from_env.config.resolve().expect("valid");
     }
 
     #[test]

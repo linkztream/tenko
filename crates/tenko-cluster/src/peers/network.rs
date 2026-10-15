@@ -5,8 +5,11 @@
 //! **Endpoints** come from the replicated member records (`cluster.members`), not from the
 //! address in the Raft membership: the first controller joined with an empty one. The
 //! Raft address serves as the fallback while a record has not replicated yet, and an
-//! endpoint can be pinned (the seed of a join). Resolved endpoints are cached for a few
-//! seconds; a connection per endpoint is kept and re-dialled by tonic when it breaks.
+//! endpoint can be pinned (the seed of a join). An address map (`[cluster]
+//! peer_address_map`) then replaces an advertised endpoint by the one this controller dials
+//! (split-horizon setups and labs); a pinned endpoint is used as it is. Resolved endpoints
+//! are cached for a few seconds; a connection per endpoint is kept and re-dialled by tonic
+//! when it breaks.
 //!
 //! **Deadlines** derive from the Raft timers and the store timeouts ([`PeerTimings`]).
 //!
@@ -140,6 +143,7 @@ struct Inner {
     tls: ArcSwapOption<ClientConfig>,
     store: OnceLock<WeakRaftStore>,
     pinned: RwLock<HashMap<NodeId, String>>,
+    address_map: RwLock<HashMap<String, String>>,
     resolved: Mutex<HashMap<NodeId, (String, Instant)>>,
     channels: Mutex<HashMap<String, Channel>>,
 }
@@ -168,6 +172,7 @@ impl PeerNetwork {
                 tls: ArcSwapOption::empty(),
                 store: OnceLock::new(),
                 pinned: RwLock::new(HashMap::new()),
+                address_map: RwLock::new(HashMap::new()),
                 resolved: Mutex::new(HashMap::new()),
                 channels: Mutex::new(HashMap::new()),
             }),
@@ -211,6 +216,30 @@ impl PeerNetwork {
             .insert(node, endpoint.into());
     }
 
+    /// Sets the address map (`[cluster] peer_address_map`): an endpoint a peer advertises
+    /// that is a key of the map is dialled at its value instead. Cached endpoints are
+    /// resolved again.
+    pub fn set_address_map(&self, map: impl IntoIterator<Item = (String, String)>) {
+        *self
+            .inner
+            .address_map
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = map.into_iter().collect();
+        lock(&self.inner.resolved).clear();
+    }
+
+    /// The endpoint this controller dials for an advertised one: its entry in the address
+    /// map, else the endpoint itself.
+    fn mapped(&self, endpoint: String) -> String {
+        self.inner
+            .address_map
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&endpoint)
+            .cloned()
+            .unwrap_or(endpoint)
+    }
+
     /// Forgets the cached endpoint of `node` (its member record changed).
     pub fn forget(&self, node: NodeId) {
         lock(&self.inner.resolved).remove(&node);
@@ -221,7 +250,8 @@ impl PeerNetwork {
     }
 
     /// The endpoint of `node`: pinned, else its member record, else `fallback` (the
-    /// address in the Raft membership).
+    /// address in the Raft membership); an endpoint that is not pinned goes through the
+    /// address map ([`PeerNetwork::set_address_map`]).
     ///
     /// # Errors
     ///
@@ -275,6 +305,7 @@ impl PeerNetwork {
                 )
                 .with_param("node", node.to_string())
             })?;
+        let endpoint = self.mapped(endpoint);
         lock(&self.inner.resolved).insert(node, (endpoint.clone(), Instant::now()));
         Ok(endpoint)
     }
@@ -864,6 +895,41 @@ mod tests {
         let sent: wire::AppendRequest = wire::decode("append", &payload).expect("decode");
         assert_eq!(sent.entries.len(), 2);
         assert_eq!(sent.leader_commit.map(|log_id| log_id.index), Some(2));
+    }
+
+    #[tokio::test]
+    async fn the_address_map_replaces_resolved_endpoints_but_not_pins() {
+        let network = PeerNetwork::new(NodeId(1), PeerTimings::default());
+        let endpoint = |node: u64, fallback: Option<&'static str>| {
+            let network = network.clone();
+            async move {
+                network
+                    .endpoint(NodeId(node), fallback)
+                    .await
+                    .expect("an endpoint")
+            }
+        };
+        assert_eq!(
+            endpoint(1001, Some("127.0.0.1:9002")).await,
+            "127.0.0.1:9002"
+        );
+        network.set_address_map([("127.0.0.1:9002".to_owned(), "127.0.0.1:9102".to_owned())]);
+        assert_eq!(
+            endpoint(1001, Some("127.0.0.1:9002")).await,
+            "127.0.0.1:9102",
+            "a new map is applied to a cached endpoint, too"
+        );
+        assert_eq!(
+            endpoint(1002, Some("127.0.0.1:9003")).await,
+            "127.0.0.1:9003"
+        );
+        network.pin(NodeId(1003), "127.0.0.1:9002");
+        assert_eq!(endpoint(1003, None).await, "127.0.0.1:9002");
+        network.set_address_map([]);
+        assert_eq!(
+            endpoint(1001, Some("127.0.0.1:9002")).await,
+            "127.0.0.1:9002"
+        );
     }
 
     #[test]

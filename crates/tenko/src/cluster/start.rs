@@ -211,6 +211,7 @@ pub async fn start_peers(
     check_entry_limit(store)?;
     store.set_isolation_after(Duration::from_millis(section.isolation_after_ms));
     let network = PeerNetwork::new(resolved.node_id, PeerTimings::from_store(store.config()));
+    network.set_address_map(section.peer_address_map.clone());
     let credentials = identity(resolved)?;
     let membership = store.membership();
     // A member of a group of several nodes (a joined controller, or the first one after

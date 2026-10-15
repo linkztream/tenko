@@ -921,7 +921,9 @@ impl Peers {
             .find(|member| member.node == node)
     }
 
-    /// Changes the voters and audits the change.
+    /// Changes the voters and audits the change. A voter left out of `voters` (the dead
+    /// voter of a replacement) leaves the cluster instead of staying as a learner; the
+    /// learners stay as they are.
     async fn set_voters(
         &self,
         cx: &RequestCtx,
@@ -931,7 +933,7 @@ impl Peers {
         context: Vec<(&'static str, String)>,
     ) -> Result<(), ClusterError> {
         self.store()
-            .set_voters(voters.clone(), true)
+            .set_voters(voters.clone(), false)
             .await
             .map_err(|error| membership_error(&error))?;
         let mut draft = AuditDraft::success(
