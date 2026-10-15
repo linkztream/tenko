@@ -21,6 +21,10 @@ on:
 permissions:
   contents: read
 
+# Linux jobs run on GitHub's hosted runners (ubuntu-latest) unless the repository variable
+# LINUX_RUNNER names the label of a self-hosted runner (.github/runner/README.md); the
+# Windows jobs always run on windows-latest. Steps that only make sense on a hosted runner
+# check runner.environment.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
@@ -34,15 +38,16 @@ env:
 
 jobs:
   rust-linux:
-    name: Rust (ubuntu-latest)
+    name: Rust (Linux)
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     env:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
       TENKO_UI_STUB: "1"
     steps:
       - uses: actions/checkout@v5
       - name: Free disk space
+        if: runner.environment == 'github-hosted'
         # The hosted runner ships toolchains this build never uses.
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
       - uses: dtolnay/rust-toolchain@stable
@@ -79,7 +84,7 @@ jobs:
   deny:
     name: cargo-deny
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -91,7 +96,7 @@ jobs:
   audit:
     name: cargo-audit
     if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -107,7 +112,7 @@ jobs:
   ui:
     name: UI
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: ui
@@ -140,7 +145,7 @@ jobs:
     # The server with the embedded UI, driven by a browser (WP1.11).
     needs: ui
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -162,7 +167,15 @@ jobs:
         run: npm ci
       - name: Install Chromium
         working-directory: ui
-        run: npx playwright install --with-deps chromium
+        # The hosted runner gets the system libraries of Chromium installed as well; a
+        # self-hosted runner keeps them from its first run ($RUNNER_ENVIRONMENT is set by
+        # the runner).
+        run: |
+          if [ "$RUNNER_ENVIRONMENT" = github-hosted ]; then
+            npx playwright install --with-deps chromium
+          else
+            npx playwright install chromium
+          fi
       - name: End-to-end tests
         working-directory: ui
         env:
@@ -182,7 +195,7 @@ jobs:
     # TENKO_UI_STUB.
     needs: ui
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -206,9 +219,9 @@ jobs:
   # crates/tenko/tests/cluster_smoke*.rs. WP3.1c adds those files; they are picked up by
   # name, so this job never needs another edit. The full workspace run stays in rust-linux.
   cluster-smoke:
-    name: Cluster smoke (ubuntu-latest)
+    name: Cluster smoke (Linux)
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     env:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
@@ -216,6 +229,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Free disk space
+        if: runner.environment == 'github-hosted'
         # The hosted runner ships toolchains this build never uses.
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
       - uses: dtolnay/rust-toolchain@stable
@@ -254,9 +268,9 @@ jobs:
   # so. Helpers of the lab live in the directory tests/cluster_support/, not in a file
   # named cluster_*.rs, which would be run as a test.
   cluster-lab:
-    name: Cluster lab (ubuntu-latest, weekly schedule)
+    name: Cluster lab (Linux, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 90
     env:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
@@ -264,6 +278,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Free disk space
+        if: runner.environment == 'github-hosted'
         # The hosted runner ships toolchains this build never uses.
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
       - uses: dtolnay/rust-toolchain@stable
@@ -330,9 +345,9 @@ jobs:
   # update through the layout with the restart on exit status 12, the probe drop-in and the
   # exposure gate below 2.5) and the macvlan compose smoke on a dummy parent interface.
   systemd-smoke:
-    name: systemd smoke (ubuntu-latest, weekly schedule)
+    name: systemd smoke (Linux, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 120
     env:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
@@ -410,6 +425,16 @@ jobs:
         # macvlan network over a dummy parent interface.
         run: sudo -E env "PATH=$PATH" deploy/compose/smoke-macvlan.sh
         timeout-minutes: 45
+      - name: Remove the service install on a self-hosted runner
+        # A hosted runner is thrown away; a self-hosted one would keep the unit, the
+        # configuration and the binary of this run and start the next run from them.
+        if: always() && runner.environment == 'self-hosted'
+        run: |
+          sudo systemctl stop tenko.service 2> /dev/null || true
+          sudo systemctl disable tenko.service 2> /dev/null || true
+          sudo rm -rf /etc/systemd/system/tenko.service /etc/systemd/system/tenko.service.d \
+            /etc/tenko /var/lib/tenko /usr/local/bin/tenko
+          sudo systemctl daemon-reload
 
   # Nightly fuzz smoke (API-14): 60 seconds for every target that `cargo fuzz list` prints.
   # WP3.13 and the packages that add parsers of network input add targets under
@@ -417,9 +442,9 @@ jobs:
   # fuzz/seeds/<target>/ is used as an extra corpus when it exists. All targets run even
   # after one crashes, then the job fails and keeps fuzz/artifacts/.
   fuzz-smoke:
-    name: Fuzz smoke (ubuntu-latest, weekly schedule)
+    name: Fuzz smoke (Linux, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60
     env:
       # Targets that link tenko-api embed the web UI. cargo-fuzz builds with debug
@@ -497,7 +522,7 @@ jobs:
     name: Changelog
     # Not on the weekly schedule or on manual runs: there is no base to compare with.
     if: github.event_name == 'push' || github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
       pull-requests: read # to read the labels of the pull request

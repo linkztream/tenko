@@ -44,7 +44,8 @@ Read before changing anything substantial:
   `docs: …`, `chore: …`, `bench: …`.
 - Small, focused commits. Never use `--no-verify`. Never amend or force-push a shared
   branch.
-- `cargo deny check` and `cargo audit` are CI gates.
+- `cargo deny check` and `cargo audit` are CI gates. The Linux jobs run on a self-hosted
+  runner when the repository variable `LINUX_RUNNER` is set (`.github/runner/README.md`).
 - Public API types derive `utoipa::ToSchema`. The OpenAPI document is generated, never
   edited by hand.
 - Measure before optimizing. Benchmarks and their results live in `bench/`; a performance

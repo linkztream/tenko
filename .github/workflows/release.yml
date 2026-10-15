@@ -28,6 +28,9 @@
 # Not yet here: signing of the binaries and of releases.json. It arrives with its own
 # requirement; the two places for it are marked SIGNING below.
 
+# The Linux jobs run on GitHub's hosted runners (ubuntu-latest) unless the repository variable
+# LINUX_RUNNER names the label of a self-hosted runner (.github/runner/README.md); the Windows
+# build always runs on windows-latest.
 name: Release
 
 on:
@@ -63,7 +66,7 @@ jobs:
   # -------------------------------------------------------------------------------------
   verify:
     name: Verify the tag
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     outputs:
       version: ${{ steps.tag.outputs.version }}
       prerelease: ${{ steps.tag.outputs.prerelease }}
@@ -102,7 +105,7 @@ jobs:
   ui:
     name: UI
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: ui
@@ -140,7 +143,7 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
             target: x86_64-unknown-linux-musl
             platform: linux-x86_64
             exe: ""
@@ -224,7 +227,7 @@ jobs:
     # The static binary must run on the distributions the product supports (R33). The
     # images carry no bash, no curl and no glibc-specific tooling the binary could lean on.
     needs: [verify, build]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     strategy:
       fail-fast: true
       matrix:
@@ -326,7 +329,7 @@ jobs:
     # After the binaries and their smoke runs: nothing is pushed, and `latest` does not move,
     # for a release whose build failed or whose binary does not run.
     needs: [verify, build, smoke-linux]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -366,7 +369,7 @@ jobs:
   publish:
     name: Publish the release
     needs: [verify, build, smoke-linux, image]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: write
     env:
