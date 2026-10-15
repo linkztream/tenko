@@ -130,6 +130,7 @@ use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
 };
+use tracing::{Instrument as _, field::Empty};
 
 use self::{
     coalescer::{CoalescerStats, Hold, Queued, Refused},
@@ -1099,6 +1100,27 @@ impl RaftStore {
     /// [`ForwardError::NoAnswer`] when the entry did not apply in time, or the store's error
     /// for the batch.
     pub async fn accept_forwarded(&self, batch: Bytes) -> Result<Committed, ForwardError> {
+        let span = propose_span(batch.len());
+        let result = self.accept_queued(batch).instrument(span.clone()).await;
+        if !matches!(result, Err(ForwardError::NotLeader { .. })) {
+            span.record("tenko.store.forwarded", false);
+            span.record("tenko.store.leader", self.inner.me());
+        }
+        let outcome = match &result {
+            Ok(committed) => {
+                span.record("tenko.store.revision", committed.revision.0);
+                "ok"
+            }
+            Err(ForwardError::Store(error)) => outcome_of(error),
+            Err(ForwardError::NoAnswer(_)) => "timeout",
+            Err(_) => "refused",
+        };
+        span.record("tenko.store.outcome", outcome);
+        result
+    }
+
+    /// [`RaftStore::accept_forwarded`] inside its span.
+    async fn accept_queued(&self, batch: Bytes) -> Result<Committed, ForwardError> {
         let inner = &self.inner;
         inner.check_running().map_err(ForwardError::Store)?;
         let leader = inner.leader();
@@ -1559,6 +1581,36 @@ async fn recover_purged_gap(log: &LogStore, sm: &StateMachine) -> Result<(), Sto
     }
 }
 
+/// Where a proposal went, for the attributes of its span.
+#[derive(Debug, Default)]
+struct Route {
+    /// The last leader the proposal was sent to (this node or another).
+    leader: Option<RaftNodeId>,
+    /// The forward to the leader failed without an answer of the leader's store.
+    forward_failed: bool,
+}
+
+/// The span of a proposal (OPS-05): its size now, where it went and how it ended later.
+fn propose_span(batch_bytes: usize) -> tracing::Span {
+    tracing::info_span!(
+        "tenko.store.propose",
+        tenko.store.batch_bytes = batch_bytes,
+        tenko.store.forwarded = Empty,
+        tenko.store.leader = Empty,
+        tenko.store.revision = Empty,
+        tenko.store.outcome = Empty,
+    )
+}
+
+/// The `tenko.store.outcome` of a refused proposal.
+fn outcome_of(error: &StoreError) -> &'static str {
+    match error {
+        StoreError::Timeout => "timeout",
+        StoreError::NoQuorum => "no_quorum",
+        _ => "refused",
+    }
+}
+
 impl Inner {
     fn me(&self) -> RaftNodeId {
         self.config.node_id.0
@@ -1568,8 +1620,15 @@ impl Inner {
         self.raft.metrics().borrow().current_leader
     }
 
-    /// Queues an encoded batch to this node's coalescer and waits for its answer.
+    /// Queues an encoded batch to this node's coalescer and waits for its answer, in the
+    /// span `tenko.store.coalesce` (from the enqueue to the commit notification).
     async fn queue_local(&self, batch: ProposedBatch) -> Result<Committed, Refused> {
+        self.queue_and_wait(batch)
+            .instrument(tracing::info_span!("tenko.store.coalesce"))
+            .await
+    }
+
+    async fn queue_and_wait(&self, batch: ProposedBatch) -> Result<Committed, Refused> {
         let sender = lock(&self.queue)
             .clone()
             .ok_or(Refused::Store(StoreError::ShuttingDown))?;
@@ -1647,10 +1706,40 @@ impl Inner {
 
     /// Proposes an encoded batch: on the leader through the coalescer, on any other member
     /// by forwarding it to the leader and waiting until this node has applied the commit.
+    /// Runs in the span `tenko.store.propose`.
     async fn propose_encoded(
         &self,
         encoded: Bytes,
         fingerprint: Option<Digest>,
+    ) -> Result<Committed, StoreError> {
+        let span = propose_span(encoded.len());
+        let mut route = Route::default();
+        let result = self
+            .propose_routed(encoded, fingerprint, &mut route)
+            .instrument(span.clone())
+            .await;
+        if let Some(leader) = route.leader {
+            span.record("tenko.store.leader", leader);
+            span.record("tenko.store.forwarded", leader != self.me());
+        }
+        let outcome = match &result {
+            Ok(committed) => {
+                span.record("tenko.store.revision", committed.revision.0);
+                "ok"
+            }
+            Err(_) if route.forward_failed => "forwarded_error",
+            Err(error) => outcome_of(error),
+        };
+        span.record("tenko.store.outcome", outcome);
+        result
+    }
+
+    /// [`Inner::propose_encoded`] inside its span; `route` learns the leader it went to.
+    async fn propose_routed(
+        &self,
+        encoded: Bytes,
+        fingerprint: Option<Digest>,
+        route: &mut Route,
     ) -> Result<Committed, StoreError> {
         let started = Instant::now();
         let deadline = started + self.config.write_timeout;
@@ -1658,6 +1747,9 @@ impl Inner {
         loop {
             self.check_running()?;
             let leader = self.leader();
+            if leader.is_some() {
+                route.leader = leader;
+            }
             match leader {
                 Some(id) if id == self.me() => {
                     let batch = ProposedBatch {
@@ -1686,10 +1778,12 @@ impl Inner {
                     Err(ForwardError::Store(error)) => return Err(error),
                     Err(ForwardError::Wire(detail)) => {
                         tracing::error!(leader = id, code = "cluster.forward.wire", "{detail}");
+                        route.forward_failed = true;
                         return Err(StoreError::NoQuorum);
                     }
                     Err(error) => {
                         tracing::warn!(leader = id, %error, "a forwarded write got no answer");
+                        route.forward_failed = true;
                         return Err(StoreError::Timeout);
                     }
                 },

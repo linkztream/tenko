@@ -98,9 +98,14 @@ pub async fn fetch(network: &PeerNetwork, node: NodeId, deadline: Duration) -> P
             .map_err(|error| error.detail().to_owned())?;
         let mut client = v1::metrics_client::MetricsClient::new(channel)
             .max_decoding_message_size(MAX_ANSWER_BYTES);
-        let mut request = Request::new(v1::SnapshotRequest {});
-        request.set_timeout(deadline);
-        Ok::<_, String>(client.snapshot(request).await)
+        let answer = crate::trace::rpc(Some(node), crate::trace::METRICS, "Snapshot", async {
+            let mut request = Request::new(v1::SnapshotRequest {});
+            request.set_timeout(deadline);
+            crate::trace::inject(&mut request);
+            client.snapshot(request).await
+        })
+        .await;
+        Ok::<_, String>(answer)
     };
     match tokio::time::timeout(deadline, call).await {
         Err(_) => PeerReply::Failed(format!("no answer within {} ms", deadline.as_millis())),

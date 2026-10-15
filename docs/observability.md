@@ -1,6 +1,6 @@
-# Observability: metrics
+# Observability: metrics and traces
 
-This document describes the metrics of a Tenko DDI controller: where they are served, who may read them, how the gauges are computed, every series with its labels, how to scrape them with Prometheus, what they cost, and the live metrics of the start page. It is for administrators who monitor Tenko and for reviewers. Requirements are cited by ID and defined in [REQUIREMENTS.md](REQUIREMENTS.md) (OPS-05, OPS-20, OPS-21); the endpoint is in the [OpenAPI document](api/openapi.json). Where this document and the code disagree, the code is right and the document has a defect.
+This document describes the metrics and the traces of a Tenko DDI controller: where the metrics are served, who may read them, how the gauges are computed, every series with its labels, how to scrape them with Prometheus, what they cost, the live metrics of the start page, and the OpenTelemetry traces exported over OTLP with their span catalogue. It is for administrators who monitor Tenko and for reviewers. Requirements are cited by ID and defined in [REQUIREMENTS.md](REQUIREMENTS.md) (OPS-05, OPS-20, OPS-21); the endpoint is in the [OpenAPI document](api/openapi.json). Where this document and the code disagree, the code is right and the document has a defect.
 
 Contents:
 
@@ -11,7 +11,8 @@ Contents:
 5. [Scraping with Prometheus](#5-scraping-with-prometheus)
 6. [Cost](#6-cost)
 7. [Dashboard](#7-dashboard)
-8. [Not covered yet](#8-not-covered-yet)
+8. [Traces](#8-traces)
+9. [Not covered yet](#9-not-covered-yet)
 
 ## 1. Where the metrics are served
 
@@ -175,6 +176,74 @@ The start page shows administrators live metrics of the controllers (OPS-20): on
 
 **The call between controllers.** `Metrics.Snapshot` (`tenko.cluster.v1`, on the cluster port) answers the callee's newest sample: `node_id`, `at`, `encoding` `cbor/1` and the CBOR of the `MetricsSample` in `payload`. While the callee's own publisher runs, that is the sample of its last tick; otherwise the call takes one on demand, at most one per 500 ms (two callers in the same half second get the same sample). The caller must hold a controller certificate, and when it has a node record (every controller that joined) the record must name the role and hold the certificate; a controller whose API has not started yet answers `UNAVAILABLE` with `cluster.metrics.unavailable`. The bytes travel over the mutual TLS of the cluster port like every other call.
 
-## 8. Not covered yet
+## 8. Traces
 
-Traces (OpenTelemetry over OTLP, `[telemetry]`) come with a later package. DNS and DHCP metrics, and their tiles on the start page, arrive with those modules. Probes report no samples of their own; their buffers show through the controller they are connected to.
+A controller exports OpenTelemetry traces (OPS-05) to an OTLP collector over gRPC when `[telemetry] otlp_endpoint` is set. Without it nothing is built: no tracer provider, no exporter, no thread and no task, and every span in the code is a disabled callsite. The code is `crates/tenko/src/telemetry.rs` (the layer, the provider, the flush), `tenko-api` `middleware::trace` (the request span), `tenko-cluster` `trace` (the context between controllers) and `tenko-connect` `host::client` and `sdk` (the context to plugins).
+
+### 8.1 Configuration
+
+```toml
+[telemetry]
+otlp_endpoint = "http://127.0.0.1:4317"
+sampling_ratio = 1.0
+```
+
+- `otlp_endpoint`: `http://` or `https://` with host and port, the OTLP/gRPC port of a collector (4317 by convention). `https://` verifies the collector's certificate against the system's root certificates (rustls with aws-lc-rs). Not set (the default): traces are off.
+- `sampling_ratio`: the share of traces exported, 0.0 to 1.0 (default 1.0). See 8.4.
+- The exporter's timeout is 10 s per export. The SDK also reads the standard OpenTelemetry variables (`OTEL_EXPORTER_OTLP_HEADERS` for headers a collector may need, `OTEL_BSP_*` for the batch processor, `OTEL_RESOURCE_ATTRIBUTES` for more resource attributes); the endpoint and the timeout set here win over theirs.
+
+Any OTLP receiver works: the OpenTelemetry Collector with its `otlp` receiver, or a tracing back end that accepts OTLP over gRPC directly. Run it next to the controller or reach it over TLS; the traces carry no secrets (8.6) but do show the activity of the installation.
+
+The process is the resource: `service.name` is `tenko`, `service.version` the version of the binary, `service.instance.id` the node id of the controller. In a cluster every controller exports its own spans with its own node id, to the collector its own `tenko.toml` names.
+
+When traces are on, the start logs `telemetry: traces are exported over OTLP` with the endpoint (without any `user:password@` part) and the ratio.
+
+### 8.2 Span catalogue
+
+Every span is at level `INFO`. Attribute names follow the OpenTelemetry semantic conventions where one exists; the others are under `tenko.`. The bridge from `tracing` adds the source location (`code.file.path`, `code.module.name`, `code.line.number`), the busy and idle time (`busy_ns`, `idle_ns`) and `target`; spans that end in an error have the status `error` (an HTTP status of 500 or more, a gRPC status other than the expected refusals, a failed connector call).
+
+| Span | Where it is created | Attributes |
+|---|---|---|
+| `http.server.request` (kind server) | `tenko-api` `middleware::trace`, the outermost layer of the router, for API paths only: it covers the CSRF guard, the rate limits, authentication, the quorum gate and the idempotency replay. Not for `/api/v1/health`, `/api/v1/health/ready`, `GET /api/v1/metrics` or the web UI. The span of an event stream (`/api/v1/events`) ends when the response head is sent, not when the stream closes | `http.request.method` (`_OTHER` for a non-standard method), `http.route` (the path template of the request metrics, such as `/api/v1/prefixes/{id}`, or `other`; never the raw path), `http.response.status_code`, `url.scheme` (as the client reached Tenko, behind a trusted proxy the proxy's scheme), `network.protocol.version` (`1.1`, `2`), `tenko.route_class` (the class label of `tenko_http_request_duration_seconds`) |
+| `tenko.store.propose` | `tenko-store`, every proposal of a write batch on any member (`propose_encoded`), and on the leader the acceptance of a batch another member forwarded (`accept_forwarded`) | `tenko.store.batch_bytes`, `tenko.store.forwarded` (true when the leader is another controller), `tenko.store.leader` (the leader's node id), `tenko.store.revision` (on success), `tenko.store.outcome`: `ok`, `refused` (a precondition, an idempotency conflict, a shut-down store and the other refusals), `timeout`, `no_quorum`, `forwarded_error` (the forward got no answer of the leader's store) |
+| `tenko.store.coalesce` | `tenko-store`, child of `tenko.store.propose` on the leader: from the batch's enqueue in the coalescer to the commit notification | none in Phase 1 (`tenko.store.coalesced_with` is not known to the caller) |
+| `tenko.job.step` | `tenko-jobs` `drive::run_execute`, around the `execute` call of a step handler. The root of a trace of its own: the step belongs to its job, not to the request that created it (`tenko.job.id` connects them). The engine's own writes have no span | `tenko.job.id`, `tenko.job.step` (the index), `tenko.job.kind` (the job kind, such as `ipam.edit`), `tenko.job.attempt`, `tenko.job.outcome`: `ok`, `failed`, `timeout`, `manual` (the step waits for a person), `panicked` |
+| `tenko.connector.call` (kind client) | `tenko-connect` `host::client`, every call of the host to a plugin; a poll has one span per page, a migration read one span for the whole stream | `rpc.system` (`grpc`), `rpc.service` (such as `tenko.connect.v1.Inventory`), `rpc.method`, `tenko.connector.instance` (the instance id, for calls made for an instance), `rpc.grpc.status_code`, `tenko.connector.outcome` (`ok` or the error code, such as `connect.timeout` or `connect.plugin.unavailable`) |
+| `tenko.cluster.rpc` (kind client) | `tenko-cluster` `trace::rpc`, a call to another controller | `rpc.system` (`grpc`), `rpc.service` (`tenko.cluster.v1.Cluster` or `tenko.cluster.v1.Metrics`), `rpc.method`, `tenko.cluster.peer` (the callee's node id), `rpc.grpc.status_code` |
+| `tenko.cluster.request` (kind server) | `tenko-cluster` `trace::span_for`, the handler of a traced call on the callee, its parent the caller's `tenko.cluster.rpc` | the same as `tenko.cluster.rpc`, with `tenko.cluster.peer` the caller's node id |
+
+Only these spans are exported: the layer passes spans of Tenko's own crates and no log events, so neither the spans of libraries (HTTP, gRPC, Raft) nor the text of log lines reach the collector.
+
+A forwarded write reads, on the follower that took the request: `http.server.request` → `tenko.store.propose` (`forwarded = true`) → `tenko.cluster.rpc Cluster/Propose`; on the leader: `tenko.cluster.request Cluster/Propose` → `tenko.store.propose` → `tenko.store.coalesce`; one trace across both controllers.
+
+### 8.3 Propagation
+
+- **API: none inbound.** A `traceparent` on an API request is ignored in Phase 1: every request starts a trace (the context of a proxy or a client is not trusted yet), and no trace id goes back to the client.
+- **Between controllers: W3C trace context.** The caller puts `traceparent` and `tracestate` into the gRPC metadata, the callee continues the trace. The cluster port is mutual TLS only, so every caller is a node of the installation and its context is trusted. Traced: the `Cluster` service (`Join`, `Propose`, `ReadIndex`, `Members`, `Digest`, `Campaign`, `Change`) and `Metrics.Snapshot`. Not traced: the `Raft` service (append entries, votes and snapshot chunks; its heartbeats every few hundred milliseconds would drown everything else), the node services (handshake, heartbeats, observations, configuration, commands) and `Cluster.TransferKek`, the key-generation exchange.
+- **To plugins: W3C trace context.** Every call of the host carries the context of its `tenko.connector.call` span in the metadata. The SDK's token check puts it into the request extensions as `tenko_connect::sdk::TraceContext { traceparent, tracestate }`, so a plugin that installs a tracer of its own can continue the trace. Plugin processes export nothing in Phase 1 (section 9).
+
+### 8.4 Sampling
+
+The sampler is `ParentBased(TraceIdRatioBased(sampling_ratio))`. The root of a trace (an API request, a job step, a call that arrives without a context) decides by its trace id, and every span below follows its parent: a trace is exported whole or not at all, also across controllers, since the callee follows the caller's sampled flag. With `sampling_ratio = 0.0` no trace is exported while the server runs normally; with `1.0` every trace is.
+
+### 8.5 Shutdown, batching and the log level
+
+Finished spans go to the SDK's batch span processor, which runs on a thread of its own and exports at most every 5 seconds or every 512 spans, whichever comes first (the SDK defaults); it holds at most 2,048 spans and drops new ones while the queue is full (a collector that is down costs memory up to that bound, not more). The exporter's gRPC channel runs on the controller's runtime. At a graceful stop the controller flushes the queue after the server has stopped and before the runtime ends, bounded by 5 seconds, and logs `telemetry: the OTLP traces were flushed` (or that they were not all flushed, when the collector did not answer in time; the spans still queued are then lost).
+
+The trace layer is filtered by the configured log level like the console and the file: traces flow only when `[log] level` is `info` or lower, and `RUST_LOG=warn` (which takes precedence over the configured level) silences traces as well.
+
+### 8.6 Privacy
+
+Span attributes never carry request or response bodies, headers, cookies, tokens, passwords, user names, object names, prefix or address values, secret ids, or anything else from the data. They carry identifiers of the system only: node ids, job ids and kinds, connector instance ids, revisions, sizes, route templates, method names, status codes and outcome codes. Log events are not exported (8.2). The serve test `crates/tenko/tests/serve_telemetry.rs` checks every attribute of every span of a setup, a write and a read against the setup token, the password, the session cookie and the prefix.
+
+### 8.7 Cost
+
+Spans are created with the `tracing` macros. Without the endpoint the layer is absent: each span is a disabled callsite check, nothing is allocated and nothing runs (M9 in `bench/phase1-server/results/2026-10-15-m9-idle-rss.md`: the idle working set of the branch was 0.48 MiB below `main`, within the noise of the pair). With the endpoint, a sampled span is built in the request's task and handed to the batch processor's queue; an unsampled one is not recorded. The quick check `crates/tenko/tests/serve_telemetry_cost.rs` (ignored by default; `cargo nextest run -p tenko --test serve_telemetry_cost --run-ignored only --no-capture`) sends 2,000 `GET /api/v1/prefixes` from one client in sequence to a fresh debug build with the endpoint set (the test collector on loopback, every trace sampled) and without it. Windows workstation, 2026-10-15, four pairs: the server's CPU time over the 2,000 reads was 734 to 828 ms without traces and 750 to 938 ms with them (means 800 and 836 ms, about 18 µs per request, inside the spread of the pairs), and the p99 of `tenko_http_request_duration_seconds{class="prefixes"}` was 0.25 to 0.26 ms without and 0.25 to 0.41 ms with traces (the buckets are 250 and 500 µs wide there). The collector received 2,001 request spans per run.
+
+## 9. Not covered yet
+
+- **Exporters in plugin processes.** A plugin receives the trace context of every call (section 8.3) but the SDK exports no spans; a plugin that wants to continue the trace installs a tracer of its own.
+- **Inbound context from a proxy.** The API ignores a `traceparent` it receives; every request starts a trace.
+- **Logs and metrics over OTLP.** Only traces use OTLP; the metrics are scraped (sections 1 and 5), the log goes to its sinks.
+- **DNS and DHCP.** Their metrics, their tiles on the start page and their spans arrive with those modules.
+- **Probes.** A node without the controller role exports no traces and reports no metrics samples of its own; its buffers show through the controller it is connected to.

@@ -81,6 +81,7 @@ use crate::{
     proto::v1,
     registry::{EDIT_JOB, EDIT_TITLE, NodeRegistry, WRITE_PREVIEW, check_name},
     server::{code_of, status_of},
+    trace,
     wire::{self, CLUSTER_WIRE, ChangeEnvelope, ChangeResult, MemberChange, RAFT_WIRE, WireCtx},
 };
 
@@ -513,11 +514,14 @@ impl Peers {
         if !self.leads() {
             let leader = self.store().current_leader().ok_or_else(not_leader)?;
             let mut client = self.network().cluster_client(leader).await?;
-            return client
-                .join(tonic::Request::new(request))
-                .await
-                .map(tonic::Response::into_inner)
-                .map_err(|status| error_of_status(&status));
+            return trace::rpc(Some(leader), trace::CLUSTER, "Join", async {
+                let mut request = tonic::Request::new(request);
+                trace::inject(&mut request);
+                client.join(request).await
+            })
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(|status| error_of_status(&status));
         }
         let registry = Arc::clone(self.registry()?);
         let _change = self.inner.changes.lock().await;
@@ -775,13 +779,15 @@ impl Peers {
         };
         let asked = async {
             let mut client = self.network().cluster_client(leader).await.ok()?;
-            let answer = tokio::time::timeout(
-                Duration::from_secs(2),
-                client.members(tonic::Request::new(v1::MembersRequest {})),
-            )
-            .await
-            .ok()?
-            .ok()?;
+            let call = trace::rpc(Some(leader), trace::CLUSTER, "Members", async {
+                let mut request = tonic::Request::new(v1::MembersRequest {});
+                trace::inject(&mut request);
+                client.members(request).await
+            });
+            let answer = tokio::time::timeout(Duration::from_secs(2), call)
+                .await
+                .ok()?
+                .ok()?;
             Some(answer.into_inner())
         };
         asked
@@ -1211,11 +1217,14 @@ impl Peers {
                         .cluster_client(target)
                         .await
                         .map_err(|_| StoreError::NoQuorum)?;
-                    client
-                        .campaign(tonic::Request::new(v1::CampaignRequest {}))
-                        .await
-                        .map(|_| ())
-                        .map_err(|_| StoreError::NoQuorum)
+                    trace::rpc(Some(target), trace::CLUSTER, "Campaign", async {
+                        let mut request = tonic::Request::new(v1::CampaignRequest {});
+                        trace::inject(&mut request);
+                        client.campaign(request).await
+                    })
+                    .await
+                    .map(|_| ())
+                    .map_err(|_| StoreError::NoQuorum)
                 },
                 STEP_DOWN_TIMEOUT,
             )
@@ -1268,11 +1277,13 @@ impl Peers {
             change: wire::encode(&envelope)?,
         });
         request.set_timeout(STEP_DOWN_TIMEOUT + Duration::from_secs(10));
-        let answer = client
-            .change(request)
-            .await
-            .map_err(|status| error_of_status(&status))?
-            .into_inner();
+        let answer = trace::rpc(Some(leader), trace::CLUSTER, "Change", async {
+            trace::inject(&mut request);
+            client.change(request).await
+        })
+        .await
+        .map_err(|status| error_of_status(&status))?
+        .into_inner();
         wire::check(&answer.wire, CLUSTER_WIRE)?;
         wire::decode("change result", &answer.result)
     }
@@ -1587,13 +1598,15 @@ impl Peers {
             } else {
                 async {
                     let mut client = self.network().cluster_client(node).await?;
-                    let answer = client
-                        .digest(tonic::Request::new(v1::DigestRequest {
-                            revision: target.0,
-                        }))
-                        .await
-                        .map_err(|status| error_of_status(&status))?
-                        .into_inner();
+                    let answer = trace::rpc(Some(node), trace::CLUSTER, "Digest", async {
+                        let mut request =
+                            tonic::Request::new(v1::DigestRequest { revision: target.0 });
+                        trace::inject(&mut request);
+                        client.digest(request).await
+                    })
+                    .await
+                    .map_err(|status| error_of_status(&status))?
+                    .into_inner();
                     Ok((
                         Revision(answer.revision),
                         answer.sha256,

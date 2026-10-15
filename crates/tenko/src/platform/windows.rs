@@ -12,7 +12,7 @@
 //! because the `define_windows_service!` macro expands to an `unsafe` block. It reads the
 //! arguments that `run_dispatcher` stored (the arguments the SCM passes carry nothing this
 //! service needs), registers the control handler and moves the service through
-//! `START_PENDING`, `RUNNING`, `STOP_PENDING` and `STOPPED` around [`serve::run`].
+//! `START_PENDING`, `RUNNING`, `STOP_PENDING` and `STOPPED` around [`serve::run_on`].
 //!
 //! There is no console under the SCM, so the service logs to a file (rotated by size) and to
 //! the Application Event Log under the service name (`[log] event_log`, OPS-10). `service
@@ -992,9 +992,47 @@ fn serve_until_stopped(
     // A restart request (exit status 12) relies on the failure actions below.
     crate::upgrade::restart::set_windows_service();
     let path = log_path(&resolved);
+    let controller = resolved.roles.contains(tenko_core::Role::Controller);
+    // A controller's runtime comes first: the trace exporter's channel runs on it, so the
+    // layer is built and the subscriber installed inside it. A node without the controller
+    // role does not trace.
+    let runtime = if controller {
+        match serve::runtime(&resolved) {
+            Ok(runtime) => Some(runtime),
+            Err(error) => {
+                logging::event_log::report_early(
+                    &args.name,
+                    &format!("tenko service {}: {error}", args.name),
+                );
+                return exit::FAILURE;
+            }
+        }
+    } else {
+        None
+    };
+    let entered = runtime.as_ref().map(tokio::runtime::Runtime::enter);
+    let (extra, telemetry) = if controller {
+        match crate::telemetry::layer(
+            &resolved.config.telemetry,
+            resolved.node_id,
+            tenko_api::version(),
+        ) {
+            Ok(Some((layer, telemetry))) => (Some(layer), Some(telemetry)),
+            Ok(None) => (None, None),
+            Err(error) => {
+                logging::event_log::report_early(
+                    &args.name,
+                    &format!("tenko service {}: {error}", args.name),
+                );
+                return exit::FAILURE;
+            }
+        }
+    } else {
+        (None, None)
+    };
     let layers = logging::Layers {
         event_log: logging::event_log::layer(&args.name, resolved.config.log.event_log).ok(),
-        extra: None,
+        extra,
     };
     if let Err(error) =
         logging::init_server_with(&resolved.config.log, Some(&path), Sink::FileOnly, layers)
@@ -1021,11 +1059,12 @@ fn serve_until_stopped(
             let _ = stop.await;
         })
     };
+    drop(entered);
     // A node without the controller role runs the node process (WP2.2).
-    if !resolved.roles.contains(tenko_core::Role::Controller) {
+    let Some(runtime) = runtime else {
         return crate::node::agent::serve(resolved, shutdown, hooks(handle));
-    }
-    match serve::run(resolved, shutdown, hooks(handle)) {
+    };
+    match serve::run_on(runtime, resolved, shutdown, hooks(handle), telemetry) {
         Ok(()) => exit::OK,
         Err(error) => {
             tracing::error!(%error, "tenko service ended with an error");

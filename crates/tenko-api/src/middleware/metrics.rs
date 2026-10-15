@@ -158,6 +158,11 @@ pub(crate) struct RouteTable {
     by_template: HashMap<Box<str>, [Option<u16>; METHOD_LABELS.len()]>,
     /// The class series of each row.
     classes: Vec<u16>,
+    /// The route label of each row (the path template, `ui` or `other`), for the request
+    /// span of `middleware::trace`.
+    routes: Vec<Box<str>>,
+    /// The class labels, by class series.
+    class_names: Vec<Box<str>>,
     /// The first row of `ui`; one row per method label.
     ui: u16,
     /// The first row of `other`; one row per method label.
@@ -237,6 +242,10 @@ impl RouteTable {
         };
         let ui = fixed_rows(UI_ROUTE);
         let other = fixed_rows(OTHER_ROUTE);
+        let routes = rows
+            .iter()
+            .map(|(route, _)| Box::<str>::from(*route))
+            .collect();
 
         let mut series: Vec<[&str; 3]> = Vec::with_capacity(rows.len() * STATUS_LABELS.len());
         for (route, method) in &rows {
@@ -253,9 +262,29 @@ impl RouteTable {
         Self {
             by_template,
             classes,
+            routes,
+            class_names: class_names
+                .iter()
+                .map(|name| Box::<str>::from(*name))
+                .collect(),
             ui,
             other,
         }
+    }
+
+    /// The route label of a row: its path template, `ui` or `other`.
+    pub(crate) fn route_of(&self, row: RouteRow) -> &str {
+        self.routes
+            .get(usize::from(row.0))
+            .map_or(OTHER_ROUTE, |route| route)
+    }
+
+    /// The class label of a row.
+    pub(crate) fn class_of_row(&self, row: RouteRow) -> &str {
+        self.classes
+            .get(usize::from(row.0))
+            .and_then(|class| self.class_names.get(usize::from(*class)))
+            .map_or(OTHER_ROUTE, |name| name)
     }
 
     /// The row of a request: its matched path template (`None` when no route matched) and
@@ -509,6 +538,20 @@ mod tests {
         assert_eq!(class_of("/api/v1/prefixes/{id}/next-free"), "prefixes");
         assert_eq!(class_of("/api/v1/metrics"), "metrics");
         assert_eq!(class_of("/somewhere"), OTHER_ROUTE);
+    }
+
+    #[test]
+    fn a_row_names_its_route_template_and_class() {
+        let routes = RouteTable::get();
+        let row = routes.row(Some("/api/v1/prefixes/{id}"), &Method::GET);
+        assert_eq!(routes.route_of(row), "/api/v1/prefixes/{id}");
+        assert_eq!(routes.class_of_row(row), "prefixes");
+        let other = routes.other_row(&Method::GET);
+        assert_eq!(routes.route_of(other), OTHER_ROUTE);
+        assert_eq!(routes.class_of_row(other), OTHER_ROUTE);
+        let ui = routes.ui_row(&Method::GET);
+        assert_eq!(routes.route_of(ui), UI_ROUTE);
+        assert_eq!(routes.class_of_row(ui), UI_ROUTE);
     }
 
     #[tokio::test]

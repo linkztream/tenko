@@ -1070,3 +1070,161 @@ async fn a_member_reports_its_binary_once_after_a_start() {
         (1..=member.data_format.expect("format")).collect::<Vec<_>>()
     );
 }
+
+/// The subscriber of this test process: the spans of Tenko's crates go to memory, with the
+/// W3C propagator, as `tenko serve` sets them up with an OTLP endpoint.
+fn in_memory_traces() -> opentelemetry_sdk::trace::InMemorySpanExporter {
+    use opentelemetry::trace::TracerProvider as _;
+    use tracing_subscriber::{Layer as _, filter::filter_fn, layer::SubscriberExt as _};
+
+    let exporter = opentelemetry_sdk::trace::InMemorySpanExporter::default();
+    let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+        .with_simple_exporter(exporter.clone())
+        .build();
+    opentelemetry::global::set_text_map_propagator(
+        opentelemetry_sdk::propagation::TraceContextPropagator::new(),
+    );
+    let layer = tracing_opentelemetry::layer()
+        .with_tracer(provider.tracer("test"))
+        .with_filter(filter_fn(|metadata| metadata.target().starts_with("tenko")));
+    tracing::subscriber::set_global_default(tracing_subscriber::registry().with(layer))
+        .expect("the only subscriber of this test process");
+    exporter
+}
+
+/// The finished spans named `name`, waiting until `ready` holds for them.
+async fn finished(
+    exporter: &opentelemetry_sdk::trace::InMemorySpanExporter,
+    name: &str,
+    ready: impl Fn(&[opentelemetry_sdk::trace::SpanData]) -> bool,
+) -> Vec<opentelemetry_sdk::trace::SpanData> {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let spans: Vec<_> = exporter
+            .get_finished_spans()
+            .expect("the finished spans")
+            .into_iter()
+            .filter(|span| span.name == name)
+            .collect();
+        if ready(&spans) {
+            return spans;
+        }
+        assert!(Instant::now() < deadline, "no matching span {name}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+fn attribute(span: &opentelemetry_sdk::trace::SpanData, key: &str) -> Option<String> {
+    span.attributes
+        .iter()
+        .find(|attribute| attribute.key.as_str() == key)
+        .map(|attribute| attribute.value.to_string())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_members_call_continues_the_trace_of_its_caller() {
+    use opentelemetry::trace::{SpanId, TraceContextExt as _, TraceId};
+    use tracing::Instrument as _;
+    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+
+    let exporter = in_memory_traces();
+    let lab = Lab::first(&no_change).await;
+    let second = lab.join("controller-two", &no_change).await;
+    let mut client = second
+        .peers
+        .network()
+        .cluster_client(NodeId(1))
+        .await
+        .expect("a channel to the first controller");
+
+    // A `traceparent` put into the metadata by hand: the server span is its child.
+    let trace_id = "0af7651916cd43dd8448eb211c80319c";
+    let parent = "b7ad6b7169203331";
+    let mut request = tonic::Request::new(v1::MembersRequest {});
+    request.metadata_mut().insert(
+        "traceparent",
+        format!("00-{trace_id}-{parent}-01")
+            .parse()
+            .expect("metadata"),
+    );
+    client.members(request).await.expect("members");
+    let served = finished(&exporter, "tenko.cluster.request", |spans| {
+        spans
+            .iter()
+            .any(|span| span.span_context.trace_id() == TraceId::from_hex(trace_id).expect("id"))
+    })
+    .await;
+    let request_span = served
+        .iter()
+        .find(|span| span.span_context.trace_id() == TraceId::from_hex(trace_id).expect("id"))
+        .expect("the server span of the call");
+    assert_eq!(
+        request_span.parent_span_id,
+        SpanId::from_hex(parent).expect("span id")
+    );
+    assert_eq!(
+        attribute(request_span, "rpc.service").as_deref(),
+        Some("tenko.cluster.v1.Cluster")
+    );
+    assert_eq!(
+        attribute(request_span, "rpc.method").as_deref(),
+        Some("Members")
+    );
+    assert_eq!(
+        attribute(request_span, "rpc.system").as_deref(),
+        Some("grpc")
+    );
+    assert_eq!(
+        attribute(request_span, "tenko.cluster.peer"),
+        Some(second.node().0.to_string())
+    );
+    assert_eq!(
+        attribute(request_span, "rpc.grpc.status_code").as_deref(),
+        Some("0")
+    );
+
+    // Through the client helpers: the server span is a child of the client span, which is
+    // a child of the caller's span.
+    let caller = tracing::info_span!(target: "tenko::test", "caller");
+    let caller_ids = caller.context().span().span_context().clone();
+    tenko_cluster::trace::rpc(
+        Some(NodeId(1)),
+        tenko_cluster::trace::CLUSTER,
+        "Members",
+        async {
+            let mut request = tonic::Request::new(v1::MembersRequest {});
+            tenko_cluster::trace::inject(&mut request);
+            client.members(request).await
+        },
+    )
+    .instrument(caller.clone())
+    .await
+    .expect("members through the helpers");
+    drop(caller);
+    let rpc = finished(&exporter, "tenko.cluster.rpc", |spans| {
+        spans
+            .iter()
+            .any(|span| span.span_context.trace_id() == caller_ids.trace_id())
+    })
+    .await
+    .into_iter()
+    .find(|span| span.span_context.trace_id() == caller_ids.trace_id())
+    .expect("the client span");
+    assert_eq!(rpc.parent_span_id, caller_ids.span_id());
+    assert_eq!(attribute(&rpc, "tenko.cluster.peer").as_deref(), Some("1"));
+    let child = finished(&exporter, "tenko.cluster.request", |spans| {
+        spans
+            .iter()
+            .any(|span| span.parent_span_id == rpc.span_context.span_id())
+    })
+    .await
+    .into_iter()
+    .find(|span| span.parent_span_id == rpc.span_context.span_id())
+    .expect("the server span under the client span");
+    assert_eq!(
+        child.span_context.trace_id(),
+        caller_ids.trace_id(),
+        "the server span is in the caller's trace"
+    );
+    lab.stop().await;
+}

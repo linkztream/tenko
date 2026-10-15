@@ -22,6 +22,7 @@
 //! | [`client`] | the node side: the supervised connection, heartbeats, buffer replay, renewal |
 //! | [`node_sync`] | configuration sync to nodes, node commands, ingest cursors and node secrets, both sides (OPS-28, SCAN-09) |
 //! | [`wire`] | the payloads of the controller-to-controller services and their encodings |
+//! | [`trace`] | the W3C trace context of the controller-to-controller calls and their spans (OPS-05) |
 //! | [`error`] | the coded error of the registry and the transport |
 //!
 //! `docs/cluster.md` describes enrolment, certificates, revocation, the versioning rule,
@@ -46,6 +47,7 @@ pub mod server;
 mod service;
 pub mod session;
 pub mod token;
+pub mod trace;
 pub mod version;
 pub mod wire;
 

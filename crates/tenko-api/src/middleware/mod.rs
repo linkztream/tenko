@@ -25,6 +25,7 @@ pub mod idempotency;
 pub(crate) mod metrics;
 pub mod quorum;
 pub mod rate_limit;
+pub(crate) mod trace;
 
 use std::{sync::Arc, time::Instant};
 

@@ -16,6 +16,7 @@
 //! | [`upgrade`] | `tenko upgrade`, the data-directory format and its migrations, in-app updates (OPS-23, OPS-24) |
 //! | [`plugin`] | `tenko plugin`: list, run a bundled plugin, conformance test; the connector service of `tenko serve` |
 //! | [`logging`] | `tracing` to standard error or a file, as text or JSON |
+//! | [`telemetry`] | traces over OpenTelemetry, exported to an OTLP collector when configured |
 //! | [`exit`] | the exit statuses |
 
 #![forbid(unsafe_code)]
@@ -36,6 +37,7 @@ pub mod node;
 pub mod platform;
 pub mod plugin;
 pub mod serve;
+pub mod telemetry;
 pub mod upgrade;
 
 /// Name of this crate as declared in its manifest.

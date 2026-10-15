@@ -22,6 +22,9 @@ bytes = { workspace = true }
 futures = { workspace = true }
 hyper-util = { version = "0.1.21", features = ["tokio"] }
 ipnet = { workspace = true }
+# The W3C trace context the host puts on its calls to plugins (WP3.5c): the propagator API
+# and the span context of the `tracing` bridge.
+opentelemetry = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 regex = { workspace = true }
@@ -40,6 +43,7 @@ tonic = { workspace = true }
 tonic-prost = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
 utoipa = { workspace = true }
 uuid = { workspace = true }
 zeroize = { workspace = true }
@@ -49,6 +53,8 @@ protox = { workspace = true }
 tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
+# The in-memory span exporter of the trace context tests.
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
 # A test certificate authority and a TLS server for the `sdk::http` tests (both already in the
 # graph through tenko-api and tenko-cluster, with the same features).
 rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "crypto", "pem"] }
@@ -57,6 +63,7 @@ tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_
 tenko-jobs = { workspace = true, features = ["testing"] }
 tenko-store = { workspace = true, features = ["testing"] }
 tenko-vault = { workspace = true, features = ["testing"] }
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true

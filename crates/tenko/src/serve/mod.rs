@@ -299,14 +299,44 @@ pub fn command(args: &ServeArgs, err: &mut impl Write) -> u8 {
     if !resolved.roles.contains(Role::Controller) {
         return crate::node::agent::command(resolved, args.stop_on_eof, err);
     }
-    if let Err(error) = logging::init_server(
-        &resolved.config.log,
-        resolved.config.log.file.as_deref(),
-        logging::Sink::Console,
-    ) {
-        let _ = writeln!(err, "tenko serve: {error}");
-        return exit::FAILURE;
-    }
+    let runtime = match runtime(&resolved) {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            let _ = writeln!(err, "tenko serve: {error}");
+            return exit::FAILURE;
+        }
+    };
+    // The trace exporter's channel runs on the server's runtime: the layer is built and the
+    // subscriber installed inside it.
+    let telemetry = {
+        let _guard = runtime.enter();
+        let (extra, telemetry) = match crate::telemetry::layer(
+            &resolved.config.telemetry,
+            resolved.node_id,
+            tenko_api::version(),
+        ) {
+            Ok(Some((layer, telemetry))) => (Some(layer), Some(telemetry)),
+            Ok(None) => (None, None),
+            Err(error) => {
+                let _ = writeln!(err, "tenko serve: {error}");
+                return exit::FAILURE;
+            }
+        };
+        let layers = logging::Layers {
+            event_log: None,
+            extra,
+        };
+        if let Err(error) = logging::init_server_with(
+            &resolved.config.log,
+            resolved.config.log.file.as_deref(),
+            logging::Sink::Console,
+            layers,
+        ) {
+            let _ = writeln!(err, "tenko serve: {error}");
+            return exit::FAILURE;
+        }
+        telemetry
+    };
     crate::backup::service::remember_config_file(args.config.clone());
     let stop_on_eof = args.stop_on_eof;
     let shutdown = move || -> Shutdown {
@@ -321,7 +351,13 @@ pub fn command(args: &ServeArgs, err: &mut impl Write) -> u8 {
             }
         })
     };
-    match run(resolved, shutdown, crate::platform::notify_hooks()) {
+    match run_on(
+        runtime,
+        resolved,
+        shutdown,
+        crate::platform::notify_hooks(),
+        telemetry,
+    ) {
         Ok(()) => exit::OK,
         Err(ServeError::Restart(reason)) => {
             tracing::info!(%reason, "tenko serve stopped for a restart (exit status 12)");
@@ -386,27 +422,47 @@ pub fn check_roles(roles: RoleSet, err: &mut impl Write) -> Option<u8> {
     (!roles.contains(Role::Probe)).then_some(exit::USAGE)
 }
 
-/// Runs the server on a runtime of its own until `shutdown` resolves.
+/// The runtime the server runs on, with `[runtime] workers` worker threads.
+///
+/// # Errors
+///
+/// [`ServeError::Runtime`] when the runtime cannot be built.
+pub fn runtime(resolved: &Resolved) -> Result<tokio::runtime::Runtime, ServeError> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(resolved.config.runtime.workers)
+        .thread_name("tenko-core")
+        .enable_all()
+        .build()
+        .map_err(|error| ServeError::Runtime(format!("core runtime: {error}")))
+}
+
+/// Runs the server on `runtime` (from [`runtime`]) until `shutdown` resolves, flushes the
+/// traces of `telemetry` inside the runtime, and shuts the runtime down.
 ///
 /// `shutdown` is called once, inside the runtime, to build the shutdown future (signals
 /// need a runtime to register).
 ///
 /// # Errors
 ///
-/// [`ServeError::Start`] when a step fails, [`ServeError::Runtime`] when the runtime
-/// cannot be built or the API stops with an error.
-pub fn run(
+/// [`ServeError::Start`] when a step fails, [`ServeError::Runtime`] when the API stops with
+/// an error.
+pub fn run_on(
+    runtime: tokio::runtime::Runtime,
     resolved: Resolved,
     shutdown: impl FnOnce() -> Shutdown + Send + 'static,
     hooks: Hooks,
+    telemetry: Option<crate::telemetry::Telemetry>,
 ) -> Result<(), ServeError> {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(resolved.config.runtime.workers)
-        .thread_name("tenko-core")
-        .enable_all()
-        .build()
-        .map_err(|error| ServeError::Runtime(format!("core runtime: {error}")))?;
-    let result = runtime.block_on(async move { serve(resolved, shutdown(), hooks).await });
+    if let Some(telemetry) = &telemetry {
+        telemetry.log_start();
+    }
+    let result = runtime.block_on(async move {
+        let result = serve(resolved, shutdown(), hooks).await;
+        if let Some(telemetry) = telemetry {
+            telemetry.shutdown().await;
+        }
+        result
+    });
     runtime.shutdown_timeout(Duration::from_secs(5));
     result
 }

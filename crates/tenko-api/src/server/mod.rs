@@ -329,6 +329,11 @@ fn build_app(
                     next.run(request).await
                 }
             },
+        ))
+        // The request span covers everything above (OPS-05, `middleware::trace`).
+        .layer(from_fn_with_state(
+            Arc::clone(&layers),
+            middleware::trace::request,
         ));
     Ok((router, layers))
 }

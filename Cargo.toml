@@ -69,7 +69,9 @@ zip = { version = "8.6.0", default-features = false }
 prost = "0.14.4"
 prost-types = "0.14.4"
 quick-xml = "0.41"
-tonic = { version = "0.14.6", default-features = false, features = ["transport", "codegen", "router"] }
+# `tls-aws-lc` and `tls-native-roots`: the OTLP exporter of the traces reaches an `https://`
+# collector over rustls with aws-lc-rs and the system roots (WP3.5c); ring and OpenSSL stay out.
+tonic = { version = "0.14.6", default-features = false, features = ["transport", "codegen", "router", "tls-aws-lc", "tls-native-roots"] }
 tonic-prost = "0.14.6"
 tonic-prost-build = { version = "0.14.6", default-features = false, features = ["transport"] }
 protox = "0.10.0"
@@ -110,6 +112,16 @@ clap = { version = "4.6.7", features = ["derive"] }
 thiserror = "2.0.21"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+# Traces (WP3.5c): OpenTelemetry over OTLP/gRPC on the tonic of the graph, off by default.
+# The SDK and the exporter are dependencies of `tenko` only; the crates that carry the trace
+# context between processes use the API and the bridge.
+opentelemetry = { version = "0.33.1", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["grpc-tonic", "trace", "tls-aws-lc", "tls-roots"] }
+opentelemetry-proto = { version = "0.33.1", default-features = false }
+opentelemetry-semantic-conventions = "0.33.1"
+tracing-opentelemetry = { version = "0.34.0", default-features = false }
 
 # Tests only.
 proptest = "1.11.0"

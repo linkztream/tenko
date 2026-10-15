@@ -43,6 +43,10 @@
 //! converts between the protocol messages and the types of this crate, maps
 //! [`ConnectorError`]s to gRPC statuses, and exits when the host asks (`Plugin.Shutdown`) or
 //! when standard input closes. Log to standard error; the host forwards each line.
+//!
+//! When the host traces (OPS-05), its calls carry the W3C trace context in the metadata;
+//! the token check puts it into the request extensions as a [`TraceContext`], so a plugin
+//! that installs a tracer of its own can continue the host's trace. The SDK exports nothing.
 
 #[cfg(feature = "http-client")]
 pub mod http;
@@ -503,7 +507,35 @@ async fn serve_until(
     }
 }
 
-/// The per-launch token check in front of every service.
+/// The W3C trace context the host sent with a call (`traceparent` and `tracestate`), in the
+/// request extensions of every call that carried one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceContext {
+    /// The `traceparent` header value: version, trace id, parent span id, flags.
+    pub traceparent: String,
+    /// The `tracestate` header value, when the host sent one.
+    pub tracestate: Option<String>,
+}
+
+impl TraceContext {
+    /// The context in the metadata of `request`, if it has a `traceparent`.
+    fn of<T>(request: &Request<T>) -> Option<Self> {
+        let text = |key: &str| {
+            request
+                .metadata()
+                .get(key)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned)
+        };
+        Some(Self {
+            traceparent: text("traceparent")?,
+            tracestate: text("tracestate"),
+        })
+    }
+}
+
+/// The per-launch token check in front of every service; it also exposes the host's trace
+/// context ([`TraceContext`]).
 #[derive(Clone)]
 struct TokenCheck {
     token: Arc<str>,
@@ -511,13 +543,118 @@ struct TokenCheck {
 }
 
 impl tonic::service::Interceptor for TokenCheck {
-    fn call(&mut self, request: Request<()>) -> Result<Request<()>, Status> {
-        if !self.enforce {
-            return Ok(request);
+    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
+        if self.enforce {
+            match request.metadata().get(TOKEN_METADATA) {
+                Some(value) if handshake::token_matches(&self.token, value.as_bytes()) => {}
+                _ => return Err(token_refused()),
+            }
         }
-        match request.metadata().get(TOKEN_METADATA) {
-            Some(value) if handshake::token_matches(&self.token, value.as_bytes()) => Ok(request),
-            _ => Err(token_refused()),
+        if let Some(context) = TraceContext::of(&request) {
+            request.extensions_mut().insert(context);
         }
+        Ok(request)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use opentelemetry::trace::{TraceContextExt as _, TracerProvider as _};
+    use tonic::service::Interceptor as _;
+    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+    use tracing_subscriber::layer::SubscriberExt as _;
+
+    use super::*;
+    use crate::host::client::PluginClient;
+
+    fn token() -> String {
+        "0".repeat(64)
+    }
+
+    fn check() -> TokenCheck {
+        TokenCheck {
+            token: Arc::from(token()),
+            enforce: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn the_token_check_exposes_the_context_the_host_injected() {
+        opentelemetry::global::set_text_map_propagator(
+            opentelemetry_sdk::propagation::TraceContextPropagator::new(),
+        );
+        let exporter = opentelemetry_sdk::trace::InMemorySpanExporter::default();
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_simple_exporter(exporter)
+            .build();
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_opentelemetry::layer().with_tracer(provider.tracer("test")));
+        let _default = tracing::subscriber::set_default(subscriber);
+
+        let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:9").connect_lazy();
+        let client = PluginClient::new(channel, &token())
+            .expect("client")
+            .with_instance("instance-1");
+        let (request, span) = client.traced(
+            "tenko.connect.v1.Plugin",
+            "Ping",
+            (),
+            Duration::from_secs(1),
+        );
+        let ids = span.context().span().span_context().clone();
+        assert!(ids.is_valid(), "the call span belongs to a trace");
+
+        let checked = check().call(request).expect("the token is right");
+        let context = checked
+            .extensions()
+            .get::<TraceContext>()
+            .expect("the host's trace context");
+        assert_eq!(
+            context.traceparent,
+            format!("00-{}-{}-01", ids.trace_id(), ids.span_id())
+        );
+    }
+
+    #[test]
+    fn a_call_without_a_trace_has_no_context() {
+        let mut request = Request::new(());
+        request
+            .metadata_mut()
+            .insert(TOKEN_METADATA, token().parse().expect("metadata"));
+        let checked = check().call(request).expect("the token is right");
+        assert!(checked.extensions().get::<TraceContext>().is_none());
+    }
+
+    #[test]
+    fn a_refused_token_refuses_whatever_the_context() {
+        let mut request = Request::new(());
+        request.metadata_mut().insert(
+            "traceparent",
+            "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+                .parse()
+                .expect("metadata"),
+        );
+        assert!(check().call(request).is_err());
+    }
+
+    #[test]
+    fn the_context_keeps_the_tracestate() {
+        let mut request = Request::new(());
+        request.metadata_mut().insert(
+            "traceparent",
+            "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+                .parse()
+                .expect("metadata"),
+        );
+        request
+            .metadata_mut()
+            .insert("tracestate", "vendor=value".parse().expect("metadata"));
+        assert_eq!(
+            TraceContext::of(&request),
+            Some(TraceContext {
+                traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01".to_owned(),
+                tracestate: Some("vendor=value".to_owned()),
+            })
+        );
     }
 }

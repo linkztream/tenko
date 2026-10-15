@@ -305,9 +305,14 @@ promote_lag_entries = 100
 sync_kbps = 0
 
 [telemetry]
-# OpenTelemetry traces over OTLP (OPS-05). Off unless an endpoint is set: no exporter runs.
+# OpenTelemetry traces over OTLP/gRPC (OPS-05), see docs/observability.md section 8. Off
+# unless an endpoint is set: no exporter, thread or task runs. http:// or https:// with host
+# and port; https:// verifies the collector against the system's root certificates. Traces
+# pass the [log] level filter like the console: they need level "info" or lower, and
+# RUST_LOG=warn silences them too. Default: not set.
 # otlp_endpoint = "http://127.0.0.1:4317"
-# The share of traces exported while an endpoint is set, from 0.0 to 1.0.
+# The share of traces exported while an endpoint is set, from 0.0 to 1.0; the root of a
+# trace decides and its children follow. Default 1.0.
 sampling_ratio = 1.0
 
 [metrics]

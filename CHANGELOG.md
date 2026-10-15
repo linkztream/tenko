@@ -73,7 +73,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - The role `auditor`, for people who check the installation without working in it: it reads the audit log, the state of the audit export and the system status, and nothing else.
 - The security profile toggle TGL-21, the audit export: the local audit log only (Home, Lab), export optional (Standard), export required (Hardened). The export itself arrives in a later release.
 - `tenko setup token` prints the one-time setup token of a first start from the data directory.
-- New settings in `tenko.toml`, checked by `tenko config check`, for features of later releases: in `[cluster]` the isolation timeout, the catch-up timeout, the automatic promotion of new controllers and its lag limit, and a bandwidth cap for node configuration; `[telemetry]` with an OTLP endpoint for traces (off by default); `[metrics]` with an optional metrics listener on a loopback address; `[backup]` with the directory for backup files.
+- New settings in `tenko.toml`, checked by `tenko config check`, for features of later releases: in `[cluster]` the isolation timeout, the catch-up timeout, the automatic promotion of new controllers and its lag limit, and a bandwidth cap for node configuration; `[metrics]` with an optional metrics listener on a loopback address; `[backup]` with the directory for backup files.
 - Right-to-left layout: the interface mirrors itself for languages written right to left.
 - Language packs: administrators upload a translation of the interface as an XLIFF 2.0 file, see a validation report with the share of translated texts and every problem, preview it in their own browser tab, and activate it for everyone. English and Swedish stay built in; an upload can override them and be reverted. Texts a pack lacks show in English. Packs placed in `<data_dir>/i18n/` are imported at start.
 - The languages settings page (Settings, Languages) lists the languages with their packs and offers the upload, the report, preview, activation, discard, removal and revert.
@@ -140,6 +140,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - `GET /api/v1/metrics` reports request latency histograms per area and gauges for the store, the cluster, the jobs, the connectors, the nodes, the keys, the audit export and the backup, computed on a timer; a token with the `metrics` scope reads it, and `[metrics] listen` serves the same text on loopback without authentication.
 - The start page shows live metrics for administrators: API requests per second with p50 and p99, store size, Raft role and lag per controller, commit latency, jobs, ingest rate, event-stream clients and node buffers, with a sixty-second sparkline per tile, updated once per second while the page is open.
 - Controllers exchange their metrics snapshots, so the start page of any controller shows the whole cluster.
+- Traces over OpenTelemetry (OPS-05): with `[telemetry] otlp_endpoint` set, every API request, store write, job step, connector call and controller-to-controller call is exported as a span to an OTLP collector over gRPC, sampled by `sampling_ratio`, with the trace context carried between controllers and to plugins; off by default and free when off.
 
 ### Changed
 

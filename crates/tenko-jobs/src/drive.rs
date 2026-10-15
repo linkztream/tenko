@@ -44,11 +44,12 @@ use tenko_core::{
     Coded, CodedError, JobId, NodeId, RequestCtx, Revision, Timestamp, cluster::LEADER_EPOCH,
 };
 use tenko_store::{FailedPrecondition, ReadConsistency, ReadViewExt, StoreError};
+use tracing::Instrument as _;
 
 use crate::{
     engine::Inner,
     machine::{Boundary, Machine, ResultOp, step_timeout},
-    model::{Job, JobError, JobState, StepContext, StepError, StepKind},
+    model::{Job, JobError, JobState, StepContext, StepError, StepKind, StepOutcome},
     persist::{self, Author, Loaded},
     runner::Scope,
     stage::{StagedWrite, run_staged},
@@ -494,8 +495,47 @@ fn after_conflict(
     }
 }
 
-/// Calls `execute` of a step with staging, its deadline and panic protection.
+/// Calls `execute` of a step with staging, its deadline and panic protection, in the span
+/// `tenko.job.step`. The span is the root of a trace of its own (the step belongs to the job,
+/// not to the request that created it; the job id connects them).
 pub(crate) async fn run_execute(
+    inner: &Inner,
+    job: &Job,
+    step: u16,
+    deadline: Option<Timestamp>,
+    request: RequestCtx,
+) -> (ResultOp, StagedWrite) {
+    let span = tracing::info_span!(
+        parent: None,
+        "tenko.job.step",
+        tenko.job.id = %job.id,
+        tenko.job.step = step,
+        tenko.job.kind = %job.spec.kind,
+        tenko.job.attempt = job.steps.get(usize::from(step)).map_or(0, |record| record.attempts),
+        tenko.job.outcome = tracing::field::Empty,
+    );
+    let (op, writes) = execute_step(inner, job, step, deadline, request)
+        .instrument(span.clone())
+        .await;
+    let outcome = match &op {
+        ResultOp::Executed {
+            outcome: StepOutcome::Manual(_),
+            ..
+        } => "manual",
+        ResultOp::Executed { .. } => "ok",
+        ResultOp::TimedOut { .. } => "timeout",
+        ResultOp::ExecFailed { error, .. } if error.code == PANICKED => "panicked",
+        _ => "failed",
+    };
+    span.record("tenko.job.outcome", outcome);
+    (op, writes)
+}
+
+/// The code of a step whose handler panicked.
+const PANICKED: &str = "jobs.step.panicked";
+
+/// [`run_execute`] inside its span.
+async fn execute_step(
     inner: &Inner,
     job: &Job,
     step: u16,
@@ -546,7 +586,7 @@ pub(crate) async fn run_execute(
         Some((Err(_panic), _)) => (
             ResultOp::ExecFailed {
                 step,
-                error: CodedError::new("jobs.step.panicked", 500, format!("step {step} panicked")),
+                error: CodedError::new(PANICKED, 500, format!("step {step} panicked")),
             },
             StagedWrite::default(),
         ),

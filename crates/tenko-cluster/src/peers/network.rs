@@ -59,6 +59,7 @@ use crate::{
     model::tables,
     proto::v1,
     server::{MAX_MESSAGE_BYTES, code_of},
+    trace,
     wire::{self, BATCH_WIRE, NOT_LEADER, RAFT_WIRE},
 };
 
@@ -671,21 +672,24 @@ impl LeaderLink for PeerNetwork {
             .cluster_client_at(&endpoint)
             .await
             .map_err(|error| ForwardError::Unreachable(error.to_string()))?;
-        let request = timed(
-            self.inner.timings.forward,
-            Request::new(v1::ProposeRequest {
-                wire: BATCH_WIRE.to_owned(),
-                batch: batch.to_vec(),
-            }),
-        );
-        match self
-            .deadline(
+        let answer = trace::rpc(Some(NodeId(target)), trace::CLUSTER, "Propose", async {
+            let mut request = timed(
+                self.inner.timings.forward,
+                Request::new(v1::ProposeRequest {
+                    wire: BATCH_WIRE.to_owned(),
+                    batch: batch.to_vec(),
+                }),
+            );
+            trace::inject(&mut request);
+            self.deadline(
                 &endpoint,
                 self.inner.timings.forward,
                 client.propose(request),
             )
             .await
-        {
+        })
+        .await;
+        match answer {
             Ok(response) => {
                 wire::check(&response.wire, BATCH_WIRE)
                     .map_err(|error| ForwardError::Wire(error.to_string()))?;
@@ -709,18 +713,21 @@ impl LeaderLink for PeerNetwork {
             .cluster_client_at(&endpoint)
             .await
             .map_err(|error| ForwardError::Unreachable(error.to_string()))?;
-        let request = timed(
-            self.inner.timings.read_index,
-            Request::new(v1::ReadIndexRequest {}),
-        );
-        match self
-            .deadline(
+        let answer = trace::rpc(Some(NodeId(target)), trace::CLUSTER, "ReadIndex", async {
+            let mut request = timed(
+                self.inner.timings.read_index,
+                Request::new(v1::ReadIndexRequest {}),
+            );
+            trace::inject(&mut request);
+            self.deadline(
                 &endpoint,
                 self.inner.timings.read_index,
                 client.read_index(request),
             )
             .await
-        {
+        })
+        .await;
+        match answer {
             Ok(response) => Ok(ReadIndex {
                 log_index: response.log_index,
                 term: response.term,

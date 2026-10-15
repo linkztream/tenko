@@ -1385,7 +1385,10 @@ impl ConnectorHost {
                 || CodedError::new("connect.plugin.unusable", 503, "the plugin cannot run here"),
             ))));
         };
-        let client = supervisor.client(self.config.start_wait).await?;
+        let client = supervisor
+            .client(self.config.start_wait)
+            .await?
+            .with_instance(id);
         Ok((Arc::clone(&runtime), client))
     }
 
