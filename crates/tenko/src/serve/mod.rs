@@ -1550,6 +1550,9 @@ async fn start(
             gauges.leader = Some(leader_view.source());
             gauges.kek = Some(Arc::clone(&kek_admin));
             gauges.backups = Some(backup_status);
+            // The metrics topic shows the other controllers and answers their reads.
+            gauges.peers = Some(cluster_peers.peers().clone());
+            gauges.node_registry = Some(Arc::clone(cluster.registry()));
             let metrics_listen = config
                 .metrics
                 .listen_addr()

@@ -2698,6 +2698,37 @@ export type MessageKey =
   | "languages.version.not_previewed"
   | "languages.version.percent"
   | "languages.version.previewed"
+  | "metrics.raft.lag"
+  | "metrics.raft.node"
+  | "metrics.raft.stale"
+  | "metrics.raft.unsupported"
+  | "metrics.sparkline"
+  | "metrics.sub"
+  | "metrics.tile.commit"
+  | "metrics.tile.commit_hint"
+  | "metrics.tile.commit_idle"
+  | "metrics.tile.ingest"
+  | "metrics.tile.ingest_hint"
+  | "metrics.tile.jobs"
+  | "metrics.tile.jobs_hint"
+  | "metrics.tile.nodes"
+  | "metrics.tile.nodes_hint"
+  | "metrics.tile.nodes_hint_unknown"
+  | "metrics.tile.raft"
+  | "metrics.tile.raft_hint"
+  | "metrics.tile.requests"
+  | "metrics.tile.requests_hint"
+  | "metrics.tile.requests_idle"
+  | "metrics.tile.sse"
+  | "metrics.tile.sse_hint"
+  | "metrics.tile.store"
+  | "metrics.tile.store_hint"
+  | "metrics.tile.store_memory"
+  | "metrics.title"
+  | "metrics.unit.bytes"
+  | "metrics.unit.ms"
+  | "metrics.unit.per_second"
+  | "metrics.waiting"
   | "move.checklist"
   | "move.checklist_foot"
   | "move.checklist_sum"
@@ -4946,6 +4977,16 @@ export interface MessageArgs {
   "languages.version.by": { when: string | number; who: string | number };
   "languages.version.label": { version: string | number };
   "languages.version.percent": { percent: string | number };
+  "metrics.raft.lag": { entries: number };
+  "metrics.raft.node": { node: string | number };
+  "metrics.sparkline": { name: string | number; values: string | number };
+  "metrics.tile.ingest_hint": { batches: string | number };
+  "metrics.tile.jobs_hint": { waiting: number };
+  "metrics.tile.nodes_hint": { drops: number; nodes: number };
+  "metrics.tile.nodes_hint_unknown": { nodes: number };
+  "metrics.tile.raft_hint": { term: number };
+  "metrics.tile.requests_hint": { p50: string | number; p99: string | number };
+  "metrics.tile.store_hint": { data: string | number };
   "move.checklist_sum": { count: number };
   "move.group.cleanup": { count: number };
   "move.group.device_manual": { count: number };
@@ -7955,6 +7996,37 @@ export const messageKeys: readonly MessageKey[] = [
   "languages.version.not_previewed",
   "languages.version.percent",
   "languages.version.previewed",
+  "metrics.raft.lag",
+  "metrics.raft.node",
+  "metrics.raft.stale",
+  "metrics.raft.unsupported",
+  "metrics.sparkline",
+  "metrics.sub",
+  "metrics.tile.commit",
+  "metrics.tile.commit_hint",
+  "metrics.tile.commit_idle",
+  "metrics.tile.ingest",
+  "metrics.tile.ingest_hint",
+  "metrics.tile.jobs",
+  "metrics.tile.jobs_hint",
+  "metrics.tile.nodes",
+  "metrics.tile.nodes_hint",
+  "metrics.tile.nodes_hint_unknown",
+  "metrics.tile.raft",
+  "metrics.tile.raft_hint",
+  "metrics.tile.requests",
+  "metrics.tile.requests_hint",
+  "metrics.tile.requests_idle",
+  "metrics.tile.sse",
+  "metrics.tile.sse_hint",
+  "metrics.tile.store",
+  "metrics.tile.store_hint",
+  "metrics.tile.store_memory",
+  "metrics.title",
+  "metrics.unit.bytes",
+  "metrics.unit.ms",
+  "metrics.unit.per_second",
+  "metrics.waiting",
   "move.checklist",
   "move.checklist_foot",
   "move.checklist_sum",

@@ -328,6 +328,27 @@ async fn concurrent_proposals_are_coalesced_into_shared_entries() {
     );
 }
 
+/// Every committed proposal is timed once in `tenko_store_commit_duration_seconds`; a
+/// refused one is not.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn committed_proposals_are_timed_once() {
+    let store = RaftStore::open_temp(config(Path::new("unused")))
+        .await
+        .expect("open");
+    let before = tenko_store::raft::COMMIT_DURATION.get().count();
+    for n in 0..3_u64 {
+        put(&store, n, "v").await;
+    }
+    let mut refused = batch();
+    refused.put(ROWS, key(9), Bytes::from_static(b"v"));
+    refused.expect_version(ROWS, key(0), None);
+    assert!(store.propose(refused).await.is_err());
+    // Other tests of this binary may commit at the same time, so at least three.
+    let after = tenko_store::raft::COMMIT_DURATION.get();
+    assert!(after.count() >= before + 3, "{after:?}");
+    assert!(after.sum > 0, "{after:?}");
+}
+
 /// The entry and batch byte limits split the queue across entries; an oversized batch
 /// travels alone.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

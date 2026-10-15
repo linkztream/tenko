@@ -34,6 +34,7 @@ pub mod client;
 pub mod error;
 pub mod identity;
 pub mod kek;
+pub mod metrics;
 pub mod model;
 pub mod mtls;
 pub mod node_sync;

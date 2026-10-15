@@ -88,6 +88,8 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   reconciler: ["reconciler."],
   guardrails: ["guardrails."],
   languages: ["languages.", "errors.i18n."],
+  // The live metrics of the start page (WP3.5b), a lazy part of the dashboard for administrators.
+  metrics: ["metrics."],
 };
 
 export default defineConfig(({ command, mode }) => {

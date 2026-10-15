@@ -89,6 +89,21 @@ use crate::{
 /// The name of the leader service that runs the reconciler.
 pub const LEADER_SERVICE: &str = "ipam.reconcile";
 
+/// `tenko_ipam_ingest_batches_total`: observation batches [`Reconciler::ingest`] wrote on
+/// this controller. The server registers the family with its metrics registry.
+pub static INGEST_BATCHES: tenko_core::metrics::Counter =
+    tenko_core::metrics::Counter::new(tenko_core::metrics::Desc::counter(
+        "tenko_ipam_ingest_batches",
+        "Observation batches ingested by this controller.",
+    ));
+
+/// `tenko_ipam_ingest_facts_total`: the observations (facts) in those batches.
+pub static INGEST_FACTS: tenko_core::metrics::Counter =
+    tenko_core::metrics::Counter::new(tenko_core::metrics::Desc::counter(
+        "tenko_ipam_ingest_facts",
+        "Observations in the batches ingested by this controller.",
+    ));
+
 /// Settings of the reconciler: the code defaults, which the settings in the store
 /// ([`settings`]) override at every run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -317,6 +332,8 @@ impl Reconciler {
     pub async fn ingest(&self, batch: IngestBatch) -> IpamResult<IngestReport> {
         let config = self.effective().await;
         let report = observe::ingest(self.ipam.store(), &batch, &config.observe).await?;
+        INGEST_BATCHES.inc();
+        INGEST_FACTS.add(u64::try_from(batch.observations.len()).unwrap_or(u64::MAX));
         if let Err(error) = self.wake_jobs(&batch.observations, report.revision).await {
             tracing::warn!(error = %error.code_str(), "observations did not reach waiting jobs");
         }

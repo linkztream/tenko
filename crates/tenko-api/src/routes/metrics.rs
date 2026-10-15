@@ -90,14 +90,7 @@ pub(crate) fn register(registry: &Registry) {
 /// does not compute them again.
 #[allow(clippy::cast_precision_loss)]
 pub fn refresh_gauges(state: &AppState, now: Timestamp) {
-    let store = state.store.status();
-    let hub = state.events();
-    SSE_SUBSCRIBERS.set(hub.subscribers() as f64);
-    SSE_EVENTS.set_total(hub.published());
-    STORE_REVISION.set(store.revision.get() as f64);
-    AUDIT_HEAD.set(store.audit_head.get() as f64);
-    STORE_JOURNAL.set(store.journal_len as f64);
-    STORE_DATA_BYTES.set(store.data_bytes as f64);
+    refresh_live_gauges(state);
     let expiry = state
         .platform
         .listener
@@ -108,6 +101,27 @@ pub fn refresh_gauges(state: &AppState, now: Timestamp) {
         Some(not_after) => TLS_EXPIRY.set((not_after.0 - now.0).whole_seconds() as f64),
         None => TLS_EXPIRY.unset(),
     }
+}
+
+/// Sets the gauges of this crate that read memory only (the event hub and the store
+/// status), without the certificate: what the samples of the `metrics` topic read, once per
+/// second while a client listens.
+pub fn refresh_live_gauges(state: &AppState) {
+    let store = state.store.status();
+    let hub = state.events();
+    SSE_SUBSCRIBERS.set(as_gauge(
+        u64::try_from(hub.subscribers()).unwrap_or(u64::MAX),
+    ));
+    SSE_EVENTS.set_total(hub.published());
+    STORE_REVISION.set(as_gauge(store.revision.get()));
+    AUDIT_HEAD.set(as_gauge(store.audit_head.get()));
+    STORE_JOURNAL.set(as_gauge(store.journal_len));
+    STORE_DATA_BYTES.set(as_gauge(store.data_bytes));
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn as_gauge(value: u64) -> f64 {
+    value as f64
 }
 
 /// The routes of the area.

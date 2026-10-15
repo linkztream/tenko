@@ -95,6 +95,26 @@ describe("dashboard", () => {
   });
 });
 
+describe("live metrics", () => {
+  it("are shown to an administrator below the tiles of the page", async () => {
+    renderRoute(Dashboard, { url: "/" });
+    const metrics = await screen.findByTestId("metrics-tiles");
+    expect(metrics.querySelectorAll("[data-testid^='metrics-tile-']")).toHaveLength(8);
+    // Below the tiles of the page: after the uptime tile, before the cards.
+    const page = screen.getByTestId("page-dashboard");
+    const order = [...page.querySelectorAll("[data-testid='metrics-tiles'], [data-testid='dashboard-waiting']")];
+    expect(order.map((e) => (e as HTMLElement).dataset.testid)).toEqual(["metrics-tiles", "dashboard-waiting"]);
+  });
+
+  it("are not shown to a viewer", async () => {
+    await signInAlex({ prepare: (user) => (user.roles = ["viewer"]) });
+    renderRoute(Dashboard, { url: "/" });
+    await screen.findByTestId("dashboard-waiting");
+    await waitFor(() => expect(screen.getByTestId("dashboard-audit").querySelectorAll("li").length).toBeGreaterThan(0));
+    expect(screen.queryByTestId("metrics-tiles")).toBeNull();
+  });
+});
+
 describe("alarm status", () => {
   it("shows the number of alarms and the critical ones, links to the dashboard and follows alarm events", async () => {
     stopBridge = bridgeMockEvents();

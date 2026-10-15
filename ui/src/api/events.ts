@@ -17,7 +17,8 @@ import { createSignal, type Accessor } from "solid-js";
  * `secrets` the metadata, reveal stamps and host bindings of operator secrets (never values),
  * `cluster` the enrolled nodes and enrolment tokens (never a token's text), `connectors` the
  * connector instances and plugins, `discovery` the observed facts and last sightings (table-level
- * events that name no object).
+ * events that name no object), `metrics` one snapshot of the controllers' metrics per second
+ * (only for a stream that names it; the start page opens a stream of its own for it).
  */
 export type Topic =
   | "ipam"
@@ -29,8 +30,9 @@ export type Topic =
   | "connectors"
   | "discovery"
   | "secrets"
-  | "cluster";
-export const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin", "connectors", "discovery", "secrets", "cluster"];
+  | "cluster"
+  | "metrics";
+export const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin", "connectors", "discovery", "secrets", "cluster", "metrics"];
 
 export interface ObjectRef {
   kind: string;
@@ -67,6 +69,12 @@ export function backoffDelay(attempt: number, options: BackoffOptions, random: (
 
 export interface EventStreamOptions {
   url?: string;
+  /**
+   * Topics the stream always names besides those with a subscriber; default `system`, so the
+   * tab's stream is never opened without topics (which would mean every topic). A stream for
+   * one topic passes an empty list.
+   */
+  baseTopics?: readonly Topic[];
   backoff?: BackoffOptions;
   random?: () => number;
   /** Injected for tests. */
@@ -86,6 +94,7 @@ export class EventStream {
   private readonly setLastEventAt: (t: number | null) => void;
 
   private readonly url: string;
+  private readonly baseTopics: readonly Topic[];
   private readonly backoff: BackoffOptions;
   private readonly random: () => number;
   private readonly create: (url: string) => EventSource;
@@ -108,6 +117,7 @@ export class EventStream {
 
   constructor(options: EventStreamOptions = {}) {
     this.url = options.url ?? "/api/v1/events";
+    this.baseTopics = options.baseTopics ?? ["system"];
     this.backoff = options.backoff ?? { baseMs: 1000, maxMs: 30_000 };
     this.random = options.random ?? Math.random;
     this.create = options.createEventSource ?? ((u) => new EventSource(u, { withCredentials: true }));
@@ -177,9 +187,9 @@ export class EventStream {
     };
   }
 
-  /** The topics with a subscriber, sorted; `system` is always included for resets. */
+  /** The topics with a subscriber, sorted, with the base topics (by default `system`, for resets). */
   topics(): Topic[] {
-    const all = new Set<Topic>(["system", ...this.handlers.keys(), ...this.resetHandlers.keys()]);
+    const all = new Set<Topic>([...this.baseTopics, ...this.handlers.keys(), ...this.resetHandlers.keys()]);
     return TOPICS.filter((t) => all.has(t));
   }
 

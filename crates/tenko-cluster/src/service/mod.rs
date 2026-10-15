@@ -14,12 +14,11 @@
 //! | `commands.rs` | `Commands`: commands to nodes, reports back | a node record | WP3.10 |
 //! | `raft.rs` | `Raft`: consensus between controllers | a controller with a member record | WP3.1a |
 //! | `membership.rs` | `Cluster`: join, forwarding, digest, key transfer | a controller with a member record | WP3.1a |
-//! | `metrics.rs` | `Metrics`: one controller's snapshot | a controller | WP3.5 |
+//! | `metrics.rs` | `Metrics`: one controller's newest metrics sample | a controller | WP3.5 |
 //!
-//! A service that is still a stub answers `UNIMPLEMENTED` with a message that names the
-//! package that implements it. Replacing a stub body is not a protocol change.
-
-use tonic::Status;
+//! A new service may start as a stub that answers `UNIMPLEMENTED` with a message that names
+//! the package that implements it; the last one, `Metrics`, was filled in by WP3.5.
+//! Replacing a stub body is not a protocol change.
 
 mod commands;
 mod config;
@@ -29,8 +28,3 @@ mod metrics;
 mod node;
 mod observations;
 mod raft;
-
-/// The answer of a service that its package has not filled in yet.
-fn arrives_with(service: &str, package: &str) -> Status {
-    Status::unimplemented(format!("the {service} service arrives with {package}"))
-}

@@ -138,6 +138,8 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - A guardrails page (Settings, Guardrails): the most parallel layer 2 writes and the list of protected ports, networks, VLANs and clients that connector writes and moves never touch, added in a dialog and removed in the list.
 - The cluster page shows the compatibility of every member (protocol versions, Raft wire version and the data formats it can open) and a data format panel that names the controllers blocking a pending migration, with the warning to update them first.
 - `GET /api/v1/metrics` reports request latency histograms per area and gauges for the store, the cluster, the jobs, the connectors, the nodes, the keys, the audit export and the backup, computed on a timer; a token with the `metrics` scope reads it, and `[metrics] listen` serves the same text on loopback without authentication.
+- The start page shows live metrics for administrators: API requests per second with p50 and p99, store size, Raft role and lag per controller, commit latency, jobs, ingest rate, event-stream clients and node buffers, with a sixty-second sparkline per tile, updated once per second while the page is open.
+- Controllers exchange their metrics snapshots, so the start page of any controller shows the whole cluster.
 
 ### Changed
 

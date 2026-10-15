@@ -19,6 +19,7 @@ use tenko_store::{
     ChangeSet, KeyRange, ReadConsistency, Store, StoreError, WatchError, WatchFilter, tables,
 };
 use tokio::sync::{
+    Notify,
     broadcast::{self, error::RecvError},
     watch,
 };
@@ -112,6 +113,10 @@ struct Inner {
     filter: ArcSwap<Box<dyn EventFilter>>,
     shutting_down: AtomicBool,
     subscribers: AtomicUsize,
+    /// Open streams by topic, in the order of [`Topic::ALL`].
+    topic_subscribers: [AtomicUsize; Topic::ALL.len()],
+    /// Signalled when the count of a topic leaves zero.
+    listened: Notify,
     published: AtomicU64,
 }
 
@@ -144,6 +149,8 @@ impl EventHub {
                 filter: ArcSwap::from_pointee(Box::new(AdmitAll)),
                 shutting_down: AtomicBool::new(false),
                 subscribers: AtomicUsize::new(0),
+                topic_subscribers: std::array::from_fn(|_| AtomicUsize::new(0)),
+                listened: Notify::new(),
                 published: AtomicU64::new(0),
             }),
         }
@@ -167,6 +174,25 @@ impl EventHub {
     /// Open event streams.
     pub fn subscribers(&self) -> usize {
         self.inner.subscribers.load(Ordering::Relaxed)
+    }
+
+    /// Open event streams that receive `topic`. A stream that asked for `metrics` without
+    /// the right to read it does not count.
+    pub fn subscribers_of(&self, topic: Topic) -> usize {
+        self.inner.topic_subscribers[topic as usize].load(Ordering::SeqCst)
+    }
+
+    /// Returns once at least one open stream receives `topic` (at once when one does).
+    pub async fn listened(&self, topic: Topic) {
+        loop {
+            let notified = self.inner.listened.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.subscribers_of(topic) > 0 {
+                return;
+            }
+            notified.await;
+        }
     }
 
     /// Frames published since start.
@@ -508,12 +534,35 @@ fn reset_frame(reason: ResetReason, revision: Revision) -> Bytes {
     Bytes::from(format!("id: {revision}\nevent: reset\ndata: {data}\n\n"))
 }
 
-/// Counts an open stream; dropped with the stream.
-struct SubscriberGuard(Arc<Inner>);
+/// Counts an open stream, in all and per topic; dropped with the stream.
+struct SubscriberGuard {
+    inner: Arc<Inner>,
+    topics: TopicSet,
+}
+
+impl SubscriberGuard {
+    fn new(inner: &Arc<Inner>, topics: TopicSet) -> Self {
+        inner.subscribers.fetch_add(1, Ordering::Relaxed);
+        let mut first = false;
+        for topic in topics.topics() {
+            first |= inner.topic_subscribers[topic as usize].fetch_add(1, Ordering::SeqCst) == 0;
+        }
+        if first {
+            inner.listened.notify_waiters();
+        }
+        Self {
+            inner: Arc::clone(inner),
+            topics,
+        }
+    }
+}
 
 impl Drop for SubscriberGuard {
     fn drop(&mut self) {
-        self.0.subscribers.fetch_sub(1, Ordering::Relaxed);
+        self.inner.subscribers.fetch_sub(1, Ordering::Relaxed);
+        for topic in self.topics.topics() {
+            self.inner.topic_subscribers[topic as usize].fetch_sub(1, Ordering::SeqCst);
+        }
     }
 }
 
@@ -608,8 +657,20 @@ pub(crate) async fn event_stream(
     topics: TopicSet,
     principal: Principal,
 ) -> impl Stream<Item = Result<Bytes, Infallible>> + Send + use<> {
-    hub.inner.subscribers.fetch_add(1, Ordering::Relaxed);
-    let guard = SubscriberGuard(Arc::clone(&hub.inner));
+    let mut topics = topics;
+    // The metrics snapshots go only to principals that read the metrics; a stream that may
+    // not does not count as a listener, so it does not start the publisher either.
+    if topics.contains(Topic::Metrics)
+        && hub
+            .inner
+            .filter
+            .load()
+            .select(&principal, Topic::Metrics, &[])
+            != Admission::All
+    {
+        topics.remove(Topic::Metrics);
+    }
+    let guard = SubscriberGuard::new(&hub.inner, topics);
     let (rx, replay) = hub.subscribe(last);
     let retry = hub.inner.config.retry.as_millis();
     let mut first = BytesMut::from(format!("retry: {retry}\n: connected\n\n").as_bytes());
@@ -977,6 +1038,76 @@ event: ipam
         hub.publish_change_set(&prefix_change(21, 21));
         let next = stream.next().await.expect("next").expect("ok");
         assert!(next.starts_with(b"id: 21\n"), "stale frames are skipped");
+    }
+
+    /// Admits everything except the `metrics` topic.
+    struct NoMetrics;
+
+    impl EventFilter for NoMetrics {
+        fn admit(&self, _: &Principal, topic: Topic, _: &[ObjectRef]) -> bool {
+            topic != Topic::Metrics
+        }
+    }
+
+    #[tokio::test]
+    async fn streams_are_counted_per_topic_and_the_first_listener_wakes_a_waiter() {
+        let hub = hub(SseConfig::default());
+        let store = tenko_store::MemStore::default();
+        let principal = Principal::system(SystemComponent::Api);
+        let waiter = {
+            let hub = hub.clone();
+            tokio::spawn(async move { hub.listened(Topic::Metrics).await })
+        };
+        tokio::task::yield_now().await;
+        assert!(!waiter.is_finished());
+        let jobs = event_stream(
+            &hub,
+            &store,
+            None,
+            TopicSet::parse("jobs").expect("topics"),
+            principal.clone(),
+        )
+        .await;
+        assert_eq!(hub.subscribers_of(Topic::Jobs), 1);
+        assert_eq!(hub.subscribers_of(Topic::Metrics), 0);
+        let metrics = event_stream(
+            &hub,
+            &store,
+            None,
+            TopicSet::parse("metrics,jobs").expect("topics"),
+            principal.clone(),
+        )
+        .await;
+        assert_eq!(hub.subscribers_of(Topic::Metrics), 1);
+        assert_eq!(hub.subscribers_of(Topic::Jobs), 2);
+        tokio::time::timeout(Duration::from_secs(5), waiter)
+            .await
+            .expect("woken")
+            .expect("no panic");
+        // Listened already: returns at once.
+        tokio::time::timeout(Duration::from_secs(5), hub.listened(Topic::Metrics))
+            .await
+            .expect("at once");
+        drop(metrics);
+        assert_eq!(hub.subscribers_of(Topic::Metrics), 0);
+        assert_eq!(hub.subscribers_of(Topic::Jobs), 1);
+        drop(jobs);
+        assert_eq!(hub.subscribers_of(Topic::Jobs), 0);
+        assert_eq!(hub.subscribers(), 0);
+
+        // A principal that may not read the metrics does not count as their listener.
+        hub.set_filter(Box::new(NoMetrics));
+        let refused = event_stream(
+            &hub,
+            &store,
+            None,
+            TopicSet::parse("metrics").expect("topics"),
+            principal,
+        )
+        .await;
+        assert_eq!(hub.subscribers(), 1);
+        assert_eq!(hub.subscribers_of(Topic::Metrics), 0);
+        drop(refused);
     }
 
     #[test]

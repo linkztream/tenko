@@ -17,19 +17,27 @@
 //! `[metrics] listen` (a loopback address, checked by the configuration) serves the same
 //! text in plain HTTP without authentication; it starts in the `api` step and stops with
 //! the server.
+//!
+//! The publisher of the `metrics` topic of the event stream
+//! ([`tenko_api::sse::metrics::MetricsPublisher`]) starts next to the timer. While a client
+//! listens it takes a sample every second, and before each one it refreshes the gauges that
+//! read memory only ([`refresh_live`]: the event hub and the store status, Raft, the store
+//! files, the jobs and the connected nodes); the other gauges keep the timer's values.
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, net::SocketAddr, sync::Arc, time::Duration};
 
+use futures::future::BoxFuture;
 use tenko_api::{
     dto::system::{LeaderServiceState, LeaderStatus},
     routes::{backup::BackupService, system::LeaderSource},
+    sse::metrics::{MetricsPublisher, PeerLayer, PeerSamples, SampleSources, Sampler},
     state::AppState,
 };
-use tenko_cluster::session::Sessions;
+use tenko_cluster::{peers::Peers, registry::NodeRegistry, session::Sessions};
 use tenko_connect::{Health, host::ConnectorHost};
 use tenko_core::{
-    Timestamp,
-    metrics::{Desc, Gauge, GaugeVec, Registry},
+    NodeId, Timestamp,
+    metrics::{Collect, Desc, Gauge, GaugeVec, Registry},
 };
 use tenko_jobs::{JobEngine, JobQuery, JobState};
 use tenko_store::{ReadConsistency, ReadViewExt as _, Store, StoreRole, StoreStatus, tables};
@@ -180,6 +188,10 @@ pub(crate) struct Sources {
     pub(crate) kek: Option<Arc<KekAdmin>>,
     /// The backup service.
     pub(crate) backups: Option<Arc<dyn BackupService>>,
+    /// The peer layer: the other controllers whose samples the `metrics` topic shows.
+    pub(crate) peers: Option<Peers>,
+    /// The node registry, which answers `Metrics.Snapshot` from this controller's samples.
+    pub(crate) node_registry: Option<Arc<NodeRegistry>>,
 }
 
 impl Sources {
@@ -194,6 +206,8 @@ impl Sources {
             leader: None,
             kek: None,
             backups: None,
+            peers: None,
+            node_registry: None,
         }
     }
 }
@@ -207,7 +221,7 @@ pub(crate) fn register(registry: &Registry) {
     KEK_PROTECTION.seal_slots(PROVIDER_SLOTS);
     AUDIT_EXPORT_LAG.seal_slots(SINK_SLOTS);
     for family in [
-        &STORE_FILE_BYTES as &'static dyn tenko_core::metrics::Collect,
+        &STORE_FILE_BYTES as &'static dyn Collect,
         &STORE_STATE_RATIO,
         &STORE_COALESCER,
         &RAFT_ROLE,
@@ -221,14 +235,42 @@ pub(crate) fn register(registry: &Registry) {
         &KEK_PROTECTION,
         &AUDIT_EXPORT_LAG,
         &BACKUP_AGE,
+        // Observed by the store and the reconciler (the samples of the `metrics` topic).
+        &tenko_store::raft::COMMIT_DURATION,
+        &tenko_ipam::reconcile::INGEST_BATCHES,
+        &tenko_ipam::reconcile::INGEST_FACTS,
     ] {
         registry.register(family);
     }
 }
 
-/// Registers the gauges, starts the timer and, when `listen` is set, the loopback
-/// listener. Returns the tasks (they end when `stop` turns true) and a summary for the
-/// start log.
+/// The sources of the samples of the `metrics` topic: the gauges that read memory only, and
+/// the drops the node sessions report.
+struct LiveSources(Sources);
+
+impl SampleSources for LiveSources {
+    fn refresh(&self) -> BoxFuture<'_, ()> {
+        Box::pin(refresh_live(&self.0))
+    }
+
+    fn node_drops(&self) -> BTreeMap<NodeId, u64> {
+        self.0
+            .sessions
+            .as_ref()
+            .map(|sessions| {
+                sessions
+                    .connected()
+                    .into_iter()
+                    .map(|(node, view)| (node, view.dropped_batches))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// Registers the gauges, starts the timer, the publisher of the `metrics` topic and, when
+/// `listen` is set, the loopback listener. Returns the tasks (they end when `stop` turns
+/// true) and a summary for the start log.
 ///
 /// # Errors
 ///
@@ -241,7 +283,19 @@ pub(crate) async fn start(
 ) -> std::io::Result<(Vec<JoinHandle<()>>, String)> {
     register(sources.state.metrics());
     let state = sources.state.clone();
-    let mut tasks = vec![spawn_timer(sources, interval, stop.clone())];
+    let sampler = Sampler::new(state.clone(), Arc::new(LiveSources(sources.clone())));
+    if let Some(registry) = &sources.node_registry {
+        registry.set_metrics_source(Arc::new(sampler.clone()));
+    }
+    let peers = sources
+        .peers
+        .clone()
+        .map(|peers| Arc::new(PeerLayer(peers)) as Arc<dyn PeerSamples>);
+    let publisher = Arc::new(MetricsPublisher::new(&state, sampler, peers));
+    let mut tasks = vec![
+        spawn_timer(sources, interval, stop.clone()),
+        publisher.spawn(stop.clone()),
+    ];
     let summary = match listen {
         Some(addr) => {
             let (local, task) = listen_plain(addr, state, stop.clone()).await?;
@@ -323,18 +377,9 @@ pub(crate) async fn listen_plain(
 pub(crate) async fn refresh(sources: &Sources, now: Timestamp) {
     let state = &sources.state;
     tenko_api::routes::metrics::refresh_gauges(state, now);
-    raft(&state.store.status());
-    if let Some(store) = &sources.store {
-        store_files(store);
-    }
-    if let Some(engine) = &sources.engine {
-        jobs(engine).await;
-    }
+    refresh_sources(sources).await;
     if let Some(host) = &sources.connectors {
         connectors(host).await;
-    }
-    if let Some(sessions) = &sources.sessions {
-        nodes(sessions);
     }
     if let Some(leader) = &sources.leader {
         leader_services(&leader.current());
@@ -345,6 +390,32 @@ pub(crate) async fn refresh(sources: &Sources, now: Timestamp) {
     audit_export(state.store.as_ref(), now).await;
     if let Some(backups) = &sources.backups {
         backup_age(backups.as_ref()).await;
+    }
+}
+
+/// Sets the gauges that read memory only (and the jobs from their state index): those the
+/// samples of the `metrics` topic read.
+pub(crate) async fn refresh_live(sources: &Sources) {
+    tenko_api::routes::metrics::refresh_live_gauges(&sources.state);
+    refresh_sources(sources).await;
+}
+
+/// One round of the slot families at a time: the timer and the publisher of the `metrics`
+/// topic both set them, and a sweep between another round's sets would drop a series.
+static ROUND: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// The Raft status, the store files, the jobs and the connected nodes.
+async fn refresh_sources(sources: &Sources) {
+    let _round = ROUND.lock().await;
+    raft(&sources.state.store.status());
+    if let Some(store) = &sources.store {
+        store_files(store);
+    }
+    if let Some(engine) = &sources.engine {
+        jobs(engine).await;
+    }
+    if let Some(sessions) = &sources.sessions {
+        nodes(sessions);
     }
 }
 
@@ -597,6 +668,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_sample_refreshes_and_reads_the_live_gauges_of_the_store() {
+        let store = tenko_store::raft::RaftStore::open_temp(
+            tenko_store::raft::RaftStoreConfig::new(std::env::temp_dir()),
+        )
+        .await
+        .expect("a store");
+        let state = AppState::new(Arc::new(store.clone()));
+        register(state.metrics());
+        let mut sources = Sources::of(state.clone());
+        sources.store = Some(store.clone());
+        let sampler = Sampler::new(state.clone(), Arc::new(LiveSources(sources)));
+        // No timer ran: the sample's own refresh sets the gauges it reads.
+        let local = sampler.take().await;
+        assert_eq!(local.sample.raft.role.as_deref(), Some("leader"));
+        assert!(local.sample.raft.term >= 1);
+        assert!(local.sample.store.file_bytes.is_some_and(|bytes| bytes > 0));
+        let text = render(&state);
+        for line in [
+            "# TYPE tenko_store_commit_duration_seconds histogram\n",
+            "# TYPE tenko_ipam_ingest_batches counter\n",
+            "# TYPE tenko_ipam_ingest_facts counter\n",
+        ] {
+            assert!(text.contains(line), "missing {line:?} in\n{text}");
+        }
+        tenko_core::metrics::check(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
+        store.shutdown().await.expect("closed");
+    }
+
+    #[tokio::test]
     async fn the_loopback_listener_serves_the_text_without_authentication() {
         let state = AppState::default();
         register(state.metrics());
@@ -644,7 +744,7 @@ mod tests {
         )
         .await
         .expect("started");
-        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks.len(), 3, "timer, publisher and listener");
         assert!(summary.starts_with("gauges every 30 s, metrics listener on http://127.0.0.1:"));
         // The first tick runs at once.
         tokio::time::timeout(Duration::from_secs(10), async {

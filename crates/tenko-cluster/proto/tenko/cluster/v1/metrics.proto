@@ -3,8 +3,8 @@
 //
 // The service Metrics lets a controller read another controller's current figures, so the
 // dashboard of any controller shows the whole cluster. A caller needs the role
-// `controller`. It is filled in by work package WP3.5; until then every method answers
-// UNIMPLEMENTED.
+// `controller`. A build before work package WP3.5 answers UNIMPLEMENTED; a controller whose
+// API has not started yet answers UNAVAILABLE.
 syntax = "proto3";
 
 package tenko.cluster.v1;

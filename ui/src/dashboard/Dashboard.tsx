@@ -1,7 +1,8 @@
 // The start page (decision 13): the node at a glance, the utilization of the networks per
 // tenant and VRF, the active utilization alarms, the jobs that wait for a person, the open
-// proposals, the connector health and the connected nodes (WP2.9), the most recent audit
-// records, and the quick actions (claim the next free address, a new prefix, an import).
+// proposals, the connector health and the connected nodes (WP2.9), the live metrics for
+// administrators (WP3.5b), the most recent audit records, and the quick actions (claim the next
+// free address, a new prefix, an import).
 // Every number that can grow is an SI number with the exact value as tooltip; utilization is a
 // bar, never a gauge.
 import { A, useNavigate } from "@solidjs/router";
@@ -11,6 +12,7 @@ import { createLiveQuery } from "../api/live";
 import { fetchAll } from "../api/paginate";
 import type { AuditRecord, JobSummary, Range, Tenant, TreeNode, TreeResponse, Vrf } from "../api/types";
 import { paths } from "../app/paths";
+import { isAdmin } from "../auth/session";
 import { Addr } from "../components/Addr";
 import { Icon } from "../components/Icon";
 import { Kbd } from "../components/Kbd";
@@ -18,7 +20,7 @@ import { PageHead } from "../components/PageHead";
 import { PrincipalLabel } from "../components/Principal";
 import { Si } from "../components/Si";
 import { AlarmFlag, Count, TimeAgo, UtilizationMeter } from "../grid/cells";
-import { formatDuration, t, type MessageKey } from "../i18n";
+import { formatDuration, t, withPacks, type MessageKey } from "../i18n";
 import { isAlarmEvent } from "../ipam/alarms";
 import { MoveDialog } from "../ipam/move/MoveDialog";
 import { NextFreeAddressDialog } from "../ipam/prefix/NextFreeDialogs";
@@ -35,6 +37,8 @@ import "./dashboard.css";
 // The notices of the updates area: a newer release, and a module change that waits for a restart.
 const UpdateCard = lazy(() => import("../updates/UpdateCard"));
 const ModulesNotice = lazy(() => import("../updates/ModulesNotice"));
+// The live metrics, with their own chunk and message pack; only administrators read the topic.
+const MetricsTiles = lazy(withPacks(["metrics"], () => import("./MetricsTiles")));
 
 const ROLE: Record<string, MessageKey> = {
   controller: "node.role.controller",
@@ -209,6 +213,10 @@ export default function Dashboard() {
             <p class="muted">{s() ? t("shell.status.version", { version: s()!.version }) : ""}</p>
           </section>
         </div>
+
+        <Show when={isAdmin()}>
+          <MetricsTiles />
+        </Show>
 
         <div class="dash-grid">
           <UpdateCard />

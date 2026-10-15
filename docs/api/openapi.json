@@ -27567,6 +27567,17 @@
             ],
             "description": "Kind of a system event that did not come from the store, for example an alarm code."
           },
+          "metrics": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MetricsSnapshot",
+                "description": "The metrics of the controllers (topic `metrics`, kind `metrics.snapshot`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "objects": {
             "type": "array",
             "items": {
@@ -32778,6 +32789,302 @@
           "updated": {
             "$ref": "#/components/schemas/Stamp",
             "description": "Last change."
+          }
+        }
+      },
+      "MetricsApi": {
+        "type": "object",
+        "description": "The HTTP API of a sample: requests under `/api/v1` (the files of the web UI do not count).",
+        "required": [
+          "requests_per_second"
+        ],
+        "properties": {
+          "p50_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The median time to the response head in milliseconds; absent without requests."
+          },
+          "p99_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The 99th percentile in milliseconds; absent without requests."
+          },
+          "requests_per_second": {
+            "type": "number",
+            "format": "double",
+            "description": "Requests per second."
+          }
+        }
+      },
+      "MetricsIngest": {
+        "type": "object",
+        "description": "The ingest of observations in a sample.",
+        "required": [
+          "batches_per_second",
+          "facts_per_second"
+        ],
+        "properties": {
+          "batches_per_second": {
+            "type": "number",
+            "format": "double",
+            "description": "Observation batches per second."
+          },
+          "facts_per_second": {
+            "type": "number",
+            "format": "double",
+            "description": "Observations (facts) per second."
+          }
+        }
+      },
+      "MetricsJobs": {
+        "type": "object",
+        "description": "The jobs of a sample. The jobs are shared by the cluster, so every controller counts the\nsame ones and the cluster takes the highest count.",
+        "required": [
+          "running",
+          "waiting"
+        ],
+        "properties": {
+          "running": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Jobs running.",
+            "minimum": 0
+          },
+          "waiting": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Jobs waiting for a person or an observation.",
+            "minimum": 0
+          }
+        }
+      },
+      "MetricsLag": {
+        "type": "object",
+        "description": "The replication lag of one member.",
+        "required": [
+          "node",
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Log entries it is behind the leader.",
+            "minimum": 0
+          },
+          "node": {
+            "$ref": "#/components/schemas/NodeId",
+            "description": "The member."
+          }
+        }
+      },
+      "MetricsNode": {
+        "type": "object",
+        "description": "A node connected to the controller.",
+        "required": [
+          "node",
+          "buffer_batches"
+        ],
+        "properties": {
+          "buffer_batches": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Observation batches waiting in its disk buffer.",
+            "minimum": 0
+          },
+          "drops": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Batches its buffer dropped since the node started, as its last heartbeat reported;\nabsent when the node registry does not say.",
+            "minimum": 0
+          },
+          "node": {
+            "$ref": "#/components/schemas/NodeId",
+            "description": "The node."
+          }
+        }
+      },
+      "MetricsRaft": {
+        "type": "object",
+        "description": "Raft in a sample.",
+        "required": [
+          "term",
+          "lag"
+        ],
+        "properties": {
+          "lag": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsLag"
+            },
+            "description": "Log entries members are behind the leader: every member on the leader, this member\non a follower."
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The member's role: `leader`, `follower`, `learner`, `candidate`, `shutdown` or\n`memory`; absent on the cluster sum and for a controller without figures."
+          },
+          "term": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The term the member knows.",
+            "minimum": 0
+          }
+        }
+      },
+      "MetricsSample": {
+        "type": "object",
+        "description": "One controller's metrics over one interval (about a second), built from two consecutive\nsnapshots of its metrics registry: rates and quantiles from the change of the counters\nand histograms, the rest from the gauges.",
+        "required": [
+          "at",
+          "interval_ms",
+          "api",
+          "store",
+          "raft",
+          "jobs",
+          "ingest",
+          "sse",
+          "nodes"
+        ],
+        "properties": {
+          "api": {
+            "$ref": "#/components/schemas/MetricsApi",
+            "description": "The HTTP API."
+          },
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the sample was taken, by the controller's clock."
+          },
+          "ingest": {
+            "$ref": "#/components/schemas/MetricsIngest",
+            "description": "The observations the reconciler ingests."
+          },
+          "interval_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The span of the rates and quantiles in milliseconds; 0 for a first sample, which\nhas no rates and no quantiles.",
+            "minimum": 0
+          },
+          "jobs": {
+            "$ref": "#/components/schemas/MetricsJobs",
+            "description": "The jobs that are not finished."
+          },
+          "node": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NodeId",
+                "description": "The controller; absent on the cluster sum."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsNode"
+            },
+            "description": "The nodes connected to the controller and their buffers."
+          },
+          "raft": {
+            "$ref": "#/components/schemas/MetricsRaft",
+            "description": "Raft."
+          },
+          "sse": {
+            "$ref": "#/components/schemas/MetricsSse",
+            "description": "The event stream."
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "The controller did not answer this second: the sample is its last good one, or, with\nno role, an empty one when it has not answered yet."
+          },
+          "store": {
+            "$ref": "#/components/schemas/MetricsStore",
+            "description": "The store."
+          },
+          "unsupported": {
+            "type": "boolean",
+            "description": "The controller runs an older build without the metrics exchange: it has no figures."
+          }
+        }
+      },
+      "MetricsSnapshot": {
+        "type": "object",
+        "description": "The data of a `metrics.snapshot` event (topic `metrics`, OPS-20): one sample per\ncontroller and their sum, once per second while a client listens.",
+        "required": [
+          "nodes",
+          "cluster"
+        ],
+        "properties": {
+          "cluster": {
+            "$ref": "#/components/schemas/MetricsSample",
+            "description": "The cluster: rates, sizes and counts summed over the controllers whose sample is\ncurrent, the highest quantiles, terms and lags. On a single controller, its own\nsample without its node id."
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsSample"
+            },
+            "description": "One sample per controller of the cluster, the publishing controller first."
+          }
+        }
+      },
+      "MetricsSse": {
+        "type": "object",
+        "description": "The event stream of a sample.",
+        "required": [
+          "subscribers"
+        ],
+        "properties": {
+          "subscribers": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Open event streams.",
+            "minimum": 0
+          }
+        }
+      },
+      "MetricsStore": {
+        "type": "object",
+        "description": "The store of a sample.",
+        "required": [
+          "data_bytes"
+        ],
+        "properties": {
+          "commit_p99_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The 99th percentile of the time from a proposal to its commit in milliseconds;\nabsent without writes."
+          },
+          "data_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes of live data (keys and values).",
+            "minimum": 0
+          },
+          "file_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes on disk: the Raft log, the state file and the snapshots; absent for an\nin-memory store.",
+            "minimum": 0
           }
         }
       },

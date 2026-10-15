@@ -158,6 +158,24 @@ pub const JOINING_MARKER: &str = "joining";
 /// The file in a store directory that holds the node id the directory belongs to.
 pub const NODE_ID_FILE: &str = "node-id";
 
+/// Bucket bounds of [`COMMIT_DURATION`], in microseconds: 100 µs to 10 s.
+const COMMIT_BOUNDS: [u64; 16] = [
+    100, 250, 500, 1_000, 2_500, 5_000, 10_000, 25_000, 50_000, 100_000, 250_000, 500_000,
+    1_000_000, 2_500_000, 5_000_000, 10_000_000,
+];
+
+/// `tenko_store_commit_duration_seconds`: the time from a write's proposal on this member to
+/// its commit (on the leader the coalescer's queue and the Raft commit, on another member the
+/// forward to the leader and this member's apply). Observed once per committed proposal; the
+/// server registers the family with its metrics registry.
+pub static COMMIT_DURATION: tenko_core::metrics::Histogram =
+    tenko_core::metrics::Histogram::new(tenko_core::metrics::Desc::histogram(
+        "tenko_store_commit_duration_seconds",
+        "Time from a write's proposal on this controller to its commit.",
+        &COMMIT_BOUNDS,
+        1_000_000,
+    ));
+
 /// Marks `dir` (a store directory) as joining a cluster; creates the directory.
 ///
 /// # Errors
@@ -1842,6 +1860,7 @@ async fn maintain(inner: Weak<Inner>) {
 #[async_trait::async_trait]
 impl Store for RaftStore {
     async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
+        let started = Instant::now();
         let inner = &self.inner;
         inner.check_running()?;
         batch.validate(inner.config.coalescer.max_batch_bytes)?;
@@ -1850,7 +1869,9 @@ impl Store for RaftStore {
             None => None,
         };
         let encoded = to_cbor(&batch)?;
-        inner.propose_encoded(encoded, fingerprint).await
+        let committed = inner.propose_encoded(encoded, fingerprint).await?;
+        COMMIT_DURATION.observe(u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX));
+        Ok(committed)
     }
 
     async fn read(&self, consistency: ReadConsistency) -> Result<Arc<dyn ReadView>, StoreError> {

@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="metrics">
+      <unit id="metrics.title">
+        <notes><note category="description">Heading of the live metrics on the start page, which administrators see.</note></notes>
+        <segment><source>Live metrics</source></segment>
+      </unit>
+      <unit id="metrics.sub">
+        <segment><source>Updated every second while this page is open</source></segment>
+      </unit>
+      <unit id="metrics.waiting">
+        <segment><source>Waiting for the first sample from the server.</source></segment>
+      </unit>
+      <unit id="metrics.sparkline">
+        <notes><note category="description">Tooltip of the small line chart of a tile: the tile title and its values of the last minute, oldest first.</note></notes>
+        <segment><source>{name} over the last minute: {values}</source></segment>
+      </unit>
+      <unit id="metrics.unit.per_second">
+        <notes><note category="description">Unit after a rate, such as requests per second.</note></notes>
+        <segment><source>/s</source></segment>
+      </unit>
+      <unit id="metrics.unit.ms">
+        <notes><note category="description">Unit after a time in milliseconds.</note></notes>
+        <segment><source>ms</source></segment>
+      </unit>
+      <unit id="metrics.unit.bytes">
+        <notes><note category="description">Unit after a size with an SI suffix, such as 4.1K (bytes).</note></notes>
+        <segment><source>B</source></segment>
+      </unit>
+      <unit id="metrics.tile.requests">
+        <segment><source>API requests</source></segment>
+      </unit>
+      <unit id="metrics.tile.requests_hint">
+        <notes><note category="description">Median and 99th percentile of the API response time in the last second, in milliseconds.</note></notes>
+        <segment><source>p50 {p50} ms, p99 {p99} ms</source></segment>
+      </unit>
+      <unit id="metrics.tile.requests_idle">
+        <segment><source>No requests in the last second</source></segment>
+      </unit>
+      <unit id="metrics.tile.commit">
+        <notes><note category="description">Tile title: the 99th percentile of the time from a write to its commit in the replicated store.</note></notes>
+        <segment><source>Commit p99</source></segment>
+      </unit>
+      <unit id="metrics.tile.commit_hint">
+        <segment><source>From a write to its commit in the store</source></segment>
+      </unit>
+      <unit id="metrics.tile.commit_idle">
+        <segment><source>No writes in the last second</source></segment>
+      </unit>
+      <unit id="metrics.tile.store">
+        <segment><source>Store on disk</source></segment>
+      </unit>
+      <unit id="metrics.tile.store_hint">
+        <notes><note category="description">The size of the live data of the store; {data} is a number with an SI suffix, followed by B for bytes.</note></notes>
+        <segment><source>{data}B of live data in memory</source></segment>
+      </unit>
+      <unit id="metrics.tile.store_memory">
+        <segment><source>In memory only, nothing on disk</source></segment>
+      </unit>
+      <unit id="metrics.tile.raft">
+        <notes><note category="description">Tile title: how many log entries the controllers are behind the Raft leader, at most.</note></notes>
+        <segment><source>Replication lag</source></segment>
+      </unit>
+      <unit id="metrics.tile.raft_hint">
+        <segment><source>Log entries behind the leader, term {term, number}</source></segment>
+      </unit>
+      <unit id="metrics.raft.node">
+        <segment><source>Controller {node}</source></segment>
+      </unit>
+      <unit id="metrics.raft.lag">
+        <segment><source>{entries, plural, one {# entry behind} other {# entries behind}}</source></segment>
+      </unit>
+      <unit id="metrics.raft.stale">
+        <notes><note category="description">A controller of the cluster did not send its figures in time; the row shows its last ones.</note></notes>
+        <segment><source>No answer</source></segment>
+      </unit>
+      <unit id="metrics.raft.unsupported">
+        <notes><note category="description">A controller runs an older version that cannot send its figures.</note></notes>
+        <segment><source>Older version</source></segment>
+      </unit>
+      <unit id="metrics.tile.jobs">
+        <segment><source>Jobs running</source></segment>
+      </unit>
+      <unit id="metrics.tile.jobs_hint">
+        <segment><source>{waiting, plural, one {# job waiting} other {# jobs waiting}}</source></segment>
+      </unit>
+      <unit id="metrics.tile.ingest">
+        <notes><note category="description">Tile title: observations (facts) from connectors and probes taken in per second.</note></notes>
+        <segment><source>Observations</source></segment>
+      </unit>
+      <unit id="metrics.tile.ingest_hint">
+        <segment><source>{batches} batches per second</source></segment>
+      </unit>
+      <unit id="metrics.tile.sse">
+        <segment><source>Event-stream clients</source></segment>
+      </unit>
+      <unit id="metrics.tile.sse_hint">
+        <segment><source>Browsers and tools that follow changes live</source></segment>
+      </unit>
+      <unit id="metrics.tile.nodes">
+        <notes><note category="description">Tile title: observation batches waiting in the disk buffers of the connected nodes.</note></notes>
+        <segment><source>Node buffers</source></segment>
+      </unit>
+      <unit id="metrics.tile.nodes_hint">
+        <segment><source>{nodes, plural, one {# node} other {# nodes}} connected, {drops, plural, one {# batch} other {# batches}} dropped</source></segment>
+      </unit>
+      <unit id="metrics.tile.nodes_hint_unknown">
+        <segment><source>{nodes, plural, one {# node} other {# nodes}} connected</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

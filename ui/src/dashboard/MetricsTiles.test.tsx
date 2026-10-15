@@ -1,0 +1,217 @@
+import { render, screen, waitFor, within } from "@solidjs/testing-library";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { axeViolations } from "../app/testing/axe";
+import { setLocale } from "../i18n";
+import type { MetricsSample, MetricsSnapshot } from "./metrics";
+import MetricsTiles from "./MetricsTiles";
+
+/** A stand-in for EventSource that the tests feed. */
+class FakeSource {
+  static all: FakeSource[] = [];
+  readonly url: string;
+  onopen: ((e: Event) => void) | null = null;
+  onerror: ((e: Event) => void) | null = null;
+  closed = false;
+  private listeners = new Map<string, ((e: Event) => void)[]>();
+
+  constructor(url: string) {
+    this.url = url;
+    FakeSource.all.push(this);
+  }
+  addEventListener(type: string, fn: (e: Event) => void) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
+  }
+  close() {
+    this.closed = true;
+  }
+  open() {
+    this.onopen?.(new Event("open"));
+  }
+  emit(type: string, data: unknown) {
+    const event = new MessageEvent(type, { data: JSON.stringify(data) });
+    for (const fn of this.listeners.get(type) ?? []) fn(event);
+  }
+  static last(): FakeSource {
+    const source = FakeSource.all[FakeSource.all.length - 1];
+    if (!source) throw new Error("no stream");
+    return source;
+  }
+}
+
+function sample(node: number | null, patch: Partial<MetricsSample> = {}): MetricsSample {
+  return {
+    node,
+    at: "2026-10-14T12:00:00Z",
+    interval_ms: 1000,
+    api: { requests_per_second: 12.5, p50_ms: 0.8, p99_ms: 24 },
+    store: { data_bytes: 4_096, file_bytes: 1_500_000, commit_p99_ms: 3.2 },
+    raft: { role: node === null ? null : "leader", term: 3, lag: [{ node: node ?? 1, entries: 0 }] },
+    jobs: { running: 2, waiting: 1 },
+    ingest: { batches_per_second: 0.5, facts_per_second: 40 },
+    sse: { subscribers: 4 },
+    nodes: [{ node: 1001, buffer_batches: 7, drops: 2 }],
+    ...patch,
+  };
+}
+
+function snapshot(nodes: MetricsSample[], cluster: MetricsSample): MetricsSnapshot {
+  return { nodes, cluster };
+}
+
+function send(source: FakeSource, value: MetricsSnapshot) {
+  source.emit("metrics", { topic: "metrics", kind: "metrics.snapshot", metrics: value });
+}
+
+function mount() {
+  return render(() => <MetricsTiles streamOptions={{ createEventSource: (url) => new FakeSource(url) as unknown as EventSource }} />);
+}
+
+const tile = (name: string) => screen.getByTestId(`metrics-tile-${name}`);
+
+beforeEach(async () => {
+  FakeSource.all = [];
+  await setLocale("en");
+});
+
+afterEach(async () => {
+  await setLocale("en");
+});
+
+describe("metrics tiles", () => {
+  it("open a stream of their own on the metrics topic and close it when the page goes", async () => {
+    const { unmount } = mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const source = FakeSource.last();
+    const url = new URL(source.url, "http://localhost");
+    expect(url.pathname).toBe("/api/v1/events");
+    expect(url.searchParams.get("topics")).toBe("metrics");
+    expect(screen.getByTestId("metrics-tiles").dataset.state).toBe("connecting");
+    source.open();
+    await waitFor(() => expect(screen.getByTestId("metrics-tiles").dataset.state).toBe("live"));
+    expect(screen.getByTestId("metrics-waiting")).toBeTruthy();
+    expect(tile("requests").dataset.value).toBeUndefined();
+    unmount();
+    expect(source.closed).toBe(true);
+  });
+
+  it("show the numbers of the newest sample and a sparkline of every sample", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const source = FakeSource.last();
+    source.open();
+    for (const rate of [10, 20, 30]) {
+      const own = sample(1, { api: { requests_per_second: rate, p50_ms: 0.8, p99_ms: 24 } });
+      send(source, snapshot([own], { ...own, node: null, raft: { ...own.raft, role: null } }));
+    }
+    await waitFor(() => expect(tile("requests").dataset.value).toBe("30"));
+    expect(screen.queryByTestId("metrics-waiting")).toBeNull();
+    expect(screen.getByTestId("metrics-tiles").dataset.controllers).toBe("1");
+    expect(screen.getByTestId("metrics-sparkline-requests").dataset.points).toBe("3");
+    expect(screen.getByTestId("metrics-sparkline-requests").querySelector("title")?.textContent).toBe(
+      "API requests over the last minute: 10, 20, 30",
+    );
+    expect(tile("requests").textContent).toContain("p50 0.8 ms, p99 24 ms");
+    expect(tile("commit").dataset.value).toBe("3.2");
+    expect(tile("store").dataset.value).toBe("1500000");
+    expect(tile("store").textContent).toContain("1.5M");
+    expect(tile("store").textContent).toContain("4.1KB of live data in memory");
+    expect(tile("raft").dataset.value).toBe("0");
+    expect(tile("jobs").dataset.value).toBe("2");
+    expect(tile("jobs").textContent).toContain("1 job waiting");
+    expect(tile("ingest").dataset.value).toBe("40");
+    expect(tile("ingest").textContent).toContain("0.5 batches per second");
+    expect(tile("sse").dataset.value).toBe("4");
+    expect(tile("nodes").dataset.value).toBe("7");
+    expect(tile("nodes").textContent).toContain("1 node connected, 2 batches dropped");
+    const rows = within(tile("raft")).getAllByTestId("metrics-raft-node");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.dataset).toMatchObject({ node: "1", role: "leader", lag: "0", state: "current" });
+    expect(await axeViolations(screen.getByTestId("metrics-tiles"))).toEqual([]);
+  });
+
+  it("show a minute: the sixty newest samples", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const source = FakeSource.last();
+    for (let i = 1; i <= 65; i++) {
+      const own = sample(1, { sse: { subscribers: i } });
+      send(source, snapshot([own], own));
+    }
+    await waitFor(() => expect(tile("sse").dataset.value).toBe("65"));
+    expect(screen.getByTestId("metrics-sparkline-sse").dataset.points).toBe("60");
+  });
+
+  it("show the cluster's sum and one Raft row per controller, marking silent and older ones", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const source = FakeSource.last();
+    const leader = sample(1, {
+      raft: {
+        role: "leader",
+        term: 5,
+        lag: [
+          { node: 1, entries: 0 },
+          { node: 2, entries: 12 },
+          { node: 3, entries: 3 },
+        ],
+      },
+    });
+    const silent = { ...sample(2, { raft: { role: "follower", term: 5, lag: [{ node: 2, entries: 9 }] } }), stale: true };
+    const older = { ...sample(3, { raft: { role: null, term: 0, lag: [] } }), unsupported: true };
+    const cluster = sample(null, {
+      api: { requests_per_second: 99, p50_ms: 1, p99_ms: 40 },
+      raft: { role: null, term: 5, lag: leader.raft.lag },
+    });
+    send(source, snapshot([leader, silent, older], cluster));
+    await waitFor(() => expect(tile("requests").dataset.value).toBe("99"));
+    expect(screen.getByTestId("metrics-tiles").dataset.controllers).toBe("3");
+    expect(tile("raft").dataset.value).toBe("12");
+    const rows = within(tile("raft")).getAllByTestId("metrics-raft-node");
+    expect(rows.map((row) => ({ ...row.dataset }))).toEqual([
+      { testid: "metrics-raft-node", node: "1", role: "leader", lag: "0", state: "current" },
+      { testid: "metrics-raft-node", node: "2", role: "follower", lag: "12", state: "stale" },
+      { testid: "metrics-raft-node", node: "3", lag: "3", state: "unsupported" },
+    ]);
+    expect(rows[1]!.textContent).toContain("No answer");
+    expect(rows[2]!.textContent).toContain("Older version");
+    expect(rows[1]!.textContent).toContain("12 entries behind");
+    expect(await axeViolations(screen.getByTestId("metrics-tiles"))).toEqual([]);
+  });
+
+  it("ignore other events and show an idle API and an in-memory store in words", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const source = FakeSource.last();
+    source.emit("metrics", { topic: "metrics", kind: "something.else", metrics: {} });
+    source.emit("metrics", { topic: "metrics", kind: "metrics.snapshot" });
+    expect(screen.getByTestId("metrics-waiting")).toBeTruthy();
+    const idle = sample(1, {
+      api: { requests_per_second: 0 },
+      store: { data_bytes: 2_048 },
+      nodes: [{ node: 1001, buffer_batches: 0 }],
+    });
+    send(source, snapshot([idle], idle));
+    await waitFor(() => expect(tile("requests").dataset.value).toBe("0"));
+    expect(tile("requests").textContent).toContain("No requests in the last second");
+    expect(tile("commit").dataset.value).toBeUndefined();
+    expect(tile("commit").textContent).toContain("No writes in the last second");
+    expect(tile("store").dataset.value).toBe("2048");
+    expect(tile("store").textContent).toContain("In memory only, nothing on disk");
+    expect(tile("nodes").textContent).toContain("1 node connected");
+    expect(tile("nodes").textContent).not.toContain("dropped");
+  });
+
+  it("speak Swedish", async () => {
+    await setLocale("sv");
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const own = sample(1);
+    send(FakeSource.last(), snapshot([own], own));
+    await waitFor(() => expect(tile("jobs").dataset.value).toBe("2"));
+    const root = screen.getByTestId("metrics-tiles");
+    expect(root.textContent).toContain("Mätvärden i realtid");
+    expect(tile("jobs").textContent).toContain("1 jobb väntar");
+    expect(tile("nodes").textContent).toContain("1 nod ansluten, 2 omgångar kastade");
+    expect(within(tile("raft")).getByTestId("metrics-raft-node").textContent).toContain("ledare");
+  });
+});

@@ -42,7 +42,7 @@ ui/
     api/                typed client, problem details, SSE stream, live queries, pagination,
                         type aliases (types.ts), the move API (moves.ts), mock/ (msw handlers)
     i18n/               t(), tx(), formats, locale choice, message packs
-    components/         small shared pieces: Dialog, Icon, Addr, Si, toast, QrCode, ...
+    components/         small shared pieces: Dialog, Icon, Addr, Si, Sparkline, toast, QrCode, ...
     grid/               the data grid and its parts: filter bar, column chooser, action bar,
                         cells, selection, keyboard focus, sources, drag and drop
     shell/              rail, top bar, status bar, command palette, keyboard chords, search
@@ -51,7 +51,8 @@ ui/
                         export, vault, backup, languages); the last five are sub-pages in folders of
                         their own (settings/access/, audit-export/, vault/, backup/, languages/) with a
                         route each in settings/routes.ts
-    dashboard/          the start page (decision 13)
+    dashboard/          the start page (decision 13); MetricsTiles.tsx and metrics.ts are its live
+                        metrics for administrators (WP3.5b), on a stream of their own
     ipam/               networks (tree and prefix pane), addresses, tenancy collections,
                         forms, plan dialogs, history, move preview, utilization alarms
     hosts/              host list and detail, interfaces, connection hand-off
@@ -208,6 +209,7 @@ other key stays in the core table that the first load carries.
 | `reconciler` | `reconciler.` (the text of `ipam.reconciler.settings.invalid` is `reconciler.error.invalid`, mapped in the page, because `errors.ipam.reconciler.` belongs to `discovery`) |
 | `guardrails` | `guardrails.` (likewise `connect.guardrails.invalid` is `guardrails.error.invalid`, because `errors.connect.` belongs to `connectors`) |
 | `languages` | `languages.` |
+| `metrics` | `metrics.` (the live metrics of the start page, loaded with their lazy part for administrators) |
 
 The `jobs` pack also holds `connect.job.` and `cluster.job.`, the job titles the server sends
 for connector and node edits, and the `ipam` pack `errors.ipam.adoption.` for the adoption tab.
@@ -332,6 +334,7 @@ The hooks of the WP2.9 views beyond the generic ones:
 | Scan now (prefix pane, host page) | `scan-now`, `dialog-scan-now` with `scan-now-kind-<kind>`, `scan-now-deadline`, `scan-now-start`, `scan-now-cancel`, then `scan-now-started` (an `error-notice` for a refusal), `scan-now-follow`, `scan-now-close` |
 | Probe scan configuration | `scan-config-form` (`data-dirty`), `scan-config-save`, `scan-config-revert`, `scan-config-readonly`, `scan-config-stale`, `scan-config-remote`, `scan-config-reload`, `scan-config-lacking`, `scan-config-errors`, `scan-config-not-probe`, `scan-config-back`; `scan-group-general`, `scan-group-scope`, `scan-group-methods`, `method-<key>` (`data-raw`) with `method-<key>-raw`, `field-<path>` (e.g. `field-concurrency`, `field-icmp.interval_secs`); `scan-devices`, `scan-devices-empty`, `scan-device`, `device-add`, `device-remove-<i>`, `device-lacking`, `device-<column>-<i>`; `scan-config-sync` (`data-sync`, `data-stored`) with `scan-sync-state`, `scan-sync-origin`, `scan-sync-revision`; `scan-config-applied` with `scan-applied-*`; `scan-kill-switch` (`data-state` `running` or `stopped`) with `scan-ks-state`, `scan-ks-reason`, `scan-ks-confirmed`; `scan-stop`, `scan-resume`, `dialog-stop-probe` with `field-reason`, `form-submit`, `form-cancel`; `node-scan-config` (the link in the node panel) |
 | Dashboard | `dashboard-proposals`, `dashboard-proposals-link`, `dashboard-proposals-hint` (`data-conflicts`), `dashboard-connectors`, `dashboard-connectors-link`, `dashboard-connectors-hint` (`data-total`, `data-failing`), `dashboard-nodes`, `dashboard-nodes-link`, `dashboard-nodes-hint` (`data-total`, `data-mismatched`). The hints are translated plural messages, so their numbers are data attributes; a tile that has not read its data (or the nodes tile without a cluster summary) leaves them off |
+| Live metrics (start page, administrators) | `metrics-tiles` (`data-state` the connection state of its stream, `data-controllers` the controllers of the last sample, absent before the first), `metrics-waiting` (before the first sample), `metrics-tile-<name>` for `requests`, `commit`, `store`, `raft`, `jobs`, `ingest`, `sse` and `nodes` (`data-value` the raw number, absent while unknown), `metrics-sparkline-<name>` (`data-points` the samples drawn, at most 60), `metrics-raft-node` per controller on the Raft tile (`data-node`, `data-role`, `data-lag`, `data-state` `current`, `stale` or `unsupported`) |
 | Host connect panel | `host-connect` with `remote-target` (`data-key` the address, or the host name), `host-rdp` and `host-ssh` (`data-key`), `field-user`, `field-rdp_port` and `field-ssh_port` |
 | Release notes (`Markdown` of `updates/markdown.tsx`, in `update-release`, `update-action` and the install confirmation) | `md-heading` (`data-level` the level of the element, 1 to 6), `md-paragraph`, `md-list` (`data-ordered` `true` or `false`), `md-item`, `md-strong`, `md-em`, `md-code` (inline code), `md-pre` (fenced code), `md-link`; text that stays text has none |
 | Settings navigation (the tabs of the settings pages and of the secrets page, which administrators see) | `settings-nav` with `settings-nav-link` (`data-key` `security`, `users`, `updates`, `secrets`, `access`, `audit-export`, `vault`, `backup`, `reconciler`, `guardrails` or `languages`) |

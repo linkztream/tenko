@@ -947,17 +947,8 @@ async fn enrolled_channel(
         .expect("channel")
 }
 
-fn assert_unimplemented<T: std::fmt::Debug>(result: Result<T, tonic::Status>, package: &str) {
-    let status = result.expect_err("a stub service answers with an error");
-    assert_eq!(status.code(), tonic::Code::Unimplemented, "{status:?}");
-    assert!(
-        status.message().contains(package),
-        "the message names {package}: {status:?}"
-    );
-}
-
 #[tokio::test]
-async fn a_port_without_controller_services_and_a_stub_answer_unimplemented() {
+async fn a_port_without_controller_services_answers_unimplemented_and_metrics_refuse_a_probe() {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
     let channel = enrolled_channel(&controller, dir.path(), "probe-stubs").await;
@@ -980,11 +971,85 @@ async fn a_port_without_controller_services_and_a_stub_answer_unimplemented() {
             .expect_err("no Cluster"),
     );
 
+    // The metrics of a controller are for controllers only.
     let mut metrics = v1::metrics_client::MetricsClient::new(channel);
-    assert_unimplemented(
-        metrics.snapshot(v1::SnapshotRequest::default()).await,
-        "WP3.5",
+    let refused = metrics
+        .snapshot(v1::SnapshotRequest::default())
+        .await
+        .expect_err("a probe may not read them");
+    assert_eq!(refused.code(), tonic::Code::PermissionDenied, "{refused:?}");
+    assert_eq!(
+        tenko_cluster::server::code_of(&refused),
+        Some("cluster.peer.not_controller")
     );
+}
+
+/// A source that answers one fixed sample.
+struct FixedSample(tenko_cluster::metrics::EncodedSample);
+
+impl tenko_cluster::metrics::MetricsSource for FixedSample {
+    fn current(
+        &self,
+    ) -> futures::future::BoxFuture<'_, Option<tenko_cluster::metrics::EncodedSample>> {
+        Box::pin(async { Some(self.0.clone()) })
+    }
+}
+
+#[tokio::test]
+async fn metrics_snapshot_answers_the_newest_sample_to_a_controller() {
+    use tenko_cluster::{
+        metrics::{EncodedSample, PeerReply, SAMPLE_ENCODING, fetch},
+        peers::{PeerNetwork, PeerTimings},
+    };
+
+    let controller = Controller::start().await;
+    let dir = tempfile::tempdir().expect("dir");
+    let token = controller
+        .token(NewEnrolment {
+            roles: vec![Role::Controller],
+            ..NewEnrolment::default()
+        })
+        .await;
+    let (credentials, _) = controller
+        .enrol_with(dir.path(), "controller-2", &token, vec![1])
+        .await
+        .expect("a controller enrols");
+    let network = PeerNetwork::new(credentials.identity.node, PeerTimings::default());
+    network.set_tls(credentials.client_config().expect("client configuration"));
+    network.pin(NodeId(1), controller.addr.to_string());
+    let deadline = Duration::from_millis(500);
+
+    // Before the API started there is no sample.
+    let PeerReply::Failed(detail) = fetch(&network, NodeId(1), deadline).await else {
+        panic!("no sample before the source is set");
+    };
+    assert!(detail.contains("no metrics sample yet"), "{detail}");
+
+    let sample = EncodedSample {
+        node: NodeId(1),
+        at: Timestamp::from_unix_nanos(1_791_547_200_000_000_000).expect("time"),
+        encoding: SAMPLE_ENCODING.to_owned(),
+        payload: vec![0xa1, 0x61, 0x6e, 0x01],
+    };
+    controller
+        .registry
+        .set_metrics_source(Arc::new(FixedSample(sample.clone())));
+    assert_eq!(
+        fetch(&network, NodeId(1), deadline).await,
+        PeerReply::Sample(sample)
+    );
+
+    // A controller that does not answer in time.
+    let silent = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    network.pin(NodeId(3), silent.local_addr().expect("addr").to_string());
+    let started = std::time::Instant::now();
+    assert!(matches!(
+        fetch(&network, NodeId(3), deadline).await,
+        PeerReply::Failed(_)
+    ));
+    assert!(started.elapsed() < Duration::from_secs(2));
 }
 
 #[tokio::test]

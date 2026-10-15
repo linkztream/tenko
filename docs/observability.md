@@ -1,6 +1,6 @@
 # Observability: metrics
 
-This document describes the metrics of a Tenko DDI controller: where they are served, who may read them, how the gauges are computed, every series with its labels, how to scrape them with Prometheus, and what they cost. It is for administrators who monitor Tenko and for reviewers. Requirements are cited by ID and defined in [REQUIREMENTS.md](REQUIREMENTS.md) (OPS-05, OPS-20, OPS-21); the endpoint is in the [OpenAPI document](api/openapi.json). Where this document and the code disagree, the code is right and the document has a defect.
+This document describes the metrics of a Tenko DDI controller: where they are served, who may read them, how the gauges are computed, every series with its labels, how to scrape them with Prometheus, what they cost, and the live metrics of the start page. It is for administrators who monitor Tenko and for reviewers. Requirements are cited by ID and defined in [REQUIREMENTS.md](REQUIREMENTS.md) (OPS-05, OPS-20, OPS-21); the endpoint is in the [OpenAPI document](api/openapi.json). Where this document and the code disagree, the code is right and the document has a defect.
 
 Contents:
 
@@ -10,7 +10,8 @@ Contents:
 4. [Series](#4-series)
 5. [Scraping with Prometheus](#5-scraping-with-prometheus)
 6. [Cost](#6-cost)
-7. [Not covered yet](#7-not-covered-yet)
+7. [Dashboard](#7-dashboard)
+8. [Not covered yet](#8-not-covered-yet)
 
 ## 1. Where the metrics are served
 
@@ -54,6 +55,7 @@ The metrics reveal sizes, counts, versions and the health of connected systems, 
 - **Counters and histograms** (requests, refusals, connections, request durations) are updated on the request path and are always current.
 - **Gauges** are set by a timer every `[metrics] gauge_interval_secs` seconds (default 30, 5 to 3600), and once at start. The timer reads the status interfaces of the services (the store, Raft, the job engine, the connector host, the node sessions, the leader supervisor, the key service, the audit export cursors, the backup records, the TLS listener); a scrape returns the values of the last round and computes nothing again. A source that cannot be read in a round keeps its last values.
 - **At scrape time** only `tenko_uptime_seconds` and `tenko_build_info` are computed.
+- **While the start page shows live metrics** (section 7), the gauges that read memory only are also set once per second: the event-stream subscribers, the store revision, audit head, journal and data, the Raft role, term and lag, the store files and the coalescer queue, the jobs (from their state index) and the connected nodes with their buffers. The others keep the timer's values.
 
 A gauge that has no value is left out: for example `tenko_backup_age_seconds` before the first good backup, `tenko_tls_certificate_expiry_seconds` without a certificate (TLS mode c), and every timer gauge before the first round. A family is still listed with its `# TYPE` and `# HELP` lines.
 
@@ -73,6 +75,9 @@ Request and process counters:
 | `tenko_http_idempotent_replays_total` | counter | | Responses replayed for a repeated `Idempotency-Key` |
 | `tenko_http_connections_total` | counter | `outcome` | Connections of the API listener: `accepted`, `over_limit`, `proxy_only`, `tls_failed`, `proxy_header_failed` |
 | `tenko_sse_events_total` | counter | | Events published to server-sent event subscribers (set by the timer) |
+| `tenko_store_commit_duration_seconds` | histogram | | Time from a write's proposal on this controller to its commit: on the leader the coalescer's queue and the Raft commit, on another member the forward to the leader and the apply here. Observed once per committed write. Buckets from 100 µs to 10 s: 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10 |
+| `tenko_ipam_ingest_batches_total` | counter | | Observation batches of connectors and probes that the reconciler ingested on this controller |
+| `tenko_ipam_ingest_facts_total` | counter | | Observations (facts) in those batches |
 
 Gauges set by the timer:
 
@@ -143,6 +148,33 @@ A scrape interval shorter than `[metrics] gauge_interval_secs` returns the same 
 
 The counters and histograms are those of `tenko_core::metrics` (OPS-21): each family keeps one stripe of cells per shard (the number of logical CPUs rounded up to a power of two, at most 32), each stripe on its own cache lines, and an update is one or two relaxed atomic additions on the calling thread's stripe, without a lock, an allocation or formatting. A read sums the stripes. The memory of a family is its series times the shards times 8 bytes; the two request families, the largest by far, use at most 8 shards (the API serves thousands of requests per second at most), about 0.42 MiB in all. The measurements are in `bench/phase1-metrics/` (M8: the cost on a UDP responder's hot path; the zero-allocation check) and `bench/phase1-server/` (M9: the idle memory of the controller).
 
-## 7. Not covered yet
+## 7. Dashboard
 
-Traces (OpenTelemetry over OTLP, `[telemetry]`), the live metrics topic of the event stream with the dashboard tiles, and the metrics of peers in one view (`Metrics.Snapshot` between controllers) come with a later package. DNS and DHCP metrics arrive with those modules.
+The start page shows administrators live metrics of the controllers (OPS-20): one tile per figure, each a number with an SI suffix and a sparkline of the last sixty seconds, no dial gauges. The figures arrive on the event stream, not by polling.
+
+**The topic.** `GET /api/v1/events?topics=metrics` subscribes to the topic `metrics`; a stream that names no topics does not receive it. It is admitted by the read of the metrics object, like `GET /api/v1/metrics` (section 2): a stream of a principal that may not read the metrics does not receive the topic and does not count as its listener. The start page opens a stream of its own for the topic while it is shown and closes it when the page goes.
+
+**The one-second rule.** The controller samples only while at least one stream receives the topic. The publisher sleeps otherwise and wakes with the first subscription; while someone listens it runs a one-second tick, and each tick takes one snapshot of the metrics registry, builds this controller's sample against the snapshot before it, asks the other controllers for theirs, and publishes one system event: `event: metrics`, no id (it is never replayed; a client that reconnects gets the next one), data an `EventData` with `kind` `metrics.snapshot` and the field `metrics`. The frame is encoded once and shared by every stream, so the cost does not grow with the number of subscribers: the acceptance test in `crates/tenko-api/tests/metrics_stream.rs` opens 100 streams, counts five events on each in five seconds from five aggregations, and prints the CPU time of the process (Windows workstation, 2026-10-14: 31 ms over five seconds with 100 streams on the topic, about 0.6 percent of one core, including the clients in the same process).
+
+**The sample.** `metrics.nodes` holds one `MetricsSample` per controller, this controller first, and `metrics.cluster` their sum. A sample covers the interval between two snapshots (`interval_ms`, about 1,000; 0 for the first sample after the publisher wakes, which has no rates):
+
+| Field | Source |
+|---|---|
+| `node`, `at` | The controller and its clock |
+| `api.requests_per_second` | The change of `tenko_http_requests_total` over the interval, without the route `ui` (the files of the web UI) |
+| `api.p50_ms`, `api.p99_ms` | Interpolated inside the buckets of the change of `tenko_http_request_duration_seconds`, summed over the route classes without `ui` (as Prometheus' `histogram_quantile` does; a quantile in the `+Inf` bucket reads as the highest bound); absent without requests |
+| `store.data_bytes`, `store.file_bytes` | `tenko_store_data_bytes` and the sum of `tenko_store_file_bytes` (absent for an in-memory store) |
+| `store.commit_p99_ms` | The change of `tenko_store_commit_duration_seconds`; absent without writes |
+| `raft.role`, `raft.term`, `raft.lag` | `tenko_raft_role`, `tenko_raft_term` and `tenko_raft_lag_entries` (every member on the leader, this member on a follower) |
+| `jobs.running`, `jobs.waiting` | `tenko_jobs` |
+| `ingest.batches_per_second`, `ingest.facts_per_second` | The change of `tenko_ipam_ingest_batches_total` and `tenko_ipam_ingest_facts_total` |
+| `sse.subscribers` | `tenko_sse_subscribers` |
+| `nodes[]` | `tenko_node_buffer_batches` per connected node, with `drops`, the batches the node's buffer dropped as its last heartbeat reported (absent when the node registry does not say) |
+
+**The cluster merge.** A controller of a cluster asks every other member for its newest sample once per tick, in parallel, with a deadline of 500 ms per peer. A peer that does not answer keeps its last good sample in `nodes`, marked `stale: true` (one that has not answered since the publisher woke appears with `stale: true` and no role); a member of an older build answers `UNIMPLEMENTED` and appears with `unsupported: true` and no figures. `cluster` sums the rates, sizes and counts of the current samples (neither stale nor unsupported) and takes the highest quantiles, term and lag per member; the jobs are shared by the cluster, so it takes the highest job counts rather than their sum. On a single controller `cluster` is its own sample without the node id. The tiles show `cluster`, except the Raft tile, which lists every controller with its role and lag.
+
+**The call between controllers.** `Metrics.Snapshot` (`tenko.cluster.v1`, on the cluster port) answers the callee's newest sample: `node_id`, `at`, `encoding` `cbor/1` and the CBOR of the `MetricsSample` in `payload`. While the callee's own publisher runs, that is the sample of its last tick; otherwise the call takes one on demand, at most one per 500 ms (two callers in the same half second get the same sample). The caller must hold a controller certificate, and when it has a node record (every controller that joined) the record must name the role and hold the certificate; a controller whose API has not started yet answers `UNAVAILABLE` with `cluster.metrics.unavailable`. The bytes travel over the mutual TLS of the cluster port like every other call.
+
+## 8. Not covered yet
+
+Traces (OpenTelemetry over OTLP, `[telemetry]`) come with a later package. DNS and DHCP metrics, and their tiles on the start page, arrive with those modules. Probes report no samples of their own; their buffers show through the controller they are connected to.

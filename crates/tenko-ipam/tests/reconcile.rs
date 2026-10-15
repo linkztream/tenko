@@ -48,6 +48,25 @@ async fn intended(world: &World, name: &str, mode: AssignmentMode, mac: &str, ip
 }
 
 #[tokio::test]
+async fn every_ingest_counts_its_batch_and_its_facts() {
+    use tenko_ipam::reconcile::{INGEST_BATCHES, INGEST_FACTS};
+    let world = lab().await;
+    let (batches, facts) = (INGEST_BATCHES.get(), INGEST_FACTS.get());
+    world
+        .poll(
+            vec![
+                vm("qemu/101", None, Some("00:00:5e:00:53:01"), &["192.0.2.10"]),
+                vm("qemu/102", None, Some("00:00:5e:00:53:02"), &["192.0.2.11"]),
+            ],
+            at("08:00"),
+        )
+        .await;
+    // Other tests of this binary may ingest at the same time, so at least.
+    assert!(INGEST_BATCHES.get() > batches);
+    assert!(INGEST_FACTS.get() >= facts + 2);
+}
+
+#[tokio::test]
 async fn an_unknown_mac_becomes_a_discovered_host_and_approval_makes_it_intent() {
     let world = lab().await;
     world

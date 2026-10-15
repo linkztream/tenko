@@ -87,6 +87,20 @@ describe("EventStream", () => {
     expect(s.state()).toBe("idle");
   });
 
+  it("names only its subscribed topics without base topics, and delivers metrics snapshots without a revision", () => {
+    const s = new EventStream({ baseTopics: [], createEventSource: (url) => new FakeSource(url) as unknown as EventSource });
+    const got: ApiEvent[] = [];
+    s.subscribe("metrics", (e) => got.push(e));
+    s.start();
+    const src = FakeSource.last();
+    expect(src.query.get("topics")).toBe("metrics");
+    src.emit("metrics", { topic: "metrics", kind: "metrics.snapshot", metrics: { nodes: [], cluster: {} } }, "12");
+    expect(got).toHaveLength(1);
+    expect(got[0]?.revision).toBeUndefined();
+    expect(got[0]?.data.kind).toBe("metrics.snapshot");
+    s.stop();
+  });
+
   it("delivers topic events with revision and object references, and tracks the last id", () => {
     const s = stream();
     const seen: ApiEvent[] = [];

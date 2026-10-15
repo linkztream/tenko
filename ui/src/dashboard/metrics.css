@@ -1,0 +1,10 @@
+/* The live metrics of the start page (MetricsTiles.tsx). Token colors only. */
+.dash-metrics { display: grid; gap: var(--sp-4); }
+.dash-metrics > h2 { font-size: var(--fs-14); display: flex; align-items: baseline; gap: var(--sp-4); flex-wrap: wrap; }
+.dash-metrics > h2 .aside { font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); }
+.metrics-tile h3 { font-size: var(--fs-12); font-weight: var(--fw-medium); color: var(--ink-3); }
+.metrics-unit { margin-inline-start: var(--sp-2); font-size: var(--fs-14); font-weight: var(--fw-regular); color: var(--ink-3); }
+.metrics-raft { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); font-size: var(--fs-12); }
+.metrics-raft li { display: flex; align-items: baseline; gap: var(--sp-4); flex-wrap: wrap; min-width: 0; }
+.metrics-raft li .lag { margin-inline-start: auto; color: var(--ink-3); }
+.metrics-raft li[data-state="stale"], .metrics-raft li[data-state="unsupported"] { color: var(--ink-3); }

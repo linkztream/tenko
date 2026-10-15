@@ -5070,6 +5070,7 @@ export interface components {
             deleted?: components["schemas"]["ObjectRef"][];
             /** @description Kind of a system event that did not come from the store, for example an alarm code. */
             kind?: string | null;
+            metrics?: components["schemas"]["MetricsSnapshot"] | null;
             /** @description Objects created or changed (including soft deletes, which are changes). */
             objects?: components["schemas"]["ObjectRef"][];
             /** @description Parameters of such an event, for the UI's translated message. */
@@ -6934,6 +6935,176 @@ export interface components {
             tags?: components["schemas"]["Tag"][];
             /** @description Last change. */
             updated: components["schemas"]["Stamp"];
+        };
+        /** @description The HTTP API of a sample: requests under `/api/v1` (the files of the web UI do not count). */
+        MetricsApi: {
+            /**
+             * Format: double
+             * @description The median time to the response head in milliseconds; absent without requests.
+             */
+            p50_ms?: number | null;
+            /**
+             * Format: double
+             * @description The 99th percentile in milliseconds; absent without requests.
+             */
+            p99_ms?: number | null;
+            /**
+             * Format: double
+             * @description Requests per second.
+             */
+            requests_per_second: number;
+        };
+        /** @description The ingest of observations in a sample. */
+        MetricsIngest: {
+            /**
+             * Format: double
+             * @description Observation batches per second.
+             */
+            batches_per_second: number;
+            /**
+             * Format: double
+             * @description Observations (facts) per second.
+             */
+            facts_per_second: number;
+        };
+        /**
+         * @description The jobs of a sample. The jobs are shared by the cluster, so every controller counts the
+         *     same ones and the cluster takes the highest count.
+         */
+        MetricsJobs: {
+            /**
+             * Format: int64
+             * @description Jobs running.
+             */
+            running: number;
+            /**
+             * Format: int64
+             * @description Jobs waiting for a person or an observation.
+             */
+            waiting: number;
+        };
+        /** @description The replication lag of one member. */
+        MetricsLag: {
+            /**
+             * Format: int64
+             * @description Log entries it is behind the leader.
+             */
+            entries: number;
+            /** @description The member. */
+            node: components["schemas"]["NodeId"];
+        };
+        /** @description A node connected to the controller. */
+        MetricsNode: {
+            /**
+             * Format: int64
+             * @description Observation batches waiting in its disk buffer.
+             */
+            buffer_batches: number;
+            /**
+             * Format: int64
+             * @description Batches its buffer dropped since the node started, as its last heartbeat reported;
+             *     absent when the node registry does not say.
+             */
+            drops?: number | null;
+            /** @description The node. */
+            node: components["schemas"]["NodeId"];
+        };
+        /** @description Raft in a sample. */
+        MetricsRaft: {
+            /**
+             * @description Log entries members are behind the leader: every member on the leader, this member
+             *     on a follower.
+             */
+            lag: components["schemas"]["MetricsLag"][];
+            /**
+             * @description The member's role: `leader`, `follower`, `learner`, `candidate`, `shutdown` or
+             *     `memory`; absent on the cluster sum and for a controller without figures.
+             */
+            role?: string | null;
+            /**
+             * Format: int64
+             * @description The term the member knows.
+             */
+            term: number;
+        };
+        /**
+         * @description One controller's metrics over one interval (about a second), built from two consecutive
+         *     snapshots of its metrics registry: rates and quantiles from the change of the counters
+         *     and histograms, the rest from the gauges.
+         */
+        MetricsSample: {
+            /** @description The HTTP API. */
+            api: components["schemas"]["MetricsApi"];
+            /** @description When the sample was taken, by the controller's clock. */
+            at: components["schemas"]["Timestamp"];
+            /** @description The observations the reconciler ingests. */
+            ingest: components["schemas"]["MetricsIngest"];
+            /**
+             * Format: int64
+             * @description The span of the rates and quantiles in milliseconds; 0 for a first sample, which
+             *     has no rates and no quantiles.
+             */
+            interval_ms: number;
+            /** @description The jobs that are not finished. */
+            jobs: components["schemas"]["MetricsJobs"];
+            node?: components["schemas"]["NodeId"] | null;
+            /** @description The nodes connected to the controller and their buffers. */
+            nodes: components["schemas"]["MetricsNode"][];
+            /** @description Raft. */
+            raft: components["schemas"]["MetricsRaft"];
+            /** @description The event stream. */
+            sse: components["schemas"]["MetricsSse"];
+            /**
+             * @description The controller did not answer this second: the sample is its last good one, or, with
+             *     no role, an empty one when it has not answered yet.
+             */
+            stale?: boolean;
+            /** @description The store. */
+            store: components["schemas"]["MetricsStore"];
+            /** @description The controller runs an older build without the metrics exchange: it has no figures. */
+            unsupported?: boolean;
+        };
+        /**
+         * @description The data of a `metrics.snapshot` event (topic `metrics`, OPS-20): one sample per
+         *     controller and their sum, once per second while a client listens.
+         */
+        MetricsSnapshot: {
+            /**
+             * @description The cluster: rates, sizes and counts summed over the controllers whose sample is
+             *     current, the highest quantiles, terms and lags. On a single controller, its own
+             *     sample without its node id.
+             */
+            cluster: components["schemas"]["MetricsSample"];
+            /** @description One sample per controller of the cluster, the publishing controller first. */
+            nodes: components["schemas"]["MetricsSample"][];
+        };
+        /** @description The event stream of a sample. */
+        MetricsSse: {
+            /**
+             * Format: int64
+             * @description Open event streams.
+             */
+            subscribers: number;
+        };
+        /** @description The store of a sample. */
+        MetricsStore: {
+            /**
+             * Format: double
+             * @description The 99th percentile of the time from a proposal to its commit in milliseconds;
+             *     absent without writes.
+             */
+            commit_p99_ms?: number | null;
+            /**
+             * Format: int64
+             * @description Bytes of live data (keys and values).
+             */
+            data_bytes: number;
+            /**
+             * Format: int64
+             * @description Bytes on disk: the Raft log, the state file and the snapshots; absent for an
+             *     in-memory store.
+             */
+            file_bytes?: number | null;
         };
         /**
          * @description Who must use a second factor (TGL-02). The PIN coupling rule (IAM-07) can force it

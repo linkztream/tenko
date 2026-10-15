@@ -226,6 +226,7 @@ pub struct NodeRegistry {
     touched: Mutex<HashMap<NodeId, Instant>>,
     mismatches: Mutex<HashMap<NodeId, (VersionMismatch, Instant)>>,
     node_sync: OnceLock<crate::node_sync::NodeSync>,
+    metrics: OnceLock<Arc<dyn crate::metrics::MetricsSource>>,
 }
 
 impl std::fmt::Debug for NodeRegistry {
@@ -271,7 +272,20 @@ impl NodeRegistry {
             touched: Mutex::new(HashMap::new()),
             mismatches: Mutex::new(HashMap::new()),
             node_sync: OnceLock::new(),
+            metrics: OnceLock::new(),
         })
+    }
+
+    /// Hands the registry this controller's metrics samples, which `Metrics.Snapshot`
+    /// answers to the other controllers; called once by the server's `api` start step. Until
+    /// then the call answers `UNAVAILABLE`.
+    pub fn set_metrics_source(&self, source: Arc<dyn crate::metrics::MetricsSource>) {
+        let _ = self.metrics.set(source);
+    }
+
+    /// The source of `Metrics.Snapshot`, once set.
+    pub fn metrics_source(&self) -> Option<&Arc<dyn crate::metrics::MetricsSource>> {
+        self.metrics.get()
     }
 
     /// Hands the registry the node-sync services (configuration, commands, node secrets)

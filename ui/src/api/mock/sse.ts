@@ -25,7 +25,10 @@ import { advanceMockJobs } from "./job-store";
 import { fail } from "./reply";
 import { route } from "./route";
 
-const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin", "connectors", "discovery", "secrets", "cluster"];
+// `metrics` is accepted and carries nothing here: the mock has no metrics to sample.
+const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin", "connectors", "discovery", "secrets", "cluster", "metrics"];
+/** The topics of a stream that names none: all but `metrics`, as on the server. */
+const DEFAULT_TOPICS: readonly Topic[] = TOPICS.filter((topic) => topic !== "metrics");
 
 interface OpenStream {
   controller: ReadableStreamDefaultController<Uint8Array>;
@@ -67,7 +70,7 @@ function parseTopics(raw: string | null): ReadonlySet<Topic> {
     .split(",")
     .map((t) => t.trim())
     .filter((t) => t !== "");
-  if (names.length === 0) return new Set(TOPICS);
+  if (names.length === 0) return new Set(DEFAULT_TOPICS);
   const set = new Set<Topic>();
   for (const name of names) {
     if (!(TOPICS as readonly string[]).includes(name)) {

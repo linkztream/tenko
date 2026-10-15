@@ -1,0 +1,4 @@
+/* The sparkline beside the number of a metrics tile (Sparkline.tsx). Token colors only; the
+   newest value sits at the inline end, so the drawing mirrors right to left. */
+.sparkline { display: block; width: 100%; height: 28px; overflow: visible; transform: scaleX(var(--inline-sign, 1)); }
+.sparkline polyline { fill: none; stroke: var(--accent); stroke-width: 1.5px; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }

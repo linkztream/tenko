@@ -23,6 +23,7 @@ and the `data-testid` convention they rely on, are in the section "End-to-end te
 | `backup` | The backup page: back up now with a passphrase (a weak or mistyped one refused first) and the run in the list with its restore command, an interval schedule with a recipient kept across a reload, enabling without a recipient hinted and refused (`backup.key.missing`), keyboard and axe, Swedish |
 | `reconciler` | The reconciler settings page: the server's defaults in human units, a changed interval and orphan age kept across a reload, an interval of 10 s refused inline with nothing sent, the keyboard order of the fields, axe, Swedish |
 | `guardrails` | The guardrails page: the default of ten parallel writes, a VLAN path and a client path saved and shown after a reload, removing one path saves the other alone, `max_parallel` 0 refused inline, the add dialog with the keyboard, axe, Swedish |
+| `metrics` | The live metrics of the start page: an administrator gets a sample within three seconds with a number on every tile and the controller as leader, and the next samples follow; a viewer sees no tiles; nothing in them takes the focus, axe, Swedish |
 
 Each area spec also renders at least one page in Swedish (`support/i18n.ts`). A `test.fixme`
 marks a scenario that waits for a recorded defect.
