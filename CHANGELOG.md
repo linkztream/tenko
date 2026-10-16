@@ -180,6 +180,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - After an update installed from the web UI, the health check and the start-up line name the version that runs, so the update page sees the restart into the new version.
 - Revoking a node no longer fails with a conflict when the node's heartbeat changes its record at the same moment, for example right after it connects: the controller plans the revocation again, and does the same for a certificate renewal.
 - A re-import no longer deletes a replaced credential that a connector instance still references.
+- The API's metrics tests no longer assume they run alone in the process, so `cargo test` passes on Linux as `cargo nextest` does on Windows.
 
 ### Security
 

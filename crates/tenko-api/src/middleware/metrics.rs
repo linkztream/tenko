@@ -465,10 +465,32 @@ mod tests {
         text
     }
 
+    /// The value of one sample line of the rendered text, by its name and label set; a
+    /// series the text does not carry (a route row nobody has hit yet) counts as zero.
+    fn sample(text: &str, series: &str) -> u64 {
+        text.lines()
+            .find_map(|line| line.strip_prefix(series)?.strip_prefix(' '))
+            .map_or(0, |value| {
+                value.trim().parse().unwrap_or_else(|error| {
+                    panic!("the sample {series} is not an integer: {error}")
+                })
+            })
+    }
+
+    // The families are process-wide statics, so under `cargo test` the other tests of
+    // this crate add to the same series while a test runs (nextest gives every test its
+    // own process). The assertions below therefore read the series before the test's own
+    // requests and expect at least the test's additions on top: the counters never go
+    // down.
     #[test]
     fn renders_openmetrics_text() {
         let metrics = Metrics::default();
         let routes = RouteTable::get();
+        let before = render(&metrics);
+        let health_before = requests_for("/api/v1/health", "GET", "200");
+        let prefixes_before = requests_for("/api/v1/prefixes/{id}", "PATCH", "409");
+        let odd_before = requests_for(OTHER_ROUTE, "OTHER", "other");
+        let refused_before = metrics.get(Event::RateLimitedIp);
         let health = routes.row(Some("/api/v1/health"), &Method::GET);
         routes.record(health, 200, Duration::from_micros(300));
         routes.record(health, 200, Duration::from_micros(300));
@@ -481,29 +503,55 @@ mod tests {
         routes.record(odd, 418, Duration::from_secs(20));
         metrics.count(Event::RateLimitedIp);
         let text = render(&metrics);
-        assert!(text.contains(
-            "tenko_http_requests_total{route=\"/api/v1/health\",method=\"GET\",status=\"200\"} 2\n"
-        ));
-        assert!(
-            text.contains("route=\"/api/v1/prefixes/{id}\",method=\"PATCH\",status=\"409\"} 1")
+        let grew = |series: &str, by: u64| {
+            let (was, is) = (sample(&before, series), sample(&text, series));
+            assert!(
+                is >= was + by,
+                "{series}: {was} before, {is} after, expected +{by}"
+            );
+        };
+        grew(
+            "tenko_http_requests_total{route=\"/api/v1/health\",method=\"GET\",status=\"200\"}",
+            2,
         );
-        assert!(text.contains("route=\"other\",method=\"OTHER\",status=\"other\"} 1"));
-        assert!(text.contains("tenko_http_refused_total{reason=\"rate_limit_ip\"} 1\n"));
-        assert!(text.contains("tenko_http_idempotent_replays_total 0\n"));
-        assert!(text.contains(
-            "tenko_http_request_duration_seconds_bucket{class=\"health\",le=\"0.0005\"} 2\n"
-        ));
-        assert!(text.contains(
-            "tenko_http_request_duration_seconds_bucket{class=\"prefixes\",le=\"0.05\"} 1\n"
-        ));
-        assert!(text.contains(
-            "tenko_http_request_duration_seconds_bucket{class=\"other\",le=\"10.0\"} 0\n"
-        ));
-        assert!(text.contains("tenko_http_request_duration_seconds_count{class=\"other\"} 1\n"));
+        grew(
+            "tenko_http_requests_total{route=\"/api/v1/prefixes/{id}\",method=\"PATCH\",status=\"409\"}",
+            1,
+        );
+        grew(
+            "tenko_http_requests_total{route=\"other\",method=\"OTHER\",status=\"other\"}",
+            1,
+        );
+        grew("tenko_http_refused_total{reason=\"rate_limit_ip\"}", 1);
+        assert!(text.contains("\ntenko_http_idempotent_replays_total "));
+        grew(
+            "tenko_http_request_duration_seconds_bucket{class=\"health\",le=\"0.0005\"}",
+            2,
+        );
+        grew(
+            "tenko_http_request_duration_seconds_bucket{class=\"prefixes\",le=\"0.05\"}",
+            1,
+        );
+        grew(
+            "tenko_http_request_duration_seconds_count{class=\"other\"}",
+            1,
+        );
+        // The 20 s observation lies above the last finite bucket; whatever the other tests
+        // add lands in the bucket and the count alike.
+        let above_ten = sample(
+            &text,
+            "tenko_http_request_duration_seconds_count{class=\"other\"}",
+        ) - sample(
+            &text,
+            "tenko_http_request_duration_seconds_bucket{class=\"other\",le=\"10.0\"}",
+        );
+        assert!(above_ten >= 1, "{above_ten} observations above 10 s");
         assert!(text.contains("# UNIT tenko_http_request_duration_seconds seconds\n"));
         assert!(text.ends_with("# EOF\n"));
-        assert_eq!(requests_for("/api/v1/health", "GET", "200"), 2);
-        assert_eq!(metrics.get(Event::RateLimitedIp), 1);
+        assert!(requests_for("/api/v1/health", "GET", "200") >= health_before + 2);
+        assert!(requests_for("/api/v1/prefixes/{id}", "PATCH", "409") > prefixes_before);
+        assert!(requests_for(OTHER_ROUTE, "OTHER", "other") > odd_before);
+        assert!(metrics.get(Event::RateLimitedIp) > refused_before);
     }
 
     #[test]
@@ -559,6 +607,11 @@ mod tests {
         let state = AppState::default();
         let app = crate::server::app(state.clone(), &HttpConfig::default(), &UiSource::Embedded)
             .expect("the app");
+        let not_found_before = requests_for(OTHER_ROUTE, "GET", "404");
+        let not_allowed_before = requests_for(OTHER_ROUTE, "PUT", "405");
+        let before = crate::routes::metrics::render_metrics(&state);
+        let count_other = "tenko_http_request_duration_seconds_count{class=\"other\"}";
+        let not_found = "tenko_http_requests_total{route=\"other\",method=\"GET\",status=\"404\"}";
         for (method, path) in [
             ("GET", "/api/v1/no-such-area"),
             ("GET", "/api/v1/no-such-area"),
@@ -572,16 +625,18 @@ mod tests {
             let response = app.clone().oneshot(request).await.expect("response");
             assert!(response.status().is_client_error(), "{method} {path}");
         }
-        assert_eq!(requests_for(OTHER_ROUTE, "GET", "404"), 2);
-        assert_eq!(requests_for(OTHER_ROUTE, "PUT", "405"), 1);
+        // Process-wide series: other tests may add to them meanwhile (see above).
+        assert!(requests_for(OTHER_ROUTE, "GET", "404") >= not_found_before + 2);
+        assert!(requests_for(OTHER_ROUTE, "PUT", "405") > not_allowed_before);
         let text = crate::routes::metrics::render_metrics(&state);
         assert!(
-            text.contains(
-                "tenko_http_requests_total{route=\"other\",method=\"GET\",status=\"404\"} 2\n"
-            ),
+            sample(&text, not_found) >= sample(&before, not_found) + 2,
             "{text}"
         );
-        assert!(text.contains("tenko_http_request_duration_seconds_count{class=\"other\"} 3\n"));
+        assert!(
+            sample(&text, count_other) >= sample(&before, count_other) + 3,
+            "{text}"
+        );
         tenko_core::metrics::check(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
     }
 }
