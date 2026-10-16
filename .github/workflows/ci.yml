@@ -189,15 +189,10 @@ jobs:
         run: npm ci
       - name: Install Chromium
         working-directory: ui
-        # The hosted runner gets the system libraries of Chromium installed as well; a
-        # self-hosted runner keeps them from its first run ($RUNNER_ENVIRONMENT is set by
-        # the runner).
-        run: |
-          if [ "$RUNNER_ENVIRONMENT" = github-hosted ]; then
-            npx playwright install --with-deps chromium
-          else
-            npx playwright install chromium
-          fi
+        # With the system libraries of Chromium on every runner: the hosted one starts
+        # fresh each time, and the self-hosted one needs them once (its runner account has
+        # passwordless sudo for this; apt is quick when they are there already).
+        run: npx playwright install --with-deps chromium
       - name: End-to-end tests
         working-directory: ui
         env:
