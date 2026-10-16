@@ -104,3 +104,43 @@ tenko_read_secret() {
   fi
   printf -v "$name" '%s' "$value"
 }
+
+# tenko_jobs_for_memory <mib-per-job> [<memory-kib>] [<cores>]: how many jobs of the given
+# size run side by side in the memory: MemTotal of /proc/meminfo (which lxcfs limits to the
+# container's share) divided by the size, at most one per core (nproc) and at least one.
+# Linkers are the case: a build starts one per core, and the kernel kills them when they
+# do not fit.
+tenko_jobs_for_memory() {
+  local per_job="$1" mem_kib="${2:-}" cores="${3:-}" jobs
+  if [[ -z "$mem_kib" ]]; then
+    mem_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || true)"
+  fi
+  if [[ -z "$cores" ]]; then
+    cores="$(nproc 2>/dev/null || true)"
+  fi
+  [[ "$per_job" =~ ^[0-9]+$ && "$per_job" -gt 0 ]] || per_job=1
+  [[ "$mem_kib" =~ ^[0-9]+$ ]] || mem_kib=0
+  [[ "$cores" =~ ^[0-9]+$ && "$cores" -gt 0 ]] || cores=1
+  jobs=$((mem_kib / 1024 / per_job))
+  if ((jobs > cores)); then
+    jobs="$cores"
+  fi
+  if ((jobs < 1)); then
+    jobs=1
+  fi
+  echo "$jobs"
+}
+
+# tenko_env_file_set <file> <name> <value>: NAME=value in a file of such lines (the
+# runner's .env), replacing the line of that name and keeping every other line; the file
+# is created when missing, and an existing file keeps its owner and mode.
+tenko_env_file_set() {
+  local file="$1" name="$2" value="$3" tmp
+  tmp="$(mktemp)"
+  if [[ -f "$file" ]]; then
+    grep -v "^${name}=" "$file" >"$tmp" || true
+  fi
+  printf '%s=%s\n' "$name" "$value" >>"$tmp"
+  cat "$tmp" >"$file"
+  rm -f "$tmp"
+}

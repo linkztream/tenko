@@ -22,6 +22,10 @@
 #   RUNNER_DIR      default: /opt/actions-runner
 #   RUNNER_TOKEN    the registration token; read from standard input when not set and
 #                   standard input is not a terminal; empty: no registration
+#   CARGO_BUILD_JOBS  cap on cargo's parallel jobs in the runner's jobs, written to
+#                   <RUNNER_DIR>/.env; default: the container's memory in GiB divided by
+#                   two, at most the core count (the test build links one binary per job,
+#                   each about 2 GiB)
 #   TENKO_INSTALL_TEST=1  under the container test: no systemctl, no Docker daemon
 # Exit status: 0 done; 10 installed, but the registration was refused; anything else failed.
 #
@@ -45,6 +49,11 @@ RUNNER_USER="${RUNNER_USER:-runner}"
 RUNNER_DIR="${RUNNER_DIR:-/opt/actions-runner}"
 RUNNER_TOKEN="${RUNNER_TOKEN:-}"
 tenko_read_secret RUNNER_TOKEN
+CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-}"
+if [[ -n "$CARGO_BUILD_JOBS" && ! "$CARGO_BUILD_JOBS" =~ ^[1-9][0-9]*$ ]]; then
+  msg_error "CARGO_BUILD_JOBS: a number of jobs from 1, not '${CARGO_BUILD_JOBS}'"
+  exit 2
+fi
 
 if [[ "$(dpkg --print-architecture)" != "amd64" ]]; then
   msg_error "The runner container is built for amd64; this is $(dpkg --print-architecture)"
@@ -122,6 +131,24 @@ msg_info "Installing the runner's .NET dependencies"
 $STD "${RUNNER_DIR}/bin/installdependencies.sh"
 msg_ok "Installed the runner's .NET dependencies"
 
+# The runner puts every line of its .env into the environment of each job. The workspace
+# test build links one binary per parallel job, each about 2 GiB; without a cap cargo
+# starts one per core, and a container with many cores and little memory has the kernel
+# kill the linkers and the runner with them.
+msg_info "Capping cargo's parallel jobs by the container's memory"
+MEM_KIB="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || true)"
+CORES="$(nproc 2>/dev/null || echo 1)"
+if [[ -z "$CARGO_BUILD_JOBS" ]]; then
+  CARGO_BUILD_JOBS="$(tenko_jobs_for_memory 2048 "$MEM_KIB" "$CORES")"
+  JOBS_SOURCE="from the memory"
+else
+  JOBS_SOURCE="given"
+fi
+tenko_env_file_set "${RUNNER_DIR}/.env" CARGO_BUILD_JOBS "$CARGO_BUILD_JOBS"
+chown "${RUNNER_USER}:${RUNNER_USER}" "${RUNNER_DIR}/.env"
+chmod 0644 "${RUNNER_DIR}/.env"
+msg_ok "CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS} in ${RUNNER_DIR}/.env (${JOBS_SOURCE}; $((${MEM_KIB:-0} / 1048576)) GiB memory, ${CORES} cores, about 2 GiB per job)"
+
 if [[ -n "$RUNNER_TOKEN" ]]; then
   msg_info "Registering the runner as ${RUNNER_NAME} with the labels ${RUNNER_LABELS}"
   # The token goes to config.sh through ACTIONS_RUNNER_INPUT_TOKEN, which the runner reads
@@ -147,6 +174,12 @@ if [[ -n "$RUNNER_TOKEN" ]]; then
     TENKO_EXIT=10
   fi
   RUNNER_TOKEN=""
+elif [[ -f "${RUNNER_DIR}/.service" ]] && ! tenko_under_test; then
+  # A run without a token on a registered runner: the service was stopped above for the
+  # extraction and starts again here, with the fresh .env.
+  msg_info "Starting the runner service again"
+  (cd "$RUNNER_DIR" && $STD ./svc.sh start)
+  msg_ok "Started the runner service $(<"${RUNNER_DIR}/.service") (registration kept)"
 else
   msg_warn "No registration token: the runner is installed but not registered (deploy/proxmox/README.md)"
 fi

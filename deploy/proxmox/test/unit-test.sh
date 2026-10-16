@@ -19,6 +19,8 @@ else
   # shellcheck source=../lib/common.sh
   source "${root}/lib/common.sh"
 fi
+# shellcheck source=../lib/container.sh
+source "${root}/lib/container.sh"
 
 failures=0
 expect() {
@@ -91,6 +93,26 @@ resolve() {
 expect "a malformed checksum is refused" "1 given" "$(resolve 2.338.0 nothex)"
 expect "a checksum without a version is refused" "1 " "$(resolve "" "$sha_x64")"
 expect "a given version and checksum are taken, normalised" "0 given" "$(resolve v2.338.0 "${sha_x64^^}")"
+
+echo "== jobs for the memory (lib/container.sh)"
+gib=1048576
+expect "28 cores, 8 GiB: four jobs of 2 GiB" "4" "$(tenko_jobs_for_memory 2048 $((8 * gib)) 28)"
+expect "28 cores, 32 GiB: sixteen" "16" "$(tenko_jobs_for_memory 2048 $((32 * gib)) 28)"
+expect "28 cores, 64 GiB: one per core" "28" "$(tenko_jobs_for_memory 2048 $((64 * gib)) 28)"
+expect "4 cores, 1 GiB: never below one" "1" "$(tenko_jobs_for_memory 2048 $gib 4)"
+expect "4 cores, 7.9 GiB: whole jobs only" "3" "$(tenko_jobs_for_memory 2048 $((8 * gib - 1)) 4)"
+expect "a garbage core count counts as one" "1" "$(tenko_jobs_for_memory 2048 $((32 * gib)) none)"
+expect "a garbage memory counts as none" "1" "$(tenko_jobs_for_memory 2048 none 8)"
+echo "== the env file (lib/container.sh)"
+envfile="$(mktemp)"
+printf 'LANG=C.UTF-8\n' >"$envfile"
+tenko_env_file_set "$envfile" CARGO_BUILD_JOBS 4
+tenko_env_file_set "$envfile" CARGO_BUILD_JOBS 16
+expect "the line replaced, the other kept" "LANG=C.UTF-8 CARGO_BUILD_JOBS=16" "$(tr '\n' ' ' <"$envfile" | sed 's/ $//')"
+rm -f "$envfile"
+tenko_env_file_set "$envfile" CARGO_BUILD_JOBS 2
+expect "a missing file is created" "CARGO_BUILD_JOBS=2" "$(cat "$envfile")"
+rm -f "$envfile"
 
 if declare -F tenko_pick_template >/dev/null; then
   echo "== templates and storages (lib/host.sh)"

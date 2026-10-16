@@ -24,6 +24,7 @@ A self-hosted runner has no minute budget and keeps its caches warm between runs
 | `curl`, `openssl`, `python3`, `jq`, `file`, `iproute2` | the smokes, the release checks | apt |
 | Rust and Node | every job | installed by the jobs themselves (`dtolnay/rust-toolchain`, `actions/setup-node`) into the runner account's home |
 | Disk | the test build of the workspace is tens of gigabytes; `Swatinem/rust-cache` restores and saves it through GitHub's cache | a 120 GB root disk on SSD; see housekeeping |
+| Memory | the test build links one binary per parallel job, about 2 GiB each, one job per core unless capped | about 2 GiB per core; the install script caps cargo's jobs to the memory through `CARGO_BUILD_JOBS` in the runner's `.env` (the memory in GiB divided by two, at most the core count) |
 
 ## The container
 
@@ -31,9 +32,10 @@ A self-hosted runner has no minute budget and keeps its caches warm between runs
 create an unprivileged container on the Proxmox host (the names and addresses are yours; this
 document uses placeholders):
 
-- Template: Ubuntu 24.04 standard. Resources: 4 vCPU or more, 8 GB RAM (16 GB makes the
-  workspace test build comfortable), 120 GB root disk on SSD-backed storage, one bridged
-  network interface with outbound access to github.com, crates.io, registry.npmjs.org,
+- Template: Ubuntu 24.04 standard. Resources: 4 vCPU or more with about 2 GiB of RAM per
+  vCPU (8 GiB for 4; 28 vCPU want 32 GiB and a few GiB of swap; with less memory the
+  install script caps the build's parallel jobs to it), 120 GB root disk on SSD-backed
+  storage, one bridged network interface with outbound access to github.com, crates.io, registry.npmjs.org,
   download.docker.com and the Ubuntu mirrors. The runner polls GitHub; nothing reaches the
   container from outside, so no port is forwarded to it.
 - Options: `features: nesting=1,keyctl=1` (Docker needs both in an unprivileged container),
@@ -120,6 +122,11 @@ builds at once first.
   scripts clean their containers and networks themselves); `<RUNNER_DIR>/_work/` holds the
   checkouts and the target directories of the last run of every job and can be emptied while
   no job runs. `df -h /` and `docker system df` tell when.
+- After a resize of the container: the cap `CARGO_BUILD_JOBS` in `<RUNNER_DIR>/.env`
+  follows the memory at install time. Run the install script again in the container, as
+  root and without a token (`bash deploy/proxmox/install/tenko-ci-runner-install.sh </dev/null`):
+  it keeps the registration, rewrites the cap and starts the service again. Or edit the
+  line and restart the service.
 - Switching back to the hosted runners (for example while the container is down):
   `gh variable delete LINUX_RUNNER --repo linkztream/tenko`. The next run uses
   `ubuntu-latest` again; nothing else changes.

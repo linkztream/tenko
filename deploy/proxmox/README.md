@@ -23,7 +23,8 @@ anywhere else. The only tools used on the host are the ones Proxmox VE ships (`p
 
 - An unprivileged Ubuntu 24.04 container (the newest `ubuntu-24.04-standard` template
   that `pveam available` lists, downloaded to the template storage when missing) with
-  `features: nesting=1,keyctl=1` (Docker needs both), 4 cores, 8 GiB memory, 512 MiB swap,
+  `features: nesting=1,keyctl=1` (Docker needs both), 4 cores, 8 GiB memory (give about
+  2 GiB per core; with less, the build runs fewer jobs than cores, below), 512 MiB swap,
   a 120 GB root disk, one bridged NIC (`eth0` on `vmbr0`, DHCP), start on boot, the tags
   `ci;runner`, a description with the app, the repository and the date. No root password
   unless you give one; the console is `pct enter <ctid>`.
@@ -34,7 +35,12 @@ anywhere else. The only tools used on the host are the ones Proxmox VE ships (`p
   group with passwordless sudo (`/etc/sudoers.d/90-runner`), the runner software in
   `/opt/actions-runner` (owned by the account, verified against its SHA-256 before it is
   unpacked) with its .NET dependencies, and, with a registration token, the registration
-  (labels `tenko-linux`) and the service `actions.runner.<owner>-<repo>.<name>`.
+  (labels `tenko-linux`) and the service `actions.runner.<owner>-<repo>.<name>`. In
+  `/opt/actions-runner/.env`, which the runner puts into the environment of every job,
+  `CARGO_BUILD_JOBS`: the container's memory in GiB divided by two, at most the core count.
+  The workspace test build links one binary per parallel job at about 2 GiB each; without
+  the cap cargo starts one per core, and a container with many cores and little memory has
+  the kernel kill the linkers and the runner with them.
 - Checks at the end, as `ok`/`!!` lines: Docker runs, a `dummy` link can be created (the
   macvlan smoke), systemd 250 or later and `systemd-creds` (the systemd smoke), free disk,
   the runner service.
@@ -134,6 +140,7 @@ The runner's own (`ct/tenko-ci-runner.sh`) and the environment:
 | `var_runner_version` | the latest release | Runner version, e.g. `2.330.0` |
 | `var_runner_sha256` | from the release notes | SHA-256 of `actions-runner-linux-x64-<version>.tar.gz` |
 | `RUNNER_TOKEN` | empty: a password box asks | Registration token; empty: register later by hand |
+| `CARGO_BUILD_JOBS` | empty: from the memory | Cap on cargo's parallel jobs in the runner's jobs (`/opt/actions-runner/.env`); empty: the memory in GiB divided by two, at most the core count |
 | `GITHUB_TOKEN` | empty | Fine-grained read token for the one-command form and the API lookup |
 | `TENKO_SCRIPTS_URL` | `https://raw.githubusercontent.com/linkztream/tenko/main/deploy/proxmox` | Where the one-command form fetches `lib/` and `install/` |
 | `TENKO_DRY_RUN` | `0` | `1`: print every `pct`, `pveam`, `pvesm` and `pvesh` command instead of running it, with canned answers; runs on any Linux |
@@ -158,8 +165,9 @@ mode in a container without the runner.
 the former `.github/runner/setup-lxc.sh`. Its settings come from the environment:
 `RUNNER_VERSION` and `RUNNER_SHA256` (default: resolved from the GitHub API as above),
 `RUNNER_LABELS` (`tenko-linux`), `RUNNER_NAME` (the host name), `REPO_URL` (this
-repository), `RUNNER_USER` (`runner`), `RUNNER_DIR` (`/opt/actions-runner`). The token is
-read from standard input:
+repository), `RUNNER_USER` (`runner`), `RUNNER_DIR` (`/opt/actions-runner`),
+`CARGO_BUILD_JOBS` (empty: from the container's memory, as above). The token is read from
+standard input:
 
 ```bash
 printf '%s\n' '<registration token>' | bash deploy/proxmox/install/tenko-ci-runner-install.sh
@@ -172,9 +180,21 @@ Exit status 10 means installed, but the token was refused (they expire after an 
 Run the same script inside the runner container (`pct enter <ctid>`, then the one-command
 form, or the checkout path if the container has one). It creates nothing: it upgrades the
 packages, offers `docker system prune --all --force` (default no), and prints the runner's
-version and whether its service is active. The runner updates itself; the script does not
-reinstall it. Run it while no job runs: an upgrade of Docker restarts the daemon. Inside a
-container without the runner it stops with exit 233.
+version, whether its service is active, and the `CARGO_BUILD_JOBS` cap of `.env` next to
+the memory the container has now. The runner updates itself; the script does not reinstall
+it. Run it while no job runs: an upgrade of Docker restarts the daemon. Inside a container
+without the runner it stops with exit 233.
+
+## After a resize
+
+The cap on the build's parallel jobs is derived at install time. When the container gets
+more memory or cores, run the install script again in it, as root and without a token: it
+keeps the registration, rewrites `CARGO_BUILD_JOBS` in `/opt/actions-runner/.env` and
+starts the service again. Or set the line by hand and restart the service.
+
+```bash
+bash deploy/proxmox/install/tenko-ci-runner-install.sh </dev/null
+```
 
 ## A second runner
 

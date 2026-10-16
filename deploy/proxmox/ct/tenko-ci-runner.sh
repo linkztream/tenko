@@ -129,6 +129,10 @@ before_create() {
 install_env() {
   printf '%s\n' "RUNNER_VERSION=${var_runner_version}" "RUNNER_SHA256=${var_runner_sha256,,}" \
     "RUNNER_LABELS=${var_runner_labels}" "RUNNER_NAME=${var_hostname}" "REPO_URL=${var_repo_url}"
+  # The cap on cargo's parallel jobs; empty: the install script derives it from the memory.
+  if [[ -n "${CARGO_BUILD_JOBS:-}" ]]; then
+    printf 'CARGO_BUILD_JOBS=%s\n' "$CARGO_BUILD_JOBS"
+  fi
 }
 
 # install_stdin: the token, the only secret, on the install script's standard input.
@@ -166,7 +170,7 @@ final_lines() {
 
 # update_script: update mode, when this script runs inside the runner container.
 update_script() {
-  local version unit state
+  local version unit state jobs mem_gib
   if [[ ! -f "${RUNNER_DIR}/config.sh" ]]; then
     msg_error "No ${APP} installation found"
     exit 233
@@ -187,6 +191,15 @@ update_script() {
   unit="$(cat "${RUNNER_DIR}/.service" 2>/dev/null || echo 'actions.runner.*')"
   state="$(systemctl is-active "$unit" 2>/dev/null | head -n 1 || true)"
   msg_ok "Runner ${version:-unknown} (it updates itself), service ${unit}: ${state:-unknown}"
+  # The cap on cargo's parallel jobs follows the container's memory at install time; after
+  # a resize the install script, run again without a token, rewrites it.
+  jobs="$(sed -n 's/^CARGO_BUILD_JOBS=//p' "${RUNNER_DIR}/.env" 2>/dev/null | tail -n 1)"
+  mem_gib="$(($(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0) / 1048576))"
+  if [[ -z "$jobs" ]]; then
+    msg_warn "No CARGO_BUILD_JOBS in ${RUNNER_DIR}/.env (${mem_gib} GiB memory, $(nproc) cores): run install/tenko-ci-runner-install.sh again to cap the build"
+  else
+    msg_ok "CARGO_BUILD_JOBS=${jobs} in ${RUNNER_DIR}/.env (${mem_gib} GiB memory, $(nproc) cores); run install/tenko-ci-runner-install.sh again after a resize"
+  fi
 }
 
 tenko_main "$@"

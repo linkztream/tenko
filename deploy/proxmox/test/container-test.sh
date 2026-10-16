@@ -72,6 +72,9 @@ check "runner may sudo without a password" 'sudo -l -U runner | grep -F "(ALL) N
 check "runner extracted, owned by runner" 'test -x /opt/actions-runner/config.sh && test -x /opt/actions-runner/run.sh && stat -c "%U %n" /opt/actions-runner/config.sh /opt/actions-runner/bin'
 check "runner version" '/opt/actions-runner/bin/Runner.Listener --version'
 check "not registered (no token)" 'test ! -e /opt/actions-runner/.runner && echo "no .runner file"'
+# shellcheck disable=SC2016 # Expanded in the container.
+check "CARGO_BUILD_JOBS in .env, owned by runner, at most one per core" \
+  'jobs="$(sed -n "s/^CARGO_BUILD_JOBS=//p" /opt/actions-runner/.env)"; test "$(stat -c %U /opt/actions-runner/.env)" = runner && [ "$jobs" -ge 1 ] && [ "$jobs" -le "$(nproc)" ] && echo "CARGO_BUILD_JOBS=$jobs of $(nproc) cores"'
 check "installdependencies.sh ran (libicu installed)" 'dpkg-query -W -f="\${Package} \${db:Status-Status}\n" "libicu*" | grep " installed$"'
 check "no tarball left behind" '! ls /tmp/tmp.*/actions-runner-* 2>/dev/null && echo none'
 grep -q "Installed the runner ${RUNNER_VERSION} into /opt/actions-runner (SHA-256 verified)" "$log" &&
@@ -110,7 +113,7 @@ grep -E '\(jq\)|^FAIL|^== unit' <<<"$out" || true
 ((rc == 0)) || failures=$((failures + 1))
 
 echo "== install script output (checks)"
-grep -E '(ok|!!)  (dummy links|systemd|disk|runner service|Docker|Under the test)' "$log" || true
+grep -E '(ok|!!)  (dummy links|systemd|disk|runner service|Docker|Under the test|CARGO_BUILD_JOBS)' "$log" || true
 
 if ((failures > 0)); then
   echo "== container test: ${failures} check(s) failed"
