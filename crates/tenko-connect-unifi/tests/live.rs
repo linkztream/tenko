@@ -10,7 +10,10 @@
 //! applies or reverts, so it writes nothing. It prints shapes and counts only, never names,
 //! addresses or identifiers.
 
-use std::{collections::BTreeMap, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 
 use tenko_connect::{
     CallContext, Connector, ControllerDhcp, InventorySource, NetworkController, Secrets,
@@ -208,4 +211,98 @@ fn report(topology: &tenko_connect::TopologySnapshot) {
         count(wlans, |w| w.vlan.is_some()),
         count(wlans, |w| !w.access_points.is_empty()),
     );
+}
+
+// ---- recording the fixtures ---------------------------------------------------------
+
+/// The endpoints the recording reads, and the file each one becomes.
+const RECORDED: [&str; 7] = [
+    "stat/device",
+    "stat/sta",
+    "rest/networkconf",
+    "rest/wlanconf",
+    "rest/portconf",
+    "rest/user",
+    "stat/sysinfo",
+];
+
+/// Records the classic answers of the real controller as anonymised fixtures under
+/// `tests/fixtures/recorded/`. It runs only with `TENKO_LIVE_UNIFI=1` and `TENKO_RECORD=1`
+/// and a local account in `.env`; it never prints an answer, only counts.
+#[tokio::test]
+#[ignore = "reads a real controller and rewrites the recorded fixtures; set TENKO_LIVE_UNIFI=1 and TENKO_RECORD=1"]
+async fn live_record_fixtures() {
+    use tenko_connect::sdk::anonymise::Anonymiser;
+    use tenko_connect_unifi::{classic::Session, detect, http::Http, settings};
+
+    if std::env::var("TENKO_LIVE_UNIFI").ok().as_deref() != Some("1")
+        || std::env::var("TENKO_RECORD").ok().as_deref() != Some("1")
+    {
+        eprintln!("skipped: TENKO_LIVE_UNIFI and TENKO_RECORD are not both 1");
+        return;
+    }
+    let Some(ctx) = live_context().await else {
+        return;
+    };
+    let config = settings::config(&ctx).expect("settings");
+    let settings::Credentials::Account { username, password } =
+        settings::credentials(&ctx).expect("credentials")
+    else {
+        eprintln!("skipped: recording needs the local account (classic API)");
+        return;
+    };
+    let http = Http::new(&config).expect("http client");
+    let detected = detect::detect(&http, config.deployment)
+        .await
+        .expect("detection");
+    let mut session = Session::login(&http, detected.paths, &config.site, &username, &password)
+        .await
+        .expect("login");
+    let mut raw = serde_json::Map::new();
+    for path in RECORDED {
+        let records = session.records(path).await.expect(path);
+        raw.insert(path.to_owned(), serde_json::Value::Array(records));
+    }
+    session.logout().await;
+
+    // The known-client records are kept for the connected clients and a few others, so that
+    // the offline shape is on record without the whole history of the site.
+    let connected: BTreeSet<String> = raw["stat/sta"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|client| client["mac"].as_str().map(str::to_ascii_lowercase))
+        .collect();
+    let mut others = 0;
+    if let Some(users) = raw
+        .get_mut("rest/user")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        users.retain(|user| {
+            let online = user["mac"]
+                .as_str()
+                .is_some_and(|mac| connected.contains(&mac.to_ascii_lowercase()));
+            others += usize::from(!online);
+            online || others <= 3
+        });
+    }
+
+    let mut anonymiser = Anonymiser::new();
+    let output = anonymiser.anonymise(&serde_json::Value::Object(raw));
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/recorded");
+    std::fs::create_dir_all(&dir).expect("the recorded directory");
+    for path in RECORDED {
+        let data = &output[path];
+        let file = dir.join(format!("{}.json", path.rsplit('/').next().unwrap_or(path)));
+        let envelope = serde_json::json!({ "meta": { "rc": "ok" }, "data": data });
+        let mut text = serde_json::to_string_pretty(&envelope).expect("json");
+        text.push('\n');
+        std::fs::write(&file, text).expect("write the fixture");
+        println!(
+            "recorded {path}: {} records -> {}",
+            data.as_array().map_or(0, Vec::len),
+            file.file_name().unwrap_or_default().to_string_lossy()
+        );
+    }
+    println!("replaced: {:?}", anonymiser.counts());
 }

@@ -220,6 +220,17 @@ impl Session {
         Ok(data.first().and_then(|info| json::text(info, "version")))
     }
 
+    /// The records a read endpoint of the site answers (`stat/device`, `rest/networkconf`),
+    /// as the controller sent them. The recorder of the crate's fixtures uses it; the plugin's
+    /// own reads go through the typed methods below.
+    ///
+    /// # Errors
+    ///
+    /// The controller's error.
+    pub async fn records(&mut self, path: &str) -> Result<Vec<Value>, ConnectorError> {
+        self.site_call(Method::GET, path, None).await
+    }
+
     /// The managed devices.
     ///
     /// # Errors

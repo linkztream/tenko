@@ -48,6 +48,7 @@
 //! the token check puts it into the request extensions as a [`TraceContext`], so a plugin
 //! that installs a tracer of its own can continue the host's trace. The SDK exports nothing.
 
+pub mod anonymise;
 #[cfg(feature = "http-client")]
 pub mod http;
 mod services;

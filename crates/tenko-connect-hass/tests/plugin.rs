@@ -344,3 +344,71 @@ async fn the_plugin_passes_the_conformance_suite_without_settings() {
     let report = run(&launch_spec(), &options).await;
     assert!(report.passed(), "{report}");
 }
+
+/// The recording of a real instance (`tests/fixtures/recorded.json`, see the README there)
+/// reads as the live smoke did on the day of the recording: 106 of 360 devices have a MAC
+/// address, no entity shows an IP address, 9 integrations, 34 devices in an area.
+#[tokio::test]
+async fn the_recorded_instance_reads_like_the_live_one() {
+    use std::collections::BTreeSet;
+
+    use tenko_connect_hass::inventory::{self, Options, Snapshot};
+
+    let mock = Mock::start(fixture("recorded.json")).await;
+    let ctx = context(&mock, &serde_json::json!({}));
+    let report = HomeAssistant.check(&ctx).await.expect("check");
+    assert_eq!(report.health, Health::Healthy);
+    assert!(
+        report
+            .remote_version
+            .is_some_and(|v| v.starts_with("Home Assistant 20"))
+    );
+    let batch = HomeAssistant.poll(&ctx, None).await.expect("poll");
+    assert!(batch.complete && !batch.more);
+    let hosts = &batch.hosts;
+    assert_eq!(hosts.len(), 106);
+    assert!(hosts.iter().all(|h| h.external_id.starts_with("device/")));
+    assert_eq!(hosts.iter().map(|h| h.macs.len()).sum::<usize>(), 115);
+    assert!(hosts.iter().all(|h| h.ips.is_empty()));
+    assert!(hosts.iter().all(|h| h.platform.is_some()));
+    assert_eq!(
+        hosts
+            .iter()
+            .filter(|h| h.tags.iter().any(|t| t.starts_with("area:")))
+            .count(),
+        34
+    );
+    assert_eq!(batch.vendors.len(), 52);
+    let integrations: BTreeSet<&str> = hosts
+        .iter()
+        .flat_map(|h| h.tags.iter())
+        .filter_map(|t| t.strip_prefix("integration:"))
+        .collect();
+    assert_eq!(integrations.len(), 9);
+
+    // The recording maps every public IPv4 address into TEST-NET-3, which the plugin counts
+    // as local; with TEST-NET-3 as "the internet" the inventory must come out the same.
+    let text = std::fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/recorded.json"),
+    )
+    .expect("fixture");
+    let value: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+    let list = |v: &serde_json::Value| v.as_array().cloned().unwrap_or_default();
+    let snapshot = Snapshot {
+        devices: list(&value["ws"]["config/device_registry/list"]),
+        entities: list(&value["ws"]["config/entity_registry/list"]),
+        areas: list(&value["ws"]["config/area_registry/list"]),
+        entries: Some(list(&value["ws"]["config_entries/get"])),
+        states: list(&value["rest"]["/api/states"]),
+    };
+    assert_eq!(snapshot.devices.len(), 360);
+    let built = inventory::build(
+        &snapshot,
+        &Options {
+            public_v4: |ip| ip.octets()[..3] == [203, 0, 113],
+            ..Options::default()
+        },
+    );
+    assert_eq!(built.hosts, batch.hosts);
+    assert_eq!(built.vendors, batch.vendors);
+}

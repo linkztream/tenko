@@ -1,0 +1,69 @@
+{
+  "data": [
+    {
+      "_id": "00000000000000000000000e",
+      "autoneg": false,
+      "dot1x_ctrl": "text-2",
+      "egress_rate_limit_kbps": 100,
+      "egress_rate_limit_kbps_enabled": false,
+      "excluded_networkconf_ids": [
+        "000000000000000000000004",
+        "000000000000000000000006",
+        "00000000000000000000000a",
+        "000000000000000000000008"
+      ],
+      "forward": "customize",
+      "full_duplex": true,
+      "isolation": false,
+      "lldpmed_enabled": true,
+      "lldpmed_notify_enabled": false,
+      "name": "name-8",
+      "native_networkconf_id": "00000000000000000000000c",
+      "op_mode": "switch",
+      "poe_mode": "off",
+      "setting_preference": "manual",
+      "site_id": "000000000000000000000003",
+      "speed": 1000,
+      "stormctrl_bcast_enabled": false,
+      "stormctrl_bcast_rate": 100,
+      "stormctrl_mcast_enabled": false,
+      "stormctrl_mcast_rate": 100,
+      "stormctrl_ucast_enabled": false,
+      "stormctrl_ucast_rate": 100,
+      "stp_edge_state": "text-3",
+      "stp_port_mode": true,
+      "tagged_vlan_mgmt": "text-4",
+      "voice_networkconf_id": ""
+    },
+    {
+      "_id": "00000000000000000000000f",
+      "autoneg": true,
+      "dot1x_ctrl": "text-2",
+      "egress_rate_limit_kbps": 100,
+      "egress_rate_limit_kbps_enabled": false,
+      "forward": "native",
+      "isolation": false,
+      "lldpmed_enabled": true,
+      "lldpmed_notify_enabled": false,
+      "name": "name-9",
+      "native_networkconf_id": "00000000000000000000000c",
+      "op_mode": "switch",
+      "poe_mode": "auto",
+      "setting_preference": "auto",
+      "site_id": "000000000000000000000003",
+      "stormctrl_bcast_enabled": false,
+      "stormctrl_bcast_rate": 100,
+      "stormctrl_mcast_enabled": false,
+      "stormctrl_mcast_rate": 100,
+      "stormctrl_ucast_enabled": false,
+      "stormctrl_ucast_rate": 100,
+      "stp_edge_state": "text-3",
+      "stp_port_mode": true,
+      "tagged_vlan_mgmt": "text-5",
+      "voice_networkconf_id": ""
+    }
+  ],
+  "meta": {
+    "rc": "ok"
+  }
+}

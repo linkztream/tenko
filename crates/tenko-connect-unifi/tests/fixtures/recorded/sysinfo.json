@@ -1,0 +1,48 @@
+{
+  "data": [
+    {
+      "anonymous_controller_id": "00000000-0000-0000-0000-000000000089",
+      "autobackup": false,
+      "build": "text-67",
+      "data_retention_days": 90,
+      "data_retention_time_in_hours_for_5minutes_scale": 24,
+      "data_retention_time_in_hours_for_daily_scale": 2160,
+      "data_retention_time_in_hours_for_hourly_scale": 168,
+      "data_retention_time_in_hours_for_monthly_scale": 8760,
+      "data_retention_time_in_hours_for_others": 2160,
+      "debug_device": "text-68",
+      "debug_mgmt": "text-68",
+      "debug_sdn": "text-68",
+      "debug_setting_preference": "auto",
+      "debug_system": "text-68",
+      "has_webrtc_support": true,
+      "hostname": "00005e005367",
+      "https_port": 8443,
+      "image_maps_use_google_engine": false,
+      "inform_port": 8080,
+      "ip_addrs": [
+        "198.18.2.0",
+        "127.0.0.1"
+      ],
+      "is_cloud_console": false,
+      "live_chat": "text-69",
+      "name": "name-138",
+      "override_inform_host": false,
+      "portal_http_port": 8880,
+      "previous_version": "text-70",
+      "radius_disconnect_running": false,
+      "sso_app_id": "id-19",
+      "store_enabled": "text-69",
+      "timezone": "text-71",
+      "unsupported_device_count": 0,
+      "unsupported_device_list": [],
+      "update_available": false,
+      "update_downloaded": false,
+      "uptime": 10407833,
+      "version": "10.6.106"
+    }
+  ],
+  "meta": {
+    "rc": "ok"
+  }
+}

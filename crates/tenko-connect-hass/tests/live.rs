@@ -172,3 +172,120 @@ async fn live_inventory_shape() {
     }
     print_shape(&hosts, vendors, pages);
 }
+
+// ---- recording the fixture ------------------------------------------------------------
+
+/// The WebSocket commands the recording reads.
+const COMMANDS: [&str; 4] = [
+    "config/device_registry/list",
+    "config/entity_registry/list",
+    "config/area_registry/list",
+    "config_entries/get",
+];
+
+/// One record per line inside the lists, the rest indented: the layout of the fixture files.
+fn format_fixture(value: &serde_json::Value, indent: usize) -> String {
+    let pad = "  ".repeat(indent);
+    let inner = "  ".repeat(indent + 1);
+    match value {
+        serde_json::Value::Object(map) if map.values().any(|v| v.is_array() || v.is_object()) => {
+            let members: Vec<String> = map
+                .iter()
+                .map(|(key, item)| {
+                    format!(
+                        "{inner}{}: {}",
+                        serde_json::to_string(key).unwrap_or_default(),
+                        format_fixture(item, indent + 1)
+                    )
+                })
+                .collect();
+            format!("{{\n{}\n{pad}}}", members.join(",\n"))
+        }
+        serde_json::Value::Array(items) if !items.is_empty() => {
+            let lines: Vec<String> = items
+                .iter()
+                .map(|item| format!("{inner}{}", serde_json::to_string(item).unwrap_or_default()))
+                .collect();
+            format!("[\n{}\n{pad}]", lines.join(",\n"))
+        }
+        other => serde_json::to_string(other).unwrap_or_default(),
+    }
+}
+
+/// Records the answers of the real Home Assistant as the anonymised fixture
+/// `tests/fixtures/recorded.json`, in the layout of `documented.json`. It runs only with
+/// `TENKO_LIVE_HASS=1` and `TENKO_RECORD=1`; it never prints an answer, only counts.
+#[tokio::test]
+async fn live_record_fixture() {
+    use tenko_connect::sdk::anonymise::Anonymiser;
+    use tenko_connect_hass::{Settings, api::Api};
+
+    if std::env::var("TENKO_LIVE_HASS").as_deref() != Ok("1")
+        || std::env::var("TENKO_RECORD").as_deref() != Ok("1")
+    {
+        eprintln!("skipped: set TENKO_LIVE_HASS=1 and TENKO_RECORD=1 to record the fixture");
+        return;
+    }
+    let Some(ctx) = context() else {
+        eprintln!("skipped: HASS_URL and HASS_TOKEN are not set (or still placeholders)");
+        return;
+    };
+    let settings: Settings = ctx.settings().expect("settings");
+    let api = Api::new(
+        &settings.url,
+        &settings.tls(),
+        ctx.secret_str(SECRET).expect("the token"),
+    )
+    .expect("api client");
+    let mut rest = serde_json::Map::new();
+    rest.insert("/api/".to_owned(), api.get("/api/").await.expect("/api/"));
+    let config = api.get("/api/config").await.expect("/api/config");
+    // Of the configuration only the version is read; the rest names the installation.
+    rest.insert(
+        "/api/config".to_owned(),
+        serde_json::json!({ "version": config.get("version").cloned().unwrap_or_default() }),
+    );
+    rest.insert(
+        "/api/states".to_owned(),
+        api.get("/api/states").await.expect("/api/states"),
+    );
+    let mut ws = serde_json::Map::new();
+    let mut session = api.session().await.expect("websocket session");
+    for command in COMMANDS {
+        let answer = session.command(command).await.expect(command);
+        let value = match answer {
+            Ok(value) => value,
+            Err((code, _)) => serde_json::json!({ "error": { "code": code, "message": code } }),
+        };
+        ws.insert(command.to_owned(), value);
+    }
+    session.close().await;
+
+    let mut anonymiser = Anonymiser::new();
+    let raw = serde_json::json!({ "ws": ws, "rest": rest });
+    let mut output = anonymiser.anonymise(&raw);
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for (name, list) in output["rest"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .chain(output["ws"].as_object().into_iter().flatten())
+    {
+        counts.insert(name.clone(), list.as_array().map_or(0, Vec::len));
+    }
+    let description = format!(
+        "The answers of a real Home Assistant, recorded through the plugin's own client and anonymised with tenko_connect::sdk::anonymise (see README.md). Counts: {}.",
+        counts
+            .iter()
+            .map(|(name, count)| format!("{name} {count}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    output["description"] = serde_json::Value::String(description);
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/recorded.json");
+    let mut text = format_fixture(&output, 0);
+    text.push('\n');
+    std::fs::write(&path, text).expect("write the fixture");
+    eprintln!("recorded: {counts:?}");
+    eprintln!("replaced: {:?}", anonymiser.counts());
+}

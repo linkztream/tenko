@@ -87,9 +87,15 @@ pub fn subnet(text: &str) -> Option<IpNet> {
     text.trim().parse::<IpNet>().ok().map(|net| net.trunc())
 }
 
-/// The port index in an LLDP port id of a managed device (`Port 7`, `7`).
+/// The port index in an LLDP port id of a managed device (`Port 7`, `local Port 7`, `7`).
+/// A UniFi switch names its port with the locally assigned subtype, which the controller
+/// renders as `local Port 7`.
 fn lldp_port_index(text: &str) -> Option<u16> {
     let text = text.trim();
+    let text = text
+        .strip_prefix("local ")
+        .or_else(|| text.strip_prefix("Local "))
+        .unwrap_or(text);
     let digits = text
         .strip_prefix("Port ")
         .or_else(|| text.strip_prefix("port "))
@@ -630,6 +636,7 @@ mod tests {
             Some("192.0.2.0/24")
         );
         assert_eq!(lldp_port_index("Port 9"), Some(9));
+        assert_eq!(lldp_port_index("local Port 23"), Some(23));
         assert_eq!(lldp_port_index("eth0"), None);
     }
 }

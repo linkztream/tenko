@@ -1,0 +1,72 @@
+{
+  "data": [
+    {
+      "_id": "000000000000000000000011",
+      "ap_group_ids": [
+        "000000000000000000000052"
+      ],
+      "ap_group_mode": "text-9",
+      "b_supported": false,
+      "bc_filter_enabled": false,
+      "bc_filter_list": [],
+      "dtim_6e": 3,
+      "dtim_mode": "text-10",
+      "dtim_na": 3,
+      "dtim_ng": 1,
+      "enabled": true,
+      "enhanced_iot": false,
+      "external_id": "00000000-0000-0000-0000-000000000053",
+      "group_rekey": 3600,
+      "hide_ssid": false,
+      "hotspot2conf_enabled": false,
+      "iapp_enabled": true,
+      "is_guest": false,
+      "mac_filter_enabled": false,
+      "mac_filter_list": [],
+      "mac_filter_policy": "text-11",
+      "minrate_na_advertising_rates": false,
+      "minrate_na_data_rate_kbps": 6000,
+      "minrate_na_enabled": false,
+      "minrate_ng_advertising_rates": false,
+      "minrate_ng_data_rate_kbps": 1000,
+      "minrate_ng_enabled": true,
+      "minrate_setting_preference": "auto",
+      "mlo_enabled": false,
+      "name": "name-60",
+      "networkconf_id": "00000000000000000000000c",
+      "no2ghz_oui": false,
+      "optimize_iot_wifi_connectivity": true,
+      "pmf_mode": "text-12",
+      "radius_das_enabled": false,
+      "roaming_assistant_6e_enabled": true,
+      "roaming_assistant_6e_rssi": -88,
+      "roaming_assistant_na_enabled": false,
+      "roaming_assistant_na_rssi": -75,
+      "sae_anti_clogging": 5,
+      "sae_sync": 5,
+      "schedule": [],
+      "schedule_enabled": false,
+      "schedule_with_duration": [],
+      "security": "wpapsk",
+      "setting_preference": "manual",
+      "short_id": 1,
+      "site_id": "000000000000000000000003",
+      "uapsd_enabled": true,
+      "usergroup_id": "000000000000000000000054",
+      "wep_idx": 1,
+      "wlan_band": "both",
+      "wlan_bands": [
+        "2g",
+        "5g",
+        "6g"
+      ],
+      "wpa3_support": true,
+      "wpa3_transition": true,
+      "wpa_enc": "ccmp",
+      "wpa_mode": "wpa2"
+    }
+  ],
+  "meta": {
+    "rc": "ok"
+  }
+}

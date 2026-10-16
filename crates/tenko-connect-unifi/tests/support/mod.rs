@@ -251,6 +251,20 @@ impl State {
         }
     }
 
+    /// The anonymised recordings of a real controller (`tests/fixtures/recorded`), in place
+    /// of the documented fixtures.
+    fn recorded() -> Self {
+        Self {
+            devices: fixture(include_str!("../fixtures/recorded/device.json")),
+            clients: fixture(include_str!("../fixtures/recorded/sta.json")),
+            networks: fixture(include_str!("../fixtures/recorded/networkconf.json")),
+            wlans: fixture(include_str!("../fixtures/recorded/wlanconf.json")),
+            profiles: fixture(include_str!("../fixtures/recorded/portconf.json")),
+            users: fixture(include_str!("../fixtures/recorded/user.json")),
+            ..Self::fixtures()
+        }
+    }
+
     /// The number of open sessions (logged in and not logged out).
     pub fn open_sessions(&self) -> usize {
         self.sessions.len()
@@ -456,6 +470,19 @@ impl FakeController {
     /// Makes the next `n` requests (any path) answer `429` with `Retry-After: 0`.
     pub fn rate_limit_next(&self, n: u32) {
         self.shared.lock().rate_limit = n;
+    }
+
+    /// Replaces the documented fixtures with the anonymised recordings of a real controller
+    /// (`tests/fixtures/recorded`); the sessions and counters stay.
+    pub fn load_recorded(&self) {
+        let recorded = State::recorded();
+        let mut state = self.shared.lock();
+        state.devices = recorded.devices;
+        state.clients = recorded.clients;
+        state.networks = recorded.networks;
+        state.wlans = recorded.wlans;
+        state.profiles = recorded.profiles;
+        state.users = recorded.users;
     }
 
     /// Direct access to the data and the knobs. Do not hold the guard across an `.await`.
