@@ -432,3 +432,103 @@ fn fixtures_hold_documentation_data_only() {
         }
     }
 }
+
+/// The recording of a real node (`tests/fixtures/recorded.json`, see the README there) reads
+/// as the live smoke did on the day of the recording: the node, 9 QEMU and 5 LXC guests, 7
+/// guest agent answers, 17 MAC addresses, 17 IPv4 and 8 IPv6 addresses, 1 VLAN tag, no pool
+/// and no SDN vnet.
+#[tokio::test]
+async fn the_recorded_node_reads_like_the_live_one() {
+    let mock = Mock::start(fixture("recorded.json")).await;
+    let ctx = context(&mock, &serde_json::json!({}));
+    let report = Proxmox.check(&ctx).await.expect("check");
+    assert!(
+        report
+            .remote_version
+            .as_deref()
+            .is_some_and(|v| v.starts_with("Proxmox VE 9")),
+        "{:?}",
+        report.remote_version
+    );
+    let (hosts, cursors) = poll_all(&ctx).await.expect("poll");
+    assert_eq!(cursors, [None], "one page");
+    let mut by_platform: BTreeMap<&str, usize> = BTreeMap::new();
+    for host in &hosts {
+        *by_platform
+            .entry(host.platform.as_deref().unwrap_or_default())
+            .or_default() += 1;
+    }
+    assert_eq!(
+        by_platform,
+        BTreeMap::from([("lxc", 5), ("proxmox-ve", 1), ("qemu", 9)])
+    );
+    let mut by_status: BTreeMap<&str, usize> = BTreeMap::new();
+    for tag in hosts.iter().flat_map(|h| &h.tags) {
+        if let Some(status) = tag.strip_prefix("status:") {
+            *by_status.entry(status).or_default() += 1;
+        }
+    }
+    assert_eq!(
+        by_status,
+        BTreeMap::from([("online", 1), ("running", 11), ("stopped", 3)])
+    );
+    let count = |f: &dyn Fn(&ObservedHost) -> bool| hosts.iter().filter(|h| f(h)).count();
+    assert_eq!(count(&|h| !h.macs.is_empty()), 14);
+    assert_eq!(count(&|h| !h.ips.is_empty()), 13);
+    assert_eq!(count(&|h| h.os.is_some()), 15);
+    assert_eq!(hosts.iter().map(|h| h.macs.len()).sum::<usize>(), 17);
+    let ips: Vec<&IpAddr> = hosts.iter().flat_map(|h| &h.ips).collect();
+    assert_eq!(ips.iter().filter(|ip| ip.is_ipv4()).count(), 17);
+    assert_eq!(ips.iter().filter(|ip| ip.is_ipv6()).count(), 8);
+    assert_eq!(count(&|h| h.tags.iter().any(|t| t.starts_with("vlan:"))), 1);
+    assert_eq!(count(&|h| h.tags.iter().any(|t| t.starts_with("pool:"))), 0);
+    assert_eq!(count(&|h| h.tags.iter().any(|t| t.starts_with("vnet:"))), 0);
+    assert_eq!(
+        count(&|h| h.parent.is_some()),
+        14,
+        "every guest under the node"
+    );
+    let agents = mock
+        .requests()
+        .iter()
+        .filter(|r| r.path.ends_with("/agent/network-get-interfaces"))
+        .count();
+    assert_eq!(agents, 7, "the guest agents that answered");
+    assert!(mock.requests().iter().all(|r| r.method == "GET"));
+}
+
+/// The addresses of a recording: documentation addresses, the benchmarking range, loopback
+/// and link-local; MAC addresses from the documentation block, or all zero.
+#[test]
+fn the_recording_holds_placeholders_only() {
+    let routes: BTreeMap<String, support::Answer> = fixture("recorded.json");
+    for (path, (_, body)) in &routes {
+        for word in body.split(|c: char| !(c.is_ascii_hexdigit() || c == ':' || c == '.')) {
+            if let Ok(address) = word.parse::<IpAddr>() {
+                let placeholder = match address {
+                    IpAddr::V4(v4) => {
+                        let [a, b, c, _] = v4.octets();
+                        matches!((a, b, c), (192, 0, 2) | (198, 51, 100) | (203, 0, 113))
+                            || (a, b & 0xfe) == (198, 18)
+                            || v4.is_loopback()
+                            || v4.is_unspecified()
+                    }
+                    IpAddr::V6(v6) => {
+                        v6.segments()[0] == 0x2001 && v6.segments()[1] == 0x0db8
+                            || v6.is_loopback()
+                            || v6.is_unspecified()
+                            || (v6.segments()[0] & 0xffc0) == 0xfe80
+                    }
+                };
+                assert!(placeholder, "{path}: {address}");
+            }
+            if word.len() == 17 && word.matches(':').count() == 5 {
+                let lower = word.to_ascii_lowercase();
+                assert!(
+                    lower.starts_with("00:00:5e:00:53:") || lower == "00:00:00:00:00:00",
+                    "{path}: {word}"
+                );
+            }
+        }
+    }
+}

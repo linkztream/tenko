@@ -14,13 +14,20 @@
 //! its value is a generic word (`on`, `home`, `loaded`), a number, a timestamp or empty.
 //! Members whose keys name credentials (`x_passphrase`, `*token*`, `*password*`) or
 //! locations (`geo_info`, `latitude`) are dropped or zeroed. The `attributes` of a Home
-//! Assistant state are reduced to the ones a connector reads.
+//! Assistant state are reduced to the ones a connector reads. The property strings of a
+//! Proxmox VE guest configuration (`net0`, `ipconfig0`, `agent`:
+//! `virtio=<mac>,bridge=vmbr0,tag=20`) are split and each value is anonymised on its own,
+//! so the MAC address, bridge and VLAN stay readable; tag lists (`a;b`) keep their length.
+//! The all-zero and the broadcast MAC address name nothing and are kept. A bare prefix
+//! length next to an address (`netmask`, `netmask6`, `prefix`, as a number, as text or
+//! as a dotted mask) is written as the width of the anonymised network that address is in:
+//! the width of a wide network as its CIDR is written, else 24.
 //!
 //! The anonymiser keeps its maps between calls, so several answers of one system can be
 //! anonymised one after the other and still agree with each other.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
@@ -82,7 +89,7 @@ const ZERO_KEYS: [&str; 9] = [
 ];
 
 /// Keys whose string values are kept: enumerations and version texts.
-const KEEP_KEYS: [&str; 62] = [
+const KEEP_KEYS: [&str; 70] = [
     "type",
     "purpose",
     "networkgroup",
@@ -145,6 +152,14 @@ const KEEP_KEYS: [&str; 62] = [
     "dhcp_relay_mode",
     "dhcpguard_mode",
     "lte_mode",
+    "ostype",
+    "arch",
+    "status",
+    "method",
+    "method6",
+    "release",
+    "ip-address-type",
+    "plugintype",
 ];
 
 /// Keys whose string values are names of things in the owner's environment.
@@ -206,7 +221,7 @@ const ENTITY_KEYS: [&str; 4] = [
 ];
 
 /// Generic words that are kept wherever they appear as a whole value.
-const WORDS: [&str; 76] = [
+const WORDS: [&str; 89] = [
     "home",
     "not_home",
     "on",
@@ -283,6 +298,19 @@ const WORDS: [&str; 76] = [
     "run",
     "wire",
     "wireless",
+    "dhcp",
+    "manual",
+    "static",
+    "veth",
+    "online",
+    "offline",
+    "running",
+    "stopped",
+    "ipv4",
+    "ipv6",
+    "inet",
+    "inet6",
+    "bridge",
 ];
 
 /// The attributes of a Home Assistant state that survive, besides what the rules keep.
@@ -312,7 +340,17 @@ pub struct Anonymiser {
     /// Private and public IPv4 /24 blocks to their placeholder blocks.
     v4_blocks: HashMap<[u8; 3], [u8; 3]>,
     /// The number of /24 blocks handed out in the benchmarking range.
-    v4_next: u16,
+    v4_next: u32,
+    /// The prefix lengths of wide networks that were narrowed to the blocks seen in them,
+    /// by their first /24 block and their length.
+    v4_lengths: HashMap<(u32, u8), u8>,
+    /// Every network wider than a /24 that got a run of blocks: its first block, its length
+    /// and the length it is written with.
+    v4_wide: Vec<(u32, u8, u8)>,
+    /// Public IPv4 addresses to their host number in TEST-NET-3.
+    v4_public: HashMap<Ipv4Addr, u8>,
+    /// Addresses that found no free placeholder (the ranges ran out).
+    v4_exhausted: u64,
     /// The number of documentation networks handed out.
     v4_documentation: usize,
     /// IPv6 /48 prefixes to their placeholder.
@@ -331,6 +369,7 @@ pub struct Anonymiser {
 
 /// A MAC address in the notation it was found in.
 struct MacText {
+    original: String,
     bytes: Vec<u8>,
     separator: Option<char>,
     upper: bool,
@@ -352,6 +391,8 @@ impl Anonymiser {
     pub fn counts(&self) -> BTreeMap<&'static str, u64> {
         let mut counts = self.counters.clone();
         counts.insert("ipv4 blocks", self.v4_blocks.len() as u64);
+        counts.insert("ipv4 narrowed networks", self.v4_lengths.len() as u64);
+        counts.insert("ipv4 exhausted", self.v4_exhausted);
         counts.insert("ipv6 prefixes", self.v6_prefixes.len() as u64);
         counts.insert("macs", self.macs.len() as u64);
         counts
@@ -363,36 +404,84 @@ impl Anonymiser {
         *counter
     }
 
-    /// Reserves contiguous placeholder blocks for every IPv4 network wider than a /24, so
-    /// that its addresses stay inside it.
+    /// Plans the IPv4 placeholders of a value before it is walked: every private network
+    /// wider than a /24 gets an aligned run of blocks of its own size in the benchmarking
+    /// range, so that its addresses stay inside it. When the ranges cannot hold every wide
+    /// network next to the other blocks seen, each wide network is narrowed to the blocks
+    /// seen in it (a power of two), and its prefix length is written narrower too.
     fn reserve(&mut self, value: &Value) {
-        match value {
-            Value::String(text) => {
-                if let Some((IpAddr::V4(ip), Some(len))) = cidr(text)
-                    && len < 24
-                    && is_mapped_v4(ip)
-                    && !is_global_v4(ip)
-                {
-                    let count = 1u32 << (24 - len);
-                    let first = u32::from(ip) & !(count - 1);
-                    let blocks: Vec<[u8; 3]> = (0..count)
-                        .map(|i| block_of(Ipv4Addr::from(first + (i << 8))))
-                        .collect();
-                    if blocks.iter().any(|b| self.v4_blocks.contains_key(b)) {
-                        return;
-                    }
-                    let aligned = (u32::from(self.v4_next) + count - 1) & !(count - 1);
-                    for (i, block) in blocks.into_iter().enumerate() {
-                        let n = aligned + u32::try_from(i).unwrap_or(u32::MAX);
-                        self.v4_blocks.insert(block, bench_block(n));
-                    }
-                    self.v4_next = u16::try_from(aligned + count).unwrap_or(u16::MAX);
-                }
+        let mut wide: Vec<(u32, u8)> = Vec::new();
+        let mut seen: BTreeSet<u32> = BTreeSet::new();
+        collect_v4(value, &mut wide, &mut seen);
+        wide.sort_by_key(|(first, len)| (*len, *first));
+        wide.dedup();
+        let mut kept: Vec<(u32, u8)> = Vec::new();
+        for (first, len) in wide {
+            let size = 1u32 << (24 - len);
+            let inside = kept
+                .iter()
+                .any(|(f, l)| first >= *f && first + size <= *f + (1u32 << (24 - *l)));
+            let reserved = self.v4_blocks.contains_key(&index_block(first));
+            if !inside && !reserved {
+                kept.push((first, len));
             }
-            Value::Array(items) => items.iter().for_each(|item| self.reserve(item)),
-            Value::Object(map) => map.values().for_each(|item| self.reserve(item)),
-            _ => {}
         }
+        let within = |block: u32| {
+            kept.iter()
+                .any(|(f, l)| block >= *f && block < *f + (1u32 << (24 - *l)))
+        };
+        let outside = seen
+            .iter()
+            .filter(|b| !within(**b) && !self.v4_blocks.contains_key(&index_block(**b)))
+            .count();
+        let documentation = 2usize.saturating_sub(self.v4_documentation);
+        let needed: u32 = kept.iter().map(|(_, len)| 1u32 << (24 - len)).sum::<u32>()
+            + u32::try_from(outside.saturating_sub(documentation)).unwrap_or(u32::MAX);
+        let narrow = needed > BENCH_BLOCKS.saturating_sub(self.v4_next);
+        for (first, len) in kept {
+            let size = 1u32 << (24 - len);
+            let blocks: Vec<u32> = if narrow {
+                seen.range(first..first + size).copied().collect()
+            } else {
+                (first..first + size).collect()
+            };
+            let run = if narrow {
+                u32::try_from(blocks.len().max(1))
+                    .unwrap_or(u32::MAX)
+                    .next_power_of_two()
+            } else {
+                size
+            };
+            let written = 24 - u8::try_from(run.trailing_zeros()).unwrap_or(0);
+            if narrow {
+                self.v4_lengths.insert((first, len), written);
+            }
+            self.v4_wide.push((first, len, written));
+            let aligned = (self.v4_next + run - 1) & !(run - 1);
+            for (i, block) in blocks.into_iter().enumerate() {
+                let n = aligned + u32::try_from(i).unwrap_or(u32::MAX);
+                let placeholder = self.bench(n);
+                self.v4_blocks.insert(index_block(block), placeholder);
+            }
+            self.v4_next = aligned + run;
+        }
+    }
+
+    /// The `n`th block of the benchmarking range, counting an address that finds none.
+    fn bench(&mut self, n: u32) -> [u8; 3] {
+        if n >= BENCH_BLOCKS {
+            self.v4_exhausted += 1;
+        }
+        bench_block(n)
+    }
+
+    /// The prefix length a CIDR is written with: narrower for a narrowed wide network.
+    fn v4_length(&self, ip: Ipv4Addr, len: u8) -> u8 {
+        if len >= 24 {
+            return len;
+        }
+        let first = (u32::from(ip) >> 8) & !((1u32 << (24 - len)) - 1);
+        self.v4_lengths.get(&(first, len)).copied().unwrap_or(len)
     }
 
     fn walk(&mut self, value: &Value, key: &str) -> Value {
@@ -428,7 +517,77 @@ impl Anonymiser {
             }
             out.insert(key.clone(), self.walk(value, &lower));
         }
+        self.bare_widths(map, &mut out);
         out
+    }
+
+    /// Writes the bare prefix lengths of an object (`netmask`, `netmask6`, `prefix`) as
+    /// the width of the anonymised network of the address next to them.
+    fn bare_widths(&self, map: &Map<String, Value>, out: &mut Map<String, Value>) {
+        for (key, value) in map {
+            let lower = key.to_ascii_lowercase();
+            let siblings: &[&str] = match lower.as_str() {
+                "netmask" | "mask" | "prefix" | "prefixlen" | "prefix_length" => &[
+                    "address",
+                    "ip",
+                    "ip-address",
+                    "ip_address",
+                    "ipaddr",
+                    "cidr",
+                ],
+                "netmask6" | "prefix6" | "prefixlen6" => &["address6", "ip6", "cidr6"],
+                _ => continue,
+            };
+            let address = siblings.iter().find_map(|name| {
+                map.iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                    .and_then(|(_, v)| v.as_str())
+                    .and_then(|text| cidr(text.trim()))
+                    .map(|(ip, _)| ip)
+            });
+            let (len, form) = match value {
+                Value::Number(number) => match number.as_u64().and_then(|n| u8::try_from(n).ok()) {
+                    Some(len) => (len, Form::Number),
+                    None => continue,
+                },
+                Value::String(text) => match text.trim().parse::<u8>() {
+                    Ok(len) => (len, Form::Text),
+                    Err(_) => match text.trim().parse::<Ipv4Addr>().ok().and_then(mask_length) {
+                        Some(len) => (len, Form::Mask),
+                        None => continue,
+                    },
+                },
+                _ => continue,
+            };
+            let width = match address {
+                Some(IpAddr::V4(ip)) if len <= 32 => self.bare_v4_width(ip, len),
+                // IPv6 networks keep their widths, as their CIDR texts do.
+                Some(IpAddr::V6(_)) => len,
+                _ if len <= 32 => 24,
+                _ => continue,
+            };
+            let written = match form {
+                Form::Number => Value::from(width),
+                Form::Text => Value::String(width.to_string()),
+                Form::Mask => Value::String(length_mask(width).to_string()),
+            };
+            out.insert(key.clone(), written);
+        }
+    }
+
+    /// The width a bare prefix length of an IPv4 address is written with: the written width
+    /// of the wide network the address is in (the narrowest one), else 24. Loopback and the
+    /// other addresses that are not replaced keep their width.
+    fn bare_v4_width(&self, ip: Ipv4Addr, len: u8) -> u8 {
+        if !is_mapped_v4(ip) {
+            return len;
+        }
+        let block = u32::from(ip) >> 8;
+        self.v4_wide
+            .iter()
+            .filter(|(first, wide, _)| block >= *first && block < *first + (1u32 << (24 - *wide)))
+            .max_by_key(|(_, wide, _)| *wide)
+            .map_or(24, |(_, _, written)| *written)
     }
 
     /// The placeholder of one string value under `key` (lower case).
@@ -442,10 +601,21 @@ impl Anonymiser {
         }
         if let Some((ip, len)) = cidr(trimmed) {
             let mapped = self.ip(ip);
-            return match len {
-                Some(len) => format!("{mapped}/{len}"),
-                None => mapped.to_string(),
+            return match (ip, len) {
+                (IpAddr::V4(v4), Some(len)) => format!("{mapped}/{}", self.v4_length(v4, len)),
+                (_, Some(len)) => format!("{mapped}/{len}"),
+                (_, None) => mapped.to_string(),
             };
+        }
+        if (is_property_key(key) && trimmed.contains('=')) || key == "agent" {
+            return self.properties(trimmed);
+        }
+        if key == "tags" && trimmed.contains([';', ',', ' ']) {
+            return trimmed
+                .split(';')
+                .map(|tag| self.string(tag, "tag"))
+                .collect::<Vec<_>>()
+                .join(";");
         }
         if ENTITY_KEYS.contains(&key) || key.ends_with("_entity_id") {
             return self.entity(trimmed);
@@ -476,6 +646,24 @@ impl Anonymiser {
             return text.to_owned();
         }
         self.text(trimmed, "text", "text-")
+    }
+
+    /// A Proxmox property string, each value anonymised under its own key: the MAC address
+    /// of `virtio=<mac>`, the bridge, the VLAN tag and the addresses of `ip=` stay
+    /// readable. A key that is not a short lower-case word is not kept either.
+    fn properties(&mut self, text: &str) -> String {
+        text.split(',')
+            .map(|part| match part.split_once('=') {
+                Some((name, value)) if is_property_name(name.trim()) => {
+                    let name = name.trim();
+                    format!("{name}={}", self.string(value, &name.to_ascii_lowercase()))
+                }
+                Some(_) => self.text(part.trim(), "text", "text-"),
+                // A part without a key (`1` of `agent`) is read as a plain value.
+                None => self.string(part, "value"),
+            })
+            .collect::<Vec<_>>()
+            .join(",")
     }
 
     fn text(&mut self, value: &str, family: &'static str, prefix: &str) -> String {
@@ -526,6 +714,9 @@ impl Anonymiser {
     }
 
     fn mac(&mut self, mac: &MacText) -> String {
+        if mac.bytes.iter().all(|b| *b == 0) || mac.bytes.iter().all(|b| *b == 0xff) {
+            return mac.original.clone();
+        }
         let bytes = if let Some(bytes) = self.macs.get(&mac.bytes) {
             bytes.clone()
         } else {
@@ -573,9 +764,17 @@ impl Anonymiser {
         }
         let [_, _, _, host] = ip.octets();
         if is_global_v4(ip) {
-            // Every public address lands in TEST-NET-3; the host part is kept.
+            // Every public address lands in TEST-NET-3, each on a host number of its own.
+            let next = self.v4_public.len() + 1;
+            let number = *self
+                .v4_public
+                .entry(ip)
+                .or_insert_with(|| u8::try_from(next).unwrap_or(u8::MAX));
+            if next > 254 {
+                self.v4_exhausted += 1;
+            }
             let [a, b, c] = DOCUMENTATION_V4[2];
-            return Ipv4Addr::new(a, b, c, host);
+            return Ipv4Addr::new(a, b, c, number);
         }
         let block = block_of(ip);
         let mapped = if let Some(mapped) = self.v4_blocks.get(&block) {
@@ -585,9 +784,9 @@ impl Anonymiser {
                 self.v4_documentation += 1;
                 DOCUMENTATION_V4[self.v4_documentation - 1]
             } else {
-                let n = u32::from(self.v4_next);
-                self.v4_next = self.v4_next.saturating_add(1);
-                bench_block(n)
+                let n = self.v4_next;
+                self.v4_next += 1;
+                self.bench(n)
             };
             self.v4_blocks.insert(block, mapped);
             mapped
@@ -637,11 +836,89 @@ impl Anonymiser {
     }
 }
 
+/// Whether the value of a key is a Proxmox property string: `netN` and `ipconfigN` of a
+/// guest configuration (`agent` is handled by name).
+fn is_property_key(key: &str) -> bool {
+    ["net", "ipconfig"].iter().any(|prefix| {
+        key.strip_prefix(prefix)
+            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+    })
+}
+
+/// Whether the key of a property is a vocabulary word (`bridge`, `ip6`, `hwaddr`).
+fn is_property_name(name: &str) -> bool {
+    (1..=32).contains(&name.len())
+        && name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
 /// Whether a member is dropped by its key.
 fn dropped(key: &str) -> bool {
     key.starts_with("x_")
         || DROP_KEYS.contains(&key)
         || DROP_SUBSTRINGS.iter().any(|part| key.contains(part))
+}
+
+/// How a bare prefix length was written.
+#[derive(Debug, Clone, Copy)]
+enum Form {
+    /// A number (`24`).
+    Number,
+    /// Text of a number (`"24"`).
+    Text,
+    /// A dotted mask (`"255.255.255.0"`).
+    Mask,
+}
+
+/// The length of a contiguous dotted IPv4 mask.
+fn mask_length(mask: Ipv4Addr) -> Option<u8> {
+    let bits = u32::from(mask);
+    let len = bits.leading_ones();
+    (bits.checked_shl(len).unwrap_or(0) == 0).then(|| u8::try_from(len).unwrap_or(32))
+}
+
+/// The dotted IPv4 mask of a length.
+fn length_mask(len: u8) -> Ipv4Addr {
+    Ipv4Addr::from(
+        u32::MAX
+            .checked_shl(32 - u32::from(len.min(32)))
+            .unwrap_or(0),
+    )
+}
+
+/// The number of /24 blocks of the benchmarking range 198.18.0.0/15.
+const BENCH_BLOCKS: u32 = 512;
+
+/// The /24 block of a block index (the address shifted right by eight bits).
+fn index_block(index: u32) -> [u8; 3] {
+    block_of(Ipv4Addr::from(index << 8))
+}
+
+/// The private IPv4 blocks a value names, and its networks wider than a /24 (by first block
+/// index and length), also inside property strings and free text.
+fn collect_v4(value: &Value, wide: &mut Vec<(u32, u8)>, seen: &mut BTreeSet<u32>) {
+    match value {
+        Value::String(text) => {
+            for token in text.split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '/')) {
+                let Some((IpAddr::V4(ip), len)) = cidr(token) else {
+                    continue;
+                };
+                if !is_mapped_v4(ip) || is_global_v4(ip) {
+                    continue;
+                }
+                seen.insert(u32::from(ip) >> 8);
+                if let Some(len) = len.filter(|len| *len < 24) {
+                    let first = (u32::from(ip) >> 8) & !((1u32 << (24 - len)) - 1);
+                    wide.push((first, len));
+                }
+            }
+        }
+        Value::Array(items) => items.iter().for_each(|item| collect_v4(item, wide, seen)),
+        Value::Object(map) => map.values().for_each(|item| collect_v4(item, wide, seen)),
+        _ => {}
+    }
 }
 
 /// The /24 block of an address.
@@ -722,6 +999,7 @@ fn mac_text(text: &str) -> Option<MacText> {
         bytes.push(u8::from_str_radix(part, 16).ok()?);
     }
     Some(MacText {
+        original: text.to_owned(),
         bytes,
         separator,
         upper: text.chars().any(|c| c.is_ascii_uppercase()),
@@ -740,6 +1018,7 @@ fn mac_digits(text: &str) -> Option<MacText> {
         .filter_map(|i| u8::from_str_radix(&text[2 * i..2 * i + 2], 16).ok())
         .collect();
     Some(MacText {
+        original: text.to_owned(),
         bytes,
         separator: None,
         upper: text.chars().any(|c| c.is_ascii_uppercase()),
@@ -863,11 +1142,71 @@ mod tests {
         assert_eq!(out[1]["ip_subnet"], "198.18.0.1/22");
         assert_eq!(out[0]["ip"], "198.18.1.9");
         assert_eq!(out[2]["ip"], "198.18.3.200");
-        assert_eq!(out[2]["wan"], "203.0.113.34");
+        assert_eq!(
+            out[2]["wan"], "203.0.113.2",
+            "keys are walked in order: dns first"
+        );
         assert_eq!(out[2]["dns"], json!(["203.0.113.1", "127.0.0.1"]));
         assert_eq!(out[3]["ip_subnet"], "192.0.2.1/24");
         assert_eq!(out[3]["dhcpd_start"], "192.0.2.100");
         assert_eq!(out[4]["ip_subnet"], "198.51.100.1/24");
+    }
+
+    #[test]
+    fn wide_networks_are_narrowed_when_the_ranges_run_out() {
+        let mut anonymiser = Anonymiser::new();
+        let out = anonymiser.anonymise(&json!([
+            "10.10.0.1/16", "10.10.0.7", "10.10.9.7", "10.10.200.7",
+            "172.20.0.1/16", "172.20.5.5",
+            "192.168.1.1/24", "192.168.2.1/24", "192.168.3.9", { "ipconfig0": "ip=192.168.4.9/24,gw=192.168.4.1" }
+        ]));
+        assert_eq!(out[0], "198.18.0.1/22", "three blocks seen: a run of four");
+        assert_eq!(out[1], "198.18.0.7");
+        assert_eq!(out[2], "198.18.1.7");
+        assert_eq!(out[3], "198.18.2.7");
+        assert_eq!(out[4], "198.18.4.1/23", "two blocks seen: a run of two");
+        assert_eq!(out[5], "198.18.5.5");
+        assert_eq!(out[6], "192.0.2.1/24");
+        assert_eq!(out[7], "198.51.100.1/24");
+        assert_eq!(out[8], "198.18.6.9");
+        assert_eq!(out[9]["ipconfig0"], "ip=198.18.7.9/24,gw=198.18.7.1");
+        // Two /16 networks and four more blocks do not fit 2 + 512 blocks.
+        assert_eq!(anonymiser.counts()["ipv4 narrowed networks"], 2);
+        assert_eq!(anonymiser.counts()["ipv4 exhausted"], 0);
+    }
+
+    #[test]
+    fn bare_prefix_lengths_follow_the_anonymised_network() {
+        let mut anonymiser = Anonymiser::new();
+        let out = anonymiser.anonymise(&json!({
+            "wide": ["10.10.0.1/16", "10.10.0.7", "10.10.9.7", "10.10.200.7",
+                     "172.20.0.1/16", "172.20.5.5"],
+            "fill": ["192.168.1.1/24", "192.168.2.1/24", "192.168.3.9"],
+            "network": [
+                { "iface": "vmbr0", "address": "10.10.0.5", "netmask": "16", "cidr": "10.10.0.5/16" },
+                { "iface": "vmbr1", "address": "172.20.5.9", "netmask": "255.255.0.0" },
+                { "iface": "vmbr2", "address": "192.168.3.32", "netmask": "16" },
+                { "iface": "vmbr3", "address6": "fd00:1:2:3::5", "netmask6": "64" },
+                { "iface": "lo", "address": "127.0.0.1", "netmask": "8" }
+            ],
+            "agent": [{ "ip-address": "10.10.9.7", "ip-address-type": "ipv4", "prefix": 16 },
+                      { "ip-address": "172.31.0.1", "ip-address-type": "ipv4", "prefix": 16 }]
+        }));
+        let network = &out["network"];
+        assert_eq!(network[0]["cidr"], "198.18.0.5/22");
+        assert_eq!(
+            network[0]["netmask"], "22",
+            "the width of the cidr next to it"
+        );
+        assert_eq!(
+            network[1]["netmask"], "255.255.254.0",
+            "a dotted mask stays a mask"
+        );
+        assert_eq!(network[2]["netmask"], "24", "in no wide network");
+        assert_eq!(network[3]["netmask6"], "64");
+        assert_eq!(network[4]["netmask"], "8", "loopback is not replaced");
+        assert_eq!(out["agent"][0]["prefix"], 22);
+        assert_eq!(out["agent"][1]["prefix"], 24);
     }
 
     #[test]
@@ -922,6 +1261,59 @@ mod tests {
         assert_eq!(entry["domain"], "shelly");
         assert_eq!(entry["title"], "name-1", "the device's name again");
         assert_eq!(entry["state"], "loaded");
+    }
+
+    #[test]
+    fn proxmox_property_strings_keep_their_keys_and_relations() {
+        let mut anonymiser = Anonymiser::new();
+        let out = anonymiser.anonymise(&json!({
+            "resources": [{ "type": "qemu", "vmid": 101, "node": "hv-owner", "name": "owner-vm",
+                            "status": "running", "tags": "owner;secret project" }],
+            "config": { "net0": "virtio=BC:24:11:12:34:56,bridge=vmbr7,tag=30,firewall=1",
+                        "net1": "name=eth0,bridge=vmbr7,hwaddr=BC:24:11:12:34:57,ip=dhcp,ip6=auto,type=veth",
+                        "ipconfig0": "ip=10.1.2.3/24,gw=10.1.2.1", "agent": "enabled=1,fstrim_cloned_disks=1",
+                        "ostype": "l26", "description": "Owner=Pat,Room=Kitchen" },
+            "network": [{ "iface": "vmbr7", "type": "bridge", "method": "static", "cidr": "10.1.2.2/24" }],
+            "interfaces": [{ "name": "lo", "hardware-address": "00:00:00:00:00:00" }],
+            "status": [{ "type": "node", "name": "hv-owner", "ip": "10.1.2.2" }]
+        }));
+        let node = out["resources"][0]["node"]
+            .as_str()
+            .expect("node")
+            .to_owned();
+        assert_eq!(
+            out["status"][0]["name"],
+            node.as_str(),
+            "the node keeps its relation"
+        );
+        assert_eq!(out["resources"][0]["status"], "running");
+        assert_eq!(
+            out["resources"][0]["tags"]
+                .as_str()
+                .map(|t| t.split(';').count()),
+            Some(2)
+        );
+        let net0 = out["config"]["net0"].as_str().expect("net0");
+        assert!(net0.starts_with("virtio=00:00:5E:00:53:"), "{net0}");
+        assert!(net0.ends_with(",tag=30,firewall=1"), "{net0}");
+        let bridge = out["network"][0]["iface"].as_str().expect("iface");
+        assert!(net0.contains(&format!("bridge={bridge},")), "{net0}");
+        let net1 = out["config"]["net1"].as_str().expect("net1");
+        assert!(net1.contains(",ip=dhcp,ip6=auto,type=veth"), "{net1}");
+        assert_eq!(out["config"]["ipconfig0"], "ip=192.0.2.3/24,gw=192.0.2.1");
+        assert_eq!(out["config"]["agent"], "enabled=1,fstrim_cloned_disks=1");
+        assert_eq!(out["config"]["ostype"], "l26");
+        let description = out["config"]["description"].as_str().expect("description");
+        assert!(
+            !description.contains("Owner") && !description.contains("Pat"),
+            "{description}"
+        );
+        assert_eq!(out["network"][0]["method"], "static");
+        assert_eq!(out["status"][0]["ip"], "192.0.2.2");
+        assert_eq!(
+            out["interfaces"][0]["hardware-address"],
+            "00:00:00:00:00:00"
+        );
     }
 
     #[test]
