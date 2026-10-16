@@ -56,6 +56,10 @@ pub(crate) fn serialize_bytes_or_hex<S: Serializer>(
     }
 }
 
+/// The most bytes [`deserialize_bytes_or_hex`] reserves ahead for a sequence of bytes on the
+/// length the input declares; longer sequences grow as their bytes are read.
+const MAX_PREALLOCATED_BYTES: usize = 4096;
+
 pub(crate) fn deserialize_bytes_or_hex<'de, D: Deserializer<'de>>(
     deserializer: D,
     what: &'static str,
@@ -81,8 +85,13 @@ pub(crate) fn deserialize_bytes_or_hex<'de, D: Deserializer<'de>>(
             Ok(v)
         }
 
+        /// The length of a sequence is what the input declares, not what it holds: it
+        /// reserves at most [`MAX_PREALLOCATED_BYTES`], and the vector grows only by bytes
+        /// that are read, so a declaration longer than the input ends in the format's
+        /// decode error instead of an allocation of the declared size.
         fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-            let mut out = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+            let declared = seq.size_hint().unwrap_or(0);
+            let mut out = Vec::with_capacity(declared.min(MAX_PREALLOCATED_BYTES));
             while let Some(byte) = seq.next_element::<u8>()? {
                 out.push(byte);
             }
@@ -242,5 +251,22 @@ mod tests {
         assert_eq!(back, value);
         let back: HexBytes = serde_json::from_str("\"01:02:ff\"").expect("decode");
         assert_eq!(back, value);
+    }
+
+    /// A CBOR array of bytes that declares about a terabyte and then ends is a decode
+    /// error, and nothing is reserved for the declared length; a complete array decodes.
+    #[test]
+    fn a_byte_array_longer_than_the_input_is_a_decode_error() {
+        let declared = [
+            0x9b, 0x00, 0x00, 0x00, 0xf4, 0xf4, 0xf4, 0xc0, 0xc0, 0x01, 0x02,
+        ];
+        let error = crate::codec::from_cbor::<HexBytes>(&declared).expect_err("too short");
+        assert!(
+            matches!(error, crate::codec::CodecError::Decode(_)),
+            "{error:?}"
+        );
+        let complete = [0x83, 0x01, 0x02, 0x18, 0xff];
+        let back: HexBytes = crate::codec::from_cbor(&complete).expect("decode");
+        assert_eq!(back, HexBytes(vec![1, 2, 255]));
     }
 }

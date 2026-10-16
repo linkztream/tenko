@@ -184,6 +184,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - A re-import no longer deletes a replaced credential that a connector instance still references.
 - The API's metrics tests no longer assume they run alone in the process, so `cargo test` passes on Linux as `cargo nextest` does on Windows.
 - The UniFi connector reads the LLDP port id `local Port 7`, which a UniFi switch reports for its own port, as the port index 7, so a link to a managed neighbour names the port instead of carrying the text.
+- A node refuses a configuration message whose bytes declare a length far beyond what the message holds with `node.config.payload`, instead of trying to reserve that much memory and stopping; the same holds for every byte value Tenko reads from CBOR, such as keys, MAC addresses and DUIDs.
 
 ### Security
 
