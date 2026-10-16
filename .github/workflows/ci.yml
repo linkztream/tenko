@@ -59,12 +59,20 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # nextest, as the lead's gate: one process per test, so a test that touches a
+      # process-wide static cannot see another test's additions. Doctests are not nextest's
+      # and run separately.
       - name: Test
-        run: cargo test --workspace --locked
+        run: cargo nextest run --workspace --locked
+      - name: Doctests
+        run: cargo test --doc --workspace --locked
 
   rust-windows:
     name: Rust (windows-latest, weekly schedule)
@@ -80,12 +88,20 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # nextest, as the lead's gate: one process per test, so a test that touches a
+      # process-wide static cannot see another test's additions. Doctests are not nextest's
+      # and run separately.
       - name: Test
-        run: cargo test --workspace --locked
+        run: cargo nextest run --workspace --locked
+      - name: Doctests
+        run: cargo test --doc --workspace --locked
 
   deny:
     name: cargo-deny
