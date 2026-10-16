@@ -446,6 +446,17 @@ fn node_config(dir: &TestDir, node: u64) -> RaftStoreConfig {
     cfg
 }
 
+async fn wait_for_installs(store: &RaftStore, installs: u64) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while store.engine_stats().snapshots_installed < installs {
+        assert!(
+            Instant::now() < deadline,
+            "the node did not install snapshot {installs}: it caught up from the log instead"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 async fn wait_for_revision(store: &RaftStore, revision: Revision) {
     let deadline = Instant::now() + Duration::from_secs(60);
     while store.status().revision < revision {
@@ -492,7 +503,10 @@ async fn snapshot_install_swaps_the_index_without_empty_reads() {
         .expect("add learner");
     wait_for_revision(&follower, leader.status().revision).await;
     assert_eq!(index.image().rows.len(), 300);
-    assert_eq!(follower.engine_stats().snapshots_installed, 1);
+    // The revision becomes visible a moment before the engine counts the install, so wait
+    // for the counter instead of reading it at once; the deadline turns a learner that
+    // caught up from the log instead into a failure with a message.
+    wait_for_installs(&follower, 1).await;
     assert_eq!(follower.status().role, StoreRole::Learner);
 
     // Cut the learner off and move on. openraft defers purging logs a replication request
