@@ -24,7 +24,7 @@
       </unit>
       <unit id="scans.probes.label">
         <notes><note category="description">Accessible name of the table of probes.</note></notes>
-        <segment><source>Probes and their scan scope</source><target>Probar och deras skanningsomfång</target></segment>
+        <segment><source>Probes and their scan scope</source><target>Probar och deras scope för skanning</target></segment>
       </unit>
       <unit id="scans.col.target">
         <notes><note category="description">Column heading: what a scan job covers.</note></notes>
@@ -224,7 +224,7 @@
       </unit>
       <unit id="scans.probe.col.scope">
         <notes><note category="description">Column heading: what a probe scans, as it last reported it.</note></notes>
-        <segment><source>Applied scope</source><target>Tillämpat omfång</target></segment>
+        <segment><source>Applied scope</source><target>Tillämpat scope</target></segment>
       </unit>
       <unit id="scans.probe.col.switch">
         <notes><note category="description">Column heading: the kill switch of a probe.</note></notes>
@@ -248,7 +248,7 @@
       </unit>
       <unit id="scans.probe.scope_none">
         <notes><note category="description">A probe has not reported a scope yet.</note></notes>
-        <segment><source>No scope reported</source><target>Inget omfång rapporterat</target></segment>
+        <segment><source>No scope reported</source><target>Inget scope rapporterat</target></segment>
       </unit>
       <unit id="scans.probe.methods_none">
         <notes><note category="description">A probe applies no scan method.</note></notes>

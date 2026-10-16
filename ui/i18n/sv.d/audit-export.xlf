@@ -7,7 +7,7 @@
         <segment><source>Audit export</source><target>Granskningsexport</target></segment>
       </unit>
       <unit id="audit_export.lede">
-        <segment><source>Every audit record goes to each sink as syslog or into a file, with its sequence number and chain hash, so a receiver can drop duplicates and see gaps. Checkpoints with the head of the chain follow every 100 records or 5 minutes.</source><target>Varje granskningspost skickas till varje exportmål som syslog eller till en fil, med sitt sekvensnummer och sin kedjehash, så att en mottagare kan släppa dubbletter och se luckor. Kontrollpunkter med kedjans topp följer efter var 100:e post eller var 5:e minut.</target></segment>
+        <segment><source>Every audit record goes to each sink as syslog or into a file, with its sequence number and chain hash, so a receiver can drop duplicates and see gaps. Checkpoints with the head of the chain follow every 100 records or 5 minutes.</source><target>Varje granskningspost skickas till varje sink som syslog eller till en fil, med sitt sekvensnummer och sin kedjehash, så att en mottagare kan släppa dubbletter och se luckor. Kontrollpunkter med kedjans topp följer efter var 100:e post eller var 5:e minut.</target></segment>
       </unit>
       <unit id="audit_export.required.title">
         <segment><source>The profile requires an audit export</source><target>Profilen kräver granskningsexport</target></segment>
@@ -17,13 +17,13 @@
       </unit>
       <unit id="audit_export.warning.failing">
         <notes><note category="description">sinks is a comma-separated list of sink names.</note></notes>
-        <segment><source>Sinks that fail or fall behind: {sinks}. Records wait on this installation until they deliver again.</source><target>Exportmål som misslyckas eller ligger efter: {sinks}. Posterna väntar på den här installationen tills de levereras igen.</target></segment>
+        <segment><source>Sinks that fail or fall behind: {sinks}. Records wait on this installation until they deliver again.</source><target>Sinks som misslyckas eller ligger efter: {sinks}. Posterna väntar på den här installationen tills de levereras igen.</target></segment>
       </unit>
       <unit id="audit_export.warning.required">
-        <segment><source>The profile requires an audit export (TGL-21) and no sink is enabled. Add a sink or switch one on.</source><target>Profilen kräver granskningsexport (TGL-21) och inget exportmål är aktiverat. Lägg till ett exportmål eller aktivera ett.</target></segment>
+        <segment><source>The profile requires an audit export (TGL-21) and no sink is enabled. Add a sink or switch one on.</source><target>Profilen kräver granskningsexport (TGL-21) och ingen sink är aktiverad. Lägg till en sink eller aktivera en.</target></segment>
       </unit>
       <unit id="audit_export.sinks.heading">
-        <segment><source>Sinks</source><target>Exportmål</target></segment>
+        <segment><source>Sinks</source><target>Sinks</target></segment>
       </unit>
       <unit id="audit_export.policy.heading">
         <segment><source>Policy</source><target>Policy</target></segment>
@@ -33,16 +33,16 @@
         <segment><source>The security profile sets the audit export (TGL-21) to {value}.</source><target>Säkerhetsprofilen ställer in granskningsexporten (TGL-21) på {value}.</target></segment>
       </unit>
       <unit id="audit_export.policy.met">
-        <segment><source>The requirement is met: a sink is enabled.</source><target>Kravet är uppfyllt: ett exportmål är aktiverat.</target></segment>
+        <segment><source>The requirement is met: a sink is enabled.</source><target>Kravet är uppfyllt: en sink är aktiverad.</target></segment>
       </unit>
       <unit id="audit_export.policy.unmet">
-        <segment><source>The requirement is not met: no sink is enabled.</source><target>Kravet är inte uppfyllt: inget exportmål är aktiverat.</target></segment>
+        <segment><source>The requirement is not met: no sink is enabled.</source><target>Kravet är inte uppfyllt: ingen sink är aktiverad.</target></segment>
       </unit>
       <unit id="audit_export.field.alert_after">
         <segment><source>Alarm after (seconds)</source><target>Larm efter (sekunder)</target></segment>
       </unit>
       <unit id="audit_export.field.alert_after_help">
-        <segment><source>How long a sink may fail before the alarm audit.export.failing is raised, from 10 to 86,400 seconds.</source><target>Hur länge ett exportmål får misslyckas innan larmet audit.export.failing utlöses, från 10 till 86 400 sekunder.</target></segment>
+        <segment><source>How long a sink may fail before the alarm audit.export.failing is raised, from 10 to 86,400 seconds.</source><target>Hur länge en sink får misslyckas innan larmet audit.export.failing utlöses, från 10 till 86 400 sekunder.</target></segment>
       </unit>
       <unit id="audit_export.error.alert_after">
         <segment><source>Enter a whole number of seconds from 10 to 86,400.</source><target>Ange ett helt antal sekunder från 10 till 86 400.</target></segment>
@@ -51,16 +51,16 @@
         <segment><source>Alarm delay saved</source><target>Larmfördröjningen sparades</target></segment>
       </unit>
       <unit id="audit_export.add">
-        <segment><source>Add sink</source><target>Lägg till exportmål</target></segment>
+        <segment><source>Add sink</source><target>Lägg till sink</target></segment>
       </unit>
       <unit id="audit_export.add_title">
-        <segment><source>Add an audit export sink</source><target>Lägg till ett exportmål för granskningsexport</target></segment>
+        <segment><source>Add an audit export sink</source><target>Lägg till en sink för granskningsexport</target></segment>
       </unit>
       <unit id="audit_export.edit_title">
-        <segment><source>Change the audit export sink</source><target>Ändra exportmålet för granskningsexport</target></segment>
+        <segment><source>Change the audit export sink</source><target>Ändra sink för granskningsexport</target></segment>
       </unit>
       <unit id="audit_export.none">
-        <segment><source>No sinks. The audit log stays on this installation only.</source><target>Inga exportmål. Granskningsloggen finns bara kvar på den här installationen.</target></segment>
+        <segment><source>No sinks. The audit log stays on this installation only.</source><target>Inga sinks. Granskningsloggen finns bara kvar på den här installationen.</target></segment>
       </unit>
       <unit id="audit_export.col.name">
         <segment><source>Name</source><target>Namn</target></segment>
@@ -159,28 +159,28 @@
         <segment><source>Resume</source><target>Återuppta</target></segment>
       </unit>
       <unit id="audit_export.paused">
-        <segment><source>Sink {name} paused</source><target>Exportmålet {name} har pausats</target></segment>
+        <segment><source>Sink {name} paused</source><target>Sink {name} har pausats</target></segment>
       </unit>
       <unit id="audit_export.resumed">
-        <segment><source>Sink {name} resumed</source><target>Exportmålet {name} har återupptagits</target></segment>
+        <segment><source>Sink {name} resumed</source><target>Sink {name} har återupptagits</target></segment>
       </unit>
       <unit id="audit_export.saved">
-        <segment><source>Sink {name} saved</source><target>Exportmålet {name} har sparats</target></segment>
+        <segment><source>Sink {name} saved</source><target>Sink {name} har sparats</target></segment>
       </unit>
       <unit id="audit_export.removed">
-        <segment><source>Sink {name} removed</source><target>Exportmålet {name} har tagits bort</target></segment>
+        <segment><source>Sink {name} removed</source><target>Sink {name} har tagits bort</target></segment>
       </unit>
       <unit id="audit_export.remove_named">
-        <segment><source>Remove the sink {name}</source><target>Ta bort exportmålet {name}</target></segment>
+        <segment><source>Remove the sink {name}</source><target>Ta bort sink {name}</target></segment>
       </unit>
       <unit id="audit_export.remove_title">
-        <segment><source>Remove the sink {name}?</source><target>Ta bort exportmålet {name}?</target></segment>
+        <segment><source>Remove the sink {name}?</source><target>Ta bort sink {name}?</target></segment>
       </unit>
       <unit id="audit_export.remove_body">
-        <segment><source>The sink receives no more records. Records already delivered stay where they are.</source><target>Exportmålet får inga fler poster. Poster som redan levererats ligger kvar där de är.</target></segment>
+        <segment><source>The sink receives no more records. Records already delivered stay where they are.</source><target>Sink får inga fler poster. Poster som redan levererats ligger kvar där de är.</target></segment>
       </unit>
       <unit id="audit_export.remove_last">
-        <segment><source>This is the last sink, and the profile requires one: the server refuses to remove it.</source><target>Det här är det sista exportmålet och profilen kräver ett: servern vägrar ta bort det.</target></segment>
+        <segment><source>This is the last sink, and the profile requires one: the server refuses to remove it.</source><target>Det här är sista sink och profilen kräver en: servern vägrar ta bort den.</target></segment>
       </unit>
       <unit id="audit_export.field.name">
         <segment><source>Name</source><target>Namn</target></segment>
@@ -223,7 +223,7 @@
         <segment><source>Secret with the client key</source><target>Hemlighet med klientnyckeln</target></segment>
       </unit>
       <unit id="audit_export.field.client_key_help">
-        <segment><source>The id of the operator secret that holds the private key in PEM. It is read from the vault each time the sink connects.</source><target>Id för den operatörshemlighet som innehåller den privata nyckeln i PEM. Den läses från valvet varje gång exportmålet ansluter.</target></segment>
+        <segment><source>The id of the operator secret that holds the private key in PEM. It is read from the vault each time the sink connects.</source><target>Id för den operatörshemlighet som innehåller den privata nyckeln i PEM. Den läses från valvet varje gång sink ansluter.</target></segment>
       </unit>
       <unit id="audit_export.field.file">
         <segment><source>File name</source><target>Filnamn</target></segment>
@@ -265,7 +265,7 @@
         <segment><source>Send test record</source><target>Skicka testpost</target></segment>
       </unit>
       <unit id="audit_export.test_ok">
-        <segment><source>The test record was handed to the sink in {ms} ms.</source><target>Testposten lämnades till exportmålet på {ms} ms.</target></segment>
+        <segment><source>The test record was handed to the sink in {ms} ms.</source><target>Testposten lämnades till sink på {ms} ms.</target></segment>
       </unit>
       <unit id="audit_export.test_failed">
         <segment><source>The test record was not delivered ({ms} ms): {detail}</source><target>Testposten levererades inte ({ms} ms): {detail}</target></segment>
@@ -278,7 +278,7 @@
       </unit>
       <unit id="errors.audit.export.required">
         <notes><note category="description">Also shown when a change would leave no enabled sink while the profile requires one.</note></notes>
-        <segment><source>The profile requires an audit export. Enable an export sink first, then switch the profile.</source><target>Profilen kräver granskningsexport. Aktivera först ett exportmål och byt sedan profil.</target></segment>
+        <segment><source>The profile requires an audit export. Enable an export sink first, then switch the profile.</source><target>Profilen kräver granskningsexport. Aktivera först en sink för export och byt sedan profil.</target></segment>
       </unit>
       <unit id="errors.audit.export.conflict">
         <segment><source>The audit export settings changed in the meantime. The page shows the current ones; check them and try again.</source><target>Inställningarna för granskningsexport ändrades under tiden. Sidan visar de aktuella; kontrollera dem och försök igen.</target></segment>
@@ -287,19 +287,19 @@
         <segment><source>The audit export settings are not valid. Check the marked fields.</source><target>Inställningarna för granskningsexport är inte giltiga. Kontrollera de markerade fälten.</target></segment>
       </unit>
       <unit id="errors.audit.export.not_found">
-        <segment><source>The sink no longer exists. Reload the page.</source><target>Exportmålet finns inte längre. Ladda om sidan.</target></segment>
+        <segment><source>The sink no longer exists. Reload the page.</source><target>Sink finns inte längre. Ladda om sidan.</target></segment>
       </unit>
       <unit id="errors.audit.export.name">
         <segment><source>Enter a name of 1 to 64 characters without control characters.</source><target>Ange ett namn på 1 till 64 tecken utan styrtecken.</target></segment>
       </unit>
       <unit id="errors.audit.export.duplicate">
-        <segment><source>Two sinks have the same name or id. Names are compared without regard to case.</source><target>Två exportmål har samma namn eller id. Namn jämförs utan hänsyn till versaler och gemener.</target></segment>
+        <segment><source>Two sinks have the same name or id. Names are compared without regard to case.</source><target>Två sinks har samma namn eller id. Namn jämförs utan hänsyn till versaler och gemener.</target></segment>
       </unit>
       <unit id="errors.audit.export.unknown_sink">
-        <segment><source>The sink is not known to the server. Reload the page.</source><target>Servern känner inte till exportmålet. Ladda om sidan.</target></segment>
+        <segment><source>The sink is not known to the server. Reload the page.</source><target>Servern känner inte till sink. Ladda om sidan.</target></segment>
       </unit>
       <unit id="errors.audit.export.too_many">
-        <segment><source>At most 8 sinks are allowed.</source><target>Högst 8 exportmål är tillåtna.</target></segment>
+        <segment><source>At most 8 sinks are allowed.</source><target>Högst 8 sinks är tillåtna.</target></segment>
       </unit>
       <unit id="errors.audit.export.host">
         <segment><source>Enter a host name or an IPv4 or IPv6 address.</source><target>Ange ett värdnamn eller en IPv4- eller IPv6-adress.</target></segment>
@@ -323,7 +323,7 @@
         <segment><source>The value is out of range.</source><target>Värdet är utanför tillåtet intervall.</target></segment>
       </unit>
       <unit id="errors.audit.export.test_target">
-        <segment><source>A test needs either a stored sink or a sink from the form.</source><target>Ett test behöver antingen ett sparat exportmål eller ett exportmål från formuläret.</target></segment>
+        <segment><source>A test needs either a stored sink or a sink from the form.</source><target>Ett test behöver antingen en sparad sink eller en sink från formuläret.</target></segment>
       </unit>
 
     </group>

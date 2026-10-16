@@ -260,7 +260,7 @@
       </unit>
       <unit id="nodes.scan.group.scope">
         <notes><note category="description">Heading of the group with the prefixes and exclusions.</note></notes>
-        <segment><source>Scope</source><target>Omfång</target></segment>
+        <segment><source>Scope</source><target>Scope</target></segment>
       </unit>
       <unit id="nodes.scan.group.methods">
         <notes><note category="description">Heading of the group with the scan methods.</note></notes>

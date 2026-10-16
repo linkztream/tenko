@@ -7,7 +7,7 @@
         <segment><source>Access</source><target>Åtkomst</target></segment>
       </unit>
       <unit id="access.lede">
-        <segment><source>Who may do what: the roles, the sign-in each role needs, scoped grants over VRFs, sites and prefixes, and the service accounts that automation uses. The server checks every request.</source><target>Vem som får göra vad: rollerna, inloggningen som varje roll kräver, avgränsade behörigheter över VRF, platser och prefix samt de tjänstekonton som automatiseringen använder. Servern kontrollerar varje begäran.</target></segment>
+        <segment><source>Who may do what: the roles, the sign-in each role needs, scoped grants over VRFs, sites and prefixes, and the service accounts that automation uses. The server checks every request.</source><target>Vem som får göra vad: rollerna, inloggningen som varje roll kräver, avgränsade grants över VRF, platser och prefix samt de tjänstekonton som automatiseringen använder. Servern kontrollerar varje begäran.</target></segment>
       </unit>
       <unit id="access.col.actions">
         <notes><note category="description">Hidden header of the column with the buttons of a row.</note></notes>
@@ -39,11 +39,11 @@
       </unit>
       <unit id="access.role.operator_grant">
         <notes><note category="description">Help under the role choice of a grant.</note></notes>
-        <segment><source>Reads and changes what lies in the scope.</source><target>Läser och ändrar det som ligger i omfånget.</target></segment>
+        <segment><source>Reads and changes what lies in the scope.</source><target>Läser och ändrar det som ligger inom scopet.</target></segment>
       </unit>
       <unit id="access.role.viewer_grant">
         <notes><note category="description">Help under the role choice of a grant.</note></notes>
-        <segment><source>Reads what lies in the scope.</source><target>Läser det som ligger i omfånget.</target></segment>
+        <segment><source>Reads what lies in the scope.</source><target>Läser det som ligger inom scopet.</target></segment>
       </unit>
       <unit id="access.mfa.optional">
         <notes><note category="description">An MFA policy of a role: no second factor required.</note></notes>
@@ -71,7 +71,7 @@
         <segment><source>Roles and sign-in</source><target>Roller och inloggning</target></segment>
       </unit>
       <unit id="access.roles.lede">
-        <segment><source>A person needs the strictest sign-in of every role they hold, globally or through a grant. A requirement weaker than the profile has no effect beyond the profile.</source><target>En person behöver den strängaste inloggningen av alla roller som hen har, globalt eller via en behörighet. Ett krav som är svagare än profilen har ingen effekt utöver profilen.</target></segment>
+        <segment><source>A person needs the strictest sign-in of every role they hold, globally or through a grant. A requirement weaker than the profile has no effect beyond the profile.</source><target>En person behöver den strängaste inloggningen av alla roller som hen har, globalt eller via en grant. Ett krav som är svagare än profilen har ingen effekt utöver profilen.</target></segment>
       </unit>
       <unit id="access.roles.col.role">
         <segment><source>Role</source><target>Roll</target></segment>
@@ -89,7 +89,7 @@
         <segment><source>Globally only</source><target>Endast globalt</target></segment>
       </unit>
       <unit id="access.roles.global_or_grant">
-        <segment><source>Globally or through a grant</source><target>Globalt eller via en behörighet</target></segment>
+        <segment><source>Globally or through a grant</source><target>Globalt eller via en grant</target></segment>
       </unit>
       <unit id="access.roles.follows_profile">
         <segment><source>Follows the profile</source><target>Följer profilen</target></segment>
@@ -118,25 +118,25 @@
         <segment><source>Sign-in of the role {role} saved</source><target>Inloggningen för rollen {role} har sparats</target></segment>
       </unit>
       <unit id="access.grants.heading">
-        <segment><source>Scoped grants</source><target>Avgränsade behörigheter</target></segment>
+        <segment><source>Scoped grants</source><target>Avgränsade grants</target></segment>
       </unit>
       <unit id="access.grants.lede">
-        <segment><source>A grant gives a person or a service account the operator or viewer role over a VRF, a site or a prefix. Revoking a delegable grant also revokes the grants issued under it.</source><target>En behörighet ger en person eller ett tjänstekonto rollen operatör eller läsare över en VRF, en plats eller ett prefix. När en delegerbar behörighet återkallas återkallas också de behörigheter som utfärdats under den.</target></segment>
+        <segment><source>A grant gives a person or a service account the operator or viewer role over a VRF, a site or a prefix. Revoking a delegable grant also revokes the grants issued under it.</source><target>En grant ger en person eller ett tjänstekonto rollen operatör eller läsare över en VRF, en plats eller ett prefix. När en delegerbar grant återkallas återkallas också de grants som utfärdats under den.</target></segment>
       </unit>
       <unit id="access.grants.lede_user">
         <segment><source>The roles this account holds over parts of the inventory, on top of its global roles.</source><target>De roller som det här kontot har över delar av inventariet, utöver sina globala roller.</target></segment>
       </unit>
       <unit id="access.grants.none">
-        <segment><source>No scoped grants.</source><target>Inga avgränsade behörigheter.</target></segment>
+        <segment><source>No scoped grants.</source><target>Inga avgränsade grants.</target></segment>
       </unit>
       <unit id="access.grants.add">
-        <segment><source>Add grant</source><target>Lägg till behörighet</target></segment>
+        <segment><source>Add grant</source><target>Lägg till grant</target></segment>
       </unit>
       <unit id="access.grants.add_title">
-        <segment><source>Add a scoped grant</source><target>Lägg till en avgränsad behörighet</target></segment>
+        <segment><source>Add a scoped grant</source><target>Lägg till en avgränsad grant</target></segment>
       </unit>
       <unit id="access.grants.add_confirm">
-        <segment><source>Add grant</source><target>Lägg till behörighet</target></segment>
+        <segment><source>Add grant</source><target>Lägg till grant</target></segment>
       </unit>
       <unit id="access.grants.col.holder">
         <segment><source>Holder</source><target>Innehavare</target></segment>
@@ -145,7 +145,7 @@
         <segment><source>Role</source><target>Roll</target></segment>
       </unit>
       <unit id="access.grants.col.scope">
-        <segment><source>Scope</source><target>Omfång</target></segment>
+        <segment><source>Scope</source><target>Scope</target></segment>
       </unit>
       <unit id="access.grants.col.delegable">
         <segment><source>Delegable</source><target>Delegerbar</target></segment>
@@ -167,32 +167,32 @@
         <segment><source>The holder may delegate it</source><target>Innehavaren får delegera den</target></segment>
       </unit>
       <unit id="access.grants.field.delegable_help">
-        <segment><source>They may then give others a role no higher over a scope inside this one.</source><target>Innehavaren kan då ge andra en lika hög eller lägre roll över ett omfång inom det här.</target></segment>
+        <segment><source>They may then give others a role no higher over a scope inside this one.</source><target>Innehavaren kan då ge andra en lika hög eller lägre roll över ett scope inom det här.</target></segment>
       </unit>
       <unit id="access.grants.error.subject">
-        <segment><source>Choose who receives the grant.</source><target>Välj vem som får behörigheten.</target></segment>
+        <segment><source>Choose who receives the grant.</source><target>Välj vem som ska få en grant.</target></segment>
       </unit>
       <unit id="access.grants.error.scope">
-        <segment><source>Choose the VRF, site or prefix the grant applies to.</source><target>Välj den VRF, plats eller det prefix som behörigheten gäller.</target></segment>
+        <segment><source>Choose the VRF, site or prefix the grant applies to.</source><target>Välj den VRF, plats eller det prefix som en grant gäller för.</target></segment>
       </unit>
       <unit id="access.grants.created">
-        <segment><source>Grant for {holder} added</source><target>Behörighet för {holder} har lagts till</target></segment>
+        <segment><source>Grant for {holder} added</source><target>Grant för {holder} har lagts till</target></segment>
       </unit>
       <unit id="access.grants.revoke_title">
-        <segment><source>Revoke a grant of {holder}?</source><target>Återkalla en behörighet för {holder}?</target></segment>
+        <segment><source>Revoke a grant of {holder}?</source><target>Återkalla en grant för {holder}?</target></segment>
       </unit>
       <unit id="access.grants.revoke_body">
         <notes><note category="description">The argument grant is a grant in words, e.g. Operator over prefix 203.0.113.0/24 and everything inside it.</note></notes>
         <segment><source>{holder} loses: {grant}.</source><target>{holder} förlorar: {grant}.</target></segment>
       </unit>
       <unit id="access.grants.revoke_cascade">
-        <segment><source>{count, plural, =0 {No grant was issued under it so far.} one {The # grant issued under it goes too.} other {The # grants issued under it go too.}}</source><target>{count, plural, =0 {Hittills har ingen behörighet utfärdats under den.} one {Den # behörighet som utfärdats under den försvinner också.} other {De # behörigheter som utfärdats under den försvinner också.}}</target></segment>
+        <segment><source>{count, plural, =0 {No grant was issued under it so far.} one {The # grant issued under it goes too.} other {The # grants issued under it go too.}}</source><target>{count, plural, =0 {Hittills har ingen grant utfärdats under den.} one {Den # grant som utfärdats under den försvinner också.} other {De # grants som utfärdats under den försvinner också.}}</target></segment>
       </unit>
       <unit id="access.grants.revoke_named">
         <segment><source>Revoke {grant} of {holder}</source><target>Återkalla {grant} för {holder}</target></segment>
       </unit>
       <unit id="access.grants.revoked">
-        <segment><source>{count, plural, one {Grant of {holder} revoked} other {# grants revoked, starting with the one of {holder}}}</source><target>{count, plural, one {Behörigheten för {holder} har återkallats} other {# behörigheter har återkallats, med början i den för {holder}}}</target></segment>
+        <segment><source>{count, plural, one {Grant of {holder} revoked} other {# grants revoked, starting with the one of {holder}}}</source><target>{count, plural, one {Grant för {holder} har återkallats} other {# grants har återkallats, med början i den för {holder}}}</target></segment>
       </unit>
       <unit id="access.grant.text">
         <notes><note category="description">A grant in words. role is a role name, scope a scope in words, e.g. Operator over prefix 203.0.113.0/24 only.</note></notes>
@@ -283,7 +283,7 @@
         <segment><source>Add a service account</source><target>Lägg till ett tjänstekonto</target></segment>
       </unit>
       <unit id="access.sa.add_lede">
-        <segment><source>You become its owner. Give it roles here or grants afterwards, then create a scoped token for it.</source><target>Du blir ägare till kontot. Ge det roller här eller behörigheter senare och skapa sedan ett avgränsat token för det.</target></segment>
+        <segment><source>You become its owner. Give it roles here or grants afterwards, then create a scoped token for it.</source><target>Du blir ägare till kontot. Ge det roller här eller grants senare och skapa sedan ett avgränsat token för det.</target></segment>
       </unit>
       <unit id="access.sa.field.name">
         <segment><source>Name</source><target>Namn</target></segment>
@@ -298,7 +298,7 @@
         <segment><source>Global roles</source><target>Globala roller</target></segment>
       </unit>
       <unit id="access.sa.field.roles_help">
-        <segment><source>Leave all unticked for an account that acts through scoped grants only.</source><target>Lämna alla omarkerade för ett konto som bara agerar via avgränsade behörigheter.</target></segment>
+        <segment><source>Leave all unticked for an account that acts through scoped grants only.</source><target>Lämna alla omarkerade för ett konto som bara agerar via avgränsade grants.</target></segment>
       </unit>
       <unit id="access.sa.error.name">
         <segment><source>Enter 1 to 64 characters without spaces.</source><target>Ange 1 till 64 tecken utan blanksteg.</target></segment>
@@ -310,7 +310,7 @@
         <segment><source>{display} · roles: {roles} · owner: {owner}</source><target>{display} · roller: {roles} · ägare: {owner}</target></segment>
       </unit>
       <unit id="access.sa.grants_only">
-        <segment><source>grants only</source><target>endast behörigheter</target></segment>
+        <segment><source>grants only</source><target>endast grants</target></segment>
       </unit>
       <unit id="access.sa.tokens">
         <segment><source>Tokens</source><target>Token</target></segment>
@@ -361,34 +361,34 @@
         <segment><source>Personal</source><target>Personligt</target></segment>
       </unit>
       <unit id="access.token.kind_personal_help">
-        <segment><source>Acts with every role and grant you have.</source><target>Agerar med alla roller och behörigheter du har.</target></segment>
+        <segment><source>Acts with every role and grant you have.</source><target>Agerar med alla roller och grants du har.</target></segment>
       </unit>
       <unit id="access.token.kind_scoped">
         <segment><source>Scoped</source><target>Avgränsat</target></segment>
       </unit>
       <unit id="access.token.kind_scoped_help">
-        <segment><source>Acts with the grants and scopes you choose, never more than you have.</source><target>Agerar med de behörigheter och omfång du väljer, aldrig mer än du har.</target></segment>
+        <segment><source>Acts with the grants and scopes you choose, never more than you have.</source><target>Agerar med de grants och scopes du väljer, aldrig mer än du har.</target></segment>
       </unit>
       <unit id="access.token.grants">
-        <segment><source>Grants</source><target>Behörigheter</target></segment>
+        <segment><source>Grants</source><target>Grants</target></segment>
       </unit>
       <unit id="access.token.grants_help">
-        <segment><source>Each grant is a role over the whole installation or over a VRF, a site or a prefix. Over a scope only operator and viewer are possible.</source><target>Varje behörighet är en roll över hela installationen eller över en VRF, en plats eller ett prefix. Över ett omfång är bara operatör och läsare möjliga.</target></segment>
+        <segment><source>Each grant is a role over the whole installation or over a VRF, a site or a prefix. Over a scope only operator and viewer are possible.</source><target>Varje grant är en roll över hela installationen eller över en VRF, en plats eller ett prefix. Över ett scope är bara operatör och läsare möjliga.</target></segment>
       </unit>
       <unit id="access.token.add_grant">
-        <segment><source>Add grant</source><target>Lägg till behörighet</target></segment>
+        <segment><source>Add grant</source><target>Lägg till grant</target></segment>
       </unit>
       <unit id="access.token.remove_grant">
-        <segment><source>Remove grant {n}</source><target>Ta bort behörighet {n}</target></segment>
+        <segment><source>Remove grant {n}</source><target>Ta bort grant {n}</target></segment>
       </unit>
       <unit id="access.token.scopes">
-        <segment><source>Special scopes</source><target>Särskilda omfång</target></segment>
+        <segment><source>Special scopes</source><target>Särskilda scopes</target></segment>
       </unit>
       <unit id="access.token.error.scope">
-        <segment><source>Choose a VRF, site or prefix for every grant, or the whole installation.</source><target>Välj en VRF, en plats eller ett prefix för varje behörighet, eller hela installationen.</target></segment>
+        <segment><source>Choose a VRF, site or prefix for every grant, or the whole installation.</source><target>Välj en VRF, en plats eller ett prefix för varje grant, eller hela installationen.</target></segment>
       </unit>
       <unit id="access.token.error.empty">
-        <segment><source>A scoped token needs at least one grant or special scope.</source><target>Ett avgränsat token behöver minst en behörighet eller ett särskilt omfång.</target></segment>
+        <segment><source>A scoped token needs at least one grant or special scope.</source><target>Ett avgränsat token behöver minst en grant eller ett särskilt scope.</target></segment>
       </unit>
       <unit id="access.token.created_title">
         <segment><source>Copy the token now</source><target>Kopiera token nu</target></segment>
