@@ -101,6 +101,8 @@ export default defineConfig(({ command, mode }) => {
     define: {
       // The switch index.tsx reads; replaced at build time, so production never has it.
       "import.meta.env.VITE_TENKO_MOCK": JSON.stringify(mock && command === "serve" ? "1" : ""),
+      // Under test only: lets a timing test widen its budget on a CI runner.
+      "import.meta.env.CI": JSON.stringify(testing ? (process.env.CI ?? "") : ""),
     },
     plugins: [
       // No hot-reload wrappers under test: vitest cannot resolve their runtime.

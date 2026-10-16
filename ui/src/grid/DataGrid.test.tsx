@@ -160,7 +160,7 @@ describe("DataGrid", () => {
     expect(screen.getByTestId("grid-foot").textContent).toContain("256 rows");
     // The budget is the workstation's; a CI runner may be a slower, shared machine (the
     // self-hosted one holds half its cores of CPU time), so it gets five times as long.
-    expect(elapsed).toBeLessThan(process.env.CI ? 500 : 100);
+    expect(elapsed).toBeLessThan(import.meta.env.CI ? 500 : 100);
   });
 
   it("lifts the selected rows when one of them is dragged", () => {
