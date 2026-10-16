@@ -271,20 +271,17 @@ fn assert_refused(reply: &Reply, status: u16, code: &str) {
     assert_eq!(reply.code().as_deref(), Some(code), "{}", reply.text);
 }
 
-/// Asserts that an answer gives nothing away: a refusal (403), or a list with no item
-/// (a list filters what the principal may not read).
+/// Asserts that a list answers `200` with no item: a list filters what the principal may
+/// not read and never refuses (access.md section 1), so a principal that reaches nothing of
+/// the kind gets an empty page.
 #[track_caller]
-fn assert_reaches_nothing(reply: &Reply, what: &str) {
-    let empty_list = reply.status == 200
-        && reply.json()["items"]
-            .as_array()
-            .is_some_and(std::vec::Vec::is_empty);
-    assert!(
-        reply.status == 403 || empty_list,
-        "{what} must be refused or list nothing: HTTP {} {}",
-        reply.status,
-        reply.text
-    );
+fn assert_lists_nothing(reply: &Reply, what: &str) {
+    assert_eq!(reply.status, 200, "{what}: {}", reply.text);
+    let items = reply.json()["items"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{what}: a list answer: {}", reply.text))
+        .len();
+    assert_eq!(items, 0, "{what} must list nothing: {}", reply.text);
 }
 
 /// The body text of a successful answer.
@@ -553,11 +550,9 @@ fn iam_01_a_delegable_grant_delegates_inside_its_scope_and_revoking_it_revokes_t
         revoked_ids.contains(&parent_id.as_str()) && revoked_ids.contains(&child_id.as_str()),
         "the answer lists the parent and the child: {revoked}"
     );
-    let after = dana.get("/prefixes");
-    assert!(
-        after.status == 403 || ids(&after.json()).is_empty(),
-        "dana keeps no access once the grant under it is gone: {}",
-        after.text
+    assert_lists_nothing(
+        &dana.get("/prefixes"),
+        "dana keeps no access once the grant under it is gone",
     );
 
     lab.finish();
@@ -794,11 +789,9 @@ fn iam_10_a_token_loses_the_rights_its_owner_loses_and_gains_none() {
         None,
     );
     assert_eq!(after.status, 403, "{}", after.text);
-    let list = lab.bearer(&secret, Method::GET, "/prefixes", None);
-    assert!(
-        list.status == 403 || !cidrs(&list.json()).contains(&"192.0.2.0/25".to_owned()),
-        "the token lists nothing of the lost grant: {}",
-        list.text
+    assert_lists_nothing(
+        &lab.bearer(&secret, Method::GET, "/prefixes", None),
+        "the token lists nothing once the owner lost the grant",
     );
 
     lab.finish();
@@ -826,14 +819,24 @@ fn iam_10_the_metrics_and_audit_scopes_read_their_own_route_only() {
         "{}",
         scrape.text
     );
-    for path in ["/prefixes", "/audit", "/users", "/hosts"] {
+    // The IPAM lists are empty (the token reaches nothing of the kind); the global-only
+    // reads are refused.
+    for path in ["/prefixes", "/hosts"] {
         let reply = lab.bearer(&metrics, Method::GET, path, None);
-        assert_reaches_nothing(&reply, &format!("metrics token on {path}"));
+        assert_lists_nothing(&reply, &format!("metrics token on {path}"));
+    }
+    for path in ["/audit", "/users"] {
+        let reply = lab.bearer(&metrics, Method::GET, path, None);
+        assert_refused(&reply, 403, "auth.forbidden");
     }
     lab.bearer(&audit, Method::GET, "/audit", None).expect(200);
-    for path in ["/metrics", "/prefixes", "/users"] {
+    assert_lists_nothing(
+        &lab.bearer(&audit, Method::GET, "/prefixes", None),
+        "audit token on /prefixes",
+    );
+    for path in ["/metrics", "/users"] {
         let reply = lab.bearer(&audit, Method::GET, path, None);
-        assert_reaches_nothing(&reply, &format!("audit token on {path}"));
+        assert_refused(&reply, 403, "auth.forbidden");
     }
     let anonymous = lab.admin.anonymous().get("/metrics");
     assert_eq!(
@@ -880,8 +883,8 @@ fn iam_06_a_role_policy_raises_the_requirement_of_the_people_who_hold_the_role()
         "{}",
         refused.text
     );
-    // A list gives nothing away either.
-    assert_reaches_nothing(&viewer.get("/prefixes"), "a list on a too weak session");
+    // A list gives nothing away either: it is empty, the single read carries the reason.
+    assert_lists_nothing(&viewer.get("/prefixes"), "a list on a too weak session");
 
     let cleared = lab
         .admin

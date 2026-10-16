@@ -809,6 +809,8 @@ impl Peers {
 
     /// The cluster as this controller sees it, with the replication figures given.
     async fn view_local(&self, figures: Option<Figures>) -> Result<ClusterView, ClusterError> {
+        let local = self.local();
+        let own = self.own_record(String::new(), Timestamp::UNIX_EPOCH);
         let status = self.store().status();
         let membership = self.store().membership();
         let records = self.member_records().await?;
@@ -852,13 +854,22 @@ impl Peers {
             .collect::<BTreeMap<_, _>>()
             .into_iter()
             .map(|(node, role)| {
-                let record = records.get(&node);
+                // A single controller has no member record until the first join: it
+                // reports its own binary, without an address or a join time it does not
+                // have yet.
+                let (record, joined) = match records.get(&node) {
+                    Some(record) => (Some(record), true),
+                    None if node == local => (Some(&own), false),
+                    None => (None, false),
+                };
                 let (matched, lag_entries, last_contact_ms) =
                     figures.get(&node).copied().unwrap_or((None, None, None));
                 MemberView {
                     node,
                     name: names.get(&node).cloned(),
-                    address: record.map(|record| record.address.clone()),
+                    address: record
+                        .filter(|_| joined)
+                        .map(|record| record.address.clone()),
                     role,
                     leader: status.leader == Some(node),
                     matched,
@@ -866,7 +877,7 @@ impl Peers {
                     last_contact_ms,
                     version: record.map(|record| record.version.clone()),
                     data_format: record.map(|record| record.data_format),
-                    joined_at: record.map(|record| record.joined_at),
+                    joined_at: record.filter(|_| joined).map(|record| record.joined_at),
                     protocol_majors: record
                         .map(|record| record.protocol_majors.clone())
                         .unwrap_or_default(),

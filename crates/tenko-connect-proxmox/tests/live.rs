@@ -1,5 +1,6 @@
 //! A smoke test against a real Proxmox VE cluster, read-only. Skipped unless
-//! `TENKO_LIVE_PROXMOX=1`; CI never sets it.
+//! `TENKO_LIVE_PROXMOX=1`; CI never sets it. With the variable set, a failed health check, a
+//! cluster that reports itself unreachable or a failed poll fails the test.
 //!
 //! It reads `PROXMOX_URL`, `PROXMOX_TOKEN_ID` and `PROXMOX_TOKEN_SECRET`, and optionally
 //! `PROXMOX_TLS` (`system`, `ca`, `fingerprint`, `insecure`), `PROXMOX_TLS_FINGERPRINT`,
@@ -9,7 +10,7 @@
 
 use std::{collections::BTreeMap, path::PathBuf};
 
-use tenko_connect::{CallContext, Connector, InventorySource, Secrets};
+use tenko_connect::{CallContext, Connector, Health, InventorySource, Secrets};
 use tenko_connect_proxmox::{Proxmox, SECRET};
 use zeroize::Zeroizing;
 
@@ -72,7 +73,8 @@ fn context() -> CallContext {
     }
 }
 
-/// Prints the health check as shape: health, major version, latency and which notes.
+/// Prints the health check as shape: health, major version, latency and which notes. Panics
+/// when the check fails or the cluster is unreachable.
 async fn print_check(ctx: &CallContext) {
     match Proxmox.check(ctx).await {
         Ok(report) => {
@@ -107,8 +109,13 @@ async fn print_check(ctx: &CallContext) {
                 ),
                 report.latency_ms
             );
+            assert_ne!(
+                report.health,
+                Health::Unreachable,
+                "the cluster in .env is unreachable"
+            );
         }
-        Err(error) => eprintln!("check: error {}", tenko_core::Coded::code(&error)),
+        Err(error) => panic!("check: error {}", tenko_core::Coded::code(&error)),
     }
 }
 
@@ -126,10 +133,7 @@ async fn live_inventory_shape() {
     loop {
         let batch = match Proxmox.poll(&ctx, cursor).await {
             Ok(batch) => batch,
-            Err(error) => {
-                eprintln!("poll: error {}", tenko_core::Coded::code(&error));
-                return;
-            }
+            Err(error) => panic!("poll: error {}", tenko_core::Coded::code(&error)),
         };
         pages += 1;
         hosts.extend(batch.hosts);

@@ -1,5 +1,6 @@
 //! A smoke test against a real Home Assistant, read-only. Skipped unless `TENKO_LIVE_HASS=1`;
-//! CI never sets it.
+//! CI never sets it. With the variable set, missing settings, a failed health check, an
+//! instance that reports itself unreachable or a failed poll fails the test.
 //!
 //! It reads `HASS_URL` and `HASS_TOKEN`, and optionally `HASS_TLS` (`system`, `ca`,
 //! `fingerprint`, `insecure`), `HASS_TLS_FINGERPRINT`, `HASS_TLS_CA` (a PEM file path) and
@@ -9,7 +10,7 @@
 
 use std::{collections::BTreeMap, path::PathBuf};
 
-use tenko_connect::{CallContext, Connector, InventorySource, Secrets};
+use tenko_connect::{CallContext, Connector, Health, InventorySource, Secrets};
 use tenko_connect_hass::{HomeAssistant, SECRET};
 use tenko_core::observe::ObservedHost;
 use zeroize::Zeroizing;
@@ -69,7 +70,8 @@ fn context() -> Option<CallContext> {
     })
 }
 
-/// Prints the health check as shape: health, version family, latency and which notes.
+/// Prints the health check as shape: health, version family, latency and which notes. Panics
+/// when the check fails or the instance is unreachable.
 async fn print_check(ctx: &CallContext) {
     match HomeAssistant.check(ctx).await {
         Ok(report) => {
@@ -92,8 +94,13 @@ async fn print_check(ctx: &CallContext) {
                 report.remote_version.is_some(),
                 report.latency_ms
             );
+            assert_ne!(
+                report.health,
+                Health::Unreachable,
+                "the Home Assistant in .env is unreachable"
+            );
         }
-        Err(error) => eprintln!("check: error {}", tenko_core::Coded::code(&error)),
+        Err(error) => panic!("check: error {}", tenko_core::Coded::code(&error)),
     }
 }
 
@@ -145,10 +152,9 @@ async fn live_inventory_shape() {
         eprintln!("skipped: set TENKO_LIVE_HASS=1 to run against the Home Assistant in .env");
         return;
     }
-    let Some(ctx) = context() else {
-        eprintln!("skipped: HASS_URL and HASS_TOKEN are not set (or still placeholders)");
-        return;
-    };
+    let ctx = context().expect(
+        "TENKO_LIVE_HASS=1 needs HASS_URL and HASS_TOKEN (not placeholders) in the environment or .env",
+    );
     print_check(&ctx).await;
     let mut hosts = Vec::new();
     let mut vendors = 0;
@@ -157,10 +163,7 @@ async fn live_inventory_shape() {
     loop {
         let batch = match HomeAssistant.poll(&ctx, cursor).await {
             Ok(batch) => batch,
-            Err(error) => {
-                eprintln!("poll: error {}", tenko_core::Coded::code(&error));
-                return;
-            }
+            Err(error) => panic!("poll: error {}", tenko_core::Coded::code(&error)),
         };
         pages += 1;
         vendors += batch.vendors.len();
@@ -226,10 +229,9 @@ async fn live_record_fixture() {
         eprintln!("skipped: set TENKO_LIVE_HASS=1 and TENKO_RECORD=1 to record the fixture");
         return;
     }
-    let Some(ctx) = context() else {
-        eprintln!("skipped: HASS_URL and HASS_TOKEN are not set (or still placeholders)");
-        return;
-    };
+    let ctx = context().expect(
+        "TENKO_LIVE_HASS=1 needs HASS_URL and HASS_TOKEN (not placeholders) in the environment or .env",
+    );
     let settings: Settings = ctx.settings().expect("settings");
     let api = Api::new(
         &settings.url,

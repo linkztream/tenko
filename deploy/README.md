@@ -245,7 +245,8 @@ other hardening setting stays. The probe works without it; the capability only m
 the unit 1.2 without the drop-in and 1.6 with it.
 
 **The smoke test.** `systemd/smoke.sh` checks the unit end to end on a host where systemd
-is PID 1; the nightly CI job runs it on a hosted Linux runner. It installs the binary,
+is PID 1; the CI job `systemd-smoke` runs it on a Linux runner on the weekly schedule
+and when the workflow is started by hand. It installs the binary,
 the account, a smoke configuration, the unit and the credential, starts the service,
 checks the key source and the log directory, stops and starts it, completes first-run
 setup, installs the same binary as the next version from a release source on the loopback

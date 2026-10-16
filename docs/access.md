@@ -29,6 +29,8 @@ Every request is decided in three steps.
 2. **Strength.** The session must be at least as strong as the strictest of the profile's requirement (TGL-02, TGL-03), the PIN coupling rule (IAM-07) and the multi-factor policy of every role the user holds, globally or through a grant (section 8). Otherwise the request is refused with 403 `auth.step_up_required`.
 3. **Scope.** When only grants reach the kind, the anchors of the object must be covered: one anchor for a read, every anchor for a create, update or delete. Otherwise the request is refused with 403 `auth.out_of_scope`.
 
+The three refusals are the answer of a write, of a single read and of an export. A list, the prefix tree, the search and the tag list filter instead of refusing: a principal that reaches nothing of a kind, whether no role or grant allows the read (step 1) or its session is too weak (step 2), gets `200` with no items on the lists of that kind, exactly as a principal whose scope holds no object of it (section 10). The reason is told by the single reads and the writes of the kind, which carry the refusal and its code. Nothing leaks either way; a client that wants the reason asks for one object.
+
 Authorization reads no table while it decides. The roles, grants, tokens and policies are kept in an index that the store updates in commit order, so a revoked grant, a disabled account or a removed token takes effect with the commit that made it, on the controller that serves the request once it has applied that commit.
 
 Global roles stay in the user record. Grants, scoped tokens and role policies are stored in their own tables (section 14).
@@ -166,7 +168,7 @@ A personal token acts with all the roles and grants of its owner. A scoped token
 
 A grant without a scope applies to the whole installation, and its role must be covered by a global role of the owner. A grant with a scope needs a role that is `operator` or `viewer`, a scope that can be granted and exists, and either a global role of the owner that covers the role or one of the owner's grants that covers the role over a scope containing the token's scope. Otherwise the request is refused with 403 `auth.grant.exceeds_own`, 422 `auth.grant.invalid_role` or 422 `auth.grant.invalid_scope`.
 
-**Special scopes.** `metrics` lets the token read the metrics endpoint; `audit:read` lets it read the audit log. Both read only: the token reaches nothing else through them. An owner may ask for a special scope if it is a service account or holds a global role that reads the system. A token needs at least one grant or one scope.
+**Special scopes.** `metrics` lets the token read the metrics endpoint; `audit:read` lets it read the audit log. Both read only: the token reaches nothing else through them; its lists of the other kinds are empty and their single reads are refused with 403 `auth.forbidden` (section 1). An owner may ask for a special scope if it is a service account or holds a global role that reads the system. A token needs at least one grant or one scope.
 
 **Intersection.** The effective right of a request is the intersection of the token's grants and the owner's grants at that moment. An object must be covered by the token's rules and by the owner's rules. A token therefore loses rights when its owner loses them, is refused when the owner is disabled or deleted (the scoped tokens of a deleted account are removed), and never gains rights its owner gains later. A token cannot administer: changing users, settings, the system, tokens, sessions or secrets, revealing a secret, and every administrative action need an interactive session.
 
@@ -205,7 +207,7 @@ The multi-factor requirement (IAM-06) is set per role. A policy has one of three
 
 **Defaults.** Without a stored policy a role follows the profile: `passkey` for the admin role when the profile requires a passkey for administrators (TGL-03); otherwise `totp_or_stronger` for every role when the profile requires multi-factor for everyone, and for the admin role when it requires it for administrators (TGL-02); otherwise `optional`.
 
-**Strictest wins.** The requirement of a user is the strictest of the profile floor and the policies of every role the user holds at any scope: the global roles and the roles of grants. A policy weaker than the profile has no effect beyond the profile. The result is enforced through the existing step-up path: a session that is too weak gets 403 `auth.step_up_required` with the required strength.
+**Strictest wins.** The requirement of a user is the strictest of the profile floor and the policies of every role the user holds at any scope: the global roles and the roles of grants. A policy weaker than the profile has no effect beyond the profile. The result is enforced through the existing step-up path: a session that is too weak gets 403 `auth.step_up_required` with the required strength on a write and on a single read, and empty lists (section 1).
 
 | Profile (TGL-02, TGL-03) | Stored policy of `viewer` | Viewer must have |
 |---|---|---|
@@ -232,6 +234,7 @@ A principal whose reach is scoped receives only what its rules cover. Lists filt
 | Route | Behaviour |
 |---|---|
 | Lists (tenants, VRFs, sites, VLANs, prefixes, ranges, addresses, hosts, interfaces, custom fields, observations, proposals, jobs, topology) | Only objects in scope; tenants, VRFs, sites and custom fields as context |
+| Lists of a kind the principal reaches nothing of | `200` with no items, never 403 (section 1) |
 | Single reads and history | 403 `auth.out_of_scope` outside the scope |
 | Prefix tree | The prefixes in scope as nodes; see below |
 | Search | Only hits in scope |

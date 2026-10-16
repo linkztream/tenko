@@ -863,7 +863,8 @@ format until every voter runs a binary that knows the new one (section 3.7).
 
 A member that joined with an older build shows `-` in the columns it has not reported. It
 reports them after its next start, and the report says so. Such a member does not make the
-check fail.
+check fail. A single controller, which has no member record before its first join, reports
+its own version, majors, Raft wire and formats; only its name shows `-` until then.
 
 A worked example. Three controllers run 0.1.0, which knows format 1. The new binary is 0.2.0
 and knows formats 1 and 2. Node 1 leads.

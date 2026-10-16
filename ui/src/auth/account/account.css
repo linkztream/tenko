@@ -57,8 +57,9 @@
 .acct-this { margin-inline-start: var(--sp-4); }
 .acct-token { font-size: var(--fs-13); flex: 1; min-width: 0; }
 
-/* Dialogs that show a secret once are a little wider than a confirmation. */
-.dialog.wide { width: min(560px, calc(100vw - 32px)); }
+/* Dialogs that show a secret once are a little wider than a confirmation; one taller than
+   the window scrolls (the same rule as in src/settings/settings.css). */
+.dialog.wide { width: min(560px, calc(100vw - 32px)); max-height: 84vh; overflow: auto; }
 
 /* The QR code of the TOTP enrolment: dark on light in both themes. */
 .acct-qr { margin: var(--sp-3) 0 var(--sp-4); }

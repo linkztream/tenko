@@ -235,8 +235,7 @@ test("IAM-10: a scoped personal token reads only the prefix it was given", async
   await dialog.getByTestId("field-name").fill("prefix-reader");
   await dialog.getByTestId("field-kind-scoped").check();
   await pickPrefix(dialog.getByTestId("token-grant"), inScope);
-  // The Create button lies below the fold of a 1280x720 window (see the fixme below), so the
-  // form is submitted with the Enter key from the name field.
+  // The form is submitted with the Enter key from the name field; the next scenario clicks.
   await dialog.getByTestId("field-name").press("Enter");
   const shown = page.getByTestId("dialog-token-created");
   const secret = ((await shown.getByTestId("token-secret").textContent()) ?? "").trim();
@@ -254,23 +253,25 @@ test("IAM-10: a scoped personal token reads only the prefix it was given", async
   }
 });
 
-// A defect, recorded: `.dialog.wide` in src/auth/account/account.css has no `max-height` and no
-// `overflow`, unlike the same class in src/settings/settings.css that the access page loads. The
-// dialog of a scoped personal token is taller than a 1280x720 window and cannot be scrolled, so
-// its Create button cannot be clicked (the keyboard still submits the form).
-test.fixme("IAM-10: the Create button of the scoped personal-token dialog can be clicked in a 1280x720 window (defect: the dialog is taller than the window and does not scroll)", async ({
+// The dialog of a scoped personal token is taller than a 1280x720 window: it stays inside the
+// window and scrolls, so its Create button can be clicked (deviation 66 of the exit document).
+test("IAM-10: the Create button of the scoped personal-token dialog can be clicked in a 1280x720 window", async ({
   page,
   api,
   signedIn,
 }) => {
   void signedIn;
+  await page.setViewportSize({ width: 1280, height: 720 });
   const { inScope } = await arrange(api);
   await page.goto("/account/tokens");
   await page.getByTestId("account-token-create").click();
   const dialog = page.getByTestId("dialog-token");
-  await dialog.getByTestId("field-name").fill("prefix-reader");
+  await dialog.getByTestId("field-name").fill("prefix-clicker");
   await dialog.getByTestId("field-kind-scoped").check();
   await pickPrefix(dialog.getByTestId("token-grant"), inScope);
+  const box = await dialog.boundingBox();
+  expect(box, "the dialog is laid out").not.toBeNull();
+  expect((box?.y ?? 0) + (box?.height ?? 0), "the dialog ends inside the window").toBeLessThanOrEqual(720);
   await dialog.getByTestId("form-submit").click({ timeout: 5_000 });
   await expect(page.getByTestId("dialog-token-created")).toBeVisible();
 });

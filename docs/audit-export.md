@@ -140,7 +140,7 @@ Every controller computes the status of every sink from the cursors, so the stat
 
 TGL-21 decides what the installation requires of the export ([SECURITY-PROFILES.md](SECURITY-PROFILES.md)): `local` (Home, Lab), `optional` (Standard) and `required` (Hardened). The audit log itself is never off.
 
-While TGL-21 is `required`, `PUT /settings/audit-export` refuses settings without an enabled sink (409 `audit.export.required`, audited as a failed `sys.audit_export.update`), and the status shows the warning `audit.export.required` when no sink is enabled, for example right after switching to Hardened. `GET /settings/audit-export` reports the policy as `policy.audit_export`, `policy.required` and `policy.satisfied`, which the setup wizard and the banner of the UI use. The settings of the security profile do not consult the export yet; see [11](#11-limits-and-open-items).
+While TGL-21 is `required`, `PUT /settings/audit-export` refuses settings without an enabled sink (409 `audit.export.required`, audited as a failed `sys.audit_export.update`), and the status shows the warning `audit.export.required` when no sink is enabled, for example right after switching to Hardened. `GET /settings/audit-export` reports the policy as `policy.audit_export`, `policy.required` and `policy.satisfied`, which the setup wizard and the banner of the UI use. `PATCH /settings/security` consults the export the same way: a change that starts to require it, by setting TGL-21 to `required` or by switching the profile to Hardened, is refused with 409 `audit.export.required` while no sink is enabled, and the refusal is audited like the PIN coupling rule. A sink that fails or is disabled afterwards is the status warning's business.
 
 ## 8. API
 
@@ -194,7 +194,6 @@ Failure codes in a sink's `last_error` and a test result: `audit.export.resolve`
 
 ## 11. Limits and open items
 
-- The security settings (`PATCH /settings/security`) do not yet refuse switching TGL-21 to `required` or the profile to Hardened while no sink is enabled; the status warning `audit.export.required` shows instead. The check is `tenko_auth::audit_export::status::required_unmet`, to be called by the settings service.
 - The client certificate of a TLS sink is supplied by the operator; issuing it from the internal CA is not built.
 - No HTTPS push to a collector (S3-Q6 option b); webhooks come with API-06.
 - `tenko audit verify --file` reads JSON exports only; RFC 5424 and CEF files carry sequence and hash for receivers but are not verified by Tenko.

@@ -9,8 +9,8 @@
 //! on reads of the minority and its absence on the majority, and the drain of the queue after the
 //! heal: one change applied, one a conflict that waits for the person's decision.
 //!
-//! The acceptance files are not in the weekly lab job, which runs `cluster_*.rs` only; they run in
-//! the exit run with `--run-ignored`. The scenario is the one of `cluster_partition.rs`
+//! The weekly lab job (`cluster-lab` in `ci.yml`) runs this file with the `cluster_*.rs` scenarios,
+//! ignored tests included; the exit run runs it with `--run-ignored all`. The scenario is the one of `cluster_partition.rs`
 //! (`cluster_support/scenarios.rs`) with the banner checks switched on.
 
 mod cluster_support;

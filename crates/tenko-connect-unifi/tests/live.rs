@@ -5,6 +5,8 @@
 //! `UNIFI_USER` with `UNIFI_PASSWORD` (a local account) or `UNIFI_LOCAL_API_KEY` (a local
 //! Integration API key); optionally `UNIFI_SITE` and `UNIFI_TLS_FINGERPRINT`. Without a
 //! pinned fingerprint it pins the certificate the controller presents (trust on first use).
+//! With `TENKO_LIVE_UNIFI=1`, missing settings, a failed call or a controller that reports
+//! itself unreachable fails the test; without it the test passes as skipped.
 //!
 //! It calls only `Check`, `Poll` and `Topology`: the plugin's read paths. It never plans,
 //! applies or reverts, so it writes nothing. It prints shapes and counts only, never names,
@@ -47,7 +49,7 @@ fn count<T>(items: &[T], test: impl Fn(&T) -> bool) -> usize {
 async fn live_context() -> Option<CallContext> {
     let values = env_file();
     let Some(url) = values.get("UNIFI_URL").cloned() else {
-        eprintln!("skipped: no UNIFI_URL in .env");
+        eprintln!("missing: no UNIFI_URL in .env");
         return None;
     };
     let mut secrets = Secrets::new();
@@ -70,7 +72,7 @@ async fn live_context() -> Option<CallContext> {
             println!("credentials: local Integration API key");
         }
         _ => {
-            eprintln!("skipped: no local account and no local Integration API key in .env");
+            eprintln!("missing: no local account and no local Integration API key in .env");
             return None;
         }
     }
@@ -115,9 +117,9 @@ async fn live_read_only_smoke() {
         eprintln!("skipped: TENKO_LIVE_UNIFI is not 1");
         return;
     }
-    let Some(ctx) = live_context().await else {
-        return;
-    };
+    let ctx = live_context()
+        .await
+        .expect("TENKO_LIVE_UNIFI=1 needs the controller and its credentials in .env");
     let health = Unifi.check(&ctx).await.expect("check");
     println!(
         "check: health {:?}, version {}",
@@ -126,6 +128,11 @@ async fn live_read_only_smoke() {
             || "unknown".to_owned(),
             |v| v.split('.').take(2).collect::<Vec<_>>().join(".")
         )
+    );
+    assert_ne!(
+        health.health,
+        tenko_connect::Health::Unreachable,
+        "the controller in .env is unreachable"
     );
 
     let topology = Unifi.topology(&ctx).await.expect("topology");
@@ -241,9 +248,9 @@ async fn live_record_fixtures() {
         eprintln!("skipped: TENKO_LIVE_UNIFI and TENKO_RECORD are not both 1");
         return;
     }
-    let Some(ctx) = live_context().await else {
-        return;
-    };
+    let ctx = live_context()
+        .await
+        .expect("TENKO_LIVE_UNIFI=1 needs the controller and its credentials in .env");
     let config = settings::config(&ctx).expect("settings");
     let settings::Credentials::Account { username, password } =
         settings::credentials(&ctx).expect("credentials")

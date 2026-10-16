@@ -11,8 +11,8 @@
 //! API of every survivor. It does not cover `HAProxy` in front of the controllers or three separate
 //! virtual machines: those are the owner's part (WP3.8b).
 //!
-//! The acceptance files are not in the weekly lab job, which runs `cluster_*.rs` only; they run in
-//! the exit run with `--run-ignored`. The scenario itself is the one of `cluster_failover.rs`
+//! The weekly lab job (`cluster-lab` in `ci.yml`) runs this file with the `cluster_*.rs` scenarios,
+//! ignored tests included; the exit run runs it with `--run-ignored all`. The scenario itself is the one of `cluster_failover.rs`
 //! (`cluster_support/scenarios.rs`), called, not copied.
 
 mod cluster_support;

@@ -176,6 +176,8 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ### Fixed
 
+- The dialog that creates a scoped personal token on the account page scrolls when it is taller than the window, so its Create button can be reached with the mouse on a small screen.
+- On a single controller, `GET /cluster/members` and `tenko cluster upgrade-check` report its version, protocol majors, Raft wire version and data formats; they were empty before the first join, and the check showed `-`.
 - The page of a connector, the connectors list and the connectors tile of the start page follow the plugin process from starting to running, and every change of its health, without a reload.
 - The nodes tile of the start page and the cluster summary of the nodes page count a node as soon as it enrols, connects, disconnects or is revoked, instead of keeping the old numbers until a reload.
 - With an operator secret in the vault, the security settings of the Home and Lab profiles can be changed again, for example the reveal policy (TGL-24). Only a change of the password policy or of the MFA requirement that would let a PIN be the only factor is refused, and the settings page says so before anything is sent.

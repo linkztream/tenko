@@ -281,8 +281,9 @@ jobs:
           cargo test --locked -p tenko-cluster --tests
           cargo test --locked -p tenko --test node_cluster "${smoke[@]}"
 
-  # Nightly cluster lab. Runs every crates/tenko/tests/cluster_*.rs including the tests
-  # marked #[ignore] (the slow scenarios), then the compose lab smoke. WP3.1c adds both
+  # Weekly cluster lab. Runs every crates/tenko/tests/cluster_*.rs and the lab acceptance
+  # tests of the phase exit (acceptance_cluster.rs, acceptance_partition.rs), including the
+  # tests marked #[ignore] (the slow scenarios), then the compose lab smoke. WP3.1c adds both
   # (the test files and deploy/compose/lab-cluster/smoke.sh); until then the job only says
   # so. Helpers of the lab live in the directory tests/cluster_support/, not in a file
   # named cluster_*.rs, which would be run as a test.
@@ -307,7 +308,7 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           lab=()
-          for f in crates/tenko/tests/cluster_*.rs; do
+          for f in crates/tenko/tests/cluster_*.rs crates/tenko/tests/acceptance_cluster.rs crates/tenko/tests/acceptance_partition.rs; do
             lab+=(--test "$(basename "$f" .rs)")
           done
           if [ "${#lab[@]}" -eq 0 ]; then
@@ -323,7 +324,7 @@ jobs:
         if: ${{ hashFiles('deploy/compose/lab-cluster/smoke.sh') == '' }}
         run: echo "::notice::deploy/compose/lab-cluster/smoke.sh does not exist yet; WP3.1c adds the compose lab."
 
-  # Nightly Windows service smoke (OPS-10, E10). The hosted Windows runner runs elevated,
+  # Weekly Windows service smoke (OPS-10, E10). The hosted Windows runner runs elevated,
   # which the Service Control Manager needs. WP3.6 adds deploy/windows/smoke.ps1 (install,
   # start, readiness, Event Log, upgrade through the version layout, stop, uninstall); the
   # job runs it with the debug binary. Until then it runs the unit tests of the service
@@ -456,7 +457,7 @@ jobs:
             /etc/tenko /var/lib/tenko /usr/local/bin/tenko
           sudo systemctl daemon-reload
 
-  # Nightly fuzz smoke (API-14): 60 seconds for every target that `cargo fuzz list` prints.
+  # Weekly fuzz smoke (API-14): 60 seconds for every target that `cargo fuzz list` prints.
   # WP3.13 and the packages that add parsers of network input add targets under
   # fuzz/fuzz_targets/ and fuzz/Cargo.toml; no edit of this file is needed. A directory
   # fuzz/seeds/<target>/ is used as an extra corpus when it exists. All targets run even

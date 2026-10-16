@@ -1,8 +1,12 @@
 //! The acceptance of the `metrics` topic (WP3.5, OPS-20): 100 event streams on the topic
 //! against a running server receive one snapshot per second each, from one aggregation per
-//! second, over five seconds. The CPU time of the process is measured and printed (not
-//! asserted): once with 100 streams on another topic, the publisher asleep, and once with
-//! 100 streams on `metrics`. Run with `--no-capture` to read it.
+//! second, over a window of about five seconds. The aggregations are counted against the
+//! time that passed between the two readings of the counters, not against the nominal
+//! window: under the load of a full parallel test run the window stretches (on Windows the
+//! CPU reading alone starts a PowerShell process), and the claim is a rate. The CPU time of
+//! the process is measured and printed (not asserted): once with 100 streams on another
+//! topic, the publisher asleep, and once with 100 streams on `metrics`. Run with
+//! `--no-capture` to read it.
 
 use std::{
     net::SocketAddr,
@@ -157,6 +161,18 @@ async fn measure() -> (Option<f64>, Duration) {
     (before.zip(after).map(|(a, b)| b - a), elapsed)
 }
 
+/// The whole seconds an interval of `elapsed` can hold ticks of one second at: from one
+/// fewer than its whole seconds to one more than its rounded-up seconds, because the first
+/// and the last tick may fall just inside or just outside it. For a window of 5.0 s that is
+/// 4 to 6, the bounds of a run on an idle machine.
+fn ticks_in(elapsed: Duration) -> std::ops::RangeInclusive<u64> {
+    let seconds = elapsed.as_secs_f64();
+    // Whole seconds of a test window: far below the range where the casts lose anything.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let (low, high) = (seconds.floor() as u64, seconds.ceil() as u64);
+    low.saturating_sub(1)..=high + 1
+}
+
 fn counts(readers: &[Reader]) -> Vec<u64> {
     readers
         .iter()
@@ -194,9 +210,12 @@ async fn one_hundred_streams_get_one_snapshot_per_second_from_one_aggregation() 
     })
     .await
     .expect("every stream gets a first snapshot");
+    // The counters are read at the two ends of `elapsed`, with the CPU readings outside it.
+    let cpu_before = cpu_ms();
+    let started = Instant::now();
     let (ticks_before, taken_before) = (publisher.ticks(), publisher.sampler().taken());
     let events_before = counts(&readers);
-    let (busy_cpu, elapsed) = measure().await;
+    tokio::time::sleep(WINDOW).await;
     let ticks = publisher.ticks() - ticks_before;
     let taken = publisher.sampler().taken() - taken_before;
     let per_stream: Vec<u64> = counts(&readers)
@@ -204,6 +223,8 @@ async fn one_hundred_streams_get_one_snapshot_per_second_from_one_aggregation() 
         .zip(&events_before)
         .map(|(after, before)| after - before)
         .collect();
+    let elapsed = started.elapsed();
+    let busy_cpu = cpu_before.zip(cpu_ms()).map(|(a, b)| b - a);
     let seconds = elapsed.as_secs_f64();
     let min = per_stream.iter().min().copied().unwrap_or_default();
     let max = per_stream.iter().max().copied().unwrap_or_default();
@@ -220,18 +241,22 @@ async fn one_hundred_streams_get_one_snapshot_per_second_from_one_aggregation() 
         _ => println!("metrics acceptance: the CPU time is not measured on this platform"),
     }
     // One aggregation per second whatever the number of streams, and one sample per tick.
+    let expected = ticks_in(elapsed);
     assert!(
-        (4..=6).contains(&ticks),
-        "{ticks} aggregations in {seconds:.2} s"
+        expected.contains(&ticks),
+        "{ticks} aggregations in {seconds:.2} s, expected {expected:?}"
     );
     assert!(
         taken <= ticks + 1,
         "{taken} samples for {ticks} aggregations"
     );
-    // Every stream gets every snapshot.
+    // Every stream gets every snapshot: as many as there were aggregations, give or take
+    // the one in flight when the counters were read.
     assert!(
-        per_stream.iter().all(|events| (4..=6).contains(events)),
-        "events per stream: {per_stream:?}"
+        per_stream
+            .iter()
+            .all(|events| events.abs_diff(ticks) <= 1 && expected.contains(events)),
+        "events per stream for {ticks} aggregations: {per_stream:?}"
     );
 
     for reader in readers {

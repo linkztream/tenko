@@ -583,9 +583,9 @@ fn ops_23_the_check_of_a_newer_format_exits_11_and_usage_and_configuration_error
     .assert_code(3);
 }
 
-/// OPS-08: `tenko cluster upgrade-check` on a single controller lists the one member, says
-/// that this binary can replace it (exit status 0) and prints the rolling order; `--json` has
-/// the same facts. Without a stored sign-in it exits with status 6 and changes nothing.
+/// OPS-08: `tenko cluster upgrade-check` on a single controller lists the one member with
+/// its version, majors, Raft wire and formats, says that this binary can replace it (exit
+/// status 0) and prints the rolling order; `--json` has the same facts. Without a stored sign-in it exits with status 6 and changes nothing.
 #[test]
 fn ops_08_the_cluster_upgrade_check_on_a_single_controller_says_this_binary_fits() {
     let mut node = Node::new();
@@ -625,6 +625,7 @@ fn ops_08_the_cluster_upgrade_check_on_a_single_controller_says_this_binary_fits
         "{}",
         report.diagnostics()
     );
+    assert_own_row(&report);
 
     let outcome = node.client(&["cluster", "upgrade-check", "--json"]);
     outcome.assert_code(0);
@@ -646,12 +647,18 @@ fn ops_08_the_cluster_upgrade_check_on_a_single_controller_says_this_binary_fits
     );
     assert_eq!(members[0]["leader"], true, "{json}");
     assert_eq!(members[0]["role"], "voter", "{json}");
-    // A stand-alone controller has no member record of a cluster, so it may not report its
-    // own version yet; when it does, it is this binary's.
-    assert!(
-        members[0]["version"].is_null() || members[0]["version"] == VERSION,
+    // A stand-alone controller has no member record of a cluster yet; it reports its own
+    // binary all the same (deviation 68 of the exit document).
+    assert_eq!(members[0]["version"], VERSION, "{json}");
+    assert_eq!(
+        members[0]["raft_wire"], json["binary"]["raft_wire"],
         "{json}"
     );
+    assert_eq!(
+        members[0]["protocol_majors"], json["binary"]["protocol_majors"],
+        "{json}"
+    );
+    assert_eq!(members[0]["formats"], json["binary"]["formats"], "{json}");
     assert!(
         members[0]["problems"].as_array().is_some_and(Vec::is_empty),
         "{json}"
@@ -667,6 +674,46 @@ fn ops_08_the_cluster_upgrade_check_on_a_single_controller_says_this_binary_fits
         "{json}"
     );
     server.stop().assert_graceful_shutdown();
+}
+
+/// Asserts that the member row of a single controller carries its own version, majors,
+/// Raft wire and formats, the values of the line about this binary, and that no "has not
+/// reported" line follows. The name stays `-`: a stand-alone controller has no node record
+/// until its first join.
+#[track_caller]
+fn assert_own_row(report: &Outcome) {
+    let row = report
+        .stdout
+        .lines()
+        .find(|line| line.contains("voter (leader)"))
+        .unwrap_or_else(|| panic!("the member row\n{}", report.diagnostics()));
+    let after_role = row
+        .split_once("voter (leader)")
+        .map_or("", |(_, rest)| rest)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    // The same values as the line about this binary, which is the controller's own.
+    let binary_line = report
+        .stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("this binary: version "))
+        .unwrap_or_else(|| panic!("the line about this binary\n{}", report.diagnostics()));
+    let expected = binary_line
+        .replace(", protocol major(s) ", " ")
+        .replace(", Raft wire ", " ")
+        .replace(", formats ", " ");
+    assert_eq!(
+        after_role,
+        format!("{expected} ok"),
+        "{}",
+        report.diagnostics()
+    );
+    assert!(
+        !report.stdout.contains("has not reported"),
+        "{}",
+        report.diagnostics()
+    );
 }
 
 /// E10 (OPS-23, OPS-24): the operator's procedure of `deploy/README.md` ("Upgrades") on one
