@@ -23,8 +23,11 @@ anywhere else. The only tools used on the host are the ones Proxmox VE ships (`p
 
 - An unprivileged Ubuntu 24.04 container (the newest `ubuntu-24.04-standard` template
   that `pveam available` lists, downloaded to the template storage when missing) with
-  `features: nesting=1,keyctl=1` (Docker needs both), 4 cores, 8 GiB memory (give about
-  2 GiB per core; with less, the build runs fewer jobs than cores, below), 512 MiB swap,
+  `features: nesting=1,keyctl=1` (Docker needs both), 4 cores with a CPU limit of half of
+  them (`cpulimit`: the sustained load of a build stays at half the host's CPU time while
+  short bursts may use every core; raise it for speed, lower it for a quieter host), 8 GiB
+  memory (give about 2 GiB per core; with less, the build runs fewer jobs than cores,
+  below), 512 MiB swap,
   a 120 GB root disk, one bridged NIC (`eth0` on `vmbr0`, DHCP), start on boot, the tags
   `ci;runner`, a description with the app, the repository and the date. No root password
   unless you give one; the console is `pct enter <ctid>`.
@@ -117,6 +120,7 @@ Every setting is a variable that the environment overrides. Generic ones (`lib/h
 | `var_gateway` | empty | Required with a static address |
 | `var_dns` | empty | DNS servers, space or comma separated; empty: the host's |
 | `var_cpu` | `4` (generic `1`) | Cores |
+| `var_cpulimit` | half of `var_cpu` (generic `0`: none) | Cores of CPU time the container may use on a sustained basis (`pct ... -cpulimit`), a number such as `2` or `1.5`, at most `var_cpu` |
 | `var_ram` | `8192` (generic `1024`) | Memory, MiB |
 | `var_swap` | `512` | Swap, MiB |
 | `var_disk` | `120` (generic `8`) | Root disk, GB |
@@ -184,6 +188,17 @@ version, whether its service is active, and the `CARGO_BUILD_JOBS` cap of `.env`
 the memory the container has now. The runner updates itself; the script does not reinstall
 it. Run it while no job runs: an upgrade of Docker restarts the daemon. Inside a container
 without the runner it stops with exit 233.
+
+## A CPU limit on an existing container
+
+A runner that builds for an hour at full load on every core stresses the host more than any
+other guest. For a container that exists already, set the limit on the host without a
+restart; the number is cores of CPU time on a sustained basis, short bursts may still use
+every core:
+
+```bash
+pct set <ctid> --cpulimit 14
+```
 
 ## After a resize
 

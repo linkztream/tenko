@@ -32,7 +32,10 @@ A self-hosted runner has no minute budget and keeps its caches warm between runs
 create an unprivileged container on the Proxmox host (the names and addresses are yours; this
 document uses placeholders):
 
-- Template: Ubuntu 24.04 standard. Resources: 4 vCPU or more with about 2 GiB of RAM per
+- Template: Ubuntu 24.04 standard. Give the container a CPU limit of about half its cores
+  (`pct set <ctid> --cpulimit <n>`; the runner script does so by default): the workspace
+  build keeps every core busy for up to an hour, and a host that also runs other guests
+  should not spend all of its CPU time on it. Resources: 4 vCPU or more with about 2 GiB of RAM per
   vCPU (8 GiB for 4; 28 vCPU want 32 GiB and a few GiB of swap; with less memory the
   install script caps the build's parallel jobs to it), 120 GB root disk on SSD-backed
   storage, one bridged network interface with outbound access to github.com, crates.io, registry.npmjs.org,

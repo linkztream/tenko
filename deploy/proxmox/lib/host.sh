@@ -203,14 +203,15 @@ tenko_in_list() {
 # The generic settings, in dialog order. A ct/ script appends its own to TENKO_APP_SETTINGS
 # and labels them in TENKO_LABEL.
 TENKO_SETTINGS=(var_ctid var_hostname var_storage var_template_storage var_bridge var_ip
-  var_gateway var_dns var_cpu var_ram var_swap var_disk var_os var_version var_unprivileged
+  var_gateway var_dns var_cpu var_cpulimit var_ram var_swap var_disk var_os var_version var_unprivileged
   var_nesting var_keyctl var_fuse var_onboot var_tags var_password var_ssh_key var_verbose
   var_keep_on_failure)
 declare -gA TENKO_LABEL=(
   [var_ctid]="Container ID" [var_hostname]="Host name" [var_storage]="Root disk storage"
   [var_template_storage]="Template storage" [var_bridge]="Network bridge"
   [var_ip]="IPv4 address (dhcp or a.b.c.d/nn)" [var_gateway]="Gateway (with a static address)"
-  [var_dns]="DNS servers (optional)" [var_cpu]="CPU cores" [var_ram]="Memory (MiB)"
+  [var_dns]="DNS servers (optional)" [var_cpu]="CPU cores"
+  [var_cpulimit]="CPU limit (cores of CPU time; 0: none)" [var_ram]="Memory (MiB)"
   [var_swap]="Swap (MiB)" [var_disk]="Root disk (GB)" [var_os]="OS" [var_version]="OS version"
   [var_unprivileged]="Unprivileged (1/0)" [var_nesting]="Nesting (1/0)" [var_keyctl]="Keyctl (1/0)"
   [var_fuse]="FUSE (1/0)" [var_onboot]="Start on boot (1/0)" [var_tags]="Tags (a;b)"
@@ -242,7 +243,7 @@ tenko_default_settings() {
     var_template_storage="${TENKO_TEMPLATE_STORAGES[0]}"
   : "${var_storage:=}" "${var_template_storage:=}"
   : "${var_bridge:=vmbr0}" "${var_ip:=dhcp}" "${var_gateway:=}" "${var_dns:=}"
-  : "${var_cpu:=1}" "${var_ram:=1024}" "${var_swap:=512}" "${var_disk:=8}"
+  : "${var_cpu:=1}" "${var_cpulimit:=0}" "${var_ram:=1024}" "${var_swap:=512}" "${var_disk:=8}"
   : "${var_os:=ubuntu}" "${var_version:=24.04}" "${var_unprivileged:=1}" "${var_nesting:=1}"
   : "${var_keyctl:=1}" "${var_fuse:=0}" "${var_onboot:=1}" "${var_tags:=}" "${var_password:=}"
   : "${var_ssh_key:=}" "${var_verbose:=no}" "${var_keep_on_failure:=no}"
@@ -284,6 +285,13 @@ tenko_validate_settings() {
     tenko_valid_ipv4 "$d" || errors+=("var_dns: not an IPv4 address: '${d}'")
   done
   tenko_valid_int "$var_cpu" 1 512 || errors+=("var_cpu: a number of cores from 1, not '${var_cpu}'")
+  if [[ "$var_cpulimit" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    # Proxmox takes a fraction of cores; the limit cannot exceed the cores of the container.
+    awk -v l="$var_cpulimit" -v c="$var_cpu" 'BEGIN { exit !(l <= c) }' ||
+      errors+=("var_cpulimit: at most the ${var_cpu} cores of the container, not '${var_cpulimit}'")
+  else
+    errors+=("var_cpulimit: cores of CPU time such as 2 or 1.5, 0 for no limit, not '${var_cpulimit}'")
+  fi
   tenko_valid_int "$var_ram" 256 || errors+=("var_ram: MiB, 256 or more, not '${var_ram}'")
   tenko_valid_int "$var_swap" 0 || errors+=("var_swap: MiB, 0 or more, not '${var_swap}'")
   tenko_valid_int "$var_disk" 2 || errors+=("var_disk: GB, 2 or more, not '${var_disk}'")
@@ -421,6 +429,9 @@ create_container() {
   opts=(-hostname "$var_hostname" -cores "$var_cpu" -memory "$var_ram" -swap "$var_swap"
     -rootfs "${var_storage}:${var_disk}" -net0 "$net" -unprivileged "$var_unprivileged"
     -onboot "$var_onboot" -ostype "$var_os" -description "$(tenko_description)")
+  # A CPU limit keeps a container that is busy for hours (a build runner) from taking the
+  # whole host; 0 means none, which pct also takes as the default.
+  [[ "$var_cpulimit" != "0" ]] && opts+=(-cpulimit "$var_cpulimit")
   ((${#features[@]} > 0)) && opts+=(-features "$(IFS=,; echo "${features[*]}")")
   [[ -n "$var_tags" ]] && opts+=(-tags "$var_tags")
   [[ -n "$var_dns" ]] && opts+=(-nameserver "${var_dns//,/ }")

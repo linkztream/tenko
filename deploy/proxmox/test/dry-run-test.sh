@@ -53,7 +53,7 @@ has "$out" "[dry-run] pveam available --section system" "pveam available"
 has "$out" "[dry-run] pveam download local ubuntu-24.04-standard_24.04-2_amd64.tar.zst" "newest 24.04 template downloaded"
 create="$(grep -F '[dry-run] pct create ' <<<"$out")"
 for opt in "pct create 100 local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst" \
-  "-hostname tenko-ci-runner" "-cores 4" "-memory 8192" "-swap 512" "-rootfs local-lvm:120" \
+  "-hostname tenko-ci-runner" "-cores 4" "-cpulimit 2" "-memory 8192" "-swap 512" "-rootfs local-lvm:120" \
   "-net0 name=eth0,bridge=vmbr0,ip=dhcp" "-unprivileged 1" "-features nesting=1,keyctl=1" \
   "-onboot 1" "-tags ci;runner" "-ostype ubuntu" "-description Tenko CI Runner"; do
   has "$create" " ${opt}" "pct create has ${opt}"

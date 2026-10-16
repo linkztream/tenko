@@ -61,6 +61,9 @@ source "${TENKO_ROOT}/lib/host.sh"
 # ── The runner's defaults (each one overridable from the environment) ─────────────────────
 APP="Tenko CI Runner"
 var_cpu="${var_cpu:-4}"
+# Half the cores of CPU time, so that a build that is busy for an hour never takes the whole
+# host (the cores stay available for short bursts; the cap is on the sustained load).
+var_cpulimit="${var_cpulimit:-$((var_cpu / 2 > 0 ? var_cpu / 2 : 1))}"
 var_ram="${var_ram:-8192}"
 var_disk="${var_disk:-120}"
 var_hostname="${var_hostname:-tenko-ci-runner}"
