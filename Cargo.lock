@@ -2957,6 +2957,7 @@ dependencies = [
  "opentelemetry-proto",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
+ "rcgen",
  "reqwest",
  "rpassword",
  "rustls",

@@ -591,6 +591,9 @@ pub enum Transport {
     Plain,
     /// HTTPS on `localhost` with a certificate from the internal CA.
     InternalCa,
+    /// HTTPS on `localhost` with an imported certificate: a leaf of a test CA that
+    /// [`Node::with_transport`] writes into the node's directory (`tls.mode = "imported"`).
+    Imported,
 }
 
 /// Which key-encryption key provider protects the vault.
@@ -642,7 +645,47 @@ impl Node {
     #[must_use]
     pub fn with_transport(mut self, transport: Transport) -> Self {
         self.transport = transport;
+        if transport == Transport::Imported {
+            self.write_imported_certificate();
+        }
         self
+    }
+
+    /// The test CA's root of [`Transport::Imported`].
+    pub fn imported_ca_path(&self) -> PathBuf {
+        self.root().join("imported-ca.pem")
+    }
+
+    /// The certificate chain of [`Transport::Imported`] (the leaf, then the test CA).
+    pub fn imported_cert_path(&self) -> PathBuf {
+        self.root().join("imported-cert.pem")
+    }
+
+    /// The private key of [`Transport::Imported`].
+    pub fn imported_key_path(&self) -> PathBuf {
+        self.root().join("imported-key.pem")
+    }
+
+    /// Writes a test CA and a leaf for `localhost` signed by it, as an operator would
+    /// import them.
+    fn write_imported_certificate(&self) {
+        let mut params = rcgen::CertificateParams::new(Vec::<String>::new()).expect("params");
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "Tenko imported test CA");
+        let ca_key = rcgen::KeyPair::generate().expect("a CA key");
+        let issuer = rcgen::CertifiedIssuer::self_signed(params, ca_key).expect("a CA");
+        let key = rcgen::KeyPair::generate().expect("a leaf key");
+        let leaf = rcgen::CertificateParams::new(vec!["localhost".to_owned()])
+            .expect("params")
+            .signed_by(&key, &issuer)
+            .expect("a leaf");
+        let ca_pem = issuer.as_ref().pem();
+        std::fs::write(self.imported_ca_path(), &ca_pem).expect("write the CA");
+        std::fs::write(self.imported_cert_path(), format!("{}{ca_pem}", leaf.pem()))
+            .expect("write the chain");
+        std::fs::write(self.imported_key_path(), key.serialize_pem()).expect("write the key");
     }
 
     /// Chooses the key-encryption key provider.
@@ -746,8 +789,11 @@ impl Node {
 
     /// The CA root of the internal CA, if this node serves HTTPS.
     pub fn ca_file(&self) -> Option<PathBuf> {
-        (self.transport == Transport::InternalCa)
-            .then(|| self.data_dir().join("tls").join("ca-root.pem"))
+        match self.transport {
+            Transport::Plain => None,
+            Transport::InternalCa => Some(self.data_dir().join("tls").join("ca-root.pem")),
+            Transport::Imported => Some(self.imported_ca_path()),
+        }
     }
 
     /// The base URL clients use.
@@ -758,7 +804,7 @@ impl Node {
     fn url_on(&self, port: u16) -> String {
         match self.transport {
             Transport::Plain => format!("http://127.0.0.1:{port}"),
-            Transport::InternalCa => format!("https://localhost:{port}"),
+            Transport::InternalCa | Transport::Imported => format!("https://localhost:{port}"),
         }
     }
 
@@ -781,6 +827,20 @@ impl Node {
             Transport::InternalCa => {
                 let _ = writeln!(text, "\n[tls]");
                 let _ = writeln!(text, "mode = \"internal_ca\"\n");
+            }
+            Transport::Imported => {
+                let _ = writeln!(text, "\n[tls]");
+                let _ = writeln!(text, "mode = \"imported\"");
+                let _ = writeln!(
+                    text,
+                    "cert_path = {}",
+                    toml_path(&self.imported_cert_path())
+                );
+                let _ = writeln!(
+                    text,
+                    "key_path = {}\n",
+                    toml_path(&self.imported_key_path())
+                );
             }
         }
         match self.kek {

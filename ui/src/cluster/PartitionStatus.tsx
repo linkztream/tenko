@@ -130,7 +130,7 @@ function PartitionBanner() {
             <strong>{b().title}</strong>
           </Show>
           <span class="grow">{b().body}</span>
-          <A class="btn sm" href={CLUSTER_QUEUE_PATH}>
+          <A class="btn sm" href={CLUSTER_QUEUE_PATH} data-testid="cluster-banner-link">
             {b().title ? t("cluster.partition.queue_link") : t("cluster.partition.review")}
           </A>
         </div>
@@ -214,7 +214,7 @@ export function NoQuorumDialog(props: { refused: RefusedWrite; onClose: () => vo
         {(item) => (
           <p role="status" data-testid="no-quorum-queued">
             {t("cluster.no_quorum.queued", { expires: formatDateTime(item().expires_at) })}{" "}
-            <A href={CLUSTER_QUEUE_PATH} onClick={() => props.onClose()}>
+            <A href={CLUSTER_QUEUE_PATH} onClick={() => props.onClose()} data-testid="no-quorum-show-queue">
               {t("cluster.no_quorum.show_queue")}
             </A>
           </p>

@@ -89,7 +89,12 @@ sd-notify = "0.5.0"
 [dev-dependencies]
 # The OTLP receiver of the trace tests (`tests/serve_support/otlp.rs`), on loopback.
 opentelemetry-proto = { workspace = true, features = ["gen-tonic", "trace"] }
+# The imported-certificate transport of `tests/serve_support` (a test CA and a leaf for
+# `localhost`).
+rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "crypto", "pem"] }
 tempfile = { workspace = true }
+# The software authenticator of the passkey acceptance tests.
+tenko-auth = { workspace = true, features = ["online", "testing"] }
 # The in-process cluster fixtures and the memory vault of the leader supervisor tests.
 tenko-store = { workspace = true, features = ["raft", "testing"] }
 tenko-vault = { workspace = true, features = ["testing"] }

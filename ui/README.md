@@ -307,6 +307,7 @@ Page roots in this version:
 | `/connectors`, `/connectors/:id` | `page-connectors`, `page-connector` |
 | `/nodes`, `/nodes/:id` | `page-nodes` (with `node-panel`) |
 | `/nodes/:id/scan` | `page-scan-config` (`data-node`) |
+| Any route the person may not open | `page-forbidden` |
 
 The hooks of the WP2.9 views beyond the generic ones:
 
@@ -353,6 +354,10 @@ The hooks of the WP2.9 views beyond the generic ones:
 | Guardrails (`/settings/guardrails`, `page-guardrails`) | `guardrails-form` with `field-max_parallel`, `field-error` (`data-field`), `guardrails-paths` with `guardrails-add`, `guardrails-empty`, `guardrails-note`, `guardrail-path` (`data-kind`, `data-key` such as `vlan:30`) holding `guardrail-remove`, `form-submit`, `guardrails-reloaded`; `dialog-guardrail-path` with `field-kind`, `field-device`, `field-port`, `field-network`, `field-vid`, `field-mac`, `guardrails-duplicate`, `form-submit`, `form-cancel` |
 | Cluster compatibility and data format (WP3.11d) | `member-compat-<node>` with `compat-majors`, `compat-wire`, `compat-formats`; `cluster-format` (`data-state` `current` or `pending`) with `format-stored`, `format-binary`, `format-target`, `format-current`, `format-blockers` with `format-blocker` (`data-node`), `format-advice`, and `cluster-warning` (`data-code` `upgrade.migration_blocked`) |
 | Job state and job group | `job-state` (`data-state`; `data-rollback="cancel"` on a cancelled job that its cancellation rolled back); in `job-group`: `job-group-l2-hint` on a layer 2 undo task, `job-group-not-moved` with `job-group-not-moved-item` (`data-job`, `data-state`), `job-group-move-failed`, `job-group-not-moved-reason`, `job-group-not-moved-link` |
+| Personal tokens (`/account/tokens`) | `account-token-create`, `account-token` (`data-key` the name), `account-token-revoke`; the form with `field-name`, `field-lifetime`, `form-submit`; `dialog-token-created` with `token-secret`, `token-stored`, `token-done` |
+| Partition links | `cluster-banner-link` (the banner's link to the queue), `no-quorum-show-queue` (the same in `dialog-no-quorum`) |
+| Command palette | `dialog-palette`, `palette-item` (`data-key` the command id) |
+| Cancel of a form or plan dialog | `form-cancel`, `plan-cancel` |
 
 A new view follows the same pattern: a page root id, `grid-<id>` for each grid, the generic
 row and cell hooks from `DataGrid`, and `<area>-<action>` for its actions.

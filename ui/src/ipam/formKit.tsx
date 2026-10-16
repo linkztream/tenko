@@ -272,7 +272,7 @@ export function FormDialog(props: {
         <div class="form-fields">{props.children}</div>
         <ErrorNotice error={props.error} />
         <div class="dialog-actions">
-          <button type="button" class="btn ghost" onClick={() => props.onClose()}>
+          <button type="button" class="btn ghost" data-testid="form-cancel" onClick={() => props.onClose()}>
             {t("common.action.cancel")}
           </button>
           <button type="submit" class="btn primary" data-testid="form-submit" disabled={props.submitDisabled}>

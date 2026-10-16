@@ -8,10 +8,17 @@
 // - A viewer does not see the tiles.
 // - The tiles hold nothing to focus (the keyboard passes them by) and axe finds nothing.
 // - Swedish.
+// - WP3.8a, a cluster of several controllers: the e2e server is one controller, so these scenarios
+//   FAKE THE METRICS STREAM. The request for the `metrics` topic is answered in the browser with
+//   snapshots shaped like the server's (`MetricsSnapshot` of docs/api/openapi.json: the cluster's
+//   sample and one sample per controller), and the later reconnects are refused. What they prove
+//   is how the tiles show what they are given: the cluster's figures on every tile, one row per
+//   controller with its role, its lag and its state (current, stale, unsupported), a sparkline
+//   that grows with each sample, and the waiting state while nothing arrives. The samples of the
+//   peers themselves come through `Metrics.Snapshot`, which the Rust tests cover.
 //
-// Not covered here: a cluster of several controllers (the samples of the peers come through
-// `Metrics.Snapshot`, which the Rust tests cover), and the CPU cost of 100 streams (the
-// acceptance test `crates/tenko-api/tests/metrics_stream.rs`).
+// Not covered here: the CPU cost of 100 streams (the acceptance test
+// `crates/tenko-api/tests/metrics_stream.rs`).
 
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -19,6 +26,7 @@ import type { Page } from "@playwright/test";
 import { signInAsViewer } from "./support/accounts";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
+import { fakeMetricsStream, refuseMetricsStream, sample, type MetricsSnapshot } from "./support/metrics-mock";
 
 const TILES = ["requests", "commit", "store", "raft", "jobs", "ingest", "sse", "nodes"];
 
@@ -97,8 +105,109 @@ test("the tiles hold nothing to focus and pass axe", async ({ page, signedIn }) 
   expect(reachedBelow).toBe(true);
 });
 
+/**
+ * Four controllers: 1 leads, 2 follows four entries behind, 3 did not answer this second (its last
+ * good sample, stale) and 4 runs an older build without figures. The cluster sample sums the
+ * controllers whose sample is current.
+ */
+function fourControllers(): MetricsSnapshot {
+  const lag = [
+    { node: 1, entries: 0 },
+    { node: 2, entries: 4 },
+  ];
+  const leader = sample(1, {
+    api: { requests_per_second: 20, p50_ms: 1.2, p99_ms: 30 },
+    raft: { role: "leader", term: 9, lag },
+    nodes: [{ node: 1001, buffer_batches: 5, drops: 0 }],
+  });
+  const follower = sample(2, {
+    api: { requests_per_second: 15, p50_ms: 0.9, p99_ms: 18 },
+    raft: { role: "follower", term: 9, lag: [{ node: 2, entries: 4 }] },
+    nodes: [{ node: 1002, buffer_batches: 3, drops: 1 }],
+  });
+  const stale = sample(3, { stale: true, raft: { role: "follower", term: 9, lag: [] } });
+  const unsupported = sample(4, { unsupported: true, raft: { role: null, term: 0, lag: [] } });
+  const cluster = sample(null, {
+    api: { requests_per_second: 35, p50_ms: 1.2, p99_ms: 30 },
+    store: { data_bytes: 8_192, file_bytes: 4_000_000, commit_p99_ms: 6.4 },
+    raft: { role: null, term: 9, lag },
+    jobs: { running: 2, waiting: 1 },
+    ingest: { batches_per_second: 1, facts_per_second: 25 },
+    sse: { subscribers: 7 },
+    nodes: [
+      { node: 1001, buffer_batches: 5, drops: 0 },
+      { node: 1002, buffer_batches: 3, drops: 1 },
+    ],
+  });
+  return { cluster, nodes: [leader, follower, stale, unsupported] };
+}
+
+test("OPS-20: with several controllers the tiles show the cluster's figures and one row per controller (faked stream)", async ({ page, signedIn }) => {
+  void signedIn;
+  const base = fourControllers();
+  // Three samples, the requests per second rising, so that the sparkline has three points.
+  const rising = (rps: number): MetricsSnapshot => ({ ...base, cluster: { ...base.cluster, api: { ...base.cluster.api, requests_per_second: rps } } });
+  await fakeMetricsStream(page, [rising(10), rising(20), base]);
+  await page.goto("/");
+  const tiles = page.getByTestId("metrics-tiles");
+  await expect(tiles).toHaveAttribute("data-controllers", "4");
+  await expect(page.getByTestId("metrics-waiting")).toHaveCount(0);
+
+  // Every tile shows the cluster's sample of the last snapshot.
+  const value = (name: string) => page.getByTestId(`metrics-tile-${name}`).getAttribute("data-value");
+  expect(await value("requests")).toBe("35");
+  expect(await value("commit")).toBe("6.4");
+  expect(await value("store")).toBe("4000000");
+  expect(await value("raft")).toBe("4");
+  expect(await value("jobs")).toBe("2");
+  expect(await value("ingest")).toBe("25");
+  expect(await value("sse")).toBe("7");
+  // The nodes tile is the batches buffered by the connected nodes of every controller.
+  expect(await value("nodes")).toBe("8");
+  await expect(page.getByTestId("metrics-sparkline-requests")).toHaveAttribute("data-points", "3");
+
+  // One row per controller, with its role, its lag as the cluster reports it and its state.
+  const rows = page.getByTestId("metrics-raft-node");
+  await expect(rows).toHaveCount(4);
+  const row = (node: number) => page.locator(`[data-testid="metrics-raft-node"][data-node="${node}"]`);
+  await expect(row(1)).toHaveAttribute("data-role", "leader");
+  await expect(row(1)).toHaveAttribute("data-state", "current");
+  await expect(row(1)).toHaveAttribute("data-lag", "0");
+  await expect(row(2)).toHaveAttribute("data-role", "follower");
+  await expect(row(2)).toHaveAttribute("data-state", "current");
+  await expect(row(2)).toHaveAttribute("data-lag", "4");
+  // A controller that did not answer is marked stale and has no lag; one without figures is unsupported.
+  await expect(row(3)).toHaveAttribute("data-state", "stale");
+  await expect(row(3)).not.toHaveAttribute("data-lag", /.+/);
+  await expect(row(4)).toHaveAttribute("data-state", "unsupported");
+  await expect(row(4)).not.toHaveAttribute("data-role", /.+/);
+  await expect(row(4)).not.toHaveAttribute("data-lag", /.+/);
+});
+
+test("OPS-20: while no sample arrives the tiles say they are waiting and show no number (faked stream)", async ({ page, signedIn }) => {
+  void signedIn;
+  await refuseMetricsStream(page);
+  await page.goto("/");
+  const tiles = page.getByTestId("metrics-tiles");
+  await expect(tiles).toBeVisible();
+  await expect(page.getByTestId("metrics-waiting")).toBeVisible();
+  await expect(tiles).not.toHaveAttribute("data-controllers", /.+/);
+  for (const name of TILES) await expect(page.getByTestId(`metrics-tile-${name}`)).not.toHaveAttribute("data-value", /.+/);
+  await expect(page.getByTestId("metrics-raft-node")).toHaveCount(0);
+  // The rest of the start page does not wait for them.
+  await expect(page.getByTestId("dashboard-waiting")).toBeVisible();
+});
+
 test.describe("in Swedish", () => {
   test.use({ locale: "sv-SE" });
+
+  test("OPS-20: renders the rows of a stale and an unsupported controller in Swedish (faked stream)", async ({ page, signedIn }, testInfo) => {
+    void signedIn;
+    await fakeMetricsStream(page, [fourControllers()]);
+    await page.goto("/");
+    await expect(page.getByTestId("metrics-tiles")).toHaveAttribute("data-controllers", "4");
+    await expectRendered(page, page.getByTestId("metrics-tiles"), "sv", testInfo, "metrics-cluster");
+  });
 
   test("renders the live metrics in Swedish", async ({ page, signedIn }, testInfo) => {
     void signedIn;

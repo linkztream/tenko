@@ -64,7 +64,7 @@ export default function Tokens() {
       <section class="page-section" aria-labelledby="acct-tokens">
         <div class="acct-head">
           <h2 id="acct-tokens">{t("account.tokens.title")}</h2>
-          <button type="button" class="btn" onClick={() => setCreating(true)}>
+          <button type="button" class="btn" data-testid="account-token-create" onClick={() => setCreating(true)}>
             <Icon name="plus" size="sm" />
             {t("account.tokens.create")}
           </button>
@@ -110,7 +110,7 @@ export default function Tokens() {
                   <tbody>
                     <For each={list()}>
                       {(token) => (
-                        <tr>
+                        <tr data-testid="account-token" data-key={token.name}>
                           <td>{token.name}</td>
                           <td>
                             <span class="mono">{token.prefix}</span>
@@ -143,6 +143,7 @@ export default function Tokens() {
                             <button
                               type="button"
                               class="btn sm"
+                              data-testid="account-token-revoke"
                               aria-label={t("account.tokens.revoke_named", { name: token.name })}
                               onClick={() => {
                                 setRevokeError(null);
@@ -257,12 +258,12 @@ function CreateTokenDialog(props: { catalog: ScopeCatalog | undefined; onCreated
     <Switch>
       <Match when={created()}>
         {(token) => (
-          <Dialog label={t("account.tokens.created_title")} onClose={closeWhenStored} class="dialog wide">
+          <Dialog label={t("account.tokens.created_title")} onClose={closeWhenStored} class="dialog wide" testid="dialog-token-created">
             <h2 class="dialog-title">{t("account.tokens.created_title")}</h2>
             <div class="dialog-body">
               <p>{t("account.tokens.created_body", { name: token().info.name })}</p>
               <div class="form-row">
-                <code class="secret acct-token">
+                <code class="secret acct-token" data-testid="token-secret">
                   {token().token}
                 </code>
                 <button type="button" class="btn sm" onClick={() => void copyText(token().token)}>
@@ -274,6 +275,7 @@ function CreateTokenDialog(props: { catalog: ScopeCatalog | undefined; onCreated
                 <input
                   type="checkbox"
                   class="cb"
+                  data-testid="token-stored"
                   checked={stored()}
                   onChange={(e) => setStored(e.currentTarget.checked)}
                 />
@@ -281,7 +283,7 @@ function CreateTokenDialog(props: { catalog: ScopeCatalog | undefined; onCreated
               </label>
             </div>
             <div class="dialog-actions">
-              <button type="button" class="btn primary" disabled={!stored()} onClick={closeWhenStored}>
+              <button type="button" class="btn primary" data-testid="token-done" disabled={!stored()} onClick={closeWhenStored}>
                 {t("common.action.close")}
               </button>
             </div>
@@ -304,6 +306,7 @@ function CreateTokenDialog(props: { catalog: ScopeCatalog | undefined; onCreated
                 ref={nameInput}
                 id="acct-token-name"
                 class="input"
+                data-testid="field-name"
                 maxlength={100}
                 autocomplete="off"
                 aria-describedby="acct-token-name-help"
@@ -319,6 +322,7 @@ function CreateTokenDialog(props: { catalog: ScopeCatalog | undefined; onCreated
               <select
                 id="acct-token-lifetime"
                 class="select"
+                data-testid="field-lifetime"
                 aria-describedby="acct-token-lifetime-help"
                 value={lifetime()}
                 onChange={(e) => setLifetime(e.currentTarget.value)}
@@ -386,7 +390,7 @@ function CreateTokenDialog(props: { catalog: ScopeCatalog | undefined; onCreated
               <button type="button" class="btn ghost" onClick={() => props.onClose()}>
                 {t("common.action.cancel")}
               </button>
-              <button type="submit" class="btn primary" disabled={busy()}>
+              <button type="submit" class="btn primary" data-testid="form-submit" disabled={busy()}>
                 {t("common.action.create")}
               </button>
             </div>

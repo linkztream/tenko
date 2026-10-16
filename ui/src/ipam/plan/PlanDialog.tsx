@@ -122,7 +122,7 @@ export function PlanDialog<R extends WriteLike>(props: {
           <p class="muted">{t("ipam.plan.ack_needed")}</p>
         </Show>
         <div class="dialog-actions">
-          <button type="button" class="btn ghost" onClick={() => props.onClose()}>
+          <button type="button" class="btn ghost" data-testid="plan-cancel" onClick={() => props.onClose()}>
             {t("common.action.cancel")}
           </button>
           <button

@@ -24,6 +24,12 @@ records:
 - the numbers
 - the conclusion
 
+A results file carries one line `Verdict: PASS` or `Verdict: FAIL`, optionally followed
+by ` (<short qualifier>)`, right below its title, matching the conclusion the file states.
+The acceptance test `crates/tenko/tests/acceptance_observability.rs` reads the newest file
+of each measurement (M8, M9) and platform (Windows, Linux) by the date prefix of its name
+and the platform named in the parenthesis at the end of its title, and asserts the verdict.
+
 Raw output goes in `bench/<name>/results/raw/`, which is git-ignored.
 
 ## Rule

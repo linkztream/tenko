@@ -42,6 +42,7 @@ pub mod lab;
 pub mod load;
 pub mod probe;
 pub mod relay;
+pub mod scenarios;
 pub mod sse;
 
 pub use lab::{ClusterLab, LabOptions, State, StoreSize, learners, odd_voters, voters};

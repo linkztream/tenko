@@ -157,7 +157,7 @@ export function CommandPalette(props: { onClose: () => void; initial?: string })
   const optionId = (i: number) => `palette-option-${i}`;
 
   return (
-    <Dialog label={t("shell.palette.label")} onClose={props.onClose} class="palette" initialFocus={() => input}>
+    <Dialog label={t("shell.palette.label")} onClose={props.onClose} class="palette" testid="dialog-palette" initialFocus={() => input}>
       <div class="pin">
         <Icon name="search" />
         <input
@@ -187,6 +187,8 @@ export function CommandPalette(props: { onClose: () => void; initial?: string })
               </Show>
               <div
                 class="it"
+                data-testid="palette-item"
+                data-key={item.id}
                 id={optionId(i())}
                 data-index={i()}
                 role="option"

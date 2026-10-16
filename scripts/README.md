@@ -8,6 +8,7 @@ root.
 |---|---|
 | `changelog.mjs` | Validates `CHANGELOG.md`, prints the notes of one release, and checks that a change to the product comes with an entry. |
 | `release-manifest.mjs` | Builds `releases.json` (the manifest running installations read) and `SHA256SUMS` from the changelog and the release binaries. |
+| `requirement-trace.mjs` | Generates `docs/plans/phase-1-trace.md`, the table of Phase 1 requirements and exit criteria against the tests, measurements and documents that name them, and checks that the committed file is current. |
 | `*.test.mjs` | Tests with `node:test`. |
 
 ```sh
@@ -87,6 +88,48 @@ this release) next to it. An asset URL is `<base-url>/<file name>`. A manifest w
 
 `action`, `format` and `image` are left out of a release entry when not given; `action`
 appears only when the section has an `### Action required` subsection.
+
+## `requirement-trace.mjs`
+
+```sh
+node scripts/requirement-trace.mjs            # write docs/plans/phase-1-trace.md
+node scripts/requirement-trace.mjs --check    # exit 1 when the committed file is stale
+node scripts/requirement-trace.mjs --stdout   # print instead of writing
+```
+
+`--root <dir>` runs it against another tree (the tests use it). Exit codes: 0 success, 1 the
+committed trace differs from the one that would be written (or does not exist), 2 bad usage
+or a missing source document.
+
+Input: the requirement rows of `docs/REQUIREMENTS.md` (`| PREFIX-NN | text | phase | priority |`)
+whose phase cell starts with the number 1 (`1`, `1 (Slice 2)`, `1 (ACME: 3)`; not `2`, `10` or
+`2 and 3`), and the exit criteria E1 to E12 of the table under "Exit criteria" in
+`docs/plans/phase-1-execution.md`. The `CON-NN` design constraints are headings, not rows, and
+are not traced.
+
+What counts as a mention of an ID:
+
+- A mention is the whole canonical ID: `OPS-1` never matches `OPS-15`, and `OPS-3` is not
+  `OPS-03`. A range (`SCAN-01 to SCAN-09`, `IAM-03 to IAM-09`, `IAM-03 to 05`, with `..`,
+  `through` or a dash) names every ID of the set between its ends.
+- **Tests**, Rust under `crates/**/tests/**` and `crates/**/src/**`: a function after
+  `#[test]` or `#[tokio::test]` whose snake-case name has the lower-case prefix and the
+  number as consecutive parts (`fn iam_10_lockout` is IAM-10, `fn phase1_ops_03_x` is
+  OPS-03), or whose `///` comment names the ID. It is listed as `file::fn`. A `//!` comment,
+  or a `///` comment on anything else, in a file under a `tests` directory names the whole
+  file; in `src` it counts as a document.
+- **Tests**, TypeScript: `ui/e2e/**/*.spec.ts` and `ui/src/**/*.test.ts(x)`, when a comment or
+  the title of `test(`, `it(` or `describe(` names the ID. The file is listed.
+- **Measurements**: `bench/**/results/*.md`.
+- **Documents**: `docs/**/*.md` except `docs/REQUIREMENTS.md` and the generated trace itself,
+  and, as above, code documentation in `crates/**/src`.
+- An exit criterion `E9` is named by a test whose Rust name starts with `e9_` or whose
+  comment or title has the word `E9`.
+- `node_modules`, `target`, `dist`, `.artifacts` and `.git` are never entered.
+
+The output is sorted, has no timestamps and uses `/` in paths. A table cell shows five
+entries and then "and N more". The Uncovered section lists the requirements no test names,
+and separately those that no test, measurement or document names.
 
 ## Where they run
 

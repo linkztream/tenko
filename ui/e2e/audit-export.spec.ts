@@ -20,6 +20,9 @@
 // - Keyboard and axe: the dialog opens and closes with the keyboard and keeps focus inside;
 //   axe finds nothing on the page and in the dialog.
 // - Swedish: the page and the sink dialog.
+// - WP3.8a: a CEF sink writes CEF lines with the sequence number, the hash and a checkpoint; a
+//   sink is edited (its id, and so its cursor, are kept), paused, resumed, and one of two removed
+//   after the question.
 
 import { createSocket } from "node:dgram";
 import { readdir, readFile } from "node:fs/promises";
@@ -341,7 +344,7 @@ test.describe("in Swedish", () => {
     });
     await page.goto("/settings/audit-export");
     await expect(sinkRow(page, "Shipper")).toBeVisible();
-    await expect(page.getByTestId("audit-export-add")).toHaveText("Lägg till exportmål");
+    await expect(page.getByTestId("audit-export-add")).toHaveText("Lägg till sink");
     await expectRendered(page, page.getByTestId("page-audit-export"), "sv", testInfo, "audit-export");
     await page.getByTestId("audit-export-add").click();
     const dialog = page.getByTestId("dialog-audit-sink");
@@ -349,4 +352,106 @@ test.describe("in Swedish", () => {
     await dialog.getByTestId("field-transport-tls").check();
     await expectRendered(page, dialog, "sv", testInfo, "audit-export-dialog");
   });
+});
+
+// WP3.8a: the formats of a sink, editing a sink and removing one that is not the last.
+
+test("IAM-18: a sink in the CEF format writes CEF lines with the sequence number and the hash, and a checkpoint", async ({ page, api, server, signedIn }) => {
+  void signedIn;
+  const dialog = await openDialog(page);
+  await dialog.getByTestId("field-transport-file").check();
+  await dialog.getByTestId("field-name").fill("Siem");
+  await dialog.getByTestId("field-file").fill("siem.cef");
+  await dialog.getByTestId("field-format").selectOption("cef");
+  await dialog.getByTestId("form-submit").click();
+  await expect(dialog).toBeHidden();
+
+  const row = sinkRow(page, "Siem");
+  await expect(row).toContainText("siem.cef");
+  await expect(row.getByTestId("audit-export-state")).toHaveAttribute("data-state", "ok", { timeout: 60_000 });
+  const view = await api.get<View>("/settings/audit-export");
+  expect(view.sinks[0]).toMatchObject({ name: "Siem", format: "cef" });
+
+  const path = join(server.dataDir, "audit-export", "siem.cef");
+  await expect.poll(async () => (await readFile(path, "utf8")).split("\n").filter(Boolean).length, { timeout: 60_000 }).toBeGreaterThan(1);
+  const lines = (await readFile(path, "utf8")).split("\n").filter(Boolean);
+  // Every line is a CEF message: the header with the vendor and the product, then the extension.
+  for (const line of lines) expect(line).toMatch(/^CEF:0\|Tenko\|Tenko DDI\|[^|]+\|[^|]+\|[^|]+\|\d\|/);
+  // A record carries its sequence number and its hash; the sink starts with a checkpoint.
+  const records = lines.filter((line) => line.includes("cn1Label=seq"));
+  expect(records.length).toBeGreaterThan(0);
+  for (const line of records) {
+    expect(line).toMatch(/cn1=\d+ cn1Label=seq/);
+    expect(line).toContain("cs1Label=hash");
+  }
+  // The sink sends a checkpoint when it connects: a CEF line of severity 1.
+  expect(lines.some((line) => /^CEF:0\|Tenko\|Tenko DDI\|[^|]*\|[^|]*\|[^|]*\|1\|/.test(line))).toBe(true);
+  // No line is JSON: the format of the sink decides.
+  expect(lines.some((line) => line.startsWith("{"))).toBe(false);
+});
+
+test("IAM-18: editing a sink keeps it and its position in the log, and changes the name and the format", async ({ page, api, signedIn }) => {
+  void signedIn;
+  await api.put("/settings/audit-export", {
+    sinks: [{ name: "Shipper", target: { kind: "file", file: "audit.jsonl" }, format: "json" }],
+  });
+  await page.goto("/settings/audit-export");
+  const row = sinkRow(page, "Shipper");
+  await expect(row.getByTestId("audit-export-state")).toHaveAttribute("data-state", "ok", { timeout: 60_000 });
+  const before = (await api.get<View>("/settings/audit-export")).sinks[0]!;
+
+  await row.getByTestId("audit-export-edit").click();
+  const dialog = page.getByTestId("dialog-audit-sink");
+  await expect(dialog.getByTestId("field-name")).toHaveValue("Shipper");
+  await expect(dialog.getByTestId("field-file")).toHaveValue("audit.jsonl");
+  await expect(dialog.getByTestId("field-format")).toHaveValue("json");
+  await dialog.getByTestId("field-name").fill("Archive");
+  await dialog.getByTestId("field-format").selectOption("rfc5424");
+  await dialog.getByTestId("form-submit").click();
+  await expect(dialog).toBeHidden();
+
+  await expect(sinkRow(page, "Archive")).toBeVisible();
+  await expect(sinkRow(page, "Shipper")).toHaveCount(0);
+  const after = await api.get<View>("/settings/audit-export");
+  expect(after.sinks).toHaveLength(1);
+  // The same sink: its id, and so its cursor, are kept.
+  expect(after.sinks[0]).toMatchObject({ id: before.id, name: "Archive", format: "rfc5424" });
+  expect(after.sinks[0]!.status.delivered.seq).toBeGreaterThanOrEqual(before.status.delivered.seq);
+});
+
+test("IAM-18: a sink is paused and resumed, and one of two is removed after the question", async ({ page, api, signedIn }) => {
+  void signedIn;
+  await api.put("/settings/audit-export", {
+    sinks: [
+      { name: "First", target: { kind: "file", file: "first.jsonl" }, format: "json" },
+      { name: "Second", target: { kind: "file", file: "second.jsonl" }, format: "json" },
+    ],
+  });
+  await page.goto("/settings/audit-export");
+  const first = sinkRow(page, "First");
+  const second = sinkRow(page, "Second");
+  await expect(first).toBeVisible();
+  await expect(second).toBeVisible();
+
+  await first.getByTestId("audit-export-toggle").click();
+  await expect(first.getByTestId("audit-export-state")).toHaveAttribute("data-state", "disabled");
+  expect((await api.get<View>("/settings/audit-export")).sinks.map((s) => [s.name, s.enabled])).toEqual([
+    ["First", false],
+    ["Second", true],
+  ]);
+  await first.getByTestId("audit-export-toggle").click();
+  await expect(first.getByTestId("audit-export-state")).not.toHaveAttribute("data-state", "disabled");
+  expect((await api.get<View>("/settings/audit-export")).sinks.every((s) => s.enabled)).toBe(true);
+
+  // The question can be answered with no; with yes only that sink goes.
+  await second.getByTestId("audit-export-remove").click();
+  const confirm = page.getByTestId("dialog-confirm");
+  await confirm.getByTestId("confirm-cancel").click();
+  await expect(confirm).toHaveCount(0);
+  expect((await api.get<View>("/settings/audit-export")).sinks).toHaveLength(2);
+  await second.getByTestId("audit-export-remove").click();
+  await page.getByTestId("dialog-confirm").getByTestId("confirm-ok").click();
+  await expect(second).toHaveCount(0);
+  await expect(first).toBeVisible();
+  expect((await api.get<View>("/settings/audit-export")).sinks.map((s) => s.name)).toEqual(["First"]);
 });
