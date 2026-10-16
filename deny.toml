@@ -10,7 +10,11 @@ feature-depth = 1
 # Security advisories from the RustSec database. Vulnerabilities are always errors.
 [advisories]
 db-urls = ["https://github.com/rustsec/advisory-db"]
-yanked = "deny"
+# "warn" since 2026-10-16: every 8.x release of `zip` was yanked while the only released
+# calamine (0.36) and rust_xlsxwriter (0.99) still require zip 8, so no lockfile passes
+# "deny" until both move to zip 9. Back to "deny" with that update; the check still prints
+# the yanked crate on every run.
+yanked = "warn"
 unmaintained = "all"
 ignore = []
 
