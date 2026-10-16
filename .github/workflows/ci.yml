@@ -152,7 +152,9 @@ jobs:
       - name: Lint
         run: npm run lint
       - name: Test
-        run: npm run test
+        # Half the cores: vitest starts one process per test file and a self-hosted runner
+        # shares its machine, so one worker per core oversubscribes it and tests time out.
+        run: npm run test -- --maxWorkers=50%
       - name: Build
         run: npm run build
       - name: Keep the bundle for the embedded build

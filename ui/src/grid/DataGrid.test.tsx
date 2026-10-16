@@ -158,7 +158,9 @@ describe("DataGrid", () => {
     const elapsed = performance.now() - started;
     expect(within(table()).getAllByTestId("row")[0]?.dataset.id).toBe("r255");
     expect(screen.getByTestId("grid-foot").textContent).toContain("256 rows");
-    expect(elapsed).toBeLessThan(100);
+    // The budget is the workstation's; a CI runner may be a slower, shared machine (the
+    // self-hosted one holds half its cores of CPU time), so it gets five times as long.
+    expect(elapsed).toBeLessThan(process.env.CI ? 500 : 100);
   });
 
   it("lifts the selected rows when one of them is dragged", () => {
