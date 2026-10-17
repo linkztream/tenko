@@ -8,10 +8,13 @@
 //! and its serial moves by the zone's policy, once per scope the batch touches, in the
 //! same write, with one journal entry per scope.
 //!
-//! Origins (plan section 2.5): a batch writes `manual` RRsets. A change that would replace,
-//! shrink or delete an RRset of another origin (`ipam`, `dynamic`, `dhcp`, `ad`) is
-//! refused with `dns.record.origin` unless the change says `take_over`; the RRset is then
-//! `manual`, and the audit record names it.
+//! Origins (plan section 2.5): each change names the origin of its writer, and the RRsets
+//! it writes carry it. The API, the UI and zone files write `manual`; the DNS actuator of
+//! IPAM writes `ipam`. A change that would replace, shrink or delete an RRset of another
+//! origin than its own is refused with `dns.record.origin` unless the change says
+//! `take_over`; the RRset then takes the change's origin, and the audit record names it.
+//! A batch with an `ipam` change is audited as `dns.record.actuate`, any other as
+//! `dns.record.change`.
 
 use std::collections::BTreeMap;
 
@@ -63,6 +66,8 @@ pub struct Change {
     pub records: Vec<RecordData>,
     /// The change may replace an RRset of another origin.
     pub take_over: bool,
+    /// The origin of the writer: the RRsets it writes carry it (`manual` for the API).
+    pub origin: Origin,
 }
 
 /// The diff of one RRset.
@@ -257,7 +262,7 @@ pub(crate) fn plan(
         };
         let existing = entry.after.get(&change.rtype).cloned();
         if let Some(existing) = &existing
-            && existing.origin != Origin::Manual
+            && existing.origin != change.origin
         {
             if !change.take_over {
                 return Err(ZoneError::new(
@@ -292,7 +297,7 @@ pub(crate) fn plan(
             rtype: change.rtype,
             ttl,
             rdata,
-            origin: Origin::Manual,
+            origin: change.origin,
             key: None,
             updated: stamp.clone(),
         };
@@ -398,7 +403,12 @@ pub(crate) fn plan(
         )?;
         serials.push(step);
     }
-    let mut draft = AuditDraft::success(audit::RECORD_CHANGE, vec![ObjectRef::from(zone.id)])
+    let action = if changes.iter().any(|change| change.origin == Origin::Ipam) {
+        audit::RECORD_ACTUATE
+    } else {
+        audit::RECORD_CHANGE
+    };
+    let mut draft = AuditDraft::success(action, vec![ObjectRef::from(zone.id)])
         .with_source_ip(cx.source_ip)
         .with_context("zone", zone.name.as_str())
         .with_context("rrsets", diff.len().to_string());

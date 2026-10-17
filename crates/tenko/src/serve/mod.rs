@@ -1272,6 +1272,16 @@ async fn start(
             tenko_dns::zone::ZoneConfig::default(),
         )
     });
+    // The DNS actuator of IPAM (WP4.4): the automatic move step joins the engine, and the
+    // reconciler writes the records of the intent through the zone service.
+    let dns_actuator = match (&zones, &ipam) {
+        (Some(zones), Some(_)) => {
+            let actuator = Arc::new(tenko_ipam::dns::DnsActuator::new(Arc::clone(zones)));
+            tenko_ipam::dns::register_steps(&mut engine, &actuator);
+            Some(actuator)
+        }
+        _ => None,
+    };
     if let Some(ipam) = &ipam {
         let mut stop = running.stop.subscribe();
         running
@@ -1291,6 +1301,9 @@ async fn start(
         ),
         None => None,
     };
+    if let (Some(reconciler), Some(actuator)) = (&reconciler, &dns_actuator) {
+        reconciler.set_dns(Arc::clone(actuator));
+    }
     if let Some(reconciler) = &reconciler {
         // The settings live in the store (plan 2.6): seeded from the code defaults once, then
         // read by every run. The loop and the purge run on the leader.

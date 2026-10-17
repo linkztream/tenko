@@ -137,6 +137,7 @@ pub(super) async fn create_dns_zone(
                 dnssec: body.dnssec.unwrap_or_default(),
                 source: body.source,
                 description: body.description,
+                reverse_of: None,
             },
         )
         .await?;
@@ -225,6 +226,7 @@ pub(super) async fn update_dns_zone(
                 dnssec: body.dnssec,
                 source: body.source,
                 description: body.description,
+                reverse_of: None,
             },
             expect,
         )

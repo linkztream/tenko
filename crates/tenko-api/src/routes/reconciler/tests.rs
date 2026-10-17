@@ -34,7 +34,9 @@ fn changed() -> Value {
         "retention_secs": 172_800,
         "refresh_secs": 1_800,
         "purge_interval_secs": 7_200,
-        "adopt": false
+        "adopt": false,
+        "dns_actuator": false,
+        "dns_orphans": "propose"
     })
 }
 
@@ -50,6 +52,8 @@ async fn an_empty_store_answers_the_defaults_without_etag() {
     assert_eq!(reply.body["refresh_secs"], 900);
     assert_eq!(reply.body["purge_interval_secs"], 3_600);
     assert_eq!(reply.body["adopt"], true);
+    assert_eq!(reply.body["dns_actuator"], true);
+    assert_eq!(reply.body["dns_orphans"], "remove");
     assert!(reply.header("etag").is_none());
 }
 

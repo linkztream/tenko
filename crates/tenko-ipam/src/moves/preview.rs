@@ -59,6 +59,8 @@ pub(super) struct StepPlan {
     pub timeout: Option<Duration>,
     /// The change of an automatic L2 step.
     pub l2: Option<L2StepPlan>,
+    /// The zone of an automatic DNS step.
+    pub dns: Option<super::dns::DnsStepPlan>,
 }
 
 impl StepPlan {
@@ -221,6 +223,9 @@ pub(super) fn compute(
                 name,
                 old: Some(candidate.address.ip),
                 new: Some(new_ip),
+                zone: None,
+                remove: Vec::new(),
+                add: Vec::new(),
             }),
             l2: MoveL2::default(),
             steps: Vec::new(),
@@ -245,6 +250,7 @@ pub(super) fn compute(
         });
     }
     warnings.extend(dns_collisions(view, &target, &candidates, &items)?);
+    warnings.extend(dns_records(view, &candidates, &mut items)?);
 
     Ok(Base {
         target: MoveTarget {
@@ -702,6 +708,53 @@ fn dns_collisions(
     Ok(warnings)
 }
 
+/// Fills the DNS change of every item from the actuator's dry run (the zone that makes
+/// the DNS step automatic, the records it removes and writes) and warns when another
+/// origin holds a record the step needs: the step would stop with the same code.
+fn dns_records(
+    view: &dyn ReadView,
+    candidates: &[Candidate],
+    items: &mut [MoveItem],
+) -> IpamResult<Vec<PlanWarning>> {
+    let moved: Vec<crate::dns::moves::MovedAddress> = candidates
+        .iter()
+        .zip(items.iter())
+        .map(|(candidate, item)| crate::dns::moves::MovedAddress {
+            old: candidate.address.clone(),
+            new_id: item.new_address,
+            new_ip: item.new_ip,
+        })
+        .collect();
+    let changes = crate::dns::moves::preview(view, &moved)?;
+    let mut warnings = Vec::new();
+    for (item, change) in items.iter_mut().zip(changes) {
+        let Some(dns) = &mut item.dns else {
+            continue;
+        };
+        dns.zone = change.zone.as_ref().map(ToString::to_string);
+        dns.remove = change.remove;
+        dns.add = change.add;
+        if !change.held.is_empty() {
+            warnings.push(PlanWarning {
+                code: codes::DNS_COLLISION.to_owned(),
+                message: format!(
+                    "the DNS step of {} will stop: {}",
+                    dns.name,
+                    change.held.join("; ")
+                ),
+                object: Some(item.object),
+                params: BTreeMap::from([
+                    ("name".to_owned(), dns.name.to_string()),
+                    ("held".to_owned(), change.held.join("; ")),
+                ]),
+                requires_ack: true,
+                acknowledged: false,
+            });
+        }
+    }
+    Ok(warnings)
+}
+
 /// A free-looking alternative name: `-2` on the first label.
 fn propose_name(name: &Fqdn) -> String {
     match name.as_str().split_once('.') {
@@ -770,6 +823,7 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
         task: None,
         timeout: None,
         l2: None,
+        dns: None,
     }];
     if item.mode == Some(AssignmentMode::Reserved) {
         let mac = item.mac.map_or_else(
@@ -788,9 +842,30 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
             task: Some(manual("ipam.move.task.dhcp", &base)),
             timeout: None,
             l2: None,
+            dns: None,
         });
     }
-    if let Some(dns) = &item.dns {
+    if let Some(dns) = &item.dns
+        && let Some(zone) = &dns.zone
+    {
+        let mut args = base.clone();
+        args.insert("name".to_owned(), dns.name.to_string());
+        args.insert("zone".to_owned(), zone.clone());
+        steps.push(StepPlan {
+            kind: "dns.records",
+            step_kind: super::steps::DNS,
+            automatic: true,
+            text: format!(
+                "Point {} to {} in {zone}: remove the address and reverse records of {} and write those of {}",
+                dns.name, item.new_ip, item.old_ip, item.new_ip
+            ),
+            params: args,
+            task: None,
+            timeout: None,
+            l2: None,
+            dns: Some(super::dns::DnsStepPlan { zone: zone.clone() }),
+        });
+    } else if let Some(dns) = &item.dns {
         let mut args = base.clone();
         args.insert("name".to_owned(), dns.name.to_string());
         steps.push(StepPlan {
@@ -805,6 +880,7 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
             task: Some(manual("ipam.move.task.dns", &args)),
             timeout: None,
             l2: None,
+            dns: None,
         });
     }
     if item.mode == Some(AssignmentMode::Static) {
@@ -821,6 +897,7 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
             task: Some(manual("ipam.move.task.device", &base)),
             timeout: None,
             l2: None,
+            dns: None,
         });
     }
     if let Some(step) = l2_step(item, target, &base, &who) {
@@ -840,6 +917,7 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
         task: Some(manual("ipam.move.task.observe", &observe)),
         timeout: Some(Duration::from_secs(u64::from(timeout_secs))),
         l2: None,
+        dns: None,
     });
     steps.push(StepPlan {
         kind: "cleanup",
@@ -850,6 +928,7 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
         task: None,
         timeout: None,
         l2: None,
+        dns: None,
     });
     steps
 }
@@ -891,6 +970,7 @@ fn l2_step(
                 action: l2.action,
                 diff: l2.diff.clone(),
             }),
+            dns: None,
         });
     }
     debug_assert_eq!(l2.action, MoveL2Action::Manual);
@@ -903,6 +983,7 @@ fn l2_step(
         task: Some(manual(l2::instruction(l2), &args)),
         timeout: None,
         l2: None,
+        dns: None,
     })
 }
 

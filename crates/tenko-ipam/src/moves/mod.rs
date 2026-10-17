@@ -31,7 +31,7 @@
 //! |---|---|---|---|
 //! | `ipam.move.intent` | `ipam.intent` | yes: the new address as planned intent on the interface; the old one stays | always |
 //! | `ipam.move.dhcp` | `dhcp.manual` | no (Tenko DHCP from Phase 3): the reservation | `reserved` hosts |
-//! | `ipam.move.dns` | `dns.manual` | no (Tenko DNS from Phase 2): A or AAAA and PTR | a DNS name |
+//! | `ipam.move.dns` | `dns.records` or `dns.manual` | yes when the name's zone is in Tenko ([`dns`]): the old A or AAAA and PTR removed, the new ones written; otherwise a task for a person | a DNS name |
 //! | `ipam.move.device` | `device.manual` | no: reconfigure the device | `static` hosts |
 //! | `ipam.move.controller` | `l2.controller` | yes: the port profile or the per-client VLAN through the network controller | the controller can make the change |
 //! | `ipam.move.l2` | `l2.move` | no: a person moves the device, with the exact action | the controller cannot (see below) |
@@ -93,9 +93,10 @@
 //! that address only; a bulk move runs as one job group of at most `parallelism` jobs
 //! between "moved" and "confirmed" (CONN-09).
 
+pub mod dns;
 mod l2;
 mod preview;
-mod steps;
+pub mod steps;
 mod submit;
 
 use std::{collections::BTreeMap, net::IpAddr, sync::Arc};
@@ -168,8 +169,13 @@ pub mod codes {
     pub const HOST_PART_RESERVED: &str = "ipam.move.host_part_reserved";
     /// Reason: the same host part is used already.
     pub const HOST_PART_TAKEN: &str = "ipam.move.host_part_taken";
-    /// Warning (needs acknowledgement): another object in the target VRF has the DNS name.
+    /// Warning (needs acknowledgement): another object in the target VRF has the DNS name;
+    /// and the error of the automatic DNS step when another origin holds the name's RRset
+    /// or a PTR the move needs (409).
     pub const DNS_COLLISION: &str = "ipam.move.dns_collision";
+    /// The automatic DNS step could not write the records (409; `cause` names the zone
+    /// service's code).
+    pub const DNS_FAILED: &str = "ipam.move.dns_failed";
     /// The plan differs from the confirmed preview (`expect_fingerprint`) (409).
     pub const PLAN_CHANGED: &str = "ipam.move.plan_changed";
     /// The L2 step found the device or its port changed since the submit (409).
@@ -428,6 +434,16 @@ pub struct MoveDns {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
     pub new: Option<IpAddr>,
+    /// The zone Tenko serves for the name: the DNS step is automatic. Absent, a person
+    /// points the name to the new address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone: Option<String>,
+    /// The records the step removes (the dry run of the actuator), in presentation form.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remove: Vec<String>,
+    /// The records the step writes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub add: Vec<String>,
 }
 
 /// One step of an item, as previewed.

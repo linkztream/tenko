@@ -53,6 +53,7 @@
 //! | [`alarm`] | alarm levels and events (IPAM-10) |
 //! | [`jobs`] | the inline job of a change, [`JobSink`], [`DirectJobs`] |
 //! | [`moves`] | moving hosts and addresses to another network (IPAM-19) |
+//! | [`dns`] | the records of the intent, the reverse zones and the DNS actuator (DNS-22, IPAM-13) |
 //! | [`vlan`] | the VLAN provision job and the port to network controllers (IPAM-03) |
 //! | [`topology`] | the computed topology graph (IPAM-20) |
 //! | [`history`] | history entries (IPAM-09) |
@@ -69,6 +70,7 @@ pub mod alloc;
 pub mod command;
 pub mod custom;
 pub mod diff;
+pub mod dns;
 pub mod error;
 pub mod export;
 pub mod history;

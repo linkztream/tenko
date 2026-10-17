@@ -50,7 +50,7 @@ mod tests;
 use std::sync::Arc;
 
 use tenko_core::{
-    CounterKey, ObjectRef, RequestCtx, Revision, TenantId,
+    CounterKey, ObjectRef, PrefixId, RequestCtx, Revision, TenantId,
     audit::{AuditDraft, FieldChange},
     codec::key::encode_key,
     dns::{
@@ -126,6 +126,9 @@ pub struct NewZone {
     pub source: Option<SecondarySource>,
     /// Free text.
     pub description: Option<String>,
+    /// The IPAM prefix whose reverse zone this is (plan section 2.6); set by the DNS
+    /// actuator of IPAM, never by the API.
+    pub reverse_of: Option<PrefixId>,
 }
 
 /// Changes to a zone; the name and the kind do not change.
@@ -147,6 +150,9 @@ pub struct ZoneChange {
     pub source: Option<SecondarySource>,
     /// Free text; an empty string clears it.
     pub description: Option<String>,
+    /// The IPAM prefix whose reverse zone this is; `Some(None)` clears it (the DNS actuator
+    /// of IPAM adopts a zone with it, never the API).
+    pub reverse_of: Option<Option<PrefixId>>,
 }
 
 /// What a zone list shows besides the row.
@@ -634,7 +640,7 @@ impl ZoneService {
             update: new.update.clone(),
             dnssec: new.dnssec.clone(),
             source: new.source.clone(),
-            reverse_of: None,
+            reverse_of: new.reverse_of,
             description: clean_description(new.description.clone()),
             created: stamp.clone(),
             updated: stamp.clone(),
@@ -774,6 +780,10 @@ impl ZoneService {
                 if let Some(description) = &change.description {
                     zone.description = clean_description(Some(description.clone()));
                     fields.push("description");
+                }
+                if let Some(reverse_of) = change.reverse_of {
+                    zone.reverse_of = reverse_of;
+                    fields.push("reverse_of");
                 }
                 zone.validate()?;
                 if zone == before {

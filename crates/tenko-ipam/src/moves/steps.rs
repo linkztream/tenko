@@ -33,7 +33,8 @@ use crate::{
 pub const INTENT: &str = "ipam.move.intent";
 /// Step kind: the DHCP reservation (manual until Tenko DHCP).
 pub const DHCP: &str = "ipam.move.dhcp";
-/// Step kind: the DNS records (manual until Tenko DNS).
+/// Step kind: the DNS records (automatic when the name's zone is in Tenko, see
+/// [`super::dns`]).
 pub const DNS: &str = "ipam.move.dns";
 /// Step kind: reconfiguring a static device.
 pub const DEVICE: &str = "ipam.move.device";
@@ -90,6 +91,9 @@ pub struct MoveStepParams {
     /// The change of the controller step.
     #[serde(default)]
     pub l2: Option<L2StepPlan>,
+    /// The zone of an automatic DNS step; absent, the step is a task for a person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dns: Option<super::dns::DnsStepPlan>,
 }
 
 /// What the controller step changes, as the submit planned it.
@@ -141,11 +145,11 @@ pub struct MoveL2Output {
 }
 
 impl MoveStepParams {
-    fn decode(params: &[u8]) -> Result<Self, StepError> {
+    pub(super) fn decode(params: &[u8]) -> Result<Self, StepError> {
         from_cbor(params).map_err(|error| StepError::InvalidParams(error.to_string()))
     }
 
-    fn changes(&self) -> Vec<ObjectRef> {
+    pub(super) fn changes(&self) -> Vec<ObjectRef> {
         let mut out = vec![
             ObjectRef::from(self.address),
             ObjectRef::from(self.new_address),
@@ -156,7 +160,7 @@ impl MoveStepParams {
         out
     }
 
-    fn args(&self) -> BTreeMap<String, String> {
+    pub(super) fn args(&self) -> BTreeMap<String, String> {
         let mut args = BTreeMap::from([
             ("old_ip".to_owned(), self.old_ip.to_string()),
             ("new_ip".to_owned(), self.new_ip.to_string()),
@@ -726,7 +730,7 @@ pub fn move_step_handlers() -> Vec<Arc<dyn StepHandler>> {
         Arc::new(MoveIntentStep),
         Arc::new(MoveCleanupStep),
         Arc::new(MoveManualStep::new(DHCP)),
-        Arc::new(MoveManualStep::new(DNS)),
+        Arc::new(super::dns::MoveDnsStep::manual()),
         Arc::new(MoveManualStep::new(DEVICE)),
         Arc::new(MoveManualStep::new(L2)),
         Arc::new(MoveManualStep::new(OBSERVE)),

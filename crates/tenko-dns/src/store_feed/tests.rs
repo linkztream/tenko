@@ -52,6 +52,7 @@ fn new_zone(apex: &str) -> NewZone {
         dnssec: tenko_core::dns::DnssecPolicy::default(),
         source: None,
         description: None,
+        reverse_of: None,
     }
 }
 
@@ -70,6 +71,7 @@ fn a(owner: &str, address: &str, op: Op) -> RecordChange {
             }]
         },
         take_over: false,
+        origin: tenko_core::dns::Origin::Manual,
     }
 }
 

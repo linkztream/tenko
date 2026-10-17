@@ -14,7 +14,7 @@ const DAY = 86_400;
 const YEAR = 365 * DAY;
 
 /** The limits in seconds, as the server enforces them. */
-const LIMITS: readonly { key: Exclude<keyof Settings, "adopt">; min: number; max: number }[] = [
+const LIMITS: readonly { key: Exclude<keyof Settings, "adopt" | "dns_actuator" | "dns_orphans">; min: number; max: number }[] = [
   { key: "interval_secs", min: 30, max: DAY },
   { key: "debounce_secs", min: 0, max: 300 },
   { key: "orphan_after_secs", min: 3_600, max: YEAR },
@@ -32,6 +32,8 @@ function fresh(): ReconcilerState {
   return {
     settings: {
       adopt: true,
+      dns_actuator: true,
+      dns_orphans: "remove",
       debounce_secs: 2,
       interval_secs: 300,
       orphan_after_secs: 604_800,

@@ -17,9 +17,19 @@
 //! | `ipam.reconcile.conflict_networks` | conflict | warning | none |
 //! | `ipam.reconcile.conflict_address_taken` | conflict | warning | none |
 //! | `ipam.reconcile.outside_prefixes` | outside prefixes | warning | create the suggested network |
+//! | `ipam.reconcile.dns_record_held` | conflict | warning | none: another origin holds an RRset IPAM wants |
+//! | `ipam.reconcile.dns_no_zone` | orphaned intent | info | none: DNS names without a zone in Tenko, listed |
+//! | `ipam.reconcile.dns_orphaned_record` | orphaned intent | info | none: an `ipam` RRset without intent (orphan rule `propose`) |
+//! | `ipam.reconcile.dns_delegation` | orphaned intent | info | none: the RFC 2317 lines to add to a parent zone Tenko does not serve |
+//! | `ipam.reconcile.dns_reverse_orphaned` | orphaned intent | info | none: a reverse zone Tenko no longer keeps |
+//! | `ipam.reconcile.dns_reverse_no_servers` | orphaned intent | info | none: no zone lends a new reverse zone its SOA and name servers |
+//!
+//! The DNS rules come from the planner of [`crate::dns`] (the same read view); a person
+//! resolves them in the zones or the intent, so they carry no commands.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fmt::Write as _,
     net::IpAddr,
     time::Duration,
 };
@@ -37,6 +47,7 @@ use crate::{
         AddressInput, AddressPatch, HostInput, InterfaceInput, IpamCommand, PrefixInput,
         UpdateAddress,
     },
+    dns::{DnsFinding, plan::record_text},
     net::{Family, contains_net},
     observe::model::IntentSighting,
     proposals::model::{IntentProposalKind, ProposalEvidence, ProposalSeverity, ProposalSubject},
@@ -62,7 +73,22 @@ pub mod rule {
     pub const CONFLICT_ADDRESS_TAKEN: &str = "ipam.reconcile.conflict_address_taken";
     /// Addresses outside every known network.
     pub const OUTSIDE_PREFIXES: &str = "ipam.reconcile.outside_prefixes";
+    /// An RRset IPAM wants is held by another origin with other data.
+    pub const DNS_RECORD_HELD: &str = "ipam.reconcile.dns_record_held";
+    /// DNS names of intent without a zone in Tenko.
+    pub const DNS_NO_ZONE: &str = "ipam.reconcile.dns_no_zone";
+    /// An `ipam` RRset whose address lost its name or its intent.
+    pub const DNS_ORPHANED_RECORD: &str = "ipam.reconcile.dns_orphaned_record";
+    /// The RFC 2317 delegation to add in a parent zone Tenko does not serve.
+    pub const DNS_DELEGATION: &str = "ipam.reconcile.dns_delegation";
+    /// A reverse zone whose prefix is gone or off: no longer kept.
+    pub const DNS_REVERSE_ORPHANED: &str = "ipam.reconcile.dns_reverse_orphaned";
+    /// A managed prefix whose reverse zone has no zone to lend it SOA values and servers.
+    pub const DNS_REVERSE_NO_SERVERS: &str = "ipam.reconcile.dns_reverse_no_servers";
 }
+
+/// Names listed in full in a DNS proposal's summary; the rest are counted.
+const LISTED_NAMES: usize = 20;
 
 /// The tag of hosts created from a discovered-host proposal.
 pub const DISCOVERED_TAG: &str = "discovered";
@@ -96,9 +122,11 @@ pub(crate) fn candidates(
     snapshot: &Snapshot,
     sightings: &BTreeMap<ObjectRef, IntentSighting>,
     config: RuleConfig,
+    dns_findings: &[DnsFinding],
 ) -> Vec<Candidate> {
     let mut names = NameBook::new(snapshot);
     let mut out = Vec::new();
+    out.extend(dns(snapshot, dns_findings));
     out.extend(discovered(snapshot, &mut names));
     out.extend(mismatches(snapshot));
     out.extend(conflicts(snapshot));
@@ -1191,6 +1219,242 @@ fn orphans(
         });
     }
     out
+}
+
+// ----- DNS ------------------------------------------------------------------------------
+
+fn address_objects(snapshot: &Snapshot, addresses: &[AddressId]) -> Vec<ObjectRef> {
+    let mut objects: Vec<ObjectRef> = addresses.iter().map(|id| ObjectRef::from(*id)).collect();
+    for id in addresses {
+        if let Some(host) = snapshot
+            .intent
+            .addresses
+            .get(id)
+            .and_then(|address| snapshot.intent.host_of_address(address))
+        {
+            objects.push(ObjectRef::from(host.id));
+        }
+    }
+    objects.sort();
+    objects.dedup();
+    objects
+}
+
+fn first_address<'a>(snapshot: &'a Snapshot, addresses: &[AddressId]) -> Option<&'a Address> {
+    addresses
+        .iter()
+        .find_map(|id| snapshot.intent.addresses.get(id))
+}
+
+fn origin_text(origin: tenko_core::dns::Origin) -> &'static str {
+    tenko_dns::zone::records::origin_name(origin)
+}
+
+/// The proposals of the DNS planner's findings (see the module documentation).
+#[allow(clippy::too_many_lines, reason = "one arm per finding")]
+fn dns(snapshot: &Snapshot, findings: &[DnsFinding]) -> Vec<Candidate> {
+    findings
+        .iter()
+        .map(|finding| match finding {
+            DnsFinding::Held {
+                zone,
+                name,
+                rtype,
+                held_type,
+                origin,
+                wanted,
+                addresses,
+            } => {
+                let wanted: Vec<String> = wanted
+                    .iter()
+                    .map(|data| record_text(name, *rtype, data))
+                    .collect();
+                let address = first_address(snapshot, addresses);
+                Candidate {
+                    kind: IntentProposalKind::Conflict,
+                    rule: rule::DNS_RECORD_HELD,
+                    key: format!("conflict/dns:{zone}/{name}/{rtype}"),
+                    subject: ProposalSubject {
+                        mac: None,
+                        ip: address.map(|a| a.ip),
+                        cidr: None,
+                        vrf: address.map(|a| a.vrf),
+                        prefix: address.map(|a| a.prefix),
+                        name: Some(name.to_string()),
+                        objects: address_objects(snapshot, addresses),
+                    },
+                    severity: ProposalSeverity::Warning,
+                    summary: format!(
+                        "{name} {held_type} in {zone} belongs to the origin {}, so IPAM cannot write {}; delete it to give the name back to IPAM, or change the DNS name of the address",
+                        origin_text(*origin),
+                        join(&wanted)
+                    ),
+                    params: BTreeMap::from([
+                        ("zone".to_owned(), zone.to_string()),
+                        ("name".to_owned(), name.to_string()),
+                        ("type".to_owned(), rtype.to_string()),
+                        ("held_type".to_owned(), held_type.to_string()),
+                        ("origin".to_owned(), origin_text(*origin).to_owned()),
+                        ("wanted".to_owned(), join(&wanted)),
+                    ]),
+                    evidence: Vec::new(),
+                    commands: Vec::new(),
+                    shape: vec![
+                        format!("held:{zone}:{name}:{held_type}:{}", origin_text(*origin)),
+                        format!("wanted:{}", join(&wanted)),
+                    ],
+                }
+            }
+            DnsFinding::NoZone { names } => {
+                let listed: Vec<String> = names
+                    .keys()
+                    .take(LISTED_NAMES)
+                    .map(ToString::to_string)
+                    .collect();
+                let more = names.len().saturating_sub(LISTED_NAMES);
+                let addresses: Vec<AddressId> = names.values().flatten().copied().collect();
+                let mut text = join(&listed);
+                if more > 0 {
+                    let _ = write!(text, " and {more} more");
+                }
+                Candidate {
+                    kind: IntentProposalKind::OrphanedIntent,
+                    rule: rule::DNS_NO_ZONE,
+                    key: "orphaned_intent/dns_no_zone".to_owned(),
+                    subject: ProposalSubject {
+                        objects: address_objects(snapshot, &addresses),
+                        ..ProposalSubject::default()
+                    },
+                    severity: ProposalSeverity::Info,
+                    summary: format!(
+                        "{} have no zone in Tenko: {text}; IPAM leaves them to the DNS servers that hold them",
+                        plural(names.len(), "DNS name", "DNS names")
+                    ),
+                    params: BTreeMap::from([
+                        ("count".to_owned(), names.len().to_string()),
+                        ("names".to_owned(), text),
+                    ]),
+                    evidence: Vec::new(),
+                    commands: Vec::new(),
+                    shape: names.keys().map(|name| format!("name:{name}")).collect(),
+                }
+            }
+            DnsFinding::Orphaned {
+                zone,
+                name,
+                rtype,
+                records,
+            } => {
+                let texts: Vec<String> = records
+                    .iter()
+                    .map(|data| record_text(name, *rtype, data))
+                    .collect();
+                Candidate {
+                    kind: IntentProposalKind::OrphanedIntent,
+                    rule: rule::DNS_ORPHANED_RECORD,
+                    key: format!("orphaned_intent/dns_record:{zone}/{name}/{rtype}"),
+                    subject: ProposalSubject {
+                        name: Some(name.to_string()),
+                        ..ProposalSubject::default()
+                    },
+                    severity: ProposalSeverity::Info,
+                    summary: format!(
+                        "{} in {zone} came from IPAM and no address of intent has it any more; delete it in the zone",
+                        join(&texts)
+                    ),
+                    params: BTreeMap::from([
+                        ("zone".to_owned(), zone.to_string()),
+                        ("name".to_owned(), name.to_string()),
+                        ("type".to_owned(), rtype.to_string()),
+                        ("records".to_owned(), join(&texts)),
+                    ]),
+                    evidence: Vec::new(),
+                    commands: Vec::new(),
+                    shape: texts,
+                }
+            }
+            DnsFinding::Delegation {
+                prefix,
+                cidr,
+                zone,
+                parent,
+                lines,
+            } => Candidate {
+                kind: IntentProposalKind::OrphanedIntent,
+                rule: rule::DNS_DELEGATION,
+                key: format!("orphaned_intent/dns_delegation:{zone}"),
+                subject: ProposalSubject {
+                    cidr: Some(*cidr),
+                    prefix: Some(*prefix),
+                    objects: vec![ObjectRef::from(*prefix)],
+                    ..ProposalSubject::default()
+                },
+                severity: ProposalSeverity::Info,
+                summary: format!(
+                    "Tenko serves {zone} for {cidr} but not its parent {parent}; add these lines to {parent} where it is served: {}",
+                    lines.join(" | ")
+                ),
+                params: BTreeMap::from([
+                    ("zone".to_owned(), zone.to_string()),
+                    ("parent".to_owned(), parent.to_string()),
+                    ("cidr".to_owned(), cidr.to_string()),
+                    ("lines".to_owned(), lines.join("\n")),
+                ]),
+                evidence: Vec::new(),
+                commands: Vec::new(),
+                shape: lines.clone(),
+            },
+            DnsFinding::ReverseOrphaned { zone, name, prefix } => Candidate {
+                kind: IntentProposalKind::OrphanedIntent,
+                rule: rule::DNS_REVERSE_ORPHANED,
+                key: format!("orphaned_intent/dns_reverse_zone:{zone}"),
+                subject: ProposalSubject {
+                    name: Some(name.to_string()),
+                    prefix: Some(*prefix),
+                    objects: vec![ObjectRef::from(*zone)],
+                    ..ProposalSubject::default()
+                },
+                severity: ProposalSeverity::Info,
+                summary: format!(
+                    "The reverse zone {name} belongs to a prefix that is gone or whose reverse setting is off; IPAM no longer keeps it, delete it when it is not needed"
+                ),
+                params: BTreeMap::from([("zone".to_owned(), name.to_string())]),
+                evidence: Vec::new(),
+                commands: Vec::new(),
+                shape: vec![format!("zone:{zone}:{prefix}")],
+            },
+            DnsFinding::NoNameServers {
+                prefix,
+                cidr,
+                zones,
+            } => {
+                let zones: Vec<String> = zones.iter().map(ToString::to_string).collect();
+                Candidate {
+                    kind: IntentProposalKind::OrphanedIntent,
+                    rule: rule::DNS_REVERSE_NO_SERVERS,
+                    key: format!("orphaned_intent/dns_reverse_no_servers:{prefix}"),
+                    subject: ProposalSubject {
+                        cidr: Some(*cidr),
+                        prefix: Some(*prefix),
+                        objects: vec![ObjectRef::from(*prefix)],
+                        ..ProposalSubject::default()
+                    },
+                    severity: ProposalSeverity::Info,
+                    summary: format!(
+                        "The reverse zones of {cidr} ({}) cannot be created: no zone in Tenko has name servers to copy; create a forward zone first",
+                        join(&zones)
+                    ),
+                    params: BTreeMap::from([
+                        ("cidr".to_owned(), cidr.to_string()),
+                        ("zones".to_owned(), join(&zones)),
+                    ]),
+                    evidence: Vec::new(),
+                    commands: Vec::new(),
+                    shape: zones,
+                }
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

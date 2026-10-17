@@ -32,6 +32,7 @@
 //! and `ipam.obs.by_name`, and `ipam.obs.last_seen` for the last sighting of addresses and
 //! interfaces of intent.
 
+pub mod dns;
 pub mod ingest;
 pub mod model;
 pub mod retention;

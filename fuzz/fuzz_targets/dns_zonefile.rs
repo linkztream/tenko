@@ -172,6 +172,7 @@ fuzz_target!(|data: &[u8]| {
                 ttl: Some(record.ttl),
                 records: vec![data],
                 take_over: false,
+                origin: Origin::Manual,
             });
         }
     }

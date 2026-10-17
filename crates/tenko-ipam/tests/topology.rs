@@ -323,6 +323,7 @@ fn lab_intent() -> (Intent, tenko_core::HostId, PrefixId) {
         site: None,
         alarm: None,
         alloc: AllocPolicy::Lowest,
+        dns_reverse: None,
         meta: Meta::new(stamp.clone()),
     };
     let printer = Host {

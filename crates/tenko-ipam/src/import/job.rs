@@ -634,6 +634,7 @@ fn revert_update(before: &IpamObject, after: &IpamObject) -> Option<IpamCommand>
                     site: changed(&b.site, &a.site),
                     alarm: changed(&b.alarm, &a.alarm),
                     alloc: changed(&b.alloc, &a.alloc),
+                    dns_reverse: changed(&b.dns_reverse, &a.dns_reverse),
                     tags,
                     custom,
                     description,

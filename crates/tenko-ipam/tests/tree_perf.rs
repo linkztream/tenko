@@ -124,6 +124,7 @@ async fn fill(store: &MemStore) -> Space {
         site: None,
         alarm: None,
         alloc: AllocPolicy::Lowest,
+        dns_reverse: None,
         meta: meta(),
     };
     let supernet_prefix = prefix_of(root, "2001:db8::/112", PrefixRole::Supernet);

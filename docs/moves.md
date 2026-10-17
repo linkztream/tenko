@@ -1,7 +1,7 @@
 # Moving devices between networks
 
-- Status: Slice 2 (WP2.8)
-- Requirements: IPAM-19, IPAM-16, CON-10, CONN-06, CONN-08, CONN-09, CONN-18, TGL-20; acceptance E8
+- Status: Slice 2 (WP2.8); the automatic DNS step from Phase 2 (WP4.4)
+- Requirements: IPAM-19, IPAM-16, CON-10, CONN-06, CONN-08, CONN-09, CONN-18, TGL-20, DNS-22; acceptance E8 and E17
 
 A move takes hosts or addresses into another network: the operator drags them onto a network in the IPAM tree (or presses M and picks the network), checks the preview and starts the move. Dragging moves nothing physically (CON-10). A device stays in its old VLAN and keeps getting the old scope's address until its switch port or wireless association changes, and it takes its new address only after a link flap or a lease renewal. A move is therefore a job per device: it changes the intended state, gets the device into the target VLAN through the network controller where it can, waits until the device is seen at its new address, and cleans up. It rolls back when the device does not show up in time.
 
@@ -22,7 +22,7 @@ The new address keeps the host part (the last octet, or the interface ID for IPv
 `POST /api/v1/moves?dry_run=true` answers a `MovePreview` and changes nothing. The network controllers are read, never written. For every device the preview shows:
 
 - the old and the new address, and whether the host part stays and why not;
-- the DNS change (the name keeps pointing to the device, now at the new address);
+- the DNS change (the name keeps pointing to the device, now at the new address): when the name falls under a zone Tenko serves, `dns.zone` names the zone and `dns.remove` and `dns.add` list the records the DNS step removes and writes, from the dry run of the DNS actuator ([dns.md](dns.md) section 7); otherwise the step is a task for a person;
 - the **L2 step** (`l2`). This is a port profile on which switch port, a per-client VLAN override on which access point, a manual step and why, or a refusal of a guardrail with its code. It comes with the diff from the controller's current state, notes about side effects, and the SSIDs that carry the target VLAN;
 - the steps of the device's job, automatic and manual, in order;
 - the warnings of the device.
@@ -107,7 +107,8 @@ A submit starts one job per item. All jobs of a move share one job group named `
 |---|---|---|---|
 | `ipam.move.intent` | `ipam.intent` | Yes: the new address as `planned` on the interface; the old one stays | Always |
 | `ipam.move.dhcp` | `dhcp.manual` | No (Tenko DHCP from Phase 3): create the reservation in the target scope, keep the old one | `reserved` hosts |
-| `ipam.move.dns` | `dns.manual` | No (Tenko DNS from Phase 2): point the name to the new address, address and reverse records | An address with a DNS name |
+| `ipam.move.dns` | `dns.records` | Yes: the DNS actuator removes the A or AAAA record and the PTR record of the old address and writes those of the new one, with the origin `ipam` | An address whose DNS name falls under a zone Tenko serves |
+| `ipam.move.dns` | `dns.manual` | No: point the name to the new address, address and reverse records | An address whose DNS name has no zone in Tenko |
 | `ipam.move.device` | `device.manual` | No: reconfigure the device | `static` hosts |
 | `ipam.move.controller` | `l2.controller` | Yes: the L2 change through the network controller | Section 3 found a change the controller can make |
 | `ipam.move.l2` | `l2.move` | No: the exact manual action of section 3.4 | The controller cannot make it |
@@ -115,6 +116,8 @@ A submit starts one job per item. All jobs of a move share one job group named `
 | `ipam.move.cleanup` | `cleanup` | Yes: remove the old address, make the new one active, clear `move-failed` | Always |
 
 The manual tasks come before the L2 change: a device waits for its ticked tasks before it moves (IPAM-19).
+
+**The DNS step.** When its name falls under a zone Tenko serves (the submit found the zone, and the server runs the DNS module), the step plans the records of the name from the current state with the move treated as in flight and writes the changes that concern the name: its A or AAAA set and the PTR sets that point to it, in the forward zone and in the reverse zones of both addresses where Tenko serves them. The step's output (JSON of `MoveDnsOutput`) lists the records removed and added. The collision rule of IPAM-19 is unchanged: the preview warns with `ipam.move.dns_collision` (to acknowledge) when another object of the target VRF has the name or another origin holds a record the step needs, and the step stops with 409 `ipam.move.dns_collision` when another origin holds the name's RRset or a PTR it needs, so the job rolls back. Until the cleanup the reconciler keeps what the step wrote, although the new address is still `planned` ([reconciliation.md](reconciliation.md) section 10). A reverse zone that does not exist yet gets its PTR from the reconciler's next run.
 
 **The controller step.** When it runs, which may be hours after the submit while people work through the tasks, the step goes through these stages in order:
 
@@ -141,7 +144,8 @@ A person can confirm the step by hand at any time. The timeout comes from the re
 The job rolls back when the observation timeout passes, when a step fails, or when the job is cancelled. Steps are undone in reverse:
 
 - The **controller step** is undone with the undo steps of its receipt: the previous port profile, or the previous per-client override, or none. A person is asked instead, with a manual undo task on the step that the jobs view explains with the previous value, in three cases: the receipt has no undo steps (the port had no profile on record), the undo fails (writes off by now, a guardrail refuses, or the controller changed since the write and Tenko will not overwrite that), or an interrupted attempt may have written without keeping the receipt.
-- The **manual steps** have no undo task: a rollback never waits for a person to take back the DHCP reservation, the DNS records or a manual L2 change. The job's error names the reason, and the jobs view lists what was done.
+- The automatic **DNS step** plans again without the move and writes the old address's records back; when that fails the reconciler's next run does it.
+- The **manual steps** have no undo task: a rollback never waits for a person to take back the DHCP reservation, the DNS records of a name outside Tenko or a manual L2 change. The job's error names the reason, and the jobs view lists what was done.
 - The **intent step** removes the new address, restores the old one if needed, and tags the moved object `move-failed`. The tag goes away with the next successful move of the object.
 
 The job ends `rolled_back` with the reason in its error, or `cancelled` when a cancel started the rollback. Every address has its own job, so a failure rolls back that address only and never touches the other devices of the move.
@@ -156,11 +160,11 @@ The jobs of one move form one job group whose limit is the move's parallelism: 4
 |---|---|---|
 | 1. Choose the new address | Automatic | |
 | 2. Create the reservation | A task for a person (`reserved` hosts) | Automatic with Tenko DHCP (Phase 3) |
-| 3. Update DNS | A task for a person | Automatic with Tenko DNS (Phase 2) |
+| 3. Update DNS | Automatic when the name's zone is in Tenko (the DNS actuator, section 4); a task for a person otherwise | |
 | 4. L2 move | Automatic through the network controller, else a task with the exact action | |
 | 5. Wait for the observation | Automatic from probes and the controller's client table, or a person | DHCP leases (Phase 3) |
-| 6. Clean up | The IPAM part is automatic. Removing the old reservation and the old DNS records is part of the tasks of steps 2 and 3 | Automatic with Tenko DHCP and DNS |
-| 7. Roll back | Automatic for IPAM and the L2 change; the manual steps are not taken back | |
+| 6. Clean up | The IPAM part is automatic, and so are the DNS records in Tenko zones (the DNS step removed the old ones). Removing the old reservation, and the old DNS records of a name outside Tenko, is part of the tasks of steps 2 and 3 | Automatic with Tenko DHCP (Phase 3) |
+| 7. Roll back | Automatic for IPAM, the DNS records in Tenko zones and the L2 change; the manual steps are not taken back | |
 
 `static` hosts keep the manual reconfiguration of the device until a hypervisor actuator can do it (Phase 5).
 
@@ -174,6 +178,8 @@ The jobs of one move form one job group whose limit is the move's parallelism: 4
 | `ipam.plan.unacknowledged` | 409 | A warning needs an acknowledgement (`ipam.move.dns_collision`, `ipam.move.l2_refused`, `ipam.move.controller_unavailable`, ...) |
 | `ipam.move.plan_changed` | 409 | The plan differs from the confirmed preview (`expect_fingerprint`) |
 | `ipam.move.l2_changed` | 409 | The job's controller step found the device or its port changed since the submit (a step error, the job rolls back) |
+| `ipam.move.dns_collision` | 409 | The automatic DNS step found the name's RRset or a PTR it needs held by another origin (a step error, the job rolls back) |
+| `ipam.move.dns_failed` | 409 | The automatic DNS step could not write (`cause` names the zone service's code; the job rolls back) |
 | `ipam.move.no_engine` | 503 | The server runs no job engine |
 
 A submit needs `Update` on every named object, `Execute` on jobs and `Execute` on every connector an automatic L2 step writes through. A preview needs `Read` on every named object.

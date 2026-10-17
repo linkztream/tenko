@@ -62,6 +62,7 @@ fn new_zone(apex: &str) -> NewZone {
         dnssec: tenko_core::dns::DnssecPolicy::default(),
         source: None,
         description: None,
+        reverse_of: None,
     }
 }
 
@@ -79,6 +80,7 @@ fn a(owner: &str, addresses: &[&str]) -> Change {
             })
             .collect(),
         take_over: false,
+        origin: Origin::Manual,
     }
 }
 
@@ -193,6 +195,7 @@ async fn the_rules_between_rrsets_hold() {
             target: name("web.example.test"),
         }],
         take_over: false,
+        origin: Origin::Manual,
     };
     let error = service
         .change_records(&cx(), zone.id, std::slice::from_ref(&cname), false)
@@ -219,6 +222,7 @@ async fn the_rules_between_rrsets_hold() {
         ttl: None,
         records: Vec::new(),
         take_over: false,
+        origin: Origin::Manual,
     };
     let error = service
         .change_records(&cx(), zone.id, &[soa], false)
@@ -241,6 +245,7 @@ async fn the_rules_between_rrsets_hold() {
         ttl: None,
         records: Vec::new(),
         take_over: false,
+        origin: Origin::Manual,
     };
     let error = service
         .change_records(&cx(), zone.id, &[ns_delete], false)
@@ -291,6 +296,7 @@ async fn another_origin_needs_a_take_over() {
 
     let take_over = Change {
         take_over: true,
+        origin: Origin::Manual,
         ..change
     };
     let done = service
@@ -895,4 +901,157 @@ async fn importing_an_export_into_its_own_zone_changes_nothing() {
             .expect("export");
         assert_eq!(again.text, first.text);
     }
+}
+
+fn audit_actions(view: &dyn tenko_store::ReadView) -> Vec<String> {
+    view.scan_typed(
+        &tenko_store::tables::AUDIT,
+        KeyRange::all(),
+        usize::MAX,
+        false,
+    )
+    .expect("audit")
+    .into_iter()
+    .map(|(_, record, _)| record.draft.action.as_str().to_owned())
+    .collect()
+}
+
+#[tokio::test]
+async fn a_writer_of_another_origin_writes_its_own_rrsets_and_needs_take_over_for_others() {
+    let (service, _) = new_service();
+    let zone = service
+        .create(&cx(), new_zone("example.test"))
+        .await
+        .expect("create")
+        .zone;
+    let ipam = Change {
+        origin: Origin::Ipam,
+        ..a("host.example.test", &["192.0.2.20"])
+    };
+    let done = service
+        .change_records(&cx(), zone.id, std::slice::from_ref(&ipam), false)
+        .await
+        .expect("ipam write");
+    assert_eq!(
+        done.diff[0].after.as_ref().map(|rrset| rrset.origin),
+        Some(Origin::Ipam)
+    );
+    // The same writer replaces its own RRset without take_over.
+    let replace = Change {
+        origin: Origin::Ipam,
+        ..a("host.example.test", &["192.0.2.21"])
+    };
+    service
+        .change_records(&cx(), zone.id, &[replace], false)
+        .await
+        .expect("ipam replace");
+    let view = service.view(None).await.expect("view");
+    let actions = audit_actions(view.as_ref());
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| action.as_str() == "dns.record.actuate")
+            .count(),
+        2,
+        "{actions:?}"
+    );
+    assert!(!actions.iter().any(|action| action == "dns.record.change"));
+
+    // A manual RRset is not the actuator's: refused, then taken over.
+    service
+        .change_records(
+            &cx(),
+            zone.id,
+            &[a("www.example.test", &["192.0.2.30"])],
+            false,
+        )
+        .await
+        .expect("manual write");
+    let over = Change {
+        origin: Origin::Ipam,
+        ..a("www.example.test", &["192.0.2.31"])
+    };
+    let error = service
+        .change_records(&cx(), zone.id, std::slice::from_ref(&over), false)
+        .await
+        .expect_err("origin");
+    assert!(error.is(codes::RECORD_ORIGIN), "{error:?}");
+    assert_eq!(
+        error.coded().params.get("origin").map(String::as_str),
+        Some("manual")
+    );
+    let taken = Change {
+        take_over: true,
+        ..over
+    };
+    let done = service
+        .change_records(&cx(), zone.id, &[taken], false)
+        .await
+        .expect("take over");
+    assert_eq!(
+        done.diff[0].after.as_ref().map(|rrset| rrset.origin),
+        Some(Origin::Ipam)
+    );
+    assert_eq!(
+        summary(&service, zone.id).await.origins,
+        vec![(Origin::Manual, 2), (Origin::Ipam, 2)]
+    );
+}
+
+#[tokio::test]
+async fn a_zone_carries_the_prefix_whose_reverse_zone_it_is() {
+    let (service, _) = new_service();
+    let prefix = tenko_core::PrefixId::generate();
+    let created = service
+        .create(
+            &cx(),
+            NewZone {
+                reverse_of: Some(prefix),
+                ..new_zone("2.0.192.in-addr.arpa")
+            },
+        )
+        .await
+        .expect("create")
+        .zone;
+    assert_eq!(created.reverse_of, Some(prefix));
+    // A forward zone cannot belong to a prefix.
+    let error = service
+        .create(
+            &cx(),
+            NewZone {
+                reverse_of: Some(prefix),
+                ..new_zone("example.test")
+            },
+        )
+        .await
+        .expect_err("forward zone");
+    assert!(error.is(codes::ZONE_INVALID), "{error:?}");
+
+    let other = tenko_core::PrefixId::generate();
+    let adopted = service
+        .update(
+            &cx(),
+            created.id,
+            super::ZoneChange {
+                reverse_of: Some(Some(other)),
+                ..super::ZoneChange::default()
+            },
+            None,
+        )
+        .await
+        .expect("adopt");
+    assert_eq!(adopted.zone.reverse_of, Some(other));
+    let cleared = service
+        .update(
+            &cx(),
+            created.id,
+            super::ZoneChange {
+                reverse_of: Some(None),
+                ..super::ZoneChange::default()
+            },
+            None,
+        )
+        .await
+        .expect("clear");
+    assert_eq!(cleared.zone.reverse_of, None);
 }

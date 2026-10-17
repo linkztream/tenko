@@ -5604,6 +5604,36 @@ export interface components {
              */
             revision: number;
         };
+        /** @description What one run of the actuator did; part of the reconciler's run report. */
+        DnsActuation: {
+            /**
+             * Format: int32
+             * @description Batches committed (one per zone and chunk).
+             */
+            batches: number;
+            /** @description Writes that failed; the next run tries again. */
+            failures?: components["schemas"]["DnsFailure"][];
+            /**
+             * Format: int64
+             * @description The revision of the last write; `null` when nothing was written.
+             */
+            revision?: number | null;
+            /**
+             * Format: int32
+             * @description RRsets written or deleted.
+             */
+            rrsets_changed: number;
+            /**
+             * Format: int32
+             * @description Existing zones adopted as reverse zones of a prefix.
+             */
+            zones_adopted: number;
+            /**
+             * Format: int32
+             * @description Reverse zones created.
+             */
+            zones_created: number;
+        };
         /** @description A node command that was recorded. */
         DnsCommandAccepted: {
             /**
@@ -5611,6 +5641,15 @@ export interface components {
              * @description The command.
              */
             command_id: string;
+        };
+        /** @description A batch or a zone write that failed. */
+        DnsFailure: {
+            /** @description The error code. */
+            code: string;
+            /** @description The error in English. */
+            detail: string;
+            /** @description The zone apex. */
+            zone: string;
         };
         /** @description A request that started a job. */
         DnsJobStarted: {
@@ -5676,6 +5715,12 @@ export interface components {
              */
             zones: number;
         };
+        /**
+         * @description Whether Tenko creates and keeps the reverse zone of a prefix (plan section 2.6,
+         *     P2-Q11).
+         * @enum {string}
+         */
+        DnsReverse: "managed" | "off";
         /**
          * @description Who may change a zone by dynamic update (DNS-11, TGL-09). Named `DnsUpdatePolicy` in
          *     the OpenAPI document, apart from the software-update policy of the system settings.
@@ -8296,12 +8341,21 @@ export interface components {
         };
         /** @description The DNS change of an item. */
         MoveDns: {
+            /** @description The records the step writes. */
+            add?: string[];
             /** @description The name. */
             name: string;
             /** @description What it will point to. */
             new?: string | null;
             /** @description What the name points to now. */
             old?: string | null;
+            /** @description The records the step removes (the dry run of the actuator), in presentation form. */
+            remove?: string[];
+            /**
+             * @description The zone Tenko serves for the name: the DNS step is automatic. Absent, a person
+             *     points the name to the new address.
+             */
+            zone?: string | null;
         };
         /** @description One address that moves. */
         MoveItem: {
@@ -9187,6 +9241,11 @@ export interface components {
              */
             rrsets: number;
         };
+        /**
+         * @description What happens to an `ipam` RRset whose address lost its name or its intent.
+         * @enum {string}
+         */
+        OrphanRule: "remove" | "propose";
         /** @description A language and its packs, for administrators (`GET /i18n/packs`). */
         PackInfo: {
             active?: components["schemas"]["PackVersion"] | null;
@@ -10042,6 +10101,7 @@ export interface components {
                  * @example 192.0.2.0/24
                  */
                 cidr: string;
+                dns_reverse?: components["schemas"]["DnsReverse"] | null;
                 /** @description Identifier. */
                 id: components["schemas"]["PrefixId"];
                 /** @description Metadata. */
@@ -10847,6 +10907,7 @@ export interface components {
              * @example 192.0.2.0/24
              */
             cidr: string;
+            dns_reverse?: components["schemas"]["DnsReverse"] | null;
             /** @description Identifier. */
             id: components["schemas"]["PrefixId"];
             /** @description Metadata. */
@@ -10920,6 +10981,7 @@ export interface components {
             } | null;
             /** @description Replaces the description; `null` clears it. */
             description?: string | null;
+            dns_reverse?: components["schemas"]["DnsReverse"] | null;
             role?: components["schemas"]["PrefixRole"] | null;
             /** @description New site; `null` clears it. */
             site?: string | null;
@@ -11650,6 +11712,7 @@ export interface components {
             adoption_failures: number;
             /** @description When the run started. */
             at: components["schemas"]["Timestamp"];
+            dns?: components["schemas"]["DnsActuation"] | null;
             /**
              * Format: int32
              * @description Proposals whose observation no longer holds.
@@ -11711,6 +11774,19 @@ export interface components {
              * @default 2
              */
             debounce_secs: number;
+            /**
+             * @description Whether the DNS actuator writes the records of the intent and keeps the reverse
+             *     zones after every run, while the DNS module runs (default on). Off, the findings are
+             *     still proposed and nothing is written.
+             * @default true
+             */
+            dns_actuator: boolean;
+            /**
+             * @description What happens to an `ipam` RRset whose address lost its name or its intent: `remove`
+             *     (default) deletes it, `propose` keeps it and proposes it as an orphan.
+             * @default remove
+             */
+            dns_orphans: components["schemas"]["OrphanRule"];
             /**
              * Format: int64
              * @description Seconds between periodic runs, 30 to 86,400 (default 300).
@@ -15430,6 +15506,7 @@ export interface components {
                  * @example 192.0.2.0/24
                  */
                 cidr: string;
+                dns_reverse?: components["schemas"]["DnsReverse"] | null;
                 /** @description Identifier. */
                 id: components["schemas"]["PrefixId"];
                 /** @description Metadata. */

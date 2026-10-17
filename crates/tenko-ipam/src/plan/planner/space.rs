@@ -315,6 +315,7 @@ impl Planner<'_> {
             site: input.site,
             alarm,
             alloc: input.alloc.unwrap_or_default(),
+            dns_reverse: None,
             meta,
         };
         self.nibble_warning(&prefix);
@@ -377,6 +378,9 @@ impl Planner<'_> {
         }
         if let Some(alloc) = patch.alloc {
             after.alloc = alloc;
+        }
+        if let Some(dns_reverse) = patch.dns_reverse {
+            after.dns_reverse = dns_reverse;
         }
         self.patch_meta(
             Prefix::KIND,

@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use super::ReconcilerConfig;
 use crate::{
+    dns::OrphanRule,
     error::{IpamError, IpamResult},
     observe::ObserveConfig,
 };
@@ -73,6 +74,13 @@ pub struct ReconcilerSettings {
     /// Whether adoption policies are applied; off, every proposal waits for a person
     /// (default on).
     pub adopt: bool,
+    /// Whether the DNS actuator writes the records of the intent and keeps the reverse
+    /// zones after every run, while the DNS module runs (default on). Off, the findings are
+    /// still proposed and nothing is written.
+    pub dns_actuator: bool,
+    /// What happens to an `ipam` RRset whose address lost its name or its intent: `remove`
+    /// (default) deletes it, `propose` keeps it and proposes it as an orphan.
+    pub dns_orphans: OrphanRule,
 }
 
 impl Default for ReconcilerSettings {
@@ -92,6 +100,8 @@ impl ReconcilerSettings {
             refresh_secs: config.observe.refresh.as_secs(),
             purge_interval_secs: config.purge_interval.as_secs(),
             adopt: config.adopt,
+            dns_actuator: config.dns_actuator,
+            dns_orphans: config.dns_orphans,
         }
     }
 
@@ -108,6 +118,8 @@ impl ReconcilerSettings {
             orphan_after: Duration::from_secs(self.orphan_after_secs),
             purge_interval: Duration::from_secs(self.purge_interval_secs),
             adopt: self.adopt,
+            dns_actuator: self.dns_actuator,
+            dns_orphans: self.dns_orphans,
             ..base
         }
     }
@@ -177,7 +189,28 @@ impl ReconcilerSettings {
                 self.adopt.to_string(),
             ));
         }
+        if old.dns_actuator != self.dns_actuator {
+            changes.push(change(
+                "dns_actuator",
+                old.dns_actuator.to_string(),
+                self.dns_actuator.to_string(),
+            ));
+        }
+        if old.dns_orphans != self.dns_orphans {
+            changes.push(change(
+                "dns_orphans",
+                orphan_rule(old.dns_orphans).to_owned(),
+                orphan_rule(self.dns_orphans).to_owned(),
+            ));
+        }
         changes
+    }
+}
+
+fn orphan_rule(rule: OrphanRule) -> &'static str {
+    match rule {
+        OrphanRule::Remove => "remove",
+        OrphanRule::Propose => "propose",
     }
 }
 

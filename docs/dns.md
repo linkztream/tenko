@@ -12,11 +12,12 @@ Contents:
 4. [Zone files: import, export, limits](#4-zone-files-import-export-limits)
 5. [Serials and the journal](#5-serials-and-the-journal)
 6. [Access lists and TSIG keys](#6-access-lists-and-tsig-keys)
+7. [Reverse zones and the IPAM link](#7-reverse-zones-and-the-ipam-link)
 8. [The dns role](#8-the-dns-role)
 9. [The plain forwarder](#9-the-plain-forwarder)
 12. [The engine](#12-the-engine)
 
-Sections 7, 10 and 11 are kept for the packages that write them (the IPAM link of WP4.4, then transfers, dynamic updates and views); the resolver side gets its own page with Slice 5.
+Sections 10 and 11 are kept for the packages that write them (transfers, dynamic updates and views); the resolver side gets its own page with Slice 5.
 
 All routes are under `/api/v1` and exist only while the DNS module runs (OPS-25); otherwise they answer 404 `sys.route_not_found`. Reads need the scope `dns.read`, changes `dns.write`, everything on keys `dns.keys` (section 6). Every change is committed with its audit record in one write, and every change of the DNS data appears on the event topic `dns`.
 
@@ -287,6 +288,72 @@ The key writes are proposed with their audit record (`dns.key.create`, `dns.key.
 | `dns.key.not_found` | 404 | No such key |
 | `dns.key.exists` | 409 | A key of this name exists |
 | `sys.invalid_value` | 400 | An access list name that is invalid or taken; a key name or secret that is invalid |
+
+## 7. Reverse zones and the IPAM link
+
+IPAM keeps the address and reverse records of its intent in the zones Tenko serves (DNS-22, IPAM-13, plan sections 2.5 and 2.6). The DNS actuator in `tenko_ipam::dns` plans them from the intent and writes them through the zone service of section 3 with the origin `ipam`; the reconciler runs it after its proposals, and the move step `ipam.move.dns` runs it for one device ([moves.md](moves.md) section 4). The settings and the findings are in [reconciliation.md](reconciliation.md) section 10.
+
+### What an address gets
+
+An address is published when it is live, has a DNS name and is not `planned` (an address in flight in a move is the exception: once the move's DNS step has started, its new address replaces the old one). Its name gets an A or AAAA record in the zone Tenko serves for it: the longest apex among the primary zones the name falls under, unless an NS set inside that zone (a delegation) covers the name. Its address gets a PTR record pointing to the name, in the RFC 2317 zone that covers it when Tenko serves one, else at the plain reverse name in the longest reverse zone. Several addresses with one name make one RRset with several records; a name in no zone is listed and left to the DNS servers that hold it, and its PTR record is still written when Tenko serves the reverse zone. New RRsets take the zone's default TTL.
+
+```
+GET /api/v1/dns/zones/{id}/records?name=printer
+{"items": [{"scope": "default", "name": "printer.example.test", "type": "A", "ttl": 3600,
+  "records": [{"type": "A", "address": "192.0.2.15"}], "origin": "ipam", ...}], ...}
+```
+
+### Reverse zones per prefix
+
+A network prefix has the setting `dns_reverse`: `managed` creates and keeps its reverse zones, `off` keeps none, and absent (the default, P2-Q11) means `managed` when the tenant of the prefix's VRF has a forward zone in Tenko (a primary zone outside `arpa` of that tenant, or one without a tenant for the default tenant), else `off`. It is set with `PATCH /prefixes/{id}` (`{"dns_reverse": "off"}`; `null` returns to the default). Supernets have no reverse zones.
+
+| Network | Reverse zones |
+|---|---|
+| IPv4 /0 to /24 | one per octet boundary at or below the prefix length: a /24 is `2.0.192.in-addr.arpa`, a /22 four /24 zones, a /12 sixteen /16 zones |
+| IPv4 /25 to /32 | the RFC 2317 zone `<first>/<len>.<octet>.<octet>.<octet>.in-addr.arpa`, such as `64/26.2.0.192.in-addr.arpa` |
+| IPv6 /0 to /124 | one per nibble boundary at or below the prefix length: a /48 is one zone of 12 nibbles, a /62 four zones of 16 nibbles |
+| IPv6 longer than /124 | none |
+
+A prefix length off the boundary rounds up, so the zones cover the prefix and nothing outside it. A new reverse zone is a primary zone whose SOA values, serial policy and name servers are copied from the longest reverse zone above it in Tenko, else from the tenant's first forward zone, else from the first forward zone; its `reverse_of` names the prefix (read only in the zone's answer). A zone of the same name that an operator created by hand is adopted: the actuator sets its `reverse_of` and keeps its PTR records. When two prefixes cover one zone, the shorter one keeps it.
+
+Deleting the prefix or switching its setting off leaves the zone and its records in place; the actuator stops writing there and the finding `ipam.reconcile.dns_reverse_orphaned` says so. A reverse zone that belongs to no prefix (no `reverse_of`) is still written to, like any forward zone.
+
+### RFC 2317
+
+The PTR record of an address in an RFC 2317 block is written in the block's zone as `<last octet>.<block zone>` (`70.64/26.2.0.192.in-addr.arpa`). When Tenko serves the parent zone (the zone that holds the names of the /24), the actuator writes there, with the origin `ipam`, the delegation (an NS set at the block's apex with the block zone's name servers) and the CNAME of every address of the block (`70.2.0.192.in-addr.arpa CNAME 70.64/26.2.0.192.in-addr.arpa`). When it does not, the finding `ipam.reconcile.dns_delegation` lists the lines to add to the parent where it is served:
+
+```
+64/26.2.0.192.in-addr.arpa. IN NS ns1.example.test.
+$GENERATE 64-127 $.2.0.192.in-addr.arpa. IN CNAME $.64/26.2.0.192.in-addr.arpa.
+```
+
+`$GENERATE` is BIND's form; on a server without it, one CNAME per address of the block.
+
+### The origin rule from the IPAM side
+
+The actuator changes only RRsets of the origin `ipam`; the zone service refuses anything else (`dns.record.origin`). An RRset IPAM wants that another origin holds with other data (a person's record, a CNAME at the name, data beside a CNAME IPAM wants) stays as it is and is proposed as `ipam.reconcile.dns_record_held`; one that holds the same data is left alone. A person who changes an `ipam` RRset through the API takes it over (`take_over`, it becomes `manual`) and gets the same proposal; a person who deletes one sees it written again by the next run, audited as `dns.record.actuate` by `system:reconciler`. An `ipam` RRset whose address lost its name or its intent is deleted, or with the orphan rule `propose` kept and proposed (`ipam.reconcile.dns_orphaned_record`).
+
+Every batch of the actuator is one write per zone (at most 10,000 RRsets, so a larger change splits by owner), moves the zone's serial once by its policy, leaves one journal entry and is audited as `dns.record.actuate`. A zone or batch that fails is reported in the reconciler's run (`dns.failures`) and tried again at the next run.
+
+### Findings
+
+| Rule | Kind | When |
+|---|---|---|
+| `ipam.reconcile.dns_no_zone` | orphaned intent | DNS names of intent under no zone Tenko serves (or under a delegation inside one), listed with their addresses; only while Tenko serves at least one forward zone |
+| `ipam.reconcile.dns_record_held` | conflict | An RRset IPAM wants is held by another origin with other data |
+| `ipam.reconcile.dns_orphaned_record` | orphaned intent | An `ipam` RRset without intent, with the orphan rule `propose` |
+| `ipam.reconcile.dns_delegation` | orphaned intent | The RFC 2317 delegation and CNAMEs to add to a parent zone Tenko does not serve |
+| `ipam.reconcile.dns_reverse_orphaned` | orphaned intent | A reverse zone of a prefix that is gone or whose setting is `off` |
+| `ipam.reconcile.dns_reverse_no_servers` | orphaned intent | A managed prefix whose reverse zone cannot be created: no zone in Tenko has name servers to copy |
+
+The findings carry no commands: a person resolves them in the zones or the intent. They expire when the cause is gone.
+
+### Limits
+
+- Reverse names ignore the VRF: two VRFs with one address give one PTR RRset with both names.
+- Every run reads the `ipam` RRsets of every zone that has any (the origin counters tell which), and the A, AAAA and PTR records of every primary zone for the observations; zones of millions of records make runs slower.
+- The actuator's writes are not fenced with the leader epoch; a deposed leader checks before it writes, and the next leader's run corrects what a late write left.
+- The switch `dns_actuator` and the orphan rule are reconciler settings without a control on the settings page yet (the modules page of WP5.5).
 
 ## 8. The dns role
 

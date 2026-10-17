@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs --phase 2`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --phase 2 --check`
 
-29 Phase 2 requirements; 4 named by at least one test, 25 not; 0 named by no test, measurement or document.
+29 Phase 2 requirements; 5 named by at least one test, 24 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -31,7 +31,7 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 | DNS-19 | Must | - | - | `crates/tenko-core/src/dns.rs`<br>`docs/SECURITY-PROFILES.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-20 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-core/src/dns/name.rs`<br>`crates/tenko-core/src/dns/rrset.rs`<br>`crates/tenko-dns/src/catalog.rs`<br>and 9 more |
 | DNS-21 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
-| DNS-22 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
+| DNS-22 | Must | `crates/tenko/tests/acceptance_reverse.rs` | - | `crates/tenko-core/src/ipam.rs`<br>`crates/tenko-ipam/src/dns/mod.rs`<br>`crates/tenko-ipam/src/dns/reverse.rs`<br>`crates/tenko-ipam/src/lib.rs`<br>`docs/CONFORMANCE.md`<br>and 4 more |
 | DNS-23 | Must | - | - | `crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/policy.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-24 | Must | `crates/tenko-core/tests/dns_model.rs` | - | `crates/tenko-core/src/dns.rs`<br>`crates/tenko-core/src/dns/rdata.rs`<br>`docs/adr/0017-dns-data-model-and-serving-path.md`<br>`docs/dns-contracts.md`<br>`docs/dns.md`<br>and 1 more |
 | DNS-25 | Could | - | - | `docs/plans/phase-2-plan.md` |
@@ -51,7 +51,7 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 | E14 | A home network sends all of its queries through Tenko: the owner's clients resolve through a Tenko node that forwards AD zones to the domain controllers and everything else to a DoT upstream, with a blocklist active | DNS-02, DNS-15, DNS-21, DNS-23, TGL-14, TGL-22 | - |
 | E15 | BIND as secondary receives Tenko's zones (AXFR, IXFR, NOTIFY, TSIG, XoT) and Tenko as secondary receives a BIND zone; Windows DNS as primary of one zone into Tenko on the owner's go | DNS-09, DNS-19, TGL-10 | - |
 | E16 | Fuzz targets for the wire format, the zone file parser and TSIG run in the weekly fuzz smoke | API-14, API-15 | - |
-| E17 | Every IPAM address with a DNS name has its A or AAAA and PTR records in Tenko zones, reverse zones exist for the managed prefixes including an RFC 2317 delegation, and the five-device move lab of Phase 1 (E8) runs with the DNS step automatic | DNS-22, IPAM-19, IPAM-13 | - |
+| E17 | Every IPAM address with a DNS name has its A or AAAA and PTR records in Tenko zones, reverse zones exist for the managed prefixes including an RFC 2317 delegation, and the five-device move lab of Phase 1 (E8) runs with the DNS step automatic | DNS-22, IPAM-19, IPAM-13 | `crates/tenko/tests/acceptance_move.rs`<br>`crates/tenko/tests/acceptance_move.rs::e17_a_deleted_ipam_record_is_restored_and_a_taken_over_one_is_proposed`<br>`crates/tenko/tests/acceptance_move.rs::e17_the_dns_step_is_automatic_when_the_zone_is_in_tenko`<br>`crates/tenko/tests/acceptance_reverse.rs` |
 | E18 | An RFC 2136 update signed with TSIG from `nsupdate` is applied through the store and answered from the index, refused without the key or outside the ACL, and answered SERVFAIL when the store refuses the write (the no-quorum path, exercised with the store's test hook on one node) | DNS-11, TGL-09 | - |
 | E19 | A zone signed by Tenko (NSEC and NSEC3) validates in an external validator, a ZSK rollover completes without a validation failure, and CDS and CDNSKEY are published for the KSK | DNS-12, OPS-09 | - |
 | E20 | DoT and DoH are served with the certificate of the configured TLS mode and answer `kdig`; RRL slows a reflection pattern; ANY answers are minimal; a TXT over 255 bytes round-trips split | DNS-14, DNS-17, DNS-18, DNS-24, TGL-11 | - |
@@ -79,7 +79,6 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 - DNS-19 (Must)
 - DNS-20 (Must)
 - DNS-21 (Must)
-- DNS-22 (Must)
 - DNS-23 (Must)
 - DNS-25 (Could)
 - DNS-26 (Should)

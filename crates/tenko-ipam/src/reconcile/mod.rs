@@ -123,6 +123,11 @@ pub struct ReconcilerConfig {
     pub max_attempts: u32,
     /// Whether adoption policies are applied (off: every proposal waits for a person).
     pub adopt: bool,
+    /// Whether the DNS actuator writes after every run (when the server gave the
+    /// reconciler one, [`Reconciler::set_dns`]).
+    pub dns_actuator: bool,
+    /// What happens to an `ipam` RRset that nothing wants any more.
+    pub dns_orphans: crate::dns::OrphanRule,
 }
 
 impl Default for ReconcilerConfig {
@@ -135,6 +140,8 @@ impl Default for ReconcilerConfig {
             purge_interval: Duration::from_secs(3600),
             max_attempts: 8,
             adopt: true,
+            dns_actuator: true,
+            dns_orphans: crate::dns::OrphanRule::Remove,
         }
     }
 }
@@ -164,6 +171,10 @@ pub struct ReconcileReport {
     pub sightings: u32,
     /// Move jobs whose observation step was confirmed.
     pub moves_confirmed: u32,
+    /// What the DNS actuator wrote; `null` without the DNS module or with the actuator
+    /// off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dns: Option<crate::dns::DnsActuation>,
     /// The revision of the proposal write; `null` when nothing changed.
     #[schema(value_type = Option<u64>)]
     pub revision: Option<Revision>,
@@ -184,6 +195,7 @@ impl ReconcileReport {
             adoption_failures: 0,
             sightings: 0,
             moves_confirmed: 0,
+            dns: None,
             revision: None,
         }
     }
@@ -198,6 +210,7 @@ pub struct Reconciler {
     changed: Arc<Notify>,
     run_lock: tokio::sync::Mutex<()>,
     last: Mutex<Option<ReconcileReport>>,
+    dns: std::sync::OnceLock<Arc<crate::dns::DnsActuator>>,
 }
 
 /// A derived index that only signals: the store calls it on its apply path for every
@@ -229,6 +242,8 @@ impl tenko_store::DerivedIndex for ChangeSignal {
                 tables::INTERFACES.name(),
                 ADOPTION.name(),
                 FACTS.name(),
+                tenko_core::dns::tables::ZONES.name(),
+                tenko_core::dns::tables::RRSETS.name(),
             ]
             .into_iter()
             .cloned(),
@@ -282,7 +297,21 @@ impl Reconciler {
             changed,
             run_lock: tokio::sync::Mutex::new(()),
             last: Mutex::new(None),
+            dns: std::sync::OnceLock::new(),
         }))
+    }
+
+    /// Gives the reconciler the DNS actuator (the server does when the DNS module runs):
+    /// its findings join the proposals, it writes after every run while the setting
+    /// `dns_actuator` is on, and the zones' records become observations. A second call
+    /// changes nothing.
+    pub fn set_dns(&self, actuator: Arc<crate::dns::DnsActuator>) {
+        let _ = self.dns.set(actuator);
+    }
+
+    /// The DNS actuator, when the server gave one.
+    pub fn dns(&self) -> Option<&Arc<crate::dns::DnsActuator>> {
+        self.dns.get()
     }
 
     /// The IPAM service.
@@ -438,6 +467,10 @@ impl Reconciler {
 
     /// [`reconcile`](Self::reconcile), with the proposal write fenced with the leader
     /// `epoch` when given; a deposed leader's run ends with `ipam.reconcile.deposed`.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the steps of one run read best in order"
+    )]
     async fn reconcile_fenced(
         &self,
         now: Timestamp,
@@ -446,6 +479,19 @@ impl Reconciler {
         let _guard = self.run_lock.lock().await;
         let config = self.effective().await;
         let mut report = ReconcileReport::empty(now);
+        if self.dns.get().is_some() {
+            match observe::dns::ingest_zones(self.ipam.store(), &config.observe, now).await {
+                Ok(0) => {}
+                Ok(count) => tracing::debug!(count, "DNS records ingested as observations"),
+                Err(error) => {
+                    tracing::warn!(error = %error.code_str(), "the zones' records were not ingested");
+                }
+            }
+        }
+        let dns_options = crate::dns::PlanOptions {
+            orphans: config.dns_orphans,
+            ..crate::dns::PlanOptions::default()
+        };
         let attempts = config.max_attempts.max(1);
         let mut committed = None;
         for attempt in 0..attempts {
@@ -461,6 +507,10 @@ impl Reconciler {
                 return Err(deposed());
             }
             let snapshot = Snapshot::load(view.as_ref(), now)?;
+            let dns_findings = match self.dns.get() {
+                Some(_) => crate::dns::plan::plan(view.as_ref(), &dns_options)?.findings,
+                None => Vec::new(),
+            };
             drop(view);
             let mut batch = WriteBatch::new(Principal::system(SystemComponent::Reconciler), now);
             if let Some(epoch) = epoch {
@@ -473,6 +523,7 @@ impl Reconciler {
                 RuleConfig {
                     orphan_after: config.orphan_after,
                 },
+                &dns_findings,
             );
             let counts = sync::sync(
                 &snapshot,
@@ -516,6 +567,16 @@ impl Reconciler {
         }
         if config.adopt {
             self.adopt(committed, now, &mut report).await?;
+        }
+        let deposed = match epoch {
+            Some(epoch) => self.deposed(epoch).await,
+            None => false,
+        };
+        if let Some(actuator) = self.dns.get()
+            && config.dns_actuator
+            && !deposed
+        {
+            report.dns = Some(actuator.run(&reconciler_cx(now), &dns_options).await?);
         }
         report.moves_confirmed = self.confirm_moves(now).await?;
         *self.last.lock().unwrap_or_else(PoisonError::into_inner) = Some(report.clone());

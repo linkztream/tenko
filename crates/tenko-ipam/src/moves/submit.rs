@@ -275,12 +275,14 @@ fn job_spec(
         dns_name: item.dns.as_ref().map(|dns| dns.name.clone()),
         task: None,
         l2: None,
+        dns: None,
     };
     let mut steps = Vec::with_capacity(plans.len());
     for plan in plans {
         let params = MoveStepParams {
             task: plan.task.clone(),
             l2: plan.l2.clone(),
+            dns: plan.dns.clone(),
             ..base.clone()
         };
         steps.push(StepSpec {

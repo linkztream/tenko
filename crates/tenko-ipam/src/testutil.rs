@@ -27,6 +27,7 @@ pub(crate) fn prefix(cidr: &str) -> Prefix {
         site: None,
         alarm: None,
         alloc: AllocPolicy::Lowest,
+        dns_reverse: None,
         meta: Meta::new(stamp()),
     }
 }

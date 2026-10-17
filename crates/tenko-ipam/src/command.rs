@@ -21,8 +21,8 @@ use tenko_core::{
     AddressId, CustomFieldId, HostId, InterfaceId, MacAddr, ObjectKind, ObjectRef, PrefixId,
     RangeId, Revision, SiteId, TenantId, VlanId, VrfId,
     ipam::{
-        AllocPolicy, AssignmentMode, CustomKind, CustomValue, FieldKey, PrefixRole, RangeRole,
-        Status, Tag, UtilizationAlarm,
+        AllocPolicy, AssignmentMode, CustomKind, CustomValue, DnsReverse, FieldKey, PrefixRole,
+        RangeRole, Status, Tag, UtilizationAlarm,
     },
     net::{Duid, Fqdn, HostName},
     serde_util::HexBytes,
@@ -276,6 +276,11 @@ meta_patch_fields! {
         /// New next-free policy.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub alloc: Option<AllocPolicy>,
+        /// Whether Tenko keeps the reverse zone (plan section 2.6); `null` returns to the
+        /// automatic default.
+        #[serde(default, deserialize_with = "nullable", skip_serializing_if = "Option::is_none")]
+        #[schema(value_type = Option<DnsReverse>, nullable)]
+        pub dns_reverse: Option<Option<DnsReverse>>,
     }
 }
 

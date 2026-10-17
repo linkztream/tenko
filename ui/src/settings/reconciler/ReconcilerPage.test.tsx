@@ -126,6 +126,8 @@ describe("the reconciler settings page", () => {
 describe("the reconciler model", () => {
   const stored = {
     adopt: true,
+    dns_actuator: true,
+    dns_orphans: "remove" as const,
     debounce_secs: 2,
     interval_secs: 300,
     orphan_after_secs: 604_800,

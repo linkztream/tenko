@@ -31267,6 +31267,58 @@
           }
         }
       },
+      "DnsActuation": {
+        "type": "object",
+        "description": "What one run of the actuator did; part of the reconciler's run report.",
+        "required": [
+          "zones_created",
+          "zones_adopted",
+          "rrsets_changed",
+          "batches"
+        ],
+        "properties": {
+          "batches": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Batches committed (one per zone and chunk).",
+            "minimum": 0
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DnsFailure"
+            },
+            "description": "Writes that failed; the next run tries again."
+          },
+          "revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The revision of the last write; `null` when nothing was written.",
+            "minimum": 0
+          },
+          "rrsets_changed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "RRsets written or deleted.",
+            "minimum": 0
+          },
+          "zones_adopted": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Existing zones adopted as reverse zones of a prefix.",
+            "minimum": 0
+          },
+          "zones_created": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Reverse zones created.",
+            "minimum": 0
+          }
+        }
+      },
       "DnsCommandAccepted": {
         "type": "object",
         "description": "A node command that was recorded.",
@@ -31278,6 +31330,29 @@
             "type": "string",
             "format": "uuid",
             "description": "The command."
+          }
+        }
+      },
+      "DnsFailure": {
+        "type": "object",
+        "description": "A batch or a zone write that failed.",
+        "required": [
+          "zone",
+          "code",
+          "detail"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The error code."
+          },
+          "detail": {
+            "type": "string",
+            "description": "The error in English."
+          },
+          "zone": {
+            "type": "string",
+            "description": "The zone apex."
           }
         }
       },
@@ -31403,6 +31478,14 @@
             "minimum": 0
           }
         }
+      },
+      "DnsReverse": {
+        "type": "string",
+        "description": "Whether Tenko creates and keeps the reverse zone of a prefix (plan section 2.6,\nP2-Q11).",
+        "enum": [
+          "managed",
+          "off"
+        ]
       },
       "DnsUpdatePolicy": {
         "type": "object",
@@ -38466,6 +38549,13 @@
           "name"
         ],
         "properties": {
+          "add": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The records the step writes."
+          },
           "name": {
             "type": "string",
             "description": "The name."
@@ -38483,6 +38573,20 @@
               "null"
             ],
             "description": "What the name points to now."
+          },
+          "remove": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The records the step removes (the dry run of the actuator), in presentation form."
+          },
+          "zone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The zone Tenko serves for the name: the DNS step is automatic. Absent, a person\npoints the name to the new address."
           }
         }
       },
@@ -40948,6 +41052,14 @@
           }
         }
       },
+      "OrphanRule": {
+        "type": "string",
+        "description": "What happens to an `ipam` RRset whose address lost its name or its intent.",
+        "enum": [
+          "remove",
+          "propose"
+        ]
+      },
       "PackInfo": {
         "type": "object",
         "description": "A language and its packs, for administrators (`GET /i18n/packs`).",
@@ -43077,6 +43189,17 @@
                   "description": "The network in CIDR notation, without host bits.",
                   "example": "192.0.2.0/24"
                 },
+                "dns_reverse": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DnsReverse",
+                      "description": "Whether Tenko keeps the reverse zone of the network (plan section 2.6, DNS-22);\nabsent: managed when the VRF's tenant has a forward zone in Tenko, else off."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "id": {
                   "$ref": "#/components/schemas/PrefixId",
                   "description": "Identifier."
@@ -45172,6 +45295,17 @@
             "description": "The network in CIDR notation, without host bits.",
             "example": "192.0.2.0/24"
           },
+          "dns_reverse": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DnsReverse",
+                "description": "Whether Tenko keeps the reverse zone of the network (plan section 2.6, DNS-22);\nabsent: managed when the VRF's tenant has a forward zone in Tenko, else off."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "$ref": "#/components/schemas/PrefixId",
             "description": "Identifier."
@@ -45466,6 +45600,17 @@
               "null"
             ],
             "description": "Replaces the description; `null` clears it."
+          },
+          "dns_reverse": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DnsReverse",
+                "description": "Whether Tenko keeps the reverse zone (plan section 2.6); `null` returns to the\nautomatic default."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "role": {
             "oneOf": [
@@ -47454,6 +47599,17 @@
             "$ref": "#/components/schemas/Timestamp",
             "description": "When the run started."
           },
+          "dns": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DnsActuation",
+                "description": "What the DNS actuator wrote; `null` without the DNS module or with the actuator\noff."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "expired": {
             "type": "integer",
             "format": "int32",
@@ -47528,6 +47684,16 @@
             "description": "Seconds a run waits after an ingest or an intent change to collect what follows,\n0 to 300 (default 2).",
             "default": 2,
             "minimum": 0
+          },
+          "dns_actuator": {
+            "type": "boolean",
+            "description": "Whether the DNS actuator writes the records of the intent and keeps the reverse\nzones after every run, while the DNS module runs (default on). Off, the findings are\nstill proposed and nothing is written.",
+            "default": true
+          },
+          "dns_orphans": {
+            "$ref": "#/components/schemas/OrphanRule",
+            "description": "What happens to an `ipam` RRset whose address lost its name or its intent: `remove`\n(default) deletes it, `propose` keeps it and proposes it as an orphan.",
+            "default": "remove"
           },
           "interval_secs": {
             "type": "integer",
@@ -56789,6 +56955,17 @@
                 "type": "string",
                 "description": "The network in CIDR notation, without host bits.",
                 "example": "192.0.2.0/24"
+              },
+              "dns_reverse": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/DnsReverse",
+                    "description": "Whether Tenko keeps the reverse zone of the network (plan section 2.6, DNS-22);\nabsent: managed when the VRF's tenant has a forward zone in Tenko, else off."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "id": {
                 "$ref": "#/components/schemas/PrefixId",

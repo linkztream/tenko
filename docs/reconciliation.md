@@ -37,7 +37,7 @@ An observation names its source. Tenko turns the source into a canonical text, t
 | Inventory connector | `inventory:<connector id>` | The connector host (Phase 1) |
 | Network controller connector | `network_controller:<connector id>` | The connector host (Phase 1) |
 | Probe | `probe:<node>:<method>`, method one of `arp`, `nd`, `icmp`, `tcp_connect`, `reverse_dns`, `mdns`, `llmnr`, `snmp`, and the declared raw-socket methods `arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp` | Probes (WP2.3, see [scanning.md](scanning.md)) |
-| DNS zone | `dns:<zone>` | Tenko DNS (Phase 2) |
+| DNS zone | `dns:<zone>` (the parent zone for an RFC 2317 zone) | The reconciler, from the zones in the store (Phase 2, section 10) |
 | DHCP node | `dhcp:<node>` | Tenko DHCP (Phase 3) |
 
 A probe method is part of the key, so the ARP and the ICMP sightings of one probe are different sources with separate facts.
@@ -113,6 +113,7 @@ The loop and the purge are the leader service `ipam.reconcile`: they run on the 
 - right after the controller takes office, and then on an interval (every 5 minutes by default);
 - 2 seconds (the debounce) after an ingest that wrote something, on whichever controller it happened: an ingest on a follower reaches the leader as a write to `ipam.obs.facts`, and the leader watches that table;
 - 2 seconds after a change to the intent tables or to an adoption policy, including a change a person just made by approving a proposal;
+- 2 seconds after a change to the DNS zones or records (`dns.zones`, `dns.rrsets`), so that a hand-deleted `ipam` record comes back (section 10);
 - on demand with `POST /api/v1/proposals/reconcile` (section 5.3), on the controller that answers.
 
 The service also purges old facts on its own timer (every hour by default). Its writes carry the leader epoch as a precondition, so a controller that lost the leadership commits nothing more; it stops when the leadership moves, and the new leader runs at once. Ingest stays on every controller.
@@ -130,6 +131,8 @@ The settings are the same on every controller: they live in the store (`ipam.rec
 | `refresh_secs` | 900 (15 minutes) | 60 to 86,400, and shorter than the retention | Refresh interval of an unchanged fact, and the shortest interval between two counted sightings |
 | `purge_interval_secs` | 3,600 (1 hour) | 300 to 86,400 | Interval of retention purges |
 | `adopt` | on | | Whether adoption policies are applied; off means every proposal waits for a person |
+| `dns_actuator` | on | | Whether the DNS actuator writes after every run while the DNS module runs (section 10); off, its findings are still proposed |
+| `dns_orphans` | `remove` | `remove`, `propose` | What happens to an `ipam` RRset whose address lost its name or its intent: deleted, or kept and proposed |
 
 `max_attempts` (8 repeats of a run or an ingest that loses races with other writers) is a constant of the code, not a setting.
 
@@ -141,9 +144,10 @@ The settings are the same on every controller: they live in the store (`ipam.rec
 2. It brings the last sightings of addresses and interfaces up to date from the current facts.
 3. It evaluates the rules (section 4) and writes the proposals accordingly: it opens new proposals, refreshes unchanged ones, supersedes changed ones and expires those that no longer hold. Steps 2 and 3 commit as one batch by `system:reconciler`. A run that finds nothing to change writes nothing.
 4. It applies the open proposals that an adoption policy covers (section 6), each in its own inline job.
-5. It completes the observation step of move jobs when a current fact shows the device at its new address (section 7).
+5. With the DNS module, the DNS actuator writes the records of the intent and keeps the reverse zones (section 10). Its findings joined the rules of step 3, from the same view; the DNS records were ingested as observations before step 1.
+6. It completes the observation step of move jobs when a current fact shows the device at its new address (section 7).
 
-The answer of a run, `ReconcileReport`, counts `opened`, `refreshed`, `unchanged`, `superseded`, `expired`, `suppressed` (subjects not opened again because a person rejected the same evidence), `adopted`, `adoption_failures`, `sightings` (last sightings written) and `moves_confirmed`, and carries the revision of the proposal write.
+The answer of a run, `ReconcileReport`, counts `opened`, `refreshed`, `unchanged`, `superseded`, `expired`, `suppressed` (subjects not opened again because a person rejected the same evidence), `adopted`, `adoption_failures`, `sightings` (last sightings written) and `moves_confirmed`, carries the revision of the proposal write, and with the DNS actuator `dns`: `zones_created`, `zones_adopted`, `rrsets_changed`, `batches`, the `failures` (zone, code, detail) and the `revision` of its last write.
 
 ### 3.3 Where an observed address belongs
 
@@ -377,7 +381,7 @@ Independently of moves, `Reconciler::ingest` hands the addresses of the ingested
 | Source | Phase | What it adds |
 |---|---|---|
 | Probes (WP2.3) | 1 | Delivered, see [scanning.md](scanning.md). `address` facts from the neighbor tables, ICMP, mDNS, LLMNR and SNMP (SCAN-02 to SCAN-05), each with the VRF of the probe, so the placement of section 3.3 needs no guess. `services` facts from the TCP connect scan and mDNS, and `os` facts from mDNS and SNMP (SCAN-04, SCAN-08), which fill the open ports and OS of the computed view. `name` facts from reverse DNS, mDNS, LLMNR and SNMP, `vendor` facts from the OUI table of the probe, and `attachment` and `link` facts from SNMP polling (SCAN-05). A `name` or `vendor` fact is never a sighting of an address: it neither wakes a waiting job nor confirms a move, at ingest or in a run, does not refresh the last sighting of section 2.6, and does not by itself make a discovered host, a suggested network or a conflict. A discovered host takes the name a probe found for one of its addresses when no inventory source names it. The `vendors` constraint of adoption policies reads the `vendor` facts (section 6.2). On-demand scans (SCAN-09) ingest like scheduled ones. The scan scopes tell the orphan rule "gone" from "not scanned" (section 4.7). The raw-socket methods (`arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp`) are declared and do not run yet |
-| DNS records | 2 | `dns:<zone>` facts, and orphaned-record proposals: a record without a host (IPAM-15) |
+| DNS records | 2 | Delivered (section 10): `name` facts of the `ipam` and `manual` A, AAAA and PTR records of the zones, and the DNS findings of the actuator, among them the orphaned `ipam` record |
 | DHCP leases | 3 | `dhcp:<node>` lease facts without polling (DHCP-16), `LeaseInPrefix` wake-ups for move steps, and reservations as intent |
 
 Phase 3 also adds the reconciliation views across the four truths (IPAM-21): ghost, rogue, orphan and PTR-mismatch views with "who wins" rules, built on the same facts and proposals.
@@ -423,3 +427,13 @@ The index tables follow their fact in the same batch.
 ### 9.3 Live updates
 
 Changes of `ipam.proposals` and `ipam.adoption` are events of the `ipam` topic. Changes of `ipam.obs.facts` and `ipam.obs.last_seen` are table-level events of the `discovery` topic: they name the changed table and no object, because a poll can change many facts at once. Like every event they carry references, not bodies, so a client refetches what it shows.
+
+## 10. The DNS actuator
+
+With the DNS module, the reconciler drives the DNS actuator of IPAM (IPAM-13, plan sections 2.5 and 2.6): the A or AAAA and PTR records of every address with a DNS name, and the reverse zones of the managed prefixes, written through the zone service with the origin `ipam`. What the actuator writes and how it chooses zones is in [dns.md](dns.md) section 7; this section is the reconciler's side.
+
+- **The DNS source.** Before each run, the reconciler reads the `ipam` and `manual` A, AAAA and PTR records of every primary zone from the store (the engine is never asked) and ingests them as `name` facts of the source `dns:<zone>`, one complete batch per zone, so a deleted record's fact expires at the next run. An RFC 2317 zone reports under its parent's name. A name is not a sighting (section 8): the facts show in the computed view and name the hosts the reconciler proposes; retention purges them like any other.
+- **The findings.** The planner runs on the same view as the rules and its findings become proposals of the rules `ipam.reconcile.dns_*` ([dns.md](dns.md) section 7): `dns_no_zone` (orphaned intent, info: names without a zone in Tenko), `dns_record_held` (conflict, warning: an RRset IPAM wants held by another origin, among them an `ipam` record a person took over), `dns_orphaned_record` (orphaned intent, info: an `ipam` record without intent, with `dns_orphans = propose`), `dns_delegation` (orphaned intent, info: the RFC 2317 lines for a parent zone elsewhere), `dns_reverse_orphaned` and `dns_reverse_no_servers` (orphaned intent, info). They carry no commands and are never adopted; they expire when their cause is gone.
+- **The writes.** After the proposals and the adoptions, while `dns_actuator` is on, the actuator plans again from a fresh view and writes: reverse zones to create and to adopt first, then one batch per zone, audited as `dns.record.actuate` by `system:reconciler`. A hand-deleted `ipam` record comes back in the next run (a change to `dns.rrsets` schedules one). Its changes are the `dns` part of the run's report.
+- **The dry run.** The same planner, without writing, gives the move preview its DNS change ([moves.md](moves.md) section 2): the records the move removes and writes.
+- **Moves in flight.** While a move job runs, its old address stays active and its new one is `planned`. Once the job's automatic DNS step has started, the planner publishes the new address instead of the old one, so a run in between keeps what the step wrote; when the job rolls back, the step's compensation and the planner both return to the old address.

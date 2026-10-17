@@ -187,8 +187,25 @@ pub struct Prefix {
     /// Allocation policy for next-free (IPAM-07).
     #[serde(default)]
     pub alloc: AllocPolicy,
+    /// Whether Tenko keeps the reverse zone of the network (plan section 2.6, DNS-22);
+    /// absent: managed when the VRF's tenant has a forward zone in Tenko, else off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dns_reverse: Option<DnsReverse>,
     /// Metadata.
     pub meta: Meta,
+}
+
+/// Whether Tenko creates and keeps the reverse zone of a prefix (plan section 2.6,
+/// P2-Q11).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DnsReverse {
+    /// The `in-addr.arpa` or `ip6.arpa` zone is created and its PTR records kept.
+    Managed,
+    /// No reverse zone is kept; a zone kept before stays in place.
+    Off,
 }
 
 /// A range of addresses inside a prefix.
@@ -660,6 +677,7 @@ mod tests {
             site: None,
             alarm: Some(UtilizationAlarm::new(80, 95).expect("alarm")),
             alloc: AllocPolicy::Lowest,
+            dns_reverse: None,
             meta: Meta::new(stamp()),
         }
     }
@@ -685,12 +703,35 @@ mod tests {
     fn optional_fields_default_when_absent() {
         let mut json = serde_json::to_value(prefix()).expect("json");
         let object = json.as_object_mut().expect("object");
-        for field in ["vlan", "site", "alarm", "alloc"] {
+        for field in ["vlan", "site", "alarm", "alloc", "dns_reverse"] {
             object.remove(field);
         }
         let back: Prefix = serde_json::from_value(json).expect("json");
         assert_eq!(back.alloc, AllocPolicy::Lowest);
         assert_eq!(back.alarm, None);
+        assert_eq!(back.dns_reverse, None);
+    }
+
+    #[test]
+    fn the_reverse_setting_round_trips_and_older_rows_read_without_it() {
+        let mut prefix = prefix();
+        prefix.dns_reverse = Some(DnsReverse::Managed);
+        let json = serde_json::to_value(&prefix).expect("json");
+        assert_eq!(json["dns_reverse"], "managed");
+        let back: Prefix = from_cbor(&to_cbor(&prefix).expect("cbor")).expect("cbor");
+        assert_eq!(back, prefix);
+        // A row written before the field existed (format 3) reads as automatic.
+        prefix.dns_reverse = None;
+        let old = to_cbor(&prefix).expect("cbor");
+        let back: Prefix = from_cbor(&old).expect("cbor");
+        assert_eq!(back.dns_reverse, None);
+        assert!(
+            !serde_json::to_value(&back)
+                .expect("json")
+                .as_object()
+                .expect("object")
+                .contains_key("dns_reverse")
+        );
     }
 
     #[test]

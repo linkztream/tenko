@@ -3214,6 +3214,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tenko-core",
+ "tenko-dns",
  "tenko-jobs",
  "tenko-store",
  "tenko-vault",

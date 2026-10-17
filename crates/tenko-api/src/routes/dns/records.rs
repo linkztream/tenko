@@ -14,7 +14,7 @@ use axum::{
 };
 use tenko_core::{
     Action, ObjectRef,
-    dns::{RrSet, ZoneId},
+    dns::{Origin, RrSet, ZoneId},
 };
 use tenko_dns::zone::{
     RrSetFilter, ZoneService,
@@ -192,6 +192,7 @@ pub(super) async fn change_dns_records(
             ttl: change.ttl,
             records: change.records,
             take_over: change.take_over.unwrap_or(false),
+            origin: Origin::Manual,
         })
         .collect();
     let outcome = service

@@ -22,6 +22,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 tenko-core = { workspace = true }
+# The zone service of the DNS actuator (WP4.4); tenko-dns never depends on this crate.
+tenko-dns = { workspace = true }
 tenko-jobs = { workspace = true }
 tenko-store = { workspace = true }
 # Credential columns of an import become operator secrets (WP1.5).

@@ -8,7 +8,7 @@ import { formatDuration, t, tDynamic } from "../../i18n";
 export type ReconcilerSettings = components["schemas"]["ReconcilerSettings"];
 
 export type FieldId = "interval" | "debounce" | "refresh" | "purge" | "orphan" | "retention";
-type SecondsKey = Exclude<keyof ReconcilerSettings, "adopt">;
+type SecondsKey = Exclude<keyof ReconcilerSettings, "adopt" | "dns_actuator" | "dns_orphans">;
 export type Unit = "second" | "minute" | "hour" | "day";
 
 export interface FieldSpec {
