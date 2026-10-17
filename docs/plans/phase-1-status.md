@@ -150,3 +150,7 @@ Follow-ups left by the WP3.5a merge (2026-10-14): WP3.5b (the `metrics` SSE topi
 - Rule learned 2026-10-10: every OpenAPI regeneration is followed by `npm run test` in `ui/` as well, because the mock coverage test fails for a documented route without an msw handler; a Rust package that adds routes needs a matching mock task in the UI.
 - Local test builds intermittently fail with invalid-metadata errors; the underlying note is "failed to mmap file … (os error 1455)", the paging file is too small: many parallel rustc jobs map large rlibs while builders run their own builds, and `C:` has about 19 GB free. Gates now run with `CARGO_BUILD_JOBS=6` and `line-tables-only` debuginfo; a larger page file or more free space on `C:` is the owner's decision.
 - Disk `C:` reached 3.3 GB free on the night of 2026-10-10: the WSL virtual disk grew with the Linux build directories of several packages (removed inside WSL, but the disk image does not shrink by itself). Freed since: WSL crash dumps and stale test directories under the Windows temp folder (about 2 GB). Owner actions recommended: shut WSL down and compact its disk image (`wsl --shutdown`, then `Optimize-VHD` or `diskpart compact vdisk`, administrator), and check Docker Desktop's image; builds stay on `F:`.
+
+## Phase 2
+
+The Phase 2 plan is [phase-2-plan.md](phase-2-plan.md), drafted on 2026-10-17 while the WP3.8b live parts wait for the owner; its section 7 holds the decisions the owner takes before WP4.0 starts. A `phase-2-status.md` takes over from this file when the first Phase 2 package is merged.

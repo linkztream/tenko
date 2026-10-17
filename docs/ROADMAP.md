@@ -140,6 +140,8 @@ Topology graph library: the candidates are sigma.js with graphology (WebGL, thou
 
 ## Phase 2: DNS
 
+Execution plan: [plans/phase-2-plan.md](plans/phase-2-plan.md) (draft of 2026-10-17; the owner's decisions in its section 7 are pending).
+
 ### Deliverables
 
 - **Authoritative engine**: all common RR types plus unknown types, TCP and UDP, EDNS0, Cookies, RRL, minimal-responses and ANY minimization (DNS-01, DNS-05 to DNS-07, DNS-17, DNS-18).
