@@ -683,6 +683,10 @@ pub struct DnsNodeStatus {
     pub zones: u32,
     /// RRsets served.
     pub rrsets: u64,
+    /// Octets the bases of the index hold, a lower bound of its memory (the arrays and the
+    /// record data, without allocator overhead and changes not yet folded into a base).
+    #[serde(default)]
+    pub index_bytes: u64,
     /// The listeners.
     pub listeners: Vec<ListenerItem>,
     /// Entries in the cache.
@@ -690,6 +694,42 @@ pub struct DnsNodeStatus {
     /// When the role started.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started: Option<Timestamp>,
+    /// How the UDP workers use sockets: `reuseport` (a socket per worker) or `shared`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket_mode: Option<String>,
+    /// The UDP workers with their counters since the start (ADR 0009): uneven `received`
+    /// counts across `reuseport` workers are the flow-hash effect.
+    #[serde(default)]
+    pub udp_workers: Vec<UdpWorkerItem>,
+    /// Open TCP connections.
+    #[serde(default)]
+    pub tcp_open: u64,
+    /// TCP connections refused by the per-node or per-client cap since the start.
+    #[serde(default)]
+    pub tcp_refused: u64,
+}
+
+/// One UDP worker of a node's DNS role and its counters.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UdpWorkerItem {
+    /// The worker's number, from 0.
+    pub index: u32,
+    /// The address its socket is bound to.
+    pub listen: String,
+    /// The socket of the address it reads (0 for the shared socket).
+    pub socket: u32,
+    /// Datagrams received.
+    pub received: u64,
+    /// Answers sent.
+    pub sent: u64,
+    /// Queries dropped.
+    pub dropped: u64,
+    /// Queries handed to the forwarder.
+    pub forwarded: u64,
+    /// Receive errors.
+    pub recv_errors: u64,
+    /// Send errors.
+    pub send_errors: u64,
 }
 
 /// A node command that was recorded.

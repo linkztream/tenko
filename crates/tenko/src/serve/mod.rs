@@ -1,6 +1,7 @@
 //! `tenko serve`: runs the roles of this node.
 //!
-//! Phase 1 implements the `controller` role. It starts in this order, each step logged with
+//! A controller node runs the `controller` role, and the `probe` and `dns` roles in the same
+//! process when they are listed. It starts in this order, each step logged with
 //! its duration, and refuses to start with a coded error when a step fails:
 //!
 //! | # | Step | What comes up |
@@ -18,6 +19,7 @@
 //! | 11 | `nodes` | the node transport: internal CA node certificate, node registry, the mutual TLS listener for enrolled nodes (OPS-04), configuration sync and commands to nodes |
 //! | 12 | `scans` | the scan control (probe configuration, scans on demand, the kill switch) and the probe role in process |
 //! | 13 | `api` | the HTTP API, the web UI and server-sent events; the metrics timer and the optional loopback metrics listener (`[metrics]`, [`metrics`]) |
+//! | 14 | `dns` | the `dns` role when the node runs it and the DNS module is on ([`dns`]): the index from the store, then the UDP and TCP listeners, the plain forwarder and the query log |
 //!
 //! After the last step the leader supervisor ([`leader`]) starts the leader-only services
 //! (`tenko_core::cluster::LeaderService`) once this controller has taken office; on a single
@@ -37,7 +39,8 @@
 //!
 //! Shutdown (Ctrl-C, `SIGTERM`, the service manager, or the end of standard input with
 //! `--stop-on-eof`) runs in reverse: the API ends its event streams and lets open requests
-//! finish, the leader services and the job runners stop, the background tasks end, and the
+//! finish, the `dns` role answers the queries in hand and closes its listeners, the leader
+//! services and the job runners stop, the background tasks end, and the
 //! store makes its state durable and closes its files.
 //!
 //! The data directory holds `kek/` (key generations), `store/` (`log.redb`, `sm.redb`,
@@ -46,6 +49,7 @@
 //! one-time setup token that `tenko setup token` prints (see [`setup_token`]).
 
 pub mod cluster_key;
+mod dns;
 mod imports;
 pub(crate) mod leader;
 mod maintenance;
@@ -103,7 +107,7 @@ pub const FSYNC_WARN_MICROS: u64 = 10_000;
 const RUNNER_STOP_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The start steps of the controller role, in order.
-pub const START_ORDER: [(&str, &str); 13] = [
+pub const START_ORDER: [(&str, &str); 14] = [
     ("kek", "key-encryption keys"),
     ("store", "replicated store (openraft over redb)"),
     (
@@ -126,6 +130,10 @@ pub const START_ORDER: [(&str, &str); 13] = [
         "scan control: probe configuration, scans on demand, probe role in process",
     ),
     ("api", "HTTP API, web UI and server-sent events"),
+    (
+        "dns",
+        "dns role: the index from the store, then the UDP and TCP listeners",
+    ),
 ];
 
 /// Arguments of `tenko serve`.
@@ -141,7 +149,8 @@ pub struct ServeArgs {
     pub data_dir: Option<PathBuf>,
 
     /// Roles to run: a comma-separated list of controller, dns, dhcp and probe, or `all`;
-    /// overrides `roles` of the file. Phase 1 implements `controller`.
+    /// overrides `roles` of the file. A controller node runs dns and probe in its process;
+    /// dhcp is not implemented yet.
     #[arg(long, value_name = "ROLES")]
     pub roles: Option<String>,
 
@@ -389,33 +398,37 @@ pub fn load(args: &ServeArgs) -> Result<Resolved, ConfigError> {
 
 /// Reports roles this build does not run. Returns the exit status when the node has nothing
 /// to run: a node without the controller runs the probe role through `crate::node::agent`;
-/// a controller node runs the probe role in process when it is listed.
+/// a controller node runs the probe and dns roles in process when they are listed. `dhcp`
+/// is not implemented, and `dns` needs the controller in the same process until Phase 5.
 pub fn check_roles(roles: RoleSet, err: &mut impl Write) -> Option<u8> {
+    if roles.contains(Role::Controller) {
+        if roles.contains(Role::Dhcp) {
+            let mut running = vec!["controller"];
+            running.extend(
+                [Role::Dns, Role::Probe]
+                    .into_iter()
+                    .filter(|role| roles.contains(*role))
+                    .map(Role::as_str),
+            );
+            let _ = writeln!(
+                err,
+                "tenko serve: role(s) dhcp: not implemented in Phase 2; this node runs the {} \
+                 role(s)",
+                running.join(", ")
+            );
+        }
+        return None;
+    }
     let missing: Vec<&str> = roles
         .roles()
         .filter(|role| !matches!(role, Role::Controller | Role::Probe))
         .map(Role::as_str)
         .collect();
-    if roles.contains(Role::Controller) {
-        if !missing.is_empty() {
-            let running = if roles.contains(Role::Probe) {
-                "the controller and probe roles"
-            } else {
-                "the controller role only"
-            };
-            let _ = writeln!(
-                err,
-                "tenko serve: role(s) {}: not implemented on a controller node in Phase 1; \
-                 this node runs {running}",
-                missing.join(", ")
-            );
-        }
-        return None;
-    }
     if !missing.is_empty() {
         let _ = writeln!(
             err,
-            "tenko serve: role(s) {}: not implemented in Phase 1",
+            "tenko serve: role(s) {}: not implemented without the controller role in Phase 2 \
+             (the dns role runs in a controller's process; a node of its own comes with Phase 5)",
             missing.join(", ")
         );
     }
@@ -600,6 +613,8 @@ fn millis(duration: Duration) -> u64 {
 /// Everything that must be stopped, in reverse start order.
 struct Running {
     store: Option<RaftStore>,
+    /// The `dns` role; stopped first.
+    dns: Option<dns::DnsRole>,
     /// The leader supervisor and its services, the leader's job runner among them.
     leader: Option<leader::SupervisorHandle>,
     /// The runner of the jobs pinned to this controller.
@@ -619,6 +634,7 @@ impl Running {
         let (stop, _) = watch::channel(false);
         Self {
             store: None,
+            dns: None,
             leader: None,
             runner: None,
             stop,
@@ -630,6 +646,11 @@ impl Running {
     /// Stops the leader services, the runner and the background tasks, then closes the
     /// store.
     async fn stop(mut self) {
+        if let Some(role) = self.dns.take() {
+            let began = Instant::now();
+            role.stop().await;
+            tracing::info!(elapsed_ms = millis(began.elapsed()), "dns role stopped");
+        }
         if let Some(leader) = self.leader.take() {
             let began = Instant::now();
             leader.stop(RUNNER_STOP_TIMEOUT).await;
@@ -824,6 +845,8 @@ struct Services {
     https: bool,
     elapsed: Duration,
     lab_plain_http: bool,
+    /// The line of the `dns` role, when it runs.
+    dns: Option<String>,
 }
 
 /// Runs the start steps. Whatever started is recorded in `running` for the cleanup.
@@ -1481,6 +1504,9 @@ async fn start(
 
     let lab_plain_http = tls.lab_plain_http;
     let https = tls.https;
+    // The dns role starts after the API (step `dns`); the API reaches it through the slot.
+    let dns_on = dns::runs(resolved, modules);
+    let dns_slot = tenko_api::routes::dns::DnsNodeSlot::default();
     let metrics_stop = running.stop.subscribe();
     let (server, events, warnings_state, metrics_tasks) = steps
         .run("api", async {
@@ -1491,7 +1517,14 @@ async fn start(
                     event_routes: event_routes(),
                     node: NodeStatus {
                         id: Some(resolved.node_id),
-                        roles: vec![Role::Controller.as_str().to_owned()],
+                        roles: if dns_on {
+                            vec![
+                                Role::Controller.as_str().to_owned(),
+                                Role::Dns.as_str().to_owned(),
+                            ]
+                        } else {
+                            vec![Role::Controller.as_str().to_owned()]
+                        },
                     },
                     modules,
                 },
@@ -1546,6 +1579,7 @@ async fn start(
             if let Some(zones) = &zones {
                 server.extensions.insert(Arc::clone(zones));
             }
+            server.extensions.insert(dns_slot.clone());
             let module_switch: Arc<dyn tenko_api::routes::system::modules::ModuleService> =
                 Arc::new(crate::modules::ModuleSwitch::new(
                     Arc::clone(&store_dyn),
@@ -1661,6 +1695,33 @@ async fn start(
         })
         .await?;
     running.tasks.extend(metrics_tasks);
+    let dns_role = steps
+        .run("dns", async {
+            if !dns_on {
+                let why = if resolved.roles.contains(Role::Dns) {
+                    format!(
+                        "the DNS module is off ({}), so the dns role does not run",
+                        crate::modules::describe(modules, config.modules)
+                    )
+                } else {
+                    "the dns role is not on this node".to_owned()
+                };
+                return Ok((None, why));
+            }
+            let (role, summary) = dns::start(dns::Parts {
+                resolved,
+                store: Arc::clone(&store_dyn),
+                metrics: warnings_state.metrics(),
+            })
+            .await?;
+            Ok((Some(role), summary))
+        })
+        .await?;
+    let dns_line = dns_role.as_ref().map(|role| role.announce().to_owned());
+    if let Some(role) = dns_role {
+        dns_slot.set(role.node());
+        running.dns = Some(role);
+    }
     leaders.register(leader::clock::beat_service(
         Arc::clone(&store_dyn),
         resolved.node_id,
@@ -1712,6 +1773,7 @@ async fn start(
         https,
         elapsed: steps.started.elapsed(),
         lab_plain_http,
+        dns: dns_line,
     })
 }
 
@@ -1914,6 +1976,10 @@ fn announce(resolved: &Resolved, services: &Services, ready: &Ready) {
             "WARNING: plain HTTP from every source (Lab profile); do not use this in production"
         );
     }
+    if let Some(line) = &services.dns {
+        tracing::info!("{line}");
+        let _ = writeln!(out, "{line}");
+    }
     if let Some(sha256) = &services.ca_root_sha256 {
         let _ = writeln!(
             out,
@@ -2066,7 +2132,8 @@ mod tests {
                 "connectors",
                 "nodes",
                 "scans",
-                "api"
+                "api",
+                "dns"
             ]
         );
     }
@@ -2078,26 +2145,25 @@ mod tests {
         assert_eq!(status, Some(exit::USAGE));
         let text = String::from_utf8(err).expect("UTF-8");
         assert!(
-            text.contains("dns, dhcp: not implemented in Phase 1"),
+            text.contains("dns, dhcp: not implemented without the controller role"),
             "{text}"
         );
     }
 
     #[test]
-    fn roles_with_the_controller_run_the_controller_and_the_probe() {
+    fn a_controller_runs_dns_and_probe_and_refuses_dhcp() {
         let mut err = Vec::new();
         assert_eq!(check_roles(RoleSet::ALL, &mut err), None);
         let text = String::from_utf8(err).expect("UTF-8");
         assert!(
-            text.contains("runs the controller and probe roles"),
+            text.contains("dhcp: not implemented in Phase 2; this node runs the controller, dns, probe role(s)"),
             "{text}"
         );
-        let mut err = Vec::new();
-        assert_eq!(
-            check_roles("controller".parse().expect("roles"), &mut err),
-            None
-        );
-        assert_eq!(err, b"");
+        for roles in ["controller", "controller,dns", "controller,dns,probe"] {
+            let mut err = Vec::new();
+            assert_eq!(check_roles(roles.parse().expect("roles"), &mut err), None);
+            assert_eq!(err, b"", "{roles}");
+        }
     }
 
     #[test]

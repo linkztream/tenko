@@ -74,6 +74,7 @@
 mod acls;
 mod keys;
 mod model;
+mod nodes;
 mod records;
 mod zones;
 
@@ -102,6 +103,7 @@ use utoipa_axum::{
     routes,
 };
 
+pub use nodes::DnsNodeSlot;
 pub use zones::{JournalItem, JournalParams};
 
 pub use model::{
@@ -110,8 +112,8 @@ pub use model::{
     ImportLoss, ImportTypeCount, KeyCreate, KeyCreated, KeyItem, ListCreate, ListItem, ListPatch,
     ListVersionItem, ListenerItem, OriginCount, PrimaryState, QueryLogLine, QueryLogParams,
     RecordBatch, RecordBatchResult, RecordChange, RecordDiff, RecordFilters, RecordOp,
-    RolloverRequest, RrSetItem, TransferStatus, ViewCreate, ViewItem, ViewPatch, ZoneCreate,
-    ZoneFileImport, ZoneFileImportReport, ZoneItem, ZonePatch,
+    RolloverRequest, RrSetItem, TransferStatus, UdpWorkerItem, ViewCreate, ViewItem, ViewPatch,
+    ZoneCreate, ZoneFileImport, ZoneFileImportReport, ZoneItem, ZonePatch,
 };
 
 use super::not_implemented;
@@ -271,9 +273,9 @@ fn acl_key_and_list_routes() -> OpenApiRouter<AppState> {
 #[inline(never)]
 fn node_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(get_node_dns_status))
-        .routes(routes!(flush_node_dns_cache))
-        .routes(routes!(read_node_dns_log))
+        .routes(routes!(nodes::get_node_dns_status))
+        .routes(routes!(nodes::flush_node_dns_cache))
+        .routes(routes!(nodes::read_node_dns_log))
 }
 
 #[utoipa::path(
@@ -853,98 +855,4 @@ async fn fetch_dns_list(
         &ObjectRef::from(parse_id::<BlockListId>(&id)?),
     )?;
     Err(not_implemented("POST", "/dns/lists/{id}/fetch"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/nodes/{id}/dns",
-    tag = "dns",
-    operation_id = "get_node_dns_status",
-    summary = "Get the DNS role of a node",
-    description = "Scope: `dns.read`.",
-    params(("id" = u64, Path, description = "Node id")),
-    responses(
-        (status = 200, description = "The state of the node's DNS role", body = DnsNodeStatus),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The node does not run the dns role (`dns.node.not_dns`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_node_dns_status(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &ObjectRef::node(parse_node(&id)?),
-    )?;
-    Err(not_implemented("GET", "/nodes/{id}/dns"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/nodes/{id}/dns/cache/flush",
-    tag = "dns",
-    operation_id = "flush_node_dns_cache",
-    summary = "Flush a node's DNS cache",
-    description = "Scope: `dns.write`.",
-    params(("id" = u64, Path, description = "Node id")),
-    responses(
-        (status = 202, description = "The command is recorded", body = DnsCommandAccepted),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The node does not run the dns role (`dns.node.not_dns`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn flush_node_dns_cache(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Update,
-        &ObjectRef::node(parse_node(&id)?),
-    )?;
-    app.authorize(&cx.principal, Action::Execute, &anywhere(ObjectKind::Zone))?;
-    Err(not_implemented("POST", "/nodes/{id}/dns/cache/flush"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/nodes/{id}/dns/log",
-    tag = "dns",
-    operation_id = "read_node_dns_log",
-    summary = "Read a node's DNS query log",
-    description = "Scope: `dns.read`.",
-    params(("id" = u64, Path, description = "Node id"), QueryLogParams),
-    responses(
-        (status = 200, description = "A page of log lines, newest first", body = Page<QueryLogLine>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The node does not run the dns role or its log is off (`dns.node.not_dns`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn read_node_dns_log(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &ObjectRef::node(parse_node(&id)?),
-    )?;
-    Err(not_implemented("GET", "/nodes/{id}/dns/log"))
 }

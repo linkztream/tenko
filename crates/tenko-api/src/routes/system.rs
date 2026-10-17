@@ -195,6 +195,40 @@ impl std::fmt::Debug for DataFormatSource {
 /// Warning code of a format migration that waits for voters with an older binary.
 pub const MIGRATION_BLOCKED: &str = "upgrade.migration_blocked";
 
+/// Warning code of a `dns` role that has stopped answering.
+pub const DNS_ROLE_NOT_SERVING: &str = "dns.role.not_serving";
+
+/// Warning code of a `dns` role whose index is far behind the store.
+pub const DNS_ROLE_LAGGING: &str = "dns.role.lagging";
+
+/// Revisions a `dns` role may be behind the store before the status warns.
+pub const DNS_LAG_WARNING: u64 = 1_000;
+
+/// The warnings of the `dns` role of this node: not answering, or far behind the store.
+pub fn dns_role_warnings(role: &tenko_dns::status::DnsStatus) -> Vec<StatusWarning> {
+    let mut params = std::collections::BTreeMap::new();
+    params.insert("node".to_owned(), role.node.to_string());
+    if !role.serving {
+        return vec![StatusWarning {
+            code: DNS_ROLE_NOT_SERVING.to_owned(),
+            detail: "the dns role of this node has stopped answering queries".to_owned(),
+            params,
+        }];
+    }
+    if role.lag > DNS_LAG_WARNING {
+        params.insert("lag".to_owned(), role.lag.to_string());
+        return vec![StatusWarning {
+            code: DNS_ROLE_LAGGING.to_owned(),
+            detail: format!(
+                "the dns role answers from revision {}, {} revisions behind the store",
+                role.revision, role.lag
+            ),
+            params,
+        }];
+    }
+    Vec::new()
+}
+
 /// The warning of a pending migration that voters block, naming them.
 pub fn data_format_warnings(format: &DataFormatStatus) -> Vec<StatusWarning> {
     let Some(pending) = &format.pending else {
@@ -361,6 +395,7 @@ async fn system_status(
     leader: Option<Extension<LeaderSource>>,
     backup: Option<Extension<Arc<dyn super::backup::BackupService>>>,
     format: Option<Extension<DataFormatSource>>,
+    dns: Option<Extension<super::dns::DnsNodeSlot>>,
     Ctx(ctx): Ctx,
 ) -> Result<Json<SystemStatus>, ApiError> {
     state.authorize(&ctx.principal, Action::Read, &system_object())?;
@@ -378,6 +413,11 @@ async fn system_status(
     if let Some(format) = format.and_then(|Extension(source)| source.current()) {
         status.warnings.extend(data_format_warnings(&format));
         status.data_format = Some(format);
+    }
+    if let Some(Extension(slot)) = dns
+        && let Some(role) = slot.status()
+    {
+        status.warnings.extend(dns_role_warnings(&role));
     }
     Ok(Json(status))
 }

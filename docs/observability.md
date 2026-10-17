@@ -112,6 +112,15 @@ Computed at scrape time:
 | `tenko_uptime_seconds` | gauge | | Seconds since the API started |
 | `tenko_build_info` | gauge | | Always 1 |
 
+The `dns` role, while it runs on the node ([dns.md](dns.md) sections 8 and 12.8), counted on the shard of the answering thread:
+
+| Name | Type | Labels | Meaning |
+|---|---|---|---|
+| `tenko_dns_queries_total` | counter | `proto`, `view`, `rcode` | Queries answered, by transport (`udp`, `tcp`, `dot`, `doh`), view (`default` or `named`) and RCODE (`noerror`, `formerr`, `servfail`, `nxdomain`, `notimp`, `refused`, `notauth`, `badvers`, `badcookie`, `other`); a query the plain forwarder answers is counted with the RCODE it relayed |
+| `tenko_dns_query_duration_seconds` | histogram | `proto` | Time from a query's arrival to its answer (for a forwarded query, from the hand-over to the forwarder). Buckets from 50 µs to 2 s: 0.00005, 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2 |
+
+The other families of the DNS module (`tenko_dns_cache_*`, `tenko_dns_upstream_*`, `tenko_dns_rrl_dropped_total`, `tenko_dns_blocked_total`, `tenko_dns_zone_serial`, `tenko_dns_signing_*`, `tenko_dns_log_dropped_total`; [dns-contracts.md](dns-contracts.md) section 7) are declared and registered by the packages that count them. The health of the role is in `GET /api/v1/nodes/{id}/dns` and in the warnings of `GET /api/v1/system/status`: `dns.role.not_serving` (the role stopped answering) and `dns.role.lagging` (its index is more than 1,000 revisions behind the store).
+
 Every controller reports its own values: in a cluster, scrape each controller. The Raft lag of every member and the leader services in state `running` come from the leader.
 
 ## 5. Scraping with Prometheus
@@ -245,5 +254,5 @@ Spans are created with the `tracing` macros. Without the endpoint the layer is a
 - **Exporters in plugin processes.** A plugin receives the trace context of every call (section 8.3) but the SDK exports no spans; a plugin that wants to continue the trace installs a tracer of its own.
 - **Inbound context from a proxy.** The API ignores a `traceparent` it receives; every request starts a trace.
 - **Logs and metrics over OTLP.** Only traces use OTLP; the metrics are scraped (sections 1 and 5), the log goes to its sinks.
-- **DNS and DHCP.** Their metrics, their tiles on the start page and their spans arrive with those modules.
+- **DNS and DHCP.** The `dns` role counts its queries (section 4); the rest of the DNS metrics, the tiles on the start page and the spans arrive with the packages of Slices 5 and 6, DHCP's with Phase 3.
 - **Probes.** A node without the controller role exports no traces and reports no metrics samples of its own; its buffers show through the controller it is connected to.

@@ -126,14 +126,22 @@ async fn a_reader_reads_and_is_refused_writes() {
 #[tokio::test]
 async fn keys_rollovers_and_nodes_are_checked_on_their_objects() {
     let (router, policy) = with_policy(true, true);
+    send(
+        &router,
+        "POST",
+        &format!("/dns/zones/{ZONE}/dnssec/rollover"),
+    )
+    .await
+    .assert_problem(501, "sys.not_implemented");
+    // A node this server neither is nor knows: the dns role is not here.
     for (method, path) in [
-        ("POST", format!("/dns/zones/{ZONE}/dnssec/rollover")),
-        ("GET", "/nodes/1001/dns".to_owned()),
-        ("POST", "/nodes/1001/dns/cache/flush".to_owned()),
+        ("GET", "/nodes/1001/dns"),
+        ("POST", "/nodes/1001/dns/cache/flush"),
+        ("GET", "/nodes/1001/dns/log"),
     ] {
-        send(&router, method, &path)
+        send(&router, method, path)
             .await
-            .assert_problem(501, "sys.not_implemented");
+            .assert_problem(404, "cluster.node.not_found");
     }
     let kinds: Vec<(Action, ObjectKind)> =
         policy.asked().iter().map(|(a, o)| (*a, o.kind)).collect();
@@ -142,8 +150,11 @@ async fn keys_rollovers_and_nodes_are_checked_on_their_objects() {
         [
             (Action::Execute, ObjectKind::DnsKey),
             (Action::Read, ObjectKind::Node),
+            (Action::Read, ObjectKind::Zone),
             (Action::Update, ObjectKind::Node),
             (Action::Execute, ObjectKind::Zone),
+            (Action::Read, ObjectKind::Node),
+            (Action::Read, ObjectKind::Zone),
         ]
     );
 }

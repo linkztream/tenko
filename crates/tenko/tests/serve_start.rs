@@ -123,7 +123,11 @@ fn a_busy_port_fails_the_api_step_and_leaves_the_data_directory_usable() {
     let mut refused = node.spawn();
     let outcome = refused.finish(STOP_TIMEOUT);
     outcome.assert_code(4);
-    let mut needles = step_ready_lines(1, STEP_COUNT - 1);
+    let api = STEPS
+        .iter()
+        .position(|step| *step == "api")
+        .expect("the api step");
+    let mut needles = step_ready_lines(1, api);
     needles.push(step_marker("api", "failed"));
     assert_in_order(&outcome.stderr, &needles);
     outcome.assert_stderr_contains("tenko serve: start step `api` failed [start.api.bind]");
@@ -208,12 +212,22 @@ fn internal_ca_mode_serves_https_with_the_published_ca_root() {
 }
 
 #[test]
-fn roles_all_runs_the_controller_and_probe_roles() {
-    let mut node = Node::new().with_args(&["--roles", "all"]);
+fn roles_all_runs_the_controller_dns_and_probe_roles() {
+    let port = serve_support::free_port();
+    let mut node = Node::new()
+        .with_args(&["--roles", "all"])
+        .with_config(&format!(
+            "[dns]
+listen = [\"127.0.0.1:{port}\"]
+workers = 1"
+        ));
     let mut server = node.start();
     let outcome = server.stop();
     outcome.assert_graceful_shutdown();
     outcome.assert_stderr_contains(
-        "not implemented on a controller node in Phase 1; this node runs the controller and probe roles",
+        "dhcp: not implemented in Phase 2; this node runs the controller, dns, probe role(s)",
     );
+    outcome.assert_stderr_contains(&step_marker("dns", "ready in "));
+    outcome.assert_stdout_contains(&format!("dns role answering on 127.0.0.1:{port}"));
+    outcome.assert_stderr_contains("dns role stopped");
 }

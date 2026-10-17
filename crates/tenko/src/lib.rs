@@ -532,7 +532,10 @@ mod tests {
         let dir = dir.to_str().expect("UTF-8 temp path");
         let (status, _, err) = run(&["serve", "--roles", "dns", "--data-dir", dir]);
         assert_eq!(status, exit::USAGE);
-        assert!(err.contains("dns: not implemented in Phase 1"), "{err}");
+        assert!(
+            err.contains("dns: not implemented without the controller role"),
+            "{err}"
+        );
         assert!(!std::path::Path::new(dir).exists());
     }
 

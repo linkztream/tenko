@@ -1,6 +1,7 @@
-# Hardened systemd unit for Tenko DDI, Phase 1: the controller role (REST API, web UI,
-# replicated store, IPAM). The DNS and DHCP roles do not exist yet; the end of this file
-# lists what the unit gains when they do.
+# Hardened systemd unit for Tenko DDI: the controller role (REST API, web UI, replicated
+# store, IPAM) and, when tenko.toml lists it, the dns role in the same process (port 53).
+# The DHCP role does not exist yet; the end of this file lists what the unit gains when it
+# does.
 #
 # Needs systemd 250 or later (LoadCredentialEncrypted= and the %d specifier): Debian 12,
 # Ubuntu 24.04, RHEL 9 and newer.
@@ -56,8 +57,9 @@ StartLimitBurst=5
 Type=notify
 NotifyAccess=main
 # The configuration file names the node's settings; --roles defaults to the file's value
-# ("controller"). Phase 1 runs the controller role only: a role list without `controller`
-# exits with status 2, and dns/dhcp next to it are skipped with a notice. The binary is the
+# ("controller"). A controller node runs the dns and probe roles in its process when they
+# are listed (roles = "controller,dns"); a role list without `controller` exits with status
+# 2, and dhcp next to it is skipped with a notice. The binary is the
 # version that `current` points at; ExecStartPre= sets the layout up (see the top).
 ExecStartPre=/usr/local/bin/tenko upgrade layout --config /etc/tenko/tenko.toml
 ExecStart=/var/lib/tenko/updates/current/tenko serve --config /etc/tenko/tenko.toml
@@ -90,9 +92,11 @@ TimeoutStopSec=30s
 # Identity
 User=tenko
 Group=tenko
-# Phase 1 listens on 8443 (above 1024) and opens no raw sockets: no capability at all.
-CapabilityBoundingSet=
-AmbientCapabilities=
+# The API listens on 8443 (above 1024) and nothing opens raw sockets. The one capability is
+# CAP_NET_BIND_SERVICE, for the dns role on port 53 ([dns] listen); a node without the dns
+# role does not use it, and removing both lines' value takes it away again.
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 NoNewPrivileges=yes
 
 # Key-encryption key (KEK) of the vault
@@ -173,7 +177,8 @@ RemoveIPC=yes
 LimitCORE=0
 
 # Network
-# TCP listeners (AF_INET, AF_INET6) and the sd_notify socket (AF_UNIX).
+# TCP and UDP listeners (AF_INET, AF_INET6: the API, the dns role, the forwarder's
+# upstream queries) and the sd_notify socket (AF_UNIX).
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 # System calls
@@ -184,21 +189,22 @@ SystemCallFilter=~@privileged @resources
 SystemCallErrorNumber=EPERM
 
 # Limits
-# One descriptor per open connection (server.max_connections, default 20000) plus the store
-# files.
+# One descriptor per open connection (server.max_connections, default 20000, and the dns
+# role's TCP connections, [dns.tcp] max_connections, default 1000) plus the store files,
+# the dns role's UDP sockets (one per worker and listen address on Linux) and the
+# forwarder's upstream sockets.
 LimitNOFILE=65536
 
 # The probe role: deploy/systemd/probe.conf is a drop-in for `--roles controller,probe`
 # (CAP_NET_RAW and the address families the scan methods need). Install it as
 # /etc/systemd/system/tenko.service.d/probe.conf; see its header.
 #
-# Later roles (not implemented yet). When the DNS and DHCP roles exist, this unit gains:
+# Later roles (not implemented yet). When the DHCP role exists, this unit gains:
 #   AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
 #   CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW
-#       port 53 (DNS) and 67/547 (DHCP), and raw sockets for DHCP;
+#       ports 67/547 and raw sockets for DHCP;
 #   RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
-#       interface discovery (AF_NETLINK) and layer-2 DHCP replies (AF_PACKET);
-#   a higher LimitNOFILE for the DNS sockets.
+#       interface discovery (AF_NETLINK) and layer-2 DHCP replies (AF_PACKET).
 
 [Install]
 WantedBy=multi-user.target

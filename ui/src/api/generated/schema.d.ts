@@ -2199,7 +2199,7 @@ export interface paths {
         };
         /**
          * Get the DNS role of a node
-         * @description Scope: `dns.read`.
+         * @description Scope: `dns.read`. The report `dns.status` of the node's DNS role: whether it answers, the store revision its index holds and how far it is behind, the zones and RRsets it serves, its listeners and the cache. In Phase 2 the role runs in the controller's process, so only that node answers.
          */
         get: operations["get_node_dns_status"];
         put?: never;
@@ -2221,7 +2221,7 @@ export interface paths {
         put?: never;
         /**
          * Flush a node's DNS cache
-         * @description Scope: `dns.write`.
+         * @description Scope: `dns.write`. Issues the node command `dns.cache.flush`. The plain forwarder of Phase 2 keeps no cache, so the command is done at once with a detail that says so; it is recorded in the node's commands and audited.
          */
         post: operations["flush_node_dns_cache"];
         delete?: never;
@@ -2239,7 +2239,7 @@ export interface paths {
         };
         /**
          * Read a node's DNS query log
-         * @description Scope: `dns.read`.
+         * @description Scope: `dns.read`. Issues the node command `dns.log.read`: a page of the node's query log, newest first, with the cursor of the next page. The read is recorded in the node's commands. 409 when the node's query log is off.
          */
         get: operations["read_node_dns_log"];
         put?: never;
@@ -5630,6 +5630,12 @@ export interface components {
             cache_entries: number;
             /**
              * Format: int64
+             * @description Octets the bases of the index hold, a lower bound of its memory (the arrays and the
+             *     record data, without allocator overhead and changes not yet folded into a base).
+             */
+            index_bytes?: number;
+            /**
+             * Format: int64
              * @description How far the index is behind the store, in revisions.
              */
             lag: number;
@@ -5646,7 +5652,24 @@ export interface components {
             rrsets: number;
             /** @description The role answers queries. */
             serving: boolean;
+            /** @description How the UDP workers use sockets: `reuseport` (a socket per worker) or `shared`. */
+            socket_mode?: string | null;
             started?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: int64
+             * @description Open TCP connections.
+             */
+            tcp_open?: number;
+            /**
+             * Format: int64
+             * @description TCP connections refused by the per-node or per-client cap since the start.
+             */
+            tcp_refused?: number;
+            /**
+             * @description The UDP workers with their counters since the start (ADR 0009): uneven `received`
+             *     counts across `reuseport` workers are the flow-hash effect.
+             */
+            udp_workers?: components["schemas"]["UdpWorkerItem"][];
             /**
              * Format: int32
              * @description Zones served.
@@ -14528,6 +14551,51 @@ export interface components {
          * @enum {string}
          */
         TsigAlgorithm: "hmac-sha256" | "hmac-sha384" | "hmac-sha512" | "hmac-sha1";
+        /** @description One UDP worker of a node's DNS role and its counters. */
+        UdpWorkerItem: {
+            /**
+             * Format: int64
+             * @description Queries dropped.
+             */
+            dropped: number;
+            /**
+             * Format: int64
+             * @description Queries handed to the forwarder.
+             */
+            forwarded: number;
+            /**
+             * Format: int32
+             * @description The worker's number, from 0.
+             */
+            index: number;
+            /** @description The address its socket is bound to. */
+            listen: string;
+            /**
+             * Format: int64
+             * @description Datagrams received.
+             */
+            received: number;
+            /**
+             * Format: int64
+             * @description Receive errors.
+             */
+            recv_errors: number;
+            /**
+             * Format: int64
+             * @description Send errors.
+             */
+            send_errors: number;
+            /**
+             * Format: int64
+             * @description Answers sent.
+             */
+            sent: number;
+            /**
+             * Format: int32
+             * @description The socket of the address it reads (0 for the shared socket).
+             */
+            socket: number;
+        };
         /** @description Which web UI the binary serves. */
         UiStatus: {
             /** @description The UI is served from a directory (`--ui-dir`, development). */
@@ -26267,15 +26335,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     flush_node_dns_cache: {
@@ -26337,15 +26396,6 @@ export interface operations {
             };
             /** @description The node does not run the dns role (`dns.node.not_dns`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26421,15 +26471,6 @@ export interface operations {
             };
             /** @description The node does not run the dns role or its log is off (`dns.node.not_dns`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };

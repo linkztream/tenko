@@ -1,0 +1,323 @@
+//! Acceptance of the `dns` role in the process (WP4.3, plan section 2.10) through the real
+//! binary: one node with `--roles controller,dns` and the DNS module on.
+//!
+//! - A zone and its records created through the API are answered over UDP and TCP on a
+//!   loopback port, with the SOA in NXDOMAIN and NODATA answers (RFC 2308).
+//! - A client asking for a name outside the zones gets the answer of an upstream through
+//!   the plain forwarder (P2-Q16), with RA set; the upstream is a UDP responder in the test.
+//! - `GET /nodes/{id}/dns` reports the role; the cache flush and the query log read are node
+//!   commands executed in place; `GET /system/status` lists the role.
+//! - A batch of 1,000 records is answered within one second of its commit.
+//! - After a restart the node answers its zones again, from the store.
+
+mod serve_support;
+
+use std::{
+    io::{Read, Write},
+    net::{Ipv4Addr, SocketAddr, TcpStream, UdpSocket},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::{Duration, Instant},
+};
+
+use serde_json::{Value, json};
+use serve_support::{Node, api::Api, free_port, wait_for_setup_token};
+use tenko_dns::wire;
+
+const ZONE: &str = "example.test";
+const OUTSIDE: &str = "outside.example.org";
+const TYPE_A: u16 = 1;
+const TYPE_SOA: u16 = 6;
+const NOERROR: u8 = 0;
+const NXDOMAIN: u8 = 3;
+
+/// An upstream resolver in the test: answers every A query with 203.0.113.9.
+fn upstream() -> (SocketAddr, Arc<AtomicUsize>) {
+    let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind the upstream");
+    let address = socket.local_addr().expect("address");
+    let seen = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&seen);
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 2048];
+        while let Ok((len, from)) = socket.recv_from(&mut buf) {
+            let query = &buf[..len];
+            let Some(end) = wire::questions_end(query, 1) else {
+                continue;
+            };
+            count.fetch_add(1, Ordering::Relaxed);
+            let mut answer = Vec::with_capacity(end + 16);
+            answer.extend_from_slice(&query[..2]);
+            answer.extend_from_slice(&[0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0]);
+            answer.extend_from_slice(&query[wire::HEADER_LEN..end]);
+            answer.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 203, 0, 113, 9]);
+            let _ = socket.send_to(&answer, from);
+        }
+    });
+    (address, seen)
+}
+
+/// A query for `name` and `qtype` with RD set.
+fn query(id: u16, name: &str, qtype: u16) -> Vec<u8> {
+    let mut out = Vec::new();
+    wire::write_query(&mut out, id, name, qtype, Some(1232));
+    out[2] |= 0x01;
+    out
+}
+
+fn udp(server: SocketAddr, name: &str, qtype: u16) -> Vec<u8> {
+    let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind a client");
+    socket
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .expect("timeout");
+    let id = free_port();
+    for _ in 0..3 {
+        socket
+            .send_to(&query(id, name, qtype), server)
+            .expect("send");
+        let mut buf = vec![0u8; 65_535];
+        if let Ok((len, _)) = socket.recv_from(&mut buf) {
+            buf.truncate(len);
+            assert_eq!(wire::parse_header(&buf).expect("header").id, id);
+            return buf;
+        }
+    }
+    panic!("no UDP answer from {server} for {name}");
+}
+
+fn tcp(server: SocketAddr, name: &str, qtype: u16) -> Vec<u8> {
+    let mut stream =
+        TcpStream::connect_timeout(&server, Duration::from_secs(3)).expect("connect over TCP");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .expect("timeout");
+    let message = query(42, name, qtype);
+    let len = u16::try_from(message.len()).expect("length");
+    stream.write_all(&len.to_be_bytes()).expect("write");
+    stream.write_all(&message).expect("write");
+    let mut prefix = [0u8; 2];
+    stream.read_exact(&mut prefix).expect("the answer's length");
+    let mut answer = vec![0u8; usize::from(u16::from_be_bytes(prefix))];
+    stream.read_exact(&mut answer).expect("the answer");
+    answer
+}
+
+/// Whether `answer` holds the four octets of `address` in a record.
+fn holds(answer: &[u8], address: [u8; 4]) -> bool {
+    answer.windows(4).any(|window| window == address)
+}
+
+fn header(answer: &[u8]) -> wire::RawHeader {
+    wire::parse_header(answer).expect("a header")
+}
+
+fn set_a(name: &str, address: &str) -> Value {
+    json!({
+        "op": "set", "name": name, "type": "A", "ttl": 300,
+        "records": [{"type": "A", "address": address}],
+    })
+}
+
+fn batch(api: &Api, zone: &str, changes: &[Value]) {
+    api.post(
+        &format!("/dns/zones/{zone}/records/batch"),
+        &json!({ "changes": changes }),
+    )
+    .expect(200);
+}
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "one scenario, read top to bottom")]
+fn the_dns_role_serves_zones_forwards_and_survives_a_restart() {
+    let began = Instant::now();
+    let (upstream, asked) = upstream();
+    let port = free_port();
+    let dns: SocketAddr = (Ipv4Addr::LOCALHOST, port).into();
+    let mut node = Node::new()
+        .with_args(&["--roles", "controller,dns"])
+        .with_config(&format!(
+            "[dns]\nlisten = [\"{dns}\"]\nworkers = 2\nforwarders = [\"{upstream}\"]\n\
+             forward_timeout_ms = 1000\n[dns.log]\nenabled = true\npseudonymise = false\n"
+        ));
+    let mut server = node.start();
+    server
+        .wait_stdout_line(Duration::from_secs(5), |line| {
+            line.starts_with(&format!("dns role answering on {dns}"))
+        })
+        .unwrap_or_else(|| panic!("no dns line\n{}", server.diagnostics()));
+    let token = wait_for_setup_token(&server);
+    let mut api = Api::new(&node);
+    api.setup(&token);
+
+    // A zone with a record.
+    let zone = api
+        .post(
+            "/dns/zones",
+            &json!({
+                "name": ZONE,
+                "kind": "primary",
+                "serial": "counter",
+                "soa": {"mname": "ns1.example.test", "rname": "hostmaster.example.test"},
+                "name_servers": ["ns1.example.test"],
+            }),
+        )
+        .expect(201);
+    let zone_id = zone["id"].as_str().expect("a zone id").to_owned();
+    batch(
+        &api,
+        &zone_id,
+        &[
+            set_a("www.example.test", "192.0.2.10"),
+            set_a("ns1.example.test", "192.0.2.53"),
+        ],
+    );
+
+    // Answers over UDP and TCP.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let answer = loop {
+        let answer = udp(dns, "www.example.test", TYPE_A);
+        if holds(&answer, [192, 0, 2, 10]) || Instant::now() > deadline {
+            break answer;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let head = header(&answer);
+    assert!(head.qr && head.aa, "{head:?}");
+    assert_eq!((head.rcode, head.ancount), (NOERROR, 1));
+    assert!(holds(&answer, [192, 0, 2, 10]));
+    let over_tcp = tcp(dns, "www.example.test", TYPE_A);
+    assert_eq!(header(&over_tcp).ancount, 1);
+    assert!(holds(&over_tcp, [192, 0, 2, 10]));
+
+    // NXDOMAIN and NODATA carry the SOA; the SOA at the apex.
+    let missing = udp(dns, "missing.example.test", TYPE_A);
+    let head = header(&missing);
+    assert_eq!((head.rcode, head.ancount, head.nscount), (NXDOMAIN, 0, 1));
+    let nodata = udp(dns, "www.example.test", 28);
+    let head = header(&nodata);
+    assert_eq!((head.rcode, head.ancount, head.nscount), (NOERROR, 0, 1));
+    let soa = udp(dns, ZONE, TYPE_SOA);
+    assert_eq!((header(&soa).rcode, header(&soa).ancount), (NOERROR, 1));
+
+    // A name outside the zones goes to the upstream.
+    let outside = udp(dns, OUTSIDE, TYPE_A);
+    let head = header(&outside);
+    assert!(head.ra && !head.aa, "{head:?}");
+    assert_eq!((head.rcode, head.ancount), (NOERROR, 1));
+    assert!(holds(&outside, [203, 0, 113, 9]));
+    assert!(asked.load(Ordering::Relaxed) >= 1);
+    let outside_tcp = tcp(dns, OUTSIDE, TYPE_A);
+    assert!(holds(&outside_tcp, [203, 0, 113, 9]));
+
+    // The role in the status, the report, the commands.
+    let status = api.get("/system/status").expect(200);
+    let node_id = status["node"]["id"].as_u64().expect("a node id");
+    assert!(
+        status["node"]["roles"]
+            .as_array()
+            .expect("roles")
+            .contains(&json!("dns")),
+        "{status}"
+    );
+    let report = api.get(&format!("/nodes/{node_id}/dns")).expect(200);
+    assert_eq!(report["serving"], true, "{report}");
+    assert_eq!(report["zones"], 1, "{report}");
+    assert_eq!(report["lag"], 0, "{report}");
+    assert_eq!(report["cache_entries"], 0, "{report}");
+    assert!(report["index_bytes"].as_u64().unwrap_or(0) > 0, "{report}");
+    let workers = report["udp_workers"].as_array().expect("the UDP workers");
+    assert_eq!(workers.len(), 2, "{report}");
+    let received: u64 = workers
+        .iter()
+        .map(|worker| worker["received"].as_u64().unwrap_or(0))
+        .sum();
+    assert!(received >= 5, "{report}");
+    let listeners = report["listeners"].as_array().expect("listeners");
+    for transport in ["udp", "tcp"] {
+        assert!(
+            listeners
+                .iter()
+                .any(|listener| listener["transport"] == transport
+                    && listener["address"] == dns.to_string()),
+            "{report}"
+        );
+    }
+    api.get(&format!("/nodes/{}/dns", node_id + 1000))
+        .expect(404);
+    let flushed = api
+        .post(&format!("/nodes/{node_id}/dns/cache/flush"), &json!({}))
+        .expect(202);
+    assert!(flushed["command_id"].is_string(), "{flushed}");
+    let log_deadline = Instant::now() + Duration::from_secs(3);
+    let log = loop {
+        let log = api
+            .get(&format!("/nodes/{node_id}/dns/log?limit=50&qname=www"))
+            .expect(200);
+        let lines = log["items"].as_array().map_or(0, Vec::len);
+        if lines >= 2 || Instant::now() > log_deadline {
+            break log;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let lines = log["items"].as_array().expect("log lines");
+    assert!(lines.len() >= 2, "{log}");
+    assert_eq!(lines[0]["qname"], "www.example.test", "{log}");
+    assert_eq!(lines[0]["client"], "127.0.0.1", "{log}");
+
+    // 1,000 records in one batch, answered within one second of the commit.
+    let changes: Vec<Value> = (0..1_000)
+        .map(|n| {
+            set_a(
+                &format!("host-{n}.example.test"),
+                &format!("198.51.100.{}", n % 250 + 1),
+            )
+        })
+        .collect();
+    batch(&api, &zone_id, &changes);
+    let committed = Instant::now();
+    loop {
+        let answer = udp(dns, "host-999.example.test", TYPE_A);
+        if header(&answer).ancount == 1 {
+            break;
+        }
+        assert!(
+            committed.elapsed() < Duration::from_secs(1),
+            "the batch is not answered one second after its commit"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let visible = committed.elapsed();
+    assert!(holds(
+        &udp(dns, "host-999.example.test", TYPE_A),
+        [198, 51, 100, 250]
+    ));
+    let report = api.get(&format!("/nodes/{node_id}/dns")).expect(200);
+    assert_eq!(report["lag"], 0, "{report}");
+
+    // A restart: the node answers its zones from the store again.
+    let outcome = server.stop();
+    outcome.assert_graceful_shutdown();
+    outcome.assert_stderr_contains("dns role stopped");
+    let mut server = node.start();
+    let mut api = Api::new(&node);
+    api.login(None);
+    let again = udp(dns, "www.example.test", TYPE_A);
+    assert!(holds(&again, [192, 0, 2, 10]));
+    assert!(holds(
+        &udp(dns, "host-999.example.test", TYPE_A),
+        [198, 51, 100, 250]
+    ));
+    assert_eq!(
+        header(&tcp(dns, "missing.example.test", TYPE_A)).rcode,
+        NXDOMAIN
+    );
+    let report = api.get(&format!("/nodes/{node_id}/dns")).expect(200);
+    assert_eq!(report["zones"], 1, "{report}");
+    server.stop().assert_graceful_shutdown();
+    eprintln!(
+        "acceptance_dns: 1,000 records answered {} ms after the commit; the scenario took {} s",
+        visible.as_millis(),
+        began.elapsed().as_secs()
+    );
+}

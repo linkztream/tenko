@@ -15,7 +15,7 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 |---|---|---|---|---|
 | DNS-01 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/zone/import.rs`<br>`crates/tenko-dns/src/zone/records.rs`<br>`docs/CONFORMANCE.md`<br>and 5 more |
 | DNS-02 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/catalog.rs`<br>`crates/tenko-dns/src/upstream.rs`<br>`docs/CONFORMANCE.md`<br>and 3 more |
-| DNS-04 | Must | - | - | `crates/tenko-dns/src/transport/mod.rs`<br>`docs/dns-engine.md`<br>`docs/plans/phase-2-plan.md` |
+| DNS-04 | Must | - | - | `crates/tenko-dns/src/transport/mod.rs`<br>`docs/dns.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-05 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-06 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-07 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/zone/serial.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 2 more |
@@ -29,15 +29,15 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 | DNS-17 | Must | - | - | `crates/tenko-dns/src/rate.rs`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-18 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-19 | Must | - | - | `crates/tenko-core/src/dns.rs`<br>`docs/SECURITY-PROFILES.md`<br>`docs/plans/phase-2-plan.md` |
-| DNS-20 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-core/src/dns/name.rs`<br>`crates/tenko-core/src/dns/rrset.rs`<br>`crates/tenko-dns/src/catalog.rs`<br>and 10 more |
+| DNS-20 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-core/src/dns/name.rs`<br>`crates/tenko-core/src/dns/rrset.rs`<br>`crates/tenko-dns/src/catalog.rs`<br>and 9 more |
 | DNS-21 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-22 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-23 | Must | - | - | `crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/policy.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-24 | Must | `crates/tenko-core/tests/dns_model.rs` | - | `crates/tenko-core/src/dns.rs`<br>`crates/tenko-core/src/dns/rdata.rs`<br>`docs/adr/0017-dns-data-model-and-serving-path.md`<br>`docs/dns-contracts.md`<br>`docs/dns.md`<br>and 1 more |
 | DNS-25 | Could | - | - | `docs/plans/phase-2-plan.md` |
-| DNS-26 | Should | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-dns/src/log.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>and 2 more |
+| DNS-26 | Should | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-dns/src/log.rs`<br>`crates/tenko-dns/src/querylog.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>and 3 more |
 | DNS-27 | Should | - | - | `docs/ARCHITECTURE.md`<br>`docs/adr/0001-implementation-language.md`<br>`docs/adr/0009-dns-wire-format-and-udp-io.md`<br>`docs/plans/phase-2-plan.md` |
-| MIG-15 | Must | `crates/tenko/tests/dns_cli.rs` | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/dns/records.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/zone/export.rs`<br>`crates/tenko-dns/src/zone/import.rs`<br>and 9 more |
+| MIG-15 | Must | `crates/tenko/tests/dns_cli.rs` | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/dns/records.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/zone/export.rs`<br>`crates/tenko-dns/src/zone/import.rs`<br>and 10 more |
 | OPS-06 | Must | - | - | `docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 1 more |
 | OPS-09 | Should | - | - | `docs/MIGRATION.md`<br>`docs/plans/phase-2-plan.md` |
 | OPS-25 | Must | `crates/tenko/tests/upgrade_modules.rs` | - | `crates/tenko-api/src/dto/system.rs`<br>`crates/tenko-api/src/lib.rs`<br>`crates/tenko-api/src/modules.rs`<br>`crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/mod.rs`<br>and 14 more |

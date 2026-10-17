@@ -1,7 +1,7 @@
 //! Black-box tests of the configuration of `tenko`: `tenko config check` on the shipped
 //! example file and on invalid files, the precedence of file, environment and flags, and
 //! the refusals of `tenko serve` before it starts anything (status 3 for a bad
-//! configuration, status 2 for roles that Phase 1 does not implement).
+//! configuration, status 2 for roles that a node without the controller cannot run).
 
 mod serve_support;
 
@@ -332,14 +332,14 @@ fn environment_overrides_the_file_and_the_flags_override_both() {
 }
 
 #[test]
-fn roles_that_phase_1_does_not_implement_exit_with_status_2() {
+fn roles_without_the_controller_exit_with_status_2() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let data = dir.path().join("data");
     // `probe` runs without the controller since WP2.2 (`node_serve.rs`).
     for roles in ["dns", "dhcp", "dns,dhcp"] {
         let served = run_tenko(&["serve", "--roles", roles, "--data-dir", text(&data)], &[]);
         served.assert_code(2);
-        served.assert_stderr_contains("not implemented in Phase 1");
+        served.assert_stderr_contains("not implemented without the controller role");
         served.assert_stderr_contains("tenko serve: role(s) ");
         assert!(
             served.stdout.is_empty() && !served.stderr.contains(&step_marker("kek", "")),
@@ -365,5 +365,5 @@ fn roles_that_phase_1_does_not_implement_exit_with_status_2() {
     let checked = check(&["--roles", "dns", "--data-dir", text(&data)], &[]);
     checked
         .assert_code(0)
-        .assert_stderr_contains("not implemented in Phase 1");
+        .assert_stderr_contains("not implemented without the controller role");
 }

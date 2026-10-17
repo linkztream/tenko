@@ -28,7 +28,8 @@
 data_dir = "/var/lib/tenko"
 
 # Roles of this node: a comma-separated list of controller, dns, dhcp and probe, or "all".
-# Phase 1 implements the controller role; the others are reported and skipped.
+# A controller node runs the dns and probe roles in its own process; dhcp is not
+# implemented yet and is reported and skipped.
 roles = "controller"
 
 # Product modules of this installation (OPS-25): a list of "ipam", "dns", "dhcp" and
@@ -340,6 +341,72 @@ gauge_interval_secs = 30
 # or a file, in RFC 5424, CEF or JSON) are settings of the installation (the API and the
 # UI), the same on every controller; a file sink writes on the controller that leads.
 # file_dir = "/var/log/tenko-audit"
+
+[dns]
+# The dns role of this node (docs/dns.md section 8). It runs when "dns" is in roles (on a
+# controller node, in the same process) and the DNS module is on; the zones and records
+# live in the store, this section only says how this node answers.
+#
+# Addresses to answer on, UDP and TCP alike. Port 53 needs CAP_NET_BIND_SERVICE on Linux
+# (deploy/README.md). A wildcard address answers from the address the host's routing
+# picks: on a host with more than one address on a network, list each address instead.
+# Environment: TENKO_DNS__LISTEN=192.0.2.53:53,[2001:db8::53]:53
+listen = ["0.0.0.0:53", "[::]:53"]
+# UDP workers per listen address, 0 to 256; 0 is one per CPU.
+workers = 0
+# DNS cookies (RFC 7873): "on" answers every query and hands out server cookies;
+# "required" answers a UDP query that has a client cookie but no valid server cookie with
+# BADCOOKIE (spoofed sources get no amplified answer); "off" ignores cookies.
+cookies = "on"
+# Upstream resolvers of the plain forwarder for names outside the zones, tried in turn with
+# a timeout and retries; no cache, no policy (the resolver of Slice 5 replaces it). Empty:
+# names outside the zones are refused. An entry is an address ("192.0.2.1",
+# "192.0.2.1:5353") or a table { address = "2001:db8::1", port = 53, transport = "tcp" };
+# transport "udp" (the default) falls back to TCP when an answer is truncated.
+# Environment: TENKO_DNS__FORWARDERS=192.0.2.1,192.0.2.2
+forwarders = []
+# Milliseconds an upstream has for one attempt (100 to 30000).
+forward_timeout_ms = 2000
+# Attempts after the first (0 to 5); each goes to the next upstream.
+forward_retries = 2
+
+[dns.udp]
+# "auto": a socket per worker with SO_REUSEPORT on Linux, one shared socket elsewhere;
+# "reuseport" (Linux only) or "shared" choose. With few clients SO_REUSEPORT can leave
+# workers idle (the flow hash); the worker counters of GET /api/v1/nodes/{id}/dns show it.
+socket = "auto"
+# Socket buffers in octets (0 keeps the system's); the system caps them
+# (net.core.rmem_max and net.core.wmem_max on Linux).
+recv_buffer = 8388608
+send_buffer = 8388608
+
+[dns.tcp]
+# Open connections of the node (1 to 100000) and from one client address (1 to 1000).
+max_connections = 1000
+per_client = 10
+# Seconds without a query before a connection is closed (1 to 300).
+idle_secs = 10
+
+[dns.edns]
+# The EDNS UDP size of the server, 512 to 4096 (1232: DNS flag day 2020).
+udp_size = 1232
+
+[dns.log]
+# The query log of this node: JSON lines in local files, never in the store. Off by
+# default; turning it off is the kill switch. GET /api/v1/nodes/{id}/dns/log reads it.
+enabled = false
+# The directory of the log files. Not set: dns/querylog/ in the data directory.
+# path = "/var/log/tenko-dns"
+# "jsonl"; "dnstap" is refused until it is written.
+format = "jsonl"
+# Files are removed after this many days (1 to 365), and the oldest first when the files
+# take more than size_mb MiB (1 to 102400).
+days = 7
+size_mb = 256
+# Log one query in N (1 to 1000000; 1 logs every query).
+sample = 1
+# Replace client addresses with a keyed hash whose key changes every day (GDPR, TGL-15).
+pseudonymise = true
 
 [scan]
 # The scanner of the probe role (SCAN-01 to SCAN-09). A probe reads this section of its own

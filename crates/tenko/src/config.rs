@@ -33,7 +33,7 @@ use std::{
     time::Duration,
 };
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use tenko_api::{
     middleware::{Quota, RateLimitConfig},
     modules::ModuleSet,
@@ -54,8 +54,9 @@ pub const ENV_SEPARATOR: &str = "__";
 pub const DEFAULT_LISTEN: &str = "0.0.0.0:8443";
 
 /// The top-level keys of the file; environment variables are matched against them.
-const TOP_LEVEL_KEYS: [&str; 23] = [
+const TOP_LEVEL_KEYS: [&str; 24] = [
     "audit_export",
+    "dns",
     "cluster",
     "scan",
     "telemetry",
@@ -90,7 +91,8 @@ pub struct Config {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data_dir: Option<PathBuf>,
     /// Roles of this node: a comma-separated list of `controller`, `dns`, `dhcp` and
-    /// `probe`, or `all`. Phase 1 implements `controller` only.
+    /// `probe`, or `all`. A controller node runs `dns` and `probe` in its own process;
+    /// `dhcp` is not implemented yet.
     pub roles: String,
     /// The product modules this installation runs (OPS-25): a list of `ipam`, `dns`,
     /// `dhcp` and `discovery`, or `all`. Not set (the default): the choice made in the
@@ -139,6 +141,8 @@ pub struct Config {
     pub backup: BackupSection,
     /// Where file sinks of the audit export write on this node (IAM-18).
     pub audit_export: AuditExportSection,
+    /// The `dns` role of this node: listeners, workers, the plain forwarder, the query log.
+    pub dns: DnsSection,
 }
 
 impl Default for Config {
@@ -167,6 +171,7 @@ impl Default for Config {
             metrics: MetricsSection::default(),
             backup: BackupSection::default(),
             audit_export: AuditExportSection::default(),
+            dns: DnsSection::default(),
         }
     }
 }
@@ -466,6 +471,401 @@ impl MetricsSection {
             ));
         }
         Ok(())
+    }
+}
+
+/// `[dns]`: the `dns` role of this node (plan section 2.10, WP4.3): its listeners, its
+/// workers, the plain forwarder and the query log. The zones and records live in the
+/// store; this section only says how this node serves them. Read when the node runs the
+/// `dns` role and the DNS module is on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DnsSection {
+    /// Addresses to answer on, UDP and TCP alike (default `0.0.0.0:53` and `[::]:53`). A
+    /// wildcard address answers from the address the host's routing picks: on a host with
+    /// more than one address on a network, list each address instead.
+    #[serde(deserialize_with = "string_or_list")]
+    pub listen: Vec<String>,
+    /// UDP workers per listen address, 0 to 256; 0 (the default) is one per CPU.
+    pub workers: usize,
+    /// DNS cookies (RFC 7873): `on` (default), `required` or `off`.
+    pub cookies: DnsCookies,
+    /// The UDP sockets.
+    pub udp: DnsUdpSection,
+    /// The TCP listeners.
+    pub tcp: DnsTcpSection,
+    /// EDNS.
+    pub edns: DnsEdnsSection,
+    /// The upstreams of the plain forwarder for names outside the zones: addresses
+    /// (`"192.0.2.1"`, `"192.0.2.1:5353"`) or tables `{ address, port, transport }` with
+    /// `transport = "udp"` (default, TCP when an answer is truncated) or `"tcp"`. Empty (the
+    /// default): names outside the zones are refused.
+    #[serde(deserialize_with = "forwarders_or_list")]
+    pub forwarders: Vec<DnsForwarder>,
+    /// Milliseconds an upstream has for one attempt, 100 to 30,000 (default 2,000).
+    pub forward_timeout_ms: u64,
+    /// Attempts after the first, 0 to 5 (default 2); each goes to the next upstream.
+    pub forward_retries: u8,
+    /// The query log of this node.
+    pub log: DnsLogSection,
+}
+
+impl Default for DnsSection {
+    fn default() -> Self {
+        Self {
+            listen: vec!["0.0.0.0:53".to_owned(), "[::]:53".to_owned()],
+            workers: 0,
+            cookies: DnsCookies::On,
+            udp: DnsUdpSection::default(),
+            tcp: DnsTcpSection::default(),
+            edns: DnsEdnsSection::default(),
+            forwarders: Vec::new(),
+            forward_timeout_ms: 2_000,
+            forward_retries: 2,
+            log: DnsLogSection::default(),
+        }
+    }
+}
+
+/// `[dns] cookies`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DnsCookies {
+    /// Answer with cookies; a missing or stale server cookie is answered normally.
+    #[default]
+    On,
+    /// A UDP query with a client cookie but no valid server cookie gets BADCOOKIE.
+    Required,
+    /// Ignore cookies.
+    Off,
+}
+
+/// `[dns.udp] socket`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DnsSocketMode {
+    /// `reuseport` on Linux, `shared` elsewhere.
+    #[default]
+    Auto,
+    /// A socket per worker with `SO_REUSEPORT` (Linux only).
+    Reuseport,
+    /// One socket per listen address for all its workers.
+    Shared,
+}
+
+/// `[dns.udp]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DnsUdpSection {
+    /// `auto` (default), `reuseport` or `shared`.
+    pub socket: DnsSocketMode,
+    /// `SO_RCVBUF` in octets (default 8 MiB; the system caps it; 0 keeps the system's).
+    pub recv_buffer: usize,
+    /// `SO_SNDBUF` in octets (default 8 MiB; 0 keeps the system's).
+    pub send_buffer: usize,
+}
+
+impl Default for DnsUdpSection {
+    fn default() -> Self {
+        Self {
+            socket: DnsSocketMode::Auto,
+            recv_buffer: 8 * 1024 * 1024,
+            send_buffer: 8 * 1024 * 1024,
+        }
+    }
+}
+
+/// `[dns.tcp]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DnsTcpSection {
+    /// Open connections of the node, 1 to 100,000 (default 1,000).
+    pub max_connections: usize,
+    /// Open connections from one client address, 1 to 1,000 (default 10).
+    pub per_client: usize,
+    /// Seconds without a query before a connection is closed, 1 to 300 (default 10).
+    pub idle_secs: u64,
+}
+
+impl Default for DnsTcpSection {
+    fn default() -> Self {
+        Self {
+            max_connections: 1_000,
+            per_client: 10,
+            idle_secs: 10,
+        }
+    }
+}
+
+/// `[dns.edns]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DnsEdnsSection {
+    /// The EDNS UDP size of the server, 512 to 4096 (default 1232, DNS flag day 2020).
+    pub udp_size: u16,
+}
+
+impl Default for DnsEdnsSection {
+    fn default() -> Self {
+        Self { udp_size: 1_232 }
+    }
+}
+
+/// The transport to an upstream of the plain forwarder.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DnsUpstreamTransport {
+    /// UDP, TCP when an answer is truncated.
+    #[default]
+    Udp,
+    /// TCP only.
+    Tcp,
+}
+
+/// One upstream of the plain forwarder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DnsForwarder {
+    /// The upstream's IP address.
+    pub address: IpAddr,
+    /// Its port (default 53).
+    #[serde(default = "dns_port")]
+    pub port: u16,
+    /// `udp` (default) or `tcp`.
+    #[serde(default)]
+    pub transport: DnsUpstreamTransport,
+}
+
+const fn dns_port() -> u16 {
+    53
+}
+
+impl DnsForwarder {
+    /// The upstream's socket address.
+    pub fn socket_addr(&self) -> SocketAddr {
+        SocketAddr::new(self.address, self.port)
+    }
+}
+
+impl std::str::FromStr for DnsForwarder {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let text = text.trim();
+        if let Ok(address) = text.parse::<IpAddr>() {
+            return Ok(Self {
+                address,
+                port: 53,
+                transport: DnsUpstreamTransport::Udp,
+            });
+        }
+        let addr: SocketAddr = text.parse().map_err(|_| {
+            format!(
+                "`{text}` is not an IP address or an address with a port, such as 192.0.2.1 or \
+                 [2001:db8::1]:53"
+            )
+        })?;
+        Ok(Self {
+            address: addr.ip(),
+            port: addr.port(),
+            transport: DnsUpstreamTransport::Udp,
+        })
+    }
+}
+
+/// Deserializes the forwarders from a list of tables or strings, or one comma-separated
+/// string (environment variables).
+fn forwarders_or_list<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<DnsForwarder>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Item {
+        Text(String),
+        Table(DnsForwarder),
+    }
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<Item>),
+    }
+    let items: Vec<Item> = match OneOrMany::deserialize(deserializer)? {
+        OneOrMany::One(text) => text
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(|part| Item::Text(part.to_owned()))
+            .collect(),
+        OneOrMany::Many(list) => list,
+    };
+    items
+        .into_iter()
+        .map(|item| match item {
+            Item::Text(text) => text.parse().map_err(de::Error::custom),
+            Item::Table(table) => Ok(table),
+        })
+        .collect()
+}
+
+/// `[dns.log] format`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DnsLogFormat {
+    /// One JSON object per line.
+    #[default]
+    Jsonl,
+    /// dnstap frame streams (not written yet: WP5.4).
+    Dnstap,
+}
+
+/// `[dns.log]`: the query log of this node (plan section 2.9, TGL-15), off by default.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DnsLogSection {
+    /// Log queries (default false). Turning it off again is the kill switch.
+    pub enabled: bool,
+    /// The directory of the log files (default `<data_dir>/dns/querylog`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<PathBuf>,
+    /// `jsonl` (default); `dnstap` is refused until it is written (WP5.4).
+    pub format: DnsLogFormat,
+    /// Days a log file is kept, 1 to 365 (default 7).
+    pub days: u32,
+    /// MiB the log files may take, 1 to 102,400 (default 256).
+    pub size_mb: u64,
+    /// Log one query in N, 1 to 1,000,000 (default 1: every query).
+    pub sample: u32,
+    /// Replace client addresses with a keyed hash whose key changes every day (default
+    /// true).
+    pub pseudonymise: bool,
+}
+
+impl Default for DnsLogSection {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            path: None,
+            format: DnsLogFormat::Jsonl,
+            days: 7,
+            size_mb: 256,
+            sample: 1,
+            pseudonymise: true,
+        }
+    }
+}
+
+impl DnsSection {
+    /// The listen addresses.
+    ///
+    /// # Errors
+    ///
+    /// `config.invalid` for an empty list, an entry that is not an address with a port, or
+    /// an address listed twice.
+    pub fn listen_addrs(&self) -> Result<Vec<SocketAddr>, ConfigError> {
+        if self.listen.is_empty() {
+            return Err(ConfigError::invalid("dns.listen is empty"));
+        }
+        let mut addrs: Vec<SocketAddr> = Vec::with_capacity(self.listen.len());
+        for text in &self.listen {
+            let addr: SocketAddr = text.parse().map_err(|_| {
+                ConfigError::invalid(format!(
+                    "dns.listen: `{text}` is not an address with a port, such as 0.0.0.0:53 or \
+                     [::]:53"
+                ))
+            })?;
+            if addrs.contains(&addr) {
+                return Err(ConfigError::invalid(format!(
+                    "dns.listen: `{text}` is listed twice"
+                )));
+            }
+            addrs.push(addr);
+        }
+        Ok(addrs)
+    }
+
+    /// The UDP workers per listen address: `workers`, or the CPU count for 0.
+    pub fn worker_count(&self) -> usize {
+        if self.workers == 0 {
+            std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
+        } else {
+            self.workers
+        }
+    }
+
+    /// The directory of the query log.
+    pub fn log_dir(&self, data_dir: &Path) -> PathBuf {
+        self.log
+            .path
+            .clone()
+            .unwrap_or_else(|| data_dir.join("dns").join("querylog"))
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        fn check(ok: bool, message: &str) -> Result<(), ConfigError> {
+            if ok {
+                Ok(())
+            } else {
+                Err(ConfigError::invalid(message.to_owned()))
+            }
+        }
+        self.listen_addrs()?;
+        check(
+            self.workers <= 256,
+            "dns.workers must be between 0 (one per CPU) and 256",
+        )?;
+        check(
+            !(self.udp.socket == DnsSocketMode::Reuseport && cfg!(not(target_os = "linux"))),
+            "dns.udp.socket = \"reuseport\" needs Linux; use \"auto\" or \"shared\"",
+        )?;
+        check(
+            (1..=100_000).contains(&self.tcp.max_connections),
+            "dns.tcp.max_connections must be between 1 and 100000",
+        )?;
+        check(
+            (1..=1_000).contains(&self.tcp.per_client),
+            "dns.tcp.per_client must be between 1 and 1000",
+        )?;
+        check(
+            (1..=300).contains(&self.tcp.idle_secs),
+            "dns.tcp.idle_secs must be between 1 and 300",
+        )?;
+        check(
+            (512..=4_096).contains(&self.edns.udp_size),
+            "dns.edns.udp_size must be between 512 and 4096",
+        )?;
+        check(
+            self.forwarders.len() <= 16,
+            "dns.forwarders holds at most 16 upstreams",
+        )?;
+        check(
+            self.forwarders.iter().all(|upstream| upstream.port != 0),
+            "dns.forwarders: a port must be between 1 and 65535",
+        )?;
+        check(
+            (100..=30_000).contains(&self.forward_timeout_ms),
+            "dns.forward_timeout_ms must be between 100 and 30000",
+        )?;
+        check(
+            self.forward_retries <= 5,
+            "dns.forward_retries must be between 0 and 5",
+        )?;
+        check(
+            self.log.format == DnsLogFormat::Jsonl,
+            "dns.log.format = \"dnstap\" is not available yet; use \"jsonl\"",
+        )?;
+        check(
+            (1..=365).contains(&self.log.days),
+            "dns.log.days must be between 1 and 365",
+        )?;
+        check(
+            (1..=102_400).contains(&self.log.size_mb),
+            "dns.log.size_mb must be between 1 and 102400",
+        )?;
+        check(
+            (1..=1_000_000).contains(&self.log.sample),
+            "dns.log.sample must be between 1 and 1000000",
+        )
     }
 }
 
@@ -1562,6 +1962,7 @@ impl Config {
         self.metrics.validate()?;
         self.backup.validate()?;
         self.audit_export.validate()?;
+        self.dns.validate()?;
         self.scan
             .validate()
             .map_err(|error| ConfigError::invalid(error.detail().to_owned()))?;

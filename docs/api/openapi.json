@@ -13954,7 +13954,7 @@
           "dns"
         ],
         "summary": "Get the DNS role of a node",
-        "description": "Scope: `dns.read`.",
+        "description": "Scope: `dns.read`. The report `dns.status` of the node's DNS role: whether it answers, the store revision its index holds and how far it is behind, the zones and RRsets it serves, its listeners and the cache. In Phase 2 the role runs in the controller's process, so only that node answers.",
         "operationId": "get_node_dns_status",
         "parameters": [
           {
@@ -14029,16 +14029,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       }
@@ -14049,7 +14039,7 @@
           "dns"
         ],
         "summary": "Flush a node's DNS cache",
-        "description": "Scope: `dns.write`.",
+        "description": "Scope: `dns.write`. Issues the node command `dns.cache.flush`. The plain forwarder of Phase 2 keeps no cache, so the command is done at once with a detail that says so; it is recorded in the node's commands and audited.",
         "operationId": "flush_node_dns_cache",
         "parameters": [
           {
@@ -14124,16 +14114,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       }
@@ -14144,7 +14124,7 @@
           "dns"
         ],
         "summary": "Read a node's DNS query log",
-        "description": "Scope: `dns.read`.",
+        "description": "Scope: `dns.read`. Issues the node command `dns.log.read`: a page of the node's query log, newest first, with the cursor of the next page. The read is recorded in the node's commands. 409 when the node's query log is off.",
         "operationId": "read_node_dns_log",
         "parameters": [
           {
@@ -14241,16 +14221,6 @@
           },
           "409": {
             "description": "The node does not run the dns role or its log is off (`dns.node.not_dns`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -31352,6 +31322,12 @@
             "description": "Entries in the cache.",
             "minimum": 0
           },
+          "index_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Octets the bases of the index hold, a lower bound of its memory (the arrays and the\nrecord data, without allocator overhead and changes not yet folded into a base).",
+            "minimum": 0
+          },
           "lag": {
             "type": "integer",
             "format": "int64",
@@ -31383,6 +31359,13 @@
             "type": "boolean",
             "description": "The role answers queries."
           },
+          "socket_mode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "How the UDP workers use sockets: `reuseport` (a socket per worker) or `shared`."
+          },
           "started": {
             "oneOf": [
               {
@@ -31393,6 +31376,25 @@
                 "type": "null"
               }
             ]
+          },
+          "tcp_open": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Open TCP connections.",
+            "minimum": 0
+          },
+          "tcp_refused": {
+            "type": "integer",
+            "format": "int64",
+            "description": "TCP connections refused by the per-node or per-client cap since the start.",
+            "minimum": 0
+          },
+          "udp_workers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UdpWorkerItem"
+            },
+            "description": "The UDP workers with their counters since the start (ADR 0009): uneven `received`\ncounts across `reuseport` workers are the flow-hash effect."
           },
           "zones": {
             "type": "integer",
@@ -54334,6 +54336,75 @@
           "hmac-sha512",
           "hmac-sha1"
         ]
+      },
+      "UdpWorkerItem": {
+        "type": "object",
+        "description": "One UDP worker of a node's DNS role and its counters.",
+        "required": [
+          "index",
+          "listen",
+          "socket",
+          "received",
+          "sent",
+          "dropped",
+          "forwarded",
+          "recv_errors",
+          "send_errors"
+        ],
+        "properties": {
+          "dropped": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Queries dropped.",
+            "minimum": 0
+          },
+          "forwarded": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Queries handed to the forwarder.",
+            "minimum": 0
+          },
+          "index": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The worker's number, from 0.",
+            "minimum": 0
+          },
+          "listen": {
+            "type": "string",
+            "description": "The address its socket is bound to."
+          },
+          "received": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Datagrams received.",
+            "minimum": 0
+          },
+          "recv_errors": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Receive errors.",
+            "minimum": 0
+          },
+          "send_errors": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Send errors.",
+            "minimum": 0
+          },
+          "sent": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Answers sent.",
+            "minimum": 0
+          },
+          "socket": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The socket of the address it reads (0 for the shared socket).",
+            "minimum": 0
+          }
+        }
       },
       "UiStatus": {
         "type": "object",

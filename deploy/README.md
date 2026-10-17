@@ -2,10 +2,12 @@
 
 Tenko DDI is one binary, `tenko`. `tenko serve` runs the roles of a node; every other
 command (`config`, `setup`, `login`, `prefix`, `import`, `export`, ...) is the
-command-line client of the API. Phase 1 implements the `controller` role: the REST API
-and web UI on one port (8443 by default), the replicated store and IPAM. The `dns`,
-`dhcp` and `probe` roles are accepted in a role list next to `controller` and skipped
-with a notice; a role list without `controller` exits with status 2.
+command-line client of the API. The `controller` role is the REST API and web UI on one
+port (8443 by default), the replicated store, IPAM and the zone service. Next to it the
+`dns` role (port 53, section "DNS: the dns role and port 53") and the `probe` role run in
+the same process when they are listed; `dhcp` is skipped with a notice. A role list
+without `controller` runs the probe role only, and exits with status 2 when it names
+`dns` or `dhcp`.
 
 | Path | Contents |
 |---|---|
@@ -483,6 +485,65 @@ and buildx plugins, and `ip`, and the Docker daemon must run in the network name
 shell that creates the link (a Linux host, or docker.io inside a WSL distribution; the engine
 of Docker Desktop runs elsewhere and does not see the link). The Docker host cannot reach
 macvlan children, which is why every check runs in a container.
+
+## DNS: the dns role and port 53
+
+A controller node answers DNS when `roles` lists `dns` and the DNS module is on: `roles =
+"controller,dns"` in tenko.toml (or `--roles controller,dns`, `TENKO_ROLES`). The `[dns]`
+section says where it answers (`listen`, default `0.0.0.0:53` and `[::]:53`), how many
+workers it runs, the upstreams of the plain forwarder for names outside the zones, and the
+query log; see the section in `tenko.example.toml` and [../docs/dns.md](../docs/dns.md)
+sections 8 and 9. `tenko config check` validates it. The role starts after the API and the
+start fails with `start.dns.bind` (exit status 4) when a listen address cannot be bound.
+`tenko serve` prints `dns role answering on ...` below its ready line, and
+`GET /api/v1/nodes/{id}/dns` reports the role.
+
+Check a node from another host with any DNS client, for example
+`dig @192.0.2.53 www.example.test A` and `dig +tcp @192.0.2.53 www.example.test A`.
+
+**Another resolver on port 53.** Only one process can hold UDP and TCP 53 on an address.
+Move the other one off it, or give Tenko other addresses in `[dns] listen`:
+
+- systemd-resolved listens on 127.0.0.53 and 127.0.0.54 only; it does not conflict with
+  Tenko on the host's own addresses, but it does with `0.0.0.0:53`. List the host's
+  addresses in `listen`, or set `DNSStubListener=no` in `/etc/systemd/resolved.conf` and
+  restart systemd-resolved.
+- dnsmasq, unbound, bind9, Pi-hole and the Windows DNS Server role take the port on every
+  address by default: stop them or narrow them to other addresses first.
+- A host with more than one address on a network answers from the address its routing
+  picks when `listen` holds a wildcard address: list each address instead (the server logs
+  a note at start).
+
+**Linux (systemd).** Port 53 is below 1024: the unit `systemd/tenko.service` grants
+`CAP_NET_BIND_SERVICE` (bounding set and ambient), the only capability of the base unit; the
+probe drop-in keeps it. Without systemd, `setcap cap_net_bind_service+ep` on the binary
+does the same (repeat it after every update). Open the firewall for UDP and TCP 53 to the
+clients that may ask, for example `nft add rule inet filter input udp dport 53 accept` and
+the same for `tcp dport 53`, narrowed to their networks.
+
+**Containers.** Docker and Podman let an unprivileged process bind ports below 1024 inside
+the container's own network namespace (`net.ipv4.ip_unprivileged_port_start=0`), so the
+image needs no capability on a bridge or macvlan network: publish the port with
+`-p 53:53/udp -p 53:53/tcp` (bridge) or give the container its own address (macvlan). With
+`network_mode: host` the host's sysctl applies: add `cap_add: [NET_BIND_SERVICE]`, or give
+the dns role a port above 1023. Set the role and its addresses with variables:
+`TENKO_ROLES=controller,dns`, `TENKO_DNS__LISTEN=0.0.0.0:53,[::]:53`,
+`TENKO_DNS__FORWARDERS=192.0.2.1,192.0.2.2`.
+
+**Windows.** The service needs no privilege for port 53. The Windows DNS Server role and
+Internet Connection Sharing hold the port (see [windows/README.md](windows/README.md),
+"Coexistence with Windows roles"); stop them first. Allow DNS through Windows Defender
+Firewall for the service's binary, for example in an elevated PowerShell:
+
+```
+New-NetFirewallRule -DisplayName "Tenko DNS (UDP)" -Direction Inbound -Protocol UDP -LocalPort 53 -Program "C:\ProgramData\Tenko\updates\current\tenko.exe" -Action Allow
+New-NetFirewallRule -DisplayName "Tenko DNS (TCP)" -Direction Inbound -Protocol TCP -LocalPort 53 -Program "C:\ProgramData\Tenko\updates\current\tenko.exe" -Action Allow
+```
+
+Use the path the service runs (`<data_dir>\updates\current\tenko.exe` in the version
+layout, see windows/README.md), and narrow the rules with
+`-RemoteAddress` to the client networks. On Windows the UDP workers of an address share one
+socket; `[dns] workers` sets how many threads read it.
 
 ## Windows
 

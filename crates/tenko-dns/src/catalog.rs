@@ -373,6 +373,11 @@ impl Catalog {
     pub fn forwarders(&self) -> &ForwardTable {
         &self.forwarders
     }
+
+    /// A forwarding rule by id (the forwarder reads its upstreams).
+    pub fn forward_rule(&self, id: ForwardRuleId) -> Option<&ForwardRule> {
+        self.forward_rows.get(&id)
+    }
 }
 
 /// The swap the workers read the catalog through and the writer stores into.

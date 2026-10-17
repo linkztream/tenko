@@ -330,6 +330,22 @@ impl<'a> NodeRef<'a> {
 type Rows = HashMap<Vec<u8>, Vec<OwnedSet>, Seeded>;
 
 impl Base {
+    /// Octets of the arrays and of the record data (see [`IndexStats::base_bytes`]).
+    fn memory_bytes(&self) -> usize {
+        use std::mem::size_of;
+        self.names.capacity()
+            + self.nodes.capacity() * size_of::<BaseNode>()
+            + self.sets.capacity() * size_of::<BaseSet>()
+            + self.rdata.capacity() * size_of::<Rdata>()
+            + self
+                .rdata
+                .iter()
+                .map(|rdata| rdata.as_bytes().len())
+                .sum::<usize>()
+            + self.slots.len() * size_of::<u32>()
+            + self.nsec.capacity() * size_of::<u32>()
+    }
+
     fn empty() -> Self {
         Self {
             hash: Seeded::new(),
@@ -770,6 +786,10 @@ pub struct IndexStats {
     pub name_octets: usize,
     /// RRsets kept aside for zones the index does not hold.
     pub aside: usize,
+    /// Octets the bases hold in their arrays and record data (M18): a lower bound of the
+    /// index's memory, without the allocator's overhead per record data, the overlays and
+    /// the view and forwarding tables.
+    pub base_bytes: usize,
 }
 
 impl ZoneIndex {
@@ -868,6 +888,7 @@ impl ZoneIndex {
                 stats.base_rrsets += tree.base.sets.len();
                 stats.base_records += tree.base.rdata.len();
                 stats.name_octets += tree.base.names.len();
+                stats.base_bytes += tree.base.memory_bytes();
             }
         }
         stats
