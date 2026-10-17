@@ -1,6 +1,6 @@
 # Phase 2 plan: DNS
 
-- Status: Draft for the owner's decisions (section 7); nothing in it binds until the owner answers
+- Status: Draft for the owner's decisions (section 7); nothing in it binds until the owner answers. The owner's direction of 2026-10-17, single node first and the cluster data plane in Phase 5, is worked in (section 2.10)
 - Date: 2026-10-17
 - Scope: Phase 2 of [ROADMAP.md](../ROADMAP.md) (deliverables and "Done when"), written against `main` at `701a5ef` after the Phase 1 exit work recorded in [phase-1-exit.md](phase-1-exit.md). Requirement IDs refer to [REQUIREMENTS.md](../REQUIREMENTS.md), toggles (TGL) and never-off items (NEVER) to [SECURITY-PROFILES.md](../SECURITY-PROFILES.md), RFC targets to [CONFORMANCE.md](../CONFORMANCE.md). Exit criteria, measurements and risks continue the Phase 1 series (E13 onward, M16 onward, R38 onward) so that one trace covers the project.
 
@@ -25,27 +25,29 @@ Contents:
 
 Tenko serves DNS: an authoritative engine fed from the replicated store and from IPAM, a forwarder and cache with policy zones in front of it, and the transfers, dynamic updates, DNSSEC and views that let it stand beside BIND and Windows DNS. The `dns` role serves from its local copy and keeps serving when the controllers are gone (OPS-02). From this phase the move job's DNS step is automatic (IPAM-19). Recursion stays forwarding plus cache (ADR 0007); the full resolver is Phase 5.
 
+Phase 2 builds and measures a **single node**: one process with the `controller` and `dns` roles, the shape of the home lab (ADR 0004). The design stays cluster-aware so that nothing is done twice, but the multi-node data plane (a `dns` node fed by another controller) is Phase 5 work by the owner's direction of 2026-10-17 (section 2.10). The reason is practical: a working node early, so that trying, debugging and tuning happen while they are cheap, and performance measured on one node before anything is distributed, so that a later cluster figure can be compared against it and the slow link named.
+
 ### 1.2 Exit criteria
 
 ROADMAP "Done when" for Phase 2 plus the verification rows that name DNS, as checks. E13 to E16 are the ROADMAP lines; E17 to E21 are what the requirements make testable and what the Phase 1 exit left to this phase.
 
 | # | Check | Requirements | Slice |
 |---|---|---|---|
-| E13 | dnsperf and flamethrower numbers are documented: per core on loopback and between two hosts over a real link, UDP and TCP, with and without metrics | DNS-27, OPS-21 | 4 (loopback), 6 (two hosts) |
+| E13 | dnsperf and flamethrower numbers are documented for one Tenko node: per core on loopback and from a load generator on another host over a real link, UDP and TCP, with and without metrics | DNS-27, OPS-21 | 4 (loopback), 6 (real link) |
 | E14 | A home network sends all of its queries through Tenko: the owner's clients resolve through a Tenko node that forwards AD zones to the domain controllers and everything else to a DoT upstream, with a blocklist active | DNS-02, DNS-15, DNS-21, DNS-23, TGL-14, TGL-22 | 5 |
 | E15 | BIND as secondary receives Tenko's zones (AXFR, IXFR, NOTIFY, TSIG, XoT) and Tenko as secondary receives a BIND zone; Windows DNS as primary of one zone into Tenko on the owner's go | DNS-09, DNS-19, TGL-10 | 6 |
 | E16 | Fuzz targets for the wire format, the zone file parser and TSIG run in the weekly fuzz smoke | API-14, API-15 | 4 (wire, zone file), 6 (TSIG) |
 | E17 | Every IPAM address with a DNS name has its A or AAAA and PTR records in Tenko zones, reverse zones exist for the managed prefixes including an RFC 2317 delegation, and the five-device move lab of Phase 1 (E8) runs with the DNS step automatic | DNS-22, IPAM-19, IPAM-13 | 4 |
-| E18 | An RFC 2136 update signed with TSIG from `nsupdate` is applied, visible on every `dns` node, refused without the key or outside the ACL, and refused with SERVFAIL while the controllers have no quorum | DNS-11, TGL-09 | 6 |
+| E18 | An RFC 2136 update signed with TSIG from `nsupdate` is applied through the store and answered from the index, refused without the key or outside the ACL, and answered SERVFAIL when the store refuses the write (the no-quorum path, exercised with the store's test hook on one node) | DNS-11, TGL-09 | 6 |
 | E19 | A zone signed by Tenko (NSEC and NSEC3) validates in an external validator, a ZSK rollover completes without a validation failure, and CDS and CDNSKEY are published for the KSK | DNS-12, OPS-09 | 6 |
 | E20 | DoT and DoH are served with the certificate of the configured TLS mode and answer `kdig`; RRL slows a reflection pattern; ANY answers are minimal; a TXT over 255 bytes round-trips split | DNS-14, DNS-17, DNS-18, DNS-24, TGL-11 | 5 (DoT, DoH), 4 (the rest) |
-| E21 | Idle RSS below 100 MB with all Phase 1 roles plus `dns` serving the home zones and a 10,000-entry cache, on the musl binary; metrics overhead on the query path below 2 percent | OPS-15, OPS-21 | 6 |
+| E21 | Idle RSS below 100 MB with all Phase 1 roles plus `dns` serving the home zones and a 10,000-entry cache, on the musl binary, one node; metrics overhead on the query path below 2 percent | OPS-15, OPS-21 | 6 |
 
 ### 1.3 Increments
 
 | Slice | Content | Closes |
 |---|---|---|
-| 4. Authoritative core | Zone and record model in the store; the `dns` namespace; the UDP and TCP engine of ADR 0009 on `domain`; EDNS, cookies, minimal responses, ANY, TXT; the in-memory index on the node with the atomic swap of M1; the node feed through node sync; zone file import and export; the API, CLI and UI for zones and records; reverse zones from IPAM and the DNS actuator; fuzz targets; loopback measurements | E16 (two of three), E17, E20 (the rest), E13 (loopback) |
+| 4. Authoritative core | Zone and record model in the store; the `dns` namespace; the UDP and TCP engine of ADR 0009 on `domain`; EDNS, cookies, minimal responses, ANY, TXT; the in-memory index with the atomic swap of M1, fed in-process; the `dns` role in the controller's process; a plain forwarder so the node is usable at home from this slice (P2-Q16); zone file import and export; the API, CLI and UI for zones and records; reverse zones from IPAM and the DNS actuator; fuzz targets; loopback measurements | E16 (two of three), E17, E20 (the rest), E13 (loopback) |
 | 5. Resolver side | Forwarder and conditional forwarders, stub zones, the cache with serve-stale and prefetch, recursion ACL per view, DoT and DoH upstream, 0x20 and port randomisation, RPZ and blocklists, DoT and DoH served, the query log with GDPR controls, dnstap, dashboard tiles | E14, E20 (DoT, DoH) |
 | 6. Transfers, updates, DNSSEC, views | AXFR, IXFR, NOTIFY, TSIG, XoT in and out with ACLs; catalog zones; RFC 2136 updates; DNSSEC signing with rollover; views and zone scopes in the API and UI; the BIND and Windows interop lab; two-host measurements; M8 and M9 again | E13 (two hosts), E15, E16 (TSIG), E18, E19, E21 |
 
@@ -84,6 +86,7 @@ From section 4 of the exit document:
 | Webhook ingress route, SSID writes and DHCP relay verification on UniFi, raw-socket scanner methods | Connector and scanner work, not DNS; the owner's quota is better spent on the DNS slices | P2-Q13 |
 | OPS-17 anycast hooks | Phase 5; the health endpoint the hooks read exists | Phase 5 |
 | Per-node zone selection (a `dns` node serving a subset of the zones) | Every node serves every zone in Phase 2; sites and ownership are OPS-27 | Phase 5 |
+| The multi-node data plane: the node-file feed, the `dns` subset in node sync, `Dns.Update` over the cluster channel, a `dns` node without a controller, the three-process and VM labs for DNS | The owner's direction of 2026-10-17: single node first; the store model, the feed trait and the ownership rules are built so that this adds on (section 2.10) | Phase 5 |
 
 ### 1.7 Starting point in the code
 
@@ -106,7 +109,7 @@ These are the choices the packages assume. The owner decides them in section 7; 
 
 ### 2.1 Zones live in the replicated store; nodes serve from an index
 
-Zones, RRsets, views, forwarders, keys and lists are rows in the Raft store (ADR 0002, one group). Every `dns` node builds an in-memory index from its local copy of those rows (OPS-02) and answers from the index only: no store read, no lock, no allocation on the query path (ADR 0009). The index is a `DerivedIndex` on a controller that also runs the `dns` role, and the node-sync file on a node that does not; both go through one `ZoneFeed` trait so the engine never knows which. Rebuilds swap atomically (M1); deltas apply in revision order.
+Zones, RRsets, views, forwarders, keys and lists are rows in the Raft store (ADR 0002, one group). The `dns` role builds an in-memory index from those rows (OPS-02) and answers from the index only: no store read, no lock, no allocation on the query path (ADR 0009). The index is fed through one `ZoneFeed` trait so the engine never knows where the rows come from: in Phase 2 the only implementation is the `DerivedIndex` of a controller that runs the `dns` role in its own process; the node-sync file feed for a `dns` node without a controller is Phase 5 (section 2.10). Rebuilds swap atomically (M1); deltas apply in revision order.
 
 ### 2.2 The engine
 
@@ -118,7 +121,7 @@ A query is tagged with a view before the lookup (DNS-20): the match rules (clien
 
 ### 2.4 Writes go through the controllers
 
-A `dns` node never changes zone data on its own. A dynamic update (RFC 2136) arriving at a node is checked there (TSIG, ACL, prerequisites against the node's copy) and forwarded to a controller over the cluster channel as one change set; the controller commits it through the coalescer, the delta flows back to every node, and the node answers the client when its own copy holds the change. With no quorum the answer is SERVFAIL and the health view says why (OPS-26). The same path serves DDNS from Tenko DHCP in Phase 3 and GSS-TSIG in Phase 4. Zone transfers in (Tenko as secondary) land in the store the same way, by a controller service, never on a node.
+The engine never changes zone data on its own. A dynamic update (RFC 2136) is checked by the engine (TSIG, ACL, prerequisites against the index) and becomes one change set that the store commits through the coalescer; the index applies the delta, and the client is answered when the index holds the change. When the store refuses the write (no quorum, OPS-26) the answer is SERVFAIL and the health view says why. On the single node of Phase 2 the engine and the store are one process, so the change set is a function call; in Phase 5 a `dns` node without a controller sends the same change set over the cluster channel (`Dns.Update`) and waits for its delta, and nothing in the engine changes. The same path serves DDNS from Tenko DHCP in Phase 3 and GSS-TSIG in Phase 4. Zone transfers in (Tenko as secondary) land in the store the same way, by a controller service.
 
 ### 2.5 Ownership per RRset
 
@@ -138,7 +141,26 @@ Forwarders are rules (domain, upstream list, transport, TLS name) chosen by long
 
 ### 2.9 Query log and dnstap
 
-Per node, off by default, written from the per-shard ring buffers to a local file in JSON lines or in dnstap frame streams, never through Raft. Retention by days and size, pseudonymisation of client addresses with a keyed hash whose key rotates daily, sampling 1 in N, and a kill switch. The API reads a node's log through a node command with a cursor (docs/node-sync.md section 5) so that the controller never holds a copy. Defaults per profile are TGL-15.
+Per node, off by default, written from the per-shard ring buffers to a local file in JSON lines or in dnstap frame streams, never through Raft. Retention by days and size, pseudonymisation of client addresses with a keyed hash whose key rotates daily, sampling 1 in N, and a kill switch. The API reads the log through a reader behind the node-command interface with a cursor (docs/node-sync.md section 5), so that a controller never holds a copy; on the single node the reader is local, and in Phase 5 the same command reaches a remote node. Defaults per profile are TGL-15.
+
+### 2.10 Single node first, cluster-aware
+
+The owner's direction of 2026-10-17: Phase 2 (and Phase 3) deliver a working single node as early as possible and measure on it; the multi-node data plane is Phase 5. Not a licence to ignore the cluster: the rule is to build now exactly what would otherwise be rebuilt later, and nothing more.
+
+Built in Phase 2 because it would be rework later:
+
+- Zones and every DNS setting as rows in the replicated store, never in node-local files (2.1); the `dns` namespace and tables; the role-based subset of node sync declared in the contracts (which tables the `dns` role will receive) even though no node consumes it yet.
+- The `ZoneFeed`, `Index` and `Resolver` traits with the in-process implementation only; the engine takes revisions and deltas, never a store handle.
+- No writes from the engine: every change is a change set the store commits (2.4), so a remote node later needs a transport, not a redesign.
+- The RRset origin field (2.5), the per-worker metrics (OPS-21), the `dns.*` audit actions, the health rows in the shape the cluster page already shows for nodes.
+- The `dns` role as a role (ADR 0004): it starts and stops with its own switch inside the one process, so moving it to another process is placement, not code.
+
+Deferred to Phase 5:
+
+- The node-file feed and the node-sync subset implementation, the `Dns.Update` cluster message, a `dns` node without a controller, per-node zone selection, the per-node status route through node commands (in Phase 2 the status of the one node is served locally), the DNS parts of the three-process and VM labs, and every measurement that needs more than one Tenko node.
+- The same rule applies to Phase 3: DHCP on one node first; failover pairs and relay across nodes with the cluster work.
+
+Measurement rule: every Phase 2 figure is a single-node figure (the load generator may be another host). A later cluster figure is compared against it, so a slow step shows as the difference, not as a mystery.
 
 ## 3. Contracts and shared files (WP4.0)
 
@@ -206,12 +228,12 @@ The lead writes these with one Opus builder before any other package starts, as 
 - **Acceptance:** a zone file of the Spike A kind with 1 M records imports and exports to the same bytes; route tests for every operation (none at 501); the journal stays within its bound under churn; the CLI round trip in the acceptance tests.
 - **Size and risk:** L; R42.
 
-#### WP4.3 The `dns` role and the node feed (M)
+#### WP4.3 The `dns` role in the process and the plain forwarder (M)
 
-- **Owns:** `crates/tenko/src/serve` start step for the role, `tenko-cluster::node_sync` subset and commands for `dns`, the node-file feed, the health rows (`dns.status`), the systemd and Windows service bits for port 53 (capability `CAP_NET_BIND_SERVICE`, documented in deploy/README.md).
+- **Owns:** `crates/tenko/src/serve` start step for the role, the in-process `ZoneFeed` on the `DerivedIndex`, the health rows (`dns.status`), the `[dns]` configuration, a plain forwarder (P2-Q16), the systemd and Windows service bits for port 53 (capability `CAP_NET_BIND_SERVICE`, documented in deploy/README.md).
 - **Depends on:** WP4.0; WP4.1 for the index.
-- **Content:** 1. start order: the role waits for the first snapshot or the file, then listens; a node with no copy yet answers REFUSED and reports `dns.no_data`; 2. the in-process feed on a controller that runs `dns`; 3. the node-sync feed with atomic apply and the file; 4. the commands `dns.cache.flush`, `dns.stats`, `dns.log.read` and the report `dns.status`; 5. the config file keys `[dns]` (listeners, worker count, cache size, log) in `deploy/tenko.example.toml`; 6. the per-node status route `nodes/{id}/dns`.
-- **Acceptance:** a node serves after a restart with the controllers down (OPS-02, test in `acceptance_cluster`); a delta of 1,000 records applies in under one second and is visible in answers; the three-process cluster lab of Phase 1 runs with one `dns` node.
+- **Content:** 1. start order: the role builds the index from the store before it listens, and a rebuild after a snapshot install swaps atomically; 2. the in-process feed with deltas in revision order; 3. the local implementations of the command kinds `dns.cache.flush`, `dns.stats`, `dns.log.read` and the report `dns.status`, behind the node-command interface so that Phase 5 adds the remote path; 4. the config file keys `[dns]` (listeners, worker count, cache size, log, upstreams) in `deploy/tenko.example.toml`; 5. the status route `nodes/{id}/dns` for the one node; 6. the plain forwarder: queries outside the authoritative zones go to the configured upstreams over UDP and TCP with a timeout and retry, no cache, no policy, so that the node can stand in for the home resolver from this slice; Slice 5 replaces it with the cache and the policy engine behind the same `Resolver`.
+- **Acceptance:** the node serves its zones after a restart and after a snapshot install; a delta of 1,000 records applies in under one second and is visible in answers; a client behind the node resolves an outside name through the plain forwarder; the Phase 1 cluster lab stays green (regression only).
 - **Size and risk:** M; R43.
 
 #### WP4.4 Reverse zones, the DNS actuator, the move step (M)
@@ -354,7 +376,7 @@ graph LR
 |---|---|---|
 | M4.0 | WP4.0 | Workspace builds, model tests, deny, the allocator bench |
 | M4.1 | WP4.1, WP4.2, WP4.6 (three builders at once after M4.0) | Engine byte-exact tests, M16 loopback, zone round trip, fuzz targets listed |
-| M4.2 | WP4.3, WP4.4, WP4.5 | The three-process lab with a `dns` node; E17; UI scenarios |
+| M4.2 | WP4.3, WP4.4, WP4.5 | One node serves its zones and forwards the rest; E17; UI scenarios; the Phase 1 cluster lab still green |
 | M5.1 | WP5.1, WP5.3, WP5.4 (parallel) | Lab resolution through three upstream kinds; DoT and DoH in three TLS modes; log page |
 | M5.2 | WP5.2, WP5.5, WP5.6 | Lists and RRL; tiles; the E14 runbook; then the owner's cut-over |
 | M6.1 | WP6.1, WP6.4 (parallel) | BIND lab both directions; views |
@@ -365,16 +387,16 @@ Builders run as in Slice 3: local Opus agents in their own worktrees, briefed by
 
 ## 6. Measurements and exit checks
 
-Results go to `bench/phase2-dns/results/` with scripts, machine and versions. Linux figures come from the static musl binary, the one that ships; Windows figures from the release build. Loopback numbers are upper bounds and are labelled so.
+Results go to `bench/phase2-dns/results/` with scripts, machine and versions. Linux figures come from the static musl binary, the one that ships; Windows figures from the release build. Loopback numbers are upper bounds and are labelled so. Every figure is a single-node figure (section 2.10): one Tenko process, the load generator on the same host (loopback) or on another (real link).
 
 | # | Measurement | Threshold | Method | Slice |
 |---|---|---|---|---|
 | M16 | QPS per core, loopback, UDP and TCP (DNS-27) | Above 100k per core UDP; TCP documented | The Spike B load generator against `tenko serve --roles dns` with a 100,000-name zone, workers 1 to 16 | 4 |
-| M17 | Two hosts over a real link (DNS-27, ADR 0009) | Documented; the Phase 2 number that may be published | dnsperf and flamethrower from a VM and from the workstation against a `dns` node on another VM | 6 |
+| M17 | One node over a real link (DNS-27, ADR 0009) | Documented; the Phase 2 number that may be published | dnsperf and flamethrower from a VM and from the workstation against one Tenko node on another VM | 6 |
 | M18 | Zone load and index memory at 1 M and 6 M RRsets | Load under 60 s at 6 M; index memory under 1.5 GiB at 6 M, else the compact layout is scheduled | The Spike A data set through the zone file import and the feed | 4 |
 | M19 | IXFR delta and NOTIFY latency | A 100-record change reaches BIND within 5 s; the delta carries only the change | The lab-dns compose | 6 |
 | M20 | Signing time and re-sign rate | 1 M records signed under 5 min; a 100-record change re-signed under 1 s | The Spike A data set, ECDSAP256 and Ed25519 | 6 |
-| M21 | Dynamic update rate end to end | 1,000 updates/s sustained, p99 under 250 ms from `nsupdate` to the answer on the node | The three-process lab, then the VMs | 6 |
+| M21 | Dynamic update rate end to end | 1,000 updates/s sustained, p99 under 250 ms from `nsupdate` to the answer | One node; the same run on a cluster is a Phase 5 comparison | 6 |
 | M22 | M8 again: metrics cost on the query path (OPS-21) | Below 2 percent, p99 unchanged | M16 with metrics on and off | 6 |
 | M23 | M9 again: idle RSS with every role and the DNS module (OPS-15) | Below 100 MB on the musl binary | The Phase 1 M9 procedure with the `dns` role, the home zones and a 10,000-entry cache | 6 |
 | M24 | Cache behaviour | Hit ratio and p99 at a 1 M-name mixed run; serve-stale answers under an upstream cut | `bench/phase2-dns` scenario | 5 |
@@ -449,6 +471,16 @@ Ordered by when they are needed. Each recommendation is what the plan assumes if
 - Trade-offs: (a) keeps three slices of DNS work within the quota. (b) is possible if a builder is idle while the lab runs. (c) spends the phase on things the "Done when" does not name.
 - Recommendation: (a), with (b) if a slot opens. Needed before: WP4.0 (only so the exit document says where they went).
 
+**P2-Q15. The Phase 1 cluster parts that wait for the VMs (E9 on three VMs, M2 power cut, M4 catch-up, M7 on two hosts): move them to Phase 5 with the cluster work?**
+- Options: (a) record them in the Phase 1 exit document as deviations that Phase 5 closes, so Phase 1 exits on the one-machine lab results (20 of 20 kills, no committed write lost); (b) keep them as Phase 1 owner steps and run them before Phase 3; (c) run them now.
+- Trade-offs: (a) follows the single-node direction and frees the owner's VM work for the DNS measurements; the risk is that a transport defect waits until Phase 5. (b) keeps the Phase 1 promise but spends the VM effort on cluster checks before anyone runs DNS. (c) is the opposite of the direction.
+- Recommendation: (a); the cluster lab job in CI keeps the regression check weekly. Needed before: the Phase 1 exit document is closed.
+
+**P2-Q16. A plain forwarder in Slice 4, so the node is usable at home after the first slice?**
+- Options: (a) WP4.3 includes a forwarder without cache or policy (queries outside the zones go to the configured upstreams); (b) nothing until Slice 5.
+- Trade-offs: (a) costs about two builder-days and makes the first node a complete resolver for a test client at M4.2, which is the point of the direction; the Slice 5 resolver replaces it behind the same trait. (b) leaves the first node authoritative only, usable for its own zones but not as a client's resolver.
+- Recommendation: (a). Needed before: WP4.3.
+
 **P2-Q14. Does the owner want the home cut-over (E14) during Slice 5 or at the end of the phase?**
 - Options: (a) as soon as M5.2 is green, with the runbook and the rollback (point option 6 back); (b) at the end, after Slice 6.
 - Trade-offs: (a) gives real traffic and real findings early, on the owner's network, with a one-line rollback. (b) is safer for the family and delays the findings.
@@ -480,7 +512,7 @@ Ordered by when they are needed. Each recommendation is what the plan assumes if
 
 | When | Action |
 |---|---|
-| Before WP4.0 | Answer section 7 (P2-Q1 to P2-Q14); the recommendations are the plan's assumptions |
+| Before WP4.0 | Answer section 7 (P2-Q1 to P2-Q16); the recommendations are the plan's assumptions |
 | Before M4.2 | Nothing new: the three-process lab runs on the workstation |
 | Before WP5.6 and E14 | Choose the cut-over day; allow the change of DHCP option 6 on the existing DHCP server (reversible); confirm which upstreams the home uses (P2-Q5) |
 | Before WP6.1 and E15 | Allow zone transfer of one AD zone to the Tenko node's address on a domain controller (read only, revocable); the checklist comes with the package |
