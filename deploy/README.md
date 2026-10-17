@@ -20,8 +20,16 @@ with a notice; a role list without `controller` exits with status 2.
 
 ```
 cd ui && npm ci && npm run build && cd ..
-cargo build --release --locked -p tenko        # target/release/tenko
+cargo build --release --locked -p tenko --target x86_64-unknown-linux-musl   # Linux
+cargo build --release --locked -p tenko        # Windows: target\release\tenko.exe
 ```
+
+On Linux, build the static musl binary that the releases ship, which lands in
+`target/x86_64-unknown-linux-musl/release/tenko`. It needs the target
+(`rustup target add x86_64-unknown-linux-musl`) and `musl-gcc` (the `musl-tools` package on
+Debian and Ubuntu). A glibc build of the same source is not a supported binary: its
+allocator keeps the start-up peak and its idle memory fails OPS-15
+([bench/phase1-server/results/2026-10-16-m9-linux-memory.md](../bench/phase1-server/results/2026-10-16-m9-linux-memory.md)).
 
 The build script of `tenko-api` embeds `ui/dist` into the binary. A release build refuses
 the placeholder page; for Rust-only development set `TENKO_UI_STUB=1` and build without
@@ -164,7 +172,7 @@ of the unit lists the install steps; in short, as root:
 
 ```
 useradd --system --home-dir /var/lib/tenko --no-create-home --shell /usr/sbin/nologin tenko
-install -m 0755 target/release/tenko /usr/local/bin/tenko        # from the repository root
+install -m 0755 target/x86_64-unknown-linux-musl/release/tenko /usr/local/bin/tenko   # from the repository root
 install -d -m 0750 -o root -g tenko /etc/tenko
 install -m 0640 -o root -g tenko deploy/tenko.example.toml /etc/tenko/tenko.toml   # then edit
 tenko config check --config /etc/tenko/tenko.toml
@@ -308,7 +316,8 @@ data volume protects nothing.
   and a partition. Its README has the commands; `docs/cluster.md` section 12.10 says what
   the lab covers.
 
-The image is distroless (no shell, no curl). Its `HEALTHCHECK` runs `tenko health`, which
+The image is distroless and static (no shell, no curl, no C library: the binary is the
+static musl build). Its `HEALTHCHECK` runs `tenko health`, which
 asks `/api/v1/health/ready` over `https://localhost:8443` with the internal CA root and exits
 0 when the node is ready (5 when it answers that it is not, 7 when it cannot be reached). In
 `reverse_proxy` mode add `127.0.0.1` to the trusted proxies or override the check; probes

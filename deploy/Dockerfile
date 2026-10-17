@@ -2,6 +2,10 @@
 #
 # Container image for tenko (Tenko DDI): one binary, run as `tenko serve`.
 #
+# The binary is the static musl build that the release workflow ships for Linux
+# (x86_64-unknown-linux-musl, S3-Q10, OPS-01), so the runtime image carries no C library:
+# distroless/static.
+#
 # Build from the repository root, not from this directory:
 #
 #   docker build -f deploy/Dockerfile -t tenko .
@@ -90,9 +94,19 @@ RUN npm ci
 COPY ui/ ./
 RUN npm run build
 
-# Stage 2: the tenko binary.
+# Stage 2: the tenko binary, static for musl as in .github/workflows/release.yml.
 FROM rust:1-slim-bookworm AS builder
+# musl-tools provides musl-gcc, which the C code of aws-lc-sys and ring is built with for
+# the musl target. Nothing else is needed (no cmake, perl or clang).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends musl-tools \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
+# rust-toolchain.toml selects the toolchain, which is not the one of the base image: install
+# it with the musl target in its own layer, cached until the file changes.
+COPY rust-toolchain.toml ./
+RUN rustup toolchain install \
+    && rustup target add x86_64-unknown-linux-musl
 COPY . .
 # The build script of tenko-api embeds ui/dist into the binary; a release build refuses
 # the placeholder page that TENKO_UI_STUB=1 would give.
@@ -101,12 +115,12 @@ COPY --from=ui /src/ui/dist ui/dist
 # so the binary is copied out to /out inside the same RUN.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p tenko \
+    cargo build --release --locked -p tenko --target x86_64-unknown-linux-musl \
     && mkdir -p -m 0700 /out/state \
-    && cp target/release/tenko /out/tenko
+    && cp target/x86_64-unknown-linux-musl/release/tenko /out/tenko
 
-# Stage 3: runtime image.
-FROM gcr.io/distroless/cc-debian12:nonroot
+# Stage 3: runtime image. The binary is static and needs no libc, libgcc or libssl.
+FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=builder /out/tenko /usr/local/bin/tenko
 # Create the state directory owned by the distroless "nonroot" user (65532) so
 # that a new volume mounted here is writable (a named volume copies the owner and

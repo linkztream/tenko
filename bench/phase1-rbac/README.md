@@ -72,12 +72,18 @@ ended (a subscriber that fell behind).
 ```sh
 export CARGO_INCREMENTAL=0
 cd bench/phase1-rbac
-cargo build --release
+cargo build --release --target x86_64-unknown-linux-musl
 mkdir -p results/raw
-./target/release/phase1-rbac list --store mem  --out results/raw/m13-list-mem.json
-./target/release/phase1-rbac list --store raft --data-dir /path/to/scratch --out results/raw/m13-list-raft.json
-./target/release/phase1-rbac sse  --store mem  --out results/raw/m13-sse-mem.json
+BIN=./target/x86_64-unknown-linux-musl/release/phase1-rbac
+$BIN list --store mem  --out results/raw/m13-list-mem.json
+$BIN list --store raft --data-dir /path/to/scratch --out results/raw/m13-list-raft.json
+$BIN sse  --store mem  --out results/raw/m13-sse-mem.json
 ```
+
+On Linux the harness is built for the musl target, as the shipped `tenko` binary is (the
+release workflow, S3-Q10), so the measured code runs on the same C library and allocator
+(`rustup target add x86_64-unknown-linux-musl`, `musl-gcc` from `musl-tools`). On Windows
+build without `--target` and run `target/release/phase1-rbac`.
 
 Options: `--iterations` (30), `--warmup` (3), `--limit` (1000), `--mids` (100),
 `--leaves-per-mid` (5), `--hosts-per-leaf` (20), `--grants` (50), `--seconds` (30),

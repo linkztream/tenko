@@ -15,6 +15,11 @@
 #                  [--kek platform|file] [--keep-data]
 #
 # Put the work directory on a fast disk (default: a new directory under /tmp).
+#
+# Measure the binary that ships: the static musl build,
+#   cargo build -p tenko --release --locked --target x86_64-unknown-linux-musl
+# that is target/x86_64-unknown-linux-musl/release/tenko. A glibc build is reported with a
+# warning; its allocator keeps the start-up peak (results/2026-10-16-m9-linux-memory.md).
 
 set -u
 export LC_ALL=C
@@ -40,7 +45,7 @@ while [ $# -gt 0 ]; do
     --outdir) OUTDIR="$2"; shift 2 ;;
     --kek) KEK="$2"; shift 2 ;;
     --keep-data) KEEP=1; shift ;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -112,7 +117,10 @@ sample() {
 # ---- machine ------------------------------------------------------------------------------
 CPU=$(awk -F: '/model name/ { sub(/^ /, "", $2); print $2; exit }' /proc/cpuinfo)
 note "machine: $CPU, $(nproc) logical CPUs, $(awk '/MemTotal/ { printf "%.1f", $2 / 1048576 }' /proc/meminfo) GiB RAM, $(. /etc/os-release; echo "$PRETTY_NAME"), kernel $(uname -r)"
-note "binary: $BINARY ($(awk -v s="$(stat -c %s "$BINARY")" 'BEGIN { printf "%.1f", s / 1048576 }') MiB), $("$BINARY" --version)"
+LINKAGE=dynamic
+if ldd "$BINARY" 2>&1 | grep -Eq 'statically linked|not a dynamic executable'; then LINKAGE=static; fi
+note "binary: $BINARY ($(awk -v s="$(stat -c %s "$BINARY")" 'BEGIN { printf "%.1f", s / 1048576 }') MiB, $LINKAGE), $("$BINARY" --version)"
+[ "$LINKAGE" = static ] || note "WARNING: a dynamically linked binary; the shipped Linux binary is the static musl build"
 note "work dir: $WORKDIR; filesystem: $(df -PT "$WORKDIR" | awk 'NR == 2 { print $2 }')"
 note "kek provider: $KEK"
 

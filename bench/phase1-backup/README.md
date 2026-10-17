@@ -47,9 +47,14 @@ backups and restored store together, sampled every 100 ms).
 
 ```
 cd bench/phase1-backup
-CARGO_INCREMENTAL=0 TENKO_UI_DIST=<dir with an index.html> cargo run --release -- \
-    --records 1000000 --runs 3 --out-name m14
+CARGO_INCREMENTAL=0 TENKO_UI_DIST=<dir with an index.html> cargo run --release \
+    --target x86_64-unknown-linux-musl -- --records 1000000 --runs 3 --out-name m14
 ```
+
+On Linux the harness is built for the musl target, as the shipped `tenko` binary is (the
+release workflow, S3-Q10), so the measured code runs on the same C library and allocator
+(`rustup target add x86_64-unknown-linux-musl`, `musl-gcc` from `musl-tools`). On Windows
+leave out `--target x86_64-unknown-linux-musl`.
 
 | Option | Default | Meaning |
 |---|---|---|

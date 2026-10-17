@@ -37,10 +37,16 @@ idle phase.
 
 ### Run
 
-Build the release binary first (it embeds the web UI from `ui/dist`):
+Build the release binary first (it embeds the web UI from `ui/dist`). On Linux build the
+static musl binary, the one the release workflow ships; a glibc build of the same source keeps
+glibc malloc's start-up peak and fails OPS-15 where the shipped binary passes
+([results/2026-10-16-m9-linux-memory.md](results/2026-10-16-m9-linux-memory.md)). It needs the
+musl target and `musl-gcc` (`rustup target add x86_64-unknown-linux-musl`, the `musl-tools`
+package):
 
 ```sh
-cargo build -p tenko --release
+cargo build -p tenko --release --locked --target x86_64-unknown-linux-musl   # Linux
+cargo build -p tenko --release --locked                                      # Windows
 ```
 
 Windows:
@@ -52,8 +58,11 @@ pwsh -File bench\phase1-server\m9-idle-rss.ps1 -Binary C:\path\to\target\release
 Linux (also inside WSL):
 
 ```sh
-bench/phase1-server/m9-idle-rss.sh --binary /path/to/target/release/tenko
+bench/phase1-server/m9-idle-rss.sh --binary /path/to/target/x86_64-unknown-linux-musl/release/tenko
 ```
+
+The Linux script records whether the binary is statically linked and prints a warning for a
+dynamically linked one.
 
 Options (the Windows parameter names are the same with a leading dash and CamelCase):
 

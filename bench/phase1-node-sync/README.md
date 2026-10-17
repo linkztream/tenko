@@ -46,10 +46,10 @@ The size of a transfer is chosen so that it takes 5 to 20 seconds. The largest v
 
 ```
 cd ui && npm ci && npm run build && cd ..
-cargo build -p tenko --release --locked
+cargo build -p tenko --release --locked --target x86_64-unknown-linux-musl
 ```
 
-  (a release build refuses the placeholder UI; do not set `TENKO_UI_STUB`). The driver uses `target/release/tenko`, or `TENKO_BIN`, or `--binary PATH`.
+  (a release build refuses the placeholder UI; do not set `TENKO_UI_STUB`). This is the static musl binary that the release workflow ships for Linux, so the measurement runs on the binary that ships (it needs `rustup target add x86_64-unknown-linux-musl` and `musl-gcc` from `musl-tools`). The driver uses `target/x86_64-unknown-linux-musl/release/tenko`, or `TENKO_BIN`, or `--binary PATH`.
 - Free loopback ports (the driver picks them), `jq` is not needed.
 
 ## Run

@@ -28,7 +28,8 @@ const repo = resolve(here, "..", "..");
 
 // ---------------------------------------------------------------- options
 const options = {
-  binary: process.env.TENKO_BIN ?? join(repo, "target", "release", "tenko"),
+  // The shipped Linux binary: the static musl build (README.md).
+  binary: process.env.TENKO_BIN ?? join(repo, "target", "x86_64-unknown-linux-musl", "release", "tenko"),
   changes: 25,
   caps: [64, 256],
   capRuns: 5,

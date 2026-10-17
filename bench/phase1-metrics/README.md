@@ -55,6 +55,17 @@ target/release/phase1-metrics pairs --listen 127.0.0.1:5399 --workers 4 --out re
 target/release/phase1-metrics report --input results/raw/m8-windows.jsonl
 ```
 
+On Linux build for the musl target, as the shipped `tenko` binary is (the release workflow,
+S3-Q10), so the measured code runs on the same C library and allocator; the binary is then
+`target/x86_64-unknown-linux-musl/release/phase1-metrics` (it needs
+`rustup target add x86_64-unknown-linux-musl` and `musl-gcc` from `musl-tools`):
+
+```
+cargo test --release --target x86_64-unknown-linux-musl
+cargo build --release --target x86_64-unknown-linux-musl
+target/x86_64-unknown-linux-musl/release/phase1-metrics pairs --listen 127.0.0.2:5399 --workers 1 --out results/raw/m8-linux.jsonl
+```
+
 On Windows UDP port 5353 is held by the system mDNS responder; use another port, such as 5399.
 In the WSL2 distribution of the spike's Linux results, traffic to 127.0.0.1 never reaches local
 sockets: use `--listen 127.0.0.2:5399` there (still the `lo` device; see the spike's README), and
