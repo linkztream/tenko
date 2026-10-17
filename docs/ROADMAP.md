@@ -140,7 +140,7 @@ Topology graph library: the candidates are sigma.js with graphology (WebGL, thou
 
 ## Phase 2: DNS
 
-Execution plan: [plans/phase-2-plan.md](plans/phase-2-plan.md) (draft of 2026-10-17; the owner's decisions in its section 7 are pending).
+Execution plan: [plans/phase-2-plan.md](plans/phase-2-plan.md) (accepted on 2026-10-17 with its section 7 decisions; Phase 2 builds and measures a single node, section 2.10).
 
 ### Deliverables
 
@@ -213,6 +213,7 @@ Verification is by query replay (MIG-05): live queries are sampled from dnstap o
 
 ### Deliverables
 
+- **Multi-node data plane**: `dns` and `dhcp` nodes fed by the controllers through node sync, DHCP failover pairs, the cluster labs on VMs (E9, M2, M4 and M7 of Phase 1, deviation 74 of its exit document), the single-node figures of Phases 2 and 3 compared against the cluster (owner's direction of 2026-10-17: single node first).
 - **Multi-site ownership**: site-local Raft groups for the objects a site owns, so a cut-off site keeps changing its own prefixes, scopes and zones (OPS-27).
 - **Recursive resolver**: Tenko's own recursive resolver with DNSSEC validation, QNAME minimization, aggressive NSEC and RFC 5011 trust anchor maintenance (DNS-03, DNS-13, DNS-34). Until then, recursion is served by the forwarder, cache and RPZ combination from Phase 2.
 - **Identity**: OIDC and SAML, LDAP group mapping, SPNEGO and SCIM; PKCS#11 and KMS support for the KEK (IAM-11 to IAM-14, IAM-17).

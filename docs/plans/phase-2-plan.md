@@ -1,6 +1,6 @@
 # Phase 2 plan: DNS
 
-- Status: Draft for the owner's decisions (section 7); nothing in it binds until the owner answers. The owner's direction of 2026-10-17, single node first and the cluster data plane in Phase 5, is worked in (section 2.10)
+- Status: Accepted; the owner took every decision of section 7 (P2-Q1 to P2-Q16) on 2026-10-17 without change, and the plan binds from there (changes through rule 2.8 of the execution plan). The owner's direction of the same day, single node first and the cluster data plane in Phase 5, is section 2.10
 - Date: 2026-10-17
 - Scope: Phase 2 of [ROADMAP.md](../ROADMAP.md) (deliverables and "Done when"), written against `main` at `701a5ef` after the Phase 1 exit work recorded in [phase-1-exit.md](phase-1-exit.md). Requirement IDs refer to [REQUIREMENTS.md](../REQUIREMENTS.md), toggles (TGL) and never-off items (NEVER) to [SECURITY-PROFILES.md](../SECURITY-PROFILES.md), RFC targets to [CONFORMANCE.md](../CONFORMANCE.md). Exit criteria, measurements and risks continue the Phase 1 series (E13 onward, M16 onward, R38 onward) so that one trace covers the project.
 
@@ -403,6 +403,8 @@ Results go to `bench/phase2-dns/results/` with scripts, machine and versions. Li
 | M25 | Blocklist compile and match | 1 M names under 2 s; match cost constant per label | WP5.2 bench | 5 |
 
 ## 7. Owner decisions
+
+**Decided 2026-10-17:** the owner accepted every recommendation below (P2-Q1 to P2-Q16) without change; the plan builds on them. In short: the slice order of 1.3; zones in the store with one `ZoneFeed` trait (ADR 0017); updates as change sets through the store, SERVFAIL when the store refuses; controller-side DNSSEC signing with vault keys, imported signed zones for the offline case (ADR 0018); no vendor upstream default; controller-fetched blocklists; node-local query logs; the three TLS modes for DoT and DoH, no ACME; the owner's VMs for the real-link measurements; BIND in compose and Windows DNS as an owner step; reverse zones on by default with `<first>/<len>`; the origin field from the start; the connector and scanner carry-overs out; the home cut-over during Slice 5; the Phase 1 VM parts to Phase 5 (deviation 74 of the exit document); the plain forwarder in Slice 4.
 
 Ordered by when they are needed. Each recommendation is what the plan assumes if the owner accepts it.
 

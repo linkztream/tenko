@@ -153,4 +153,4 @@ Follow-ups left by the WP3.5a merge (2026-10-14): WP3.5b (the `metrics` SSE topi
 
 ## Phase 2
 
-The Phase 2 plan is [phase-2-plan.md](phase-2-plan.md), drafted on 2026-10-17 while the WP3.8b live parts wait for the owner; its section 7 holds the decisions the owner takes before WP4.0 starts. A `phase-2-status.md` takes over from this file when the first Phase 2 package is merged.
+The Phase 2 plan is [phase-2-plan.md](phase-2-plan.md), drafted on 2026-10-17 while the WP3.8b live parts wait for the owner and accepted the same day (section 7, P2-Q1 to P2-Q16, without change; single node first, section 2.10). WP3.8b shrinks with it: E9 on the VMs, M2, M4, M7 and the final M1, M3 and M12 moved to Phase 5 (deviation 74); E2, E4 to E8 and E10 stay with the owner. A `phase-2-status.md` takes over from this file when the first Phase 2 package is merged.
