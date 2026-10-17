@@ -14,8 +14,8 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 | ID | Priority | Tests | Measurements | Documents |
 |---|---|---|---|---|
 | DNS-01 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-1-exit.md`<br>and 2 more |
-| DNS-02 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/upstream.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 2 more |
-| DNS-04 | Must | - | - | `docs/plans/phase-2-plan.md` |
+| DNS-02 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/catalog.rs`<br>`crates/tenko-dns/src/upstream.rs`<br>`docs/CONFORMANCE.md`<br>and 3 more |
+| DNS-04 | Must | - | - | `crates/tenko-dns/src/transport/mod.rs`<br>`docs/dns-engine.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-05 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-06 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-07 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
@@ -29,7 +29,7 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 | DNS-17 | Must | - | - | `crates/tenko-dns/src/rate.rs`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-18 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-19 | Must | - | - | `crates/tenko-core/src/dns.rs`<br>`docs/SECURITY-PROFILES.md`<br>`docs/plans/phase-2-plan.md` |
-| DNS-20 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-core/src/dns/name.rs`<br>`crates/tenko-core/src/dns/rrset.rs`<br>`crates/tenko-dns/src/index.rs`<br>and 7 more |
+| DNS-20 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-core/src/dns/name.rs`<br>`crates/tenko-core/src/dns/rrset.rs`<br>`crates/tenko-dns/src/catalog.rs`<br>and 9 more |
 | DNS-21 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-22 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-23 | Must | - | - | `crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/policy.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |

@@ -167,6 +167,13 @@ pub fn suffix(wire: &[u8], skip: usize) -> &[u8] {
     wire.get(pos..).unwrap_or(&[0])
 }
 
+/// Whether the wire name `name` is at or below the wire name `suffix` (both lowercase).
+pub fn is_within(name: &[u8], suffix: &[u8]) -> bool {
+    let labels = label_count(name);
+    let suffix_labels = label_count(suffix);
+    labels >= suffix_labels && self::suffix(name, labels - suffix_labels) == suffix
+}
+
 /// The number of labels of a wire name, the root not counted.
 pub fn label_count(wire: &[u8]) -> usize {
     Labels { wire }.count()

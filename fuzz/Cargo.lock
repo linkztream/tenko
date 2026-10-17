@@ -3154,11 +3154,16 @@ dependencies = [
 name = "tenko-dns"
 version = "0.0.1"
 dependencies = [
+ "arc-swap",
+ "aws-lc-rs",
  "bytes",
  "domain",
+ "ipnet",
+ "socket2",
  "tenko-core",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

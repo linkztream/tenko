@@ -1,27 +1,34 @@
 //! The no-allocation rule of the query path (ADR 0009, risk R39), as a test: a counting
 //! global allocator (`stats_alloc`, the approach of the Spike B bench) wraps the system
 //! allocator, and `Codec::parse`, `Codec::build` and `Index::lookup` must not allocate once
-//! their buffers have capacity. The first test proves that the counter sees an allocation,
-//! so a pass means something.
+//! their buffers have capacity; nor must the whole path of a query through the responder,
+//! the authoritative resolver, the production index and the codec, with metrics and
+//! cookies on. The first test proves that the counter sees an allocation, so a pass means
+//! something.
 //!
 //! The allocator counts every thread of the process, so the file has one test that runs
 //! the measured sections one after another: no other test of the binary runs beside them.
 
-use std::{alloc::System, hint::black_box, net::Ipv4Addr};
+use std::{alloc::System, hint::black_box, net::Ipv4Addr, time::Instant};
 
 use stats_alloc::{INSTRUMENTED_SYSTEM, Region, StatsAlloc};
 use tenko_core::{
     Revision,
     dns::{
-        DnsName, Origin, Rdata, RecordData, RrSet, ScopeName, SoaDefaults, Zone, ZoneId, ZoneKind,
+        DnsName, Origin, QueryTransport, Rdata, RecordData, RrSet, ScopeName, SoaDefaults, Zone,
+        ZoneId, ZoneKind,
     },
     ipam::Stamp,
     principal::{Principal, SystemComponent},
 };
 use tenko_dns::{
     AnswerBuf, Codec, DnsData, DomainCodec, Index, Lookup, MemIndex, NameBuf, Request,
+    authoritative::Authoritative,
+    catalog::{Catalog, CatalogHandle},
     codec::{Owner, Section},
+    cookie::CookieSecret,
     index::DefaultScopes,
+    respond::{Clock, Conn, Reply, Responder, Scratch},
     wire::{self, MAX_MESSAGE_LEN, TsigRecord},
 };
 
@@ -262,6 +269,180 @@ fn index_lookups_do_not_allocate() {
     );
 }
 
+fn zone_row() -> Zone {
+    Zone {
+        id: ZoneId::generate(),
+        name: DnsName::new("example.test").expect("name"),
+        kind: ZoneKind::Primary,
+        tenant: None,
+        scopes: vec![tenko_core::dns::ZoneScope::default_scope()],
+        serial: tenko_core::dns::SerialPolicy::default(),
+        soa: SoaDefaults::new(
+            DnsName::new("ns1.example.test").expect("name"),
+            DnsName::new("hostmaster.example.test").expect("name"),
+        ),
+        transfer: tenko_core::dns::TransferPolicy::default(),
+        update: tenko_core::dns::UpdatePolicy::default(),
+        dnssec: tenko_core::dns::DnssecPolicy::default(),
+        source: None,
+        reverse_of: None,
+        description: None,
+        created: stamp(),
+        updated: stamp(),
+    }
+}
+
+fn dns_name(text: &str) -> DnsName {
+    DnsName::new(text).expect("name")
+}
+
+fn address(last: u8) -> RecordData {
+    RecordData::A {
+        address: Ipv4Addr::new(192, 0, 2, last),
+    }
+}
+
+/// A zone with every kind of answer the full path writes.
+fn full_image() -> DnsData {
+    let zone = zone_row();
+    let mut image = DnsData::at(Revision(1));
+    let mut add = |owner: &str, data: RecordData| {
+        let set = RrSet {
+            zone: zone.id,
+            scope: ScopeName::DEFAULT,
+            name: dns_name(owner),
+            rtype: data.rtype(),
+            ttl: 300,
+            rdata: vec![Rdata::from_data(&data)],
+            origin: Origin::Manual,
+            key: None,
+            updated: stamp(),
+        };
+        image.rrsets.insert(set.key(), set);
+    };
+    add(
+        "example.test",
+        RecordData::Soa {
+            mname: dns_name("ns1.example.test"),
+            rname: dns_name("hostmaster.example.test"),
+            serial: 1,
+            refresh: 3600,
+            retry: 900,
+            expire: 1_209_600,
+            minimum: 300,
+        },
+    );
+    add(
+        "example.test",
+        RecordData::Ns {
+            host: dns_name("ns1.example.test"),
+        },
+    );
+    add("ns1.example.test", address(53));
+    for n in 0..1000u32 {
+        let last = u8::try_from(n % 250).expect("octet");
+        add(&format!("host-{n}.example.test"), address(last));
+    }
+    add("*.wild.example.test", address(9));
+    add(
+        "alias.example.test",
+        RecordData::Cname {
+            target: dns_name("host-1.example.test"),
+        },
+    );
+    add(
+        "mail.example.test",
+        RecordData::Mx {
+            preference: 10,
+            exchange: dns_name("host-2.example.test"),
+        },
+    );
+    add(
+        "old.example.test",
+        RecordData::Dname {
+            target: dns_name("example.test"),
+        },
+    );
+    add(
+        "child.example.test",
+        RecordData::Ns {
+            host: dns_name("ns.child.example.test"),
+        },
+    );
+    add("ns.child.example.test", address(54));
+    image.zones.insert(zone.id, zone);
+    image
+}
+
+/// Queries of every kind the full path answers: positive, mixed case, NXDOMAIN, NODATA,
+/// wildcard, CNAME, MX with additional data, DNAME, referral with glue, ANY, outside the
+/// zones, a client cookie and an EDNS version 1.
+fn full_queries() -> Vec<Vec<u8>> {
+    let mut queries: Vec<Vec<u8>> = [
+        ("host-7.example.test", 1u16),
+        ("HOST-8.Example.TEST", 1),
+        ("nohost.example.test", 1),
+        ("host-9.example.test", 28),
+        ("x.wild.example.test", 1),
+        ("alias.example.test", 1),
+        ("mail.example.test", 15),
+        ("host-3.old.example.test", 1),
+        ("www.child.example.test", 1),
+        ("example.test", 255),
+        ("www.example.org", 1),
+    ]
+    .iter()
+    .map(|(name, qtype)| {
+        let mut query = Vec::new();
+        wire::write_query(&mut query, 0x4242, name, *qtype, Some(1232));
+        query
+    })
+    .collect();
+    // An OPT with a client cookie: the empty OPT's data length, then the option.
+    let mut cookie = Vec::new();
+    wire::write_query(&mut cookie, 9, "host-7.example.test", 1, Some(1232));
+    let len = cookie.len();
+    cookie[len - 2..].copy_from_slice(&12u16.to_be_bytes());
+    cookie.extend_from_slice(&[0, 10, 0, 8, 1, 2, 3, 4, 5, 6, 7, 8]);
+    queries.push(cookie);
+    // EDNS version 1: the version octet is the sixth from the end of the empty OPT.
+    let mut badvers = Vec::new();
+    wire::write_query(&mut badvers, 10, "host-7.example.test", 1, Some(1232));
+    let at = badvers.len() - 5;
+    badvers[at] = 1;
+    queries.push(badvers);
+    queries
+}
+
+fn the_full_query_path_does_not_allocate() {
+    let catalog = CatalogHandle::new(Catalog::build(&full_image()));
+    let responder = Responder::new(
+        Authoritative::new(catalog),
+        CookieSecret::with_secret([5; 16]),
+    )
+    .with_metrics(true);
+    let queries = full_queries();
+    let mut scratch = Scratch::new();
+    let clock = Clock::now();
+    let conn = Conn {
+        client: "192.0.2.77:40000".parse().expect("client"),
+        local: "192.0.2.53:53".parse().expect("local"),
+        transport: QueryTransport::Udp,
+    };
+    let (allocations, reallocations, bytes) = measure(500, || {
+        for query in &queries {
+            let reply = responder.respond(query, &conn, &clock, Instant::now(), &mut scratch);
+            assert_eq!(reply, Reply::Send);
+            black_box(&scratch.out);
+        }
+    });
+    assert_eq!(
+        (allocations, reallocations, bytes),
+        (0, 0, 0),
+        "the full query path allocated"
+    );
+}
+
 #[test]
 fn the_query_path_allocates_nothing() {
     // First: a pass of the checks below means something.
@@ -269,4 +450,5 @@ fn the_query_path_allocates_nothing() {
     parse_and_build_do_not_allocate();
     truncation_and_formerr_do_not_allocate();
     index_lookups_do_not_allocate();
+    the_full_query_path_does_not_allocate();
 }

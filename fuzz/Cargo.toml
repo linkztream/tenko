@@ -173,3 +173,10 @@ path = "fuzz_targets/dns_codec.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "dns_edns"
+path = "fuzz_targets/dns_edns.rs"
+test = false
+doc = false
+bench = false

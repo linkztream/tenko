@@ -3,7 +3,10 @@
 //! registry of `tenko_core::metrics` sums the shards when it encodes (docs/observability.md).
 //! Counter names carry no `_total`: the encoder adds it.
 
-use tenko_core::metrics::Desc;
+use tenko_core::{
+    dns::QueryTransport,
+    metrics::{CounterVec, Desc, HistogramVec, Registry},
+};
 
 /// Query latency buckets in microseconds: 50 µs to 2 s.
 pub const LATENCY_BUCKETS_US: &[u64] = &[
@@ -112,3 +115,130 @@ pub const ALL: [&Desc; 13] = [
     &SIGNING_DURATION,
     &LOG_DROPPED,
 ];
+
+/// The query counter of the engine: [`QUERIES`] by transport, view and RCODE, counted on
+/// the calling worker's shard. Sealed by [`seal`].
+pub static QUERY_COUNTER: CounterVec = CounterVec::new(QUERIES);
+
+/// The latency histogram of the engine: [`QUERY_DURATION`] by transport, in microseconds.
+/// Sealed by [`seal`].
+pub static QUERY_LATENCY: HistogramVec = HistogramVec::new(QUERY_DURATION);
+
+/// The `proto` label values, in the order of [`proto_index`].
+pub const PROTOS: [&str; 4] = ["udp", "tcp", "dot", "doh"];
+
+/// The `view` label values: the implicit default view, and any view of the view table.
+/// Per-view series come with the management of views (WP6.4), when the view names are
+/// known at sealing.
+pub const VIEWS: [&str; 2] = ["default", "named"];
+
+/// The `rcode` label values, in the order of [`rcode_index`]; `other` is every RCODE not
+/// listed.
+pub const RCODES: [&str; 10] = [
+    "noerror",
+    "formerr",
+    "servfail",
+    "nxdomain",
+    "notimp",
+    "refused",
+    "notauth",
+    "badvers",
+    "badcookie",
+    "other",
+];
+
+/// The series index of a transport in [`QUERY_LATENCY`].
+pub fn proto_index(transport: QueryTransport) -> u16 {
+    match transport {
+        QueryTransport::Udp => 0,
+        QueryTransport::Tcp => 1,
+        QueryTransport::Dot => 2,
+        QueryTransport::Doh => 3,
+    }
+}
+
+/// The position of an RCODE in [`RCODES`].
+pub fn rcode_index(rcode: u16) -> u16 {
+    match rcode {
+        0..=5 => rcode,
+        9 => 6,
+        16 => 7,
+        23 => 8,
+        _ => 9,
+    }
+}
+
+/// The series index of [`QUERY_COUNTER`] for a transport, a view (`named`: a view of the
+/// table matched) and an RCODE.
+pub fn query_index(transport: QueryTransport, named: bool, rcode: u16) -> u16 {
+    // 4 x 2 x 10 series, so the products stay far below u16::MAX.
+    (proto_index(transport) * 2 + u16::from(named)) * 10 + rcode_index(rcode)
+}
+
+/// Seals the engine's own families with every series, once per process. Allocates; the
+/// updates after it do not.
+pub fn seal() {
+    let mut rows: Vec<[&str; 3]> = Vec::with_capacity(PROTOS.len() * VIEWS.len() * RCODES.len());
+    for proto in PROTOS {
+        for view in VIEWS {
+            for rcode in RCODES {
+                rows.push([proto, view, rcode]);
+            }
+        }
+    }
+    let series: Vec<&[&str]> = rows.iter().map(|row| &row[..]).collect();
+    QUERY_COUNTER.seal(&series);
+    let protos: Vec<[&str; 1]> = PROTOS.iter().map(|proto| [*proto]).collect();
+    let series: Vec<&[&str]> = protos.iter().map(|row| &row[..]).collect();
+    QUERY_LATENCY.seal(&series);
+}
+
+/// Seals the engine's families and registers them with `registry` (the role start step of
+/// WP4.3 calls it with the process registry).
+pub fn register(registry: &Registry) {
+    seal();
+    registry.register(&QUERY_COUNTER);
+    registry.register(&QUERY_LATENCY);
+}
+
+#[cfg(test)]
+mod tests {
+    use tenko_core::metrics::{check, encode};
+
+    use super::*;
+
+    #[test]
+    fn the_engine_families_encode_and_check() {
+        let registry = Registry::new();
+        register(&registry);
+        QUERY_COUNTER.inc(query_index(QueryTransport::Tcp, true, 3));
+        QUERY_LATENCY.observe(proto_index(QueryTransport::Udp), 120);
+        let mut text = String::new();
+        encode(&registry.snapshot(), &mut text);
+        check(&text).expect("valid OpenMetrics");
+        assert!(text.contains(
+            "tenko_dns_queries_total{proto=\"tcp\",view=\"named\",rcode=\"nxdomain\"} 1
+"
+        ));
+        assert!(text.contains(
+            "tenko_dns_query_duration_seconds_bucket{proto=\"udp\",le=\"0.00025\"} 1
+"
+        ));
+        assert_eq!(QUERY_COUNTER.len(), 80);
+        let mut seen = std::collections::BTreeSet::new();
+        for transport in [
+            QueryTransport::Udp,
+            QueryTransport::Tcp,
+            QueryTransport::Dot,
+            QueryTransport::Doh,
+        ] {
+            for named in [false, true] {
+                for rcode in [0, 1, 2, 3, 4, 5, 9, 16, 23, 7] {
+                    assert!(seen.insert(query_index(transport, named, rcode)));
+                }
+            }
+        }
+        assert_eq!(seen.len(), 80);
+        assert!(seen.iter().all(|index| *index < 80));
+    }
+}

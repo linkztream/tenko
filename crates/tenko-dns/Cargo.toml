@@ -8,11 +8,16 @@ license.workspace = true
 publish = false
 
 [dependencies]
+arc-swap = { workspace = true }
+aws-lc-rs = { workspace = true }
 bytes = { workspace = true }
 domain = { workspace = true }
+ipnet = { workspace = true }
+socket2 = { workspace = true }
 tenko-core = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 
 [dev-dependencies]
 hickory-proto = { workspace = true }

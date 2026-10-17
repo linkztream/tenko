@@ -31,10 +31,7 @@ use super::{
 };
 use crate::{
     name::NameBuf,
-    wire::{
-        self, CLASS_ANY, OPTION_COOKIE, OPTION_EXTENDED_ERROR, RawRecord, SERVER_UDP_PAYLOAD,
-        TYPE_OPT, TYPE_TSIG,
-    },
+    wire::{self, CLASS_ANY, OPTION_COOKIE, OPTION_EXTENDED_ERROR, RawRecord, TYPE_OPT, TYPE_TSIG},
 };
 
 type Target = StaticCompressor<Vec<u8>>;
@@ -256,8 +253,11 @@ impl DomainCodec {
         }
         let mut additional = authority.additional();
         let mut dropped = 0;
-        for record in answer.section(Section::Additional) {
+        for (index, record) in answer.section(Section::Additional).enumerate() {
             if dropped > 0 || push_record(&mut additional, query, &record).is_err() {
+                if index < answer.required_additional() {
+                    return (additional, false, 0);
+                }
                 dropped += 1;
             }
         }
@@ -273,7 +273,7 @@ impl DomainCodec {
     ) -> Result<(), CodecError> {
         additional
             .opt(|opt| {
-                opt.set_udp_payload_size(SERVER_UDP_PAYLOAD);
+                opt.set_udp_payload_size(answer.udp_payload);
                 opt.set_dnssec_ok(dnssec_ok);
                 if answer.rcode > 0x0f {
                     opt.set_rcode(OptRcode::masked_from_int(answer.rcode));
@@ -459,7 +459,11 @@ impl Codec for DomainCodec {
             answer,
             limit,
         )?;
-        let (mut additional, fits, dropped) = Self::push_sections(message, query, answer);
+        let (mut additional, fits, dropped) = if answer.truncated {
+            (message.additional(), false, 0)
+        } else {
+            Self::push_sections(message, query, answer)
+        };
         let mut outcome = BuildOutcome {
             truncated: !fits,
             additional_dropped: dropped,

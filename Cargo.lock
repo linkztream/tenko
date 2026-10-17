@@ -3360,15 +3360,20 @@ version = "0.0.1"
 name = "tenko-dns"
 version = "0.0.1"
 dependencies = [
+ "arc-swap",
+ "aws-lc-rs",
  "bytes",
  "domain",
  "hickory-proto",
+ "ipnet",
  "proptest",
+ "socket2",
  "stats_alloc",
  "tenko-core",
  "thiserror 2.0.21",
  "time",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

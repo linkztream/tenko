@@ -353,3 +353,65 @@ fn the_answer_buffer_never_grows() {
     assert_eq!(answer.records().count(), 0);
     assert_eq!(answer.records.capacity(), capacity);
 }
+
+#[test]
+fn a_forced_truncation_and_missing_required_glue_set_tc() {
+    // The slip: header, question and OPT with TC whatever the records.
+    let message = query("www.example.test", A, Some(1232));
+    let mut slip = answer_a();
+    slip.truncated = true;
+    let (out, outcome) = build(&message, &slip, None);
+    assert!(outcome.truncated);
+    let header = parse_header(&out).expect("header");
+    assert!(header.tc);
+    assert_eq!((header.ancount, header.nscount, header.arcount), (0, 0, 1));
+    // The same bytes as the overflow path: only TC and OPT after the question.
+    let (overflow, _) = build(&message, &slip, Some(60));
+    assert_eq!(out, overflow);
+    // A referral whose required glue does not fit is truncated; optional glue is dropped.
+    let referral = |required: bool| {
+        let mut answer = AnswerBuf::with_capacity(64, 8192);
+        answer
+            .push(
+                Section::Authority,
+                Owner::Name(b"\x05child\x07example\x04test\x00"),
+                NS,
+                300,
+                b"\x02ns\x05child\x07example\x04test\x00",
+            )
+            .expect("push");
+        for last in 0..40u8 {
+            answer
+                .push(
+                    Section::Additional,
+                    Owner::Name(b"\x02ns\x05child\x07example\x04test\x00"),
+                    A,
+                    300,
+                    &[192, 0, 2, last],
+                )
+                .expect("push");
+            if required && last == 0 {
+                answer.require_additional();
+            }
+        }
+        answer
+    };
+    let small = query("www.child.example.test", A, None);
+    let (out, outcome) = build(&small, &referral(true), Some(65));
+    assert!(outcome.truncated, "the required glue did not fit");
+    assert!(parse_header(&out).expect("header").tc);
+    let (out, outcome) = build(&small, &referral(true), None);
+    assert!(!outcome.truncated);
+    assert!(outcome.additional_dropped > 0, "optional glue left out");
+    let header = parse_header(&out).expect("header");
+    assert!(!header.tc && header.arcount > 0);
+    let (_, outcome) = build(&small, &referral(false), Some(65));
+    assert!(!outcome.truncated, "no glue is required");
+    let mut cleared = referral(true);
+    cleared.clear();
+    assert_eq!(
+        (cleared.required_additional(), cleared.truncated),
+        (0, false)
+    );
+    assert!(cleared.is_empty());
+}

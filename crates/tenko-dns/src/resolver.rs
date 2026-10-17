@@ -7,11 +7,12 @@
 //! wait for an upstream is handed back as [`Resolution::Forward`]; the transport runs the
 //! [`Upstream`](crate::upstream::Upstream) exchange and writes its answer.
 //!
-//! WP4.1 implements the authoritative half on the [`Index`](crate::index::Index), WP4.3
+//! WP4.1 implements the authoritative half on the [`Index`](crate::index::Index)
+//! ([`crate::authoritative::Authoritative`]), WP4.3
 //! the plain forwarder of Slice 4, WP5.1 the cache and the forwarder rules behind the same
 //! trait.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Instant};
 
 use tenko_core::dns::{ForwardRuleId, QueryTransport, ViewId};
 
@@ -31,6 +32,8 @@ pub struct QueryContext<'a> {
     /// The minute of the day in UTC, 0 to 1439 (the time test of a view), read once per
     /// batch by the worker.
     pub minute_of_day: u16,
+    /// When the query arrived (the rate limiter's clock).
+    pub now: Instant,
 }
 
 /// What the resolver did with a query.

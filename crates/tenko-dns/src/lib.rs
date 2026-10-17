@@ -24,7 +24,10 @@
 //! keep the engine unaware of where its rows come from, so the node-file feed of Phase 5
 //! adds a feed, not a redesign.
 
+pub mod authoritative;
+pub mod catalog;
 pub mod codec;
+pub mod cookie;
 pub mod feed;
 pub mod index;
 pub mod log;
@@ -33,6 +36,10 @@ pub mod name;
 pub mod policy;
 pub mod rate;
 pub mod resolver;
+pub mod respond;
+pub mod server;
+pub mod transport;
+pub mod tree;
 pub mod upstream;
 pub mod wire;
 

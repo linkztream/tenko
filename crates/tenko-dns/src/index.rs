@@ -411,15 +411,17 @@ impl Index for MemIndex {
             .get(&entry.apex)
             .and_then(|apex| apex.get(Rtype::SOA));
         let labels = name::label_count(qname);
-        // Walk down from below the apex to the name: cuts and DNAMEs first.
+        // Walk down from the apex to the name: cuts (below the apex) and DNAMEs (at the
+        // apex too, RFC 6672) first.
         let mut encloser: &[u8] = &entry.apex;
-        for depth in entry.labels + 1..=labels {
+        for depth in entry.labels..=labels {
             let current = name::suffix(qname, labels - depth);
             let Some(node) = data.nodes.get(current) else {
                 break;
             };
             let at_name = depth == labels;
-            if let Some(ns) = node.get(Rtype::NS)
+            if depth > entry.labels
+                && let Some(ns) = node.get(Rtype::NS)
                 && !(at_name && qtype == Rtype::DS)
             {
                 return Lookup::Delegation {

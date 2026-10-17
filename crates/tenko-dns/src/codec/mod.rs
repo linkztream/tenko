@@ -17,7 +17,10 @@
 //! record, with the cookie and the extended error, is reserved before any record. When an
 //! answer or authority record does not fit, the response is the header, the question and
 //! OPT with TC set (RFC 2181, section 9; RFC 6891, section 7). Additional records that do
-//! not fit are left out without TC; [`BuildOutcome::additional_dropped`] counts them.
+//! not fit are left out without TC; [`BuildOutcome::additional_dropped`] counts them, except
+//! the ones the resolver marked required ([`AnswerBuf::require_additional`], the in-domain
+//! glue of a referral, RFC 9471), which truncate like an answer record. A resolver can also
+//! ask for the truncated form outright ([`AnswerBuf::truncated`], the slip of rate limiting).
 
 use crate::{
     name::NameBuf,
@@ -184,8 +187,14 @@ impl Request {
     /// The largest UDP answer for this request: 512 octets without EDNS, else the
     /// requester's size clamped to 512 to 1232 (DNS flag day 2020).
     pub fn max_udp_len(&self) -> usize {
+        self.udp_len(SERVER_UDP_PAYLOAD)
+    }
+
+    /// The largest UDP answer for this request when the server's EDNS size is `server`:
+    /// 512 octets without EDNS, else the requester's size clamped to 512 to `server`.
+    pub fn udp_len(&self, server: u16) -> usize {
         match self.edns {
-            Some(edns) => usize::from(edns.udp_size.clamp(512, SERVER_UDP_PAYLOAD)),
+            Some(edns) => usize::from(edns.udp_size.clamp(512, server.max(512))),
             None => CLASSIC_UDP_LEN,
         }
     }
@@ -263,6 +272,10 @@ pub struct RecordView<'a> {
 /// extras. The records and their names and data live in buffers reserved once; pushing
 /// past their capacity fails instead of allocating.
 #[derive(Debug, Clone)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "the header flags of RFC 1035 are bits"
+)]
 pub struct AnswerBuf {
     /// The RCODE, 12 bits; above 15 only with EDNS (BADVERS 16, BADCOOKIE 23).
     pub rcode: u16,
@@ -272,7 +285,14 @@ pub struct AnswerBuf {
     pub recursion_available: bool,
     /// Authentic data.
     pub authenticated: bool,
+    /// Answer with the header, the question and OPT only, with TC set, whatever the
+    /// records (the slip of response rate limiting, an answer too large for the buffer).
+    pub truncated: bool,
+    /// The UDP payload size the OPT record advertises: the server's EDNS size (1232 unless
+    /// configured). A setting of the buffer: [`AnswerBuf::clear`] keeps it.
+    pub udp_payload: u16,
     records: Vec<RecordSpan>,
+    required_additional: usize,
     arena: Vec<u8>,
     extended_error: Option<(u16, usize, usize)>,
     cookie: Option<(usize, usize)>,
@@ -286,20 +306,25 @@ impl AnswerBuf {
             authoritative: false,
             recursion_available: false,
             authenticated: false,
+            truncated: false,
+            udp_payload: SERVER_UDP_PAYLOAD,
             records: Vec::with_capacity(records),
+            required_additional: 0,
             arena: Vec::with_capacity(arena),
             extended_error: None,
             cookie: None,
         }
     }
 
-    /// Empties the buffer for the next query, keeping its capacity.
+    /// Empties the buffer for the next query, keeping its capacity and its UDP payload size.
     pub fn clear(&mut self) {
         self.rcode = 0;
         self.authoritative = false;
         self.recursion_available = false;
         self.authenticated = false;
+        self.truncated = false;
         self.records.clear();
+        self.required_additional = 0;
         self.arena.clear();
         self.extended_error = None;
         self.cookie = None;
@@ -378,6 +403,31 @@ impl AnswerBuf {
             rdata,
         });
         Ok(())
+    }
+
+    /// Marks every additional record pushed so far as required: when one of them does not
+    /// fit, the answer is truncated (TC) instead of leaving it out (RFC 9471, in-domain glue).
+    pub fn require_additional(&mut self) {
+        self.required_additional = self
+            .records
+            .iter()
+            .filter(|record| record.section == Section::Additional)
+            .count();
+    }
+
+    /// The number of leading additional records that must fit.
+    pub fn required_additional(&self) -> usize {
+        self.required_additional
+    }
+
+    /// The number of records.
+    pub fn len(&self) -> usize {
+        self.records.len()
+    }
+
+    /// Whether the buffer holds no record.
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty()
     }
 
     /// Sets the extended DNS error (RFC 8914): an info code and an optional English text.
@@ -483,7 +533,8 @@ pub trait Codec: Send + Sync + 'static {
 
     /// Writes the answer to `query` into `out` (its contents are replaced, its capacity
     /// kept) in at most `max_len` octets: [`Request::max_udp_len`] for UDP, 65,535 for TCP.
-    /// The OPT record is written when the request had one: payload size 1232, the DO bit
+    /// The OPT record is written when the request had one: the payload size of
+    /// [`AnswerBuf::udp_payload`] (1232 by default), the DO bit
     /// echoed, the extended RCODE, the cookie and the extended error of `answer`.
     ///
     /// # Errors
