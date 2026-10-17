@@ -76,8 +76,9 @@ const SCOPED_KINDS: [ObjectKind; 13] = [
     ObjectKind::Proposal,
 ];
 
-/// Kinds no scope reaches, whatever role the grant carries.
-const GLOBAL_ONLY_KINDS: [ObjectKind; 9] = [
+/// Kinds no scope reaches, whatever role the grant carries. The DNS kinds are global-only in
+/// Phase 2 (ADR 0017); zones become a scope kind with the DNS grants of a later package.
+const GLOBAL_ONLY_KINDS: [ObjectKind; 15] = [
     ObjectKind::Import,
     ObjectKind::Connector,
     ObjectKind::Node,
@@ -87,6 +88,12 @@ const GLOBAL_ONLY_KINDS: [ObjectKind; 9] = [
     ObjectKind::System,
     ObjectKind::Session,
     ObjectKind::ApiToken,
+    ObjectKind::Zone,
+    ObjectKind::DnsView,
+    ObjectKind::DnsForwarder,
+    ObjectKind::DnsAcl,
+    ObjectKind::DnsKey,
+    ObjectKind::DnsList,
 ];
 
 /// Kinds every scoped principal may read, wherever the object lies.

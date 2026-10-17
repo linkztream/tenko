@@ -1,13 +1,16 @@
-// Requirement trace for Phase 1 of Tenko DDI: which requirement (and which exit criterion)
+// Requirement trace of one phase of Tenko DDI: which requirement (and which exit criterion)
 // is named by which test, measurement or document.
 //
-//   node scripts/requirement-trace.mjs            write docs/plans/phase-1-trace.md
-//   node scripts/requirement-trace.mjs --check    exit 1 when the committed file is stale
-//   node scripts/requirement-trace.mjs --stdout   print the file instead of writing it
+//   node scripts/requirement-trace.mjs                 write docs/plans/phase-1-trace.md
+//   node scripts/requirement-trace.mjs --check         exit 1 when the committed file is stale
+//   node scripts/requirement-trace.mjs --stdout        print the file instead of writing it
+//   node scripts/requirement-trace.mjs --phase 2 ...   the same for Phase 2 (phase-2-trace.md)
 //
-// Input: the Phase 1 rows of docs/REQUIREMENTS.md (`| PREFIX-NN | text | phase | priority |`
-// whose phase cell starts with the number 1) and the exit criteria table E1 to E12 in
-// section 1.2 of docs/plans/phase-1-execution.md. scripts/README.md lists the scan rules.
+// Input: the rows of docs/REQUIREMENTS.md (`| PREFIX-NN | text | phase | priority |`) whose
+// phase cell names the phase (isInPhase), and the exit criteria table of the phase's plan:
+// E1 to E12 in section 1.2 of docs/plans/phase-1-execution.md for Phase 1, E13 to E21 in
+// section 1.2 of docs/plans/phase-2-plan.md for Phase 2 (PHASES). Without --phase the script
+// traces Phase 1. scripts/README.md lists the scan rules.
 // Node's standard library only. The output is deterministic: sorted, no timestamps,
 // `/`-separated repository-relative paths, LF line endings.
 //
@@ -21,12 +24,26 @@ import { parseArgs } from "node:util";
 
 import { isMainModule } from "./changelog.mjs";
 
-/** Repository-relative path of the generated file. */
+/** Repository-relative path of the generated file of Phase 1. */
 export const TRACE_PATH = "docs/plans/phase-1-trace.md";
 /** Repository-relative path of the requirements document. */
 export const REQUIREMENTS_PATH = "docs/REQUIREMENTS.md";
-/** Repository-relative path of the plan with the exit criteria table. */
+/** Repository-relative path of the Phase 1 plan with the exit criteria table. */
 export const EXECUTION_PATH = "docs/plans/phase-1-execution.md";
+
+/**
+ * The phases the script traces: the generated file, the plan whose section "Exit criteria"
+ * holds the exit criteria table, and those criteria in words for the file's header.
+ * @typedef {{ trace: string, plan: string, exits: string }} PhaseConfig
+ * @type {Readonly<Record<number, PhaseConfig>>}
+ */
+export const PHASES = Object.freeze({
+  1: { trace: TRACE_PATH, plan: EXECUTION_PATH, exits: "E1 to E12" },
+  2: { trace: "docs/plans/phase-2-trace.md", plan: "docs/plans/phase-2-plan.md", exits: "E13 to E21" },
+});
+
+/** Generated trace files, never scanned as documents: a trace names the IDs of its phase. */
+const TRACE_FILE = /^docs\/plans\/phase-\d+-trace\.md$/;
 
 /** Directory names that are never scanned, at any depth. */
 export const EXCLUDED_DIRS = new Set([
@@ -44,6 +61,19 @@ export const LIST_CAP = 5;
 const SCAN_ROOTS = ["crates", "ui/e2e", "ui/src", "bench", "docs"];
 
 export class TraceError extends Error {}
+
+/**
+ * The configuration of a phase.
+ * @param {number} phase
+ * @returns {PhaseConfig}
+ */
+export function phaseConfig(phase) {
+  const config = PHASES[phase];
+  if (config === undefined) {
+    throw new TraceError(`phase ${phase} is not traced (known: ${Object.keys(PHASES).join(", ")})`);
+  }
+  return config;
+}
 
 // ---------------------------------------------------------------------------------------
 // Parsing of the two input tables
@@ -71,6 +101,21 @@ export function splitRow(line) {
  */
 export function isPhaseOne(cell) {
   return /^1(?![0-9])/.test(cell);
+}
+
+/**
+ * Whether a phase cell names `phase`: the cell, or one of its parts separated by `;`, starts
+ * with the number. `2`, `2 (IXFR)`, `2 and 3 (DNS and DHCP modules)` and
+ * `1 (delta sync, Slice 3); 2 (IXFR between installations)` name Phase 2; `1 (write: 2)` and
+ * `20` do not. For Phase 1 the rule picks the same rows as isPhaseOne, because no row of
+ * REQUIREMENTS.md names Phase 1 after a `;`.
+ * @param {string} cell
+ * @param {number} phase
+ * @returns {boolean}
+ */
+export function isInPhase(cell, phase) {
+  const number = new RegExp(`^${phase}(?![0-9])`);
+  return cell.split(";").some((part) => number.test(part.trim()));
 }
 
 /**
@@ -112,6 +157,16 @@ export function parseRequirements(markdown) {
  */
 export function phaseOne(all) {
   return all.filter((r) => isPhaseOne(r.phase));
+}
+
+/**
+ * The requirements of a phase (isInPhase).
+ * @param {Requirement[]} all
+ * @param {number} phase
+ * @returns {Requirement[]}
+ */
+export function inPhase(all, phase) {
+  return all.filter((r) => isInPhase(r.phase, phase));
 }
 
 /**
@@ -399,7 +454,7 @@ export function scanFile(rel, text, ctx, add) {
     scanTypeScriptTest(rel, text, ctx, add);
   } else if (/^bench\/.+\/results\/[^/]+\.md$/.test(rel)) {
     scanMarkdown(rel, text, ctx, "measurements", add);
-  } else if (rel.startsWith("docs/") && rel.endsWith(".md") && rel !== TRACE_PATH && rel !== REQUIREMENTS_PATH) {
+  } else if (rel.startsWith("docs/") && rel.endsWith(".md") && !TRACE_FILE.test(rel) && rel !== REQUIREMENTS_PATH) {
     scanMarkdown(rel, text, ctx, "documents", add);
   }
 }
@@ -436,6 +491,7 @@ export function listFiles(root, relDir) {
 /**
  * @typedef {{ tests: Set<string>, measurements: Set<string>, documents: Set<string> }} Mentions
  * @typedef {{
+ *   phase: number,
  *   requirements: Requirement[],
  *   exits: ExitCriterion[],
  *   mentions: Map<string, Mentions>,
@@ -445,17 +501,19 @@ export function listFiles(root, relDir) {
 /**
  * Reads the inputs and scans the repository.
  * @param {string} root absolute repository root
+ * @param {number} [phase] the phase to trace, 1 by default
  * @returns {Trace}
  */
-export function buildTrace(root) {
+export function buildTrace(root, phase = 1) {
+  const config = phaseConfig(phase);
   /** @param {string} rel */
   const readRequired = (rel) => {
     const file = path.join(root, ...rel.split("/"));
     if (!existsSync(file)) throw new TraceError(`${rel} not found under ${root}`);
     return readFileSync(file, "utf8");
   };
-  const requirements = phaseOne(parseRequirements(readRequired(REQUIREMENTS_PATH)));
-  const exits = parseExitCriteria(readRequired(EXECUTION_PATH));
+  const requirements = inPhase(parseRequirements(readRequired(REQUIREMENTS_PATH)), phase);
+  const exits = parseExitCriteria(readRequired(config.plan));
   const ctx = makeContext(
     requirements.map((r) => r.id),
     exits.map((e) => e.id),
@@ -472,7 +530,7 @@ export function buildTrace(root) {
       scanFile(rel, readFileSync(path.join(root, ...rel.split("/")), "utf8"), ctx, add);
     }
   }
-  return { requirements, exits, mentions };
+  return { phase, requirements, exits, mentions };
 }
 
 /**
@@ -520,11 +578,26 @@ export function compareIds(a, b) {
 }
 
 /**
- * Renders the trace as the text of `docs/plans/phase-1-trace.md`.
+ * The command that writes the trace of a phase (Phase 1 needs no option).
+ * @param {number} phase
+ * @param {string} [extra] a further option, such as `--check`
+ * @returns {string}
+ */
+function command(phase, extra) {
+  return ["node scripts/requirement-trace.mjs", phase === 1 ? "" : `--phase ${phase}`, extra ?? ""]
+    .filter((part) => part !== "")
+    .join(" ");
+}
+
+/**
+ * Renders the trace as the text of its phase's file (`docs/plans/phase-1-trace.md` for
+ * Phase 1).
  * @param {Trace} trace
  * @returns {string}
  */
 export function renderTrace(trace) {
+  const phase = trace.phase ?? 1;
+  const config = phaseConfig(phase);
   const empty = { tests: new Set(), measurements: new Set(), documents: new Set() };
   /** @param {string} id */
   const of = (id) => trace.mentions.get(id) ?? empty;
@@ -534,21 +607,21 @@ export function renderTrace(trace) {
   const nothing = noTest.filter((r) => of(r.id).measurements.size === 0 && of(r.id).documents.size === 0);
 
   const out = [];
-  out.push("# Phase 1 requirement trace");
+  out.push(`# Phase ${phase} requirement trace`);
   out.push("");
   out.push("<!-- Generated by scripts/requirement-trace.mjs. Do not edit by hand. -->");
   out.push("");
   out.push(
-    "This file is generated. It lists every Phase 1 requirement of `docs/REQUIREMENTS.md` and the tests, " +
-      "measurements and documents that name it, and the exit criteria E1 to E12 of " +
-      "`docs/plans/phase-1-execution.md` with the tests named after them.",
+    `This file is generated. It lists every Phase ${phase} requirement of \`docs/REQUIREMENTS.md\` and the tests, ` +
+      `measurements and documents that name it, and the exit criteria ${config.exits} of ` +
+      `\`${config.plan}\` with the tests named after them.`,
   );
   out.push("");
-  out.push("- Regenerate: `node scripts/requirement-trace.mjs`");
-  out.push("- Check that the committed file is current: `node scripts/requirement-trace.mjs --check`");
+  out.push(`- Regenerate: \`${command(phase)}\``);
+  out.push(`- Check that the committed file is current: \`${command(phase, "--check")}\``);
   out.push("");
   out.push(
-    `${reqs.length} Phase 1 requirements; ${reqs.length - noTest.length} named by at least one test, ` +
+    `${reqs.length} Phase ${phase} requirements; ${reqs.length - noTest.length} named by at least one test, ` +
       `${noTest.length} not; ${nothing.length} named by no test, measurement or document.`,
   );
   out.push("");
@@ -589,10 +662,11 @@ export function renderTrace(trace) {
 /**
  * Builds the trace of a repository and renders it.
  * @param {string} root
+ * @param {number} [phase] the phase, 1 by default
  * @returns {string}
  */
-export function generate(root) {
-  return renderTrace(buildTrace(root));
+export function generate(root, phase = 1) {
+  return renderTrace(buildTrace(root, phase));
 }
 
 /**
@@ -611,27 +685,30 @@ function firstDifference(a, b) {
 }
 
 /**
- * Compares the committed trace with the generated one.
+ * Compares the committed trace of a phase with the generated one.
  * @param {string} root
+ * @param {number} [phase] the phase, 1 by default
  * @returns {{ ok: boolean, message: string }}
  */
-export function checkTrace(root) {
-  const generated = generate(root);
-  const file = path.join(root, ...TRACE_PATH.split("/"));
-  const fix = `run \`node scripts/requirement-trace.mjs\` and commit ${TRACE_PATH}`;
-  if (!existsSync(file)) return { ok: false, message: `${TRACE_PATH} does not exist; ${fix}` };
+export function checkTrace(root, phase = 1) {
+  const generated = generate(root, phase);
+  const trace = phaseConfig(phase).trace;
+  const file = path.join(root, ...trace.split("/"));
+  const fix = `run \`${command(phase)}\` and commit ${trace}`;
+  if (!existsSync(file)) return { ok: false, message: `${trace} does not exist; ${fix}` };
   const committed = readFileSync(file, "utf8").replace(/\r\n/g, "\n");
-  if (committed === generated) return { ok: true, message: `${TRACE_PATH} is current` };
-  return { ok: false, message: `${TRACE_PATH} is stale (${firstDifference(committed, generated)}); ${fix}` };
+  if (committed === generated) return { ok: true, message: `${trace} is current` };
+  return { ok: false, message: `${trace} is stale (${firstDifference(committed, generated)}); ${fix}` };
 }
 
 // ---------------------------------------------------------------------------------------
 // Command line
 
 const USAGE = `usage:
-  node scripts/requirement-trace.mjs [--root <dir>]            write ${TRACE_PATH}
-  node scripts/requirement-trace.mjs --check [--root <dir>]    exit 1 when the file is stale
-  node scripts/requirement-trace.mjs --stdout [--root <dir>]   print instead of writing
+  node scripts/requirement-trace.mjs [--phase <n>] [--root <dir>]            write the trace
+  node scripts/requirement-trace.mjs --check [--phase <n>] [--root <dir>]    exit 1 when the file is stale
+  node scripts/requirement-trace.mjs --stdout [--phase <n>] [--root <dir>]   print instead of writing
+  --phase <n>   the phase: ${Object.keys(PHASES).join(" or ")}; 1 when absent (writes ${TRACE_PATH})
 `;
 
 const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -651,6 +728,7 @@ export function main(argv) {
         check: { type: "boolean" },
         stdout: { type: "boolean" },
         root: { type: "string" },
+        phase: { type: "string" },
         help: { type: "boolean", short: "h" },
       },
       allowPositionals: false,
@@ -659,7 +737,7 @@ export function main(argv) {
     process.stderr.write(`requirement-trace: ${/** @type {Error} */ (error).message}\n\n${USAGE}`);
     return 2;
   }
-  const { check, stdout, root, help } = parsed.values;
+  const { check, stdout, root, phase: phaseText, help } = parsed.values;
   if (help === true) {
     process.stdout.write(USAGE);
     return 0;
@@ -668,29 +746,36 @@ export function main(argv) {
     process.stderr.write(`requirement-trace: --check and --stdout exclude each other\n\n${USAGE}`);
     return 2;
   }
+  const phaseArg = typeof phaseText === "string" ? phaseText : "1";
+  const phase = Number(phaseArg);
+  if (!/^\d+$/.test(phaseArg) || PHASES[phase] === undefined) {
+    process.stderr.write(`requirement-trace: --phase ${phaseArg} is not a traced phase\n\n${USAGE}`);
+    return 2;
+  }
+  const tracePath = phaseConfig(phase).trace;
   const base = path.resolve(typeof root === "string" ? root : defaultRoot);
   try {
     if (check === true) {
-      const result = checkTrace(base);
+      const result = checkTrace(base, phase);
       if (result.ok) {
         process.stdout.write(`${result.message}\n`);
         return 0;
       }
       if (process.env.GITHUB_ACTIONS === "true") {
-        process.stdout.write(`::error file=${TRACE_PATH}::${result.message.replace(/%/g, "%25")}\n`);
+        process.stdout.write(`::error file=${tracePath}::${result.message.replace(/%/g, "%25")}\n`);
       }
       process.stderr.write(`${result.message}\n`);
       return 1;
     }
-    const text = generate(base);
+    const text = generate(base, phase);
     if (stdout === true) {
       process.stdout.write(text);
       return 0;
     }
-    const file = path.join(base, ...TRACE_PATH.split("/"));
+    const file = path.join(base, ...tracePath.split("/"));
     mkdirSync(path.dirname(file), { recursive: true });
     writeFileSync(file, text, "utf8");
-    process.stdout.write(`wrote ${TRACE_PATH}\n`);
+    process.stdout.write(`wrote ${tracePath}\n`);
     return 0;
   } catch (error) {
     process.stderr.write(`requirement-trace: ${/** @type {Error} */ (error).message}\n`);

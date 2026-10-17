@@ -5656,6 +5656,24 @@
       <unit id="audit.kind.system">
         <segment><source>System</source><target>System</target></segment>
       </unit>
+      <unit id="audit.kind.zone">
+        <segment><source>DNS zone</source><target>DNS-zon</target></segment>
+      </unit>
+      <unit id="audit.kind.dns_view">
+        <segment><source>DNS view</source><target>DNS-vy</target></segment>
+      </unit>
+      <unit id="audit.kind.dns_forwarder">
+        <segment><source>Forwarding rule</source><target>Vidarebefordringsregel</target></segment>
+      </unit>
+      <unit id="audit.kind.dns_acl">
+        <segment><source>DNS access list</source><target>DNS-åtkomstlista</target></segment>
+      </unit>
+      <unit id="audit.kind.dns_key">
+        <segment><source>DNS key</source><target>DNS-nyckel</target></segment>
+      </unit>
+      <unit id="audit.kind.dns_list">
+        <segment><source>Block list</source><target>Blocklista</target></segment>
+      </unit>
       <unit id="audit.principal.kind.user">
         <segment><source>User</source><target>Användare</target></segment>
       </unit>
@@ -10268,6 +10286,20 @@
       </unit>
       <unit id="settings.security.audit_export.required_help">
         <segment><source>At least one export sink must be set up, and an alarm shows while a sink fails.</source><target>Minst en exportmottagare måste vara inställd, och ett larm visas medan en mottagare inte fungerar.</target></segment>
+      </unit>
+    </group>
+    <group id="dns">
+      <unit id="dns.title">
+        <notes><note category="description">Title of the DNS page and its entry in the browser tab.</note></notes>
+        <segment><source>DNS</source><target>DNS</target></segment>
+      </unit>
+      <unit id="dns.coming.title">
+        <notes><note category="description">Heading of the DNS page while the DNS module is being built.</note></notes>
+        <segment><source>The DNS module is coming</source><target>DNS-modulen kommer snart</target></segment>
+      </unit>
+      <unit id="dns.coming.body">
+        <notes><note category="description">Explains on the DNS page what the DNS module will hold once it is built.</note></notes>
+        <segment><source>Zones and records, views, forwarders, block lists and keys will be managed here. Until then the rest of Tenko DDI works as usual.</source><target>Här kommer zoner och poster, vyer, vidarebefordrare, blocklistor och nycklar att hanteras. Till dess fungerar resten av Tenko DDI som vanligt.</target></segment>
       </unit>
     </group>
   </file>

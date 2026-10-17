@@ -99,6 +99,18 @@ object_kinds! {
     Settings => "settings",
     /// The system as a whole (setup, break-glass); the id is nil.
     System => "system",
+    /// A DNS zone (Phase 2); its RRsets authorize as the zone.
+    Zone => "zone",
+    /// A DNS view.
+    DnsView => "dns_view",
+    /// A DNS forwarding rule.
+    DnsForwarder => "dns_forwarder",
+    /// A DNS access list.
+    DnsAcl => "dns_acl",
+    /// A TSIG or DNSSEC key.
+    DnsKey => "dns_key",
+    /// A DNS block list.
+    DnsList => "dns_list",
 }
 
 impl PartialOrd for ObjectKind {
@@ -229,7 +241,7 @@ mod tests {
             assert_eq!(json, format!("\"{}\"", kind.as_str()));
             assert_eq!(decode_key::<ObjectKind>(&encode_key(&kind)), Ok(kind));
         }
-        assert!("zone".parse::<ObjectKind>().is_err());
+        assert!("zones".parse::<ObjectKind>().is_err());
     }
 
     #[test]

@@ -27,6 +27,7 @@ use crate::{
 /// | `backup` | backups: settings, schedule and history (WP3.4b) |
 /// | `cluster` | enrolment, mTLS, internal CA (WP1.3, WP2.2); controller membership (WP3.1a) |
 /// | `connect` | connectors (WP2.5, WP2.6) |
+/// | `dns` | the DNS module: zones, records, views, forwarders, keys, lists (Phase 2, WP4.0) |
 /// | `i18n` | language packs held in the store (WP3.7) |
 /// | `import` | import and export (WP1.5) |
 /// | `ipam` | the IPAM domain (WP1.4) |
@@ -34,8 +35,8 @@ use crate::{
 /// | `scan` | discovery probes (WP2.3) |
 /// | `sys` | store, API platform and shared codes (WP1.0, WP1.1, WP1.7) |
 /// | `vault` | the vault (WP1.3) |
-pub const NAMESPACES: [&str; 11] = [
-    "auth", "backup", "cluster", "connect", "i18n", "import", "ipam", "jobs", "scan", "sys",
+pub const NAMESPACES: [&str; 12] = [
+    "auth", "backup", "cluster", "connect", "dns", "i18n", "import", "ipam", "jobs", "scan", "sys",
     "vault",
 ];
 
@@ -419,6 +420,8 @@ mod tests {
             "sys.journal",
             "auth.login.password",
             "jobs.step-1",
+            "dns.zones",
+            "dns.keys.meta",
         ] {
             assert!(is_valid_name(name), "{name}");
         }
@@ -429,7 +432,7 @@ mod tests {
             ".ipam",
             "ipam..x",
             "IPAM.x",
-            "dns.zones",
+            "dnsx.zones",
             "ipam.a b",
             "ipam.ä",
         ] {

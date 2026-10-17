@@ -374,6 +374,72 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
         "reapply_queued_change",
     ),
     ("DELETE", "/queue/conflicts/{id}", "discard_queued_change"),
+    // dns (WP4.0 contracts; the DNS module)
+    ("GET", "/dns/zones", "list_dns_zones"),
+    ("POST", "/dns/zones", "create_dns_zone"),
+    ("GET", "/dns/zones/{id}", "get_dns_zone"),
+    ("PATCH", "/dns/zones/{id}", "update_dns_zone"),
+    ("DELETE", "/dns/zones/{id}", "delete_dns_zone"),
+    ("GET", "/dns/zones/{id}/records", "list_dns_records"),
+    (
+        "POST",
+        "/dns/zones/{id}/records/batch",
+        "change_dns_records",
+    ),
+    (
+        "POST",
+        "/dns/zones/{id}/records/import",
+        "import_dns_zone_file",
+    ),
+    (
+        "GET",
+        "/dns/zones/{id}/records/export",
+        "export_dns_zone_file",
+    ),
+    ("GET", "/dns/zones/{id}/dnssec", "get_dns_zone_dnssec"),
+    (
+        "POST",
+        "/dns/zones/{id}/dnssec/rollover",
+        "start_dns_key_rollover",
+    ),
+    ("GET", "/dns/zones/{id}/transfer", "get_dns_zone_transfer"),
+    (
+        "POST",
+        "/dns/zones/{id}/transfer",
+        "trigger_dns_zone_transfer",
+    ),
+    ("GET", "/dns/views", "list_dns_views"),
+    ("POST", "/dns/views", "create_dns_view"),
+    ("GET", "/dns/views/{id}", "get_dns_view"),
+    ("PATCH", "/dns/views/{id}", "update_dns_view"),
+    ("DELETE", "/dns/views/{id}", "delete_dns_view"),
+    ("GET", "/dns/forwarders", "list_dns_forwarders"),
+    ("POST", "/dns/forwarders", "create_dns_forwarder"),
+    ("GET", "/dns/forwarders/{id}", "get_dns_forwarder"),
+    ("PATCH", "/dns/forwarders/{id}", "update_dns_forwarder"),
+    ("DELETE", "/dns/forwarders/{id}", "delete_dns_forwarder"),
+    ("GET", "/dns/acls", "list_dns_acls"),
+    ("POST", "/dns/acls", "create_dns_acl"),
+    ("GET", "/dns/acls/{id}", "get_dns_acl"),
+    ("PATCH", "/dns/acls/{id}", "update_dns_acl"),
+    ("DELETE", "/dns/acls/{id}", "delete_dns_acl"),
+    ("GET", "/dns/keys", "list_dns_keys"),
+    ("POST", "/dns/keys", "create_dns_key"),
+    ("GET", "/dns/keys/{key}", "get_dns_key"),
+    ("DELETE", "/dns/keys/{key}", "delete_dns_key"),
+    ("GET", "/dns/lists", "list_dns_lists"),
+    ("POST", "/dns/lists", "create_dns_list"),
+    ("GET", "/dns/lists/{id}", "get_dns_list"),
+    ("PATCH", "/dns/lists/{id}", "update_dns_list"),
+    ("DELETE", "/dns/lists/{id}", "delete_dns_list"),
+    ("POST", "/dns/lists/{id}/fetch", "fetch_dns_list"),
+    ("GET", "/nodes/{id}/dns", "get_node_dns_status"),
+    (
+        "POST",
+        "/nodes/{id}/dns/cache/flush",
+        "flush_node_dns_cache",
+    ),
+    ("GET", "/nodes/{id}/dns/log", "read_node_dns_log"),
 ];
 
 /// The only endpoint that is not a stub.
@@ -577,7 +643,8 @@ fn operations_have_a_declared_tag_and_a_summary() {
     // 22 areas of Slices 1 and 2, nine Slice 3 areas (metrics split from system; cluster,
     // kek, scans, audit_export, backup and queue with their operations; two that start
     // empty: access, i18n), reconciler and guardrails (WP3.12a).
-    assert_eq!(tags.len(), 33, "one tag per area");
+    // dns (WP4.0).
+    assert_eq!(tags.len(), 34, "one tag per area");
     for (path, item) in &document.paths.paths {
         for (method, operation) in operations(item) {
             let operation_tags = operation.tags.as_deref().unwrap_or_default();

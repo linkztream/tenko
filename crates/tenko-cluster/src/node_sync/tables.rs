@@ -59,3 +59,19 @@ pub fn tables_for(roles: &[Role]) -> Vec<TableName> {
         .map(|table| table.table.clone())
         .collect()
 }
+
+/// Tables whose every row a node with the role receives, whatever its key: the data a data
+/// plane serves rather than its own configuration. The `dns` role receives every `dns.*`
+/// table except `dns.sign_state` ([`tenko_core::dns::tables::NODE_TABLES`]).
+///
+/// Declared for Phase 5 (plan section 2.10): in Phase 2 the `dns` role runs in the
+/// controller's process and reads the store directly, so the configuration stream does not
+/// carry these tables and no node consumes them yet. A DHCP node adds its tables here in
+/// Phase 3.
+pub fn role_tables_for(roles: &[Role]) -> Vec<TableName> {
+    if roles.contains(&Role::Dns) {
+        tenko_core::dns::tables::NODE_TABLES.to_vec()
+    } else {
+        Vec::new()
+    }
+}

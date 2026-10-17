@@ -13,5 +13,12 @@ doc-valid-idents = [
   "PowerShell",
   "WebAuthn",
   "UUIDv7",
+  "RRset",
+  "RRsets",
+  "DNSKEY",
+  "NSEC3PARAM",
+  "DoT",
+  "DoH",
+  "XoT",
   "..",
 ]

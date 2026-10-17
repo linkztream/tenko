@@ -28,6 +28,12 @@ const KINDS: Record<ObjectKind, true> = {
   node: true,
   settings: true,
   system: true,
+  zone: true,
+  dns_view: true,
+  dns_forwarder: true,
+  dns_acl: true,
+  dns_key: true,
+  dns_list: true,
 };
 
 export const OBJECT_KINDS = Object.keys(KINDS) as ObjectKind[];
@@ -55,6 +61,7 @@ const COMPONENTS: Record<SystemComponent, true> = {
   backup: true,
   languages: true,
   leader: true,
+  dns: true,
 };
 
 export const SYSTEM_COMPONENTS = Object.keys(COMPONENTS) as SystemComponent[];

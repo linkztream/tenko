@@ -26,7 +26,7 @@ import { fail } from "./reply";
 import { route } from "./route";
 
 // `metrics` is accepted and carries nothing here: the mock has no metrics to sample.
-const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin", "connectors", "discovery", "secrets", "cluster", "metrics"];
+const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin", "connectors", "discovery", "secrets", "cluster", "metrics", "dns"];
 /** The topics of a stream that names none: all but `metrics`, as on the server. */
 const DEFAULT_TOPICS: readonly Topic[] = TOPICS.filter((topic) => topic !== "metrics");
 

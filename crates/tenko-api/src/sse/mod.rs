@@ -241,6 +241,12 @@ impl Default for EventRoutes {
                 Topic::Secrets,
                 None,
             )
+            .table(
+                TableName::from_static("dns.zones"),
+                Topic::Dns,
+                Some(ObjectKind::Zone),
+            )
+            .namespace("dns", Topic::Dns)
             .namespace("cluster", Topic::Cluster)
             .namespace("scan", Topic::Discovery)
             .table_prefix("vault.kek", Topic::System)

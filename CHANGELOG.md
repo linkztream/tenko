@@ -144,6 +144,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - The start page shows live metrics for administrators: API requests per second with p50 and p99, store size, Raft role and lag per controller, commit latency, jobs, ingest rate, event-stream clients and node buffers, with a sixty-second sparkline per tile, updated once per second while the page is open.
 - Controllers exchange their metrics snapshots, so the start page of any controller shows the whole cluster.
 - Traces over OpenTelemetry (OPS-05): with `[telemetry] otlp_endpoint` set, every API request, store write, job step, connector call and controller-to-controller call is exported as a span to an OTLP collector over gRPC, sampled by `sampling_ratio`, with the trace context carried between controllers and to plugins; off by default and free when off.
+- The contracts of the DNS module (Phase 2): the model of zones, records, views, forwarders, access lists, TSIG and DNSSEC keys and block lists in the replicated store, with record validation and TXT strings split at 255 octets; the DNS engine's wire codec, zone feed and index; the DNS routes of the API in the OpenAPI document, answering 501 until each is built, with the scopes `dns.read`, `dns.write` and `dns.keys` and the event topic `dns`; a DNS page in the web UI that says the module is coming; ADR 0017 and `docs/dns-contracts.md`; and `node scripts/requirement-trace.mjs --phase 2`, which writes the Phase 2 requirement trace (`docs/plans/phase-2-trace.md`).
 
 ### Changed
 
@@ -157,7 +158,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - A bulk move runs four devices at a time by default, instead of two; the preview still offers 1, 2, 4 and 8.
 - `GET /api/v1/openapi.json` answers the committed OpenAPI document byte for byte, in the same pretty-printed form that `tenko openapi` prints, instead of compact JSON.
 - `tenko serve` starts in eleven steps: a new `cluster` step after the store, and the step of the node transport is now called `nodes`.
-- The data-directory format is 2. The first start of this version migrates the data directory (after the usual copy), and earlier versions refuse it afterwards; to go back, restore the copy taken before the migration.
+- The data-directory format is 3. The first start of this version migrates the data directory (after the usual copy), and earlier versions refuse it afterwards; to go back, restore the copy taken before the migration.
 - `tenko kek rotate` refuses to run on a member of a cluster.
 - A user may hold no global role at all: grants within a scope can be their only access.
 - The prune of the node registry runs on the leader only (`cluster.prune`).

@@ -357,6 +357,11 @@ export type MessageKey =
   | "audit.kind.api_token"
   | "audit.kind.connector"
   | "audit.kind.custom_field"
+  | "audit.kind.dns_acl"
+  | "audit.kind.dns_forwarder"
+  | "audit.kind.dns_key"
+  | "audit.kind.dns_list"
+  | "audit.kind.dns_view"
   | "audit.kind.host"
   | "audit.kind.import"
   | "audit.kind.interface"
@@ -375,6 +380,7 @@ export type MessageKey =
   | "audit.kind.user"
   | "audit.kind.vlan"
   | "audit.kind.vrf"
+  | "audit.kind.zone"
   | "audit.live.new"
   | "audit.live.new_many"
   | "audit.live.show"
@@ -1268,6 +1274,9 @@ export type MessageKey =
   | "discovery.toast.approved"
   | "discovery.toast.dismissed"
   | "discovery.toast.rejected"
+  | "dns.coming.body"
+  | "dns.coming.title"
+  | "dns.title"
   | "errors.audit.export.client_key"
   | "errors.audit.export.conflict"
   | "errors.audit.export.duplicate"
@@ -5655,6 +5664,11 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.kind.api_token",
   "audit.kind.connector",
   "audit.kind.custom_field",
+  "audit.kind.dns_acl",
+  "audit.kind.dns_forwarder",
+  "audit.kind.dns_key",
+  "audit.kind.dns_list",
+  "audit.kind.dns_view",
   "audit.kind.host",
   "audit.kind.import",
   "audit.kind.interface",
@@ -5673,6 +5687,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.kind.user",
   "audit.kind.vlan",
   "audit.kind.vrf",
+  "audit.kind.zone",
   "audit.live.new",
   "audit.live.new_many",
   "audit.live.show",
@@ -6566,6 +6581,9 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.toast.approved",
   "discovery.toast.dismissed",
   "discovery.toast.rejected",
+  "dns.coming.body",
+  "dns.coming.title",
+  "dns.title",
   "errors.audit.export.client_key",
   "errors.audit.export.conflict",
   "errors.audit.export.duplicate",

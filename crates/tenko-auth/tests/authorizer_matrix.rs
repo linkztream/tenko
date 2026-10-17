@@ -56,7 +56,7 @@ const fn row(kind: ObjectKind, viewer_reads: bool, operator: &'static str) -> Ro
     }
 }
 
-const TABLE: [Row; 22] = [
+const TABLE: [Row; 28] = [
     row(ObjectKind::Tenant, true, "RCUD"),
     row(ObjectKind::Vrf, true, "RCUD"),
     row(ObjectKind::Site, true, "RCUD"),
@@ -80,6 +80,14 @@ const TABLE: [Row; 22] = [
     row(ObjectKind::Node, true, "R"),
     row(ObjectKind::Settings, false, "R"),
     row(ObjectKind::System, true, "R"),
+    // The DNS module (ADR 0017): dns.read for viewers, dns.read and dns.write for operators,
+    // dns.keys for administrators only.
+    row(ObjectKind::Zone, true, "RCUDX"),
+    row(ObjectKind::DnsView, true, "RCUDX"),
+    row(ObjectKind::DnsForwarder, true, "RCUDX"),
+    row(ObjectKind::DnsAcl, true, "RCUDX"),
+    row(ObjectKind::DnsKey, false, ""),
+    row(ObjectKind::DnsList, true, "RCUDX"),
 ];
 
 /// The table letter of an action; administration belongs to administrators only.
@@ -681,7 +689,8 @@ async fn token_principals_never_administer_or_reveal() {
             }
         }
     }
-    // Changing users, settings, tokens, sessions, secrets or the system needs a session.
+    // Changing users, settings, tokens, sessions, secrets, DNS keys or the system needs a
+    // session.
     for kind in [
         ObjectKind::User,
         ObjectKind::Settings,
@@ -689,6 +698,7 @@ async fn token_principals_never_administer_or_reveal() {
         ObjectKind::ApiToken,
         ObjectKind::Session,
         ObjectKind::Secret,
+        ObjectKind::DnsKey,
     ] {
         for action in [Action::Create, Action::Update, Action::Delete] {
             assert_decision(&f, "admin token", &admin_token, action, kind, false);

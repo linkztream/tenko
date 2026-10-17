@@ -49,7 +49,10 @@ beforeEach(() => {
 });
 
 describe("the node operations of the document", () => {
-  const OPERATIONS = apiOperations.filter((o) => /^\/api\/v1\/nodes(\/|$)/.test(o.path) && !/\/scan(-config)?(\/|$)/.test(o.path));
+  // The scan and DNS operations of a node belong to their modules and are tested there.
+  const OPERATIONS = apiOperations.filter(
+    (o) => /^\/api\/v1\/nodes(\/|$)/.test(o.path) && !/\/scan(-config)?(\/|$)/.test(o.path) && !/\/dns(\/|$)/.test(o.path),
+  );
 
   it("are all answered, each after the session check except the public enrolment", async () => {
     expect(OPERATIONS.length).toBe(7);

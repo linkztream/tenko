@@ -1,0 +1,21 @@
+{
+  "admin": "admin",
+  "format": 3,
+  "objects": {
+    "addresses": [
+      "192.0.2.1"
+    ],
+    "hosts": [
+      "printer01"
+    ],
+    "prefixes": [
+      "192.0.2.0/24",
+      "198.51.100.0/24",
+      "2001:db8:42::/48"
+    ],
+    "vlans": [
+      42
+    ]
+  },
+  "written_by": "0.0.1"
+}

@@ -54,6 +54,7 @@ tenko-connect-proxmox = { path = "crates/tenko-connect-proxmox" }
 tenko-connect-unifi = { path = "crates/tenko-connect-unifi" }
 tenko-scan = { path = "crates/tenko-scan" }
 tenko-core = { path = "crates/tenko-core" }
+tenko-dns = { path = "crates/tenko-dns" }
 tenko-ipam = { path = "crates/tenko-ipam" }
 tenko-jobs = { path = "crates/tenko-jobs" }
 tenko-migrate = { path = "crates/tenko-migrate" }
@@ -67,6 +68,14 @@ ciborium = "0.2.2"
 openraft = { version = "=0.9.25", features = ["serde", "storage-v2", "generic-snapshot-data"] }
 redb = "=4.3.0"
 sha2 = "0.11.0"
+
+# DNS (Phase 2, ADR 0017): the wire format behind the `Codec` trait of `tenko-dns`, pinned
+# exactly after the WP4.0 evaluation (risk R38); `std` only, no `tsig` (it pulls ring).
+domain = { version = "=0.12.3", default-features = false, features = ["std"] }
+# The differential tests of the DNS codec (ADR 0009); a dev-dependency only, never shipped.
+hickory-proto = "0.26.3"
+# The counting global allocator of the DNS allocation test.
+stats_alloc = "0.1.10"
 
 # Domain types.
 ipnet = { version = "2.12.2", features = ["serde"] }

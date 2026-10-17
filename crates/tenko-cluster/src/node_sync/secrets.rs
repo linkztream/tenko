@@ -27,8 +27,15 @@ use crate::{error::ClusterError, model::NodeRecord, proto::v1};
 /// The audit action of secrets handed to a node.
 pub const SECRETS_ACTION: AuditAction = AuditAction::from_static("cluster.node.secrets");
 
-/// The secret purposes and the role that uses each.
-pub const PURPOSES: [(&str, Role); 1] = [("snmp", Role::Probe)];
+/// The secret purposes and the role that uses each. The `dns` role's purposes, `tsig` (TSIG
+/// keys) and `dnssec` (DNSSEC keys, public parts only), are declared for Phase 5: in Phase 2
+/// the `dns` role runs in the controller's process and no node asks for them (plan section
+/// 2.10).
+pub const PURPOSES: [(&str, Role); 3] = [
+    ("snmp", Role::Probe),
+    (tenko_core::dns::TSIG_PURPOSE, Role::Dns),
+    (tenko_core::dns::DNSSEC_PURPOSE, Role::Dns),
+];
 
 /// A vault secret a node configuration names for one purpose.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -297,6 +304,10 @@ mod tests {
         assert!(purpose_allowed("snmp", &[Role::Probe]));
         assert!(!purpose_allowed("snmp", &[Role::Dns]));
         assert!(!purpose_allowed("tsig", &[Role::Probe]));
+        assert!(purpose_allowed("tsig", &[Role::Dns]));
+        assert!(purpose_allowed("dnssec", &[Role::Dns, Role::Controller]));
+        assert!(!purpose_allowed("dnssec", &[Role::Probe, Role::Dhcp]));
+        assert!(!purpose_allowed("snmp", &[Role::Dns]));
     }
 
     #[test]

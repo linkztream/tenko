@@ -909,6 +909,478 @@ export interface paths {
         patch: operations["update_custom_field"];
         trace?: never;
     };
+    "/api/v1/dns/acls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List DNS access lists
+         * @description Scope: `dns.read`.
+         */
+        get: operations["list_dns_acls"];
+        put?: never;
+        /**
+         * Create a DNS access list
+         * @description Scope: `dns.write`.
+         */
+        post: operations["create_dns_acl"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/acls/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a DNS access list
+         * @description Scope: `dns.read`.
+         */
+        get: operations["get_dns_acl"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a DNS access list
+         * @description Scope: `dns.write`.
+         */
+        delete: operations["delete_dns_acl"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a DNS access list
+         * @description Scope: `dns.write`.
+         */
+        patch: operations["update_dns_acl"];
+        trace?: never;
+    };
+    "/api/v1/dns/forwarders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List forwarding rules
+         * @description Scope: `dns.read`.
+         */
+        get: operations["list_dns_forwarders"];
+        put?: never;
+        /**
+         * Create a forwarding rule
+         * @description Scope: `dns.write`.
+         */
+        post: operations["create_dns_forwarder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/forwarders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a forwarding rule
+         * @description Scope: `dns.read`.
+         */
+        get: operations["get_dns_forwarder"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a forwarding rule
+         * @description Scope: `dns.write`.
+         */
+        delete: operations["delete_dns_forwarder"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a forwarding rule
+         * @description Scope: `dns.write`.
+         */
+        patch: operations["update_dns_forwarder"];
+        trace?: never;
+    };
+    "/api/v1/dns/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List TSIG keys
+         * @description Scope: `dns.keys`.
+         */
+        get: operations["list_dns_keys"];
+        put?: never;
+        /**
+         * Generate or import a TSIG key
+         * @description Scope: `dns.keys`.
+         */
+        post: operations["create_dns_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/keys/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a TSIG key
+         * @description Scope: `dns.keys`.
+         */
+        get: operations["get_dns_key"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a TSIG key
+         * @description Scope: `dns.keys`.
+         */
+        delete: operations["delete_dns_key"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/lists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List block lists
+         * @description Scope: `dns.read`.
+         */
+        get: operations["list_dns_lists"];
+        put?: never;
+        /**
+         * Create a block list
+         * @description Scope: `dns.write`.
+         */
+        post: operations["create_dns_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/lists/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a block list
+         * @description Scope: `dns.read`.
+         */
+        get: operations["get_dns_list"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a block list
+         * @description Scope: `dns.write`.
+         */
+        delete: operations["delete_dns_list"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a block list
+         * @description Scope: `dns.write`.
+         */
+        patch: operations["update_dns_list"];
+        trace?: never;
+    };
+    "/api/v1/dns/lists/{id}/fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fetch and compile a block list now
+         * @description Scope: `dns.write`.
+         */
+        post: operations["fetch_dns_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List DNS views
+         * @description Scope: `dns.read`.
+         */
+        get: operations["list_dns_views"];
+        put?: never;
+        /**
+         * Create a DNS view
+         * @description Scope: `dns.write`.
+         */
+        post: operations["create_dns_view"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/views/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a DNS view
+         * @description Scope: `dns.read`.
+         */
+        get: operations["get_dns_view"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a DNS view
+         * @description Scope: `dns.write`.
+         */
+        delete: operations["delete_dns_view"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a DNS view
+         * @description Scope: `dns.write`.
+         */
+        patch: operations["update_dns_view"];
+        trace?: never;
+    };
+    "/api/v1/dns/zones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List DNS zones
+         * @description Scope: `dns.read`.
+         */
+        get: operations["list_dns_zones"];
+        put?: never;
+        /**
+         * Create a DNS zone
+         * @description Scope: `dns.write`.
+         */
+        post: operations["create_dns_zone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/zones/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a DNS zone
+         * @description Scope: `dns.read`.
+         */
+        get: operations["get_dns_zone"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a DNS zone and its records
+         * @description Scope: `dns.write`.
+         */
+        delete: operations["delete_dns_zone"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a DNS zone
+         * @description Scope: `dns.write`.
+         */
+        patch: operations["update_dns_zone"];
+        trace?: never;
+    };
+    "/api/v1/dns/zones/{id}/dnssec": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the signing state and keys of a zone
+         * @description Scope: `dns.read`.
+         */
+        get: operations["get_dns_zone_dnssec"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/zones/{id}/dnssec/rollover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a DNSSEC key rollover
+         * @description Scope: `dns.keys`.
+         */
+        post: operations["start_dns_key_rollover"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/zones/{id}/records": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the RRsets of a zone
+         * @description Scope: `dns.read`.
+         */
+        get: operations["list_dns_records"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/zones/{id}/records/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change RRsets of a zone in one batch
+         * @description Scope: `dns.write`.
+         */
+        post: operations["change_dns_records"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/zones/{id}/records/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export a zone as a zone file
+         * @description Scope: `dns.read`.
+         */
+        get: operations["export_dns_zone_file"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/zones/{id}/records/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a zone file into a zone
+         * @description Scope: `dns.write`.
+         */
+        post: operations["import_dns_zone_file"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/zones/{id}/transfer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the transfer state of a zone
+         * @description Scope: `dns.read`.
+         */
+        get: operations["get_dns_zone_transfer"];
+        put?: never;
+        /**
+         * Transfer a secondary zone now
+         * @description Scope: `dns.write`.
+         */
+        post: operations["trigger_dns_zone_transfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/events": {
         parameters: {
             query?: never;
@@ -1693,6 +2165,66 @@ export interface paths {
         post?: never;
         /** Revoke a cluster node */
         delete: operations["revoke_node"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/dns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the DNS role of a node
+         * @description Scope: `dns.read`.
+         */
+        get: operations["get_node_dns_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/dns/cache/flush": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Flush a node's DNS cache
+         * @description Scope: `dns.write`.
+         */
+        post: operations["flush_node_dns_cache"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/dns/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a node's DNS query log
+         * @description Scope: `dns.read`.
+         */
+        get: operations["read_node_dns_log"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3459,6 +3991,68 @@ export interface components {
             /** @description Whether only an administrator should lift it early (Hardened). */
             until_unlock: boolean;
         };
+        /** @description A named access list for transfers, updates, recursion and queries. */
+        Acl: {
+            /** @description Free text. */
+            description?: string | null;
+            /** @description The entries, in order. */
+            entries: components["schemas"]["AclEntry"][];
+            /** @description Identifier. */
+            id: components["schemas"]["AclId"];
+            /** @description A unique name, 1 to 64 characters. */
+            name: string;
+        };
+        /** @description `POST /dns/acls`. */
+        AclCreate: {
+            /** @description Free text. */
+            description?: string | null;
+            /** @description The entries, in order. */
+            entries: components["schemas"]["AclEntry"][];
+            /** @description A unique name. */
+            name: string;
+        };
+        /** @description One entry of an access list; the first entry that matches decides. */
+        AclEntry: {
+            /** @description The entry refuses instead of allowing. */
+            deny?: boolean;
+            /** @enum {string} */
+            kind: "prefix";
+            /**
+             * @description The prefix.
+             * @example 192.0.2.0/24
+             */
+            prefix: string;
+        } | {
+            /** @description The entry refuses instead of allowing. */
+            deny?: boolean;
+            /** @enum {string} */
+            kind: "key";
+            /** @description The key. */
+            name: components["schemas"]["DnsName"];
+        } | {
+            /** @description The entry refuses instead of allowing. */
+            deny?: boolean;
+            /** @enum {string} */
+            kind: "any";
+        };
+        /** Format: uuid */
+        AclId: string;
+        /** @description An access list as the API reads it. */
+        AclItem: components["schemas"]["Acl"] & {
+            /** @description The store revision of the row. */
+            revision: components["schemas"]["Revision"];
+            /** @description The zones and views that name it. */
+            used_by: string[];
+        };
+        /** @description `PATCH /dns/acls/{id}`. */
+        AclPatch: {
+            /** @description Free text. */
+            description?: string | null;
+            /** @description The entries. */
+            entries?: components["schemas"]["AclEntry"][] | null;
+            /** @description The name. */
+            name?: string | null;
+        };
         /** @description How many items of a kind get one action. */
         ActionCount: {
             /** @description The action. */
@@ -4107,6 +4701,49 @@ export interface components {
             /** @description At least one toggle is weaker than the Home baseline. */
             weaker_than_home: boolean;
         };
+        /**
+         * @description What a blocked name answers (DNS-15); every blocked answer carries the extended error of
+         *     RFC 8914.
+         */
+        BlockAction: {
+            /** @enum {string} */
+            kind: "nxdomain";
+        } | {
+            /** @enum {string} */
+            kind: "nodata";
+        } | {
+            /**
+             * @description The address answered.
+             * @example 192.0.2.80
+             */
+            address: string;
+            /** @enum {string} */
+            kind: "redirect";
+        };
+        /** @description A block list (DNS-15, DNS-23). */
+        BlockList: {
+            /** @description What a blocked name answers. */
+            action: components["schemas"]["BlockAction"];
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Whether the list is applied. */
+            enabled?: boolean;
+            /** @description The file format. */
+            format: components["schemas"]["ListFormat"];
+            /** @description Identifier. */
+            id: components["schemas"]["BlockListId"];
+            /**
+             * Format: int32
+             * @description How often a URL list is fetched, in hours (1 to 168).
+             */
+            interval_hours?: number;
+            /** @description A unique name, 1 to 64 characters. */
+            name: string;
+            /** @description Where it comes from. */
+            source: components["schemas"]["ListSource"];
+        };
+        /** Format: uuid */
+        BlockListId: string;
         /**
          * @description Where the breached-password check looks (TGL-06).
          * @enum {string}
@@ -4867,6 +5504,21 @@ export interface components {
          * @enum {string}
          */
         Deleted: "exclude" | "include" | "only";
+        /** @description How a signed zone proves non-existence. */
+        Denial: {
+            /** @enum {string} */
+            kind: "nsec";
+        } | {
+            /**
+             * Format: int32
+             * @description Extra hash iterations; RFC 9276 recommends 0.
+             */
+            iterations?: number;
+            /** @enum {string} */
+            kind: "nsec3";
+            /** @description The salt; RFC 9276 recommends none. */
+            salt?: components["schemas"]["HexBytes"];
+        };
         /** @description A device as the controller identifies it (for UniFi the device MAC or `_id`). */
         DeviceRef: string;
         /** @description The counts of one fact type. */
@@ -4931,6 +5583,123 @@ export interface components {
              *     knows, unless the request named one).
              */
             revision: number;
+        };
+        /** @description A node command that was recorded. */
+        DnsCommandAccepted: {
+            /**
+             * Format: uuid
+             * @description The command.
+             */
+            command_id: string;
+        };
+        /** @description A request that started a job. */
+        DnsJobStarted: {
+            /** @description The job; follow it with `GET /jobs/{id}`. */
+            job_id: components["schemas"]["JobId"];
+        };
+        /** Format: uuid */
+        DnsKeyId: string;
+        /** @description DNS name in canonical form: lowercase, without the trailing dot, `.` for the root (`www.example.test`, `*.example.test`, `0/26.2.0.192.in-addr.arpa`) */
+        DnsName: string;
+        /** @description `GET /nodes/{id}/dns`: the DNS role of one node (the report `dns.status`). */
+        DnsNodeStatus: {
+            /**
+             * Format: int64
+             * @description Entries in the cache.
+             */
+            cache_entries: number;
+            /**
+             * Format: int64
+             * @description How far the index is behind the store, in revisions.
+             */
+            lag: number;
+            /** @description The listeners. */
+            listeners: components["schemas"]["ListenerItem"][];
+            /** @description The node. */
+            node: components["schemas"]["NodeId"];
+            /** @description The store revision the index holds. */
+            revision: components["schemas"]["Revision"];
+            /**
+             * Format: int64
+             * @description RRsets served.
+             */
+            rrsets: number;
+            /** @description The role answers queries. */
+            serving: boolean;
+            started?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: int32
+             * @description Zones served.
+             */
+            zones: number;
+        };
+        /**
+         * @description A DNSSEC signing algorithm Tenko signs with.
+         * @enum {string}
+         */
+        DnssecAlgorithm: "ecdsa_p256_sha256" | "ed25519";
+        /** @description A DNSSEC key without its private part. */
+        DnssecKeyItem: {
+            activated?: components["schemas"]["Timestamp"] | null;
+            /** @description The algorithm. */
+            algorithm: components["schemas"]["DnssecAlgorithm"];
+            /** @description The DNSKEY record. */
+            dnskey: components["schemas"]["RecordData"];
+            /** @description Identifier. */
+            id: components["schemas"]["DnsKeyId"];
+            /**
+             * Format: int32
+             * @description The key tag.
+             */
+            key_tag: number;
+            published?: components["schemas"]["Timestamp"] | null;
+            retired?: components["schemas"]["Timestamp"] | null;
+            /** @description KSK, ZSK or CSK. */
+            role: components["schemas"]["KeyRole"];
+            /** @description The state. */
+            state: components["schemas"]["KeyState"];
+        };
+        /**
+         * @description Whether and how a zone is signed (DNS-12, plan section 2.7).
+         * @enum {string}
+         */
+        DnssecMode: "off" | "online" | "imported";
+        /** @description The signing settings of a zone. */
+        DnssecPolicy: {
+            /** @description The algorithm of new keys. */
+            algorithm?: components["schemas"]["DnssecAlgorithm"];
+            /** @description NSEC or NSEC3. */
+            denial?: components["schemas"]["Denial"];
+            /** @description Off, online or imported. */
+            mode?: components["schemas"]["DnssecMode"];
+            /**
+             * Format: int32
+             * @description How long before the expiry a signature is renewed, in days.
+             */
+            resign_before_days?: number;
+            /**
+             * Format: int32
+             * @description How long a signature is valid, in days.
+             */
+            signature_validity_days?: number;
+        };
+        /** @description `GET /dns/zones/{id}/dnssec`. */
+        DnssecStatus: {
+            /** @description The DS records for the parent (and the CDS published during a rollover). */
+            ds: components["schemas"]["RecordData"][];
+            expires?: components["schemas"]["Timestamp"] | null;
+            /** @description The keys. */
+            keys: components["schemas"]["DnssecKeyItem"][];
+            last_signed?: components["schemas"]["Timestamp"] | null;
+            /** @description Off, online or imported. */
+            mode: components["schemas"]["DnssecMode"];
+            /**
+             * Format: int32
+             * @description The serial last signed.
+             */
+            signed_serial?: number | null;
+            /** @description The zone. */
+            zone: components["schemas"]["ZoneId"];
         };
         /** @description DHCPv6 DUID as lowercase hexadecimal */
         Duid: string;
@@ -5290,6 +6059,63 @@ export interface components {
             /** @description The software version it reported; absent when it never reported one. */
             version?: string | null;
         };
+        /**
+         * @description A forwarding rule (DNS-02, DNS-21): queries at or below `suffix` go to the upstreams.
+         *     The longest matching suffix wins; the root suffix `.` is the default forwarder.
+         */
+        ForwardRule: {
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Identifier. */
+            id: components["schemas"]["ForwardRuleId"];
+            /** @description The names the rule covers. */
+            suffix: components["schemas"]["DnsName"];
+            /** @description The name in the upstreams' certificates, for DoT and DoH. */
+            tls_name?: string | null;
+            /** @description How they are reached. */
+            transport?: components["schemas"]["ForwardTransport"];
+            /** @description The upstreams, 1 to 16. */
+            upstreams: components["schemas"]["Upstream"][];
+            view?: components["schemas"]["ViewId"] | null;
+        };
+        /** Format: uuid */
+        ForwardRuleId: string;
+        /**
+         * @description How queries reach an upstream resolver (TGL-14).
+         * @enum {string}
+         */
+        ForwardTransport: "plain" | "dot" | "doh";
+        /** @description `POST /dns/forwarders`. */
+        ForwarderCreate: {
+            /** @description Free text. */
+            description?: string | null;
+            /** @description The names the rule covers; `.` for the default forwarder. */
+            suffix: components["schemas"]["DnsName"];
+            /** @description The certificate name of DoT and DoH upstreams. */
+            tls_name?: string | null;
+            /** @description How they are reached. */
+            transport?: components["schemas"]["ForwardTransport"];
+            /** @description The upstreams. */
+            upstreams: components["schemas"]["Upstream"][];
+            view?: components["schemas"]["ViewId"] | null;
+        };
+        /** @description A forwarding rule as the API reads it. */
+        ForwarderItem: components["schemas"]["ForwardRule"] & {
+            /** @description The store revision of the row. */
+            revision: components["schemas"]["Revision"];
+        };
+        /** @description `PATCH /dns/forwarders/{id}`. */
+        ForwarderPatch: {
+            /** @description Free text. */
+            description?: string | null;
+            suffix?: components["schemas"]["DnsName"] | null;
+            /** @description The certificate name. */
+            tls_name?: string | null;
+            transport?: components["schemas"]["ForwardTransport"] | null;
+            /** @description The upstreams. */
+            upstreams?: components["schemas"]["Upstream"][] | null;
+            view?: components["schemas"]["ViewId"] | null;
+        };
         /** @description DNS name */
         Fqdn: string;
         /** @description `POST /access/grants`. */
@@ -5542,6 +6368,18 @@ export interface components {
          *     cannot collide on the same key.
          */
         IdempotencyKey: string;
+        /** @description One line of a zone file that the import could not take as it is. */
+        ImportLoss: {
+            /** @description The stable code of the problem. */
+            code: string;
+            /** @description What was lost, in English. */
+            detail: string;
+            /**
+             * Format: int32
+             * @description The line number, from 1.
+             */
+            line: number;
+        };
         /** @description Options of the whole import. */
         ImportOptions: {
             /** @description Warning codes of the plan the user acknowledges (IPAM-06). */
@@ -6399,6 +7237,46 @@ export interface components {
             provider: string;
             rotation?: components["schemas"]["KekRotationPhase"] | null;
         };
+        /** @description `POST /dns/keys`: generate a TSIG key, or import one with its secret. */
+        KeyCreate: {
+            algorithm?: components["schemas"]["TsigAlgorithm"] | null;
+            /** @description Free text. */
+            description?: string | null;
+            /** @description The key name, as the peers know it. */
+            name: components["schemas"]["DnsName"];
+            /** @description The secret in base64 to import; generated when absent. */
+            secret?: string | null;
+        };
+        /** @description The answer of `POST /dns/keys`: the secret is shown this once. */
+        KeyCreated: {
+            /** @description The key. */
+            key: components["schemas"]["KeyItem"];
+            /** @description The secret in base64. */
+            secret: string;
+        };
+        /** @description A TSIG key without its secret. */
+        KeyItem: {
+            /** @description The algorithm. */
+            algorithm: components["schemas"]["TsigAlgorithm"];
+            /** @description Creation. */
+            created: components["schemas"]["Stamp"];
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Identifier. */
+            id: components["schemas"]["DnsKeyId"];
+            /** @description The key name. */
+            name: components["schemas"]["DnsName"];
+        };
+        /**
+         * @description The role of a DNSSEC key.
+         * @enum {string}
+         */
+        KeyRole: "ksk" | "zsk" | "csk";
+        /**
+         * @description Where a DNSSEC key stands in its life (RFC 6781, RFC 7583).
+         * @enum {string}
+         */
+        KeyState: "generated" | "published" | "active" | "retired" | "removed";
         /** @description One probe's kill switch command. */
         KillSwitchCommand: {
             /**
@@ -6609,6 +7487,93 @@ export interface components {
              */
             revision: number;
         };
+        /** @description `POST /dns/lists`. */
+        ListCreate: {
+            /** @description What a blocked name answers. */
+            action: components["schemas"]["BlockAction"];
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Whether it is applied; `true` when absent. */
+            enabled?: boolean | null;
+            /** @description The file format. */
+            format: components["schemas"]["ListFormat"];
+            /**
+             * Format: int32
+             * @description How often a URL list is fetched, in hours.
+             */
+            interval_hours?: number | null;
+            /** @description A unique name. */
+            name: string;
+            /** @description Where it comes from. */
+            source: components["schemas"]["ListSource"];
+        };
+        /**
+         * @description The file format of a block list.
+         * @enum {string}
+         */
+        ListFormat: "hosts" | "domains";
+        /** @description A block list as the API reads it. */
+        ListItem: components["schemas"]["BlockList"] & {
+            /** @description The stable code of the last failed fetch. */
+            last_error?: string | null;
+            /** @description The store revision of the row. */
+            revision: components["schemas"]["Revision"];
+            version?: components["schemas"]["ListVersionItem"] | null;
+        };
+        /** @description `PATCH /dns/lists/{id}`. */
+        ListPatch: {
+            action?: components["schemas"]["BlockAction"] | null;
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Whether it is applied. */
+            enabled?: boolean | null;
+            format?: components["schemas"]["ListFormat"] | null;
+            /**
+             * Format: int32
+             * @description How often a URL list is fetched, in hours.
+             */
+            interval_hours?: number | null;
+            /** @description The name. */
+            name?: string | null;
+            source?: components["schemas"]["ListSource"] | null;
+        };
+        /** @description Where a block list comes from. */
+        ListSource: {
+            /** @enum {string} */
+            kind: "url";
+            /** @description The URL, `https://` or `http://`. */
+            url: string;
+        } | {
+            /** @enum {string} */
+            kind: "upload";
+        };
+        /** @description The newest compiled version of a block list. */
+        ListVersionItem: {
+            /**
+             * Format: int64
+             * @description How many names it blocks.
+             */
+            entries: number;
+            /** @description When the source was read. */
+            fetched: components["schemas"]["Timestamp"];
+            /**
+             * Format: int64
+             * @description The version.
+             */
+            revision: number;
+        };
+        /** @description A listener of a node's DNS role. */
+        ListenerItem: {
+            /** @description The local address and port. */
+            address: string;
+            /** @description The transport. */
+            transport: components["schemas"]["QueryTransport"];
+            /**
+             * Format: int32
+             * @description Workers on it (UDP).
+             */
+            workers: number;
+        };
         /** @description `[scan.llmnr]`. */
         LlmnrMethod: {
             /**
@@ -6789,6 +7754,56 @@ export interface components {
          * @enum {string}
          */
         MaskSource: "index" | "name" | "row_count" | "addresses" | "user";
+        /** @description One test of a view (DNS-20). A view matches a query when all its rules match. */
+        MatchRule: {
+            /**
+             * @description The prefixes.
+             * @example [
+             *       "192.0.2.0/24"
+             *     ]
+             */
+            prefixes: string[];
+            /** @enum {string} */
+            test: "client_subnet";
+        } | {
+            /** @enum {string} */
+            test: "transport";
+            /** @description The transports. */
+            transports: components["schemas"]["QueryTransport"][];
+        } | {
+            /**
+             * @description The local addresses.
+             * @example [
+             *       "192.0.2.53"
+             *     ]
+             */
+            addresses: string[];
+            /** @enum {string} */
+            test: "interface";
+        } | {
+            /** @enum {string} */
+            test: "qtype";
+            /** @description The types. */
+            types: components["schemas"]["Rtype"][];
+        } | {
+            /**
+             * Format: int32
+             * @description The first minute of the day, 0 to 1439.
+             */
+            from_minute: number;
+            /** @enum {string} */
+            test: "time_of_day";
+            /**
+             * Format: int32
+             * @description The last minute of the day, 0 to 1439.
+             */
+            to_minute: number;
+        } | {
+            /** @description The suffixes. */
+            suffixes: components["schemas"]["DnsName"][];
+            /** @enum {string} */
+            test: "qname";
+        };
         /** @description `[scan.mdns]`. */
         MdnsMethod: {
             /**
@@ -7742,6 +8757,20 @@ export interface components {
              */
             vrf?: string | null;
         };
+        /** @description A server that receives NOTIFY for a zone (RFC 1996). */
+        NotifyTarget: {
+            /**
+             * @description The address.
+             * @example 192.0.2.53
+             */
+            address: string;
+            key?: components["schemas"]["DnsName"] | null;
+            /**
+             * Format: int32
+             * @description The port.
+             */
+            port?: number;
+        };
         /**
          * @description The kind of an object: one variant per entity.
          *
@@ -7749,7 +8778,7 @@ export interface components {
          *     follows the name, so it matches the key encoding.
          * @enum {string}
          */
-        ObjectKind: "tenant" | "vrf" | "site" | "vlan" | "prefix" | "range" | "address" | "host" | "interface" | "custom_field" | "user" | "session" | "api_token" | "job" | "observation" | "proposal" | "import" | "connector" | "secret" | "node" | "settings" | "system";
+        ObjectKind: "tenant" | "vrf" | "site" | "vlan" | "prefix" | "range" | "address" | "host" | "interface" | "custom_field" | "user" | "session" | "api_token" | "job" | "observation" | "proposal" | "import" | "connector" | "secret" | "node" | "settings" | "system" | "zone" | "dns_view" | "dns_forwarder" | "dns_acl" | "dns_key" | "dns_list";
         /** @description A typed reference to one object. */
         ObjectRef: {
             /**
@@ -8045,6 +9074,11 @@ export interface components {
             /** @description When its value was last written (creation, replacement, key rotation). */
             value_updated_at: components["schemas"]["Timestamp"];
         };
+        /**
+         * @description Who owns an RRset (plan section 2.5, P2-Q12).
+         * @enum {string}
+         */
+        Origin: "manual" | "ipam" | "dynamic" | "dhcp" | "ad";
         /** @description A language and its packs, for administrators (`GET /i18n/packs`). */
         PackInfo: {
             active?: components["schemas"]["PackVersion"] | null;
@@ -8206,6 +9240,27 @@ export interface components {
          *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
          *     bound to the query that produced it.
          */
+        Page_AclItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["Acl"] & {
+                /** @description The store revision of the row. */
+                revision: components["schemas"]["Revision"];
+                /** @description The zones and views that name it. */
+                used_by: string[];
+            })[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
         Page_AddressRow: {
             /** @description The items of this page, at most `limit` of them. */
             items: (components["schemas"]["Address"] & {
@@ -8307,6 +9362,25 @@ export interface components {
                 label: string;
                 last_used_at?: components["schemas"]["Timestamp"] | null;
             }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_ForwarderItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["ForwardRule"] & {
+                /** @description The store revision of the row. */
+                revision: components["schemas"]["Revision"];
+            })[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
             /** @description Store revision the page was read at. */
@@ -8599,6 +9673,55 @@ export interface components {
          *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
          *     bound to the query that produced it.
          */
+        Page_KeyItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description The algorithm. */
+                algorithm: components["schemas"]["TsigAlgorithm"];
+                /** @description Creation. */
+                created: components["schemas"]["Stamp"];
+                /** @description Free text. */
+                description?: string | null;
+                /** @description Identifier. */
+                id: components["schemas"]["DnsKeyId"];
+                /** @description The key name. */
+                name: components["schemas"]["DnsName"];
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_ListItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["BlockList"] & {
+                /** @description The stable code of the last failed fetch. */
+                last_error?: string | null;
+                /** @description The store revision of the row. */
+                revision: components["schemas"]["Revision"];
+                version?: components["schemas"]["ListVersionItem"] | null;
+            })[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
         Page_NodeView: {
             /** @description The items of this page, at most `limit` of them. */
             items: {
@@ -8823,6 +9946,47 @@ export interface components {
          *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
          *     bound to the query that produced it.
          */
+        Page_QueryLogLine: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description When the query arrived. */
+                at: components["schemas"]["Timestamp"];
+                blocked?: components["schemas"]["BlockListId"] | null;
+                /** @description Answered from the cache. */
+                cached: boolean;
+                /** @description The client, pseudonymised or hidden per the settings (TGL-15). */
+                client: string;
+                /**
+                 * Format: int32
+                 * @description Microseconds from arrival to answer.
+                 */
+                duration_micros: number;
+                /** @description The query name. */
+                qname: string;
+                /**
+                 * Format: int32
+                 * @description The RCODE answered.
+                 */
+                rcode: number;
+                /** @description The transport. */
+                transport: components["schemas"]["QueryTransport"];
+                /** @description The query type. */
+                type: components["schemas"]["Rtype"];
+                view?: components["schemas"]["ViewId"] | null;
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
         Page_Range: {
             /** @description The items of this page, at most `limit` of them. */
             items: {
@@ -8897,6 +10061,41 @@ export interface components {
                 /** @description The role. */
                 role: components["schemas"]["RoleName"];
                 stored?: components["schemas"]["RoleMfa"] | null;
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_RrSetItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                key?: components["schemas"]["DnsName"] | null;
+                /** @description The owner name. */
+                name: components["schemas"]["DnsName"];
+                /** @description Who owns the RRset. */
+                origin: components["schemas"]["Origin"];
+                /** @description The records. */
+                records: components["schemas"]["RecordData"][];
+                /** @description The zone scope. */
+                scope: components["schemas"]["ScopeName"];
+                /**
+                 * Format: int32
+                 * @description The TTL in seconds.
+                 */
+                ttl: number;
+                /** @description The type. */
+                type: components["schemas"]["Rtype"];
+                /** @description The last change. */
+                updated: components["schemas"]["Stamp"];
             }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
@@ -9130,6 +10329,25 @@ export interface components {
          *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
          *     bound to the query that produced it.
          */
+        Page_ViewItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["View"] & {
+                /** @description The store revision of the row. */
+                revision: components["schemas"]["Revision"];
+            })[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
         Page_Vlan: {
             /** @description The items of this page, at most `limit` of them. */
             items: {
@@ -9180,6 +10398,35 @@ export interface components {
                 /** @description Owning tenant. */
                 tenant: components["schemas"]["TenantId"];
             }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_ZoneItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["Zone"] & {
+                /** @description The store revision of the zone row (the `ETag`). */
+                revision: components["schemas"]["Revision"];
+                /**
+                 * Format: int64
+                 * @description The number of RRsets in all scopes.
+                 */
+                rrsets: number;
+                /**
+                 * Format: int32
+                 * @description The SOA serial served now.
+                 */
+                serial: number;
+            })[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
             /** @description Store revision the page was read at. */
@@ -9560,6 +10807,35 @@ export interface components {
             plan?: components["schemas"]["PlanSummary"] | null;
             /** @description Source rows by outcome. */
             rows: components["schemas"]["RowCounts"];
+        };
+        /**
+         * @description A server Tenko transfers a secondary zone from, or sends the queries of a forward or
+         *     stub zone to.
+         */
+        PrimaryServer: {
+            /**
+             * @description The address.
+             * @example 192.0.2.53
+             */
+            address: string;
+            key?: components["schemas"]["DnsName"] | null;
+            /**
+             * Format: int32
+             * @description The port.
+             */
+            port?: number;
+            /** @description The name in the server's certificate. */
+            tls_name?: string | null;
+            /** @description Transfers run over TLS (XoT); `tls_name` is then the server's certificate name. */
+            xot?: boolean;
+        };
+        /** @description The transfer state of one source server. */
+        PrimaryState: {
+            /** @description The server. */
+            address: string;
+            /** @description The stable code of the last failure. */
+            last_error?: string | null;
+            last_success?: components["schemas"]["Timestamp"] | null;
         };
         /** @description Who performs an action. */
         Principal: {
@@ -9960,6 +11236,38 @@ export interface components {
             /** @description The majors the node offered in its last handshake. */
             offered?: number[];
         };
+        /** @description One line of a node's query log. */
+        QueryLogLine: {
+            /** @description When the query arrived. */
+            at: components["schemas"]["Timestamp"];
+            blocked?: components["schemas"]["BlockListId"] | null;
+            /** @description Answered from the cache. */
+            cached: boolean;
+            /** @description The client, pseudonymised or hidden per the settings (TGL-15). */
+            client: string;
+            /**
+             * Format: int32
+             * @description Microseconds from arrival to answer.
+             */
+            duration_micros: number;
+            /** @description The query name. */
+            qname: string;
+            /**
+             * Format: int32
+             * @description The RCODE answered.
+             */
+            rcode: number;
+            /** @description The transport. */
+            transport: components["schemas"]["QueryTransport"];
+            /** @description The query type. */
+            type: components["schemas"]["Rtype"];
+            view?: components["schemas"]["ViewId"] | null;
+        };
+        /**
+         * @description A transport a query arrives on.
+         * @enum {string}
+         */
+        QueryTransport: "udp" | "tcp" | "dot" | "doh";
         /** @description A queued change, as `GET /queue` lists it. */
         QueueItemView: {
             /** @description When it expires. */
@@ -10278,6 +11586,361 @@ export interface components {
              */
             retention_secs: number;
         };
+        /** @description `POST /dns/zones/{id}/records/batch`: changes applied together or not at all. */
+        RecordBatch: {
+            /** @description The changes, in order. */
+            changes: components["schemas"]["RecordChange"][];
+        };
+        /** @description The answer of a batch: the diff, and after a write the new serial and revision. */
+        RecordBatchResult: {
+            /** @description The changed RRsets. */
+            changes: components["schemas"]["RecordDiff"][];
+            /** @description Nothing was written. */
+            dry_run: boolean;
+            revision?: components["schemas"]["Revision"] | null;
+            /**
+             * Format: int32
+             * @description The serial after the write.
+             */
+            serial?: number | null;
+        };
+        /** @description One change of `POST /dns/zones/{id}/records/batch`. */
+        RecordChange: {
+            /** @description The owner name. */
+            name: components["schemas"]["DnsName"];
+            /** @description What to do. */
+            op: components["schemas"]["RecordOp"];
+            /** @description The records of `set`, `add` and `remove`. */
+            records?: components["schemas"]["RecordData"][];
+            scope?: components["schemas"]["ScopeName"] | null;
+            /**
+             * Format: int32
+             * @description The TTL; the zone's default TTL when absent.
+             */
+            ttl?: number | null;
+            /** @description The type. */
+            type: components["schemas"]["Rtype"];
+        };
+        /**
+         * @description Typed record data of the types the model knows, and RFC 3597 data of every other type.
+         *
+         *     Serialized with the record type in `type`: `{"type": "MX", "preference": 10,
+         *     "exchange": "mail.example.test"}`. Binary fields (digests, keys, signatures, salts,
+         *     hashes, parameter values) are lowercase hexadecimal.
+         */
+        RecordData: {
+            /**
+             * @description The address.
+             * @example 192.0.2.10
+             */
+            address: string;
+            /** @enum {string} */
+            type: "A";
+        } | {
+            /**
+             * @description The address.
+             * @example 2001:db8::10
+             */
+            address: string;
+            /** @enum {string} */
+            type: "AAAA";
+        } | {
+            /** @description The canonical name. */
+            target: components["schemas"]["DnsName"];
+            /** @enum {string} */
+            type: "CNAME";
+        } | {
+            /** @description The target of the subtree. */
+            target: components["schemas"]["DnsName"];
+            /** @enum {string} */
+            type: "DNAME";
+        } | {
+            /** @description The exchange. */
+            exchange: components["schemas"]["DnsName"];
+            /**
+             * Format: int32
+             * @description The preference, lower first.
+             */
+            preference: number;
+            /** @enum {string} */
+            type: "MX";
+        } | {
+            /** @description The server's name. */
+            host: components["schemas"]["DnsName"];
+            /** @enum {string} */
+            type: "NS";
+        } | {
+            /** @description The name pointed to. */
+            target: components["schemas"]["DnsName"];
+            /** @enum {string} */
+            type: "PTR";
+        } | {
+            /**
+             * Format: int32
+             * @description Expiry in seconds.
+             */
+            expire: number;
+            /**
+             * Format: int32
+             * @description TTL of negative answers in seconds (RFC 2308).
+             */
+            minimum: number;
+            /** @description The primary name server. */
+            mname: components["schemas"]["DnsName"];
+            /**
+             * Format: int32
+             * @description Refresh interval in seconds.
+             */
+            refresh: number;
+            /**
+             * Format: int32
+             * @description Retry interval in seconds.
+             */
+            retry: number;
+            /** @description The mailbox of the responsible person, as a name. */
+            rname: components["schemas"]["DnsName"];
+            /**
+             * Format: int32
+             * @description The serial.
+             */
+            serial: number;
+            /** @enum {string} */
+            type: "SOA";
+        } | {
+            /**
+             * Format: int32
+             * @description The port.
+             */
+            port: number;
+            /**
+             * Format: int32
+             * @description The priority, lower first.
+             */
+            priority: number;
+            /** @description The host. */
+            target: components["schemas"]["DnsName"];
+            /** @enum {string} */
+            type: "SRV";
+            /**
+             * Format: int32
+             * @description The weight among equal priorities.
+             */
+            weight: number;
+        } | {
+            /** @description The strings, at most 255 octets each; longer input is split (DNS-24). */
+            strings: string[];
+            /** @enum {string} */
+            type: "TXT";
+        } | {
+            /**
+             * Format: int32
+             * @description The flags (128: issuer critical).
+             */
+            flags: number;
+            /** @description The property tag (`issue`, `issuewild`, `iodef`), 1 to 15 letters or digits. */
+            tag: string;
+            /** @enum {string} */
+            type: "CAA";
+            /** @description The property value. */
+            value: string;
+        } | {
+            /**
+             * Format: int32
+             * @description The key algorithm.
+             */
+            algorithm: number;
+            /** @description The digest. */
+            digest: components["schemas"]["HexBytes"];
+            /**
+             * Format: int32
+             * @description The digest type.
+             */
+            digest_type: number;
+            /**
+             * Format: int32
+             * @description The key tag.
+             */
+            key_tag: number;
+            /** @enum {string} */
+            type: "DS";
+        } | {
+            /**
+             * Format: int32
+             * @description The algorithm.
+             */
+            algorithm: number;
+            /**
+             * Format: int32
+             * @description The flags (256: zone key, 257: zone key and secure entry point).
+             */
+            flags: number;
+            /**
+             * Format: int32
+             * @description The protocol, always 3.
+             */
+            protocol: number;
+            /** @description The public key. */
+            public_key: components["schemas"]["HexBytes"];
+            /** @enum {string} */
+            type: "DNSKEY";
+        } | {
+            /**
+             * Format: int32
+             * @description The algorithm.
+             */
+            algorithm: number;
+            /**
+             * Format: int32
+             * @description Expiration, seconds since 1970 modulo 2^32.
+             */
+            expiration: number;
+            /**
+             * Format: int32
+             * @description Inception, seconds since 1970 modulo 2^32.
+             */
+            inception: number;
+            /**
+             * Format: int32
+             * @description The key tag of the signing key.
+             */
+            key_tag: number;
+            /**
+             * Format: int32
+             * @description The label count of the owner name.
+             */
+            labels: number;
+            /**
+             * Format: int32
+             * @description The TTL of the covered RRset.
+             */
+            original_ttl: number;
+            /** @description The signature. */
+            signature: components["schemas"]["HexBytes"];
+            /** @description The signer's name. */
+            signer: components["schemas"]["DnsName"];
+            /** @enum {string} */
+            type: "RRSIG";
+            /** @description The type the signature covers. */
+            type_covered: components["schemas"]["Rtype"];
+        } | {
+            /** @description The next owner name in canonical order. */
+            next: components["schemas"]["DnsName"];
+            /** @enum {string} */
+            type: "NSEC";
+            /** @description The types present at the owner, ascending. */
+            types: components["schemas"]["Rtype"][];
+        } | {
+            /**
+             * Format: int32
+             * @description The flags (1: opt-out).
+             */
+            flags: number;
+            /**
+             * Format: int32
+             * @description The hash algorithm (1: SHA-1).
+             */
+            hash_algorithm: number;
+            /**
+             * Format: int32
+             * @description Extra hash iterations.
+             */
+            iterations: number;
+            /** @description The next hashed owner name, raw (not base32). */
+            next_hashed: components["schemas"]["HexBytes"];
+            /** @description The salt. */
+            salt: components["schemas"]["HexBytes"];
+            /** @enum {string} */
+            type: "NSEC3";
+            /** @description The types present at the owner, ascending. */
+            types: components["schemas"]["Rtype"][];
+        } | {
+            /**
+             * Format: int32
+             * @description The flags, zero.
+             */
+            flags: number;
+            /**
+             * Format: int32
+             * @description The hash algorithm (1: SHA-1).
+             */
+            hash_algorithm: number;
+            /**
+             * Format: int32
+             * @description Extra hash iterations.
+             */
+            iterations: number;
+            /** @description The salt. */
+            salt: components["schemas"]["HexBytes"];
+            /** @enum {string} */
+            type: "NSEC3PARAM";
+        } | {
+            /** @description The association data. */
+            data: components["schemas"]["HexBytes"];
+            /**
+             * Format: int32
+             * @description The matching type.
+             */
+            matching_type: number;
+            /**
+             * Format: int32
+             * @description The selector.
+             */
+            selector: number;
+            /** @enum {string} */
+            type: "TLSA";
+            /**
+             * Format: int32
+             * @description The certificate usage.
+             */
+            usage: number;
+        } | {
+            /** @description The parameters, keys strictly ascending. */
+            params: components["schemas"]["SvcParam"][];
+            /**
+             * Format: int32
+             * @description The priority; 0 is the alias form.
+             */
+            priority: number;
+            /** @description The target name (`.` for the owner itself). */
+            target: components["schemas"]["DnsName"];
+            /** @enum {string} */
+            type: "SVCB";
+        } | {
+            /** @description The parameters, keys strictly ascending. */
+            params: components["schemas"]["SvcParam"][];
+            /**
+             * Format: int32
+             * @description The priority; 0 is the alias form.
+             */
+            priority: number;
+            /** @description The target name (`.` for the owner itself). */
+            target: components["schemas"]["DnsName"];
+            /** @enum {string} */
+            type: "HTTPS";
+        } | {
+            /** @description The data in wire form. */
+            data: components["schemas"]["HexBytes"];
+            /** @description The record type. */
+            rtype: components["schemas"]["Rtype"];
+            /** @enum {string} */
+            type: "unknown";
+        };
+        /** @description The diff of one RRset. */
+        RecordDiff: {
+            after?: components["schemas"]["RrSetItem"] | null;
+            before?: components["schemas"]["RrSetItem"] | null;
+            /** @description The owner name. */
+            name: components["schemas"]["DnsName"];
+            /** @description The scope. */
+            scope: components["schemas"]["ScopeName"];
+            /** @description The type. */
+            type: components["schemas"]["Rtype"];
+        };
+        /**
+         * @description What one change of a batch does to an RRset.
+         * @enum {string}
+         */
+        RecordOp: "set" | "add" | "remove" | "delete";
         /** @description New recovery codes, shown once. */
         RecoveryCodes: {
             /** @description The codes. */
@@ -10582,6 +12245,11 @@ export interface components {
             /** @description The new roles. */
             roles: components["schemas"]["RoleName"][];
         };
+        /** @description `POST /dns/zones/{id}/dnssec/rollover`. */
+        RolloverRequest: {
+            /** @description The role of the key to roll. */
+            role: components["schemas"]["KeyRole"];
+        };
         /** @description Rows of the source by outcome. */
         RowCounts: {
             /** @description Address-only rows of pre-filled lists (free addresses). */
@@ -10612,6 +12280,29 @@ export interface components {
             /** @description A human-readable name. */
             name: string;
         };
+        /** @description An RRset as the API reads and writes it: the records typed. */
+        RrSetItem: {
+            key?: components["schemas"]["DnsName"] | null;
+            /** @description The owner name. */
+            name: components["schemas"]["DnsName"];
+            /** @description Who owns the RRset. */
+            origin: components["schemas"]["Origin"];
+            /** @description The records. */
+            records: components["schemas"]["RecordData"][];
+            /** @description The zone scope. */
+            scope: components["schemas"]["ScopeName"];
+            /**
+             * Format: int32
+             * @description The TTL in seconds.
+             */
+            ttl: number;
+            /** @description The type. */
+            type: components["schemas"]["Rtype"];
+            /** @description The last change. */
+            updated: components["schemas"]["Stamp"];
+        };
+        /** @description Record type: a mnemonic (`AAAA`) or the RFC 3597 form (`TYPE65280`) */
+        Rtype: string;
         /** @description The answer to a run request: the job that runs the connector. */
         RunAccepted: {
             /** @description The job (`GET /jobs/{id}` shows its progress). */
@@ -10993,6 +12684,8 @@ export interface components {
              */
             vrf?: string | null;
         };
+        /** @description Zone scope name ([a-z0-9][a-z0-9_-]{0,62}); `default` for the default scope */
+        ScopeName: string;
         /**
          * @description A scope rule in the API (IAM-01): `{"kind": "prefix", "value": {"id": "...",
          *     "subtree": true}}`. Grants use `vrf`, `site` and `prefix`; `tenant` and `object` are
@@ -11034,6 +12727,21 @@ export interface components {
             /** @description One object. */
             value: components["schemas"]["ObjectRef"];
         };
+        /**
+         * @description The weight of one zone scope in a view (DNS-20): among the scopes a view maps for one
+         *     zone, a query picks one in proportion to the weights.
+         */
+        ScopeWeight: {
+            /** @description The scope of the zone. */
+            scope: components["schemas"]["ScopeName"];
+            /**
+             * Format: int32
+             * @description The weight, 1 to 1000.
+             */
+            weight: number;
+            /** @description The zone. */
+            zone: components["schemas"]["ZoneId"];
+        };
         /** @description One search hit. */
         SearchHit: {
             /** @description The object itself. */
@@ -11048,6 +12756,11 @@ export interface components {
          * @enum {string}
          */
         SecondFactorMethod: "totp" | "recovery" | "webauthn";
+        /** @description Where the data of a secondary, stub, forward or transferred RPZ zone comes from. */
+        SecondarySource: {
+            /** @description The servers, tried in order. */
+            primaries: components["schemas"]["PrimaryServer"][];
+        };
         /** @description A connector instance that references a secret. */
         SecretConnectorReference: {
             /** @description The connector instance. */
@@ -11157,6 +12870,11 @@ export interface components {
             /** @description Whether the vault holds operator secrets (the PIN coupling rule applies). */
             vault_has_operator_secrets: boolean;
         };
+        /**
+         * @description How the SOA serial moves on a change (DNS-07).
+         * @enum {string}
+         */
+        SerialPolicy: "unixtime" | "counter" | "date_counter";
         /** @description `POST /access/service-accounts`. */
         ServiceAccountCreate: {
             /** @description The display name; defaults to the name. */
@@ -11611,6 +13329,38 @@ export interface components {
          * @enum {string}
          */
         SnmpPrivacy: "aes128";
+        /** @description The SOA values of a zone apart from the serial. */
+        SoaDefaults: {
+            /**
+             * Format: int32
+             * @description Expiry in seconds.
+             */
+            expire?: number;
+            /**
+             * Format: int32
+             * @description TTL of negative answers in seconds (RFC 2308).
+             */
+            minimum?: number;
+            /** @description The primary name server. */
+            mname: components["schemas"]["DnsName"];
+            /**
+             * Format: int32
+             * @description Refresh interval in seconds.
+             */
+            refresh?: number;
+            /**
+             * Format: int32
+             * @description Retry interval in seconds.
+             */
+            retry?: number;
+            /** @description The mailbox of the responsible person as a name (`hostmaster.example.test`). */
+            rname: components["schemas"]["DnsName"];
+            /**
+             * Format: int32
+             * @description TTL of the SOA record itself, and the default TTL of new RRsets.
+             */
+            ttl?: number;
+        };
         /**
          * @description Sort direction of lists that only sort by their natural key.
          * @enum {string}
@@ -11937,6 +13687,16 @@ export interface components {
              */
             restarts: number;
         };
+        /** @description One parameter of an SVCB or HTTPS record (RFC 9460): the key and its value in wire form. */
+        SvcParam: {
+            /**
+             * Format: int32
+             * @description The parameter key (`1` alpn, `3` port, `4` ipv4hint, ...).
+             */
+            key: number;
+            /** @description The value in wire form. */
+            value: components["schemas"]["HexBytes"];
+        };
         /** @description A syslog receiver. */
         SyslogTarget: {
             /** @description The facility of the messages. */
@@ -11962,7 +13722,7 @@ export interface components {
          * @description Components that act as [`Principal::System`].
          * @enum {string}
          */
-        SystemComponent: "setup" | "api" | "auth" | "vault" | "store" | "ipam" | "import" | "jobs" | "reconciler" | "connector" | "scan" | "cluster" | "audit_export" | "backup" | "languages" | "leader";
+        SystemComponent: "setup" | "api" | "auth" | "vault" | "store" | "ipam" | "import" | "jobs" | "reconciler" | "connector" | "scan" | "cluster" | "audit_export" | "backup" | "languages" | "leader" | "dns";
         /** @description Body of `GET /system/status`. */
         SystemStatus: {
             backup?: components["schemas"]["BackupSummaryView"] | null;
@@ -12277,7 +14037,7 @@ export interface components {
          *     parameter subscribes to all of them except `metrics`, which a client names to receive it.
          * @enum {string}
          */
-        Topic: "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "connectors" | "discovery" | "secrets" | "cluster" | "metrics";
+        Topic: "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "connectors" | "discovery" | "secrets" | "cluster" | "metrics" | "dns";
         /** @description An edge of the graph. */
         TopologyEdge: {
             /** @description One end: the switch, access point or hypervisor for client edges. */
@@ -12472,6 +14232,33 @@ export interface components {
              */
             skew: number;
         };
+        /** @description Who may transfer a zone and who is notified (DNS-09, DNS-19, TGL-10). */
+        TransferPolicy: {
+            /** @description The access lists that may transfer; none means nobody. */
+            allow?: components["schemas"]["AclId"][];
+            /** @description The servers notified when the serial changes. */
+            notify?: components["schemas"]["NotifyTarget"][];
+            /** @description Transfers need a TSIG key (TGL-10). */
+            require_tsig?: boolean;
+            /** @description Transfers run over TLS (XoT, RFC 9103). */
+            xot?: boolean;
+        };
+        /** @description `GET /dns/zones/{id}/transfer`. */
+        TransferStatus: {
+            expires?: components["schemas"]["Timestamp"] | null;
+            next_refresh?: components["schemas"]["Timestamp"] | null;
+            /** @description The sources of a secondary zone. */
+            primaries: components["schemas"]["PrimaryState"][];
+            /** @description A transfer is running. */
+            running: boolean;
+            /**
+             * Format: int32
+             * @description The serial held.
+             */
+            serial?: number | null;
+            /** @description The zone. */
+            zone: components["schemas"]["ZoneId"];
+        };
         /**
          * @description One row of a job's transition log. Every transition is also part of an audited write
          *     batch (IPAM-17).
@@ -12592,6 +14379,12 @@ export interface components {
             revision: number;
             vrf?: components["schemas"]["VrfId"] | null;
         };
+        /**
+         * @description A TSIG algorithm (RFC 8945). HMAC-SHA256 is the default; HMAC-SHA1 is accepted for
+         *     Windows DNS (risk R51).
+         * @enum {string}
+         */
+        TsigAlgorithm: "hmac-sha256" | "hmac-sha384" | "hmac-sha512" | "hmac-sha1";
         /** @description Which web UI the binary serves. */
         UiStatus: {
             /** @description The UI is served from a directory (`--ui-dir`, development). */
@@ -12791,6 +14584,21 @@ export interface components {
             /** @description The changes. */
             patch: components["schemas"]["VrfPatch"];
         };
+        /** @description An upstream resolver of a forwarding rule. */
+        Upstream: {
+            /**
+             * @description The address.
+             * @example 192.0.2.1
+             */
+            address: string;
+            /** @description The URL path of a DoH upstream; `/dns-query` when absent. */
+            path?: string | null;
+            /**
+             * Format: int32
+             * @description The port; the transport's default when absent.
+             */
+            port?: number | null;
+        };
         /** @description `POST /users`. */
         UserCreate: {
             /** @description The display name; defaults to the login name. */
@@ -12932,6 +14740,67 @@ export interface components {
             ours: number[];
             /** @description The majors the other side offered, sorted ascending and deduplicated. */
             theirs: number[];
+        };
+        /**
+         * @description A view (DNS-20): rules that select queries, and the zone scopes they see. Views are
+         *     tried in `order`; the first match wins; a query no view matches uses the default scope
+         *     of every zone (the implicit default view).
+         */
+        View: {
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Identifier. */
+            id: components["schemas"]["ViewId"];
+            /** @description A unique name, 1 to 64 characters. */
+            name: string;
+            /**
+             * Format: int32
+             * @description The position among the views, lower first.
+             */
+            order: number;
+            /** @description The tests; none matches every query. */
+            rules?: components["schemas"]["MatchRule"][];
+            /** @description The scopes this view sees per zone; a zone not listed is seen in its default scope. */
+            scope_map?: components["schemas"]["ScopeWeight"][];
+        };
+        /** @description `POST /dns/views`. */
+        ViewCreate: {
+            /** @description Free text. */
+            description?: string | null;
+            /** @description A unique name. */
+            name: string;
+            /**
+             * Format: int32
+             * @description The position, lower first.
+             */
+            order: number;
+            /** @description The tests. */
+            rules?: components["schemas"]["MatchRule"][];
+            /** @description The scopes per zone. */
+            scope_map?: components["schemas"]["ScopeWeight"][];
+        };
+        /** Format: uuid */
+        ViewId: string;
+        /** @description A view as the API reads it. */
+        ViewItem: components["schemas"]["View"] & {
+            /** @description The store revision of the row. */
+            revision: components["schemas"]["Revision"];
+        };
+        /** @description `PATCH /dns/views/{id}`. */
+        ViewPatch: {
+            /** @description Free text. */
+            description?: string | null;
+            /** @description The name. */
+            name?: string | null;
+            /**
+             * Format: int32
+             * @description The position.
+             */
+            order?: number | null;
+            /** @description The tests. */
+            rules?: components["schemas"]["MatchRule"][] | null;
+            /** @description The scopes per zone. */
+            scope_map?: components["schemas"]["ScopeWeight"][] | null;
         };
         /** @description A VLAN (IPAM-03). */
         Vlan: {
@@ -13542,6 +15411,138 @@ export interface components {
             revision?: number | null;
             /** @description Warnings of the plan. */
             warnings: components["schemas"]["PlanWarning"][];
+        };
+        /**
+         * @description A zone (DNS-01): its name, kind, scopes and policies. The records are rows of
+         *     `dns.rrsets`.
+         */
+        Zone: {
+            /** @description Creation. */
+            created: components["schemas"]["Stamp"];
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Signing. */
+            dnssec?: components["schemas"]["DnssecPolicy"];
+            /** @description Identifier. */
+            id: components["schemas"]["ZoneId"];
+            /** @description What the zone is. */
+            kind: components["schemas"]["ZoneKind"];
+            /** @description The apex name. */
+            name: components["schemas"]["DnsName"];
+            reverse_of?: components["schemas"]["PrefixId"] | null;
+            /** @description The scopes; always holds `default`. */
+            scopes?: components["schemas"]["ZoneScope"][];
+            /** @description How the serial moves. */
+            serial?: components["schemas"]["SerialPolicy"];
+            /** @description The SOA values. */
+            soa: components["schemas"]["SoaDefaults"];
+            source?: components["schemas"]["SecondarySource"] | null;
+            tenant?: components["schemas"]["TenantId"] | null;
+            /** @description Zone transfers and NOTIFY. */
+            transfer?: components["schemas"]["TransferPolicy"];
+            /** @description Dynamic updates. */
+            update?: components["schemas"]["UpdatePolicy"];
+            /** @description Last change. */
+            updated: components["schemas"]["Stamp"];
+        };
+        /** @description `POST /dns/zones`. */
+        ZoneCreate: {
+            /** @description Free text. */
+            description?: string | null;
+            dnssec?: components["schemas"]["DnssecPolicy"] | null;
+            /** @description What the zone is. */
+            kind: components["schemas"]["ZoneKind"];
+            /** @description The apex. */
+            name: components["schemas"]["DnsName"];
+            /** @description The name servers of the apex NS set; at least one for a primary zone. */
+            name_servers?: components["schemas"]["DnsName"][];
+            /** @description Scopes besides `default`. */
+            scopes?: components["schemas"]["ZoneScope"][];
+            serial?: components["schemas"]["SerialPolicy"] | null;
+            /** @description The SOA values. */
+            soa: components["schemas"]["SoaDefaults"];
+            source?: components["schemas"]["SecondarySource"] | null;
+            tenant?: components["schemas"]["TenantId"] | null;
+            transfer?: components["schemas"]["TransferPolicy"] | null;
+            update?: components["schemas"]["UpdatePolicy"] | null;
+        };
+        /** @description `POST /dns/zones/{id}/records/import`: a zone file (RFC 1035 master format). */
+        ZoneFileImport: {
+            /** @description Replace the scope's records (`true`) or merge into them (`false`). */
+            replace?: boolean;
+            scope?: components["schemas"]["ScopeName"] | null;
+            /** @description The zone file text; `$ORIGIN` and `$TTL` are honoured, `$INCLUDE` is refused. */
+            zone_file: string;
+        };
+        /** @description The answer of an import: counts, losses, and after a write the serial and revision. */
+        ZoneFileImportReport: {
+            /**
+             * Format: int64
+             * @description RRsets added.
+             */
+            added: number;
+            /** @description Nothing was written. */
+            dry_run: boolean;
+            /** @description What the import could not take. */
+            losses: components["schemas"]["ImportLoss"][];
+            /**
+             * Format: int64
+             * @description RRsets removed (with `replace`).
+             */
+            removed: number;
+            /**
+             * Format: int64
+             * @description RRsets replaced.
+             */
+            replaced: number;
+            revision?: components["schemas"]["Revision"] | null;
+            /**
+             * Format: int32
+             * @description The serial after the write.
+             */
+            serial?: number | null;
+        };
+        /** Format: uuid */
+        ZoneId: string;
+        /** @description A zone as the API reads it. */
+        ZoneItem: components["schemas"]["Zone"] & {
+            /** @description The store revision of the zone row (the `ETag`). */
+            revision: components["schemas"]["Revision"];
+            /**
+             * Format: int64
+             * @description The number of RRsets in all scopes.
+             */
+            rrsets: number;
+            /**
+             * Format: int32
+             * @description The SOA serial served now.
+             */
+            serial: number;
+        };
+        /**
+         * @description What a zone is (DNS-01, DNS-09, DNS-21).
+         * @enum {string}
+         */
+        ZoneKind: "primary" | "secondary" | "stub" | "forward" | "rpz";
+        /** @description `PATCH /dns/zones/{id}`: the fields to change; the name and the kind do not change. */
+        ZonePatch: {
+            /** @description Free text; an empty string clears it. */
+            description?: string | null;
+            dnssec?: components["schemas"]["DnssecPolicy"] | null;
+            /** @description The scopes, `default` included. */
+            scopes?: components["schemas"]["ZoneScope"][] | null;
+            serial?: components["schemas"]["SerialPolicy"] | null;
+            soa?: components["schemas"]["SoaDefaults"] | null;
+            source?: components["schemas"]["SecondarySource"] | null;
+            transfer?: components["schemas"]["TransferPolicy"] | null;
+            update?: components["schemas"]["UpdatePolicy"] | null;
+        };
+        /** @description A scope of a zone (DNS-20): one version of the zone's data that views choose. */
+        ZoneScope: {
+            /** @description Free text. */
+            description?: string | null;
+            /** @description The scope name, unique in the zone. */
+            name: components["schemas"]["ScopeName"];
         };
     };
     responses: never;
@@ -17666,13 +19667,2678 @@ export interface operations {
             };
         };
     };
+    list_dns_acls: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of access lists by name */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_AclItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_dns_acl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AclCreate"];
+            };
+        };
+        responses: {
+            /** @description The access list */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AclItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dns_acl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Access list identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The access list with its `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AclItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such access list (`dns.acl.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dns_acl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Access list identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The access list is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such access list (`dns.acl.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A zone or view still names it (`dns.acl.in_use`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_dns_acl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Access list identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AclPatch"];
+            };
+        };
+        responses: {
+            /** @description The changed access list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AclItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such access list (`dns.acl.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The access list changed since it was read (`If-Match`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dns_forwarders: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of rules by suffix */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ForwarderItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_dns_forwarder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForwarderCreate"];
+            };
+        };
+        responses: {
+            /** @description The rule */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForwarderItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the rule is invalid (`dns.forwarder.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dns_forwarder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Forwarding rule identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rule with its `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForwarderItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such rule (`dns.forwarder.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dns_forwarder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Forwarding rule identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rule is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such rule (`dns.forwarder.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_dns_forwarder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Forwarding rule identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForwarderPatch"];
+            };
+        };
+        responses: {
+            /** @description The changed rule */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForwarderItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such rule (`dns.forwarder.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The rule changed since it was read (`If-Match`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dns_keys: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of keys by name, without secrets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_KeyItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_dns_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KeyCreate"];
+            };
+        };
+        responses: {
+            /** @description The key and its secret, shown this once */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyCreated"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A key of this name exists (`dns.key.exists`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dns_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description TSIG key name */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key without its secret */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such key (`dns.key.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dns_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description TSIG key name */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key and its secret are gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such key (`dns.key.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dns_lists: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of block lists by name */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ListItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_dns_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListCreate"];
+            };
+        };
+        responses: {
+            /** @description The block list */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the list is invalid (`dns.list.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dns_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Block list identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The block list with its newest version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such list (`dns.list.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dns_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Block list identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The list and its versions are gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such list (`dns.list.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_dns_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Block list identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListPatch"];
+            };
+        };
+        responses: {
+            /** @description The changed block list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such list (`dns.list.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The list changed since it was read (`If-Match`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    fetch_dns_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Block list identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The fetch job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DnsJobStarted"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such list (`dns.list.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The list is uploaded, not fetched */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dns_views: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of views in order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ViewItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_dns_view: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ViewCreate"];
+            };
+        };
+        responses: {
+            /** @description The view */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ViewItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the view is invalid (`dns.view.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dns_view: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description View identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The view with its `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ViewItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such view (`dns.view.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dns_view: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description View identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The view is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such view (`dns.view.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_dns_view: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description View identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ViewPatch"];
+            };
+        };
+        responses: {
+            /** @description The changed view */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ViewItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such view (`dns.view.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The view changed since it was read (`If-Match`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dns_zones: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of zones by name */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ZoneItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_dns_zone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZoneCreate"];
+            };
+        };
+        responses: {
+            /** @description The zone, with its SOA and NS set */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZoneItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the settings are invalid (`dns.zone.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A zone of this name exists (`dns.zone.exists`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dns_zone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The zone with its `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZoneItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such zone (`dns.zone.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dns_zone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The zone is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such zone (`dns.zone.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_dns_zone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZonePatch"];
+            };
+        };
+        responses: {
+            /** @description The changed zone */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZoneItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such zone (`dns.zone.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The zone changed since it was read (`If-Match`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dns_zone_dnssec: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The signing state, the keys without private parts and the DS records */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DnssecStatus"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such zone (`dns.zone.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    start_dns_key_rollover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RolloverRequest"];
+            };
+        };
+        responses: {
+            /** @description The rollover job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DnsJobStarted"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such zone (`dns.zone.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The zone is not signed online */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dns_records: {
+        parameters: {
+            query?: {
+                /** @description The scope; `default` when absent. */
+                scope?: components["schemas"]["ScopeName"];
+                /** @description Owner names starting with this prefix (`www`, `_ldap._tcp`). */
+                name?: string;
+                /** @description One type. */
+                type?: string;
+                /** @description One origin. */
+                origin?: components["schemas"]["Origin"];
+                /** @description The cursor of the next page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 1000; 100 by default. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of RRsets in name and type order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_RrSetItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such zone (`dns.zone.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    change_dns_records: {
+        parameters: {
+            query?: {
+                /** @description Compute the diff without writing (API-09). */
+                dry_run?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordBatch"];
+            };
+        };
+        responses: {
+            /** @description The diff, and after a write the serial and revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordBatchResult"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or A record breaks a rule of its type (`dns.record.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such zone (`dns.zone.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description RRsets conflict (`dns.record.conflict`) or belong to another origin (`dns.record.origin`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    export_dns_zone_file: {
+        parameters: {
+            query?: {
+                /** @description The scope; `default` when absent. */
+                scope?: components["schemas"]["ScopeName"];
+            };
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The zone file (RFC 1035) in byte-stable order (MIG-15) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/dns": string;
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such zone (`dns.zone.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    import_dns_zone_file: {
+        parameters: {
+            query?: {
+                /** @description Compute the diff without writing (API-09). */
+                dry_run?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZoneFileImport"];
+            };
+        };
+        responses: {
+            /** @description The counts and losses, and after a write the serial and revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZoneFileImportReport"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such zone (`dns.zone.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The zone file does not parse (`dns.zonefile.invalid`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dns_zone_transfer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The serial, the sources and the refresh timers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransferStatus"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such zone (`dns.zone.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    trigger_dns_zone_transfer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The transfer is queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransferStatus"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such zone (`dns.zone.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The zone is not a secondary zone */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     events: {
         parameters: {
             query?: {
                 /**
                  * @description Comma-separated topics: `ipam`, `jobs`, `audit`, `import`, `system`, `admin`,
-                 *     `connectors`, `discovery`, `secrets`, `cluster`, `metrics`; all except `metrics` when
-                 *     absent.
+                 *     `connectors`, `discovery`, `secrets`, `cluster`, `metrics`, `dns`; all except `metrics`
+                 *     when absent.
                  */
                 topics?: string;
                 /**
@@ -21433,6 +26099,244 @@ export interface operations {
             };
             /** @description The node changed at the same time (`cluster.node.conflict`) */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_node_dns_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The state of the node's DNS role */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DnsNodeStatus"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not run the dns role (`dns.node.not_dns`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    flush_node_dns_cache: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The command is recorded */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DnsCommandAccepted"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not run the dns role (`dns.node.not_dns`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    read_node_dns_log: {
+        parameters: {
+            query?: {
+                /** @description The cursor of the next page (newest first). */
+                cursor?: string;
+                /** @description Lines per page, 1 to 1000; 100 by default. */
+                limit?: number;
+                /** @description Query names starting with this text. */
+                qname?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of log lines, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_QueryLogLine"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not run the dns role or its log is off (`dns.node.not_dns`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };

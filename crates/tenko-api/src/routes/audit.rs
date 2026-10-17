@@ -941,9 +941,9 @@ mod tests {
             ("action", ".".to_owned()),
             ("action", "ipam".to_owned()),
             ("action", "IPAM.prefix.create".to_owned()),
-            ("object", "zone".to_owned()),
+            ("object", "lease".to_owned()),
             ("object", "prefix:not-a-uuid".to_owned()),
-            ("object", format!("zone:{host}")),
+            ("object", format!("lease:{host}")),
             ("from", "yesterday".to_owned()),
             ("to", "2026-10-09".to_owned()),
         ];

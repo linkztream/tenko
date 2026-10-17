@@ -141,6 +141,7 @@ impl ScopedEvents {
             Topic::Connectors => global(ObjectRef::singleton(ObjectKind::Connector)),
             Topic::Secrets => global(ObjectRef::singleton(ObjectKind::Secret)),
             Topic::Cluster => global(ObjectRef::singleton(ObjectKind::Node)),
+            Topic::Dns => global(ObjectRef::singleton(ObjectKind::Zone)),
         }
     }
 }

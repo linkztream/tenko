@@ -3151,6 +3151,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tenko-dns"
+version = "0.0.1"
+dependencies = [
+ "bytes",
+ "domain",
+ "tenko-core",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "tenko-fuzz"
 version = "0.0.0"
 dependencies = [
@@ -3164,6 +3175,7 @@ dependencies = [
  "tenko-connect-proxmox",
  "tenko-connect-unifi",
  "tenko-core",
+ "tenko-dns",
  "tenko-scan",
  "tenko-vault",
 ]

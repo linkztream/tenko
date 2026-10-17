@@ -23,6 +23,7 @@ tenko-connect-proxmox = { path = "../crates/tenko-connect-proxmox" }
 tenko-connect-unifi = { path = "../crates/tenko-connect-unifi" }
 tenko-cluster = { path = "../crates/tenko-cluster" }
 tenko-core = { path = "../crates/tenko-core" }
+tenko-dns = { path = "../crates/tenko-dns" }
 tenko-scan = { path = "../crates/tenko-scan" }
 tenko-vault = { path = "../crates/tenko-vault" }
 
@@ -162,6 +163,13 @@ bench = false
 [[bin]]
 name = "webauthn_attestation"
 path = "fuzz_targets/webauthn_attestation.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dns_codec"
+path = "fuzz_targets/dns_codec.rs"
 test = false
 doc = false
 bench = false

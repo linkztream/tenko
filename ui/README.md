@@ -80,6 +80,8 @@ ui/
                         node panel, revocation, the token dialog; the requests are api/nodes.ts
     cluster/, scans/    the cluster area on the rail and the scans of the discovery module, which has
                         no rail entry (WP3.0 placeholders; WP3.11a builds them)
+    dns/                the DNS area (Phase 2): one page for every DNS path that says the module is
+                        coming (WP4.0); WP4.5 builds the zones and records
 ```
 
 Every area folder owns a `routes.ts` that exports `routes: AppRoute[]`; `src/app/router.ts`
@@ -210,6 +212,7 @@ other key stays in the core table that the first load carries.
 | `guardrails` | `guardrails.` (likewise `connect.guardrails.invalid` is `guardrails.error.invalid`, because `errors.connect.` belongs to `connectors`) |
 | `languages` | `languages.` |
 | `metrics` | `metrics.` (the live metrics of the start page, loaded with their lazy part for administrators) |
+| `dns` | `dns.` (the DNS area, Phase 2) |
 
 The `jobs` pack also holds `connect.job.` and `cluster.job.`, the job titles the server sends
 for connector and node edits, and the `ipam` pack `errors.ipam.adoption.` for the adoption tab.
@@ -302,6 +305,7 @@ Page roots in this version:
 | `/settings/reconciler`, `/settings/guardrails` | `page-reconciler`, `page-guardrails` |
 | `/cluster`, `/cluster/queue` | `page-cluster`, `page-cluster-queue` |
 | `/scans`, `/scans/:id` | `page-scans`, `page-scan` |
+| `/dns` and every path under it (WP4.0: the module is coming, `dns-coming`) | `page-dns` |
 | `/discovery`, `/discovery/:id` | `page-discovery` (with `proposal-panel`) |
 | `/discovery/observations`, `/discovery/observations/:subject` | `page-discovery-observations`, `page-discovery-subject` |
 | `/connectors`, `/connectors/:id` | `page-connectors`, `page-connector` |

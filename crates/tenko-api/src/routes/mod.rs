@@ -44,6 +44,7 @@
 //! | [`i18n`] | language packs (partly public) | WP3.7 |
 //! | [`queue`] | changes queued on an isolated controller (IPAM module) | WP3.9 |
 //! | [`scans`] | scan jobs, probe scan configuration, kill switch (Discovery module) | WP3.10 |
+//! | [`dns`] | zones, records, views, forwarders, access lists, keys, lists, the DNS role of a node (DNS module) | WP4.0 (contracts) |
 //!
 //! The Slice 3 modules were created empty by WP3.0 with their tags registered, so each
 //! package adds its operations in its own file. The quorum gate of WP3.9 sits in the API
@@ -74,6 +75,7 @@ pub mod backup;
 pub mod cluster;
 pub mod common;
 pub mod connectors;
+pub mod dns;
 pub mod events;
 pub mod export;
 pub mod guardrails;
@@ -142,6 +144,7 @@ pub mod vlans;
         (name = "i18n", description = "Language packs: the active languages, upload, preview, activation and the template"),
         (name = "queue", description = "Changes queued on an isolated controller and their conflicts"),
         (name = "scans", description = "Scan jobs, probe scan configuration and the remote kill switch"),
+        (name = "dns", description = "DNS: zones and records, views, forwarders, access lists, TSIG keys, block lists and the DNS role of a node"),
     ),
     components(schemas(ProblemDetails, crate::dto::SortOrder, tenko_ipam::query::Deleted)),
     modifiers(&SecurityAddon)
@@ -193,7 +196,8 @@ pub fn router() -> OpenApiRouter<AppState> {
 /// unknown path. The platform areas (setup, auth, users, settings, jobs, audit, events,
 /// system) are always registered; IPAM owns tenancy, prefixes, addresses, hosts, common,
 /// import, export, moves and the queue of an isolated controller; Discovery owns the scan
-/// jobs; DNS and DHCP have no routes yet. The Slice 3 platform areas (cluster, access,
+/// jobs; DNS owns the zones, records, views, forwarders, access lists, keys, lists and the DNS
+/// routes of a node; DHCP has no routes yet. The Slice 3 platform areas (cluster, access,
 /// audit export, KEK, backup, metrics, language packs) are always registered.
 pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
     let mut router = OpenApiRouter::with_openapi(api_doc())
@@ -237,6 +241,9 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
     }
     if modules.contains(Module::Discovery) {
         router = router.merge(scans::routes());
+    }
+    if modules.contains(Module::Dns) {
+        router = router.merge(dns::routes());
     }
     router
 }

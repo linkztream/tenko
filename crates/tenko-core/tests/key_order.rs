@@ -1409,7 +1409,7 @@ fn decode_rejects_malformed_values() {
     invalid::<ObjectKind>(&encode_key(&"nope".to_owned()));
     invalid::<TableName>(&encode_key(&"nope".to_owned()));
     invalid::<TableName>(&encode_key(&"ipam.UPPER".to_owned()));
-    invalid::<TableName>(&encode_key(&"dns.zones".to_owned()));
+    invalid::<TableName>(&encode_key(&"dnsx.zones".to_owned()));
     invalid::<IdempotencyKey>(&encode_key(&String::new()));
     invalid::<IdempotencyKey>(&encode_key(&"has space".to_owned()));
     invalid::<Fqdn>(&encode_key(&"single".to_owned()));

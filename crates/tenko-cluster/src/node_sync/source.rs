@@ -33,7 +33,7 @@ use super::{
     payload::{self, ConfigEntry, ConfigPayload},
     rate::{TokenBucket, chunks},
     store_error,
-    tables::tables_for,
+    tables::{role_tables_for, tables_for},
 };
 use crate::{error::ClusterError, proto::v1, server::status_of};
 
@@ -46,10 +46,15 @@ const JOURNAL_PAGE: usize = 1024;
 const REOPEN_PAUSE: Duration = Duration::from_millis(200);
 
 /// The rows a node receives.
+///
+/// The stream carries the node's configuration rows. The whole tables its roles will serve
+/// from ([`Subset::role_tables`], the `dns` tables for a `dns` node) are declared here and
+/// served from Phase 5 on; in Phase 2 no node consumes them (plan section 2.10).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Subset {
     node: NodeId,
     tables: Vec<TableName>,
+    role_tables: Vec<TableName>,
     key: Vec<u8>,
 }
 
@@ -70,6 +75,7 @@ impl Subset {
         Self {
             node,
             tables: tables_for(roles),
+            role_tables: role_tables_for(roles),
             key: encode_key(&node.0).to_vec(),
         }
     }
@@ -79,7 +85,13 @@ impl Subset {
         self.node
     }
 
-    /// Whether the subset has rows at all (a node whose roles use no configuration).
+    /// The whole tables the node's roles serve from (declared, not streamed in Phase 2).
+    pub fn role_tables(&self) -> &[TableName] {
+        &self.role_tables
+    }
+
+    /// Whether the subset has configuration rows at all (a node whose roles use no
+    /// configuration); the declared [`Subset::role_tables`] do not count.
     pub fn is_empty(&self) -> bool {
         self.tables.is_empty()
     }
@@ -420,7 +432,16 @@ mod tests {
         let store = MemStore::default();
         let subset = Subset::new(NodeId(1001), &[Role::Probe]);
         assert!(!subset.is_empty());
-        assert!(Subset::new(NodeId(1001), &[Role::Dns]).is_empty());
+        assert_eq!(subset.role_tables(), []);
+        // A dns node has no configuration rows yet; its tables are declared for Phase 5.
+        let dns = Subset::new(NodeId(1001), &[Role::Dns]);
+        assert!(dns.is_empty());
+        let tables: Vec<&str> = dns.role_tables().iter().map(TableName::as_str).collect();
+        assert_eq!(tables.len(), 9);
+        assert!(tables.contains(&"dns.zones") && tables.contains(&"dns.rrsets"));
+        assert!(tables.contains(&"dns.journal") && tables.contains(&"dns.keys.meta"));
+        assert!(!tables.contains(&"dns.sign_state"));
+        assert_eq!(Subset::new(NodeId(1001), &[Role::Dhcp]).role_tables(), []);
         let first = put(&store, 1001, Some(1)).await;
         put(&store, 1002, Some(9)).await;
         // From scratch: a snapshot with the one row.

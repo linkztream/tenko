@@ -56,6 +56,12 @@ export const OBJECT_KINDS: readonly ObjectKind[] = [
   "node",
   "settings",
   "system",
+  "zone",
+  "dns_view",
+  "dns_forwarder",
+  "dns_acl",
+  "dns_key",
+  "dns_list",
 ];
 
 /** The records, oldest first; `seq` starts at 1 and has no gaps. */

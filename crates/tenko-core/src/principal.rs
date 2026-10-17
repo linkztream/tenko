@@ -136,6 +136,8 @@ pub enum SystemComponent {
     Languages,
     /// The leader supervisor: taking office and the epoch of leader-only work (Slice 3).
     Leader,
+    /// The DNS module (Phase 2): the zone service, the DNS actuator, dynamic updates.
+    Dns,
 }
 
 impl SystemComponent {
@@ -158,6 +160,7 @@ impl SystemComponent {
             SystemComponent::Backup => "backup",
             SystemComponent::Languages => "languages",
             SystemComponent::Leader => "leader",
+            SystemComponent::Dns => "dns",
         }
     }
 }

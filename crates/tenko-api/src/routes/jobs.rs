@@ -928,7 +928,7 @@ mod tests {
         three_jobs(&engine).await;
         let router = app(Some(&engine), None);
         let target = format!("host/{}", HostId::generate());
-        let other = "zone/0190d1c2-0000-7000-8000-000000000001";
+        let other = "lease/0190d1c2-0000-7000-8000-000000000001";
 
         // Values only jobs understand: `jobs.query.invalid` with `param` and `value`.
         let job_specific: Vec<(String, &str, String)> = vec![

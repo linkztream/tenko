@@ -1,6 +1,6 @@
 // Tests of scripts/requirement-trace.mjs: the requirements and exit criteria tables, whole-ID
 // and range matching, snake-case test names, the scan rules per file kind, the excluded
-// directories, deterministic output, and the command line against throw-away trees.
+// directories, deterministic output, the phases, and the command line against throw-away trees.
 // Run with `node --test "scripts/*.test.mjs"`.
 
 import assert from "node:assert/strict";
@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import {
   EXCLUDED_DIRS,
   LIST_CAP,
+  PHASES,
   TRACE_PATH,
   buildTrace,
   checkTrace,
@@ -21,12 +22,15 @@ import {
   exitIdsInText,
   generate,
   idsInTestName,
+  inPhase,
+  isInPhase,
   isPhaseOne,
   listCell,
   listFiles,
   makeContext,
   parseExitCriteria,
   parseRequirements,
+  phaseConfig,
   phaseOne,
   renderTrace,
   requirementIds,
@@ -522,5 +526,116 @@ describe("command line", () => {
     const r = run("--help");
     assert.equal(r.code, 0);
     assert.match(r.out, /--check/);
+  });
+});
+
+const PHASE_2_PLAN = `# Phase 2 plan
+
+### 1.2 Exit criteria
+
+| # | Check | Requirements | Slice |
+|---|---|---|---|
+| E13 | Numbers documented | IAM-11, OPS-30 | 4 |
+| E14 | A home network | OPS-28 | 5 |
+
+### 1.3 Increments
+
+| E15 | Not in the exit criteria | X-3 | 6 |
+`;
+
+/** A tree with the Phase 2 plan and tests that name Phase 2 IDs. */
+const PHASE_2_TREE = {
+  ...TREE,
+  "docs/plans/phase-2-plan.md": PHASE_2_PLAN,
+  "crates/tenko-dns/tests/serve.rs": "#[test]\nfn e13_loopback_numbers() {}\n\n/// OPS-30.\n#[test]\nfn the_module_switch() {}\n",
+  "crates/tenko-dns/src/lib.rs": "//! Serves zones (IAM-11).\n",
+};
+
+describe("phases", () => {
+  test("isInPhase takes a cell, or a part after a semicolon, that starts with the number", () => {
+    assert.equal(isInPhase("2", 2), true);
+    assert.equal(isInPhase("2 (IXFR)", 2), true);
+    assert.equal(isInPhase("2 and 3 (DNS and DHCP modules)", 2), true);
+    assert.equal(isInPhase("1 (delta sync, Slice 3); 2 (IXFR between installations)", 2), true);
+    assert.equal(isInPhase("1 (write: 2)", 2), false);
+    assert.equal(isInPhase("20", 2), false);
+    assert.equal(isInPhase("1", 2), false);
+    // Phase 1 keeps the rule of isPhaseOne.
+    for (const cell of ["1", "1 (Slice 2)", "1 (ACME: 3)", "2", "10", "0", "2 and 3"]) {
+      assert.equal(isInPhase(cell, 1), isPhaseOne(cell), cell);
+    }
+  });
+
+  test("inPhase reads the Phase 2 rows of the requirements", () => {
+    assert.deepEqual(
+      inPhase(parseRequirements(REQUIREMENTS), 2).map((r) => r.id),
+      ["IAM-11", "OPS-28", "OPS-30"],
+    );
+  });
+
+  test("the phases name their file, plan and exit criteria, and an unknown phase is refused", () => {
+    assert.equal(PHASES[1]?.trace, TRACE_PATH);
+    assert.equal(PHASES[2]?.trace, "docs/plans/phase-2-trace.md");
+    assert.equal(PHASES[2]?.plan, "docs/plans/phase-2-plan.md");
+    assert.throws(() => phaseConfig(3), /phase 3 is not traced/);
+  });
+
+  test("the Phase 2 trace lists the Phase 2 rows and E13 to E21 of the Phase 2 plan", () => {
+    const root = makeTree(PHASE_2_TREE);
+    const trace = buildTrace(root, 2);
+    assert.equal(trace.phase, 2);
+    assert.deepEqual(trace.requirements.map((r) => r.id), ["IAM-11", "OPS-28", "OPS-30"]);
+    assert.deepEqual(trace.exits.map((e) => e.id), ["E13", "E14"]);
+    const text = renderTrace(trace);
+    assert.match(text, /^# Phase 2 requirement trace\n/);
+    assert.match(text, /the exit criteria E13 to E21 of `docs\/plans\/phase-2-plan\.md`/);
+    assert.match(text, /node scripts\/requirement-trace\.mjs --phase 2`/);
+    assert.match(text, /node scripts\/requirement-trace\.mjs --phase 2 --check`/);
+    assert.match(text, /^3 Phase 2 requirements; /m);
+    assert.match(text, /\| E13 \| Numbers documented \| IAM-11, OPS-30 \| `crates\/tenko-dns\/tests\/serve\.rs::e13_loopback_numbers` \|/);
+    assert.match(text, /\| OPS-30 \| Must \| `crates\/tenko-dns\/tests\/serve\.rs::the_module_switch` \|/);
+    assert.match(text, /\| IAM-11 \| Must \| - \| - \| `crates\/tenko-dns\/src\/lib\.rs`<br>`docs\/plans\/phase-2-plan\.md` \|/);
+  });
+
+  test("a generated trace is never a document of another phase", () => {
+    const root = makeTree(PHASE_2_TREE);
+    writeFileSync(path.join(root, "docs", "plans", "phase-2-trace.md"), generate(root, 2));
+    const phase1 = buildTrace(root, 1);
+    for (const mentions of phase1.mentions.values()) {
+      assert.ok(![...mentions.documents].some((ref) => ref.endsWith("-trace.md")));
+    }
+    assert.equal(scan("docs/plans/phase-2-trace.md", "| OPS-15 |").length, 0);
+  });
+
+  test("--phase 2 writes and checks its own file and leaves Phase 1 alone", () => {
+    const root = makeTree(PHASE_2_TREE);
+    let r = run("--phase", "2", "--root", root);
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /wrote docs\/plans\/phase-2-trace\.md/);
+    const file = path.join(root, "docs", "plans", "phase-2-trace.md");
+    assert.equal(readFileSync(file, "utf8"), generate(root, 2));
+    assert.throws(() => readFileSync(path.join(root, ...TRACE_PATH.split("/"))), "no Phase 1 file");
+    assert.equal(run("--phase", "2", "--check", "--root", root).code, 0);
+    r = run("--check", "--root", root);
+    assert.equal(r.code, 1, "Phase 1 has no file yet");
+    assert.equal(checkTrace(root, 2).ok, true);
+    writeFileSync(file, `${readFileSync(file, "utf8")}manual note\n`);
+    r = run("--phase", "2", "--check", "--root", root);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /node scripts\/requirement-trace\.mjs --phase 2/);
+    assert.equal(run("--phase", "2", "--stdout", "--root", root).out, generate(root, 2));
+  });
+
+  test("an unknown or malformed phase exits 2", () => {
+    const root = makeTree(PHASE_2_TREE);
+    for (const phase of ["3", "0", "x", "2.5", ""]) {
+      const r = run("--phase", phase, "--root", root);
+      assert.equal(r.code, 2, phase);
+      assert.match(r.err, /is not a traced phase/);
+    }
+    const missing = makeTree(TREE);
+    const r = run("--phase", "2", "--root", missing);
+    assert.equal(r.code, 2);
+    assert.match(r.err, /docs\/plans\/phase-2-plan\.md not found/);
   });
 });

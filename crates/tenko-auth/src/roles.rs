@@ -9,7 +9,7 @@
 use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
-use tenko_core::{Action, AuthStrength, ObjectKind};
+use tenko_core::{Action, AuthStrength, ObjectKind, dns::DnsScope};
 use utoipa::ToSchema;
 
 use crate::{
@@ -62,8 +62,23 @@ impl RoleName {
         }
     }
 
-    /// Whether the role grants `action` on objects of `kind`.
+    /// The scopes of the DNS module the role carries (ADR 0017): the viewer reads, the
+    /// operator reads and writes, the administrator also manages keys; the auditor has none.
+    pub const fn dns_scopes(self) -> &'static [DnsScope] {
+        match self {
+            Self::Admin => &DnsScope::ALL,
+            Self::Operator => &[DnsScope::Read, DnsScope::Write],
+            Self::Viewer => &[DnsScope::Read],
+            Self::Auditor => &[],
+        }
+    }
+
+    /// Whether the role grants `action` on objects of `kind`. An action on a DNS kind is
+    /// granted by the DNS scope it needs ([`DnsScope::required`]).
     pub fn allows(self, action: Action, kind: ObjectKind) -> bool {
+        if let Some(scope) = DnsScope::required(action, kind) {
+            return self.dns_scopes().contains(&scope);
+        }
         match self {
             Self::Admin => true,
             Self::Operator => operator_allows(action, kind),
@@ -185,6 +200,7 @@ pub(crate) fn interactive_only(action: Action, kind: ObjectKind) -> bool {
                     | ObjectKind::ApiToken
                     | ObjectKind::Session
                     | ObjectKind::Secret
+                    | ObjectKind::DnsKey
             ))
 }
 
@@ -309,6 +325,48 @@ mod tests {
             required_strength(&[RoleName::Auditor], &hardened, Action::Read, true),
             AuthStrength::PasswordTotp
         );
+    }
+
+    #[test]
+    fn dns_scopes_follow_the_roles() {
+        use tenko_core::dns::OBJECT_KINDS;
+        for kind in OBJECT_KINDS {
+            let keys = kind == ObjectKind::DnsKey;
+            assert!(RoleName::Admin.allows(Action::Create, kind), "{kind}");
+            assert_eq!(
+                RoleName::Operator.allows(Action::Read, kind),
+                !keys,
+                "{kind}"
+            );
+            assert_eq!(
+                RoleName::Operator.allows(Action::Update, kind),
+                !keys,
+                "{kind}"
+            );
+            assert_eq!(
+                RoleName::Operator.allows(Action::Execute, kind),
+                !keys,
+                "{kind}"
+            );
+            assert_eq!(RoleName::Viewer.allows(Action::Read, kind), !keys, "{kind}");
+            assert!(!RoleName::Viewer.allows(Action::Delete, kind), "{kind}");
+            assert!(!RoleName::Auditor.allows(Action::Read, kind), "{kind}");
+            assert!(
+                !RoleName::Operator.allows(Action::Administer, kind),
+                "{kind}"
+            );
+        }
+        assert_eq!(RoleName::Viewer.dns_scopes(), [DnsScope::Read]);
+        assert_eq!(
+            RoleName::Operator.dns_scopes(),
+            [DnsScope::Read, DnsScope::Write]
+        );
+        assert_eq!(RoleName::Admin.dns_scopes(), DnsScope::ALL);
+        assert_eq!(RoleName::Auditor.dns_scopes(), []);
+        // Changing keys needs an interactive session, like secrets.
+        assert!(interactive_only(Action::Create, ObjectKind::DnsKey));
+        assert!(!interactive_only(Action::Read, ObjectKind::DnsKey));
+        assert!(!interactive_only(Action::Update, ObjectKind::Zone));
     }
 
     #[test]

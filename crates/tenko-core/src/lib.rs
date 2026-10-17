@@ -27,6 +27,7 @@
 //! | [`table`] | [`TableDef`](table::TableDef): typed keys and values of one table |
 //! | [`net`] | [`MacAddr`], [`Fqdn`](net::Fqdn), [`HostName`](net::HostName), [`Duid`](net::Duid) |
 //! | [`ipam`] | the IPAM model |
+//! | [`dns`] | the DNS model: zones, RRsets, record data, views, forwarders, keys, lists, tables, scopes, codes |
 //! | [`ir`] | migration IR and loss reports |
 //! | [`metrics`] | counters, histograms and gauges on striped atomics, the registry, the `OpenMetrics` encoder |
 //! | [`observe`] | observations and proposals |
@@ -47,6 +48,7 @@ pub mod audit;
 pub mod auth;
 pub mod cluster;
 pub mod codec;
+pub mod dns;
 pub mod error;
 pub mod i18n;
 pub mod id;
