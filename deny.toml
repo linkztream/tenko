@@ -16,7 +16,14 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 # the yanked crate on every run.
 yanked = "warn"
 unmaintained = "all"
-ignore = []
+# Ignored since 2026-10-17 with the same cause as the yanked warning above: RUSTSEC-2026-0367,
+# 0368 and 0369 concern `ZipArchive::extract` and the stream extraction API writing entries to
+# the file system (SUID and SGID bits kept, symbolic links not confined). Tenko never extracts
+# an archive to disk: calamine reads spreadsheet entries into memory, and the only direct use of
+# `zip` is the import fixture generator in tenko-ipam's tests, which writes and reads archives in
+# memory. The ignores go when calamine and rust_xlsxwriter move to zip 9 (newest releases on
+# 2026-10-17: calamine 0.36.1 and rust_xlsxwriter 0.99.1 still require zip 8).
+ignore = ["RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369"]
 
 # The project licence is not decided yet (Apache-2.0 or AGPL-3.0, see docs/adr/), so the
 # dependency graph must stay permissive-compatible. Anything not listed here is rejected,

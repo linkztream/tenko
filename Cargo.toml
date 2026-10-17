@@ -13,6 +13,23 @@ rust-version = "1.90"
 # Placeholder until the project licence is decided (open question in docs/ROADMAP.md).
 license = "LicenseRef-Proprietary"
 
+# Debug information is opt-in. Development and test builds carry line tables for the workspace
+# crates (file and line in backtraces) and none for dependencies; the Windows PDB files of the
+# test binaries otherwise reach half a gigabyte each and fill the build disk. Full information
+# for a debugger session: `cargo test --profile dev-full` (output under target/dev-full).
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.dev-full]
+inherits = "dev"
+debug = 2
+
+[profile.dev-full.package."*"]
+debug = 2
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"

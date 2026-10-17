@@ -94,4 +94,6 @@ cargo run -p tenko -- serve --roles controller,dns --data-dir <dir>
 cd ui && npm ci && npm run build
 ```
 
+Development and test builds carry line tables for the workspace crates and no debug information for dependencies (`[profile.dev]` in `Cargo.toml`), so backtraces name the file and line in Tenko's own code while the build output stays small. For a debugger session with full information build with `--profile dev-full`, for example `cargo test -p tenko-ipam --profile dev-full`; its output lands under `target/dev-full/`.
+
 Rust-only builds use a placeholder UI page: set `TENKO_UI_STUB=1` when `ui/dist` has not been built (CI does this for its Rust jobs). Release builds refuse the placeholder.
