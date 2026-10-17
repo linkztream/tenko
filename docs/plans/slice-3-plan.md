@@ -82,7 +82,7 @@ M1 (over the network), M2 (VM power cut), M3, M4, M5 (through forwarding), M6 (r
 | WP1.7 | `GET /api/v1/openapi.json` serves compact JSON, the committed file is pretty-printed | status | WP3.0 (lead) |
 | WP1.8 | Windows service under the SCM; Event Log sink | status; `crates/tenko/src/platform/windows.rs` | WP3.6 |
 | WP1.8 | systemd credential protection kind; the root `systemd-creds encrypt` path end to end | status | WP3.4a (provider), WP3.6 (run) |
-| WP1.8 | M9 margins: about 14 KiB per prefix, 19 MiB of Argon2 buffers kept by glibc | status | WP3.5, WP3.8 |
+| WP1.8 | M9 margins: about 14 KiB per prefix, 19 MiB of Argon2 buffers kept by glibc (returned by musl, the shipped binary) | status | WP3.5, WP3.8 |
 | WP1.5 | Fuzz target for the multipart parser of `POST /imports` | status | WP3.13 |
 | WP2.0 | Every controller would run every connector instance: leader-only scheduling | status; `docs/plugins.md` | WP3.12 (handle), WP3.1b (supervisor) |
 | WP2.10 | Cluster rolling order (OPS-08); free-space check before the copy; `deploy/README.md` step count | `docs/upgrades.md` 8.10 and 11; status | WP3.6 |
@@ -135,7 +135,7 @@ Facts the packages build on (read on `a3be4e8`):
 - **Authorization.** `RbacAuthorizer` over a derived `AuthIndex`; `scope()` returns `All` or `Nothing`; `GET /events` checks no topic or object; `EventFilter` exists with the single implementation `AdmitAll`. In memory per controller: WebAuthn and TOTP ceremonies (`Ceremonies`), login throttling, the API rate limiter, the reveal rate limit and the idempotency HMAC key (a record of another controller answers `sys.idempotency_not_replayable`). Sessions are in the store and read with `Local` consistency.
 - **Vault.** KEK generations per host (`kek-NNNNNN.{dpapi,cred,plain}`) with random ids, except the `file` provider whose id derives from the key; `tenko kek rotate` runs offline and does not work for `file`; a plain generation loads beside sealed ones (R15).
 - **Observability.** No registry; `routes/system.rs` renders counters held under a `RwLock<BTreeMap>`; logging through `tracing-subscriber` with no OpenTelemetry.
-- **Deployment.** Windows service through the `windows-service` crate, no Event Log; the systemd unit is hardened but unverified; the Dockerfile exposes 8443 only; `release.yml` pushes `ghcr.io/linkztream/tenko:<version>` and `:latest` and builds the Linux binary on `ubuntu-latest` with glibc.
+- **Deployment.** Windows service through the `windows-service` crate, no Event Log; the systemd unit is hardened but unverified; the Dockerfile exposes 8443 only; `release.yml` pushes `ghcr.io/linkztream/tenko:<version>` and `:latest` and builds the Linux binary on `ubuntu-latest` with glibc (the state before S3-Q10).
 - **UI.** `ui/i18n/en.xlf` and `sv.xlf` (3,286 units each) compiled at build time into 15 route packs; no runtime loader; 87 physical CSS properties and no `dir` handling.
 
 ## 2. Contracts and shared files (WP3.0)
@@ -756,6 +756,7 @@ Ordered by when they are needed. Each recommendation is what the plan assumes if
 - Options: (a) a static musl binary (`x86_64-unknown-linux-musl`), as OPS-01 says "statically linked"; (b) glibc, built on the oldest supported base (an Ubuntu 22.04 runner or a Debian 12 container); (c) both.
 - Trade-offs: musl gives one binary for every distribution and matches OPS-01 but its allocator is slower under threads, which matters more for the DNS engine of Phase 2 than for the controller (M5 and M9 tell). glibc is faster by default but ties the binary to a minimum glibc and is not static. Both doubles the release matrix.
 - Recommendation: (a), with M5 and M9 measured on it; if M5 drops by more than 10 percent, (b) for Phase 1 and the allocator question goes to Phase 2. Needed before: WP3.6 deliverable 6.
+- Decided (a) on 2026-10-10. The fallback (b) was withdrawn on 2026-10-17: the musl binary is the only Linux binary, in the release, the container image and every measurement; an allocator question is solved inside the musl build (M9 on it: 76.05 MiB on 2026-10-16, 75.44 MiB on 2026-10-17).
 
 **S3-Q11. Backup format and encryption.**
 - Options: (a) one encrypted file holding the snapshot, the KEK generations wrapped under the backup key, the imported TLS files and optionally the configuration; the backup key comes from a passphrase (Argon2id) or a recipient key file; restore needs only the file and the passphrase; (b) as (a) but without the KEK, which stays a separate copy as `docs/upgrades.md` 7.2 says today; (c) unencrypted archives plus a separate KEK.

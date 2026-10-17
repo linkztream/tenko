@@ -36,3 +36,5 @@ Raw output goes in `bench/<name>/results/raw/`, which is git-ignored.
 
 Measure before optimizing. A performance claim in a pull request links to a
 result file here.
+
+Linux measurements run on the static musl release binary (`cargo build -p tenko --release --locked --target x86_64-unknown-linux-musl`), the binary that ships; a host-target release build on Linux is a glibc binary that is neither shipped nor measured. Linux results dated before 2026-10-17 (M8, M13, M14, M15 and the M9 runs that say so) were glibc host builds and are read as such.

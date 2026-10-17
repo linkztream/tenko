@@ -84,6 +84,7 @@ Windows service templates), `docs/` (architecture, requirements, roadmap, ADRs).
 
 ```sh
 cargo build --workspace
+cargo build -p tenko --release --locked --target x86_64-unknown-linux-musl   # the Linux release binary (needs musl-tools); a host-target release build is glibc and is neither shipped nor measured
 cargo nextest run --workspace        # fallback: cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
