@@ -14,6 +14,8 @@ for example the choice of Raft library or embedded key-value store.
 
 Benchmarks live under `bench/<name>/`.
 
+- `bench/phase2-dns/`: the Phase 2 DNS harness (load generator for any DNS server, zone and query file generator, report renderer, M16 to M24 procedure scripts) and the single-node baseline.
+
 ## Results
 
 Results are written up as Markdown in `bench/<name>/results/*.md`. Each file
