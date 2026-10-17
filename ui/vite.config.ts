@@ -91,7 +91,7 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   // The live metrics of the start page (WP3.5b), a lazy part of the dashboard for administrators.
   metrics: ["metrics."],
   // The DNS area (Phase 2): the page of WP4.0, then the zone and record views of WP4.5.
-  dns: ["dns."],
+  dns: ["dns.", "errors.dns."],
 };
 
 export default defineConfig(({ command, mode }) => {

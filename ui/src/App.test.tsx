@@ -2,6 +2,7 @@ import { createMemoryHistory, MemoryRouter } from "@solidjs/router";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 import { resetMockDb, type MockScenario } from "./api/mock/db";
+import { DNS_IDS } from "./api/mock/dns-model";
 import { setTheme } from "./app/prefs";
 import { axeViolations } from "./app/testing/axe";
 import { buildRoutes, Root } from "./App";
@@ -54,11 +55,11 @@ describe("shell", () => {
   });
 
   it("shows the DNS page on a deep link into the DNS area", async () => {
-    const app = await renderApp("/dns/zones/example.test", "signed-in");
+    const app = await renderApp(`/dns/zones/${DNS_IDS.zone.example}`, "signed-in");
     const rail = await screen.findByRole("navigation", { name: "Main" });
     expect(within(rail).getByRole("link", { name: /DNS/ }).classList.contains("active")).toBe(true);
-    expect(await screen.findByTestId("page-dns")).toBeTruthy();
-    expect(app.location()).toBe("/dns/zones/example.test");
+    expect(await screen.findByTestId("page-dns-zone")).toBeTruthy();
+    expect(app.location()).toBe(`/dns/zones/${DNS_IDS.zone.example}`);
   });
 
   it("opens a prefix from a deep link in the IPAM view", async () => {

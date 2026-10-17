@@ -1274,9 +1274,276 @@ export type MessageKey =
   | "discovery.toast.approved"
   | "discovery.toast.dismissed"
   | "discovery.toast.rejected"
+  | "dns.acl.col.entries"
+  | "dns.acl.col.used_by"
+  | "dns.acl.create"
+  | "dns.acl.create_title"
+  | "dns.acl.created"
+  | "dns.acl.delete_body"
+  | "dns.acl.delete_confirm"
+  | "dns.acl.delete_title"
+  | "dns.acl.delete_used"
+  | "dns.acl.deleted"
+  | "dns.acl.edit_title"
+  | "dns.acl.entry_invalid"
+  | "dns.acl.field.entries"
+  | "dns.acl.field.entries_help"
+  | "dns.acl.field.name"
+  | "dns.acl.name_invalid"
+  | "dns.acl.save"
+  | "dns.acl.saved"
+  | "dns.acls.empty"
+  | "dns.acls.sub"
+  | "dns.acls.title"
+  | "dns.batch.add_to"
+  | "dns.batch.applied"
+  | "dns.batch.apply"
+  | "dns.batch.back"
+  | "dns.batch.col.after"
+  | "dns.batch.col.before"
+  | "dns.batch.col.change"
+  | "dns.batch.count"
+  | "dns.batch.diff_summary"
+  | "dns.batch.diff_title"
+  | "dns.batch.discard"
+  | "dns.batch.drop"
+  | "dns.batch.hint"
+  | "dns.batch.kind.add"
+  | "dns.batch.kind.change"
+  | "dns.batch.kind.delete"
+  | "dns.batch.list_label"
+  | "dns.batch.mode"
+  | "dns.batch.pending_tag"
+  | "dns.batch.review"
+  | "dns.check.caa"
+  | "dns.check.empty"
+  | "dns.check.ipv4"
+  | "dns.check.ipv6"
+  | "dns.check.mx"
+  | "dns.check.name"
+  | "dns.check.number"
+  | "dns.check.outside"
+  | "dns.check.srv"
+  | "dns.check.target"
+  | "dns.check.ttl"
+  | "dns.check.txt"
+  | "dns.check.type"
+  | "dns.col.data"
+  | "dns.col.description"
+  | "dns.col.kind"
+  | "dns.col.name"
+  | "dns.col.origin"
+  | "dns.col.origins"
+  | "dns.col.rrsets"
+  | "dns.col.serial"
+  | "dns.col.ttl"
+  | "dns.col.type"
+  | "dns.col.updated"
+  | "dns.col.zone"
   | "dns.coming.body"
   | "dns.coming.title"
+  | "dns.coming.zones"
+  | "dns.do.add_records"
+  | "dns.do.delete"
+  | "dns.do.delete_rrset"
+  | "dns.do.edit"
+  | "dns.do.export"
+  | "dns.do.import"
+  | "dns.do.open"
+  | "dns.do.remove_record"
+  | "dns.do.take_over"
+  | "dns.export.failed"
+  | "dns.history.action"
+  | "dns.history.changes"
+  | "dns.history.empty"
+  | "dns.history.no_audit"
+  | "dns.history.outcome.denied"
+  | "dns.history.outcome.failed"
+  | "dns.history.outcome.success"
+  | "dns.history.result"
+  | "dns.history.revision"
+  | "dns.history.serial"
+  | "dns.history.serial_title"
+  | "dns.history.updated"
+  | "dns.history.when"
+  | "dns.import.apply.again"
+  | "dns.import.apply.done"
+  | "dns.import.apply.failed"
+  | "dns.import.apply.open_job"
+  | "dns.import.apply.open_zone"
+  | "dns.import.apply.progress"
+  | "dns.import.apply.rolled_back"
+  | "dns.import.apply.running"
+  | "dns.import.apply.serial"
+  | "dns.import.fact.added"
+  | "dns.import.fact.removed"
+  | "dns.import.fact.replaced"
+  | "dns.import.losses.line"
+  | "dns.import.losses.none"
+  | "dns.import.losses.title"
+  | "dns.import.losses.what"
+  | "dns.import.parse_error"
+  | "dns.import.preview.apply"
+  | "dns.import.preview.back"
+  | "dns.import.preview.title"
+  | "dns.import.step.apply"
+  | "dns.import.step.done"
+  | "dns.import.step.preview"
+  | "dns.import.step.upload"
+  | "dns.import.steps"
+  | "dns.import.title"
+  | "dns.import.types.caption"
+  | "dns.import.types.records"
+  | "dns.import.upload.body"
+  | "dns.import.upload.choose"
+  | "dns.import.upload.drop"
+  | "dns.import.upload.lines"
+  | "dns.import.upload.paste"
+  | "dns.import.upload.preview"
+  | "dns.import.upload.replace"
+  | "dns.import.upload.replace_help"
+  | "dns.import.upload.title"
+  | "dns.import.upload.too_large"
+  | "dns.key.col.algorithm"
+  | "dns.key.col.created"
+  | "dns.key.col.name"
+  | "dns.key.copied"
+  | "dns.key.copy_blocked"
+  | "dns.key.create_action"
+  | "dns.key.create_title"
+  | "dns.key.created_body"
+  | "dns.key.created_title"
+  | "dns.key.delete_body"
+  | "dns.key.delete_confirm"
+  | "dns.key.delete_title"
+  | "dns.key.deleted"
+  | "dns.key.generate"
+  | "dns.key.import"
+  | "dns.key.mode"
+  | "dns.key.mode_generate"
+  | "dns.key.mode_import"
+  | "dns.key.name_help"
+  | "dns.key.secret"
+  | "dns.key.secret_help"
+  | "dns.key.secret_invalid"
+  | "dns.key.stored"
+  | "dns.keys.empty"
+  | "dns.keys.sub"
+  | "dns.keys.title"
+  | "dns.kind.forward"
+  | "dns.kind.primary"
+  | "dns.kind.rpz"
+  | "dns.kind.secondary"
+  | "dns.kind.stub"
+  | "dns.loss.directive"
+  | "dns.loss.origin"
+  | "dns.loss.outside"
+  | "dns.loss.soa"
+  | "dns.loss.unsupported_type"
+  | "dns.nav.acls"
+  | "dns.nav.keys"
+  | "dns.nav.label"
+  | "dns.nav.zones"
+  | "dns.op.add"
+  | "dns.op.delete"
+  | "dns.op.remove"
+  | "dns.op.set"
+  | "dns.origin.ad"
+  | "dns.origin.dhcp"
+  | "dns.origin.dynamic"
+  | "dns.origin.ipam"
+  | "dns.origin.manual"
+  | "dns.record.line_error"
+  | "dns.records.any_origin"
+  | "dns.records.any_type"
+  | "dns.records.empty"
+  | "dns.records.filter_label"
+  | "dns.records.filter_placeholder"
+  | "dns.records.label"
+  | "dns.records.origin_filter"
+  | "dns.records.type_filter"
+  | "dns.rrset.add_action"
+  | "dns.rrset.add_records_title"
+  | "dns.rrset.add_submit"
+  | "dns.rrset.add_title"
+  | "dns.rrset.delete_body"
+  | "dns.rrset.delete_confirm"
+  | "dns.rrset.delete_title"
+  | "dns.rrset.edit_data"
+  | "dns.rrset.edit_hint"
+  | "dns.rrset.edit_ttl"
+  | "dns.rrset.failed"
+  | "dns.rrset.field.data"
+  | "dns.rrset.field.data_help"
+  | "dns.rrset.field.name"
+  | "dns.rrset.field.name_help"
+  | "dns.rrset.field.ttl"
+  | "dns.rrset.field.type"
+  | "dns.rrset.saved"
+  | "dns.serial.counter"
+  | "dns.serial.counter_help"
+  | "dns.serial.date_counter"
+  | "dns.serial.date_counter_help"
+  | "dns.serial.unixtime"
+  | "dns.serial.unixtime_help"
+  | "dns.settings.expire"
+  | "dns.settings.minimum"
+  | "dns.settings.ns"
+  | "dns.settings.ns_required"
+  | "dns.settings.refresh"
+  | "dns.settings.retry"
+  | "dns.settings.rname_help"
+  | "dns.settings.save"
+  | "dns.settings.saved"
+  | "dns.settings.serial"
+  | "dns.settings.soa"
+  | "dns.settings.soa_body"
+  | "dns.settings.ttl"
+  | "dns.state.not_built_body"
+  | "dns.state.not_built_title"
+  | "dns.state.off_body"
+  | "dns.state.off_link"
+  | "dns.state.off_title"
+  | "dns.takeover.body"
+  | "dns.takeover.confirm"
+  | "dns.takeover.tag"
+  | "dns.takeover.title"
   | "dns.title"
+  | "dns.zone.create.action"
+  | "dns.zone.create.done"
+  | "dns.zone.create.primaries_required"
+  | "dns.zone.create.submit"
+  | "dns.zone.create.title"
+  | "dns.zone.delete.body"
+  | "dns.zone.delete.confirm"
+  | "dns.zone.delete.done"
+  | "dns.zone.delete.title"
+  | "dns.zone.field.description"
+  | "dns.zone.field.kind"
+  | "dns.zone.field.mname"
+  | "dns.zone.field.name"
+  | "dns.zone.field.name_help"
+  | "dns.zone.field.name_servers"
+  | "dns.zone.field.name_servers_help"
+  | "dns.zone.field.primaries"
+  | "dns.zone.field.primaries_help"
+  | "dns.zone.field.rname"
+  | "dns.zone.field.serial"
+  | "dns.zone.field.ttl"
+  | "dns.zone.not_served"
+  | "dns.zone.not_served_hint"
+  | "dns.zone.reverse"
+  | "dns.zone.serial"
+  | "dns.zone.tab.history"
+  | "dns.zone.tab.records"
+  | "dns.zone.tab.settings"
+  | "dns.zone.tabs"
+  | "dns.zones.empty"
+  | "dns.zones.empty_body"
+  | "dns.zones.filter_label"
+  | "dns.zones.filter_placeholder"
+  | "dns.zones.sub"
+  | "dns.zones.title"
   | "errors.audit.export.client_key"
   | "errors.audit.export.conflict"
   | "errors.audit.export.duplicate"
@@ -1374,6 +1641,27 @@ export type MessageKey =
   | "errors.connect.unreachable"
   | "errors.connect.verify_mismatch"
   | "errors.connect.writes_disabled"
+  | "errors.dns.acl.in_use"
+  | "errors.dns.acl.not_found"
+  | "errors.dns.forwarder.invalid"
+  | "errors.dns.forwarder.not_found"
+  | "errors.dns.key.exists"
+  | "errors.dns.key.not_found"
+  | "errors.dns.list.invalid"
+  | "errors.dns.list.not_found"
+  | "errors.dns.module.disabled"
+  | "errors.dns.node.not_dns"
+  | "errors.dns.record.conflict"
+  | "errors.dns.record.invalid"
+  | "errors.dns.record.origin"
+  | "errors.dns.transfer.refused"
+  | "errors.dns.update.refused"
+  | "errors.dns.view.invalid"
+  | "errors.dns.view.not_found"
+  | "errors.dns.zone.exists"
+  | "errors.dns.zone.invalid"
+  | "errors.dns.zone.not_found"
+  | "errors.dns.zonefile.invalid"
   | "errors.generic.client"
   | "errors.generic.field"
   | "errors.generic.not_implemented"
@@ -1702,6 +1990,17 @@ export type MessageKey =
   | "hosts.credentials.unbind_title"
   | "hosts.credentials.unbound"
   | "hosts.crumbs"
+  | "hosts.dns.col.address"
+  | "hosts.dns.col.forward"
+  | "hosts.dns.col.reverse"
+  | "hosts.dns.no_records"
+  | "hosts.dns.no_zone"
+  | "hosts.dns.origin.ad"
+  | "hosts.dns.origin.dhcp"
+  | "hosts.dns.origin.dynamic"
+  | "hosts.dns.origin.ipam"
+  | "hosts.dns.origin.manual"
+  | "hosts.dns.title"
   | "hosts.do.create"
   | "hosts.do.lock"
   | "hosts.do.set_mode"
@@ -2565,6 +2864,8 @@ export type MessageKey =
   | "jobs.step.cleanup"
   | "jobs.step.device_manual"
   | "jobs.step.dhcp_manual"
+  | "jobs.step.dns_import_apply"
+  | "jobs.step.dns_import_parse"
   | "jobs.step.dns_manual"
   | "jobs.step.import_apply_chunk"
   | "jobs.step.import_parse"
@@ -2624,6 +2925,7 @@ export type MessageKey =
   | "jobs.task.dns_revert"
   | "jobs.task.dns_update"
   | "jobs.title"
+  | "jobs.title.dns_import"
   | "jobs.title.import_apply"
   | "jobs.title.ipam_apply"
   | "jobs.title.move"
@@ -4673,6 +4975,47 @@ export interface MessageArgs {
   "discovery.subject.fact_count": { count: number };
   "discovery.subject.unknown": { subject: string | number };
   "discovery.subject.vlan": { vlan: string | number };
+  "dns.acl.created": { name: string | number };
+  "dns.acl.delete_title": { name: string | number };
+  "dns.acl.delete_used": { zones: string | number };
+  "dns.acl.deleted": { name: string | number };
+  "dns.acl.edit_title": { name: string | number };
+  "dns.acl.entry_invalid": { line: string | number };
+  "dns.acl.saved": { name: string | number };
+  "dns.batch.applied": { count: number; serial: string | number };
+  "dns.batch.apply": { count: number };
+  "dns.batch.count": { changes: string | number; count: number };
+  "dns.batch.diff_summary": { count: number };
+  "dns.batch.drop": { name: string | number; type: string | number };
+  "dns.import.apply.progress": { done: string | number; total: string | number };
+  "dns.import.apply.serial": { serial: string | number };
+  "dns.import.fact.added": { count: number };
+  "dns.import.fact.removed": { count: number };
+  "dns.import.fact.replaced": { count: number };
+  "dns.import.losses.title": { count: number };
+  "dns.import.parse_error": { line: string | number };
+  "dns.import.upload.lines": { count: number };
+  "dns.key.created_body": { name: string | number };
+  "dns.key.delete_title": { name: string | number };
+  "dns.key.deleted": { name: string | number };
+  "dns.record.line_error": { line: string | number; message: string | number };
+  "dns.records.label": { zone: string | number };
+  "dns.rrset.add_records_title": { name: string | number; type: string | number };
+  "dns.rrset.delete_body": { count: number };
+  "dns.rrset.delete_title": { name: string | number; type: string | number };
+  "dns.rrset.edit_data": { name: string | number; type: string | number };
+  "dns.rrset.edit_ttl": { name: string | number; type: string | number };
+  "dns.rrset.field.data_help": { example: string | number };
+  "dns.rrset.field.name_help": { zone: string | number };
+  "dns.rrset.saved": { count: number; serial: string | number };
+  "dns.settings.saved": { name: string | number };
+  "dns.takeover.body": { origin: string | number };
+  "dns.takeover.title": { name: string | number; type: string | number };
+  "dns.zone.create.done": { name: string | number };
+  "dns.zone.delete.body": { count: number; name: string | number; rrsets: string | number };
+  "dns.zone.delete.done": { name: string | number };
+  "dns.zone.delete.title": { name: string | number };
+  "dns.zone.serial": { serial: string | number };
   "errors.auth.password.too_long": { max: string | number };
   "errors.auth.password.too_short": { min: string | number };
   "errors.auth.setup.invalid_host_name": { host_name: string | number };
@@ -4683,6 +5026,10 @@ export interface MessageArgs {
   "errors.connect.secret.not_found": { purpose: string | number };
   "errors.connect.secret.not_operator": { purpose: string | number };
   "errors.connect.secret.undeclared": { purpose: string | number };
+  "errors.dns.record.conflict": { name: string | number };
+  "errors.dns.record.invalid": { name: string | number; type: string | number };
+  "errors.dns.record.origin": { name: string | number; type: string | number };
+  "errors.dns.zone.invalid": { field: string | number };
   "errors.ipam.address.duplicate": { ip: string | number };
   "errors.ipam.address.full": { cidr: string | number };
   "errors.ipam.address.in_dhcp_pool": { ip: string | number; range: string | number };
@@ -4747,6 +5094,7 @@ export interface MessageArgs {
   "hosts.credentials.unbind_label": { name: string | number };
   "hosts.credentials.unbind_title": { name: string | number };
   "hosts.credentials.unbound": { name: string | number };
+  "hosts.dns.no_records": { zone: string | number };
   "hosts.form.created": { name: string | number };
   "hosts.form.edit_title": { name: string | number };
   "hosts.form.iface_create_title": { host: string | number };
@@ -6581,9 +6929,276 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.toast.approved",
   "discovery.toast.dismissed",
   "discovery.toast.rejected",
+  "dns.acl.col.entries",
+  "dns.acl.col.used_by",
+  "dns.acl.create",
+  "dns.acl.create_title",
+  "dns.acl.created",
+  "dns.acl.delete_body",
+  "dns.acl.delete_confirm",
+  "dns.acl.delete_title",
+  "dns.acl.delete_used",
+  "dns.acl.deleted",
+  "dns.acl.edit_title",
+  "dns.acl.entry_invalid",
+  "dns.acl.field.entries",
+  "dns.acl.field.entries_help",
+  "dns.acl.field.name",
+  "dns.acl.name_invalid",
+  "dns.acl.save",
+  "dns.acl.saved",
+  "dns.acls.empty",
+  "dns.acls.sub",
+  "dns.acls.title",
+  "dns.batch.add_to",
+  "dns.batch.applied",
+  "dns.batch.apply",
+  "dns.batch.back",
+  "dns.batch.col.after",
+  "dns.batch.col.before",
+  "dns.batch.col.change",
+  "dns.batch.count",
+  "dns.batch.diff_summary",
+  "dns.batch.diff_title",
+  "dns.batch.discard",
+  "dns.batch.drop",
+  "dns.batch.hint",
+  "dns.batch.kind.add",
+  "dns.batch.kind.change",
+  "dns.batch.kind.delete",
+  "dns.batch.list_label",
+  "dns.batch.mode",
+  "dns.batch.pending_tag",
+  "dns.batch.review",
+  "dns.check.caa",
+  "dns.check.empty",
+  "dns.check.ipv4",
+  "dns.check.ipv6",
+  "dns.check.mx",
+  "dns.check.name",
+  "dns.check.number",
+  "dns.check.outside",
+  "dns.check.srv",
+  "dns.check.target",
+  "dns.check.ttl",
+  "dns.check.txt",
+  "dns.check.type",
+  "dns.col.data",
+  "dns.col.description",
+  "dns.col.kind",
+  "dns.col.name",
+  "dns.col.origin",
+  "dns.col.origins",
+  "dns.col.rrsets",
+  "dns.col.serial",
+  "dns.col.ttl",
+  "dns.col.type",
+  "dns.col.updated",
+  "dns.col.zone",
   "dns.coming.body",
   "dns.coming.title",
+  "dns.coming.zones",
+  "dns.do.add_records",
+  "dns.do.delete",
+  "dns.do.delete_rrset",
+  "dns.do.edit",
+  "dns.do.export",
+  "dns.do.import",
+  "dns.do.open",
+  "dns.do.remove_record",
+  "dns.do.take_over",
+  "dns.export.failed",
+  "dns.history.action",
+  "dns.history.changes",
+  "dns.history.empty",
+  "dns.history.no_audit",
+  "dns.history.outcome.denied",
+  "dns.history.outcome.failed",
+  "dns.history.outcome.success",
+  "dns.history.result",
+  "dns.history.revision",
+  "dns.history.serial",
+  "dns.history.serial_title",
+  "dns.history.updated",
+  "dns.history.when",
+  "dns.import.apply.again",
+  "dns.import.apply.done",
+  "dns.import.apply.failed",
+  "dns.import.apply.open_job",
+  "dns.import.apply.open_zone",
+  "dns.import.apply.progress",
+  "dns.import.apply.rolled_back",
+  "dns.import.apply.running",
+  "dns.import.apply.serial",
+  "dns.import.fact.added",
+  "dns.import.fact.removed",
+  "dns.import.fact.replaced",
+  "dns.import.losses.line",
+  "dns.import.losses.none",
+  "dns.import.losses.title",
+  "dns.import.losses.what",
+  "dns.import.parse_error",
+  "dns.import.preview.apply",
+  "dns.import.preview.back",
+  "dns.import.preview.title",
+  "dns.import.step.apply",
+  "dns.import.step.done",
+  "dns.import.step.preview",
+  "dns.import.step.upload",
+  "dns.import.steps",
+  "dns.import.title",
+  "dns.import.types.caption",
+  "dns.import.types.records",
+  "dns.import.upload.body",
+  "dns.import.upload.choose",
+  "dns.import.upload.drop",
+  "dns.import.upload.lines",
+  "dns.import.upload.paste",
+  "dns.import.upload.preview",
+  "dns.import.upload.replace",
+  "dns.import.upload.replace_help",
+  "dns.import.upload.title",
+  "dns.import.upload.too_large",
+  "dns.key.col.algorithm",
+  "dns.key.col.created",
+  "dns.key.col.name",
+  "dns.key.copied",
+  "dns.key.copy_blocked",
+  "dns.key.create_action",
+  "dns.key.create_title",
+  "dns.key.created_body",
+  "dns.key.created_title",
+  "dns.key.delete_body",
+  "dns.key.delete_confirm",
+  "dns.key.delete_title",
+  "dns.key.deleted",
+  "dns.key.generate",
+  "dns.key.import",
+  "dns.key.mode",
+  "dns.key.mode_generate",
+  "dns.key.mode_import",
+  "dns.key.name_help",
+  "dns.key.secret",
+  "dns.key.secret_help",
+  "dns.key.secret_invalid",
+  "dns.key.stored",
+  "dns.keys.empty",
+  "dns.keys.sub",
+  "dns.keys.title",
+  "dns.kind.forward",
+  "dns.kind.primary",
+  "dns.kind.rpz",
+  "dns.kind.secondary",
+  "dns.kind.stub",
+  "dns.loss.directive",
+  "dns.loss.origin",
+  "dns.loss.outside",
+  "dns.loss.soa",
+  "dns.loss.unsupported_type",
+  "dns.nav.acls",
+  "dns.nav.keys",
+  "dns.nav.label",
+  "dns.nav.zones",
+  "dns.op.add",
+  "dns.op.delete",
+  "dns.op.remove",
+  "dns.op.set",
+  "dns.origin.ad",
+  "dns.origin.dhcp",
+  "dns.origin.dynamic",
+  "dns.origin.ipam",
+  "dns.origin.manual",
+  "dns.record.line_error",
+  "dns.records.any_origin",
+  "dns.records.any_type",
+  "dns.records.empty",
+  "dns.records.filter_label",
+  "dns.records.filter_placeholder",
+  "dns.records.label",
+  "dns.records.origin_filter",
+  "dns.records.type_filter",
+  "dns.rrset.add_action",
+  "dns.rrset.add_records_title",
+  "dns.rrset.add_submit",
+  "dns.rrset.add_title",
+  "dns.rrset.delete_body",
+  "dns.rrset.delete_confirm",
+  "dns.rrset.delete_title",
+  "dns.rrset.edit_data",
+  "dns.rrset.edit_hint",
+  "dns.rrset.edit_ttl",
+  "dns.rrset.failed",
+  "dns.rrset.field.data",
+  "dns.rrset.field.data_help",
+  "dns.rrset.field.name",
+  "dns.rrset.field.name_help",
+  "dns.rrset.field.ttl",
+  "dns.rrset.field.type",
+  "dns.rrset.saved",
+  "dns.serial.counter",
+  "dns.serial.counter_help",
+  "dns.serial.date_counter",
+  "dns.serial.date_counter_help",
+  "dns.serial.unixtime",
+  "dns.serial.unixtime_help",
+  "dns.settings.expire",
+  "dns.settings.minimum",
+  "dns.settings.ns",
+  "dns.settings.ns_required",
+  "dns.settings.refresh",
+  "dns.settings.retry",
+  "dns.settings.rname_help",
+  "dns.settings.save",
+  "dns.settings.saved",
+  "dns.settings.serial",
+  "dns.settings.soa",
+  "dns.settings.soa_body",
+  "dns.settings.ttl",
+  "dns.state.not_built_body",
+  "dns.state.not_built_title",
+  "dns.state.off_body",
+  "dns.state.off_link",
+  "dns.state.off_title",
+  "dns.takeover.body",
+  "dns.takeover.confirm",
+  "dns.takeover.tag",
+  "dns.takeover.title",
   "dns.title",
+  "dns.zone.create.action",
+  "dns.zone.create.done",
+  "dns.zone.create.primaries_required",
+  "dns.zone.create.submit",
+  "dns.zone.create.title",
+  "dns.zone.delete.body",
+  "dns.zone.delete.confirm",
+  "dns.zone.delete.done",
+  "dns.zone.delete.title",
+  "dns.zone.field.description",
+  "dns.zone.field.kind",
+  "dns.zone.field.mname",
+  "dns.zone.field.name",
+  "dns.zone.field.name_help",
+  "dns.zone.field.name_servers",
+  "dns.zone.field.name_servers_help",
+  "dns.zone.field.primaries",
+  "dns.zone.field.primaries_help",
+  "dns.zone.field.rname",
+  "dns.zone.field.serial",
+  "dns.zone.field.ttl",
+  "dns.zone.not_served",
+  "dns.zone.not_served_hint",
+  "dns.zone.reverse",
+  "dns.zone.serial",
+  "dns.zone.tab.history",
+  "dns.zone.tab.records",
+  "dns.zone.tab.settings",
+  "dns.zone.tabs",
+  "dns.zones.empty",
+  "dns.zones.empty_body",
+  "dns.zones.filter_label",
+  "dns.zones.filter_placeholder",
+  "dns.zones.sub",
+  "dns.zones.title",
   "errors.audit.export.client_key",
   "errors.audit.export.conflict",
   "errors.audit.export.duplicate",
@@ -6681,6 +7296,27 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.connect.unreachable",
   "errors.connect.verify_mismatch",
   "errors.connect.writes_disabled",
+  "errors.dns.acl.in_use",
+  "errors.dns.acl.not_found",
+  "errors.dns.forwarder.invalid",
+  "errors.dns.forwarder.not_found",
+  "errors.dns.key.exists",
+  "errors.dns.key.not_found",
+  "errors.dns.list.invalid",
+  "errors.dns.list.not_found",
+  "errors.dns.module.disabled",
+  "errors.dns.node.not_dns",
+  "errors.dns.record.conflict",
+  "errors.dns.record.invalid",
+  "errors.dns.record.origin",
+  "errors.dns.transfer.refused",
+  "errors.dns.update.refused",
+  "errors.dns.view.invalid",
+  "errors.dns.view.not_found",
+  "errors.dns.zone.exists",
+  "errors.dns.zone.invalid",
+  "errors.dns.zone.not_found",
+  "errors.dns.zonefile.invalid",
   "errors.generic.client",
   "errors.generic.field",
   "errors.generic.not_implemented",
@@ -7009,6 +7645,17 @@ export const messageKeys: readonly MessageKey[] = [
   "hosts.credentials.unbind_title",
   "hosts.credentials.unbound",
   "hosts.crumbs",
+  "hosts.dns.col.address",
+  "hosts.dns.col.forward",
+  "hosts.dns.col.reverse",
+  "hosts.dns.no_records",
+  "hosts.dns.no_zone",
+  "hosts.dns.origin.ad",
+  "hosts.dns.origin.dhcp",
+  "hosts.dns.origin.dynamic",
+  "hosts.dns.origin.ipam",
+  "hosts.dns.origin.manual",
+  "hosts.dns.title",
   "hosts.do.create",
   "hosts.do.lock",
   "hosts.do.set_mode",
@@ -7872,6 +8519,8 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.step.cleanup",
   "jobs.step.device_manual",
   "jobs.step.dhcp_manual",
+  "jobs.step.dns_import_apply",
+  "jobs.step.dns_import_parse",
   "jobs.step.dns_manual",
   "jobs.step.import_apply_chunk",
   "jobs.step.import_parse",
@@ -7931,6 +8580,7 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.task.dns_revert",
   "jobs.task.dns_update",
   "jobs.title",
+  "jobs.title.dns_import",
   "jobs.title.import_apply",
   "jobs.title.ipam_apply",
   "jobs.title.move",

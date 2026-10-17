@@ -10288,19 +10288,5 @@
         <segment><source>At least one export sink must be set up, and an alarm shows while a sink fails.</source></segment>
       </unit>
     </group>
-    <group id="dns">
-      <unit id="dns.title">
-        <notes><note category="description">Title of the DNS page and its entry in the browser tab.</note></notes>
-        <segment><source>DNS</source></segment>
-      </unit>
-      <unit id="dns.coming.title">
-        <notes><note category="description">Heading of the DNS page while the DNS module is being built.</note></notes>
-        <segment><source>The DNS module is coming</source></segment>
-      </unit>
-      <unit id="dns.coming.body">
-        <notes><note category="description">Explains on the DNS page what the DNS module will hold once it is built.</note></notes>
-        <segment><source>Zones and records, views, forwarders, block lists and keys will be managed here. Until then the rest of Tenko DDI works as usual.</source></segment>
-      </unit>
-    </group>
   </file>
 </xliff>

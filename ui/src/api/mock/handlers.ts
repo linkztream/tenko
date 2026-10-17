@@ -29,6 +29,7 @@ import { eventRoutes } from "./sse";
 import { stubs } from "./stubs";
 import { nodeRoutes } from "./routes-nodes";
 import { connectorRoutes } from "./routes-connectors";
+import { dnsRoutes } from "./routes-dns";
 
 export { route, mswPath, paginate, wholePage, type MockContext, type OperationPath } from "./route";
 export { ok, created, noContent, fail, Problem, Reply } from "./reply";
@@ -72,6 +73,8 @@ export const happyPaths: HttpHandler[] = [
   ...reconcilerRoutes,
   ...guardrailsRoutes,
   ...i18nRoutes,
+  // The DNS area of Phase 2 (WP4.5): zones, records, zone files, access lists and TSIG keys.
+  ...dnsRoutes,
 ];
 
 export const handlers: HttpHandler[] = [...happyPaths, ...stubs];

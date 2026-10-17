@@ -20,6 +20,7 @@ import { IpamNav } from "../IpamNav";
 import { MoveDialog } from "../move/MoveDialog";
 import { useScope } from "../scope";
 import { useTree } from "../tree/PrefixTree";
+import { DnsRecords } from "../../hosts/DnsRecords";
 import { AddressForm } from "./AddressForm";
 import "../ipam.css";
 
@@ -184,6 +185,7 @@ export default function AddressView() {
                 </dl>
                 <CustomValues values={a().meta.custom} />
               </section>
+              <DnsRecords addresses={[a()]} />
               <section class="page-section" aria-labelledby="address-history">
                 <h2 id="address-history">{t("ipam.prefix.tab.history")}</h2>
                 <HistoryPanel

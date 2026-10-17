@@ -1,0 +1,950 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="dns">
+      <unit id="dns.title">
+        <notes><note category="description">Title of the DNS area and its entry in the browser tab.</note></notes>
+        <segment><source>DNS</source><target>DNS</target></segment>
+      </unit>
+      <unit id="dns.coming.title">
+        <notes><note category="description">Heading of a DNS page whose view is not built yet (views, forwarders, block lists).</note></notes>
+        <segment><source>Coming in a later slice</source><target>Kommer i en senare etapp</target></segment>
+      </unit>
+      <unit id="dns.coming.body">
+        <segment><source>Views, forwarders and block lists are managed here once they are built. Zones, records, access lists and keys work already.</source><target>Vyer, vidarebefordringar och blocklistor hanteras här när de är byggda. Zoner, poster, åtkomstlistor och nycklar fungerar redan.</target></segment>
+      </unit>
+      <unit id="dns.coming.zones">
+        <segment><source>Go to the zones</source><target>Gå till zonerna</target></segment>
+      </unit>
+      <unit id="dns.nav.label">
+        <notes><note category="description">Accessible name of the sub-navigation of the DNS area.</note></notes>
+        <segment><source>DNS sections</source><target>DNS-avsnitt</target></segment>
+      </unit>
+      <unit id="dns.nav.zones">
+        <segment><source>Zones</source><target>Zoner</target></segment>
+      </unit>
+      <unit id="dns.nav.acls">
+        <segment><source>Access lists</source><target>Åtkomstlistor</target></segment>
+      </unit>
+      <unit id="dns.nav.keys">
+        <segment><source>TSIG keys</source><target>TSIG-nycklar</target></segment>
+      </unit>
+      <unit id="dns.state.not_built_title">
+        <notes><note category="description">Shown when the server answers the DNS routes with 501 (not implemented).</note></notes>
+        <segment><source>The DNS service is not available yet.</source><target>DNS-tjänsten är inte tillgänglig än.</target></segment>
+      </unit>
+      <unit id="dns.state.not_built_body">
+        <segment><source>This server does not answer the DNS requests yet. Zones and records can be managed here once it does; nothing has to be set up in the meantime.</source><target>Servern svarar inte på DNS-förfrågningar än. Zoner och poster kan hanteras här när den gör det; inget behöver ställas in under tiden.</target></segment>
+      </unit>
+      <unit id="dns.state.off_title">
+        <notes><note category="description">Shown when the server does not register the DNS routes because the module is off.</note></notes>
+        <segment><source>The DNS module is switched off.</source><target>DNS-modulen är avstängd.</target></segment>
+      </unit>
+      <unit id="dns.state.off_body">
+        <segment><source>This installation does not run the DNS module, so there are no zones to manage. An administrator switches it on in the module settings.</source><target>Installationen kör inte DNS-modulen, så det finns inga zoner att hantera. En administratör slår på den i modulinställningarna.</target></segment>
+      </unit>
+      <unit id="dns.state.off_link">
+        <segment><source>Open the settings</source><target>Öppna inställningarna</target></segment>
+      </unit>
+      <unit id="dns.kind.primary">
+        <notes><note category="description">Zone kind: Tenko holds the data and serves it.</note></notes>
+        <segment><source>Primary</source><target>Primär</target></segment>
+      </unit>
+      <unit id="dns.kind.secondary">
+        <notes><note category="description">Zone kind: a copy transferred from another server.</note></notes>
+        <segment><source>Secondary</source><target>Sekundär</target></segment>
+      </unit>
+      <unit id="dns.kind.stub">
+        <notes><note category="description">Zone kind: only the name servers of the zone are kept.</note></notes>
+        <segment><source>Stub</source><target>Stub</target></segment>
+      </unit>
+      <unit id="dns.kind.forward">
+        <notes><note category="description">Zone kind: queries for the zone go to other servers.</note></notes>
+        <segment><source>Forward</source><target>Vidarebefordran</target></segment>
+      </unit>
+      <unit id="dns.kind.rpz">
+        <notes><note category="description">Zone kind: a response policy zone.</note></notes>
+        <segment><source>Policy (RPZ)</source><target>Policy (RPZ)</target></segment>
+      </unit>
+      <unit id="dns.origin.manual">
+        <notes><note category="description">Origin of an RRset: written by a person (UI, API, zone file).</note></notes>
+        <segment><source>Manual</source><target>Manuell</target></segment>
+      </unit>
+      <unit id="dns.origin.ipam">
+        <notes><note category="description">Origin of an RRset: kept by IPAM from the addresses and their names.</note></notes>
+        <segment><source>IPAM</source><target>IPAM</target></segment>
+      </unit>
+      <unit id="dns.origin.dynamic">
+        <notes><note category="description">Origin of an RRset: written by an RFC 2136 dynamic update.</note></notes>
+        <segment><source>Dynamic update</source><target>Dynamisk uppdatering</target></segment>
+      </unit>
+      <unit id="dns.origin.dhcp">
+        <segment><source>DHCP</source><target>DHCP</target></segment>
+      </unit>
+      <unit id="dns.origin.ad">
+        <segment><source>Active Directory</source><target>Active Directory</target></segment>
+      </unit>
+      <unit id="dns.serial.unixtime">
+        <notes><note category="description">Serial policy: seconds since 1970.</note></notes>
+        <segment><source>Unix time</source><target>Unix-tid</target></segment>
+      </unit>
+      <unit id="dns.serial.counter">
+        <notes><note category="description">Serial policy: the previous serial plus one.</note></notes>
+        <segment><source>Counter</source><target>Räknare</target></segment>
+      </unit>
+      <unit id="dns.serial.date_counter">
+        <notes><note category="description">Serial policy: YYYYMMDDnn.</note></notes>
+        <segment><source>Date and counter</source><target>Datum och räknare</target></segment>
+      </unit>
+      <unit id="dns.serial.unixtime_help">
+        <segment><source>The serial is the time of the change in seconds since 1970, at least one above the previous serial.</source><target>Serienumret är tiden för ändringen i sekunder sedan 1970, minst ett högre än det förra.</target></segment>
+      </unit>
+      <unit id="dns.serial.counter_help">
+        <segment><source>The serial goes up by one with every change.</source><target>Serienumret ökar med ett vid varje ändring.</target></segment>
+      </unit>
+      <unit id="dns.serial.date_counter_help">
+        <segment><source>The serial is the date and a counter of the day (2026101701); after 99 changes in a day it goes up by one.</source><target>Serienumret är datumet och en räknare för dagen (2026101701); efter 99 ändringar på en dag ökar det med ett.</target></segment>
+      </unit>
+      <unit id="dns.op.set">
+        <notes><note category="description">Operation of a pending change: replace the RRset.</note></notes>
+        <segment><source>Set</source><target>Ersätt</target></segment>
+      </unit>
+      <unit id="dns.op.add">
+        <segment><source>Add</source><target>Lägg till</target></segment>
+      </unit>
+      <unit id="dns.op.remove">
+        <segment><source>Remove record</source><target>Ta bort post</target></segment>
+      </unit>
+      <unit id="dns.op.delete">
+        <segment><source>Delete</source><target>Radera</target></segment>
+      </unit>
+      <unit id="dns.col.zone">
+        <segment><source>Zone</source><target>Zon</target></segment>
+      </unit>
+      <unit id="dns.col.kind">
+        <segment><source>Kind</source><target>Typ av zon</target></segment>
+      </unit>
+      <unit id="dns.col.rrsets">
+        <segment><source>RRsets</source><target>RRset</target></segment>
+      </unit>
+      <unit id="dns.col.serial">
+        <segment><source>Serial</source><target>Serienummer</target></segment>
+      </unit>
+      <unit id="dns.col.origins">
+        <segment><source>Origins</source><target>Ursprung</target></segment>
+      </unit>
+      <unit id="dns.col.description">
+        <segment><source>Description</source><target>Beskrivning</target></segment>
+      </unit>
+      <unit id="dns.col.updated">
+        <segment><source>Updated</source><target>Ändrad</target></segment>
+      </unit>
+      <unit id="dns.col.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dns.col.type">
+        <segment><source>Type</source><target>Typ</target></segment>
+      </unit>
+      <unit id="dns.col.ttl">
+        <segment><source>TTL</source><target>TTL</target></segment>
+      </unit>
+      <unit id="dns.col.data">
+        <segment><source>Data</source><target>Data</target></segment>
+      </unit>
+      <unit id="dns.col.origin">
+        <segment><source>Origin</source><target>Ursprung</target></segment>
+      </unit>
+      <unit id="dns.do.open">
+        <segment><source>Open</source><target>Öppna</target></segment>
+      </unit>
+      <unit id="dns.do.import">
+        <segment><source>Import zone file</source><target>Importera zonfil</target></segment>
+      </unit>
+      <unit id="dns.do.export">
+        <segment><source>Export zone file</source><target>Exportera zonfil</target></segment>
+      </unit>
+      <unit id="dns.do.delete">
+        <segment><source>Delete</source><target>Radera</target></segment>
+      </unit>
+      <unit id="dns.do.edit">
+        <segment><source>Edit</source><target>Redigera</target></segment>
+      </unit>
+      <unit id="dns.do.add_records">
+        <segment><source>Add records</source><target>Lägg till poster</target></segment>
+      </unit>
+      <unit id="dns.do.remove_record">
+        <segment><source>Remove this record</source><target>Ta bort posten</target></segment>
+      </unit>
+      <unit id="dns.do.delete_rrset">
+        <segment><source>Delete the RRset</source><target>Radera RRset</target></segment>
+      </unit>
+      <unit id="dns.do.take_over">
+        <notes><note category="description">Row action: make an RRset kept by IPAM (or another writer) editable here.</note></notes>
+        <segment><source>Take over</source><target>Ta över</target></segment>
+      </unit>
+      <unit id="dns.zones.title">
+        <segment><source>Zones</source><target>Zoner</target></segment>
+      </unit>
+      <unit id="dns.zones.sub">
+        <segment><source>Authoritative zones and their records</source><target>Auktoritativa zoner och deras poster</target></segment>
+      </unit>
+      <unit id="dns.zones.filter_label">
+        <segment><source>Search zones</source><target>Sök zoner</target></segment>
+      </unit>
+      <unit id="dns.zones.filter_placeholder">
+        <segment><source>Zone name or description</source><target>Zonnamn eller beskrivning</target></segment>
+      </unit>
+      <unit id="dns.zones.empty">
+        <segment><source>No zones yet</source><target>Inga zoner än</target></segment>
+      </unit>
+      <unit id="dns.zones.empty_body">
+        <segment><source>Create a zone, then add its records or import a zone file.</source><target>Skapa en zon och lägg sedan till poster eller importera en zonfil.</target></segment>
+      </unit>
+      <unit id="dns.zone.reverse">
+        <notes><note category="description">Tag of a reverse zone (in-addr.arpa or ip6.arpa).</note></notes>
+        <segment><source>Reverse</source><target>Omvänd</target></segment>
+      </unit>
+      <unit id="dns.zone.not_served">
+        <notes><note category="description">Tag of a secondary or stub zone, which Phase 2 does not serve.</note></notes>
+        <segment><source>Not served yet</source><target>Tillhandahålls inte än</target></segment>
+      </unit>
+      <unit id="dns.zone.not_served_hint">
+        <segment><source>Tenko keeps this zone but does not answer for it yet: transfers in and stub zones come in a later slice.</source><target>Tenko sparar zonen men svarar inte för den än: överföringar in och stubzoner kommer i en senare etapp.</target></segment>
+      </unit>
+      <unit id="dns.zone.serial">
+        <segment><source>Serial {serial}</source><target>Serienummer {serial}</target></segment>
+      </unit>
+      <unit id="dns.zone.tabs">
+        <segment><source>Zone sections</source><target>Zonens avsnitt</target></segment>
+      </unit>
+      <unit id="dns.zone.tab.records">
+        <segment><source>Records</source><target>Poster</target></segment>
+      </unit>
+      <unit id="dns.zone.tab.settings">
+        <segment><source>Settings</source><target>Inställningar</target></segment>
+      </unit>
+      <unit id="dns.zone.tab.history">
+        <segment><source>History</source><target>Historik</target></segment>
+      </unit>
+      <unit id="dns.zone.create.action">
+        <segment><source>New zone</source><target>Ny zon</target></segment>
+      </unit>
+      <unit id="dns.zone.create.title">
+        <segment><source>New zone</source><target>Ny zon</target></segment>
+      </unit>
+      <unit id="dns.zone.create.submit">
+        <segment><source>Create zone</source><target>Skapa zon</target></segment>
+      </unit>
+      <unit id="dns.zone.create.done">
+        <segment><source>Zone {name} created</source><target>Zonen {name} skapades</target></segment>
+      </unit>
+      <unit id="dns.zone.create.primaries_required">
+        <segment><source>Name at least one primary server.</source><target>Ange minst en primär server.</target></segment>
+      </unit>
+      <unit id="dns.zone.field.name">
+        <segment><source>Zone name</source><target>Zonnamn</target></segment>
+      </unit>
+      <unit id="dns.zone.field.name_help">
+        <segment><source>The apex, for example example.test or 2.0.192.in-addr.arpa.</source><target>Zonens topp, till exempel example.test eller 2.0.192.in-addr.arpa.</target></segment>
+      </unit>
+      <unit id="dns.zone.field.kind">
+        <segment><source>Kind</source><target>Typ av zon</target></segment>
+      </unit>
+      <unit id="dns.zone.field.serial">
+        <segment><source>Serial policy</source><target>Serienummerpolicy</target></segment>
+      </unit>
+      <unit id="dns.zone.field.primaries">
+        <segment><source>Primary servers</source><target>Primära servrar</target></segment>
+      </unit>
+      <unit id="dns.zone.field.primaries_help">
+        <segment><source>Addresses of the servers the zone comes from, separated by commas.</source><target>Adresser till servrarna som zonen kommer från, åtskilda med komma.</target></segment>
+      </unit>
+      <unit id="dns.zone.field.mname">
+        <segment><source>Primary name server (SOA)</source><target>Primär namnserver (SOA)</target></segment>
+      </unit>
+      <unit id="dns.zone.field.rname">
+        <segment><source>Responsible mailbox (SOA)</source><target>Ansvarig brevlåda (SOA)</target></segment>
+      </unit>
+      <unit id="dns.zone.field.name_servers">
+        <segment><source>Name servers (NS)</source><target>Namnservrar (NS)</target></segment>
+      </unit>
+      <unit id="dns.zone.field.name_servers_help">
+        <segment><source>Host names separated by commas; the primary name server when empty.</source><target>Värdnamn åtskilda med komma; den primära namnservern om fältet är tomt.</target></segment>
+      </unit>
+      <unit id="dns.zone.field.ttl">
+        <segment><source>Default TTL (seconds)</source><target>Standard-TTL (sekunder)</target></segment>
+      </unit>
+      <unit id="dns.zone.field.description">
+        <segment><source>Description</source><target>Beskrivning</target></segment>
+      </unit>
+      <unit id="dns.zone.delete.title">
+        <segment><source>Delete zone {name}?</source><target>Radera zonen {name}?</target></segment>
+      </unit>
+      <unit id="dns.zone.delete.body">
+        <segment><source>The zone {name} and its {count, plural, one {{rrsets} RRset} other {{rrsets} RRsets}} are deleted, and Tenko stops answering for it. This cannot be undone.</source><target>Zonen {name} och dess {count, plural, one {{rrsets} RRset} other {{rrsets} RRset}} raderas, och Tenko slutar svara för den. Det går inte att ångra.</target></segment>
+      </unit>
+      <unit id="dns.zone.delete.confirm">
+        <segment><source>Delete zone</source><target>Radera zon</target></segment>
+      </unit>
+      <unit id="dns.zone.delete.done">
+        <segment><source>Zone {name} deleted</source><target>Zonen {name} raderades</target></segment>
+      </unit>
+      <unit id="dns.records.label">
+        <notes><note category="description">Accessible name of the record grid.</note></notes>
+        <segment><source>Records of {zone}</source><target>Poster i {zone}</target></segment>
+      </unit>
+      <unit id="dns.records.filter_label">
+        <segment><source>Filter records</source><target>Filtrera poster</target></segment>
+      </unit>
+      <unit id="dns.records.filter_placeholder">
+        <segment><source>Name starts with</source><target>Namnet börjar med</target></segment>
+      </unit>
+      <unit id="dns.records.type_filter">
+        <segment><source>Type</source><target>Typ</target></segment>
+      </unit>
+      <unit id="dns.records.any_type">
+        <segment><source>Every type</source><target>Alla typer</target></segment>
+      </unit>
+      <unit id="dns.records.origin_filter">
+        <segment><source>Origin</source><target>Ursprung</target></segment>
+      </unit>
+      <unit id="dns.records.any_origin">
+        <segment><source>Every origin</source><target>Alla ursprung</target></segment>
+      </unit>
+      <unit id="dns.records.empty">
+        <segment><source>No records in this zone</source><target>Inga poster i zonen</target></segment>
+      </unit>
+      <unit id="dns.rrset.add_action">
+        <segment><source>Add RRset</source><target>Lägg till RRset</target></segment>
+      </unit>
+      <unit id="dns.rrset.add_title">
+        <segment><source>Add an RRset</source><target>Lägg till ett RRset</target></segment>
+      </unit>
+      <unit id="dns.rrset.add_records_title">
+        <segment><source>Add records to {name} {type}</source><target>Lägg till poster i {name} {type}</target></segment>
+      </unit>
+      <unit id="dns.rrset.add_submit">
+        <segment><source>Add</source><target>Lägg till</target></segment>
+      </unit>
+      <unit id="dns.rrset.field.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dns.rrset.field.name_help">
+        <segment><source>Relative to {zone}; @ is the zone itself.</source><target>Relativt {zone}; @ är zonen själv.</target></segment>
+      </unit>
+      <unit id="dns.rrset.field.type">
+        <segment><source>Type</source><target>Typ</target></segment>
+      </unit>
+      <unit id="dns.rrset.field.ttl">
+        <segment><source>TTL (seconds)</source><target>TTL (sekunder)</target></segment>
+      </unit>
+      <unit id="dns.rrset.field.data">
+        <segment><source>Records</source><target>Poster</target></segment>
+      </unit>
+      <unit id="dns.rrset.field.data_help">
+        <segment><source>One record per line, for example {example}. A name without a dot is relative to the zone.</source><target>En post per rad, till exempel {example}. Ett namn utan punkt är relativt zonen.</target></segment>
+      </unit>
+      <unit id="dns.rrset.edit_ttl">
+        <segment><source>TTL of {name} {type}</source><target>TTL för {name} {type}</target></segment>
+      </unit>
+      <unit id="dns.rrset.edit_data">
+        <segment><source>Record of {name} {type}</source><target>Post i {name} {type}</target></segment>
+      </unit>
+      <unit id="dns.rrset.edit_hint">
+        <segment><source>Enter saves the RRset and moves the serial; Esc cancels.</source><target>Enter sparar RRset och ökar serienumret; Esc avbryter.</target></segment>
+      </unit>
+      <unit id="dns.rrset.saved">
+        <segment><source>{count, plural, one {# RRset changed} other {# RRsets changed}}, serial {serial}</source><target>{count, plural, one {# RRset ändrat} other {# RRset ändrade}}, serienummer {serial}</target></segment>
+      </unit>
+      <unit id="dns.rrset.failed">
+        <segment><source>The change was not made</source><target>Ändringen gjordes inte</target></segment>
+      </unit>
+      <unit id="dns.rrset.delete_title">
+        <segment><source>Delete {name} {type}?</source><target>Radera {name} {type}?</target></segment>
+      </unit>
+      <unit id="dns.rrset.delete_body">
+        <segment><source>The RRset and its {count, plural, one {# record} other {# records}} are deleted.</source><target>RRset och dess {count, plural, one {# post} other {# poster}} raderas.</target></segment>
+      </unit>
+      <unit id="dns.rrset.delete_confirm">
+        <segment><source>Delete RRset</source><target>Radera RRset</target></segment>
+      </unit>
+      <unit id="dns.record.line_error">
+        <segment><source>Line {line}: {message}</source><target>Rad {line}: {message}</target></segment>
+      </unit>
+      <unit id="dns.check.name">
+        <segment><source>Not a valid DNS name.</source><target>Inte ett giltigt DNS-namn.</target></segment>
+      </unit>
+      <unit id="dns.check.outside">
+        <segment><source>The name is outside the zone.</source><target>Namnet ligger utanför zonen.</target></segment>
+      </unit>
+      <unit id="dns.check.ttl">
+        <segment><source>A TTL is a whole number of seconds up to 2147483647.</source><target>En TTL är ett heltal sekunder upp till 2147483647.</target></segment>
+      </unit>
+      <unit id="dns.check.ipv4">
+        <segment><source>Not an IPv4 address.</source><target>Inte en IPv4-adress.</target></segment>
+      </unit>
+      <unit id="dns.check.ipv6">
+        <segment><source>Not an IPv6 address.</source><target>Inte en IPv6-adress.</target></segment>
+      </unit>
+      <unit id="dns.check.target">
+        <segment><source>Give one host name.</source><target>Ange ett värdnamn.</target></segment>
+      </unit>
+      <unit id="dns.check.number">
+        <segment><source>A whole number of seconds is needed.</source><target>Ett heltal sekunder behövs.</target></segment>
+      </unit>
+      <unit id="dns.check.srv">
+        <segment><source>Give priority, weight, port and target, for example 0 100 389 ldap.</source><target>Ange prioritet, vikt, port och mål, till exempel 0 100 389 ldap.</target></segment>
+      </unit>
+      <unit id="dns.check.mx">
+        <segment><source>Give a preference and a mail server, for example 10 mail.</source><target>Ange en preferens och en e-postserver, till exempel 10 mail.</target></segment>
+      </unit>
+      <unit id="dns.check.caa">
+        <segment><source>Give flags, a tag and a quoted value, for example 0 issue "ca.example.test".</source><target>Ange flaggor, en tagg och ett citerat värde, till exempel 0 issue "ca.example.test".</target></segment>
+      </unit>
+      <unit id="dns.check.txt">
+        <segment><source>Give text, or strings in double quotes.</source><target>Ange text eller strängar inom citattecken.</target></segment>
+      </unit>
+      <unit id="dns.check.empty">
+        <segment><source>Give at least one record.</source><target>Ange minst en post.</target></segment>
+      </unit>
+      <unit id="dns.check.type">
+        <segment><source>Records of this type are not edited here.</source><target>Poster av den här typen redigeras inte här.</target></segment>
+      </unit>
+      <unit id="dns.batch.mode">
+        <notes><note category="description">Toggle of the record grid: changes collect into one batch instead of being saved one by one.</note></notes>
+        <segment><source>Collect changes</source><target>Samla ändringar</target></segment>
+      </unit>
+      <unit id="dns.batch.hint">
+        <segment><source>Enter adds the change to the batch; nothing is saved until you review and apply it.</source><target>Enter lägger ändringen i omgången; inget sparas förrän du granskar och verkställer den.</target></segment>
+      </unit>
+      <unit id="dns.batch.count">
+        <segment><source>{count, plural, one {{changes} change waiting} other {{changes} changes waiting}}</source><target>{count, plural, one {{changes} ändring väntar} other {{changes} ändringar väntar}}</target></segment>
+      </unit>
+      <unit id="dns.batch.list_label">
+        <segment><source>Changes waiting</source><target>Väntande ändringar</target></segment>
+      </unit>
+      <unit id="dns.batch.drop">
+        <segment><source>Drop the change of {name} {type}</source><target>Släpp ändringen av {name} {type}</target></segment>
+      </unit>
+      <unit id="dns.batch.discard">
+        <segment><source>Discard all</source><target>Släpp alla</target></segment>
+      </unit>
+      <unit id="dns.batch.review">
+        <segment><source>Review changes</source><target>Granska ändringar</target></segment>
+      </unit>
+      <unit id="dns.batch.add_to">
+        <segment><source>Add to batch</source><target>Lägg i omgången</target></segment>
+      </unit>
+      <unit id="dns.batch.pending_tag">
+        <notes><note category="description">Tag on an RRset that a waiting change of the batch touches.</note></notes>
+        <segment><source>Changing</source><target>Ändras</target></segment>
+      </unit>
+      <unit id="dns.batch.diff_title">
+        <segment><source>Review the changes</source><target>Granska ändringarna</target></segment>
+      </unit>
+      <unit id="dns.batch.diff_summary">
+        <segment><source>{count, plural, one {A dry run found # RRset that changes. Nothing is saved until you apply.} other {A dry run found # RRsets that change. Nothing is saved until you apply.}}</source><target>{count, plural, one {En provkörning hittade # RRset som ändras. Inget sparas förrän du verkställer.} other {En provkörning hittade # RRset som ändras. Inget sparas förrän du verkställer.}}</target></segment>
+      </unit>
+      <unit id="dns.batch.col.change">
+        <segment><source>Change</source><target>Ändring</target></segment>
+      </unit>
+      <unit id="dns.batch.col.before">
+        <segment><source>Before</source><target>Före</target></segment>
+      </unit>
+      <unit id="dns.batch.col.after">
+        <segment><source>After</source><target>Efter</target></segment>
+      </unit>
+      <unit id="dns.batch.kind.add">
+        <segment><source>Added</source><target>Tillagt</target></segment>
+      </unit>
+      <unit id="dns.batch.kind.change">
+        <segment><source>Changed</source><target>Ändrat</target></segment>
+      </unit>
+      <unit id="dns.batch.kind.delete">
+        <segment><source>Removed</source><target>Borttaget</target></segment>
+      </unit>
+      <unit id="dns.batch.back">
+        <segment><source>Back</source><target>Tillbaka</target></segment>
+      </unit>
+      <unit id="dns.batch.apply">
+        <segment><source>{count, plural, one {Apply # change} other {Apply # changes}}</source><target>{count, plural, one {Verkställ # ändring} other {Verkställ # ändringar}}</target></segment>
+      </unit>
+      <unit id="dns.batch.applied">
+        <segment><source>{count, plural, one {# RRset changed} other {# RRsets changed}}, serial {serial}</source><target>{count, plural, one {# RRset ändrat} other {# RRset ändrade}}, serienummer {serial}</target></segment>
+      </unit>
+      <unit id="dns.takeover.title">
+        <segment><source>Take over {name} {type}?</source><target>Ta över {name} {type}?</target></segment>
+      </unit>
+      <unit id="dns.takeover.body">
+        <segment><source>{origin} keeps this RRset. After a change made here it is manual, and {origin} no longer keeps it: the next change of the address in IPAM does not reach it.</source><target>{origin} sköter detta RRset. Efter en ändring här är det manuellt och sköts inte längre av {origin}: nästa ändring av adressen i IPAM når det inte.</target></segment>
+      </unit>
+      <unit id="dns.takeover.confirm">
+        <segment><source>Take over</source><target>Ta över</target></segment>
+      </unit>
+      <unit id="dns.takeover.tag">
+        <segment><source>Taken over</source><target>Övertaget</target></segment>
+      </unit>
+      <unit id="dns.settings.soa">
+        <segment><source>Start of authority</source><target>Auktoritetsstart (SOA)</target></segment>
+      </unit>
+      <unit id="dns.settings.soa_body">
+        <segment><source>The SOA record of the zone. The serial is not set here: it moves by the serial policy with every change.</source><target>Zonens SOA-post. Serienumret ställs inte in här: det ändras enligt serienummerpolicyn vid varje ändring.</target></segment>
+      </unit>
+      <unit id="dns.settings.rname_help">
+        <segment><source>The mailbox with its @ written as a dot: hostmaster.example.test.</source><target>Brevlådan med @ skrivet som punkt: hostmaster.example.test.</target></segment>
+      </unit>
+      <unit id="dns.settings.refresh">
+        <segment><source>Refresh (seconds)</source><target>Uppdatering (sekunder)</target></segment>
+      </unit>
+      <unit id="dns.settings.retry">
+        <segment><source>Retry (seconds)</source><target>Nytt försök (sekunder)</target></segment>
+      </unit>
+      <unit id="dns.settings.expire">
+        <segment><source>Expire (seconds)</source><target>Utgång (sekunder)</target></segment>
+      </unit>
+      <unit id="dns.settings.minimum">
+        <segment><source>Negative TTL (seconds)</source><target>Negativ TTL (sekunder)</target></segment>
+      </unit>
+      <unit id="dns.settings.ttl">
+        <segment><source>SOA TTL (seconds)</source><target>SOA-TTL (sekunder)</target></segment>
+      </unit>
+      <unit id="dns.settings.ns">
+        <segment><source>Name servers of the zone</source><target>Zonens namnservrar</target></segment>
+      </unit>
+      <unit id="dns.settings.ns_required">
+        <segment><source>The zone needs at least one name server.</source><target>Zonen behöver minst en namnserver.</target></segment>
+      </unit>
+      <unit id="dns.settings.serial">
+        <segment><source>Serial and description</source><target>Serienummer och beskrivning</target></segment>
+      </unit>
+      <unit id="dns.settings.save">
+        <segment><source>Save settings</source><target>Spara inställningar</target></segment>
+      </unit>
+      <unit id="dns.settings.saved">
+        <segment><source>Settings of {name} saved</source><target>Inställningarna för {name} sparades</target></segment>
+      </unit>
+      <unit id="dns.history.serial_title">
+        <segment><source>Serial</source><target>Serienummer</target></segment>
+      </unit>
+      <unit id="dns.history.serial">
+        <segment><source>Served now</source><target>Tillhandahålls nu</target></segment>
+      </unit>
+      <unit id="dns.history.updated">
+        <segment><source>Last change</source><target>Senaste ändring</target></segment>
+      </unit>
+      <unit id="dns.history.revision">
+        <segment><source>Store revision</source><target>Lagringsrevision</target></segment>
+      </unit>
+      <unit id="dns.history.changes">
+        <segment><source>Recent changes</source><target>Senaste ändringar</target></segment>
+      </unit>
+      <unit id="dns.history.empty">
+        <segment><source>No changes recorded yet.</source><target>Inga ändringar registrerade än.</target></segment>
+      </unit>
+      <unit id="dns.history.no_audit">
+        <segment><source>The changes of a zone come from the audit log, which this account does not read.</source><target>En zons ändringar kommer från granskningsloggen, som det här kontot inte läser.</target></segment>
+      </unit>
+      <unit id="dns.history.when">
+        <segment><source>When</source><target>När</target></segment>
+      </unit>
+      <unit id="dns.history.action">
+        <segment><source>Action</source><target>Åtgärd</target></segment>
+      </unit>
+      <unit id="dns.history.result">
+        <segment><source>Outcome</source><target>Utfall</target></segment>
+      </unit>
+      <unit id="dns.history.outcome.success">
+        <segment><source>Done</source><target>Klar</target></segment>
+      </unit>
+      <unit id="dns.history.outcome.denied">
+        <segment><source>Refused</source><target>Nekad</target></segment>
+      </unit>
+      <unit id="dns.history.outcome.failed">
+        <segment><source>Failed</source><target>Misslyckades</target></segment>
+      </unit>
+      <unit id="dns.export.failed">
+        <segment><source>The zone file could not be exported</source><target>Zonfilen kunde inte exporteras</target></segment>
+      </unit>
+      <unit id="dns.import.title">
+        <segment><source>Import a zone file</source><target>Importera en zonfil</target></segment>
+      </unit>
+      <unit id="dns.import.steps">
+        <segment><source>Import steps</source><target>Importens steg</target></segment>
+      </unit>
+      <unit id="dns.import.step.upload">
+        <segment><source>Zone file</source><target>Zonfil</target></segment>
+      </unit>
+      <unit id="dns.import.step.preview">
+        <segment><source>Preview</source><target>Förhandsgranskning</target></segment>
+      </unit>
+      <unit id="dns.import.step.apply">
+        <segment><source>Import</source><target>Import</target></segment>
+      </unit>
+      <unit id="dns.import.step.done">
+        <segment><source>Done</source><target>Klart</target></segment>
+      </unit>
+      <unit id="dns.import.upload.title">
+        <segment><source>Choose the zone file</source><target>Välj zonfilen</target></segment>
+      </unit>
+      <unit id="dns.import.upload.body">
+        <segment><source>An RFC 1035 zone file: $ORIGIN and $TTL are read, $INCLUDE is refused. The SOA of the file is replaced by the SOA of the zone.</source><target>En zonfil enligt RFC 1035: $ORIGIN och $TTL läses, $INCLUDE nekas. Filens SOA ersätts av zonens egen.</target></segment>
+      </unit>
+      <unit id="dns.import.upload.drop">
+        <segment><source>Drop a zone file here, or</source><target>Släpp en zonfil här, eller</target></segment>
+      </unit>
+      <unit id="dns.import.upload.choose">
+        <segment><source>Choose file</source><target>Välj fil</target></segment>
+      </unit>
+      <unit id="dns.import.upload.lines">
+        <segment><source>{count, plural, one {# line} other {# lines}}</source><target>{count, plural, one {# rad} other {# rader}}</target></segment>
+      </unit>
+      <unit id="dns.import.upload.too_large">
+        <segment><source>The file is larger than 64 MiB.</source><target>Filen är större än 64 MiB.</target></segment>
+      </unit>
+      <unit id="dns.import.upload.paste">
+        <segment><source>Zone file text</source><target>Zonfilens text</target></segment>
+      </unit>
+      <unit id="dns.import.upload.replace">
+        <segment><source>Replace the manual records the file does not have</source><target>Ersätt de manuella poster som filen saknar</target></segment>
+      </unit>
+      <unit id="dns.import.upload.replace_help">
+        <segment><source>Without it the file only adds and replaces RRsets. Records kept by IPAM stay either way.</source><target>Utan detta lägger filen bara till och ersätter RRset. Poster som IPAM sköter finns kvar i båda fallen.</target></segment>
+      </unit>
+      <unit id="dns.import.upload.preview">
+        <segment><source>Preview</source><target>Förhandsgranska</target></segment>
+      </unit>
+      <unit id="dns.import.preview.title">
+        <segment><source>What the import does</source><target>Vad importen gör</target></segment>
+      </unit>
+      <unit id="dns.import.preview.back">
+        <segment><source>Back</source><target>Tillbaka</target></segment>
+      </unit>
+      <unit id="dns.import.preview.apply">
+        <segment><source>Import</source><target>Importera</target></segment>
+      </unit>
+      <unit id="dns.import.fact.added">
+        <segment><source>{count, plural, one {RRset added} other {RRsets added}}</source><target>{count, plural, one {RRset läggs till} other {RRset läggs till}}</target></segment>
+      </unit>
+      <unit id="dns.import.fact.replaced">
+        <segment><source>{count, plural, one {RRset replaced} other {RRsets replaced}}</source><target>{count, plural, one {RRset ersätts} other {RRset ersätts}}</target></segment>
+      </unit>
+      <unit id="dns.import.fact.removed">
+        <segment><source>{count, plural, one {RRset removed} other {RRsets removed}}</source><target>{count, plural, one {RRset tas bort} other {RRset tas bort}}</target></segment>
+      </unit>
+      <unit id="dns.import.types.caption">
+        <segment><source>Records of the file per type</source><target>Filens poster per typ</target></segment>
+      </unit>
+      <unit id="dns.import.types.records">
+        <segment><source>Records</source><target>Poster</target></segment>
+      </unit>
+      <unit id="dns.import.losses.title">
+        <segment><source>{count, plural, one {# thing the zone does not keep} other {# things the zone does not keep}}</source><target>{count, plural, one {# sak som zonen inte behåller} other {# saker som zonen inte behåller}}</target></segment>
+      </unit>
+      <unit id="dns.import.losses.none">
+        <segment><source>The zone keeps everything the file brings.</source><target>Zonen behåller allt som filen innehåller.</target></segment>
+      </unit>
+      <unit id="dns.import.losses.line">
+        <segment><source>Line</source><target>Rad</target></segment>
+      </unit>
+      <unit id="dns.import.losses.what">
+        <segment><source>What</source><target>Vad</target></segment>
+      </unit>
+      <unit id="dns.import.parse_error">
+        <segment><source>The zone file does not parse at line {line}. Correct it and preview again.</source><target>Zonfilen kan inte tolkas på rad {line}. Rätta den och förhandsgranska igen.</target></segment>
+      </unit>
+      <unit id="dns.import.apply.running">
+        <segment><source>Importing</source><target>Importerar</target></segment>
+      </unit>
+      <unit id="dns.import.apply.progress">
+        <segment><source>Step {done} of {total}</source><target>Steg {done} av {total}</target></segment>
+      </unit>
+      <unit id="dns.import.apply.done">
+        <segment><source>Imported</source><target>Importerad</target></segment>
+      </unit>
+      <unit id="dns.import.apply.serial">
+        <segment><source>The zone serves serial {serial} now.</source><target>Zonen tillhandahåller nu serienummer {serial}.</target></segment>
+      </unit>
+      <unit id="dns.import.apply.failed">
+        <segment><source>The import failed</source><target>Importen misslyckades</target></segment>
+      </unit>
+      <unit id="dns.import.apply.rolled_back">
+        <segment><source>Nothing of the file was kept; the zone is as it was.</source><target>Inget från filen behölls; zonen är som förut.</target></segment>
+      </unit>
+      <unit id="dns.import.apply.open_job">
+        <segment><source>Open the job</source><target>Öppna jobbet</target></segment>
+      </unit>
+      <unit id="dns.import.apply.again">
+        <segment><source>Import another file</source><target>Importera en fil till</target></segment>
+      </unit>
+      <unit id="dns.import.apply.open_zone">
+        <segment><source>Open the zone</source><target>Öppna zonen</target></segment>
+      </unit>
+      <unit id="dns.loss.directive">
+        <segment><source>A directive that is not supported was skipped.</source><target>Ett direktiv som inte stöds hoppades över.</target></segment>
+      </unit>
+      <unit id="dns.loss.outside">
+        <segment><source>A record outside the zone was skipped.</source><target>En post utanför zonen hoppades över.</target></segment>
+      </unit>
+      <unit id="dns.loss.soa">
+        <segment><source>The SOA of the file is replaced by the SOA of the zone.</source><target>Filens SOA ersätts av zonens egen SOA.</target></segment>
+      </unit>
+      <unit id="dns.loss.unsupported_type">
+        <segment><source>A record of a type that is not supported was skipped.</source><target>En post av en typ som inte stöds hoppades över.</target></segment>
+      </unit>
+      <unit id="dns.loss.origin">
+        <segment><source>An RRset that IPAM or another writer keeps was left as it is.</source><target>Ett RRset som IPAM eller en annan skrivare sköter lämnades som det är.</target></segment>
+      </unit>
+      <unit id="dns.acls.title">
+        <segment><source>Access lists</source><target>Åtkomstlistor</target></segment>
+      </unit>
+      <unit id="dns.acls.sub">
+        <segment><source>Who may transfer and update zones: prefixes, keys or anyone, first match decides</source><target>Vem som får överföra och uppdatera zoner: prefix, nycklar eller alla, första träff avgör</target></segment>
+      </unit>
+      <unit id="dns.acls.empty">
+        <segment><source>No access lists yet</source><target>Inga åtkomstlistor än</target></segment>
+      </unit>
+      <unit id="dns.acl.col.entries">
+        <segment><source>Entries</source><target>Poster</target></segment>
+      </unit>
+      <unit id="dns.acl.col.used_by">
+        <segment><source>Used by</source><target>Används av</target></segment>
+      </unit>
+      <unit id="dns.acl.create">
+        <segment><source>New access list</source><target>Ny åtkomstlista</target></segment>
+      </unit>
+      <unit id="dns.acl.create_title">
+        <segment><source>New access list</source><target>Ny åtkomstlista</target></segment>
+      </unit>
+      <unit id="dns.acl.edit_title">
+        <segment><source>Edit access list {name}</source><target>Redigera åtkomstlistan {name}</target></segment>
+      </unit>
+      <unit id="dns.acl.save">
+        <segment><source>Save</source><target>Spara</target></segment>
+      </unit>
+      <unit id="dns.acl.saved">
+        <segment><source>Access list {name} saved</source><target>Åtkomstlistan {name} sparades</target></segment>
+      </unit>
+      <unit id="dns.acl.created">
+        <segment><source>Access list {name} created</source><target>Åtkomstlistan {name} skapades</target></segment>
+      </unit>
+      <unit id="dns.acl.field.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dns.acl.field.entries">
+        <segment><source>Entries</source><target>Poster</target></segment>
+      </unit>
+      <unit id="dns.acl.field.entries_help">
+        <segment><source>One per line: a prefix (192.0.2.0/24), key and a key name, or any. A ! in front denies.</source><target>En per rad: ett prefix (192.0.2.0/24), key och ett nyckelnamn, eller any. Ett ! framför nekar.</target></segment>
+      </unit>
+      <unit id="dns.acl.name_invalid">
+        <segment><source>Letters, digits, - and _, up to 63 characters.</source><target>Bokstäver, siffror, - och _, högst 63 tecken.</target></segment>
+      </unit>
+      <unit id="dns.acl.entry_invalid">
+        <segment><source>Line {line} is not a prefix, a key or any.</source><target>Rad {line} är inte ett prefix, en nyckel eller any.</target></segment>
+      </unit>
+      <unit id="dns.acl.delete_title">
+        <segment><source>Delete access list {name}?</source><target>Radera åtkomstlistan {name}?</target></segment>
+      </unit>
+      <unit id="dns.acl.delete_body">
+        <segment><source>No zone uses the list.</source><target>Ingen zon använder listan.</target></segment>
+      </unit>
+      <unit id="dns.acl.delete_used">
+        <segment><source>The list is used by {zones}; the server refuses to delete it while it is.</source><target>Listan används av {zones}; servern vägrar radera den så länge den används.</target></segment>
+      </unit>
+      <unit id="dns.acl.delete_confirm">
+        <segment><source>Delete access list</source><target>Radera åtkomstlista</target></segment>
+      </unit>
+      <unit id="dns.acl.deleted">
+        <segment><source>Access list {name} deleted</source><target>Åtkomstlistan {name} raderades</target></segment>
+      </unit>
+      <unit id="dns.keys.title">
+        <segment><source>TSIG keys</source><target>TSIG-nycklar</target></segment>
+      </unit>
+      <unit id="dns.keys.sub">
+        <segment><source>Shared secrets that sign zone transfers and updates; the vault keeps the secrets</source><target>Delade hemligheter som signerar zonöverföringar och uppdateringar; valvet förvarar hemligheterna</target></segment>
+      </unit>
+      <unit id="dns.keys.empty">
+        <segment><source>No TSIG keys yet</source><target>Inga TSIG-nycklar än</target></segment>
+      </unit>
+      <unit id="dns.key.col.name">
+        <segment><source>Key name</source><target>Nyckelnamn</target></segment>
+      </unit>
+      <unit id="dns.key.col.algorithm">
+        <segment><source>Algorithm</source><target>Algoritm</target></segment>
+      </unit>
+      <unit id="dns.key.col.created">
+        <segment><source>Created</source><target>Skapad</target></segment>
+      </unit>
+      <unit id="dns.key.create_action">
+        <segment><source>New key</source><target>Ny nyckel</target></segment>
+      </unit>
+      <unit id="dns.key.create_title">
+        <segment><source>New TSIG key</source><target>Ny TSIG-nyckel</target></segment>
+      </unit>
+      <unit id="dns.key.mode">
+        <segment><source>Secret</source><target>Hemlighet</target></segment>
+      </unit>
+      <unit id="dns.key.mode_generate">
+        <segment><source>Generate a new secret</source><target>Generera en ny hemlighet</target></segment>
+      </unit>
+      <unit id="dns.key.mode_import">
+        <segment><source>Import a secret I have</source><target>Importera en hemlighet jag har</target></segment>
+      </unit>
+      <unit id="dns.key.name_help">
+        <segment><source>A DNS name, the same on both servers, for example xfr.example.test.</source><target>Ett DNS-namn, detsamma på båda servrarna, till exempel xfr.example.test.</target></segment>
+      </unit>
+      <unit id="dns.key.secret">
+        <segment><source>Secret (base64)</source><target>Hemlighet (base64)</target></segment>
+      </unit>
+      <unit id="dns.key.secret_help">
+        <segment><source>The secret as the other server shows it, in base64.</source><target>Hemligheten som den andra servern visar den, i base64.</target></segment>
+      </unit>
+      <unit id="dns.key.secret_invalid">
+        <segment><source>Base64 of at least 12 octets is needed.</source><target>Base64 med minst 12 oktetter behövs.</target></segment>
+      </unit>
+      <unit id="dns.key.generate">
+        <segment><source>Generate key</source><target>Generera nyckel</target></segment>
+      </unit>
+      <unit id="dns.key.import">
+        <segment><source>Import key</source><target>Importera nyckel</target></segment>
+      </unit>
+      <unit id="dns.key.created_title">
+        <segment><source>Store the secret now</source><target>Spara hemligheten nu</target></segment>
+      </unit>
+      <unit id="dns.key.created_body">
+        <segment><source>This is the only time the secret of {name} is shown. Put it into the configuration of the other server; Tenko keeps it in the vault and never shows it again.</source><target>Det här är enda gången hemligheten för {name} visas. Lägg in den i den andra serverns konfiguration; Tenko förvarar den i valvet och visar den aldrig igen.</target></segment>
+      </unit>
+      <unit id="dns.key.stored">
+        <segment><source>I have stored the secret</source><target>Jag har sparat hemligheten</target></segment>
+      </unit>
+      <unit id="dns.key.copied">
+        <segment><source>Secret copied</source><target>Hemligheten kopierades</target></segment>
+      </unit>
+      <unit id="dns.key.copy_blocked">
+        <segment><source>The browser did not allow the copy; select the secret and copy it by hand.</source><target>Webbläsaren tillät inte kopieringen; markera hemligheten och kopiera den för hand.</target></segment>
+      </unit>
+      <unit id="dns.key.delete_title">
+        <segment><source>Delete key {name}?</source><target>Radera nyckeln {name}?</target></segment>
+      </unit>
+      <unit id="dns.key.delete_body">
+        <segment><source>Transfers and updates signed with this key are refused from now on, and the secret is removed from the vault.</source><target>Överföringar och uppdateringar signerade med nyckeln nekas från och med nu, och hemligheten tas bort ur valvet.</target></segment>
+      </unit>
+      <unit id="dns.key.delete_confirm">
+        <segment><source>Delete key</source><target>Radera nyckel</target></segment>
+      </unit>
+      <unit id="dns.key.deleted">
+        <segment><source>Key {name} deleted</source><target>Nyckeln {name} raderades</target></segment>
+      </unit>
+      <unit id="hosts.dns.title">
+        <notes><note category="description">Section of the host and address pages with the records of each address.</note></notes>
+        <segment><source>DNS records</source><target>DNS-poster</target></segment>
+      </unit>
+      <unit id="hosts.dns.col.address">
+        <segment><source>Address</source><target>Adress</target></segment>
+      </unit>
+      <unit id="hosts.dns.col.forward">
+        <notes><note category="description">Column: the A or AAAA records of the DNS name of the address.</note></notes>
+        <segment><source>Name records</source><target>Namnposter</target></segment>
+      </unit>
+      <unit id="hosts.dns.col.reverse">
+        <notes><note category="description">Column: the PTR record of the address.</note></notes>
+        <segment><source>Reverse record</source><target>Omvänd post</target></segment>
+      </unit>
+      <unit id="hosts.dns.no_zone">
+        <notes><note category="description">The name or the reverse name of the address belongs to no zone Tenko holds.</note></notes>
+        <segment><source>No zone in Tenko</source><target>Ingen zon i Tenko</target></segment>
+      </unit>
+      <unit id="hosts.dns.no_records">
+        <segment><source>None in {zone} yet</source><target>Inga i {zone} än</target></segment>
+      </unit>
+      <unit id="hosts.dns.origin.manual">
+        <segment><source>manual</source><target>manuell</target></segment>
+      </unit>
+      <unit id="hosts.dns.origin.ipam">
+        <segment><source>from IPAM</source><target>från IPAM</target></segment>
+      </unit>
+      <unit id="hosts.dns.origin.dynamic">
+        <segment><source>dynamic update</source><target>dynamisk uppdatering</target></segment>
+      </unit>
+      <unit id="hosts.dns.origin.dhcp">
+        <segment><source>from DHCP</source><target>från DHCP</target></segment>
+      </unit>
+      <unit id="hosts.dns.origin.ad">
+        <segment><source>from Active Directory</source><target>från Active Directory</target></segment>
+      </unit>
+      <unit id="jobs.title.dns_import">
+        <notes><note category="description">Title of the job that imports a zone file.</note></notes>
+        <segment><source>Zone file import</source><target>Import av zonfil</target></segment>
+      </unit>
+      <unit id="jobs.step.dns_import_parse">
+        <segment><source>Read the zone file</source><target>Läs zonfilen</target></segment>
+      </unit>
+      <unit id="jobs.step.dns_import_apply">
+        <segment><source>Write the records</source><target>Skriv posterna</target></segment>
+      </unit>
+      <unit id="errors.dns.zone.not_found">
+        <segment><source>The zone does not exist (any more).</source><target>Zonen finns inte (längre).</target></segment>
+      </unit>
+      <unit id="errors.dns.zone.exists">
+        <segment><source>A zone of this name exists already.</source><target>Det finns redan en zon med det namnet.</target></segment>
+      </unit>
+      <unit id="errors.dns.zone.invalid">
+        <segment><source>The zone settings are not valid ({field}).</source><target>Zonens inställningar är inte giltiga ({field}).</target></segment>
+      </unit>
+      <unit id="errors.dns.record.invalid">
+        <segment><source>The records of {name} {type} break a rule of their type.</source><target>Posterna i {name} {type} bryter mot en regel för sin typ.</target></segment>
+      </unit>
+      <unit id="errors.dns.record.conflict">
+        <segment><source>The records of {name} conflict: a CNAME stands alone, and the apex keeps its NS.</source><target>Posterna för {name} krockar: en CNAME står ensam, och zonens topp behåller sina NS.</target></segment>
+      </unit>
+      <unit id="errors.dns.record.origin">
+        <segment><source>{name} {type} is kept by another writer. Take it over first to change it here.</source><target>{name} {type} sköts av en annan skrivare. Ta över det först för att ändra det här.</target></segment>
+      </unit>
+      <unit id="errors.dns.zonefile.invalid">
+        <segment><source>The zone file does not parse.</source><target>Zonfilen kan inte tolkas.</target></segment>
+      </unit>
+      <unit id="errors.dns.view.not_found">
+        <segment><source>The view does not exist.</source><target>Vyn finns inte.</target></segment>
+      </unit>
+      <unit id="errors.dns.view.invalid">
+        <segment><source>The view breaks a rule.</source><target>Vyn bryter mot en regel.</target></segment>
+      </unit>
+      <unit id="errors.dns.forwarder.not_found">
+        <segment><source>The forwarding rule does not exist.</source><target>Vidarebefordringsregeln finns inte.</target></segment>
+      </unit>
+      <unit id="errors.dns.forwarder.invalid">
+        <segment><source>The forwarding rule breaks a rule.</source><target>Vidarebefordringsregeln bryter mot en regel.</target></segment>
+      </unit>
+      <unit id="errors.dns.acl.not_found">
+        <segment><source>The access list does not exist (any more).</source><target>Åtkomstlistan finns inte (längre).</target></segment>
+      </unit>
+      <unit id="errors.dns.acl.in_use">
+        <segment><source>The access list is in use by a zone.</source><target>Åtkomstlistan används av en zon.</target></segment>
+      </unit>
+      <unit id="errors.dns.key.not_found">
+        <segment><source>The key does not exist (any more).</source><target>Nyckeln finns inte (längre).</target></segment>
+      </unit>
+      <unit id="errors.dns.key.exists">
+        <segment><source>A key of this name exists already.</source><target>Det finns redan en nyckel med det namnet.</target></segment>
+      </unit>
+      <unit id="errors.dns.list.not_found">
+        <segment><source>The block list does not exist.</source><target>Blocklistan finns inte.</target></segment>
+      </unit>
+      <unit id="errors.dns.list.invalid">
+        <segment><source>The block list breaks a rule.</source><target>Blocklistan bryter mot en regel.</target></segment>
+      </unit>
+      <unit id="errors.dns.update.refused">
+        <segment><source>The dynamic update was refused.</source><target>Den dynamiska uppdateringen nekades.</target></segment>
+      </unit>
+      <unit id="errors.dns.transfer.refused">
+        <segment><source>The zone transfer was refused.</source><target>Zonöverföringen nekades.</target></segment>
+      </unit>
+      <unit id="errors.dns.node.not_dns">
+        <segment><source>The node does not run the DNS role.</source><target>Noden kör inte DNS-rollen.</target></segment>
+      </unit>
+      <unit id="errors.dns.module.disabled">
+        <segment><source>The DNS module is switched off.</source><target>DNS-modulen är avstängd.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

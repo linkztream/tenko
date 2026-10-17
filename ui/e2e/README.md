@@ -28,6 +28,7 @@ and the `data-testid` convention they rely on, are in the section "End-to-end te
 | `reconciler` | The reconciler settings page: the server's defaults in human units, a changed interval and orphan age kept across a reload, an interval of 10 s refused inline with nothing sent, the keyboard order of the fields, axe, Swedish |
 | `guardrails` | The guardrails page: the default of ten parallel writes, a VLAN path and a client path saved and shown after a reload, removing one path saves the other alone, `max_parallel` 0 refused inline, the add dialog with the keyboard, axe, Swedish |
 | `metrics` | The live metrics of the start page: an administrator gets a sample within three seconds with a number on every tile and the controller as leader, and the next samples follow; a viewer sees no tiles; nothing in them takes the focus, axe, Swedish. A cluster of several controllers fakes the `metrics` stream (`support/metrics-mock.ts`): the cluster's figures on every tile, a row per controller with its role, lag and state (current, stale, unsupported), a sparkline that grows, and the waiting state |
+| `dns-zones`, `dns-import`, `dns-keys` | The DNS area (WP4.5) against faked DNS routes (`support/dns-mock.ts`): create a zone, add records, a batch with the diff of its dry run, an RRset of IPAM taken over, the SOA and name servers on the settings tab, delete; a zone file previewed (counts, records per type, losses), applied as a job, exported as a download and imported again without a change, a file that does not parse; a TSIG key generated and its secret shown once, an imported key, a name that exists, delete; a viewer; Swedish. One scenario runs against the real server and shows what the pages say while it answers the DNS routes with 501 (until WP4.2 lands); it notes the answer it met as the annotation `dns-api` |
 
 Each area spec also renders at least one page in Swedish (`support/i18n.ts`). A `test.fixme`
 marks a scenario that waits for a recorded defect.
@@ -35,7 +36,7 @@ marks a scenario that waits for a recorded defect.
 Some scenarios cannot happen on the one real controller of the e2e server: a learner to promote,
 a second voter, a quorum to lose, a backup that is days old, the samples of several controllers.
 They fake the routes concerned in the browser with `page.route` (`support/cluster-mock.ts`,
-`support/metrics-mock.ts`, `fakeHistory` in `backup.spec.ts`), say so in the header of the spec,
+`support/metrics-mock.ts`, `fakeHistory` in `backup.spec.ts`; `support/dns-mock.ts` until the DNS service of WP4.2 lands), say so in the header of the spec,
 and name the Rust tests that prove the real behaviour. Everything else still reaches the real
 server. `cluster-membership.spec.ts` fakes the cluster routes in every scenario; in the other
 specs the title of such a scenario ends in "(faked cluster routes)", "(faked status)" or
@@ -55,6 +56,7 @@ specs the title of such a scenario ends in "(faked cluster routes)", "(faked sta
 | `support/accounts.ts` | Other accounts than the administrator: `signInAsViewer`, a viewer signed in through the API; `signInCreatedAccount`, an account created with a PIN signed in after the change of its initial PIN |
 | `support/cluster-mock.ts` | `FakeCluster`: the cluster routes (`/cluster/*`, `/queue*`), the quorum of `/system/status` and the 503 `cluster.no_quorum` gate of IPAM writes answered in the browser; `member`, `threeVoters`; `sent` records the writes the UI sent; `refreshShell` and `refreshCluster` make the page read again through a real event |
 | `support/metrics-mock.ts` | `fakeMetricsStream`, `refuseMetricsStream`, `sample`: the `metrics` stream of the start page answered with snapshots of several controllers |
+| `support/dns-mock.ts` | `FakeDns`: the DNS routes (`/dns/*`) answered in the browser by the mock DNS service of `src/api/mock/dns-model.ts`, the import job (`/jobs/<id>` of a job it started) and the module list with `dns` added; `sent` records the writes; `zone(name)`, `rrsets(zone)` and `state` show what the UI changed |
 | `support/probe.ts` | `ProbeNode`: a second `tenko` process enrolled as a probe node |
 | `support/release.ts` | `ReleaseSource`: a release source on the loopback with a manifest and release files |
 | `support/totp.ts`, `support/webauthn.ts` | TOTP codes (RFC 6238) and Chromium's virtual platform authenticator |

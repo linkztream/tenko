@@ -1,0 +1,38 @@
+/* The DNS area (WP4.5): list pages with a grid that fills the page, the record grid with the
+   records of an RRset grouped under its first row, the batch bar, and the dialogs' forms. */
+.dns-page.list-page { overflow: hidden; }
+.dns-list-body { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.dns-records { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.dns-page .grow { flex: 1; }
+.dns-search { border: 0; background: transparent; min-width: 240px; outline: none; }
+.dns-chips { display: inline-flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.dns-data { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dns-toggle { display: inline-flex; align-items: center; gap: var(--sp-3); color: var(--ink-2); font-size: var(--fs-12); }
+
+/* The records of one RRset: the line between them is lighter than between RRsets. */
+.grid tr.dns-rrset-more td { border-top-color: transparent; }
+.grid tr.dns-rrset-first td { border-top: 1px solid var(--line); }
+
+.dns-batchbar {
+  display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-6);
+  border-bottom: 1px solid var(--line);
+  background: var(--accent-wash);
+  font-size: var(--fs-12);
+}
+.dns-draft { display: flex; flex-wrap: wrap; gap: var(--sp-3); list-style: none; margin: 0; padding: 0; }
+.dns-draft li { display: inline-flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface); }
+
+.dns-form { display: grid; gap: var(--sp-5); }
+.dns-form .field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-5); align-items: start; }
+.dns-form .input, .dns-form .select { width: 100%; }
+.dns-modes { display: flex; gap: var(--sp-6); border: 0; margin: 0; padding: 0; }
+.dns-modes legend { font-size: var(--fs-12); color: var(--ink-2); font-weight: var(--fw-medium); margin-bottom: var(--sp-2); }
+.dns-zonefile { min-height: 180px; width: 100%; }
+
+.dialog.dns-dialog { width: min(720px, calc(100vw - 32px)); max-height: 84vh; overflow: auto; }
+.dns-diff td { vertical-align: top; }
+.tag.dns-diff-add { background: var(--ok-wash); color: var(--ok-ink); }
+.tag.dns-diff-change { background: var(--accent-wash); color: var(--accent); }
+.tag.dns-diff-delete { background: var(--danger-wash); color: var(--danger-ink); }
+

@@ -39,6 +39,7 @@ import { cancelRolledBack, jobTitle } from "../jobs/words";
 import { isTyping } from "../shell/keyboard";
 import { ScanNowLazy } from "../scans/ScanNowLazy";
 import { Connect } from "./Connect";
+import { DnsRecords } from "./DnsRecords";
 import { HostCredentialsSection } from "./credentials";
 import { HostForm, InterfaceForm } from "./HostForm";
 import "../ipam/ipam.css";
@@ -381,6 +382,8 @@ export default function HostView() {
                   </ul>
                 </Show>
               </section>
+
+              <DnsRecords addresses={addresses()} />
 
               <section class="page-section" aria-labelledby="host-connect-title">
                 <h2 id="host-connect-title">{t("hosts.connect.title")}</h2>

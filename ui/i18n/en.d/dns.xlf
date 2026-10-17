@@ -1,0 +1,950 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="dns">
+      <unit id="dns.title">
+        <notes><note category="description">Title of the DNS area and its entry in the browser tab.</note></notes>
+        <segment><source>DNS</source></segment>
+      </unit>
+      <unit id="dns.coming.title">
+        <notes><note category="description">Heading of a DNS page whose view is not built yet (views, forwarders, block lists).</note></notes>
+        <segment><source>Coming in a later slice</source></segment>
+      </unit>
+      <unit id="dns.coming.body">
+        <segment><source>Views, forwarders and block lists are managed here once they are built. Zones, records, access lists and keys work already.</source></segment>
+      </unit>
+      <unit id="dns.coming.zones">
+        <segment><source>Go to the zones</source></segment>
+      </unit>
+      <unit id="dns.nav.label">
+        <notes><note category="description">Accessible name of the sub-navigation of the DNS area.</note></notes>
+        <segment><source>DNS sections</source></segment>
+      </unit>
+      <unit id="dns.nav.zones">
+        <segment><source>Zones</source></segment>
+      </unit>
+      <unit id="dns.nav.acls">
+        <segment><source>Access lists</source></segment>
+      </unit>
+      <unit id="dns.nav.keys">
+        <segment><source>TSIG keys</source></segment>
+      </unit>
+      <unit id="dns.state.not_built_title">
+        <notes><note category="description">Shown when the server answers the DNS routes with 501 (not implemented).</note></notes>
+        <segment><source>The DNS service is not available yet.</source></segment>
+      </unit>
+      <unit id="dns.state.not_built_body">
+        <segment><source>This server does not answer the DNS requests yet. Zones and records can be managed here once it does; nothing has to be set up in the meantime.</source></segment>
+      </unit>
+      <unit id="dns.state.off_title">
+        <notes><note category="description">Shown when the server does not register the DNS routes because the module is off.</note></notes>
+        <segment><source>The DNS module is switched off.</source></segment>
+      </unit>
+      <unit id="dns.state.off_body">
+        <segment><source>This installation does not run the DNS module, so there are no zones to manage. An administrator switches it on in the module settings.</source></segment>
+      </unit>
+      <unit id="dns.state.off_link">
+        <segment><source>Open the settings</source></segment>
+      </unit>
+      <unit id="dns.kind.primary">
+        <notes><note category="description">Zone kind: Tenko holds the data and serves it.</note></notes>
+        <segment><source>Primary</source></segment>
+      </unit>
+      <unit id="dns.kind.secondary">
+        <notes><note category="description">Zone kind: a copy transferred from another server.</note></notes>
+        <segment><source>Secondary</source></segment>
+      </unit>
+      <unit id="dns.kind.stub">
+        <notes><note category="description">Zone kind: only the name servers of the zone are kept.</note></notes>
+        <segment><source>Stub</source></segment>
+      </unit>
+      <unit id="dns.kind.forward">
+        <notes><note category="description">Zone kind: queries for the zone go to other servers.</note></notes>
+        <segment><source>Forward</source></segment>
+      </unit>
+      <unit id="dns.kind.rpz">
+        <notes><note category="description">Zone kind: a response policy zone.</note></notes>
+        <segment><source>Policy (RPZ)</source></segment>
+      </unit>
+      <unit id="dns.origin.manual">
+        <notes><note category="description">Origin of an RRset: written by a person (UI, API, zone file).</note></notes>
+        <segment><source>Manual</source></segment>
+      </unit>
+      <unit id="dns.origin.ipam">
+        <notes><note category="description">Origin of an RRset: kept by IPAM from the addresses and their names.</note></notes>
+        <segment><source>IPAM</source></segment>
+      </unit>
+      <unit id="dns.origin.dynamic">
+        <notes><note category="description">Origin of an RRset: written by an RFC 2136 dynamic update.</note></notes>
+        <segment><source>Dynamic update</source></segment>
+      </unit>
+      <unit id="dns.origin.dhcp">
+        <segment><source>DHCP</source></segment>
+      </unit>
+      <unit id="dns.origin.ad">
+        <segment><source>Active Directory</source></segment>
+      </unit>
+      <unit id="dns.serial.unixtime">
+        <notes><note category="description">Serial policy: seconds since 1970.</note></notes>
+        <segment><source>Unix time</source></segment>
+      </unit>
+      <unit id="dns.serial.counter">
+        <notes><note category="description">Serial policy: the previous serial plus one.</note></notes>
+        <segment><source>Counter</source></segment>
+      </unit>
+      <unit id="dns.serial.date_counter">
+        <notes><note category="description">Serial policy: YYYYMMDDnn.</note></notes>
+        <segment><source>Date and counter</source></segment>
+      </unit>
+      <unit id="dns.serial.unixtime_help">
+        <segment><source>The serial is the time of the change in seconds since 1970, at least one above the previous serial.</source></segment>
+      </unit>
+      <unit id="dns.serial.counter_help">
+        <segment><source>The serial goes up by one with every change.</source></segment>
+      </unit>
+      <unit id="dns.serial.date_counter_help">
+        <segment><source>The serial is the date and a counter of the day (2026101701); after 99 changes in a day it goes up by one.</source></segment>
+      </unit>
+      <unit id="dns.op.set">
+        <notes><note category="description">Operation of a pending change: replace the RRset.</note></notes>
+        <segment><source>Set</source></segment>
+      </unit>
+      <unit id="dns.op.add">
+        <segment><source>Add</source></segment>
+      </unit>
+      <unit id="dns.op.remove">
+        <segment><source>Remove record</source></segment>
+      </unit>
+      <unit id="dns.op.delete">
+        <segment><source>Delete</source></segment>
+      </unit>
+      <unit id="dns.col.zone">
+        <segment><source>Zone</source></segment>
+      </unit>
+      <unit id="dns.col.kind">
+        <segment><source>Kind</source></segment>
+      </unit>
+      <unit id="dns.col.rrsets">
+        <segment><source>RRsets</source></segment>
+      </unit>
+      <unit id="dns.col.serial">
+        <segment><source>Serial</source></segment>
+      </unit>
+      <unit id="dns.col.origins">
+        <segment><source>Origins</source></segment>
+      </unit>
+      <unit id="dns.col.description">
+        <segment><source>Description</source></segment>
+      </unit>
+      <unit id="dns.col.updated">
+        <segment><source>Updated</source></segment>
+      </unit>
+      <unit id="dns.col.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="dns.col.type">
+        <segment><source>Type</source></segment>
+      </unit>
+      <unit id="dns.col.ttl">
+        <segment><source>TTL</source></segment>
+      </unit>
+      <unit id="dns.col.data">
+        <segment><source>Data</source></segment>
+      </unit>
+      <unit id="dns.col.origin">
+        <segment><source>Origin</source></segment>
+      </unit>
+      <unit id="dns.do.open">
+        <segment><source>Open</source></segment>
+      </unit>
+      <unit id="dns.do.import">
+        <segment><source>Import zone file</source></segment>
+      </unit>
+      <unit id="dns.do.export">
+        <segment><source>Export zone file</source></segment>
+      </unit>
+      <unit id="dns.do.delete">
+        <segment><source>Delete</source></segment>
+      </unit>
+      <unit id="dns.do.edit">
+        <segment><source>Edit</source></segment>
+      </unit>
+      <unit id="dns.do.add_records">
+        <segment><source>Add records</source></segment>
+      </unit>
+      <unit id="dns.do.remove_record">
+        <segment><source>Remove this record</source></segment>
+      </unit>
+      <unit id="dns.do.delete_rrset">
+        <segment><source>Delete the RRset</source></segment>
+      </unit>
+      <unit id="dns.do.take_over">
+        <notes><note category="description">Row action: make an RRset kept by IPAM (or another writer) editable here.</note></notes>
+        <segment><source>Take over</source></segment>
+      </unit>
+      <unit id="dns.zones.title">
+        <segment><source>Zones</source></segment>
+      </unit>
+      <unit id="dns.zones.sub">
+        <segment><source>Authoritative zones and their records</source></segment>
+      </unit>
+      <unit id="dns.zones.filter_label">
+        <segment><source>Search zones</source></segment>
+      </unit>
+      <unit id="dns.zones.filter_placeholder">
+        <segment><source>Zone name or description</source></segment>
+      </unit>
+      <unit id="dns.zones.empty">
+        <segment><source>No zones yet</source></segment>
+      </unit>
+      <unit id="dns.zones.empty_body">
+        <segment><source>Create a zone, then add its records or import a zone file.</source></segment>
+      </unit>
+      <unit id="dns.zone.reverse">
+        <notes><note category="description">Tag of a reverse zone (in-addr.arpa or ip6.arpa).</note></notes>
+        <segment><source>Reverse</source></segment>
+      </unit>
+      <unit id="dns.zone.not_served">
+        <notes><note category="description">Tag of a secondary or stub zone, which Phase 2 does not serve.</note></notes>
+        <segment><source>Not served yet</source></segment>
+      </unit>
+      <unit id="dns.zone.not_served_hint">
+        <segment><source>Tenko keeps this zone but does not answer for it yet: transfers in and stub zones come in a later slice.</source></segment>
+      </unit>
+      <unit id="dns.zone.serial">
+        <segment><source>Serial {serial}</source></segment>
+      </unit>
+      <unit id="dns.zone.tabs">
+        <segment><source>Zone sections</source></segment>
+      </unit>
+      <unit id="dns.zone.tab.records">
+        <segment><source>Records</source></segment>
+      </unit>
+      <unit id="dns.zone.tab.settings">
+        <segment><source>Settings</source></segment>
+      </unit>
+      <unit id="dns.zone.tab.history">
+        <segment><source>History</source></segment>
+      </unit>
+      <unit id="dns.zone.create.action">
+        <segment><source>New zone</source></segment>
+      </unit>
+      <unit id="dns.zone.create.title">
+        <segment><source>New zone</source></segment>
+      </unit>
+      <unit id="dns.zone.create.submit">
+        <segment><source>Create zone</source></segment>
+      </unit>
+      <unit id="dns.zone.create.done">
+        <segment><source>Zone {name} created</source></segment>
+      </unit>
+      <unit id="dns.zone.create.primaries_required">
+        <segment><source>Name at least one primary server.</source></segment>
+      </unit>
+      <unit id="dns.zone.field.name">
+        <segment><source>Zone name</source></segment>
+      </unit>
+      <unit id="dns.zone.field.name_help">
+        <segment><source>The apex, for example example.test or 2.0.192.in-addr.arpa.</source></segment>
+      </unit>
+      <unit id="dns.zone.field.kind">
+        <segment><source>Kind</source></segment>
+      </unit>
+      <unit id="dns.zone.field.serial">
+        <segment><source>Serial policy</source></segment>
+      </unit>
+      <unit id="dns.zone.field.primaries">
+        <segment><source>Primary servers</source></segment>
+      </unit>
+      <unit id="dns.zone.field.primaries_help">
+        <segment><source>Addresses of the servers the zone comes from, separated by commas.</source></segment>
+      </unit>
+      <unit id="dns.zone.field.mname">
+        <segment><source>Primary name server (SOA)</source></segment>
+      </unit>
+      <unit id="dns.zone.field.rname">
+        <segment><source>Responsible mailbox (SOA)</source></segment>
+      </unit>
+      <unit id="dns.zone.field.name_servers">
+        <segment><source>Name servers (NS)</source></segment>
+      </unit>
+      <unit id="dns.zone.field.name_servers_help">
+        <segment><source>Host names separated by commas; the primary name server when empty.</source></segment>
+      </unit>
+      <unit id="dns.zone.field.ttl">
+        <segment><source>Default TTL (seconds)</source></segment>
+      </unit>
+      <unit id="dns.zone.field.description">
+        <segment><source>Description</source></segment>
+      </unit>
+      <unit id="dns.zone.delete.title">
+        <segment><source>Delete zone {name}?</source></segment>
+      </unit>
+      <unit id="dns.zone.delete.body">
+        <segment><source>The zone {name} and its {count, plural, one {{rrsets} RRset} other {{rrsets} RRsets}} are deleted, and Tenko stops answering for it. This cannot be undone.</source></segment>
+      </unit>
+      <unit id="dns.zone.delete.confirm">
+        <segment><source>Delete zone</source></segment>
+      </unit>
+      <unit id="dns.zone.delete.done">
+        <segment><source>Zone {name} deleted</source></segment>
+      </unit>
+      <unit id="dns.records.label">
+        <notes><note category="description">Accessible name of the record grid.</note></notes>
+        <segment><source>Records of {zone}</source></segment>
+      </unit>
+      <unit id="dns.records.filter_label">
+        <segment><source>Filter records</source></segment>
+      </unit>
+      <unit id="dns.records.filter_placeholder">
+        <segment><source>Name starts with</source></segment>
+      </unit>
+      <unit id="dns.records.type_filter">
+        <segment><source>Type</source></segment>
+      </unit>
+      <unit id="dns.records.any_type">
+        <segment><source>Every type</source></segment>
+      </unit>
+      <unit id="dns.records.origin_filter">
+        <segment><source>Origin</source></segment>
+      </unit>
+      <unit id="dns.records.any_origin">
+        <segment><source>Every origin</source></segment>
+      </unit>
+      <unit id="dns.records.empty">
+        <segment><source>No records in this zone</source></segment>
+      </unit>
+      <unit id="dns.rrset.add_action">
+        <segment><source>Add RRset</source></segment>
+      </unit>
+      <unit id="dns.rrset.add_title">
+        <segment><source>Add an RRset</source></segment>
+      </unit>
+      <unit id="dns.rrset.add_records_title">
+        <segment><source>Add records to {name} {type}</source></segment>
+      </unit>
+      <unit id="dns.rrset.add_submit">
+        <segment><source>Add</source></segment>
+      </unit>
+      <unit id="dns.rrset.field.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="dns.rrset.field.name_help">
+        <segment><source>Relative to {zone}; @ is the zone itself.</source></segment>
+      </unit>
+      <unit id="dns.rrset.field.type">
+        <segment><source>Type</source></segment>
+      </unit>
+      <unit id="dns.rrset.field.ttl">
+        <segment><source>TTL (seconds)</source></segment>
+      </unit>
+      <unit id="dns.rrset.field.data">
+        <segment><source>Records</source></segment>
+      </unit>
+      <unit id="dns.rrset.field.data_help">
+        <segment><source>One record per line, for example {example}. A name without a dot is relative to the zone.</source></segment>
+      </unit>
+      <unit id="dns.rrset.edit_ttl">
+        <segment><source>TTL of {name} {type}</source></segment>
+      </unit>
+      <unit id="dns.rrset.edit_data">
+        <segment><source>Record of {name} {type}</source></segment>
+      </unit>
+      <unit id="dns.rrset.edit_hint">
+        <segment><source>Enter saves the RRset and moves the serial; Esc cancels.</source></segment>
+      </unit>
+      <unit id="dns.rrset.saved">
+        <segment><source>{count, plural, one {# RRset changed} other {# RRsets changed}}, serial {serial}</source></segment>
+      </unit>
+      <unit id="dns.rrset.failed">
+        <segment><source>The change was not made</source></segment>
+      </unit>
+      <unit id="dns.rrset.delete_title">
+        <segment><source>Delete {name} {type}?</source></segment>
+      </unit>
+      <unit id="dns.rrset.delete_body">
+        <segment><source>The RRset and its {count, plural, one {# record} other {# records}} are deleted.</source></segment>
+      </unit>
+      <unit id="dns.rrset.delete_confirm">
+        <segment><source>Delete RRset</source></segment>
+      </unit>
+      <unit id="dns.record.line_error">
+        <segment><source>Line {line}: {message}</source></segment>
+      </unit>
+      <unit id="dns.check.name">
+        <segment><source>Not a valid DNS name.</source></segment>
+      </unit>
+      <unit id="dns.check.outside">
+        <segment><source>The name is outside the zone.</source></segment>
+      </unit>
+      <unit id="dns.check.ttl">
+        <segment><source>A TTL is a whole number of seconds up to 2147483647.</source></segment>
+      </unit>
+      <unit id="dns.check.ipv4">
+        <segment><source>Not an IPv4 address.</source></segment>
+      </unit>
+      <unit id="dns.check.ipv6">
+        <segment><source>Not an IPv6 address.</source></segment>
+      </unit>
+      <unit id="dns.check.target">
+        <segment><source>Give one host name.</source></segment>
+      </unit>
+      <unit id="dns.check.number">
+        <segment><source>A whole number of seconds is needed.</source></segment>
+      </unit>
+      <unit id="dns.check.srv">
+        <segment><source>Give priority, weight, port and target, for example 0 100 389 ldap.</source></segment>
+      </unit>
+      <unit id="dns.check.mx">
+        <segment><source>Give a preference and a mail server, for example 10 mail.</source></segment>
+      </unit>
+      <unit id="dns.check.caa">
+        <segment><source>Give flags, a tag and a quoted value, for example 0 issue "ca.example.test".</source></segment>
+      </unit>
+      <unit id="dns.check.txt">
+        <segment><source>Give text, or strings in double quotes.</source></segment>
+      </unit>
+      <unit id="dns.check.empty">
+        <segment><source>Give at least one record.</source></segment>
+      </unit>
+      <unit id="dns.check.type">
+        <segment><source>Records of this type are not edited here.</source></segment>
+      </unit>
+      <unit id="dns.batch.mode">
+        <notes><note category="description">Toggle of the record grid: changes collect into one batch instead of being saved one by one.</note></notes>
+        <segment><source>Collect changes</source></segment>
+      </unit>
+      <unit id="dns.batch.hint">
+        <segment><source>Enter adds the change to the batch; nothing is saved until you review and apply it.</source></segment>
+      </unit>
+      <unit id="dns.batch.count">
+        <segment><source>{count, plural, one {{changes} change waiting} other {{changes} changes waiting}}</source></segment>
+      </unit>
+      <unit id="dns.batch.list_label">
+        <segment><source>Changes waiting</source></segment>
+      </unit>
+      <unit id="dns.batch.drop">
+        <segment><source>Drop the change of {name} {type}</source></segment>
+      </unit>
+      <unit id="dns.batch.discard">
+        <segment><source>Discard all</source></segment>
+      </unit>
+      <unit id="dns.batch.review">
+        <segment><source>Review changes</source></segment>
+      </unit>
+      <unit id="dns.batch.add_to">
+        <segment><source>Add to batch</source></segment>
+      </unit>
+      <unit id="dns.batch.pending_tag">
+        <notes><note category="description">Tag on an RRset that a waiting change of the batch touches.</note></notes>
+        <segment><source>Changing</source></segment>
+      </unit>
+      <unit id="dns.batch.diff_title">
+        <segment><source>Review the changes</source></segment>
+      </unit>
+      <unit id="dns.batch.diff_summary">
+        <segment><source>{count, plural, one {A dry run found # RRset that changes. Nothing is saved until you apply.} other {A dry run found # RRsets that change. Nothing is saved until you apply.}}</source></segment>
+      </unit>
+      <unit id="dns.batch.col.change">
+        <segment><source>Change</source></segment>
+      </unit>
+      <unit id="dns.batch.col.before">
+        <segment><source>Before</source></segment>
+      </unit>
+      <unit id="dns.batch.col.after">
+        <segment><source>After</source></segment>
+      </unit>
+      <unit id="dns.batch.kind.add">
+        <segment><source>Added</source></segment>
+      </unit>
+      <unit id="dns.batch.kind.change">
+        <segment><source>Changed</source></segment>
+      </unit>
+      <unit id="dns.batch.kind.delete">
+        <segment><source>Removed</source></segment>
+      </unit>
+      <unit id="dns.batch.back">
+        <segment><source>Back</source></segment>
+      </unit>
+      <unit id="dns.batch.apply">
+        <segment><source>{count, plural, one {Apply # change} other {Apply # changes}}</source></segment>
+      </unit>
+      <unit id="dns.batch.applied">
+        <segment><source>{count, plural, one {# RRset changed} other {# RRsets changed}}, serial {serial}</source></segment>
+      </unit>
+      <unit id="dns.takeover.title">
+        <segment><source>Take over {name} {type}?</source></segment>
+      </unit>
+      <unit id="dns.takeover.body">
+        <segment><source>{origin} keeps this RRset. After a change made here it is manual, and {origin} no longer keeps it: the next change of the address in IPAM does not reach it.</source></segment>
+      </unit>
+      <unit id="dns.takeover.confirm">
+        <segment><source>Take over</source></segment>
+      </unit>
+      <unit id="dns.takeover.tag">
+        <segment><source>Taken over</source></segment>
+      </unit>
+      <unit id="dns.settings.soa">
+        <segment><source>Start of authority</source></segment>
+      </unit>
+      <unit id="dns.settings.soa_body">
+        <segment><source>The SOA record of the zone. The serial is not set here: it moves by the serial policy with every change.</source></segment>
+      </unit>
+      <unit id="dns.settings.rname_help">
+        <segment><source>The mailbox with its @ written as a dot: hostmaster.example.test.</source></segment>
+      </unit>
+      <unit id="dns.settings.refresh">
+        <segment><source>Refresh (seconds)</source></segment>
+      </unit>
+      <unit id="dns.settings.retry">
+        <segment><source>Retry (seconds)</source></segment>
+      </unit>
+      <unit id="dns.settings.expire">
+        <segment><source>Expire (seconds)</source></segment>
+      </unit>
+      <unit id="dns.settings.minimum">
+        <segment><source>Negative TTL (seconds)</source></segment>
+      </unit>
+      <unit id="dns.settings.ttl">
+        <segment><source>SOA TTL (seconds)</source></segment>
+      </unit>
+      <unit id="dns.settings.ns">
+        <segment><source>Name servers of the zone</source></segment>
+      </unit>
+      <unit id="dns.settings.ns_required">
+        <segment><source>The zone needs at least one name server.</source></segment>
+      </unit>
+      <unit id="dns.settings.serial">
+        <segment><source>Serial and description</source></segment>
+      </unit>
+      <unit id="dns.settings.save">
+        <segment><source>Save settings</source></segment>
+      </unit>
+      <unit id="dns.settings.saved">
+        <segment><source>Settings of {name} saved</source></segment>
+      </unit>
+      <unit id="dns.history.serial_title">
+        <segment><source>Serial</source></segment>
+      </unit>
+      <unit id="dns.history.serial">
+        <segment><source>Served now</source></segment>
+      </unit>
+      <unit id="dns.history.updated">
+        <segment><source>Last change</source></segment>
+      </unit>
+      <unit id="dns.history.revision">
+        <segment><source>Store revision</source></segment>
+      </unit>
+      <unit id="dns.history.changes">
+        <segment><source>Recent changes</source></segment>
+      </unit>
+      <unit id="dns.history.empty">
+        <segment><source>No changes recorded yet.</source></segment>
+      </unit>
+      <unit id="dns.history.no_audit">
+        <segment><source>The changes of a zone come from the audit log, which this account does not read.</source></segment>
+      </unit>
+      <unit id="dns.history.when">
+        <segment><source>When</source></segment>
+      </unit>
+      <unit id="dns.history.action">
+        <segment><source>Action</source></segment>
+      </unit>
+      <unit id="dns.history.result">
+        <segment><source>Outcome</source></segment>
+      </unit>
+      <unit id="dns.history.outcome.success">
+        <segment><source>Done</source></segment>
+      </unit>
+      <unit id="dns.history.outcome.denied">
+        <segment><source>Refused</source></segment>
+      </unit>
+      <unit id="dns.history.outcome.failed">
+        <segment><source>Failed</source></segment>
+      </unit>
+      <unit id="dns.export.failed">
+        <segment><source>The zone file could not be exported</source></segment>
+      </unit>
+      <unit id="dns.import.title">
+        <segment><source>Import a zone file</source></segment>
+      </unit>
+      <unit id="dns.import.steps">
+        <segment><source>Import steps</source></segment>
+      </unit>
+      <unit id="dns.import.step.upload">
+        <segment><source>Zone file</source></segment>
+      </unit>
+      <unit id="dns.import.step.preview">
+        <segment><source>Preview</source></segment>
+      </unit>
+      <unit id="dns.import.step.apply">
+        <segment><source>Import</source></segment>
+      </unit>
+      <unit id="dns.import.step.done">
+        <segment><source>Done</source></segment>
+      </unit>
+      <unit id="dns.import.upload.title">
+        <segment><source>Choose the zone file</source></segment>
+      </unit>
+      <unit id="dns.import.upload.body">
+        <segment><source>An RFC 1035 zone file: $ORIGIN and $TTL are read, $INCLUDE is refused. The SOA of the file is replaced by the SOA of the zone.</source></segment>
+      </unit>
+      <unit id="dns.import.upload.drop">
+        <segment><source>Drop a zone file here, or</source></segment>
+      </unit>
+      <unit id="dns.import.upload.choose">
+        <segment><source>Choose file</source></segment>
+      </unit>
+      <unit id="dns.import.upload.lines">
+        <segment><source>{count, plural, one {# line} other {# lines}}</source></segment>
+      </unit>
+      <unit id="dns.import.upload.too_large">
+        <segment><source>The file is larger than 64 MiB.</source></segment>
+      </unit>
+      <unit id="dns.import.upload.paste">
+        <segment><source>Zone file text</source></segment>
+      </unit>
+      <unit id="dns.import.upload.replace">
+        <segment><source>Replace the manual records the file does not have</source></segment>
+      </unit>
+      <unit id="dns.import.upload.replace_help">
+        <segment><source>Without it the file only adds and replaces RRsets. Records kept by IPAM stay either way.</source></segment>
+      </unit>
+      <unit id="dns.import.upload.preview">
+        <segment><source>Preview</source></segment>
+      </unit>
+      <unit id="dns.import.preview.title">
+        <segment><source>What the import does</source></segment>
+      </unit>
+      <unit id="dns.import.preview.back">
+        <segment><source>Back</source></segment>
+      </unit>
+      <unit id="dns.import.preview.apply">
+        <segment><source>Import</source></segment>
+      </unit>
+      <unit id="dns.import.fact.added">
+        <segment><source>{count, plural, one {RRset added} other {RRsets added}}</source></segment>
+      </unit>
+      <unit id="dns.import.fact.replaced">
+        <segment><source>{count, plural, one {RRset replaced} other {RRsets replaced}}</source></segment>
+      </unit>
+      <unit id="dns.import.fact.removed">
+        <segment><source>{count, plural, one {RRset removed} other {RRsets removed}}</source></segment>
+      </unit>
+      <unit id="dns.import.types.caption">
+        <segment><source>Records of the file per type</source></segment>
+      </unit>
+      <unit id="dns.import.types.records">
+        <segment><source>Records</source></segment>
+      </unit>
+      <unit id="dns.import.losses.title">
+        <segment><source>{count, plural, one {# thing the zone does not keep} other {# things the zone does not keep}}</source></segment>
+      </unit>
+      <unit id="dns.import.losses.none">
+        <segment><source>The zone keeps everything the file brings.</source></segment>
+      </unit>
+      <unit id="dns.import.losses.line">
+        <segment><source>Line</source></segment>
+      </unit>
+      <unit id="dns.import.losses.what">
+        <segment><source>What</source></segment>
+      </unit>
+      <unit id="dns.import.parse_error">
+        <segment><source>The zone file does not parse at line {line}. Correct it and preview again.</source></segment>
+      </unit>
+      <unit id="dns.import.apply.running">
+        <segment><source>Importing</source></segment>
+      </unit>
+      <unit id="dns.import.apply.progress">
+        <segment><source>Step {done} of {total}</source></segment>
+      </unit>
+      <unit id="dns.import.apply.done">
+        <segment><source>Imported</source></segment>
+      </unit>
+      <unit id="dns.import.apply.serial">
+        <segment><source>The zone serves serial {serial} now.</source></segment>
+      </unit>
+      <unit id="dns.import.apply.failed">
+        <segment><source>The import failed</source></segment>
+      </unit>
+      <unit id="dns.import.apply.rolled_back">
+        <segment><source>Nothing of the file was kept; the zone is as it was.</source></segment>
+      </unit>
+      <unit id="dns.import.apply.open_job">
+        <segment><source>Open the job</source></segment>
+      </unit>
+      <unit id="dns.import.apply.again">
+        <segment><source>Import another file</source></segment>
+      </unit>
+      <unit id="dns.import.apply.open_zone">
+        <segment><source>Open the zone</source></segment>
+      </unit>
+      <unit id="dns.loss.directive">
+        <segment><source>A directive that is not supported was skipped.</source></segment>
+      </unit>
+      <unit id="dns.loss.outside">
+        <segment><source>A record outside the zone was skipped.</source></segment>
+      </unit>
+      <unit id="dns.loss.soa">
+        <segment><source>The SOA of the file is replaced by the SOA of the zone.</source></segment>
+      </unit>
+      <unit id="dns.loss.unsupported_type">
+        <segment><source>A record of a type that is not supported was skipped.</source></segment>
+      </unit>
+      <unit id="dns.loss.origin">
+        <segment><source>An RRset that IPAM or another writer keeps was left as it is.</source></segment>
+      </unit>
+      <unit id="dns.acls.title">
+        <segment><source>Access lists</source></segment>
+      </unit>
+      <unit id="dns.acls.sub">
+        <segment><source>Who may transfer and update zones: prefixes, keys or anyone, first match decides</source></segment>
+      </unit>
+      <unit id="dns.acls.empty">
+        <segment><source>No access lists yet</source></segment>
+      </unit>
+      <unit id="dns.acl.col.entries">
+        <segment><source>Entries</source></segment>
+      </unit>
+      <unit id="dns.acl.col.used_by">
+        <segment><source>Used by</source></segment>
+      </unit>
+      <unit id="dns.acl.create">
+        <segment><source>New access list</source></segment>
+      </unit>
+      <unit id="dns.acl.create_title">
+        <segment><source>New access list</source></segment>
+      </unit>
+      <unit id="dns.acl.edit_title">
+        <segment><source>Edit access list {name}</source></segment>
+      </unit>
+      <unit id="dns.acl.save">
+        <segment><source>Save</source></segment>
+      </unit>
+      <unit id="dns.acl.saved">
+        <segment><source>Access list {name} saved</source></segment>
+      </unit>
+      <unit id="dns.acl.created">
+        <segment><source>Access list {name} created</source></segment>
+      </unit>
+      <unit id="dns.acl.field.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="dns.acl.field.entries">
+        <segment><source>Entries</source></segment>
+      </unit>
+      <unit id="dns.acl.field.entries_help">
+        <segment><source>One per line: a prefix (192.0.2.0/24), key and a key name, or any. A ! in front denies.</source></segment>
+      </unit>
+      <unit id="dns.acl.name_invalid">
+        <segment><source>Letters, digits, - and _, up to 63 characters.</source></segment>
+      </unit>
+      <unit id="dns.acl.entry_invalid">
+        <segment><source>Line {line} is not a prefix, a key or any.</source></segment>
+      </unit>
+      <unit id="dns.acl.delete_title">
+        <segment><source>Delete access list {name}?</source></segment>
+      </unit>
+      <unit id="dns.acl.delete_body">
+        <segment><source>No zone uses the list.</source></segment>
+      </unit>
+      <unit id="dns.acl.delete_used">
+        <segment><source>The list is used by {zones}; the server refuses to delete it while it is.</source></segment>
+      </unit>
+      <unit id="dns.acl.delete_confirm">
+        <segment><source>Delete access list</source></segment>
+      </unit>
+      <unit id="dns.acl.deleted">
+        <segment><source>Access list {name} deleted</source></segment>
+      </unit>
+      <unit id="dns.keys.title">
+        <segment><source>TSIG keys</source></segment>
+      </unit>
+      <unit id="dns.keys.sub">
+        <segment><source>Shared secrets that sign zone transfers and updates; the vault keeps the secrets</source></segment>
+      </unit>
+      <unit id="dns.keys.empty">
+        <segment><source>No TSIG keys yet</source></segment>
+      </unit>
+      <unit id="dns.key.col.name">
+        <segment><source>Key name</source></segment>
+      </unit>
+      <unit id="dns.key.col.algorithm">
+        <segment><source>Algorithm</source></segment>
+      </unit>
+      <unit id="dns.key.col.created">
+        <segment><source>Created</source></segment>
+      </unit>
+      <unit id="dns.key.create_action">
+        <segment><source>New key</source></segment>
+      </unit>
+      <unit id="dns.key.create_title">
+        <segment><source>New TSIG key</source></segment>
+      </unit>
+      <unit id="dns.key.mode">
+        <segment><source>Secret</source></segment>
+      </unit>
+      <unit id="dns.key.mode_generate">
+        <segment><source>Generate a new secret</source></segment>
+      </unit>
+      <unit id="dns.key.mode_import">
+        <segment><source>Import a secret I have</source></segment>
+      </unit>
+      <unit id="dns.key.name_help">
+        <segment><source>A DNS name, the same on both servers, for example xfr.example.test.</source></segment>
+      </unit>
+      <unit id="dns.key.secret">
+        <segment><source>Secret (base64)</source></segment>
+      </unit>
+      <unit id="dns.key.secret_help">
+        <segment><source>The secret as the other server shows it, in base64.</source></segment>
+      </unit>
+      <unit id="dns.key.secret_invalid">
+        <segment><source>Base64 of at least 12 octets is needed.</source></segment>
+      </unit>
+      <unit id="dns.key.generate">
+        <segment><source>Generate key</source></segment>
+      </unit>
+      <unit id="dns.key.import">
+        <segment><source>Import key</source></segment>
+      </unit>
+      <unit id="dns.key.created_title">
+        <segment><source>Store the secret now</source></segment>
+      </unit>
+      <unit id="dns.key.created_body">
+        <segment><source>This is the only time the secret of {name} is shown. Put it into the configuration of the other server; Tenko keeps it in the vault and never shows it again.</source></segment>
+      </unit>
+      <unit id="dns.key.stored">
+        <segment><source>I have stored the secret</source></segment>
+      </unit>
+      <unit id="dns.key.copied">
+        <segment><source>Secret copied</source></segment>
+      </unit>
+      <unit id="dns.key.copy_blocked">
+        <segment><source>The browser did not allow the copy; select the secret and copy it by hand.</source></segment>
+      </unit>
+      <unit id="dns.key.delete_title">
+        <segment><source>Delete key {name}?</source></segment>
+      </unit>
+      <unit id="dns.key.delete_body">
+        <segment><source>Transfers and updates signed with this key are refused from now on, and the secret is removed from the vault.</source></segment>
+      </unit>
+      <unit id="dns.key.delete_confirm">
+        <segment><source>Delete key</source></segment>
+      </unit>
+      <unit id="dns.key.deleted">
+        <segment><source>Key {name} deleted</source></segment>
+      </unit>
+      <unit id="hosts.dns.title">
+        <notes><note category="description">Section of the host and address pages with the records of each address.</note></notes>
+        <segment><source>DNS records</source></segment>
+      </unit>
+      <unit id="hosts.dns.col.address">
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="hosts.dns.col.forward">
+        <notes><note category="description">Column: the A or AAAA records of the DNS name of the address.</note></notes>
+        <segment><source>Name records</source></segment>
+      </unit>
+      <unit id="hosts.dns.col.reverse">
+        <notes><note category="description">Column: the PTR record of the address.</note></notes>
+        <segment><source>Reverse record</source></segment>
+      </unit>
+      <unit id="hosts.dns.no_zone">
+        <notes><note category="description">The name or the reverse name of the address belongs to no zone Tenko holds.</note></notes>
+        <segment><source>No zone in Tenko</source></segment>
+      </unit>
+      <unit id="hosts.dns.no_records">
+        <segment><source>None in {zone} yet</source></segment>
+      </unit>
+      <unit id="hosts.dns.origin.manual">
+        <segment><source>manual</source></segment>
+      </unit>
+      <unit id="hosts.dns.origin.ipam">
+        <segment><source>from IPAM</source></segment>
+      </unit>
+      <unit id="hosts.dns.origin.dynamic">
+        <segment><source>dynamic update</source></segment>
+      </unit>
+      <unit id="hosts.dns.origin.dhcp">
+        <segment><source>from DHCP</source></segment>
+      </unit>
+      <unit id="hosts.dns.origin.ad">
+        <segment><source>from Active Directory</source></segment>
+      </unit>
+      <unit id="jobs.title.dns_import">
+        <notes><note category="description">Title of the job that imports a zone file.</note></notes>
+        <segment><source>Zone file import</source></segment>
+      </unit>
+      <unit id="jobs.step.dns_import_parse">
+        <segment><source>Read the zone file</source></segment>
+      </unit>
+      <unit id="jobs.step.dns_import_apply">
+        <segment><source>Write the records</source></segment>
+      </unit>
+      <unit id="errors.dns.zone.not_found">
+        <segment><source>The zone does not exist (any more).</source></segment>
+      </unit>
+      <unit id="errors.dns.zone.exists">
+        <segment><source>A zone of this name exists already.</source></segment>
+      </unit>
+      <unit id="errors.dns.zone.invalid">
+        <segment><source>The zone settings are not valid ({field}).</source></segment>
+      </unit>
+      <unit id="errors.dns.record.invalid">
+        <segment><source>The records of {name} {type} break a rule of their type.</source></segment>
+      </unit>
+      <unit id="errors.dns.record.conflict">
+        <segment><source>The records of {name} conflict: a CNAME stands alone, and the apex keeps its NS.</source></segment>
+      </unit>
+      <unit id="errors.dns.record.origin">
+        <segment><source>{name} {type} is kept by another writer. Take it over first to change it here.</source></segment>
+      </unit>
+      <unit id="errors.dns.zonefile.invalid">
+        <segment><source>The zone file does not parse.</source></segment>
+      </unit>
+      <unit id="errors.dns.view.not_found">
+        <segment><source>The view does not exist.</source></segment>
+      </unit>
+      <unit id="errors.dns.view.invalid">
+        <segment><source>The view breaks a rule.</source></segment>
+      </unit>
+      <unit id="errors.dns.forwarder.not_found">
+        <segment><source>The forwarding rule does not exist.</source></segment>
+      </unit>
+      <unit id="errors.dns.forwarder.invalid">
+        <segment><source>The forwarding rule breaks a rule.</source></segment>
+      </unit>
+      <unit id="errors.dns.acl.not_found">
+        <segment><source>The access list does not exist (any more).</source></segment>
+      </unit>
+      <unit id="errors.dns.acl.in_use">
+        <segment><source>The access list is in use by a zone.</source></segment>
+      </unit>
+      <unit id="errors.dns.key.not_found">
+        <segment><source>The key does not exist (any more).</source></segment>
+      </unit>
+      <unit id="errors.dns.key.exists">
+        <segment><source>A key of this name exists already.</source></segment>
+      </unit>
+      <unit id="errors.dns.list.not_found">
+        <segment><source>The block list does not exist.</source></segment>
+      </unit>
+      <unit id="errors.dns.list.invalid">
+        <segment><source>The block list breaks a rule.</source></segment>
+      </unit>
+      <unit id="errors.dns.update.refused">
+        <segment><source>The dynamic update was refused.</source></segment>
+      </unit>
+      <unit id="errors.dns.transfer.refused">
+        <segment><source>The zone transfer was refused.</source></segment>
+      </unit>
+      <unit id="errors.dns.node.not_dns">
+        <segment><source>The node does not run the DNS role.</source></segment>
+      </unit>
+      <unit id="errors.dns.module.disabled">
+        <segment><source>The DNS module is switched off.</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>
