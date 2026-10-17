@@ -125,6 +125,13 @@ pub enum Command {
     /// Export prefixes, addresses or hosts as CSV.
     Export(client::export::ExportArgs),
 
+    /// DNS zones, records, zone files, access lists and TSIG keys.
+    Dns {
+        /// The `dns` subcommand to run.
+        #[command(subcommand)]
+        action: client::dns::DnsCommand,
+    },
+
     /// Audit log commands.
     Audit {
         /// The `audit` subcommand to run.
@@ -235,6 +242,7 @@ impl Command {
             Command::Health(_) => "health",
             Command::Import(_) => "import",
             Command::Export(_) => "export",
+            Command::Dns { action } => action.name(),
             Command::Audit {
                 action: client::audit::AuditCommand::Verify(_),
             } => "audit verify",
@@ -321,6 +329,11 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
             logging::init_client();
             let json = action.client().json;
             client::block_on(name, json, out, err, client::prefix::run(action))
+        }
+        Command::Dns { action } => {
+            logging::init_client();
+            let json = action.client().json;
+            client::block_on(name, json, out, err, client::dns::run(action))
         }
         Command::CaRoot(args) => {
             logging::init_client();
@@ -565,7 +578,7 @@ mod tests {
 
     #[test]
     fn command_names_match_the_command_line() {
-        let cases: [(&[&str], &str); 36] = [
+        let cases: [(&[&str], &str); 38] = [
             (&["audit", "export"], "audit export"),
             (&["audit", "export", "--from", "7"], "audit export"),
             (
@@ -605,6 +618,11 @@ mod tests {
             (&["prefix", "create", "192.0.2.0/24"], "prefix create"),
             (&["import", "file.csv"], "import"),
             (&["export", "prefixes"], "export"),
+            (&["dns", "zone", "list"], "dns zone list"),
+            (
+                &["dns", "record", "add", "z.test", "www", "A", "192.0.2.1"],
+                "dns record add",
+            ),
             (&["audit", "verify"], "audit verify"),
             (&["hibp", "build", "in", "out"], "hibp build"),
             (&["service", "stop"], "service stop"),

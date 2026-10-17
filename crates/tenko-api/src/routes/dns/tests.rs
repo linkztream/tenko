@@ -1,5 +1,8 @@
-//! Route tests of the DNS contracts: every operation checks the scope of its action on the
-//! right object before it answers 501, and refuses a malformed path first.
+//! Route tests of the DNS operations that stay 501 until their package: each checks the
+//! scope of its action on the right object before it answers, and refuses a malformed path
+//! first. The built operations (zones, records, access lists, keys) have their tests in
+//! `tests/dns_zones.rs`, `tests/dns_records.rs` and `tests/dns_keys.rs`; here they only
+//! show that a path, then the scope, is checked before the zone service is needed.
 
 use std::sync::Arc;
 
@@ -70,15 +73,15 @@ fn with_policy(read: bool, write: bool) -> (Router, Arc<Policy>) {
 #[tokio::test]
 async fn an_allowed_call_reaches_the_stub() {
     let (router, policy) = with_policy(true, true);
-    let reply = send(&router, "POST", &format!("/dns/zones/{ZONE}/records/batch")).await;
+    let reply = send(&router, "GET", &format!("/dns/zones/{ZONE}/dnssec")).await;
     reply.assert_problem(501, "sys.not_implemented");
     assert_eq!(
         reply.body["params"]["path"],
-        "/api/v1/dns/zones/{id}/records/batch"
+        "/api/v1/dns/zones/{id}/dnssec"
     );
     let asked = policy.asked();
     assert_eq!(asked.len(), 1);
-    assert_eq!(asked[0].0, Action::Update);
+    assert_eq!(asked[0].0, Action::Read);
     assert_eq!(asked[0].1.kind, ObjectKind::Zone);
     assert_eq!(asked[0].1.id.to_string(), ZONE);
 }
@@ -86,12 +89,19 @@ async fn an_allowed_call_reaches_the_stub() {
 #[tokio::test]
 async fn a_reader_reads_and_is_refused_writes() {
     let (router, policy) = with_policy(true, false);
-    send(&router, "GET", "/dns/zones")
+    send(&router, "GET", "/dns/views")
         .await
         .assert_problem(501, "sys.not_implemented");
-    send(&router, "POST", "/dns/zones")
+    send(&router, "POST", "/dns/forwarders")
         .await
         .assert_problem(403, "auth.forbidden");
+    // A built route checks the scope before it needs the zone service.
+    send(&router, "DELETE", &format!("/dns/zones/{ZONE}"))
+        .await
+        .assert_problem(403, "auth.forbidden");
+    send(&router, "GET", "/dns/zones")
+        .await
+        .assert_problem(409, "dns.module.disabled");
     send(&router, "DELETE", &format!("/dns/views/{ZONE}"))
         .await
         .assert_problem(403, "auth.forbidden");
@@ -103,8 +113,10 @@ async fn a_reader_reads_and_is_refused_writes() {
     assert_eq!(
         kinds,
         [
+            (Action::Read, ObjectKind::DnsView),
+            (Action::Create, ObjectKind::DnsForwarder),
+            (Action::Delete, ObjectKind::Zone),
             (Action::Read, ObjectKind::Zone),
-            (Action::Create, ObjectKind::Zone),
             (Action::Delete, ObjectKind::DnsView),
             (Action::Create, ObjectKind::DnsList),
         ]
@@ -115,7 +127,6 @@ async fn a_reader_reads_and_is_refused_writes() {
 async fn keys_rollovers_and_nodes_are_checked_on_their_objects() {
     let (router, policy) = with_policy(true, true);
     for (method, path) in [
-        ("GET", "/dns/keys/xfr-key.example.test".to_owned()),
         ("POST", format!("/dns/zones/{ZONE}/dnssec/rollover")),
         ("GET", "/nodes/1001/dns".to_owned()),
         ("POST", "/nodes/1001/dns/cache/flush".to_owned()),
@@ -129,7 +140,6 @@ async fn keys_rollovers_and_nodes_are_checked_on_their_objects() {
     assert_eq!(
         kinds,
         [
-            (Action::Read, ObjectKind::DnsKey),
             (Action::Execute, ObjectKind::DnsKey),
             (Action::Read, ObjectKind::Node),
             (Action::Update, ObjectKind::Node),

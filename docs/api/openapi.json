@@ -5450,7 +5450,7 @@
           "dns"
         ],
         "summary": "List DNS access lists",
-        "description": "Scope: `dns.read`.",
+        "description": "Scope: `dns.read`. Access lists by name, with the zones that name them.",
         "operationId": "list_dns_acls",
         "parameters": [
           {
@@ -5497,7 +5497,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5525,16 +5525,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -5543,7 +5533,7 @@
           "dns"
         ],
         "summary": "Create a DNS access list",
-        "description": "Scope: `dns.write`.",
+        "description": "Scope: `dns.write`. The first entry that matches decides; no match refuses.",
         "operationId": "create_dns_acl",
         "requestBody": {
           "content": {
@@ -5567,7 +5557,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed or the name is invalid or taken (`sys.invalid_request`, `sys.invalid_value`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5588,16 +5578,6 @@
           },
           "403": {
             "description": "The principal lacks the scope `dns.write`",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5640,7 +5620,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5678,16 +5658,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -5696,7 +5666,7 @@
           "dns"
         ],
         "summary": "Delete a DNS access list",
-        "description": "Scope: `dns.write`.",
+        "description": "Scope: `dns.write`. A list a zone names stays (`dns.acl.in_use`).",
         "operationId": "delete_dns_acl",
         "parameters": [
           {
@@ -5707,6 +5677,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -5714,7 +5696,7 @@
             "description": "The access list is gone"
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5754,7 +5736,7 @@
             }
           },
           "409": {
-            "description": "A zone or view still names it (`dns.acl.in_use`)",
+            "description": "A zone names the access list (`dns.acl.in_use`, parameter `by`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5763,8 +5745,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "412": {
+            "description": "The access list changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5791,6 +5773,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -5815,7 +5809,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed or the name is invalid or taken (`sys.invalid_request`, `sys.invalid_value`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5856,16 +5850,6 @@
           },
           "412": {
             "description": "The access list changed since it was read (`If-Match`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6353,7 +6337,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6381,16 +6365,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -6399,7 +6373,7 @@
           "dns"
         ],
         "summary": "Generate or import a TSIG key",
-        "description": "Scope: `dns.keys`.",
+        "description": "Scope: `dns.keys`, in an interactive session. Without `secret` a secret of the algorithm's hash length is generated; with it, the base64 secret (16 to 1,024 octets) is imported. The secret is stored in the vault and shown in this answer only.",
         "operationId": "create_dns_key",
         "requestBody": {
           "content": {
@@ -6423,7 +6397,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed, or the name or the secret is invalid (`sys.invalid_request`, `sys.invalid_value`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6443,7 +6417,7 @@
             }
           },
           "403": {
-            "description": "The principal lacks the scope `dns.keys`",
+            "description": "The principal lacks the scope `dns.keys`, or a token tries to change keys",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6454,16 +6428,6 @@
           },
           "409": {
             "description": "A key of this name exists (`dns.key.exists`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6506,7 +6470,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6544,16 +6508,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -6562,7 +6516,7 @@
           "dns"
         ],
         "summary": "Delete a TSIG key",
-        "description": "Scope: `dns.keys`.",
+        "description": "Scope: `dns.keys`, in an interactive session. The key and its secret in the vault go; an access list or zone that names the key matches nothing for it afterwards.",
         "operationId": "delete_dns_key",
         "parameters": [
           {
@@ -6580,7 +6534,7 @@
             "description": "The key and its secret are gone"
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6600,7 +6554,7 @@
             }
           },
           "403": {
-            "description": "The principal lacks the scope `dns.keys`",
+            "description": "The principal lacks the scope `dns.keys`, or a token tries to change keys",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6611,16 +6565,6 @@
           },
           "404": {
             "description": "No such key (`dns.key.not_found`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7577,7 +7521,7 @@
           "dns"
         ],
         "summary": "List DNS zones",
-        "description": "Scope: `dns.read`.",
+        "description": "Scope: `dns.read`. Zones by name, with the served serial and the RRsets per origin.",
         "operationId": "list_dns_zones",
         "parameters": [
           {
@@ -7624,7 +7568,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7652,16 +7596,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -7670,7 +7604,7 @@
           "dns"
         ],
         "summary": "Create a DNS zone",
-        "description": "Scope: `dns.write`.",
+        "description": "Scope: `dns.write`. A primary or RPZ zone gets the apex SOA (from `soa` and the first serial of the policy) and the NS set of `name_servers` in every scope; a secondary, stub or forward zone is a row only until transfers come (WP6.1).",
         "operationId": "create_dns_zone",
         "requestBody": {
           "content": {
@@ -7684,7 +7618,7 @@
         },
         "responses": {
           "201": {
-            "description": "The zone, with its SOA and NS set",
+            "description": "The zone, with its SOA and NS set; the `ETag` is its revision",
             "content": {
               "application/json": {
                 "schema": {
@@ -7732,16 +7666,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       }
@@ -7777,7 +7701,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7815,16 +7739,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -7833,7 +7747,7 @@
           "dns"
         ],
         "summary": "Delete a DNS zone and its records",
-        "description": "Scope: `dns.write`.",
+        "description": "Scope: `dns.write`. The zone, its RRsets and its journal go; a zone larger than one batch loses its row first and the rest right after.",
         "operationId": "delete_dns_zone",
         "parameters": [
           {
@@ -7844,6 +7758,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -7851,98 +7777,7 @@
             "description": "The zone is gone"
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No valid session or token",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The principal lacks the scope `dns.write`",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "No such zone (`dns.zone.not_found`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "tags": [
-          "dns"
-        ],
-        "summary": "Change a DNS zone",
-        "description": "Scope: `dns.write`.",
-        "operationId": "update_dns_zone",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Zone identifier (UUID)",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ZonePatch"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "The changed zone",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ZoneItem"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7990,9 +7825,102 @@
                 }
               }
             }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Change a DNS zone",
+        "description": "Scope: `dns.write`. A change of `soa` rewrites the SOA of every scope with the next serial; a new scope gets an SOA and a copy of the default scope's NS set; a removed scope loses its RRsets and journal.",
+        "operationId": "update_dns_zone",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Zone identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as in the `ETag`; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ZonePatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The changed zone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZoneItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the settings are invalid (`dns.zone.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.write`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such zone (`dns.zone.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The zone changed since it was read (`If-Match`, `sys.store.precondition_failed`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8190,13 +8118,115 @@
         }
       }
     },
+    "/api/v1/dns/zones/{id}/journal": {
+      "get": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "List the serial steps of a zone scope",
+        "description": "Scope: `dns.read`. The journal entries of a scope, newest first: the serials before and after, the time and the counts of records added, replaced and removed. The journal is bounded by entries and days; a large import resets it.",
+        "operationId": "list_dns_zone_journal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Zone identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "The scope; `default` when absent.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ScopeName"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The cursor of the next page (older entries).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Items per page, 1 to 1000; 100 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of journal entries, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_JournalItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`), or the scope does not exist (`dns.zone.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.read`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such zone (`dns.zone.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/dns/zones/{id}/records": {
       "get": {
         "tags": [
           "dns"
         ],
         "summary": "List the RRsets of a zone",
-        "description": "Scope: `dns.read`.",
+        "description": "Scope: `dns.read`. The RRsets of one scope in canonical name order (RFC 4034), types ascending; `name` keeps the owners whose name relative to the apex (or whole name) starts with the text, `@` the apex.",
         "operationId": "list_dns_records",
         "parameters": [
           {
@@ -8277,7 +8307,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`), or the scope does not exist (`dns.zone.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8315,16 +8345,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       }
@@ -8335,7 +8355,7 @@
           "dns"
         ],
         "summary": "Change RRsets of a zone in one batch",
-        "description": "Scope: `dns.write`.",
+        "description": "Scope: `dns.write`. The changes run in order and apply together or not at all: `set` replaces an RRset, `add` and `remove` change its records (an RRset left empty is deleted), `delete` removes it. The SOA follows the zone settings; the serial moves once per scope the batch touches. A change of an RRset of another origin needs `take_over`. `dry_run=true` answers the diff without writing.",
         "operationId": "change_dns_records",
         "parameters": [
           {
@@ -8379,7 +8399,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or A record breaks a rule of its type (`dns.record.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), a record breaks a rule of its type (`dns.record.invalid`), or the zone holds no records or lacks the scope (`dns.zone.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8419,17 +8439,7 @@
             }
           },
           "409": {
-            "description": "RRsets conflict (`dns.record.conflict`) or belong to another origin (`dns.record.origin`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+            "description": "RRsets conflict (`dns.record.conflict`) or belong to another origin without `take_over` (`dns.record.origin`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8447,7 +8457,7 @@
           "dns"
         ],
         "summary": "Export a zone as a zone file",
-        "description": "Scope: `dns.read`.",
+        "description": "Scope: `dns.read`. RFC 1035 text: `$ORIGIN` and `$TTL`, the apex SOA, then every RRset in canonical name order with the types ascending, one record per line, owners relative to the apex. The same data gives the same bytes, and a file the export wrote imports and exports to the same bytes (MIG-15). Every export writes the audit record `dns.zone.export`.",
         "operationId": "export_dns_zone_file",
         "parameters": [
           {
@@ -8481,7 +8491,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`), or the zone holds no records or lacks the scope (`dns.zone.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8519,16 +8529,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       }
@@ -8539,7 +8539,7 @@
           "dns"
         ],
         "summary": "Import a zone file into a zone",
-        "description": "Scope: `dns.write`.",
+        "description": "Scope: `dns.write`. `$ORIGIN` and `$TTL` are honoured, `$GENERATE` is expanded, `$INCLUDE` is refused. With `dry_run=true` the file is read against the zone and the answer is the preview: records per type, the RRsets that would be added, replaced and removed, and the losses. Without it the preview runs first and then the import job (`dns.import`) starts; its steps write the RRsets in chunks and its final step's output is the report (JSON).",
         "operationId": "import_dns_zone_file",
         "parameters": [
           {
@@ -8573,7 +8573,7 @@
         },
         "responses": {
           "200": {
-            "description": "The counts and losses, and after a write the serial and revision",
+            "description": "The preview of a dry run",
             "content": {
               "application/json": {
                 "schema": {
@@ -8582,8 +8582,18 @@
               }
             }
           },
+          "202": {
+            "description": "The import job; follow it at the `Location`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsJobStarted"
+                }
+              }
+            }
+          },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`), or the zone holds no records or lacks the scope (`dns.zone.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8623,17 +8633,7 @@
             }
           },
           "422": {
-            "description": "The zone file does not parse (`dns.zonefile.invalid`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+            "description": "The zone file does not parse or uses `$INCLUDE` (`dns.zonefile.invalid`, parameters `line` and `reason`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -31402,6 +31402,27 @@
           }
         }
       },
+      "DnsUpdatePolicy": {
+        "type": "object",
+        "description": "Who may change a zone by dynamic update (DNS-11, TGL-09). Named `DnsUpdatePolicy` in\nthe OpenAPI document, apart from the software-update policy of the system settings.",
+        "properties": {
+          "allowed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AclId"
+            },
+            "description": "The access lists that may update; none means nobody."
+          },
+          "may_replace_ipam": {
+            "type": "boolean",
+            "description": "A dynamic update may replace an RRset whose origin is `ipam` (plan section 2.5)."
+          },
+          "require_tsig": {
+            "type": "boolean",
+            "description": "Updates need a TSIG key (TGL-09)."
+          }
+        }
+      },
       "DnssecAlgorithm": {
         "type": "string",
         "description": "A DNSSEC signing algorithm Tenko signs with.",
@@ -33621,6 +33642,26 @@
           "failed"
         ]
       },
+      "ImportTypeCount": {
+        "type": "object",
+        "description": "How many records of one type a zone file brings.",
+        "required": [
+          "rtype",
+          "records"
+        ],
+        "properties": {
+          "records": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The records of the type.",
+            "minimum": 0
+          },
+          "rtype": {
+            "$ref": "#/components/schemas/Rtype",
+            "description": "The record type."
+          }
+        }
+      },
       "ImportUpload": {
         "type": "object",
         "description": "The multipart form of `POST /imports`.",
@@ -35797,6 +35838,59 @@
           "title": {
             "$ref": "#/components/schemas/MessageKey",
             "description": "Translatable title."
+          }
+        }
+      },
+      "JournalItem": {
+        "type": "object",
+        "description": "One serial step of a zone scope.",
+        "required": [
+          "from_serial",
+          "to_serial",
+          "at",
+          "revision",
+          "added",
+          "replaced",
+          "removed"
+        ],
+        "properties": {
+          "added": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Records added (the SOA not counted).",
+            "minimum": 0
+          },
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When."
+          },
+          "from_serial": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The serial before.",
+            "minimum": 0
+          },
+          "removed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Records removed (the SOA not counted).",
+            "minimum": 0
+          },
+          "replaced": {
+            "type": "integer",
+            "format": "int32",
+            "description": "RRsets whose records changed: an owner and type with records both removed and\nadded.",
+            "minimum": 0
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "The revision the step was planned against (the cursor of the next page)."
+          },
+          "to_serial": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The serial after.",
+            "minimum": 0
           }
         }
       },
@@ -40832,6 +40926,26 @@
           "ad"
         ]
       },
+      "OriginCount": {
+        "type": "object",
+        "description": "How many RRsets of a zone one origin owns.",
+        "required": [
+          "origin",
+          "rrsets"
+        ],
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/Origin",
+            "description": "The origin."
+          },
+          "rrsets": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Its RRsets in all scopes.",
+            "minimum": 0
+          }
+        }
+      },
       "PackInfo": {
         "type": "object",
         "description": "A language and its packs, for administrators (`GET /i18n/packs`).",
@@ -42324,6 +42438,84 @@
                 "title": {
                   "$ref": "#/components/schemas/MessageKey",
                   "description": "Translatable title."
+                }
+              }
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
+      "Page_JournalItem": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One serial step of a zone scope.",
+              "required": [
+                "from_serial",
+                "to_serial",
+                "at",
+                "revision",
+                "added",
+                "replaced",
+                "removed"
+              ],
+              "properties": {
+                "added": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "Records added (the SOA not counted).",
+                  "minimum": 0
+                },
+                "at": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When."
+                },
+                "from_serial": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "The serial before.",
+                  "minimum": 0
+                },
+                "removed": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "Records removed (the SOA not counted).",
+                  "minimum": 0
+                },
+                "replaced": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "RRsets whose records changed: an owner and type with records both removed and\nadded.",
+                  "minimum": 0
+                },
+                "revision": {
+                  "$ref": "#/components/schemas/Revision",
+                  "description": "The revision the step was planned against (the cursor of the next page)."
+                },
+                "to_serial": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "The serial after.",
+                  "minimum": 0
                 }
               }
             },
@@ -44157,11 +44349,19 @@
                 {
                   "type": "object",
                   "required": [
-                    "serial",
+                    "soa_serial",
                     "rrsets",
+                    "origins",
                     "revision"
                   ],
                   "properties": {
+                    "origins": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OriginCount"
+                      },
+                      "description": "The RRsets per origin, one entry for each origin present, sorted by origin; empty\nfor an empty zone."
+                    },
                     "revision": {
                       "$ref": "#/components/schemas/Revision",
                       "description": "The store revision of the zone row (the `ETag`)."
@@ -44172,7 +44372,7 @@
                       "description": "The number of RRsets in all scopes.",
                       "minimum": 0
                     },
-                    "serial": {
+                    "soa_serial": {
                       "type": "integer",
                       "format": "int32",
                       "description": "The SOA serial served now.",
@@ -47455,6 +47655,13 @@
                 "type": "null"
               }
             ]
+          },
+          "take_over": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "The change may replace an RRset of another origin (`ipam`, `dynamic`, `dhcp`,\n`ad`); the result is then `manual`. Without it such a change is refused with 409\n`dns.record.origin`."
           },
           "ttl": {
             "type": [
@@ -57185,7 +57392,7 @@
             "description": "Zone transfers and NOTIFY."
           },
           "update": {
-            "$ref": "#/components/schemas/UpdatePolicy",
+            "$ref": "#/components/schemas/DnsUpdatePolicy",
             "description": "Dynamic updates."
           },
           "updated": {
@@ -57294,7 +57501,7 @@
           "update": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/UpdatePolicy",
+                "$ref": "#/components/schemas/DnsUpdatePolicy",
                 "description": "Dynamic updates."
               },
               {
@@ -57340,6 +57547,7 @@
           "added",
           "replaced",
           "removed",
+          "types",
           "losses"
         ],
         "properties": {
@@ -57391,6 +57599,13 @@
             "format": "int32",
             "description": "The serial after the write.",
             "minimum": 0
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportTypeCount"
+            },
+            "description": "The records the file brings per type, sorted by type."
           }
         }
       },
@@ -57407,11 +57622,19 @@
           {
             "type": "object",
             "required": [
-              "serial",
+              "soa_serial",
               "rrsets",
+              "origins",
               "revision"
             ],
             "properties": {
+              "origins": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/OriginCount"
+                },
+                "description": "The RRsets per origin, one entry for each origin present, sorted by origin; empty\nfor an empty zone."
+              },
               "revision": {
                 "$ref": "#/components/schemas/Revision",
                 "description": "The store revision of the zone row (the `ETag`)."
@@ -57422,7 +57645,7 @@
                 "description": "The number of RRsets in all scopes.",
                 "minimum": 0
               },
-              "serial": {
+              "soa_serial": {
                 "type": "integer",
                 "format": "int32",
                 "description": "The SOA serial served now.",
@@ -57523,7 +57746,7 @@
           "update": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/UpdatePolicy",
+                "$ref": "#/components/schemas/DnsUpdatePolicy",
                 "description": "Dynamic updates."
               },
               {

@@ -579,3 +579,53 @@ fn tables_codes_and_actions_are_in_the_namespace() {
 }
 
 use crate::names::TableName;
+
+#[test]
+fn addresses_in_tagged_enums_round_trip_in_cbor_and_json() {
+    let acl = Acl {
+        id: AclId::generate(),
+        name: "secondaries".to_owned(),
+        entries: vec![
+            AclEntry::Prefix {
+                prefix: "192.0.2.0/24".parse().expect("prefix"),
+                deny: false,
+            },
+            AclEntry::Prefix {
+                prefix: "2001:db8::/32".parse().expect("prefix"),
+                deny: true,
+            },
+        ],
+        description: None,
+    };
+    assert_eq!(
+        from_cbor::<Acl>(&to_cbor(&acl).expect("cbor")).expect("cbor"),
+        acl
+    );
+    let json = serde_json::to_value(&acl).expect("json");
+    assert_eq!(json["entries"][0]["prefix"], "192.0.2.0/24");
+    assert_eq!(serde_json::from_value::<Acl>(json).expect("json"), acl);
+
+    let rules = vec![
+        MatchRule::ClientSubnet {
+            prefixes: vec!["198.51.100.0/24".parse().expect("prefix")],
+        },
+        MatchRule::Interface {
+            addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
+        },
+    ];
+    assert_eq!(
+        from_cbor::<Vec<MatchRule>>(&to_cbor(&rules).expect("cbor")).expect("cbor"),
+        rules
+    );
+    let redirect = BlockAction::Redirect {
+        address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 80)),
+    };
+    assert_eq!(
+        from_cbor::<BlockAction>(&to_cbor(&redirect).expect("cbor")).expect("cbor"),
+        redirect
+    );
+    assert_eq!(
+        serde_json::to_value(&redirect).expect("json")["address"],
+        "192.0.2.80"
+    );
+}

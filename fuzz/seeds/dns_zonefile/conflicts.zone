@@ -1,0 +1,6 @@
+www IN A 192.0.2.1
+www IN CNAME other
+*.wild IN A 192.0.2.2
+chaos CH TXT "x"
+out.other.test. IN A 192.0.2.3
+$INCLUDE other.zone

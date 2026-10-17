@@ -550,8 +550,10 @@ impl Default for TransferPolicy {
     }
 }
 
-/// Who may change a zone by dynamic update (DNS-11, TGL-09).
+/// Who may change a zone by dynamic update (DNS-11, TGL-09). Named `DnsUpdatePolicy` in
+/// the OpenAPI document, apart from the software-update policy of the system settings.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[schema(as = DnsUpdatePolicy)]
 pub struct UpdatePolicy {
     /// The access lists that may update; none means nobody.
     #[serde(default)]
@@ -887,6 +889,64 @@ impl Origin {
     }
 }
 
+/// Addresses and prefixes inside internally tagged enums, written as text in every format.
+///
+/// Serde reads an internally tagged enum through a buffer that reports a human-readable
+/// format, while CBOR writes `IpAddr` and `IpNet` in their binary form, so such a value
+/// written to the store did not read back. As text it reads back in CBOR and JSON alike.
+mod text {
+    use std::{fmt::Display, str::FromStr};
+
+    use serde::{Deserialize, Deserializer, Serializer, de::Error};
+
+    pub(super) fn serialize<T: Display, S: Serializer>(
+        value: &T,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(value)
+    }
+
+    pub(super) fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+    where
+        T: FromStr,
+        T::Err: Display,
+        D: Deserializer<'de>,
+    {
+        let text = String::deserialize(deserializer)?;
+        text.parse().map_err(D::Error::custom)
+    }
+
+    /// The same for a list.
+    pub(super) mod list {
+        use std::{fmt::Display, str::FromStr};
+
+        use serde::{Deserialize, Deserializer, Serializer, de::Error, ser::SerializeSeq};
+
+        pub(in super::super) fn serialize<T: Display, S: Serializer>(
+            values: &[T],
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            let mut seq = serializer.serialize_seq(Some(values.len()))?;
+            for value in values {
+                seq.serialize_element(&value.to_string())?;
+            }
+            seq.end()
+        }
+
+        pub(in super::super) fn deserialize<'de, T, D>(deserializer: D) -> Result<Vec<T>, D::Error>
+        where
+            T: FromStr,
+            T::Err: Display,
+            D: Deserializer<'de>,
+        {
+            Vec::<String>::deserialize(deserializer)?
+                .iter()
+                .map(|text| text.parse().map_err(D::Error::custom))
+                .collect()
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 // Views
 
@@ -914,6 +974,7 @@ pub enum MatchRule {
     ClientSubnet {
         /// The prefixes.
         #[schema(value_type = Vec<String>, example = json!(["192.0.2.0/24"]))]
+        #[serde(with = "text::list")]
         prefixes: Vec<IpNet>,
     },
     /// The query arrived on one of the transports.
@@ -925,6 +986,7 @@ pub enum MatchRule {
     Interface {
         /// The local addresses.
         #[schema(value_type = Vec<String>, example = json!(["192.0.2.53"]))]
+        #[serde(with = "text::list")]
         addresses: Vec<IpAddr>,
     },
     /// The query type is one of these.
@@ -1213,6 +1275,7 @@ pub enum AclEntry {
     Prefix {
         /// The prefix.
         #[schema(value_type = String, example = "192.0.2.0/24")]
+        #[serde(with = "text")]
         prefix: IpNet,
         /// The entry refuses instead of allowing.
         #[serde(default)]
@@ -1449,6 +1512,7 @@ pub enum BlockAction {
     Redirect {
         /// The address answered.
         #[schema(value_type = String, example = "192.0.2.80")]
+        #[serde(with = "text")]
         address: IpAddr,
     },
 }
@@ -1555,7 +1619,10 @@ pub struct JournalEntry {
     pub from_serial: u32,
     /// The serial after.
     pub to_serial: u32,
-    /// The store revision that made the step.
+    /// The store revision the step was planned against: the revision of the read view
+    /// whose SOA the change replaced. A batch is committed only while that SOA is
+    /// unchanged, so the value is strictly increasing per zone scope and below the
+    /// revision that committed the step (which a batch cannot know before it commits).
     pub revision: Revision,
     /// When.
     pub at: Timestamp,

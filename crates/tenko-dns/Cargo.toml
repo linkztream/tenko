@@ -9,20 +9,35 @@ publish = false
 
 [dependencies]
 arc-swap = { workspace = true }
+# The zone service (src/zone): the inline jobs of every write and the TSIG secrets.
+async-trait = { workspace = true }
 aws-lc-rs = { workspace = true }
 bytes = { workspace = true }
-domain = { workspace = true }
+# `zonefile` adds the zone file scanner (`domain::zonefile::inplace`) for the import; it
+# brings no crate the workspace does not already build (`bytes`, `serde`).
+domain = { workspace = true, features = ["zonefile"] }
 ipnet = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 socket2 = { workspace = true }
 tenko-core = { workspace = true }
+tenko-jobs = { workspace = true }
+tenko-store = { workspace = true }
+tenko-vault = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 hickory-proto = { workspace = true }
 proptest = { workspace = true }
 stats_alloc = { workspace = true }
+tenko-core = { workspace = true, features = ["testing"] }
+tenko-jobs = { workspace = true, features = ["testing"] }
+tenko-vault = { workspace = true, features = ["testing"] }
 time = { workspace = true }
 
 [lints]

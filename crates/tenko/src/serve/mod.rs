@@ -1236,6 +1236,19 @@ async fn start(
             .extend(imports.spawn_purge(running.stop.subscribe()));
         leaders.extend(imports.leader_services());
     }
+    // The zone service of the DNS module (WP4.2): its import steps join the engine before it
+    // starts; without the module the DNS routes are not registered and nothing is built.
+    let zones = modules.contains(crate::modules::Module::Dns).then(|| {
+        let staging = Arc::new(tenko_dns::zone::ImportStaging::default());
+        tenko_dns::zone::register_steps(&mut engine, &staging);
+        tenko_dns::zone::ZoneService::new(
+            Arc::clone(&store_dyn),
+            Arc::new(engine.clone()),
+            Some(Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>),
+            staging,
+            tenko_dns::zone::ZoneConfig::default(),
+        )
+    });
     if let Some(ipam) = &ipam {
         let mut stop = running.stop.subscribe();
         running
@@ -1530,6 +1543,9 @@ async fn start(
                     ));
             }
             server.extensions.insert(engine.clone());
+            if let Some(zones) = &zones {
+                server.extensions.insert(Arc::clone(zones));
+            }
             let module_switch: Arc<dyn tenko_api::routes::system::modules::ModuleService> =
                 Arc::new(crate::modules::ModuleSwitch::new(
                     Arc::clone(&store_dyn),

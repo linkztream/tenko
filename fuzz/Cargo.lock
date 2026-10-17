@@ -2916,6 +2916,7 @@ dependencies = [
  "tenko-connect-proxmox",
  "tenko-connect-unifi",
  "tenko-core",
+ "tenko-dns",
  "tenko-ipam",
  "tenko-jobs",
  "tenko-scan",
@@ -2960,6 +2961,7 @@ dependencies = [
  "tenko-cluster",
  "tenko-connect",
  "tenko-core",
+ "tenko-dns",
  "tenko-ipam",
  "tenko-jobs",
  "tenko-scan",
@@ -3155,21 +3157,31 @@ name = "tenko-dns"
 version = "0.0.1"
 dependencies = [
  "arc-swap",
+ "async-trait",
  "aws-lc-rs",
  "bytes",
  "domain",
  "ipnet",
+ "serde",
+ "serde_json",
  "socket2",
  "tenko-core",
+ "tenko-jobs",
+ "tenko-store",
+ "tenko-vault",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "tracing",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]
 name = "tenko-fuzz"
 version = "0.0.0"
 dependencies = [
+ "bytes",
  "libfuzzer-sys",
  "serde_json",
  "tenko",
@@ -3182,6 +3194,7 @@ dependencies = [
  "tenko-core",
  "tenko-dns",
  "tenko-scan",
+ "tenko-store",
  "tenko-vault",
 ]
 

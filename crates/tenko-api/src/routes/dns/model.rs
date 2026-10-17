@@ -24,11 +24,23 @@ pub struct ZoneItem {
     #[serde(flatten)]
     pub zone: Zone,
     /// The SOA serial served now.
-    pub serial: u32,
+    pub soa_serial: u32,
     /// The number of RRsets in all scopes.
     pub rrsets: u64,
+    /// The RRsets per origin, one entry for each origin present, sorted by origin; empty
+    /// for an empty zone.
+    pub origins: Vec<OriginCount>,
     /// The store revision of the zone row (the `ETag`).
     pub revision: Revision,
+}
+
+/// How many RRsets of a zone one origin owns.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct OriginCount {
+    /// The origin.
+    pub origin: Origin,
+    /// Its RRsets in all scopes.
+    pub rrsets: u32,
 }
 
 /// `POST /dns/zones`.
@@ -174,6 +186,11 @@ pub struct RecordChange {
     /// The records of `set`, `add` and `remove`.
     #[serde(default)]
     pub records: Vec<RecordData>,
+    /// The change may replace an RRset of another origin (`ipam`, `dynamic`, `dhcp`,
+    /// `ad`); the result is then `manual`. Without it such a change is refused with 409
+    /// `dns.record.origin`.
+    #[serde(default)]
+    pub take_over: Option<bool>,
 }
 
 /// `POST /dns/zones/{id}/records/batch`: changes applied together or not at all.
@@ -249,6 +266,15 @@ pub struct ImportLoss {
     pub detail: String,
 }
 
+/// How many records of one type a zone file brings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ImportTypeCount {
+    /// The record type.
+    pub rtype: Rtype,
+    /// The records of the type.
+    pub records: u32,
+}
+
 /// The answer of an import: counts, losses, and after a write the serial and revision.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ZoneFileImportReport {
@@ -260,6 +286,8 @@ pub struct ZoneFileImportReport {
     pub replaced: u64,
     /// RRsets removed (with `replace`).
     pub removed: u64,
+    /// The records the file brings per type, sorted by type.
+    pub types: Vec<ImportTypeCount>,
     /// What the import could not take.
     pub losses: Vec<ImportLoss>,
     /// The serial after the write.

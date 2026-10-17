@@ -396,6 +396,7 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
         "/dns/zones/{id}/records/export",
         "export_dns_zone_file",
     ),
+    ("GET", "/dns/zones/{id}/journal", "list_dns_zone_journal"),
     ("GET", "/dns/zones/{id}/dnssec", "get_dns_zone_dnssec"),
     (
         "POST",

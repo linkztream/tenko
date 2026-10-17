@@ -42,6 +42,7 @@ pub mod transport;
 pub mod tree;
 pub mod upstream;
 pub mod wire;
+pub mod zone;
 
 pub use codec::{AnswerBuf, Codec, CodecError, DomainCodec, Request};
 pub use feed::{DnsData, MemFeed, ZoneFeed};

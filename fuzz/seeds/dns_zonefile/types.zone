@@ -1,0 +1,7 @@
+txt IN TXT "hello world" "second string" ( "third" )
+caa IN CAA 0 issue "ca.example.test"
+_sip._tcp IN SRV 10 60 5060 sip.example.test.
+alias IN CNAME www
+sub IN NS ns.sub
+ns.sub IN A 192.0.2.1
+unknown IN TYPE65280 \# 4 c0000201

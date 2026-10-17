@@ -8,10 +8,14 @@
 //! DNS-21, DNS-26, MIG-15, OPS-25.
 //!
 //! Every operation is declared with its request and answer types so that the OpenAPI
-//! document, the typed client of the UI and the mock server have them; until its package
-//! builds it, an operation checks the caller's scope and answers `501` with
-//! `sys.not_implemented`. The routes belong to the DNS module (OPS-25): a server without
-//! it registers none of them, so they answer 404 `sys.route_not_found`.
+//! document, the typed client of the UI and the mock server have them. The zones, records,
+//! zone files, the zone journal, access lists and TSIG keys are built (WP4.2, files
+//! `dns/zones.rs`, `dns/records.rs`, `dns/acls.rs`, `dns/keys.rs`) on the zone service
+//! (`tenko_dns::zone`), which the server adds as the request extension
+//! `Arc<ZoneService>`. Until its package builds it, any other operation checks the
+//! caller's scope and answers `501` with `sys.not_implemented`. The routes belong to the
+//! DNS module (OPS-25): a server without it registers none of them, so they answer 404
+//! `sys.route_not_found`.
 //!
 //! | Endpoint | Scope | Purpose |
 //! |---|---|---|
@@ -20,6 +24,7 @@
 //! | `GET /dns/zones/{id}` | `dns.read` | Get a DNS zone |
 //! | `PATCH /dns/zones/{id}` | `dns.write` | Change a DNS zone |
 //! | `DELETE /dns/zones/{id}` | `dns.write` | Delete a DNS zone and its records |
+//! | `GET /dns/zones/{id}/journal` | `dns.read` | List the serial steps of a zone scope |
 //! | `GET /dns/zones/{id}/records` | `dns.read` | List the RRsets of a zone |
 //! | `POST /dns/zones/{id}/records/batch` | `dns.write` | Change RRsets of a zone in one batch |
 //! | `POST /dns/zones/{id}/records/import` | `dns.write` | Import a zone file into a zone |
@@ -66,31 +71,47 @@
 //! when it names none (lists and creates). The node routes need the action on the node as
 //! well. The DNS kinds are global-only for grants in Phase 2.
 
+mod acls;
+mod keys;
 mod model;
+mod records;
+mod zones;
 
 #[cfg(test)]
 mod tests;
 
+use std::sync::Arc;
+
 use axum::{
-    extract::{Path, State},
-    response::Response,
+    Json,
+    extract::{DefaultBodyLimit, FromRequestParts, Path, State},
+    http::{HeaderValue, StatusCode, header, request::Parts},
+    response::{IntoResponse, Response},
 };
+use serde::Serialize;
 use tenko_auth::authz::anywhere;
+use tenko_core::Revision;
 use tenko_core::{
     Action, CodedError, NodeId, ObjectKind, ObjectRef,
-    dns::{AclId, BlockListId, DnsName, ForwardRuleId, ViewId, ZoneId},
+    dns::{BlockListId, DnsName, ForwardRuleId, ViewId, ZoneId},
     error::codes,
 };
-use utoipa_axum::{router::OpenApiRouter, routes};
+use tenko_dns::zone::ZoneService;
+use utoipa_axum::{
+    router::{OpenApiRouter, UtoipaMethodRouterExt},
+    routes,
+};
+
+pub use zones::{JournalItem, JournalParams};
 
 pub use model::{
     AclCreate, AclItem, AclPatch, DnsCommandAccepted, DnsJobStarted, DnsNodeStatus, DnssecKeyItem,
     DnssecStatus, DryRunParams, ExportParams, ForwarderCreate, ForwarderItem, ForwarderPatch,
-    ImportLoss, KeyCreate, KeyCreated, KeyItem, ListCreate, ListItem, ListPatch, ListVersionItem,
-    ListenerItem, PrimaryState, QueryLogLine, QueryLogParams, RecordBatch, RecordBatchResult,
-    RecordChange, RecordDiff, RecordFilters, RecordOp, RolloverRequest, RrSetItem, TransferStatus,
-    ViewCreate, ViewItem, ViewPatch, ZoneCreate, ZoneFileImport, ZoneFileImportReport, ZoneItem,
-    ZonePatch,
+    ImportLoss, ImportTypeCount, KeyCreate, KeyCreated, KeyItem, ListCreate, ListItem, ListPatch,
+    ListVersionItem, ListenerItem, OriginCount, PrimaryState, QueryLogLine, QueryLogParams,
+    RecordBatch, RecordBatchResult, RecordChange, RecordDiff, RecordFilters, RecordOp,
+    RolloverRequest, RrSetItem, TransferStatus, ViewCreate, ViewItem, ViewPatch, ZoneCreate,
+    ZoneFileImport, ZoneFileImportReport, ZoneItem, ZonePatch,
 };
 
 use super::not_implemented;
@@ -131,6 +152,52 @@ fn parse_key(raw: &str) -> Result<DnsName, ApiError> {
     DnsName::new(raw).map_err(|_| invalid("key", "the key name is not a DNS name"))
 }
 
+/// The largest import request: a zone file of 1 GiB in JSON.
+const MAX_ZONE_FILE_REQUEST: usize = 1 << 30;
+
+/// The zone service of the request, from the `Arc<ZoneService>` extension the server adds
+/// while the DNS module runs. Taken after the path and the scope are checked
+/// ([`Zones::get`]), so a malformed path or a missing scope answers first.
+pub(crate) struct Zones(Option<Arc<ZoneService>>);
+
+impl Zones {
+    /// The service; 409 `dns.module.disabled` when the server runs none.
+    pub(crate) fn get(self) -> Result<Arc<ZoneService>, ApiError> {
+        self.0.ok_or_else(|| {
+            ApiError::from_coded_error(
+                CodedError::new(
+                    tenko_core::dns::codes::MODULE_DISABLED,
+                    409,
+                    "the zone service does not run on this server",
+                )
+                .with_title("DNS module disabled"),
+            )
+        })
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for Zones {
+    type Rejection = std::convert::Infallible;
+
+    fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+        std::future::ready(Ok(Zones(
+            parts.extensions.get::<Arc<ZoneService>>().cloned(),
+        )))
+    }
+}
+
+/// A JSON answer with the revision as its `ETag`.
+fn with_etag(status: StatusCode, body: &impl Serialize, revision: Revision) -> Response {
+    let mut response = (status, Json(body)).into_response();
+    if let Ok(etag) = HeaderValue::from_str(&format!("\"{}\"", revision.0)) {
+        response.headers_mut().insert(header::ETAG, etag);
+    }
+    response
+}
+
 /// The routes of the area.
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     zone_routes()
@@ -148,8 +215,13 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
 #[inline(never)]
 fn zone_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list_dns_zones, create_dns_zone))
-        .routes(routes!(get_dns_zone, update_dns_zone, delete_dns_zone))
+        .routes(routes!(zones::list_dns_zones, zones::create_dns_zone))
+        .routes(routes!(
+            zones::get_dns_zone,
+            zones::update_dns_zone,
+            zones::delete_dns_zone
+        ))
+        .routes(routes!(zones::list_dns_zone_journal))
         .routes(routes!(get_dns_zone_dnssec))
         .routes(routes!(start_dns_key_rollover))
         .routes(routes!(get_dns_zone_transfer, trigger_dns_zone_transfer))
@@ -158,10 +230,13 @@ fn zone_routes() -> OpenApiRouter<AppState> {
 #[inline(never)]
 fn record_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list_dns_records))
-        .routes(routes!(change_dns_records))
-        .routes(routes!(import_dns_zone_file))
-        .routes(routes!(export_dns_zone_file))
+        .routes(routes!(records::list_dns_records))
+        .routes(routes!(records::change_dns_records))
+        .routes(
+            routes!(records::import_dns_zone_file)
+                .layer(DefaultBodyLimit::max(MAX_ZONE_FILE_REQUEST)),
+        )
+        .routes(routes!(records::export_dns_zone_file))
 }
 
 #[inline(never)]
@@ -180,10 +255,14 @@ fn view_and_forwarder_routes() -> OpenApiRouter<AppState> {
 #[inline(never)]
 fn acl_key_and_list_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list_dns_acls, create_dns_acl))
-        .routes(routes!(get_dns_acl, update_dns_acl, delete_dns_acl))
-        .routes(routes!(list_dns_keys, create_dns_key))
-        .routes(routes!(get_dns_key, delete_dns_key))
+        .routes(routes!(acls::list_dns_acls, acls::create_dns_acl))
+        .routes(routes!(
+            acls::get_dns_acl,
+            acls::update_dns_acl,
+            acls::delete_dns_acl
+        ))
+        .routes(routes!(keys::list_dns_keys, keys::create_dns_key))
+        .routes(routes!(keys::get_dns_key, keys::delete_dns_key))
         .routes(routes!(list_dns_lists, create_dns_list))
         .routes(routes!(get_dns_list, update_dns_list, delete_dns_list))
         .routes(routes!(fetch_dns_list))
@@ -195,265 +274,6 @@ fn node_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(get_node_dns_status))
         .routes(routes!(flush_node_dns_cache))
         .routes(routes!(read_node_dns_log))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dns/zones",
-    tag = "dns",
-    operation_id = "list_dns_zones",
-    summary = "List DNS zones",
-    description = "Scope: `dns.read`.",
-    params(PageParams),
-    responses(
-        (status = 200, description = "A page of zones by name", body = Page<ZoneItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dns_zones(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
-    app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::Zone))?;
-    Err(not_implemented("GET", "/dns/zones"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dns/zones",
-    tag = "dns",
-    operation_id = "create_dns_zone",
-    summary = "Create a DNS zone",
-    description = "Scope: `dns.write`.",
-    request_body(content = ZoneCreate, content_type = "application/json"),
-    responses(
-        (status = 201, description = "The zone, with its SOA and NS set", body = ZoneItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the settings are invalid (`dns.zone.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "A zone of this name exists (`dns.zone.exists`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn create_dns_zone(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
-    app.authorize(&cx.principal, Action::Create, &anywhere(ObjectKind::Zone))?;
-    Err(not_implemented("POST", "/dns/zones"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dns/zones/{id}",
-    tag = "dns",
-    operation_id = "get_dns_zone",
-    summary = "Get a DNS zone",
-    description = "Scope: `dns.read`.",
-    params(("id" = String, Path, description = "Zone identifier (UUID)")),
-    responses(
-        (status = 200, description = "The zone with its `ETag`", body = ZoneItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dns_zone(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &ObjectRef::from(parse_id::<ZoneId>(&id)?),
-    )?;
-    Err(not_implemented("GET", "/dns/zones/{id}"))
-}
-
-#[utoipa::path(
-    patch,
-    path = "/dns/zones/{id}",
-    tag = "dns",
-    operation_id = "update_dns_zone",
-    summary = "Change a DNS zone",
-    description = "Scope: `dns.write`.",
-    params(("id" = String, Path, description = "Zone identifier (UUID)")),
-    request_body(content = ZonePatch, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The changed zone", body = ZoneItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 412, description = "The zone changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn update_dns_zone(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Update,
-        &ObjectRef::from(parse_id::<ZoneId>(&id)?),
-    )?;
-    Err(not_implemented("PATCH", "/dns/zones/{id}"))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/dns/zones/{id}",
-    tag = "dns",
-    operation_id = "delete_dns_zone",
-    summary = "Delete a DNS zone and its records",
-    description = "Scope: `dns.write`.",
-    params(("id" = String, Path, description = "Zone identifier (UUID)")),
-    responses(
-        (status = 204, description = "The zone is gone"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn delete_dns_zone(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Delete,
-        &ObjectRef::from(parse_id::<ZoneId>(&id)?),
-    )?;
-    Err(not_implemented("DELETE", "/dns/zones/{id}"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dns/zones/{id}/records",
-    tag = "dns",
-    operation_id = "list_dns_records",
-    summary = "List the RRsets of a zone",
-    description = "Scope: `dns.read`.",
-    params(("id" = String, Path, description = "Zone identifier (UUID)"), RecordFilters),
-    responses(
-        (status = 200, description = "A page of RRsets in name and type order", body = Page<RrSetItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dns_records(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &ObjectRef::from(parse_id::<ZoneId>(&id)?),
-    )?;
-    Err(not_implemented("GET", "/dns/zones/{id}/records"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dns/zones/{id}/records/batch",
-    tag = "dns",
-    operation_id = "change_dns_records",
-    summary = "Change RRsets of a zone in one batch",
-    description = "Scope: `dns.write`.",
-    params(("id" = String, Path, description = "Zone identifier (UUID)"), DryRunParams),
-    request_body(content = RecordBatch, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The diff, and after a write the serial and revision", body = RecordBatchResult),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or A record breaks a rule of its type (`dns.record.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "RRsets conflict (`dns.record.conflict`) or belong to another origin (`dns.record.origin`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn change_dns_records(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Update,
-        &ObjectRef::from(parse_id::<ZoneId>(&id)?),
-    )?;
-    Err(not_implemented("POST", "/dns/zones/{id}/records/batch"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dns/zones/{id}/records/import",
-    tag = "dns",
-    operation_id = "import_dns_zone_file",
-    summary = "Import a zone file into a zone",
-    description = "Scope: `dns.write`.",
-    params(("id" = String, Path, description = "Zone identifier (UUID)"), DryRunParams),
-    request_body(content = ZoneFileImport, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The counts and losses, and after a write the serial and revision", body = ZoneFileImportReport),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 422, description = "The zone file does not parse (`dns.zonefile.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn import_dns_zone_file(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Update,
-        &ObjectRef::from(parse_id::<ZoneId>(&id)?),
-    )?;
-    Err(not_implemented("POST", "/dns/zones/{id}/records/import"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dns/zones/{id}/records/export",
-    tag = "dns",
-    operation_id = "export_dns_zone_file",
-    summary = "Export a zone as a zone file",
-    description = "Scope: `dns.read`.",
-    params(("id" = String, Path, description = "Zone identifier (UUID)"), ExportParams),
-    responses(
-        (status = 200, description = "The zone file (RFC 1035) in byte-stable order (MIG-15)", body = String, content_type = "text/dns"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn export_dns_zone_file(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &ObjectRef::from(parse_id::<ZoneId>(&id)?),
-    )?;
-    Err(not_implemented("GET", "/dns/zones/{id}/records/export"))
 }
 
 #[utoipa::path(
@@ -864,238 +684,6 @@ async fn delete_dns_forwarder(
         &ObjectRef::from(parse_id::<ForwardRuleId>(&id)?),
     )?;
     Err(not_implemented("DELETE", "/dns/forwarders/{id}"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dns/acls",
-    tag = "dns",
-    operation_id = "list_dns_acls",
-    summary = "List DNS access lists",
-    description = "Scope: `dns.read`.",
-    params(PageParams),
-    responses(
-        (status = 200, description = "A page of access lists by name", body = Page<AclItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dns_acls(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
-    app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::DnsAcl))?;
-    Err(not_implemented("GET", "/dns/acls"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dns/acls",
-    tag = "dns",
-    operation_id = "create_dns_acl",
-    summary = "Create a DNS access list",
-    description = "Scope: `dns.write`.",
-    request_body(content = AclCreate, content_type = "application/json"),
-    responses(
-        (status = 201, description = "The access list", body = AclItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn create_dns_acl(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
-    app.authorize(&cx.principal, Action::Create, &anywhere(ObjectKind::DnsAcl))?;
-    Err(not_implemented("POST", "/dns/acls"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dns/acls/{id}",
-    tag = "dns",
-    operation_id = "get_dns_acl",
-    summary = "Get a DNS access list",
-    description = "Scope: `dns.read`.",
-    params(("id" = String, Path, description = "Access list identifier (UUID)")),
-    responses(
-        (status = 200, description = "The access list with its `ETag`", body = AclItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such access list (`dns.acl.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dns_acl(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &ObjectRef::from(parse_id::<AclId>(&id)?),
-    )?;
-    Err(not_implemented("GET", "/dns/acls/{id}"))
-}
-
-#[utoipa::path(
-    patch,
-    path = "/dns/acls/{id}",
-    tag = "dns",
-    operation_id = "update_dns_acl",
-    summary = "Change a DNS access list",
-    description = "Scope: `dns.write`.",
-    params(("id" = String, Path, description = "Access list identifier (UUID)")),
-    request_body(content = AclPatch, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The changed access list", body = AclItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such access list (`dns.acl.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 412, description = "The access list changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn update_dns_acl(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Update,
-        &ObjectRef::from(parse_id::<AclId>(&id)?),
-    )?;
-    Err(not_implemented("PATCH", "/dns/acls/{id}"))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/dns/acls/{id}",
-    tag = "dns",
-    operation_id = "delete_dns_acl",
-    summary = "Delete a DNS access list",
-    description = "Scope: `dns.write`.",
-    params(("id" = String, Path, description = "Access list identifier (UUID)")),
-    responses(
-        (status = 204, description = "The access list is gone"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such access list (`dns.acl.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "A zone or view still names it (`dns.acl.in_use`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn delete_dns_acl(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Delete,
-        &ObjectRef::from(parse_id::<AclId>(&id)?),
-    )?;
-    Err(not_implemented("DELETE", "/dns/acls/{id}"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dns/keys",
-    tag = "dns",
-    operation_id = "list_dns_keys",
-    summary = "List TSIG keys",
-    description = "Scope: `dns.keys`.",
-    params(PageParams),
-    responses(
-        (status = 200, description = "A page of keys by name, without secrets", body = Page<KeyItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.keys`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dns_keys(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
-    app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::DnsKey))?;
-    Err(not_implemented("GET", "/dns/keys"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dns/keys",
-    tag = "dns",
-    operation_id = "create_dns_key",
-    summary = "Generate or import a TSIG key",
-    description = "Scope: `dns.keys`.",
-    request_body(content = KeyCreate, content_type = "application/json"),
-    responses(
-        (status = 201, description = "The key and its secret, shown this once", body = KeyCreated),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.keys`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "A key of this name exists (`dns.key.exists`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn create_dns_key(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
-    app.authorize(&cx.principal, Action::Create, &anywhere(ObjectKind::DnsKey))?;
-    Err(not_implemented("POST", "/dns/keys"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dns/keys/{key}",
-    tag = "dns",
-    operation_id = "get_dns_key",
-    summary = "Get a TSIG key",
-    description = "Scope: `dns.keys`.",
-    params(("key" = String, Path, description = "TSIG key name")),
-    responses(
-        (status = 200, description = "The key without its secret", body = KeyItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.keys`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such key (`dns.key.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dns_key(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(key): Path<String>,
-) -> Result<Response, ApiError> {
-    parse_key(&key)?;
-    app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::DnsKey))?;
-    Err(not_implemented("GET", "/dns/keys/{key}"))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/dns/keys/{key}",
-    tag = "dns",
-    operation_id = "delete_dns_key",
-    summary = "Delete a TSIG key",
-    description = "Scope: `dns.keys`.",
-    params(("key" = String, Path, description = "TSIG key name")),
-    responses(
-        (status = 204, description = "The key and its secret are gone"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.keys`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such key (`dns.key.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn delete_dns_key(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(key): Path<String>,
-) -> Result<Response, ApiError> {
-    parse_key(&key)?;
-    app.authorize(&cx.principal, Action::Delete, &anywhere(ObjectKind::DnsKey))?;
-    Err(not_implemented("DELETE", "/dns/keys/{key}"))
 }
 
 #[utoipa::path(

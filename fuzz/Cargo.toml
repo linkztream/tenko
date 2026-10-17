@@ -12,6 +12,7 @@ cargo-fuzz = true
 [workspace]
 
 [dependencies]
+bytes = "1"
 libfuzzer-sys = "0.4"
 serde_json = "1"
 tenko = { path = "../crates/tenko", default-features = false }
@@ -25,6 +26,8 @@ tenko-cluster = { path = "../crates/tenko-cluster" }
 tenko-core = { path = "../crates/tenko-core" }
 tenko-dns = { path = "../crates/tenko-dns" }
 tenko-scan = { path = "../crates/tenko-scan" }
+# The read view of the `dns_zonefile` target.
+tenko-store = { path = "../crates/tenko-store" }
 tenko-vault = { path = "../crates/tenko-vault" }
 
 [[bin]]
@@ -177,6 +180,13 @@ bench = false
 [[bin]]
 name = "dns_edns"
 path = "fuzz_targets/dns_edns.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dns_zonefile"
+path = "fuzz_targets/dns_zonefile.rs"
 test = false
 doc = false
 bench = false

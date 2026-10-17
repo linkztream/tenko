@@ -110,6 +110,7 @@ export const apiOperations = [
   { id: "delete_dns_zone", method: "delete", path: "/api/v1/dns/zones/{id}", tags: ["dns"], summary: "Delete a DNS zone and its records" },
   { id: "get_dns_zone_dnssec", method: "get", path: "/api/v1/dns/zones/{id}/dnssec", tags: ["dns"], summary: "Get the signing state and keys of a zone" },
   { id: "start_dns_key_rollover", method: "post", path: "/api/v1/dns/zones/{id}/dnssec/rollover", tags: ["dns"], summary: "Start a DNSSEC key rollover" },
+  { id: "list_dns_zone_journal", method: "get", path: "/api/v1/dns/zones/{id}/journal", tags: ["dns"], summary: "List the serial steps of a zone scope" },
   { id: "list_dns_records", method: "get", path: "/api/v1/dns/zones/{id}/records", tags: ["dns"], summary: "List the RRsets of a zone" },
   { id: "change_dns_records", method: "post", path: "/api/v1/dns/zones/{id}/records/batch", tags: ["dns"], summary: "Change RRsets of a zone in one batch" },
   { id: "export_dns_zone_file", method: "get", path: "/api/v1/dns/zones/{id}/records/export", tags: ["dns"], summary: "Export a zone as a zone file" },
