@@ -6,6 +6,10 @@
 //! are interpolated linearly inside the bucket of the histogram's change that holds them (as
 //! Prometheus' `histogram_quantile` does), so a quantile in the `+Inf` bucket reads as the
 //! highest bound. Everything else is the gauge value of the newer snapshot.
+//!
+//! The DNS part ([`MetricsDns`]) is there while the registry holds the query counter of the
+//! `dns` role (`tenko_dns_queries_total`, registered when the role starts); the families of
+//! the encrypted transports and of the block lists are read when they are registered.
 
 use std::{collections::BTreeMap, time::Instant};
 
@@ -15,7 +19,9 @@ use tenko_core::{
 };
 
 use crate::dto::events::{
-    MetricsIngest, MetricsJobs, MetricsLag, MetricsNode, MetricsRaft, MetricsSample, MetricsSse,
+    MetricsDns, MetricsDnsBlocked, MetricsDnsCache, MetricsDnsConnections, MetricsDnsRcodes,
+    MetricsDnsTransports, MetricsDnsUpstreams, MetricsIngest, MetricsJobs, MetricsLag, MetricsNode,
+    MetricsRaft, MetricsSample, MetricsSse,
 };
 
 /// `tenko_http_requests_total{route,method,status}`.
@@ -38,6 +44,28 @@ const RAFT_LAG: &str = "tenko_raft_lag_entries";
 const JOBS: &str = "tenko_jobs";
 const SSE_SUBSCRIBERS: &str = "tenko_sse_subscribers";
 const NODE_BUFFER: &str = "tenko_node_buffer_batches";
+/// `tenko_dns_queries_total{proto,view,rcode}`: its presence says the `dns` role runs.
+pub(crate) const DNS_QUERIES: &str = "tenko_dns_queries";
+/// `tenko_dns_query_duration_seconds{proto}`.
+pub(crate) const DNS_DURATION: &str = "tenko_dns_query_duration_seconds";
+/// `tenko_dns_cache_hits_total{view}`.
+pub(crate) const DNS_CACHE_HITS: &str = "tenko_dns_cache_hits";
+/// `tenko_dns_cache_misses_total{view}`.
+pub(crate) const DNS_CACHE_MISSES: &str = "tenko_dns_cache_misses";
+/// `tenko_dns_cache_stale_total`.
+pub(crate) const DNS_CACHE_STALE: &str = "tenko_dns_cache_stale";
+/// `tenko_dns_cache_entries`.
+pub(crate) const DNS_CACHE_ENTRIES: &str = "tenko_dns_cache_entries";
+/// `tenko_dns_upstream_queries_total{rule,upstream,transport,outcome}`.
+pub(crate) const DNS_UPSTREAM_QUERIES: &str = "tenko_dns_upstream_queries";
+/// `tenko_dns_upstream_rtt_seconds{upstream}`.
+pub(crate) const DNS_UPSTREAM_RTT: &str = "tenko_dns_upstream_rtt_seconds";
+/// `tenko_dns_blocked_total{list}`.
+pub(crate) const DNS_BLOCKED: &str = "tenko_dns_blocked";
+/// `tenko_dns_connections{proto}`.
+pub(crate) const DNS_CONNECTIONS: &str = "tenko_dns_connections";
+/// `tenko_dns_log_dropped_total`.
+pub(crate) const DNS_LOG_DROPPED: &str = "tenko_dns_log_dropped";
 
 /// The running totals of one snapshot that the next sample's rates and quantiles are
 /// computed against.
@@ -49,6 +77,8 @@ struct Totals {
     commits: Vec<u64>,
     ingest_batches: u64,
     ingest_facts: u64,
+    /// The `dns` role's, while it runs.
+    dns: Option<DnsTotals>,
 }
 
 impl Totals {
@@ -59,8 +89,141 @@ impl Totals {
             commits: histogram_total(snapshot, STORE_COMMIT, None),
             ingest_batches: counter_total(snapshot, INGEST_BATCHES, None),
             ingest_facts: counter_total(snapshot, INGEST_FACTS, None),
+            dns: DnsTotals::of(snapshot),
         }
     }
+}
+
+/// The running totals of the `dns` role in one snapshot.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct DnsTotals {
+    /// Queries by `proto`.
+    transports: BTreeMap<String, u64>,
+    /// Queries by `rcode`.
+    rcodes: BTreeMap<String, u64>,
+    /// Cumulative bucket counts of the query duration, summed over the transports.
+    durations: Vec<u64>,
+    cache_hits: u64,
+    cache_misses: u64,
+    cache_stale: u64,
+    upstream_queries: u64,
+    /// Cumulative bucket counts of the upstream round-trip time, summed over the upstreams.
+    upstream_rtt: Vec<u64>,
+    /// Blocked queries by `list`.
+    blocked: BTreeMap<String, u64>,
+    log_dropped: u64,
+}
+
+impl DnsTotals {
+    /// The totals, or `None` when the registry has no query counter of the role.
+    fn of(snapshot: &Snapshot) -> Option<Self> {
+        snapshot.family(DNS_QUERIES)?;
+        Some(Self {
+            transports: counter_by(snapshot, DNS_QUERIES, "proto"),
+            rcodes: counter_by(snapshot, DNS_QUERIES, "rcode"),
+            durations: histogram_total(snapshot, DNS_DURATION, None),
+            cache_hits: counter_total(snapshot, DNS_CACHE_HITS, None),
+            cache_misses: counter_total(snapshot, DNS_CACHE_MISSES, None),
+            cache_stale: counter_total(snapshot, DNS_CACHE_STALE, None),
+            upstream_queries: counter_total(snapshot, DNS_UPSTREAM_QUERIES, None),
+            upstream_rtt: histogram_total(snapshot, DNS_UPSTREAM_RTT, None),
+            blocked: counter_by(snapshot, DNS_BLOCKED, "list"),
+            log_dropped: counter_total(snapshot, DNS_LOG_DROPPED, None),
+        })
+    }
+}
+
+/// The RCODE values a sample names; the others count as `other`.
+const NAMED_RCODES: [&str; 4] = ["noerror", "nxdomain", "servfail", "refused"];
+
+/// The DNS part of a sample: the gauges of `snapshot`, and against the totals `before` taken
+/// `seconds` earlier the rates and quantiles (none without `before`, as in a first sample).
+fn dns_sample(
+    snapshot: &Snapshot,
+    totals: &DnsTotals,
+    before: Option<(&DnsTotals, f64)>,
+) -> MetricsDns {
+    let mut dns = MetricsDns {
+        cache: MetricsDnsCache {
+            entries: gauge(snapshot, DNS_CACHE_ENTRIES).unwrap_or_default(),
+            ..MetricsDnsCache::default()
+        },
+        connections: snapshot
+            .family(DNS_CONNECTIONS)
+            .map(|_| MetricsDnsConnections {
+                dot: labelled_gauge(snapshot, DNS_CONNECTIONS, "proto", "dot").unwrap_or_default(),
+                doh: labelled_gauge(snapshot, DNS_CONNECTIONS, "proto", "doh").unwrap_or_default(),
+            }),
+        ..MetricsDns::default()
+    };
+    let Some((before, seconds)) = before else {
+        return dns;
+    };
+    let rate = |count: u64| {
+        if seconds > 0.0 {
+            as_f64(count) / seconds
+        } else {
+            0.0
+        }
+    };
+    let by = |now: &BTreeMap<String, u64>, then: &BTreeMap<String, u64>, key: &str| {
+        now.get(key)
+            .copied()
+            .unwrap_or_default()
+            .saturating_sub(then.get(key).copied().unwrap_or_default())
+    };
+    let transport = |name: &str| rate(by(&totals.transports, &before.transports, name));
+    dns.transports = MetricsDnsTransports {
+        udp: transport("udp"),
+        tcp: transport("tcp"),
+        dot: transport("dot"),
+        doh: transport("doh"),
+    };
+    let rcode = |name: &str| by(&totals.rcodes, &before.rcodes, name);
+    let answered: u64 = totals.rcodes.keys().map(|name| rcode(name)).sum();
+    let named: u64 = NAMED_RCODES.iter().map(|name| rcode(name)).sum();
+    dns.queries_per_second = rate(answered);
+    dns.rcodes = MetricsDnsRcodes {
+        noerror: rate(rcode("noerror")),
+        nxdomain: rate(rcode("nxdomain")),
+        servfail: rate(rcode("servfail")),
+        refused: rate(rcode("refused")),
+        other: rate(answered.saturating_sub(named)),
+    };
+    let durations = delta(&totals.durations, &before.durations);
+    dns.p50_ms = quantile_ms(snapshot, DNS_DURATION, &durations, 0.5);
+    dns.p99_ms = quantile_ms(snapshot, DNS_DURATION, &durations, 0.99);
+    let hits = totals.cache_hits.saturating_sub(before.cache_hits);
+    let misses = totals.cache_misses.saturating_sub(before.cache_misses);
+    dns.cache.hits_per_second = rate(hits);
+    dns.cache.misses_per_second = rate(misses);
+    dns.cache.hit_ratio = ratio(hits, misses);
+    dns.cache.stale_per_second = rate(totals.cache_stale.saturating_sub(before.cache_stale));
+    let rtt = delta(&totals.upstream_rtt, &before.upstream_rtt);
+    dns.upstreams = MetricsDnsUpstreams {
+        queries_per_second: rate(
+            totals
+                .upstream_queries
+                .saturating_sub(before.upstream_queries),
+        ),
+        p99_ms: quantile_ms(snapshot, DNS_UPSTREAM_RTT, &rtt, 0.99),
+    };
+    dns.blocked = totals
+        .blocked
+        .keys()
+        .map(|list| MetricsDnsBlocked {
+            list: list.clone(),
+            per_second: rate(by(&totals.blocked, &before.blocked, list)),
+        })
+        .collect();
+    dns.log_dropped_per_second = rate(totals.log_dropped.saturating_sub(before.log_dropped));
+    dns
+}
+
+/// `part` over `part + rest`; `None` when both are zero.
+fn ratio(part: u64, rest: u64) -> Option<f64> {
+    let whole = part.saturating_add(rest);
+    (whole > 0).then(|| as_f64(part) / as_f64(whole))
 }
 
 /// Builds the samples of one controller, each against the snapshot before it.
@@ -88,7 +251,15 @@ impl SampleBuilder {
     ) -> MetricsSample {
         let totals = Totals::of(snapshot);
         let mut sample = MetricsSample::empty(node, at);
-        if let Some((then, before)) = self.previous.take() {
+        let previous = self.previous.take();
+        sample.dns = totals.dns.as_ref().map(|dns| {
+            let before = previous.as_ref().and_then(|(then, before)| {
+                let seconds = now.saturating_duration_since(*then).as_secs_f64();
+                before.dns.as_ref().map(|before| (before, seconds))
+            });
+            dns_sample(snapshot, dns, before)
+        });
+        if let Some((then, before)) = previous {
             let interval = now.saturating_duration_since(then);
             sample.interval_ms = u64::try_from(interval.as_millis()).unwrap_or(u64::MAX);
             let seconds = interval.as_secs_f64();
@@ -170,6 +341,14 @@ pub fn cluster_sum(samples: &[MetricsSample], at: Timestamp) -> MetricsSample {
                 })
                 .or_insert_with(|| node.clone());
         }
+        if let Some(dns) = &sample.dns {
+            add_dns(sum.dns.get_or_insert_with(MetricsDns::default), dns);
+        }
+    }
+    if let Some(dns) = &mut sum.dns {
+        let hits = dns.cache.hits_per_second;
+        let lookups = hits + dns.cache.misses_per_second;
+        dns.cache.hit_ratio = (lookups > 0.0).then(|| hits / lookups);
     }
     sum.raft.lag = lags
         .into_iter()
@@ -177,6 +356,47 @@ pub fn cluster_sum(samples: &[MetricsSample], at: Timestamp) -> MetricsSample {
         .collect();
     sum.nodes = nodes.into_values().collect();
     sum
+}
+
+/// Adds a controller's DNS figures to the cluster's: rates, entries and connections summed,
+/// the quantiles at their highest, the block lists by name. The hit ratio is set after the
+/// last one, from the summed hits and misses.
+fn add_dns(sum: &mut MetricsDns, dns: &MetricsDns) {
+    sum.queries_per_second += dns.queries_per_second;
+    sum.transports.udp += dns.transports.udp;
+    sum.transports.tcp += dns.transports.tcp;
+    sum.transports.dot += dns.transports.dot;
+    sum.transports.doh += dns.transports.doh;
+    sum.p50_ms = max_of(sum.p50_ms, dns.p50_ms);
+    sum.p99_ms = max_of(sum.p99_ms, dns.p99_ms);
+    sum.rcodes.noerror += dns.rcodes.noerror;
+    sum.rcodes.nxdomain += dns.rcodes.nxdomain;
+    sum.rcodes.servfail += dns.rcodes.servfail;
+    sum.rcodes.refused += dns.rcodes.refused;
+    sum.rcodes.other += dns.rcodes.other;
+    sum.cache.hits_per_second += dns.cache.hits_per_second;
+    sum.cache.misses_per_second += dns.cache.misses_per_second;
+    sum.cache.stale_per_second += dns.cache.stale_per_second;
+    sum.cache.entries = sum.cache.entries.saturating_add(dns.cache.entries);
+    sum.upstreams.queries_per_second += dns.upstreams.queries_per_second;
+    sum.upstreams.p99_ms = max_of(sum.upstreams.p99_ms, dns.upstreams.p99_ms);
+    for blocked in &dns.blocked {
+        match sum
+            .blocked
+            .iter_mut()
+            .find(|known| known.list == blocked.list)
+        {
+            Some(known) => known.per_second += blocked.per_second,
+            None => sum.blocked.push(blocked.clone()),
+        }
+    }
+    sum.blocked.sort_by(|a, b| a.list.cmp(&b.list));
+    if let Some(connections) = &dns.connections {
+        let total = sum.connections.get_or_insert_with(Default::default);
+        total.dot = total.dot.saturating_add(connections.dot);
+        total.doh = total.doh.saturating_add(connections.doh);
+    }
+    sum.log_dropped_per_second += dns.log_dropped_per_second;
 }
 
 fn max_of<T: PartialOrd>(a: Option<T>, b: Option<T>) -> Option<T> {
@@ -230,6 +450,28 @@ fn counter_total(snapshot: &Snapshot, name: &str, exclude: Option<(&str, &str)>)
             Value::Histogram(_) => None,
         })
         .fold(0, u64::wrapping_add)
+}
+
+/// The totals of a counter family by the value of its label `name`, summed over the other
+/// labels; empty without the family.
+fn counter_by(snapshot: &Snapshot, family: &str, name: &str) -> BTreeMap<String, u64> {
+    let mut totals: BTreeMap<String, u64> = BTreeMap::new();
+    let Some(family) = snapshot.family(family) else {
+        return totals;
+    };
+    for series in &family.series {
+        let Some(value) = label(family, series, name) else {
+            continue;
+        };
+        let count = match series.value {
+            Value::Counter(total) => total,
+            Value::Gauge(value) => as_count(value),
+            Value::Histogram(_) => continue,
+        };
+        let total = totals.entry(value.to_owned()).or_default();
+        *total = total.wrapping_add(count);
+    }
+    totals
 }
 
 /// The cumulative bucket counts of a histogram family, summed over its series without the
@@ -638,6 +880,354 @@ mod tests {
         assert_eq!(sample.raft, MetricsRaft::default());
         assert_eq!(sample.nodes, Vec::<MetricsNode>::new());
         assert_eq!(sample.api.p50_ms, None);
+    }
+
+    static DNS_QUERY_COUNTER: CounterVec = CounterVec::fixed(
+        Desc::counter(DNS_QUERIES, "Queries.").labels(&["proto", "view", "rcode"]),
+        &[
+            &["udp", "default", "noerror"],
+            &["udp", "default", "nxdomain"],
+            &["tcp", "named", "noerror"],
+            &["dot", "default", "servfail"],
+            &["doh", "default", "refused"],
+            &["udp", "default", "formerr"],
+            &["udp", "named", "other"],
+        ],
+    );
+    static DNS_LATENCY: HistogramVec = HistogramVec::fixed(
+        Desc::histogram(DNS_DURATION, "Durations.", &BOUNDS, 1_000_000).labels(&["proto"]),
+        &[&["udp"], &["tcp"]],
+    );
+    static DNS_HITS: CounterVec = CounterVec::fixed(
+        Desc::counter(DNS_CACHE_HITS, "Hits.").labels(&["view"]),
+        &[&["default"], &["named"]],
+    );
+    static DNS_MISSES: CounterVec = CounterVec::fixed(
+        Desc::counter(DNS_CACHE_MISSES, "Misses.").labels(&["view"]),
+        &[&["default"], &["named"]],
+    );
+    static DNS_STALE: Counter = Counter::new(Desc::counter(DNS_CACHE_STALE, "Stale."));
+    static DNS_ENTRIES: Gauge = Gauge::new(Desc::gauge(DNS_CACHE_ENTRIES, "Entries."));
+    static DNS_UPSTREAM: CounterVec = CounterVec::fixed(
+        Desc::counter(DNS_UPSTREAM_QUERIES, "Upstream.").labels(&[
+            "rule",
+            "upstream",
+            "transport",
+            "outcome",
+        ]),
+        &[
+            &["default", "192.0.2.1:53", "plain", "ok"],
+            &["example.test", "198.51.100.53:853", "dot", "timeout"],
+        ],
+    );
+    static DNS_RTT: HistogramVec = HistogramVec::fixed(
+        Desc::histogram(DNS_UPSTREAM_RTT, "Round trips.", &BOUNDS, 1_000_000).labels(&["upstream"]),
+        &[&["192.0.2.1:53"]],
+    );
+    static DNS_BLOCKS: CounterVec = CounterVec::fixed(
+        Desc::counter(DNS_BLOCKED, "Blocked.").labels(&["list"]),
+        &[&["ads"], &["malware"]],
+    );
+    static DNS_OPEN: GaugeVec = GaugeVec::fixed(
+        Desc::gauge(DNS_CONNECTIONS, "Connections.").labels(&["proto"]),
+        &[&["dot"], &["doh"]],
+    );
+    static DNS_DROPPED: Counter = Counter::new(Desc::counter(DNS_LOG_DROPPED, "Dropped."));
+
+    /// A registry with the families of the `dns` role: the query path and the cache always,
+    /// the upstreams, the block lists, the encrypted transports and the log when `full`.
+    fn dns_registry(full: bool) -> Registry {
+        let registry = Registry::new();
+        for family in [
+            &DNS_QUERY_COUNTER as &'static dyn Collect,
+            &DNS_LATENCY,
+            &DNS_HITS,
+            &DNS_MISSES,
+            &DNS_STALE,
+            &DNS_ENTRIES,
+        ] {
+            registry.register(family);
+        }
+        if full {
+            for family in [
+                &DNS_UPSTREAM as &'static dyn Collect,
+                &DNS_RTT,
+                &DNS_BLOCKS,
+                &DNS_OPEN,
+                &DNS_DROPPED,
+            ] {
+                registry.register(family);
+            }
+        }
+        registry
+    }
+
+    /// Two seconds of DNS traffic: 200 queries (120 NOERROR, 40 NXDOMAIN, 10 SERVFAIL over
+    /// DoT, 10 REFUSED over DoH, 20 others), 90 cache hits and 30 misses, 4 stale answers, 30
+    /// upstream exchanges, 50 and 6 blocked queries, 2 dropped log entries.
+    fn two_seconds_of_dns() {
+        DNS_QUERY_COUNTER.add(0, 100);
+        DNS_QUERY_COUNTER.add(1, 40);
+        DNS_QUERY_COUNTER.add(2, 20);
+        DNS_QUERY_COUNTER.add(3, 10);
+        DNS_QUERY_COUNTER.add(4, 10);
+        DNS_QUERY_COUNTER.add(5, 12);
+        DNS_QUERY_COUNTER.add(6, 8);
+        // 100 answers: 90 below 1 ms, 10 between 10 and 100 ms.
+        for _ in 0..90 {
+            DNS_LATENCY.observe(0, 200);
+        }
+        for _ in 0..10 {
+            DNS_LATENCY.observe(1, 40_000);
+        }
+        DNS_HITS.add(0, 80);
+        DNS_HITS.add(1, 10);
+        DNS_MISSES.add(0, 30);
+        DNS_STALE.add(4);
+        DNS_ENTRIES.set(1_234.0);
+        DNS_UPSTREAM.add(0, 24);
+        DNS_UPSTREAM.add(1, 6);
+        for _ in 0..24 {
+            DNS_RTT.observe(0, 5_000);
+        }
+        DNS_BLOCKS.add(0, 50);
+        DNS_BLOCKS.add(1, 6);
+        DNS_OPEN.set(0, 3.0);
+        DNS_OPEN.set(1, 1.0);
+        DNS_DROPPED.add(2);
+    }
+
+    #[test]
+    fn a_node_with_the_dns_role_has_its_queries_cache_upstreams_and_lists_in_the_sample() {
+        let registry = dns_registry(true);
+        let mut builder = SampleBuilder::new();
+        let start = Instant::now();
+        let at = Timestamp::now();
+        let first = builder.build(None, at, start, &registry.snapshot(), &BTreeMap::new());
+        let dns = first.dns.expect("the role's families are registered");
+        assert!(dns.queries_per_second.abs() < f64::EPSILON);
+        assert_eq!(dns.p50_ms, None);
+        assert_eq!(dns.cache.hit_ratio, None);
+        assert_eq!(
+            dns.connections,
+            Some(MetricsDnsConnections { dot: 0, doh: 0 })
+        );
+
+        two_seconds_of_dns();
+        let second = builder.build(
+            None,
+            at,
+            start + Duration::from_secs(2),
+            &registry.snapshot(),
+            &BTreeMap::new(),
+        );
+        let dns = second.dns.clone().expect("dns");
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        assert!(near(dns.queries_per_second, 100.0), "{dns:?}");
+        assert_eq!(
+            dns.transports,
+            MetricsDnsTransports {
+                udp: 80.0,
+                tcp: 10.0,
+                dot: 5.0,
+                doh: 5.0,
+            }
+        );
+        assert_eq!(
+            dns.rcodes,
+            MetricsDnsRcodes {
+                noerror: 60.0,
+                nxdomain: 20.0,
+                servfail: 5.0,
+                refused: 5.0,
+                other: 10.0,
+            }
+        );
+        // The median at 50 of 100, in the first bucket of 90: 0.5 / 0.9 of 1 ms.
+        assert!(close(dns.p50_ms, 50.0 / 90.0), "{dns:?}");
+        // The 99th at 99 of 100: 9 of the 10 in the 10 to 100 ms bucket.
+        assert!(close(dns.p99_ms, 10.0 + 90.0 * 0.9), "{dns:?}");
+        assert!(close(dns.cache.hit_ratio, 0.75));
+        assert!(near(dns.cache.hits_per_second, 45.0));
+        assert!(near(dns.cache.misses_per_second, 15.0));
+        assert!(near(dns.cache.stale_per_second, 2.0));
+        assert_eq!(dns.cache.entries, 1_234);
+        assert!(near(dns.upstreams.queries_per_second, 15.0));
+        // 24 round trips of 5 ms: the 99th in the 1 to 10 ms bucket.
+        assert!(close(dns.upstreams.p99_ms, 1.0 + 9.0 * 0.99), "{dns:?}");
+        assert_eq!(
+            dns.blocked,
+            vec![
+                MetricsDnsBlocked {
+                    list: "ads".to_owned(),
+                    per_second: 25.0
+                },
+                MetricsDnsBlocked {
+                    list: "malware".to_owned(),
+                    per_second: 3.0
+                }
+            ]
+        );
+        assert_eq!(
+            dns.connections,
+            Some(MetricsDnsConnections { dot: 3, doh: 1 })
+        );
+        assert!(near(dns.log_dropped_per_second, 1.0));
+
+        // A quiet second: no rates and no quantiles, the gauges stay.
+        let third = builder.build(
+            None,
+            at,
+            start + Duration::from_secs(3),
+            &registry.snapshot(),
+            &BTreeMap::new(),
+        );
+        let dns = third.dns.expect("dns");
+        assert!(dns.queries_per_second.abs() < f64::EPSILON);
+        assert_eq!(
+            (dns.p50_ms, dns.p99_ms, dns.upstreams.p99_ms),
+            (None, None, None)
+        );
+        assert_eq!(dns.cache.hit_ratio, None);
+        assert_eq!(dns.cache.entries, 1_234);
+        assert!(
+            dns.blocked
+                .iter()
+                .all(|list| list.per_second.abs() < f64::EPSILON)
+        );
+
+        let json = serde_json::to_value(&second).expect("json");
+        assert_eq!(json["dns"]["transports"]["dot"], 5.0);
+        assert_eq!(json["dns"]["blocked"][0]["list"], "ads");
+        assert_eq!(json["dns"]["connections"]["dot"], 3);
+        let back: MetricsSample = serde_json::from_value(json).expect("back");
+        assert_eq!(back, second);
+    }
+
+    #[test]
+    fn the_dns_part_is_absent_without_the_role_and_optional_parts_without_their_families() {
+        let none = Registry::new();
+        let mut builder = SampleBuilder::new();
+        let sample = builder.build(
+            None,
+            Timestamp::now(),
+            Instant::now(),
+            &none.snapshot(),
+            &BTreeMap::new(),
+        );
+        assert_eq!(sample.dns, None);
+        let json = serde_json::to_value(&sample).expect("json");
+        assert!(json.get("dns").is_none());
+
+        // The role without DoT and DoH and before the block lists: no connections, no lists.
+        let registry = dns_registry(false);
+        let mut builder = SampleBuilder::new();
+        let start = Instant::now();
+        builder.build(
+            None,
+            Timestamp::now(),
+            start,
+            &registry.snapshot(),
+            &BTreeMap::new(),
+        );
+        let sample = builder.build(
+            None,
+            Timestamp::now(),
+            start + Duration::from_secs(1),
+            &registry.snapshot(),
+            &BTreeMap::new(),
+        );
+        let dns = sample.dns.expect("dns");
+        assert_eq!(dns.connections, None);
+        assert_eq!(dns.blocked, Vec::new());
+        assert_eq!(dns.upstreams, MetricsDnsUpstreams::default());
+        let json = serde_json::to_value(&dns).expect("json");
+        assert!(json.get("connections").is_none() && json.get("p99_ms").is_none());
+    }
+
+    #[test]
+    fn the_cluster_sums_the_dns_rates_and_takes_the_highest_quantiles() {
+        let dns = |qps: f64, hits: f64, misses: f64, p99: f64, lists: &[(&str, f64)]| MetricsDns {
+            queries_per_second: qps,
+            transports: MetricsDnsTransports {
+                udp: qps,
+                ..MetricsDnsTransports::default()
+            },
+            p50_ms: Some(p99 / 10.0),
+            p99_ms: Some(p99),
+            rcodes: MetricsDnsRcodes {
+                noerror: qps,
+                ..MetricsDnsRcodes::default()
+            },
+            cache: MetricsDnsCache {
+                hit_ratio: ratio(1, 1),
+                hits_per_second: hits,
+                misses_per_second: misses,
+                stale_per_second: 1.0,
+                entries: 100,
+            },
+            upstreams: MetricsDnsUpstreams {
+                queries_per_second: misses,
+                p99_ms: Some(p99 * 2.0),
+            },
+            blocked: lists
+                .iter()
+                .map(|(list, per_second)| MetricsDnsBlocked {
+                    list: (*list).to_owned(),
+                    per_second: *per_second,
+                })
+                .collect(),
+            connections: Some(MetricsDnsConnections { dot: 2, doh: 1 }),
+            log_dropped_per_second: 0.5,
+        };
+        let mut one = sample(1, 1.0, None);
+        one.dns = Some(dns(
+            100.0,
+            30.0,
+            10.0,
+            4.0,
+            &[("malware", 1.0), ("ads", 5.0)],
+        ));
+        let mut two = sample(2, 1.0, None);
+        two.dns = Some(dns(50.0, 10.0, 30.0, 12.0, &[("ads", 2.0)]));
+        let three = sample(3, 1.0, None);
+        let mut stale = sample(4, 1.0, None);
+        stale.stale = true;
+        stale.dns = Some(dns(1_000.0, 1.0, 1.0, 900.0, &[]));
+
+        let sum = cluster_sum(&[one, two, three, stale], Timestamp::now());
+        let dns = sum.dns.expect("two controllers run the role");
+        assert!((dns.queries_per_second - 150.0).abs() < 1e-9);
+        assert!((dns.transports.udp - 150.0).abs() < 1e-9);
+        assert!((dns.rcodes.noerror - 150.0).abs() < 1e-9);
+        assert_eq!(dns.p50_ms, Some(1.2));
+        assert_eq!(dns.p99_ms, Some(12.0));
+        assert_eq!(dns.upstreams.p99_ms, Some(24.0));
+        // 40 hits of 80 lookups, not the mean of the two ratios.
+        assert_eq!(dns.cache.hit_ratio, Some(0.5));
+        assert_eq!(dns.cache.entries, 200);
+        assert!((dns.cache.stale_per_second - 2.0).abs() < 1e-9);
+        assert_eq!(
+            dns.blocked,
+            vec![
+                MetricsDnsBlocked {
+                    list: "ads".to_owned(),
+                    per_second: 7.0
+                },
+                MetricsDnsBlocked {
+                    list: "malware".to_owned(),
+                    per_second: 1.0
+                }
+            ]
+        );
+        assert_eq!(
+            dns.connections,
+            Some(MetricsDnsConnections { dot: 4, doh: 2 })
+        );
+        assert!((dns.log_dropped_per_second - 1.0).abs() < 1e-9);
+
+        let without = cluster_sum(&[sample(1, 1.0, None)], Timestamp::now());
+        assert_eq!(without.dns, None);
     }
 
     fn sample(node: u64, requests: f64, p99: Option<f64>) -> MetricsSample {

@@ -3069,6 +3069,24 @@ export type MessageKey =
   | "languages.version.not_previewed"
   | "languages.version.percent"
   | "languages.version.previewed"
+  | "metrics.dns.answers"
+  | "metrics.dns.answers_hint"
+  | "metrics.dns.blocked"
+  | "metrics.dns.blocked_hint"
+  | "metrics.dns.blocked_none"
+  | "metrics.dns.cache"
+  | "metrics.dns.cache_hint"
+  | "metrics.dns.encrypted"
+  | "metrics.dns.encrypted_hint"
+  | "metrics.dns.log_dropped"
+  | "metrics.dns.queries"
+  | "metrics.dns.queries_hint"
+  | "metrics.dns.queries_idle"
+  | "metrics.dns.rate"
+  | "metrics.dns.rcode_other"
+  | "metrics.dns.upstreams"
+  | "metrics.dns.upstreams_hint"
+  | "metrics.dns.upstreams_idle"
   | "metrics.raft.lag"
   | "metrics.raft.node"
   | "metrics.raft.stale"
@@ -3099,6 +3117,7 @@ export type MessageKey =
   | "metrics.unit.bytes"
   | "metrics.unit.ms"
   | "metrics.unit.per_second"
+  | "metrics.unit.percent"
   | "metrics.waiting"
   | "move.checklist"
   | "move.checklist_foot"
@@ -5398,6 +5417,13 @@ export interface MessageArgs {
   "languages.version.by": { when: string | number; who: string | number };
   "languages.version.label": { version: string | number };
   "languages.version.percent": { percent: string | number };
+  "metrics.dns.blocked_hint": { lists: number };
+  "metrics.dns.cache_hint": { entries: string | number; stale: string | number };
+  "metrics.dns.encrypted_hint": { doh: number; dot: number };
+  "metrics.dns.log_dropped": { rate: string | number };
+  "metrics.dns.queries_hint": { p50: string | number; p99: string | number };
+  "metrics.dns.rate": { rate: string | number };
+  "metrics.dns.upstreams_hint": { p99: string | number };
   "metrics.raft.lag": { entries: number };
   "metrics.raft.node": { node: string | number };
   "metrics.sparkline": { name: string | number; values: string | number };
@@ -8788,6 +8814,24 @@ export const messageKeys: readonly MessageKey[] = [
   "languages.version.not_previewed",
   "languages.version.percent",
   "languages.version.previewed",
+  "metrics.dns.answers",
+  "metrics.dns.answers_hint",
+  "metrics.dns.blocked",
+  "metrics.dns.blocked_hint",
+  "metrics.dns.blocked_none",
+  "metrics.dns.cache",
+  "metrics.dns.cache_hint",
+  "metrics.dns.encrypted",
+  "metrics.dns.encrypted_hint",
+  "metrics.dns.log_dropped",
+  "metrics.dns.queries",
+  "metrics.dns.queries_hint",
+  "metrics.dns.queries_idle",
+  "metrics.dns.rate",
+  "metrics.dns.rcode_other",
+  "metrics.dns.upstreams",
+  "metrics.dns.upstreams_hint",
+  "metrics.dns.upstreams_idle",
   "metrics.raft.lag",
   "metrics.raft.node",
   "metrics.raft.stale",
@@ -8818,6 +8862,7 @@ export const messageKeys: readonly MessageKey[] = [
   "metrics.unit.bytes",
   "metrics.unit.ms",
   "metrics.unit.per_second",
+  "metrics.unit.percent",
   "metrics.waiting",
   "move.checklist",
   "move.checklist_foot",

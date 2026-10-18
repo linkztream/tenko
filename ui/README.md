@@ -52,7 +52,8 @@ ui/
                         their own (settings/access/, audit-export/, vault/, backup/, languages/) with a
                         route each in settings/routes.ts
     dashboard/          the start page (decision 13); MetricsTiles.tsx and metrics.ts are its live
-                        metrics for administrators (WP3.5b), on a stream of their own
+                        metrics for administrators (WP3.5b), on a stream of their own, with the
+                        DNS tiles while a controller runs the dns role (WP5.6)
     ipam/               networks (tree and prefix pane), addresses, tenancy collections,
                         forms, plan dialogs, history, move preview, utilization alarms
     hosts/              host list and detail, interfaces, connection hand-off

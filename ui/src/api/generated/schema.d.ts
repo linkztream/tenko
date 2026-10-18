@@ -8260,6 +8260,163 @@ export interface components {
              */
             requests_per_second: number;
         };
+        /**
+         * @description The `dns` role in a sample (OPS-20): the queries it answered, the cache, the upstreams, the
+         *     block lists, the encrypted transports and the query log over the interval.
+         */
+        MetricsDns: {
+            /**
+             * @description Queries blocked per second by each block list or policy zone that blocked one since
+             *     the role started, by list name.
+             */
+            blocked: components["schemas"]["MetricsDnsBlocked"][];
+            /** @description The cache. */
+            cache: components["schemas"]["MetricsDnsCache"];
+            connections?: components["schemas"]["MetricsDnsConnections"] | null;
+            /**
+             * Format: double
+             * @description Query log entries dropped per second (the ring was full or the disk failed).
+             */
+            log_dropped_per_second: number;
+            /**
+             * Format: double
+             * @description The median time from a query's arrival to its answer in milliseconds; absent without
+             *     queries.
+             */
+            p50_ms?: number | null;
+            /**
+             * Format: double
+             * @description The 99th percentile in milliseconds; absent without queries.
+             */
+            p99_ms?: number | null;
+            /**
+             * Format: double
+             * @description Queries answered per second, over every transport.
+             */
+            queries_per_second: number;
+            /** @description Answers per second by RCODE. */
+            rcodes: components["schemas"]["MetricsDnsRcodes"];
+            /** @description Queries answered per second by transport. */
+            transports: components["schemas"]["MetricsDnsTransports"];
+            /** @description The exchanges with upstream resolvers. */
+            upstreams: components["schemas"]["MetricsDnsUpstreams"];
+        };
+        /** @description The queries one block list blocked. */
+        MetricsDnsBlocked: {
+            /** @description The list, as the `list` label of `tenko_dns_blocked_total` names it. */
+            list: string;
+            /**
+             * Format: double
+             * @description Queries blocked per second.
+             */
+            per_second: number;
+        };
+        /** @description The cache of the `dns` role in a sample. */
+        MetricsDnsCache: {
+            /**
+             * Format: int64
+             * @description Entries in the cache.
+             */
+            entries: number;
+            /**
+             * Format: double
+             * @description Hits over hits and misses in the interval, 0 to 1; absent without a lookup.
+             */
+            hit_ratio?: number | null;
+            /**
+             * Format: double
+             * @description Forwarded queries the cache answered, per second.
+             */
+            hits_per_second: number;
+            /**
+             * Format: double
+             * @description Forwarded queries the cache could not answer, per second.
+             */
+            misses_per_second: number;
+            /**
+             * Format: double
+             * @description Stale answers (RFC 8767) per second.
+             */
+            stale_per_second: number;
+        };
+        /** @description The open connections of the encrypted transports. */
+        MetricsDnsConnections: {
+            /**
+             * Format: int64
+             * @description Open DNS over HTTPS connections.
+             */
+            doh: number;
+            /**
+             * Format: int64
+             * @description Open DNS over TLS connections.
+             */
+            dot: number;
+        };
+        /** @description Answers per second by RCODE. */
+        MetricsDnsRcodes: {
+            /**
+             * Format: double
+             * @description NOERROR, with or without records.
+             */
+            noerror: number;
+            /**
+             * Format: double
+             * @description NXDOMAIN.
+             */
+            nxdomain: number;
+            /**
+             * Format: double
+             * @description Every other RCODE.
+             */
+            other: number;
+            /**
+             * Format: double
+             * @description REFUSED.
+             */
+            refused: number;
+            /**
+             * Format: double
+             * @description SERVFAIL.
+             */
+            servfail: number;
+        };
+        /** @description Queries answered per second by transport. */
+        MetricsDnsTransports: {
+            /**
+             * Format: double
+             * @description Over DNS over HTTPS.
+             */
+            doh: number;
+            /**
+             * Format: double
+             * @description Over DNS over TLS.
+             */
+            dot: number;
+            /**
+             * Format: double
+             * @description Over TCP.
+             */
+            tcp: number;
+            /**
+             * Format: double
+             * @description Over UDP.
+             */
+            udp: number;
+        };
+        /** @description The upstream resolvers in a sample. */
+        MetricsDnsUpstreams: {
+            /**
+             * Format: double
+             * @description The 99th percentile of the round-trip time of the answered exchanges in milliseconds;
+             *     absent without one.
+             */
+            p99_ms?: number | null;
+            /**
+             * Format: double
+             * @description Exchanges with upstreams per second, whatever their outcome.
+             */
+            queries_per_second: number;
+        };
         /** @description The ingest of observations in a sample. */
         MetricsIngest: {
             /**
@@ -8343,6 +8500,7 @@ export interface components {
             api: components["schemas"]["MetricsApi"];
             /** @description When the sample was taken, by the controller's clock. */
             at: components["schemas"]["Timestamp"];
+            dns?: components["schemas"]["MetricsDns"] | null;
             /** @description The observations the reconciler ingests. */
             ingest: components["schemas"]["MetricsIngest"];
             /**

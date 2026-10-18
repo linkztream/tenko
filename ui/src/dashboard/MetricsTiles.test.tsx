@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { axeViolations } from "../app/testing/axe";
 import { setLocale } from "../i18n";
-import type { MetricsSample, MetricsSnapshot } from "./metrics";
+import type { MetricsDns, MetricsSample, MetricsSnapshot } from "./metrics";
 import MetricsTiles from "./MetricsTiles";
 
 /** A stand-in for EventSource that the tests feed. */
@@ -213,5 +213,130 @@ describe("metrics tiles", () => {
     expect(tile("jobs").textContent).toContain("1 jobb väntar");
     expect(tile("nodes").textContent).toContain("1 nod ansluten, 2 omgångar kastade");
     expect(within(tile("raft")).getByTestId("metrics-raft-node").textContent).toContain("ledare");
+  });
+});
+
+function dnsPart(patch: Partial<MetricsDns> = {}): MetricsDns {
+  return {
+    queries_per_second: 1_250,
+    transports: { udp: 1_000, tcp: 50, dot: 150, doh: 50 },
+    p50_ms: 0.3,
+    p99_ms: 18,
+    rcodes: { noerror: 1_000, nxdomain: 150, servfail: 50, refused: 25, other: 25 },
+    cache: { hit_ratio: 0.82, hits_per_second: 410, misses_per_second: 90, stale_per_second: 1.5, entries: 8_400 },
+    upstreams: { queries_per_second: 90, p99_ms: 42 },
+    blocked: [
+      { list: "ads", per_second: 30 },
+      { list: "malware", per_second: 2 },
+      { list: "trackers", per_second: 12 },
+      { list: "telemetry", per_second: 5 },
+      { list: "quiet", per_second: 0 },
+    ],
+    connections: { dot: 6, doh: 3 },
+    log_dropped_per_second: 0,
+    ...patch,
+  };
+}
+
+const DNS_TILES = ["dns-queries", "dns-cache", "dns-answers", "dns-blocked", "dns-upstreams", "dns-encrypted"];
+
+describe("DNS tiles", () => {
+  it("are not shown while no controller runs the dns role", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const own = sample(1);
+    send(FakeSource.last(), snapshot([own], own));
+    await waitFor(() => expect(tile("requests").dataset.value).toBe("12.5"));
+    for (const name of DNS_TILES) expect(screen.queryByTestId(`metrics-tile-${name}`)).toBeNull();
+  });
+
+  it("follow the other tiles with the queries, the cache, the answers, the lists, the upstreams and the connections", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const source = FakeSource.last();
+    for (const qps of [900, 1_100, 1_250]) {
+      const own = sample(1, { dns: dnsPart({ queries_per_second: qps }) });
+      send(source, snapshot([own], own));
+    }
+    await waitFor(() => expect(tile("dns-queries").dataset.value).toBe("1250"));
+    expect([...screen.getByTestId("metrics-tiles").querySelectorAll("[data-testid^='metrics-tile-']")].map((el) => el.getAttribute("data-testid"))).toEqual(
+      ["requests", "commit", "store", "raft", "jobs", "ingest", "sse", "nodes", ...DNS_TILES].map((name) => `metrics-tile-${name}`),
+    );
+    expect(tile("dns-queries").textContent).toContain("1.3K");
+    expect(tile("dns-queries").textContent).toContain("p50 0.3 ms, p99 18 ms");
+    expect(screen.getByTestId("metrics-sparkline-dns-queries").dataset.points).toBe("3");
+    expect(screen.queryByTestId("metrics-dns-log-dropped")).toBeNull();
+    expect(tile("dns-cache").dataset.value).toBe("82");
+    expect(tile("dns-cache").textContent).toContain("8.4K entries, 1.5 stale answers per second");
+    expect(tile("dns-answers").dataset.value).toBe("80");
+    const rcodes = within(tile("dns-answers")).getAllByTestId("metrics-dns-rcode");
+    expect(rcodes.map((row) => [row.dataset.rcode, row.dataset.rate])).toEqual([
+      ["noerror", "1000"],
+      ["nxdomain", "150"],
+      ["servfail", "50"],
+      ["refused", "25"],
+      ["other", "25"],
+    ]);
+    expect(rcodes[0]!.textContent).toBe("NOERROR1,000/s");
+    expect(rcodes[4]!.textContent).toContain("Other");
+    expect(tile("dns-blocked").dataset.value).toBe("49");
+    expect(tile("dns-blocked").textContent).toContain("5 lists have blocked queries");
+    const lists = within(tile("dns-blocked")).getAllByTestId("metrics-dns-list");
+    expect(lists.map((row) => [row.dataset.list, row.dataset.rate])).toEqual([
+      ["ads", "30"],
+      ["trackers", "12"],
+      ["telemetry", "5"],
+    ]);
+    expect(tile("dns-upstreams").dataset.value).toBe("90");
+    expect(tile("dns-upstreams").textContent).toContain("Round trip p99 42 ms");
+    expect(tile("dns-encrypted").dataset.value).toBe("9");
+    expect(tile("dns-encrypted").textContent).toContain("DoT 6, DoH 3");
+    expect(await axeViolations(screen.getByTestId("metrics-tiles"))).toEqual([]);
+  });
+
+  it("say when the role is idle, has no lists, serves no encrypted transport and drops log entries", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const idle = sample(1, {
+      dns: dnsPart({
+        queries_per_second: 0,
+        transports: { udp: 0, tcp: 0, dot: 0, doh: 0 },
+        p50_ms: null,
+        p99_ms: null,
+        rcodes: { noerror: 0, nxdomain: 0, servfail: 0, refused: 0, other: 0 },
+        cache: { hit_ratio: null, hits_per_second: 0, misses_per_second: 0, stale_per_second: 0, entries: 0 },
+        upstreams: { queries_per_second: 0 },
+        blocked: [],
+        connections: null,
+        log_dropped_per_second: 3.5,
+      }),
+    });
+    send(FakeSource.last(), snapshot([idle], idle));
+    await waitFor(() => expect(tile("dns-queries").dataset.value).toBe("0"));
+    expect(tile("dns-queries").textContent).toContain("No queries in the last second");
+    expect(screen.getByTestId("metrics-dns-log-dropped").textContent).toBe("3.5 query log entries dropped per second");
+    expect(tile("dns-cache").dataset.value).toBeUndefined();
+    expect(tile("dns-answers").dataset.value).toBeUndefined();
+    expect(tile("dns-blocked").dataset.value).toBe("0");
+    expect(tile("dns-blocked").textContent).toContain("No list has blocked a query");
+    expect(within(tile("dns-blocked")).queryAllByTestId("metrics-dns-list")).toHaveLength(0);
+    expect(tile("dns-upstreams").textContent).toContain("No upstream answered in the last second");
+    expect(screen.queryByTestId("metrics-tile-dns-encrypted")).toBeNull();
+  });
+
+  it("speak Swedish", async () => {
+    await setLocale("sv");
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const own = sample(1, { dns: dnsPart({ log_dropped_per_second: 2 }) });
+    send(FakeSource.last(), snapshot([own], own));
+    await waitFor(() => expect(tile("dns-queries").dataset.value).toBe("1250"));
+    expect(tile("dns-queries").textContent).toContain("DNS-frågor");
+    expect(screen.getByTestId("metrics-dns-log-dropped").textContent).toContain("poster i frågeloggen kastade per sekund");
+    expect(tile("dns-cache").textContent).toContain("Träffandel i cachen");
+    expect(tile("dns-answers").textContent).toContain("Övriga");
+    expect(tile("dns-blocked").textContent).toContain("5 listor har blockerat frågor");
+    expect(tile("dns-upstreams").textContent).toContain("Svarstid p99 42 ms");
+    expect(tile("dns-encrypted").textContent).toContain("Krypterade anslutningar");
   });
 });

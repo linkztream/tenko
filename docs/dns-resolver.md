@@ -606,4 +606,99 @@ Stopping keeps the files already written until their retention removes them; to 
 
 ## 9. The home cut-over
 
-(WP5.6.)
+The procedure of exit criterion E14 (owner action P2-Q14): a home network sends all of its queries through one Tenko node, which answers the home zones itself, forwards the Active Directory zones to the domain controllers, sends everything else to a DoT upstream and blocks the names of a block list (DNS-02, DNS-15, DNS-21, DNS-23, TGL-14, TGL-22). Nothing in the network changes until the DHCP server hands out the node's address; the rollback is the same setting set back, with the old resolver still running.
+
+Every name and address below is a placeholder. Put in your own:
+
+| Placeholder | Stands for |
+|---|---|
+| `192.0.2.53`, `2001:db8:1::53` | The node's fixed addresses |
+| `192.0.2.1` | The resolver the clients use today (the router, Pi-hole or another server); it keeps running |
+| `192.0.2.10`, `192.0.2.11` | The domain controllers |
+| `home.example.test` | A zone the node serves (imported, or created with its records) |
+| `ad.example.test` | The AD zone, which the domain controllers keep serving |
+| `198.51.100.53`, `198.51.100.54`, `dns.example.net` | The chosen DoT upstream: its addresses and the name in its certificate |
+| `192.0.2.0/24`, `2001:db8:1::/64` | The home networks |
+| `blocked.example.net` | A name on the block list |
+
+### 9.1 Before the day
+
+Each row is done and checked before the DHCP change, in this order.
+
+| What | How | Checked by |
+|---|---|---|
+| A node with the `dns` role on fixed addresses | `roles = "controller,dns"` and `[dns] listen = ["192.0.2.53:53", "[2001:db8:1::53]:53"]` in `tenko.toml` (or `TENKO_ROLES`, `TENKO_DNS__LISTEN`); the addresses static or reserved on the DHCP server, port 53 free on them and open in the host's firewall to the home networks ([deploy/README.md](../deploy/README.md), "DNS: the dns role and port 53") | `tenko serve` prints `dns role answering on 192.0.2.53:53 ...`; `GET /api/v1/nodes/{id}/dns` has `"serving": true` |
+| The home zones | Imported from the zone files of the server that holds them today ([dns.md](dns.md) section 4: the zone page's import, or `POST /api/v1/dns/zones/{id}/records/import` with `dry_run=true` first); the reverse zones of the home prefixes come from IPAM ([dns.md](dns.md) section 7) | `dig @192.0.2.53 nas.home.example.test` answers with the `aa` flag |
+| The AD zone to the domain controllers | A forwarding rule per AD zone, plain DNS: `tenko dns forwarder create ad.example.test --upstream 192.0.2.10 --upstream 192.0.2.11`, and the same for each reverse zone the domain controllers hold and the node does not serve. `_msdcs.ad.example.test` and every other name under the AD zone follow its rule | Section 9.2, the AD rows |
+| Everything else to the DoT upstream | The root rule: `tenko dns forwarder create . --transport dot --tls-name dns.example.net --upstream 198.51.100.53 --upstream 198.51.100.54` (section 2.1; no upstream is built in, P2-Q5). A root rule in the store wins over `[dns] forwarders` | Section 9.2, the outside rows; the Upstream queries tile counts exchanges |
+| A block list | Added and fetched once (section 5); the list's version is on the node | `dig @192.0.2.53 blocked.example.net` is blocked (section 9.2) |
+| Who may recurse | Under the Home profile every prefix IPAM knows may recurse, and loopback (section 2.3): every home network that will get the node's address by DHCP is a prefix in IPAM, the guest and IoT networks too. Otherwise a view with its own access list | A query from each network answers; one from outside is refused (section 9.6, TGL-22) |
+| The cache and the log | The cache needs nothing (10,000 entries under Home). The query log is off under Home (section 8.7); turning it on for the first days, with pseudonymised clients, helps to find what breaks | `GET /api/v1/nodes/{id}/dns`: `cache_entries`, `query_log` |
+| The DHCP lease time | Optional: a day before, lower the lease time of the scopes to an hour, so that the clients follow the change within half an hour (they renew at half the lease); set it back after the cut-over | A client's lease shows the shorter time |
+| The old resolver | Left running and unchanged: it is the rollback | `dig @192.0.2.1 www.example.com` answers |
+
+The node is the only resolver the clients get: while it is down they have no DNS until the rollback. A second node to list beside it comes with the cluster data plane (Phase 5). Listing the old resolver as a second server is no fallback: clients choose between the servers on their own, and the blocked names would answer through it.
+
+### 9.2 The check from one client
+
+From a client on a home network, before anything changes for the others, ask the node directly: `dig` on Linux and macOS, `Resolve-DnsName -Server 192.0.2.53 -Name <name> -Type <type>` on Windows, or `nslookup <name> 192.0.2.53` anywhere.
+
+| Ask | Command | Expected |
+|---|---|---|
+| A name of a home zone | `dig @192.0.2.53 nas.home.example.test A` | NOERROR, flag `aa`, the address of the zone |
+| Its reverse | `dig @192.0.2.53 -x 192.0.2.20` | NOERROR, the PTR record |
+| An AD name | `dig @192.0.2.53 dc1.ad.example.test A` | NOERROR without `aa`, the address the domain controllers give |
+| The AD locator | `dig @192.0.2.53 _ldap._tcp.dc._msdcs.ad.example.test SRV` | NOERROR, one SRV record per domain controller |
+| An outside name | `dig @192.0.2.53 www.example.com A`, twice | NOERROR, flag `ra`; the second answer comes from the cache, faster and with a lower TTL |
+| A blocked name | `dig @192.0.2.53 blocked.example.net A` | NXDOMAIN (or the answer of the list's action, section 5) with `EDE: 15 (Blocked)` in the OPT pseudo-section |
+| Over TCP | `dig +tcp @192.0.2.53 www.example.com A` | As over UDP |
+
+Then point that one client at the node (its DNS server set by hand to `192.0.2.53`) and use it for a day: browsing, the domain logon, the printers, the phones' apps. A domain-joined Windows client registers its name with the server that the AD zone's SOA record names (a domain controller), which the conditional forwarder answers; the registration itself does not go through the node.
+
+### 9.3 The DHCP change
+
+On the existing DHCP server, for each scope of the home networks:
+
+1. Set option 6 (DNS servers) to the node's address alone: `192.0.2.53`. Where the server holds the option per scope, start with one scope and go on with the others after a day. On a Windows DHCP server, for example: `Set-DhcpServerv4OptionValue -ScopeId 192.0.2.0 -DnsServer 192.0.2.53`.
+2. IPv6: when the networks announce DNS servers over IPv6 (RDNSS in the router advertisements, or DHCPv6 option 23), set those to `2001:db8:1::53` as well. A client that learns an IPv6 DNS server elsewhere keeps asking it.
+3. Wait for the clients: each takes the new server when it renews its lease, at half the lease time, or at once when it reconnects (`ipconfig /renew` on Windows, Wi-Fi off and on on a phone). Clients with a DNS server set by hand (servers, some printers) do not follow: change those where the node should serve them. Leave the domain controllers as they are.
+4. Check a few clients: `ipconfig /all` shows `DNS Servers . . . : 192.0.2.53` on Windows, `resolvectl status` on Linux with systemd-resolved, the network details on a phone.
+
+### 9.4 The first hour
+
+The DNS tiles of the start page ([observability.md](observability.md) section 7) show the node live; the query log page shows single queries when the log is on.
+
+| Tile | Healthy | When it is not |
+|---|---|---|
+| DNS queries | Rises as the clients renew; p50 below a millisecond for cached and home names, p99 near the upstreams' round trip | A p99 far above the Upstream queries tile's round trip: see `problems` in `GET /api/v1/nodes/{id}/dns` |
+| Answers | NOERROR the most; NXDOMAIN a few percent (blocked names count here) | SERVFAIL above a few percent: the upstreams or a domain controller do not answer (the Upstream queries tile, `tenko_dns_upstream_queries_total` by `outcome`). REFUSED: clients of a network that is not a prefix in IPAM (section 2.3); add the prefix |
+| Cache hit ratio | Rises over the hour as the popular names fill the cache | Stays near zero: the query log shows which names are asked |
+| Blocked queries | The lists that block, the busiest three by name | A site or app that stops working: find its names in the query log with the block flag and change the list (section 5) |
+| Upstream queries | Exchanges with the DoT upstream, round trip p99 in tens of milliseconds | No exchanges while outside names answer: the root rule is missing and `[dns] forwarders` answers instead |
+| DNS queries, the warning line | None | "query log entries dropped": the log's disk is full or slow (section 8.2) |
+
+`GET /api/v1/system/status` warns with `dns.role.not_serving` when the role stops answering: roll back at once.
+
+### 9.5 The rollback
+
+1. On the DHCP server, set option 6 back to `192.0.2.1`, and the IPv6 DNS servers to what they were, scope by scope as they were changed.
+2. Renew the leases of the clients that matter now (section 9.3, step 3); the others follow within half a lease time.
+3. Leave the node running: nothing else in the network changed, and its dashboard and query log keep what happened for the follow-up.
+
+Roll back when the domain logon fails, when SERVFAIL stays above a few percent for minutes, when the role stops answering, or when the household asks for it.
+
+### 9.6 Verification rows of E14
+
+E14 is met when every row holds on a client that got the node's address by DHCP:
+
+| Requirement | Command | Expected |
+|---|---|---|
+| E14: the client uses the node | `ipconfig /all` or `resolvectl status` | The DNS server is `192.0.2.53` only |
+| DNS-02: the forwarder and the conditional forwarders | `dig dc1.ad.example.test A`; `dig _ldap._tcp.dc._msdcs.ad.example.test SRV` | The domain controllers' answers; `tenko_dns_upstream_queries_total{rule="ad.example.test",outcome="ok"}` grows |
+| DNS-15, TGL-14: DoT to the upstream | `dig www.example.com A` for a name not asked before, while `tcpdump -ni any host 198.51.100.53` runs on the node | An answer; the capture shows port 853 only, nothing on port 53; `tenko_dns_upstream_queries_total{transport="dot",outcome="ok"}` grows |
+| DNS-21: the block list | `dig blocked.example.net A` | NXDOMAIN (or the list's action) with `EDE: 15 (Blocked)`; the Blocked queries tile names the list |
+| DNS-23: the cache | `dig www.example.com A` twice | The second answer's TTL is lower by the seconds between them; the cache hit ratio tile is above zero |
+| TGL-22: the recursion access list | From an address outside the home prefixes (a lab host on `198.51.100.0/24` routed to the node): `dig @192.0.2.53 www.example.com A` | REFUSED with `EDE: 18 (Prohibited)`; from the home networks, an answer |
+| The home zones | `dig nas.home.example.test A`; `dig -x 192.0.2.20` | Answers with `aa` from the node |
+
+Record the date, the lease time used and the findings in the Phase 2 status (`docs/plans/phase-2-status.md`).

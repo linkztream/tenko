@@ -6,6 +6,7 @@ import type { components } from "../api/generated/schema";
 type S = components["schemas"];
 export type MetricsSnapshot = S["MetricsSnapshot"];
 export type MetricsSample = S["MetricsSample"];
+export type MetricsDns = S["MetricsDns"];
 
 /** The `kind` of the events of the `metrics` topic. */
 export const SNAPSHOT_KIND = "metrics.snapshot";
@@ -52,7 +53,56 @@ export function snapshotOf(data: Record<string, unknown>): MetricsSnapshot | nul
 
 /** The tiles, in the order they are shown; each is `metrics-tile-<name>`. */
 export const TILES = ["requests", "commit", "store", "raft", "jobs", "ingest", "sse", "nodes"] as const;
-export type TileName = (typeof TILES)[number];
+/**
+ * The tiles of the `dns` role, after the others while the sample has `dns`; `dns-encrypted`
+ * only while the role serves DoT or DoH.
+ */
+export const DNS_TILES = ["dns-queries", "dns-cache", "dns-answers", "dns-blocked", "dns-upstreams", "dns-encrypted"] as const;
+export type DnsTileName = (typeof DNS_TILES)[number];
+export type TileName = (typeof TILES)[number] | DnsTileName;
+
+/** The RCODEs of the answers tile, in the order they are listed. */
+export const RCODES = ["noerror", "nxdomain", "servfail", "refused", "other"] as const;
+
+/** The share of the answers in `rcode`, in percent; null without answers. */
+export function rcodeShare(dns: MetricsDns, rcode: (typeof RCODES)[number]): number | null {
+  const all = RCODES.reduce((sum, code) => sum + dns.rcodes[code], 0);
+  return all > 0 ? (dns.rcodes[rcode] * 100) / all : null;
+}
+
+/** The queries blocked per second over every list. */
+export function blockedTotal(dns: MetricsDns): number {
+  return dns.blocked.reduce((sum, list) => sum + list.per_second, 0);
+}
+
+/** The three lists that blocked most in the sample, the most first; lists that blocked nothing are left out. */
+export function topLists(dns: MetricsDns): MetricsDns["blocked"] {
+  return dns.blocked
+    .filter((list) => list.per_second > 0)
+    .sort((a, b) => b.per_second - a.per_second || a.list.localeCompare(b.list))
+    .slice(0, 3);
+}
+
+function isDnsTile(name: TileName): name is DnsTileName {
+  return name.startsWith("dns-");
+}
+
+function dnsValue(name: DnsTileName, dns: MetricsDns): number | null {
+  switch (name) {
+    case "dns-queries":
+      return dns.queries_per_second;
+    case "dns-cache":
+      return dns.cache.hit_ratio == null ? null : dns.cache.hit_ratio * 100;
+    case "dns-answers":
+      return rcodeShare(dns, "noerror");
+    case "dns-blocked":
+      return blockedTotal(dns);
+    case "dns-upstreams":
+      return dns.upstreams.queries_per_second;
+    case "dns-encrypted":
+      return dns.connections ? dns.connections.dot + dns.connections.doh : null;
+  }
+}
 
 /** The highest replication lag of a sample. */
 export function highestLag(sample: MetricsSample): number {
@@ -72,6 +122,7 @@ export function droppedBatches(sample: MetricsSample): number | null {
 
 /** The number a tile shows for a sample; null when the sample has none. */
 export function tileValue(name: TileName, sample: MetricsSample): number | null {
+  if (isDnsTile(name)) return sample.dns ? dnsValue(name, sample.dns) : null;
   switch (name) {
     case "requests":
       return sample.api.requests_per_second;

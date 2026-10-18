@@ -38544,6 +38544,255 @@
           }
         }
       },
+      "MetricsDns": {
+        "type": "object",
+        "description": "The `dns` role in a sample (OPS-20): the queries it answered, the cache, the upstreams, the\nblock lists, the encrypted transports and the query log over the interval.",
+        "required": [
+          "queries_per_second",
+          "transports",
+          "rcodes",
+          "cache",
+          "upstreams",
+          "blocked",
+          "log_dropped_per_second"
+        ],
+        "properties": {
+          "blocked": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsDnsBlocked"
+            },
+            "description": "Queries blocked per second by each block list or policy zone that blocked one since\nthe role started, by list name."
+          },
+          "cache": {
+            "$ref": "#/components/schemas/MetricsDnsCache",
+            "description": "The cache."
+          },
+          "connections": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MetricsDnsConnections",
+                "description": "Open DoT and DoH connections; absent when the role serves neither."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "log_dropped_per_second": {
+            "type": "number",
+            "format": "double",
+            "description": "Query log entries dropped per second (the ring was full or the disk failed)."
+          },
+          "p50_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The median time from a query's arrival to its answer in milliseconds; absent without\nqueries."
+          },
+          "p99_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The 99th percentile in milliseconds; absent without queries."
+          },
+          "queries_per_second": {
+            "type": "number",
+            "format": "double",
+            "description": "Queries answered per second, over every transport."
+          },
+          "rcodes": {
+            "$ref": "#/components/schemas/MetricsDnsRcodes",
+            "description": "Answers per second by RCODE."
+          },
+          "transports": {
+            "$ref": "#/components/schemas/MetricsDnsTransports",
+            "description": "Queries answered per second by transport."
+          },
+          "upstreams": {
+            "$ref": "#/components/schemas/MetricsDnsUpstreams",
+            "description": "The exchanges with upstream resolvers."
+          }
+        }
+      },
+      "MetricsDnsBlocked": {
+        "type": "object",
+        "description": "The queries one block list blocked.",
+        "required": [
+          "list",
+          "per_second"
+        ],
+        "properties": {
+          "list": {
+            "type": "string",
+            "description": "The list, as the `list` label of `tenko_dns_blocked_total` names it."
+          },
+          "per_second": {
+            "type": "number",
+            "format": "double",
+            "description": "Queries blocked per second."
+          }
+        }
+      },
+      "MetricsDnsCache": {
+        "type": "object",
+        "description": "The cache of the `dns` role in a sample.",
+        "required": [
+          "hits_per_second",
+          "misses_per_second",
+          "stale_per_second",
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Entries in the cache.",
+            "minimum": 0
+          },
+          "hit_ratio": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Hits over hits and misses in the interval, 0 to 1; absent without a lookup."
+          },
+          "hits_per_second": {
+            "type": "number",
+            "format": "double",
+            "description": "Forwarded queries the cache answered, per second."
+          },
+          "misses_per_second": {
+            "type": "number",
+            "format": "double",
+            "description": "Forwarded queries the cache could not answer, per second."
+          },
+          "stale_per_second": {
+            "type": "number",
+            "format": "double",
+            "description": "Stale answers (RFC 8767) per second."
+          }
+        }
+      },
+      "MetricsDnsConnections": {
+        "type": "object",
+        "description": "The open connections of the encrypted transports.",
+        "required": [
+          "dot",
+          "doh"
+        ],
+        "properties": {
+          "doh": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Open DNS over HTTPS connections.",
+            "minimum": 0
+          },
+          "dot": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Open DNS over TLS connections.",
+            "minimum": 0
+          }
+        }
+      },
+      "MetricsDnsRcodes": {
+        "type": "object",
+        "description": "Answers per second by RCODE.",
+        "required": [
+          "noerror",
+          "nxdomain",
+          "servfail",
+          "refused",
+          "other"
+        ],
+        "properties": {
+          "noerror": {
+            "type": "number",
+            "format": "double",
+            "description": "NOERROR, with or without records."
+          },
+          "nxdomain": {
+            "type": "number",
+            "format": "double",
+            "description": "NXDOMAIN."
+          },
+          "other": {
+            "type": "number",
+            "format": "double",
+            "description": "Every other RCODE."
+          },
+          "refused": {
+            "type": "number",
+            "format": "double",
+            "description": "REFUSED."
+          },
+          "servfail": {
+            "type": "number",
+            "format": "double",
+            "description": "SERVFAIL."
+          }
+        }
+      },
+      "MetricsDnsTransports": {
+        "type": "object",
+        "description": "Queries answered per second by transport.",
+        "required": [
+          "udp",
+          "tcp",
+          "dot",
+          "doh"
+        ],
+        "properties": {
+          "doh": {
+            "type": "number",
+            "format": "double",
+            "description": "Over DNS over HTTPS."
+          },
+          "dot": {
+            "type": "number",
+            "format": "double",
+            "description": "Over DNS over TLS."
+          },
+          "tcp": {
+            "type": "number",
+            "format": "double",
+            "description": "Over TCP."
+          },
+          "udp": {
+            "type": "number",
+            "format": "double",
+            "description": "Over UDP."
+          }
+        }
+      },
+      "MetricsDnsUpstreams": {
+        "type": "object",
+        "description": "The upstream resolvers in a sample.",
+        "required": [
+          "queries_per_second"
+        ],
+        "properties": {
+          "p99_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The 99th percentile of the round-trip time of the answered exchanges in milliseconds;\nabsent without one."
+          },
+          "queries_per_second": {
+            "type": "number",
+            "format": "double",
+            "description": "Exchanges with upstreams per second, whatever their outcome."
+          }
+        }
+      },
       "MetricsIngest": {
         "type": "object",
         "description": "The ingest of observations in a sample.",
@@ -38687,6 +38936,17 @@
           "at": {
             "$ref": "#/components/schemas/Timestamp",
             "description": "When the sample was taken, by the controller's clock."
+          },
+          "dns": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MetricsDns",
+                "description": "The `dns` role of the controller's process; absent when the process does not run it."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "ingest": {
             "$ref": "#/components/schemas/MetricsIngest",

@@ -108,6 +108,78 @@
       <unit id="metrics.tile.nodes_hint_unknown">
         <segment><source>{nodes, plural, one {# node} other {# nodes}} connected</source></segment>
       </unit>
+      <unit id="metrics.unit.percent">
+        <notes><note category="description">Unit after a share in percent.</note></notes>
+        <segment><source>%</source></segment>
+      </unit>
+      <unit id="metrics.dns.queries">
+        <notes><note category="description">Tile title: DNS queries the dns role answered per second.</note></notes>
+        <segment><source>DNS queries</source></segment>
+      </unit>
+      <unit id="metrics.dns.queries_hint">
+        <notes><note category="description">Median and 99th percentile of the time from a DNS query to its answer in the last second, in milliseconds.</note></notes>
+        <segment><source>p50 {p50} ms, p99 {p99} ms</source></segment>
+      </unit>
+      <unit id="metrics.dns.queries_idle">
+        <segment><source>No queries in the last second</source></segment>
+      </unit>
+      <unit id="metrics.dns.log_dropped">
+        <notes><note category="description">The query log lost entries in the last second; {rate} is a number with one decimal.</note></notes>
+        <segment><source>{rate} query log entries dropped per second</source></segment>
+      </unit>
+      <unit id="metrics.dns.cache">
+        <notes><note category="description">Tile title: the share of forwarded queries the DNS cache answered, in percent.</note></notes>
+        <segment><source>Cache hit ratio</source></segment>
+      </unit>
+      <unit id="metrics.dns.cache_hint">
+        <notes><note category="description">{entries} is the number of cache entries with an SI suffix; {stale} the stale answers per second (served from an expired entry while the upstreams fail).</note></notes>
+        <segment><source>{entries} entries, {stale} stale answers per second</source></segment>
+      </unit>
+      <unit id="metrics.dns.answers">
+        <notes><note category="description">Tile title: the DNS answers by response code.</note></notes>
+        <segment><source>Answers</source></segment>
+      </unit>
+      <unit id="metrics.dns.answers_hint">
+        <notes><note category="description">The number of the tile is the share of the answers with the response code NOERROR; the rows list each response code per second.</note></notes>
+        <segment><source>Share answered with NOERROR</source></segment>
+      </unit>
+      <unit id="metrics.dns.rcode_other">
+        <notes><note category="description">Every other DNS response code than NOERROR, NXDOMAIN, SERVFAIL and REFUSED.</note></notes>
+        <segment><source>Other</source></segment>
+      </unit>
+      <unit id="metrics.dns.rate">
+        <notes><note category="description">A rate per second after a row of a tile; {rate} is a number with one decimal.</note></notes>
+        <segment><source>{rate}/s</source></segment>
+      </unit>
+      <unit id="metrics.dns.blocked">
+        <notes><note category="description">Tile title: DNS queries blocked by block lists per second.</note></notes>
+        <segment><source>Blocked queries</source></segment>
+      </unit>
+      <unit id="metrics.dns.blocked_hint">
+        <segment><source>{lists, plural, one {# list has} other {# lists have}} blocked queries</source></segment>
+      </unit>
+      <unit id="metrics.dns.blocked_none">
+        <segment><source>No list has blocked a query</source></segment>
+      </unit>
+      <unit id="metrics.dns.upstreams">
+        <notes><note category="description">Tile title: queries sent to the upstream resolvers per second.</note></notes>
+        <segment><source>Upstream queries</source></segment>
+      </unit>
+      <unit id="metrics.dns.upstreams_hint">
+        <notes><note category="description">The 99th percentile of the round-trip time to the upstream resolvers in the last second.</note></notes>
+        <segment><source>Round trip p99 {p99} ms</source></segment>
+      </unit>
+      <unit id="metrics.dns.upstreams_idle">
+        <segment><source>No upstream answered in the last second</source></segment>
+      </unit>
+      <unit id="metrics.dns.encrypted">
+        <notes><note category="description">Tile title: open DNS over TLS and DNS over HTTPS connections of clients.</note></notes>
+        <segment><source>Encrypted connections</source></segment>
+      </unit>
+      <unit id="metrics.dns.encrypted_hint">
+        <notes><note category="description">DoT and DoH are the protocol names DNS over TLS and DNS over HTTPS; not translated.</note></notes>
+        <segment><source>DoT {dot, number}, DoH {doh, number}</source></segment>
+      </unit>
     </group>
   </file>
 </xliff>

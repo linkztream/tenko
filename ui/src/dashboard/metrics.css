@@ -7,4 +7,9 @@
 .metrics-raft { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); font-size: var(--fs-12); }
 .metrics-raft li { display: flex; align-items: baseline; gap: var(--sp-4); flex-wrap: wrap; min-width: 0; }
 .metrics-raft li .lag { margin-inline-start: auto; color: var(--ink-3); }
+.metrics-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); font-size: var(--fs-12); }
+.metrics-rows li { display: flex; align-items: baseline; gap: var(--sp-4); min-width: 0; }
+.metrics-rows li > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metrics-rows li .rate { margin-inline-start: auto; color: var(--ink-3); white-space: nowrap; }
+.metrics-warn { font-size: var(--fs-12); color: var(--warn-ink); }
 .metrics-raft li[data-state="stale"], .metrics-raft li[data-state="unsupported"] { color: var(--ink-3); }

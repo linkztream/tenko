@@ -10,6 +10,13 @@
 // (the raw number, absent while unknown), `metrics-sparkline-<name>`, and on the Raft tile
 // `metrics-raft-node` per controller (`data-node`, `data-role`, `data-lag`, `data-state`
 // current, stale or unsupported).
+//
+// While the cluster's sample has `dns` (a controller runs the `dns` role) the DNS tiles follow:
+// `metrics-tile-dns-queries` (with `metrics-dns-log-dropped` while the query log drops
+// entries), `-dns-cache` (the hit ratio in percent), `-dns-answers` (the NOERROR share, and
+// `metrics-dns-rcode` per RCODE with `data-rcode` and `data-rate`), `-dns-blocked` (the top
+// three lists as `metrics-dns-list` with `data-list` and `data-rate`), `-dns-upstreams`, and
+// `-dns-encrypted` while the role serves DoT or DoH.
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { EventStream, type EventStreamOptions } from "../api/events";
 import { si } from "../app/format/si";
@@ -22,9 +29,11 @@ import {
   emptyHistory,
   lagOf,
   pushSnapshot,
+  RCODES,
   sampleState,
   snapshotOf,
   tileValue,
+  topLists,
   type MetricsHistory,
   type MetricsSample,
   type TileName,
@@ -92,6 +101,7 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
     return sample ? tileValue(name, sample) : null;
   };
   const p = (key: "p50_ms" | "p99_ms") => cluster()?.api[key];
+  const dns = () => cluster()?.dns ?? undefined;
   const rows = createMemo(() => latest()?.nodes ?? []);
 
   return (
@@ -204,6 +214,88 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
             return drops == null ? t("metrics.tile.nodes_hint_unknown", { nodes }) : t("metrics.tile.nodes_hint", { nodes, drops });
           })()}
         />
+        <Show when={dns()}>
+          {(d) => (
+            <>
+              <Tile
+                name="dns-queries"
+                title={t("metrics.dns.queries")}
+                value={value("dns-queries")}
+                unit={t("metrics.unit.per_second")}
+                series={series("dns-queries")}
+                hint={
+                  d().p50_ms != null && d().p99_ms != null
+                    ? t("metrics.dns.queries_hint", { p50: decimal(d().p50_ms!), p99: decimal(d().p99_ms!) })
+                    : t("metrics.dns.queries_idle")
+                }
+              >
+                <Show when={d().log_dropped_per_second > 0}>
+                  <p class="metrics-warn" data-testid="metrics-dns-log-dropped">
+                    {t("metrics.dns.log_dropped", { rate: decimal(d().log_dropped_per_second) })}
+                  </p>
+                </Show>
+              </Tile>
+              <Tile
+                name="dns-cache"
+                title={t("metrics.dns.cache")}
+                value={value("dns-cache")}
+                unit={t("metrics.unit.percent")}
+                series={series("dns-cache")}
+                hint={t("metrics.dns.cache_hint", { entries: si(d().cache.entries, locale()), stale: decimal(d().cache.stale_per_second) })}
+              />
+              <Tile name="dns-answers" title={t("metrics.dns.answers")} value={value("dns-answers")} unit={t("metrics.unit.percent")} series={series("dns-answers")} hint={t("metrics.dns.answers_hint")}>
+                <ul class="metrics-rows">
+                  <For each={RCODES}>
+                    {(rcode) => (
+                      <li data-testid="metrics-dns-rcode" data-rcode={rcode} data-rate={d().rcodes[rcode]}>
+                        <span class={rcode === "other" ? undefined : "mono"}>{rcode === "other" ? t("metrics.dns.rcode_other") : rcode.toUpperCase()}</span>
+                        <span class="rate">{t("metrics.dns.rate", { rate: decimal(d().rcodes[rcode]) })}</span>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </Tile>
+              <Tile
+                name="dns-blocked"
+                title={t("metrics.dns.blocked")}
+                value={value("dns-blocked")}
+                unit={t("metrics.unit.per_second")}
+                series={series("dns-blocked")}
+                hint={d().blocked.length > 0 ? t("metrics.dns.blocked_hint", { lists: d().blocked.length }) : t("metrics.dns.blocked_none")}
+              >
+                <ul class="metrics-rows">
+                  <For each={topLists(d())}>
+                    {(list) => (
+                      <li data-testid="metrics-dns-list" data-list={list.list} data-rate={list.per_second}>
+                        <span class="mono">{list.list}</span>
+                        <span class="rate">{t("metrics.dns.rate", { rate: decimal(list.per_second) })}</span>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </Tile>
+              <Tile
+                name="dns-upstreams"
+                title={t("metrics.dns.upstreams")}
+                value={value("dns-upstreams")}
+                unit={t("metrics.unit.per_second")}
+                series={series("dns-upstreams")}
+                hint={d().upstreams.p99_ms != null ? t("metrics.dns.upstreams_hint", { p99: decimal(d().upstreams.p99_ms!) }) : t("metrics.dns.upstreams_idle")}
+              />
+              <Show when={d().connections}>
+                {(c) => (
+                  <Tile
+                    name="dns-encrypted"
+                    title={t("metrics.dns.encrypted")}
+                    value={value("dns-encrypted")}
+                    series={series("dns-encrypted")}
+                    hint={t("metrics.dns.encrypted_hint", { dot: c().dot, doh: c().doh })}
+                  />
+                )}
+              </Show>
+            </>
+          )}
+        </Show>
       </div>
     </section>
   );

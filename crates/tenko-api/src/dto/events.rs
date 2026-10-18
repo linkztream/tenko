@@ -271,6 +271,9 @@ pub struct MetricsSample {
     pub sse: MetricsSse,
     /// The nodes connected to the controller and their buffers.
     pub nodes: Vec<MetricsNode>,
+    /// The `dns` role of the controller's process; absent when the process does not run it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dns: Option<MetricsDns>,
 }
 
 impl MetricsSample {
@@ -289,6 +292,7 @@ impl MetricsSample {
             ingest: MetricsIngest::default(),
             sse: MetricsSse::default(),
             nodes: Vec::new(),
+            dns: None,
         }
     }
 }
@@ -381,6 +385,110 @@ pub struct MetricsNode {
     /// absent when the node registry does not say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drops: Option<u64>,
+}
+
+/// The `dns` role in a sample (OPS-20): the queries it answered, the cache, the upstreams, the
+/// block lists, the encrypted transports and the query log over the interval.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct MetricsDns {
+    /// Queries answered per second, over every transport.
+    pub queries_per_second: f64,
+    /// Queries answered per second by transport.
+    pub transports: MetricsDnsTransports,
+    /// The median time from a query's arrival to its answer in milliseconds; absent without
+    /// queries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p50_ms: Option<f64>,
+    /// The 99th percentile in milliseconds; absent without queries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p99_ms: Option<f64>,
+    /// Answers per second by RCODE.
+    pub rcodes: MetricsDnsRcodes,
+    /// The cache.
+    pub cache: MetricsDnsCache,
+    /// The exchanges with upstream resolvers.
+    pub upstreams: MetricsDnsUpstreams,
+    /// Queries blocked per second by each block list or policy zone that blocked one since
+    /// the role started, by list name.
+    pub blocked: Vec<MetricsDnsBlocked>,
+    /// Open DoT and DoH connections; absent when the role serves neither.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connections: Option<MetricsDnsConnections>,
+    /// Query log entries dropped per second (the ring was full or the disk failed).
+    pub log_dropped_per_second: f64,
+}
+
+/// Queries answered per second by transport.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct MetricsDnsTransports {
+    /// Over UDP.
+    pub udp: f64,
+    /// Over TCP.
+    pub tcp: f64,
+    /// Over DNS over TLS.
+    pub dot: f64,
+    /// Over DNS over HTTPS.
+    pub doh: f64,
+}
+
+/// Answers per second by RCODE.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct MetricsDnsRcodes {
+    /// NOERROR, with or without records.
+    pub noerror: f64,
+    /// NXDOMAIN.
+    pub nxdomain: f64,
+    /// SERVFAIL.
+    pub servfail: f64,
+    /// REFUSED.
+    pub refused: f64,
+    /// Every other RCODE.
+    pub other: f64,
+}
+
+/// The cache of the `dns` role in a sample.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct MetricsDnsCache {
+    /// Hits over hits and misses in the interval, 0 to 1; absent without a lookup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hit_ratio: Option<f64>,
+    /// Forwarded queries the cache answered, per second.
+    pub hits_per_second: f64,
+    /// Forwarded queries the cache could not answer, per second.
+    pub misses_per_second: f64,
+    /// Stale answers (RFC 8767) per second.
+    pub stale_per_second: f64,
+    /// Entries in the cache.
+    pub entries: u64,
+}
+
+/// The upstream resolvers in a sample.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct MetricsDnsUpstreams {
+    /// Exchanges with upstreams per second, whatever their outcome.
+    pub queries_per_second: f64,
+    /// The 99th percentile of the round-trip time of the answered exchanges in milliseconds;
+    /// absent without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p99_ms: Option<f64>,
+}
+
+/// The queries one block list blocked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct MetricsDnsBlocked {
+    /// The list, as the `list` label of `tenko_dns_blocked_total` names it.
+    pub list: String,
+    /// Queries blocked per second.
+    pub per_second: f64,
+}
+
+/// The open connections of the encrypted transports.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct MetricsDnsConnections {
+    /// Open DNS over TLS connections.
+    pub dot: u64,
+    /// Open DNS over HTTPS connections.
+    pub doh: u64,
 }
 
 /// Why a `reset` event was sent: the client must reload its state at `revision` or later.

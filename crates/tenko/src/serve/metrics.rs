@@ -697,6 +697,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_sample_has_the_dns_part_once_the_role_registers_its_families() {
+        let state = AppState::default();
+        register(state.metrics());
+        let sampler = Sampler::new(
+            state.clone(),
+            Arc::new(LiveSources(Sources::of(state.clone()))),
+        );
+        assert_eq!(
+            sampler.take().await.sample.dns,
+            None,
+            "no role, no DNS part"
+        );
+
+        // What the role's start step registers (crates/tenko/src/serve/dns.rs).
+        tenko_dns::tls::register(state.metrics());
+        tenko_dns::metrics::register(state.metrics());
+        tenko_dns::querylog::register_metrics(state.metrics());
+        let first = sampler.take().await;
+        let dns = first.sample.dns.clone().expect("the role's families");
+        assert_eq!(
+            dns.connections,
+            Some(tenko_api::dto::events::MetricsDnsConnections { dot: 0, doh: 0 })
+        );
+        tenko_dns::metrics::QUERY_COUNTER.add(
+            tenko_dns::metrics::query_index(tenko_core::dns::QueryTransport::Dot, false, 3),
+            5,
+        );
+        tenko_dns::metrics::CACHE_HIT_COUNTER.add(0, 3);
+        tenko_dns::metrics::CACHE_MISS_COUNTER.add(0, 1);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let dns = sampler.take().await.sample.dns.clone().expect("dns");
+        assert!(dns.queries_per_second > 0.0, "{dns:?}");
+        assert!(
+            dns.transports.dot > 0.0 && dns.rcodes.nxdomain > 0.0,
+            "{dns:?}"
+        );
+        assert!((dns.queries_per_second - dns.transports.dot).abs() < 1e-6);
+        assert_eq!(dns.cache.hit_ratio, Some(0.75));
+    }
+
+    #[tokio::test]
     async fn the_loopback_listener_serves_the_text_without_authentication() {
         let state = AppState::default();
         register(state.metrics());

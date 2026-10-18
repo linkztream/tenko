@@ -13,6 +13,7 @@ import type { Schemas } from "./api";
 
 export type MetricsSample = Schemas["MetricsSample"];
 export type MetricsSnapshot = Schemas["MetricsSnapshot"];
+export type MetricsDns = Schemas["MetricsDns"];
 
 /** The request the tiles make: the `metrics` topic alone. */
 const STREAM = /\/api\/v1\/events\?topics=metrics(&|$)/;
@@ -30,6 +31,31 @@ export function sample(node: number | null, patch: Partial<MetricsSample> = {}):
     ingest: { batches_per_second: 0.5, facts_per_second: 40 },
     sse: { subscribers: 4 },
     nodes: [],
+    ...patch,
+  };
+}
+
+/**
+ * The `dns` part of a sample of a controller that runs the `dns` role: about 1,250 queries per
+ * second, four block lists and DoT and DoH served; every figure can be changed with `patch`.
+ */
+export function dnsPart(patch: Partial<MetricsDns> = {}): MetricsDns {
+  return {
+    queries_per_second: 1_250,
+    transports: { udp: 1_000, tcp: 50, dot: 150, doh: 50 },
+    p50_ms: 0.3,
+    p99_ms: 18,
+    rcodes: { noerror: 1_000, nxdomain: 150, servfail: 50, refused: 25, other: 25 },
+    cache: { hit_ratio: 0.82, hits_per_second: 410, misses_per_second: 90, stale_per_second: 1.5, entries: 8_400 },
+    upstreams: { queries_per_second: 90, p99_ms: 42 },
+    blocked: [
+      { list: "ads", per_second: 30 },
+      { list: "malware", per_second: 2 },
+      { list: "trackers", per_second: 12 },
+      { list: "telemetry", per_second: 5 },
+    ],
+    connections: { dot: 6, doh: 3 },
+    log_dropped_per_second: 0,
     ...patch,
   };
 }
