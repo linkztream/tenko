@@ -216,6 +216,8 @@ describe("first-run wizard", () => {
     next();
     await heading("Roles for this node");
     next();
+    await heading("Where DNS asks next");
+    next();
     await heading("Review and finish");
     next();
     await heading("Setup complete");
@@ -246,6 +248,8 @@ describe("first-run wizard", () => {
     await passHost();
     next();
     await heading("Roles for this node");
+    next();
+    await heading("Where DNS asks next");
     next();
     await heading("Review and finish");
     next();
@@ -282,6 +286,9 @@ describe("first-run wizard", () => {
     expect(await axeViolations(container)).toEqual([]);
     next();
     await heading("Roles for this node");
+    expect(await axeViolations(container)).toEqual([]);
+    next();
+    await heading("Where DNS asks next");
     expect(await axeViolations(container)).toEqual([]);
     next();
     await heading("Review and finish");

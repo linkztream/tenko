@@ -1,6 +1,7 @@
-// The live policy checklist of the administrator step: the four things the server judges about
-// a password, as rows with a state. The server answers (POST /auth/password/check); this
-// module only arranges the answer, so the rules stay in one place.
+// The checklists of the wizard. The live policy checklist of the administrator step: the four
+// things the server judges about a password, as rows with a state. The server answers
+// (POST /auth/password/check); this module only arranges the answer, so the rules stay in one
+// place. And the lines a DNS node needs before its clients use it (`dnsChecklist`).
 import type { PasswordCheckResult, PolicyViolation } from "../api/types";
 import { t } from "../i18n";
 
@@ -91,4 +92,21 @@ export function violationMessage(v: PolicyViolation): string {
     case "invalid_characters":
       return t("errors.auth.password.invalid_characters");
   }
+}
+
+// ---------------------------------------------------------------------------------
+// What a node needs before clients use it as their resolver (deploy/README.md, "DNS: the dns
+// role and port 53")
+
+export type DnsChecklistId = "role" | "port" | "capability" | "firewall" | "tls_ports";
+
+/**
+ * The lines of the DNS checklist: the `dns` role in `tenko.toml`, port 53 free on the listen
+ * addresses, `CAP_NET_BIND_SERVICE` on Linux (the systemd unit grants it), the firewall for UDP
+ * and TCP 53, and ports 853 and 443 when DoT or DoH is served.
+ */
+export function dnsChecklist(served: { dot: boolean; doh: boolean }): DnsChecklistId[] {
+  const ids: DnsChecklistId[] = ["role", "port", "capability", "firewall"];
+  if (served.dot || served.doh) ids.push("tls_ports");
+  return ids;
 }

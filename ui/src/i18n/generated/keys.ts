@@ -1353,6 +1353,66 @@ export type MessageKey =
   | "dns.do.remove_record"
   | "dns.do.take_over"
   | "dns.export.failed"
+  | "dns.fwd.all_views"
+  | "dns.fwd.check.address"
+  | "dns.fwd.check.duplicate"
+  | "dns.fwd.check.none"
+  | "dns.fwd.check.path"
+  | "dns.fwd.check.path_transport"
+  | "dns.fwd.check.port"
+  | "dns.fwd.check.suffix"
+  | "dns.fwd.check.taken"
+  | "dns.fwd.check.tls_name"
+  | "dns.fwd.check.tls_required"
+  | "dns.fwd.check.too_many"
+  | "dns.fwd.check.view"
+  | "dns.fwd.col.suffix"
+  | "dns.fwd.col.tls_name"
+  | "dns.fwd.col.transport"
+  | "dns.fwd.col.upstreams"
+  | "dns.fwd.col.view"
+  | "dns.fwd.create"
+  | "dns.fwd.create_title"
+  | "dns.fwd.created"
+  | "dns.fwd.default"
+  | "dns.fwd.delete_body"
+  | "dns.fwd.delete_confirm"
+  | "dns.fwd.delete_root"
+  | "dns.fwd.delete_title"
+  | "dns.fwd.deleted"
+  | "dns.fwd.edit_title"
+  | "dns.fwd.empty"
+  | "dns.fwd.empty_body"
+  | "dns.fwd.field.all_views"
+  | "dns.fwd.field.all_views_help"
+  | "dns.fwd.field.suffix"
+  | "dns.fwd.field.suffix_help"
+  | "dns.fwd.field.suffix_placeholder"
+  | "dns.fwd.field.tls_name"
+  | "dns.fwd.field.tls_name_help"
+  | "dns.fwd.field.transport"
+  | "dns.fwd.field.upstreams"
+  | "dns.fwd.field.upstreams_help_doh"
+  | "dns.fwd.field.upstreams_help_dot"
+  | "dns.fwd.field.upstreams_help_plain"
+  | "dns.fwd.known"
+  | "dns.fwd.no_default_body"
+  | "dns.fwd.no_default_link"
+  | "dns.fwd.no_default_title"
+  | "dns.fwd.problems_title"
+  | "dns.fwd.recursion.hardened"
+  | "dns.fwd.recursion.known"
+  | "dns.fwd.recursion.lab"
+  | "dns.fwd.recursion.title"
+  | "dns.fwd.recursion.views"
+  | "dns.fwd.save"
+  | "dns.fwd.saved"
+  | "dns.fwd.sub"
+  | "dns.fwd.title"
+  | "dns.fwd.transport.doh"
+  | "dns.fwd.transport.dot"
+  | "dns.fwd.transport.plain"
+  | "dns.fwd.use_dot"
   | "dns.history.action"
   | "dns.history.changes"
   | "dns.history.empty"
@@ -1435,6 +1495,68 @@ export type MessageKey =
   | "dns.kind.rpz"
   | "dns.kind.secondary"
   | "dns.kind.stub"
+  | "dns.list.action.nodata"
+  | "dns.list.action.nxdomain"
+  | "dns.list.action.redirect"
+  | "dns.list.check.file"
+  | "dns.list.check.interval"
+  | "dns.list.check.name"
+  | "dns.list.check.redirect"
+  | "dns.list.check.url"
+  | "dns.list.col.action"
+  | "dns.list.col.entries"
+  | "dns.list.col.etag"
+  | "dns.list.col.fetched"
+  | "dns.list.col.format"
+  | "dns.list.col.interval"
+  | "dns.list.col.last_error"
+  | "dns.list.col.source"
+  | "dns.list.create"
+  | "dns.list.create_title"
+  | "dns.list.created"
+  | "dns.list.delete_body"
+  | "dns.list.delete_confirm"
+  | "dns.list.delete_title"
+  | "dns.list.deleted"
+  | "dns.list.disabled"
+  | "dns.list.edit_title"
+  | "dns.list.every"
+  | "dns.list.fetch"
+  | "dns.list.fetch_failed"
+  | "dns.list.fetch_started"
+  | "dns.list.field.action"
+  | "dns.list.field.enabled"
+  | "dns.list.field.file"
+  | "dns.list.field.file_help"
+  | "dns.list.field.format"
+  | "dns.list.field.interval"
+  | "dns.list.field.interval_help"
+  | "dns.list.field.name"
+  | "dns.list.field.redirect"
+  | "dns.list.field.redirect_help"
+  | "dns.list.field.source"
+  | "dns.list.field.url"
+  | "dns.list.field.url_help"
+  | "dns.list.file_chosen"
+  | "dns.list.format.domains"
+  | "dns.list.format.domains_help"
+  | "dns.list.format.hosts"
+  | "dns.list.format.hosts_help"
+  | "dns.list.job"
+  | "dns.list.no_version"
+  | "dns.list.open_job"
+  | "dns.list.save"
+  | "dns.list.saved"
+  | "dns.list.source.upload"
+  | "dns.list.source.url"
+  | "dns.list.upload"
+  | "dns.list.upload_hint"
+  | "dns.list.upload_title"
+  | "dns.list.uploaded"
+  | "dns.lists.empty"
+  | "dns.lists.empty_body"
+  | "dns.lists.sub"
+  | "dns.lists.title"
   | "dns.log.blocked"
   | "dns.log.cached"
   | "dns.log.client_mode.address"
@@ -1500,10 +1622,63 @@ export type MessageKey =
   | "dns.loss.soa"
   | "dns.loss.unsupported_type"
   | "dns.nav.acls"
+  | "dns.nav.forwarders"
   | "dns.nav.keys"
   | "dns.nav.label"
+  | "dns.nav.lists"
   | "dns.nav.log"
   | "dns.nav.zones"
+  | "dns.node.col.address"
+  | "dns.node.col.key"
+  | "dns.node.col.transport"
+  | "dns.node.col.workers"
+  | "dns.node.doc"
+  | "dns.node.forwarders_hint"
+  | "dns.node.forwarders_link"
+  | "dns.node.group.cache"
+  | "dns.node.group.listeners"
+  | "dns.node.group.log"
+  | "dns.node.group.role"
+  | "dns.node.group.tcp"
+  | "dns.node.lede"
+  | "dns.node.log_off"
+  | "dns.node.no"
+  | "dns.node.no_node"
+  | "dns.node.no_role_body"
+  | "dns.node.no_role_title"
+  | "dns.node.not_served"
+  | "dns.node.off_body"
+  | "dns.node.problems"
+  | "dns.node.refresh"
+  | "dns.node.row.cache_bytes"
+  | "dns.node.row.cache_entries"
+  | "dns.node.row.cache_hit_ratio"
+  | "dns.node.row.cache_hits"
+  | "dns.node.row.cache_misses"
+  | "dns.node.row.cache_stale"
+  | "dns.node.row.lag"
+  | "dns.node.row.log_client"
+  | "dns.node.row.log_days"
+  | "dns.node.row.log_dropped"
+  | "dns.node.row.log_format"
+  | "dns.node.row.log_sample"
+  | "dns.node.row.log_size_mb"
+  | "dns.node.row.log_state"
+  | "dns.node.row.log_write_errors"
+  | "dns.node.row.log_written"
+  | "dns.node.row.rrsets"
+  | "dns.node.row.serving"
+  | "dns.node.row.socket_mode"
+  | "dns.node.row.started"
+  | "dns.node.row.tcp_open"
+  | "dns.node.row.tcp_refused"
+  | "dns.node.row.workers"
+  | "dns.node.row.zones"
+  | "dns.node.served"
+  | "dns.node.title"
+  | "dns.node.tls"
+  | "dns.node.unknown"
+  | "dns.node.yes"
   | "dns.op.add"
   | "dns.op.delete"
   | "dns.op.remove"
@@ -1558,6 +1733,11 @@ export type MessageKey =
   | "dns.settings.serial"
   | "dns.settings.soa"
   | "dns.settings.soa_body"
+  | "dns.settings.source_invalid"
+  | "dns.settings.source_primaries"
+  | "dns.settings.source_primaries_body"
+  | "dns.settings.source_stub"
+  | "dns.settings.source_stub_body"
   | "dns.settings.ttl"
   | "dns.state.not_built_body"
   | "dns.state.not_built_title"
@@ -1594,6 +1774,8 @@ export type MessageKey =
   | "dns.zone.not_served_hint"
   | "dns.zone.reverse"
   | "dns.zone.serial"
+  | "dns.zone.stub"
+  | "dns.zone.stub_hint"
   | "dns.zone.tab.history"
   | "dns.zone.tab.records"
   | "dns.zone.tab.settings"
@@ -2926,6 +3108,9 @@ export type MessageKey =
   | "jobs.step.dhcp_manual"
   | "jobs.step.dns_import_apply"
   | "jobs.step.dns_import_parse"
+  | "jobs.step.dns_list_compile"
+  | "jobs.step.dns_list_fetch"
+  | "jobs.step.dns_list_read"
   | "jobs.step.dns_manual"
   | "jobs.step.import_apply_chunk"
   | "jobs.step.import_parse"
@@ -2986,6 +3171,8 @@ export type MessageKey =
   | "jobs.task.dns_update"
   | "jobs.title"
   | "jobs.title.dns_import"
+  | "jobs.title.dns_list_fetch"
+  | "jobs.title.dns_list_upload"
   | "jobs.title.import_apply"
   | "jobs.title.ipam_apply"
   | "jobs.title.move"
@@ -3815,6 +4002,7 @@ export type MessageKey =
   | "settings.nav.access"
   | "settings.nav.audit_export"
   | "settings.nav.backup"
+  | "settings.nav.dns"
   | "settings.nav.guardrails"
   | "settings.nav.label"
   | "settings.nav.languages"
@@ -4129,6 +4317,41 @@ export type MessageKey =
   | "setup.disk.warn.rotating_title"
   | "setup.disk.warn.slow_body"
   | "setup.disk.warn.slow_title"
+  | "setup.dns.cache"
+  | "setup.dns.cache_description"
+  | "setup.dns.check.capability"
+  | "setup.dns.check.firewall"
+  | "setup.dns.check.port"
+  | "setup.dns.check.role"
+  | "setup.dns.check.tls_ports"
+  | "setup.dns.checklist"
+  | "setup.dns.doh"
+  | "setup.dns.doh_description"
+  | "setup.dns.dot"
+  | "setup.dns.dot_description"
+  | "setup.dns.entries"
+  | "setup.dns.known"
+  | "setup.dns.lede"
+  | "setup.dns.log"
+  | "setup.dns.log_description"
+  | "setup.dns.preset"
+  | "setup.dns.preset_apply"
+  | "setup.dns.preset_help"
+  | "setup.dns.preset_on"
+  | "setup.dns.skipped"
+  | "setup.dns.tls_name"
+  | "setup.dns.tls_name_help"
+  | "setup.dns.transport"
+  | "setup.dns.transport.doh"
+  | "setup.dns.transport.doh_description"
+  | "setup.dns.transport.dot"
+  | "setup.dns.transport.dot_description"
+  | "setup.dns.transport.plain"
+  | "setup.dns.transport.plain_description"
+  | "setup.dns.upstreams"
+  | "setup.dns.upstreams_help"
+  | "setup.dns.upstreams_none"
+  | "setup.dns.use_dot"
   | "setup.done.admin"
   | "setup.done.change"
   | "setup.done.change_item"
@@ -4137,6 +4360,8 @@ export type MessageKey =
   | "setup.done.disk"
   | "setup.done.disk_override"
   | "setup.done.disk_unknown"
+  | "setup.done.dns"
+  | "setup.done.dns_none"
   | "setup.done.host"
   | "setup.done.lab_note"
   | "setup.done.lede"
@@ -4156,6 +4381,9 @@ export type MessageKey =
   | "setup.gate.codes_loading"
   | "setup.gate.disk"
   | "setup.gate.display_name"
+  | "setup.gate.dns_entries"
+  | "setup.gate.dns_tls_name"
+  | "setup.gate.dns_upstreams"
   | "setup.gate.host_empty"
   | "setup.gate.host_invalid"
   | "setup.gate.lab_ack"
@@ -4236,6 +4464,14 @@ export type MessageKey =
   | "setup.result.codes.lede"
   | "setup.result.codes.loading"
   | "setup.result.codes.title"
+  | "setup.result.dns.config_help"
+  | "setup.result.dns.copied"
+  | "setup.result.dns.copy"
+  | "setup.result.dns.copy_failed"
+  | "setup.result.dns.failed"
+  | "setup.result.dns.none"
+  | "setup.result.dns.saved"
+  | "setup.result.dns.title"
   | "setup.result.lede"
   | "setup.result.next.connector_later"
   | "setup.result.next.import"
@@ -4285,6 +4521,8 @@ export type MessageKey =
   | "setup.step.admin.title"
   | "setup.step.disk.name"
   | "setup.step.disk.title"
+  | "setup.step.dns.name"
+  | "setup.step.dns.title"
   | "setup.step.done.name"
   | "setup.step.done.title"
   | "setup.step.host.name"
@@ -4297,6 +4535,8 @@ export type MessageKey =
   | "setup.step.welcome.title"
   | "setup.stepno"
   | "setup.steps.completed"
+  | "setup.steps.dns_meta"
+  | "setup.steps.dns_skipped"
   | "setup.steps.item"
   | "setup.steps.label"
   | "setup.steps.roles_meta"
@@ -5066,6 +5306,20 @@ export interface MessageArgs {
   "dns.batch.count": { changes: string | number; count: number };
   "dns.batch.diff_summary": { count: number };
   "dns.batch.drop": { name: string | number; type: string | number };
+  "dns.fwd.check.address": { entry: string | number };
+  "dns.fwd.check.path": { entry: string | number };
+  "dns.fwd.check.path_transport": { entry: string | number };
+  "dns.fwd.check.port": { entry: string | number };
+  "dns.fwd.created": { suffix: string | number };
+  "dns.fwd.delete_title": { suffix: string | number };
+  "dns.fwd.deleted": { suffix: string | number };
+  "dns.fwd.edit_title": { suffix: string | number };
+  "dns.fwd.field.all_views_help": { view: string | number };
+  "dns.fwd.known": { name: string | number; tls: string | number };
+  "dns.fwd.recursion.hardened": { profile: string | number };
+  "dns.fwd.recursion.known": { profile: string | number };
+  "dns.fwd.recursion.lab": { profile: string | number };
+  "dns.fwd.saved": { suffix: string | number };
   "dns.import.apply.progress": { done: string | number; total: string | number };
   "dns.import.apply.serial": { serial: string | number };
   "dns.import.fact.added": { count: number };
@@ -5077,10 +5331,26 @@ export interface MessageArgs {
   "dns.key.created_body": { name: string | number };
   "dns.key.delete_title": { name: string | number };
   "dns.key.deleted": { name: string | number };
+  "dns.list.check.interval": { max: string | number; min: string | number };
+  "dns.list.created": { name: string | number };
+  "dns.list.delete_title": { name: string | number };
+  "dns.list.deleted": { name: string | number };
+  "dns.list.edit_title": { name: string | number };
+  "dns.list.every": { hours: number };
+  "dns.list.fetch_failed": { name: string | number };
+  "dns.list.fetch_started": { name: string | number };
+  "dns.list.field.interval_help": { max: string | number; min: string | number };
+  "dns.list.file_chosen": { name: string | number };
+  "dns.list.job": { name: string | number };
+  "dns.list.saved": { name: string | number };
+  "dns.list.upload_title": { name: string | number };
+  "dns.list.uploaded": { name: string | number };
   "dns.log.figures": { client: string | number; days: number; dropped: number; sample: number; written: number };
   "dns.log.latency": { ms: string | number };
   "dns.log.node": { id: string | number };
   "dns.log.page": { page: string | number };
+  "dns.node.no_role_body": { roles: string | number };
+  "dns.node.tls": { doh: string | number; dot: string | number };
   "dns.record.line_error": { line: string | number; message: string | number };
   "dns.records.label": { zone: string | number };
   "dns.rrset.add_records_title": { name: string | number; type: string | number };
@@ -5637,6 +5907,8 @@ export interface MessageArgs {
   "setup.disk.fsync": { time: string | number };
   "setup.disk.media_free": { media: string | number; size: string | number };
   "setup.disk.move": { command: string | number };
+  "setup.dns.cache_description": { entries: number };
+  "setup.dns.known": { name: string | number; tls: string | number };
   "setup.done.change_item": { item: string | number };
   "setup.done.probe_on": { networks: string | number };
   "setup.done.proxies": { count: number };
@@ -5645,11 +5917,13 @@ export interface MessageArgs {
   "setup.profile.table.aside": { shown: string | number; total: string | number };
   "setup.profile.table.title": { profile: string | number };
   "setup.result.codes.lede": { user: string | number };
+  "setup.result.dns.failed": { reason: string | number };
   "setup.roles.hint": { amount: string | number };
   "setup.roles.hint_probe": { amount: string | number };
   "setup.roles.memory": { amount: string | number; total: string | number };
   "setup.roles.memory_unknown_total": { amount: string | number };
   "setup.stepno": { step: string | number; total: string | number };
+  "setup.steps.dns_meta": { count: number };
   "setup.steps.item": { name: string | number; number: string | number };
   "setup.steps.roles_meta": { count: string | number };
   "setup.tls.proxies.invalid": { count: number; entries: string | number };
@@ -7098,6 +7372,66 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.do.remove_record",
   "dns.do.take_over",
   "dns.export.failed",
+  "dns.fwd.all_views",
+  "dns.fwd.check.address",
+  "dns.fwd.check.duplicate",
+  "dns.fwd.check.none",
+  "dns.fwd.check.path",
+  "dns.fwd.check.path_transport",
+  "dns.fwd.check.port",
+  "dns.fwd.check.suffix",
+  "dns.fwd.check.taken",
+  "dns.fwd.check.tls_name",
+  "dns.fwd.check.tls_required",
+  "dns.fwd.check.too_many",
+  "dns.fwd.check.view",
+  "dns.fwd.col.suffix",
+  "dns.fwd.col.tls_name",
+  "dns.fwd.col.transport",
+  "dns.fwd.col.upstreams",
+  "dns.fwd.col.view",
+  "dns.fwd.create",
+  "dns.fwd.create_title",
+  "dns.fwd.created",
+  "dns.fwd.default",
+  "dns.fwd.delete_body",
+  "dns.fwd.delete_confirm",
+  "dns.fwd.delete_root",
+  "dns.fwd.delete_title",
+  "dns.fwd.deleted",
+  "dns.fwd.edit_title",
+  "dns.fwd.empty",
+  "dns.fwd.empty_body",
+  "dns.fwd.field.all_views",
+  "dns.fwd.field.all_views_help",
+  "dns.fwd.field.suffix",
+  "dns.fwd.field.suffix_help",
+  "dns.fwd.field.suffix_placeholder",
+  "dns.fwd.field.tls_name",
+  "dns.fwd.field.tls_name_help",
+  "dns.fwd.field.transport",
+  "dns.fwd.field.upstreams",
+  "dns.fwd.field.upstreams_help_doh",
+  "dns.fwd.field.upstreams_help_dot",
+  "dns.fwd.field.upstreams_help_plain",
+  "dns.fwd.known",
+  "dns.fwd.no_default_body",
+  "dns.fwd.no_default_link",
+  "dns.fwd.no_default_title",
+  "dns.fwd.problems_title",
+  "dns.fwd.recursion.hardened",
+  "dns.fwd.recursion.known",
+  "dns.fwd.recursion.lab",
+  "dns.fwd.recursion.title",
+  "dns.fwd.recursion.views",
+  "dns.fwd.save",
+  "dns.fwd.saved",
+  "dns.fwd.sub",
+  "dns.fwd.title",
+  "dns.fwd.transport.doh",
+  "dns.fwd.transport.dot",
+  "dns.fwd.transport.plain",
+  "dns.fwd.use_dot",
   "dns.history.action",
   "dns.history.changes",
   "dns.history.empty",
@@ -7180,6 +7514,68 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.kind.rpz",
   "dns.kind.secondary",
   "dns.kind.stub",
+  "dns.list.action.nodata",
+  "dns.list.action.nxdomain",
+  "dns.list.action.redirect",
+  "dns.list.check.file",
+  "dns.list.check.interval",
+  "dns.list.check.name",
+  "dns.list.check.redirect",
+  "dns.list.check.url",
+  "dns.list.col.action",
+  "dns.list.col.entries",
+  "dns.list.col.etag",
+  "dns.list.col.fetched",
+  "dns.list.col.format",
+  "dns.list.col.interval",
+  "dns.list.col.last_error",
+  "dns.list.col.source",
+  "dns.list.create",
+  "dns.list.create_title",
+  "dns.list.created",
+  "dns.list.delete_body",
+  "dns.list.delete_confirm",
+  "dns.list.delete_title",
+  "dns.list.deleted",
+  "dns.list.disabled",
+  "dns.list.edit_title",
+  "dns.list.every",
+  "dns.list.fetch",
+  "dns.list.fetch_failed",
+  "dns.list.fetch_started",
+  "dns.list.field.action",
+  "dns.list.field.enabled",
+  "dns.list.field.file",
+  "dns.list.field.file_help",
+  "dns.list.field.format",
+  "dns.list.field.interval",
+  "dns.list.field.interval_help",
+  "dns.list.field.name",
+  "dns.list.field.redirect",
+  "dns.list.field.redirect_help",
+  "dns.list.field.source",
+  "dns.list.field.url",
+  "dns.list.field.url_help",
+  "dns.list.file_chosen",
+  "dns.list.format.domains",
+  "dns.list.format.domains_help",
+  "dns.list.format.hosts",
+  "dns.list.format.hosts_help",
+  "dns.list.job",
+  "dns.list.no_version",
+  "dns.list.open_job",
+  "dns.list.save",
+  "dns.list.saved",
+  "dns.list.source.upload",
+  "dns.list.source.url",
+  "dns.list.upload",
+  "dns.list.upload_hint",
+  "dns.list.upload_title",
+  "dns.list.uploaded",
+  "dns.lists.empty",
+  "dns.lists.empty_body",
+  "dns.lists.sub",
+  "dns.lists.title",
   "dns.log.blocked",
   "dns.log.cached",
   "dns.log.client_mode.address",
@@ -7245,10 +7641,63 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.loss.soa",
   "dns.loss.unsupported_type",
   "dns.nav.acls",
+  "dns.nav.forwarders",
   "dns.nav.keys",
   "dns.nav.label",
+  "dns.nav.lists",
   "dns.nav.log",
   "dns.nav.zones",
+  "dns.node.col.address",
+  "dns.node.col.key",
+  "dns.node.col.transport",
+  "dns.node.col.workers",
+  "dns.node.doc",
+  "dns.node.forwarders_hint",
+  "dns.node.forwarders_link",
+  "dns.node.group.cache",
+  "dns.node.group.listeners",
+  "dns.node.group.log",
+  "dns.node.group.role",
+  "dns.node.group.tcp",
+  "dns.node.lede",
+  "dns.node.log_off",
+  "dns.node.no",
+  "dns.node.no_node",
+  "dns.node.no_role_body",
+  "dns.node.no_role_title",
+  "dns.node.not_served",
+  "dns.node.off_body",
+  "dns.node.problems",
+  "dns.node.refresh",
+  "dns.node.row.cache_bytes",
+  "dns.node.row.cache_entries",
+  "dns.node.row.cache_hit_ratio",
+  "dns.node.row.cache_hits",
+  "dns.node.row.cache_misses",
+  "dns.node.row.cache_stale",
+  "dns.node.row.lag",
+  "dns.node.row.log_client",
+  "dns.node.row.log_days",
+  "dns.node.row.log_dropped",
+  "dns.node.row.log_format",
+  "dns.node.row.log_sample",
+  "dns.node.row.log_size_mb",
+  "dns.node.row.log_state",
+  "dns.node.row.log_write_errors",
+  "dns.node.row.log_written",
+  "dns.node.row.rrsets",
+  "dns.node.row.serving",
+  "dns.node.row.socket_mode",
+  "dns.node.row.started",
+  "dns.node.row.tcp_open",
+  "dns.node.row.tcp_refused",
+  "dns.node.row.workers",
+  "dns.node.row.zones",
+  "dns.node.served",
+  "dns.node.title",
+  "dns.node.tls",
+  "dns.node.unknown",
+  "dns.node.yes",
   "dns.op.add",
   "dns.op.delete",
   "dns.op.remove",
@@ -7303,6 +7752,11 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.settings.serial",
   "dns.settings.soa",
   "dns.settings.soa_body",
+  "dns.settings.source_invalid",
+  "dns.settings.source_primaries",
+  "dns.settings.source_primaries_body",
+  "dns.settings.source_stub",
+  "dns.settings.source_stub_body",
   "dns.settings.ttl",
   "dns.state.not_built_body",
   "dns.state.not_built_title",
@@ -7339,6 +7793,8 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.zone.not_served_hint",
   "dns.zone.reverse",
   "dns.zone.serial",
+  "dns.zone.stub",
+  "dns.zone.stub_hint",
   "dns.zone.tab.history",
   "dns.zone.tab.records",
   "dns.zone.tab.settings",
@@ -8671,6 +9127,9 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.step.dhcp_manual",
   "jobs.step.dns_import_apply",
   "jobs.step.dns_import_parse",
+  "jobs.step.dns_list_compile",
+  "jobs.step.dns_list_fetch",
+  "jobs.step.dns_list_read",
   "jobs.step.dns_manual",
   "jobs.step.import_apply_chunk",
   "jobs.step.import_parse",
@@ -8731,6 +9190,8 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.task.dns_update",
   "jobs.title",
   "jobs.title.dns_import",
+  "jobs.title.dns_list_fetch",
+  "jobs.title.dns_list_upload",
   "jobs.title.import_apply",
   "jobs.title.ipam_apply",
   "jobs.title.move",
@@ -9560,6 +10021,7 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.nav.access",
   "settings.nav.audit_export",
   "settings.nav.backup",
+  "settings.nav.dns",
   "settings.nav.guardrails",
   "settings.nav.label",
   "settings.nav.languages",
@@ -9874,6 +10336,41 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.disk.warn.rotating_title",
   "setup.disk.warn.slow_body",
   "setup.disk.warn.slow_title",
+  "setup.dns.cache",
+  "setup.dns.cache_description",
+  "setup.dns.check.capability",
+  "setup.dns.check.firewall",
+  "setup.dns.check.port",
+  "setup.dns.check.role",
+  "setup.dns.check.tls_ports",
+  "setup.dns.checklist",
+  "setup.dns.doh",
+  "setup.dns.doh_description",
+  "setup.dns.dot",
+  "setup.dns.dot_description",
+  "setup.dns.entries",
+  "setup.dns.known",
+  "setup.dns.lede",
+  "setup.dns.log",
+  "setup.dns.log_description",
+  "setup.dns.preset",
+  "setup.dns.preset_apply",
+  "setup.dns.preset_help",
+  "setup.dns.preset_on",
+  "setup.dns.skipped",
+  "setup.dns.tls_name",
+  "setup.dns.tls_name_help",
+  "setup.dns.transport",
+  "setup.dns.transport.doh",
+  "setup.dns.transport.doh_description",
+  "setup.dns.transport.dot",
+  "setup.dns.transport.dot_description",
+  "setup.dns.transport.plain",
+  "setup.dns.transport.plain_description",
+  "setup.dns.upstreams",
+  "setup.dns.upstreams_help",
+  "setup.dns.upstreams_none",
+  "setup.dns.use_dot",
   "setup.done.admin",
   "setup.done.change",
   "setup.done.change_item",
@@ -9882,6 +10379,8 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.done.disk",
   "setup.done.disk_override",
   "setup.done.disk_unknown",
+  "setup.done.dns",
+  "setup.done.dns_none",
   "setup.done.host",
   "setup.done.lab_note",
   "setup.done.lede",
@@ -9901,6 +10400,9 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.gate.codes_loading",
   "setup.gate.disk",
   "setup.gate.display_name",
+  "setup.gate.dns_entries",
+  "setup.gate.dns_tls_name",
+  "setup.gate.dns_upstreams",
   "setup.gate.host_empty",
   "setup.gate.host_invalid",
   "setup.gate.lab_ack",
@@ -9981,6 +10483,14 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.result.codes.lede",
   "setup.result.codes.loading",
   "setup.result.codes.title",
+  "setup.result.dns.config_help",
+  "setup.result.dns.copied",
+  "setup.result.dns.copy",
+  "setup.result.dns.copy_failed",
+  "setup.result.dns.failed",
+  "setup.result.dns.none",
+  "setup.result.dns.saved",
+  "setup.result.dns.title",
   "setup.result.lede",
   "setup.result.next.connector_later",
   "setup.result.next.import",
@@ -10030,6 +10540,8 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.step.admin.title",
   "setup.step.disk.name",
   "setup.step.disk.title",
+  "setup.step.dns.name",
+  "setup.step.dns.title",
   "setup.step.done.name",
   "setup.step.done.title",
   "setup.step.host.name",
@@ -10042,6 +10554,8 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.step.welcome.title",
   "setup.stepno",
   "setup.steps.completed",
+  "setup.steps.dns_meta",
+  "setup.steps.dns_skipped",
   "setup.steps.item",
   "setup.steps.label",
   "setup.steps.roles_meta",

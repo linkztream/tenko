@@ -13,4 +13,8 @@ export const dnsPaths = {
   acls: () => "/dns/acls",
   keys: () => "/dns/keys",
   log: () => "/dns/log",
+  forwarders: () => "/dns/forwarders",
+  lists: () => "/dns/lists",
+  /** The DNS settings of a node (read-only, administrators): settings/dns. */
+  settings: () => "/settings/dns",
 } as const;

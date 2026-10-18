@@ -44,7 +44,9 @@ describe("the zone list", () => {
     expect(within(example).getByTestId("zone-origins").dataset.key).toBe("ipam,manual");
     expect(within(row("dns-zones", "2.0.192.in-addr.arpa")).getByTestId("zone-reverse")).toBeTruthy();
     expect(within(row("dns-zones", "lab.example.test")).getByTestId("zone-not-served")).toBeTruthy();
-    expect(within(row("dns-zones", "corp.example.test")).getByTestId("zone-not-served")).toBeTruthy();
+    // A stub zone is answered through the forwarder (WP5.1): its own chip, not "not served yet".
+    expect(within(row("dns-zones", "corp.example.test")).queryByTestId("zone-not-served")).toBeNull();
+    expect(within(row("dns-zones", "corp.example.test")).getByTestId("zone-stub")).toBeTruthy();
     expect(await axeViolations(view.container)).toEqual([]);
   });
 

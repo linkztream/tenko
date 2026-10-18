@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="setup">
+      <unit id="setup.step.dns.name">
+        <notes><note category="description">Name of step 7 in the step list.</note></notes>
+        <segment><source>DNS upstreams</source></segment>
+      </unit>
+      <unit id="setup.step.dns.title">
+        <notes><note category="description">Heading of step 7: the upstream resolvers of the forwarder (P2-Q5).</note></notes>
+        <segment><source>Where DNS asks next</source></segment>
+      </unit>
+      <unit id="setup.steps.dns_meta">
+        <notes><note category="description">Short line under the DNS step: how many upstreams are entered.</note></notes>
+        <segment><source>{count, plural, =0 {No upstream} one {# upstream} other {# upstreams}}</source></segment>
+      </unit>
+      <unit id="setup.steps.dns_skipped">
+        <notes><note category="description">Short line under the DNS step when the DNS module or role is not chosen.</note></notes>
+        <segment><source>Not used</source></segment>
+      </unit>
+      <unit id="setup.dns.skipped">
+        <segment><source>DNS is not part of this installation (the DNS module or the dns role is not chosen in the previous step), so there is nothing to set here.</source></segment>
+      </unit>
+      <unit id="setup.dns.lede">
+        <segment><source>Names outside the zones Tenko serves are sent to upstream resolvers. Tenko has none built in: choose the ones your network should use.</source></segment>
+      </unit>
+      <unit id="setup.dns.upstreams">
+        <segment><source>Upstream resolvers</source></segment>
+      </unit>
+      <unit id="setup.dns.upstreams_help">
+        <segment><source>One address per line. Start with the resolvers your network uses now: they are in the DNS settings of your router or of a computer (ipconfig /all on Windows, resolvectl status on Linux, the network settings on macOS). The browser cannot read them for you.</source></segment>
+      </unit>
+      <unit id="setup.dns.upstreams_none">
+        <segment><source>Leave it empty to decide later: until a forwarder exists, names outside the zones are refused. Forwarders can be added on the DNS page at any time.</source></segment>
+      </unit>
+      <unit id="setup.dns.transport">
+        <segment><source>How Tenko asks them</source></segment>
+      </unit>
+      <unit id="setup.dns.transport.plain">
+        <segment><source>Plain DNS</source></segment>
+      </unit>
+      <unit id="setup.dns.transport.plain_description">
+        <segment><source>UDP and TCP on port 53, as most routers and resolvers answer.</source></segment>
+      </unit>
+      <unit id="setup.dns.transport.dot">
+        <segment><source>DNS over TLS</source></segment>
+      </unit>
+      <unit id="setup.dns.transport.dot_description">
+        <segment><source>Encrypted on port 853. The resolver must offer it; you give the name in its certificate.</source></segment>
+      </unit>
+      <unit id="setup.dns.transport.doh">
+        <segment><source>DNS over HTTPS</source></segment>
+      </unit>
+      <unit id="setup.dns.transport.doh_description">
+        <segment><source>Encrypted on port 443 to the path /dns-query. The resolver must offer it.</source></segment>
+      </unit>
+      <unit id="setup.dns.known">
+        <segment><source>These are addresses of {name}, which also answers over DNS over TLS as {tls}.</source></segment>
+      </unit>
+      <unit id="setup.dns.use_dot">
+        <segment><source>Use DNS over TLS</source></segment>
+      </unit>
+      <unit id="setup.dns.tls_name">
+        <segment><source>TLS name of the resolvers</source></segment>
+      </unit>
+      <unit id="setup.dns.tls_name_help">
+        <segment><source>The name in their certificates, for example dns.quad9.net for Quad9, cloudflare-dns.com for Cloudflare or dns.google for Google Public DNS.</source></segment>
+      </unit>
+      <unit id="setup.dns.preset">
+        <segment><source>Cache, served transports and the query log</source></segment>
+      </unit>
+      <unit id="setup.dns.preset_on">
+        <segment><source>Home preset</source></segment>
+      </unit>
+      <unit id="setup.dns.preset_help">
+        <segment><source>The Home preset keeps a cache with the bound of the profile, serves no DNS over TLS or HTTPS to the clients and keeps no query log. These are settings of tenko.toml; the result step shows the section to put there.</source></segment>
+      </unit>
+      <unit id="setup.dns.preset_apply">
+        <segment><source>Use the Home preset</source></segment>
+      </unit>
+      <unit id="setup.dns.cache">
+        <segment><source>Keep a cache</source></segment>
+      </unit>
+      <unit id="setup.dns.cache_description">
+        <segment><source>Answers from the upstreams are kept for their TTL; this profile keeps at most {entries, number} entries.</source></segment>
+      </unit>
+      <unit id="setup.dns.entries">
+        <segment><source>Entries at most</source></segment>
+      </unit>
+      <unit id="setup.dns.dot">
+        <segment><source>Serve DNS over TLS to the clients</source></segment>
+      </unit>
+      <unit id="setup.dns.dot_description">
+        <segment><source>Port 853 with the certificate of this node; off unless your clients need it.</source></segment>
+      </unit>
+      <unit id="setup.dns.doh">
+        <segment><source>Serve DNS over HTTPS to the clients</source></segment>
+      </unit>
+      <unit id="setup.dns.doh_description">
+        <segment><source>Port 443 on an address of its own, not the port of the console.</source></segment>
+      </unit>
+      <unit id="setup.dns.log">
+        <segment><source>Keep a query log</source></segment>
+      </unit>
+      <unit id="setup.dns.log_description">
+        <segment><source>Which names the clients asked for, with the clients pseudonymised; kept on the node only.</source></segment>
+      </unit>
+      <unit id="setup.dns.checklist">
+        <segment><source>Before clients use this node</source></segment>
+      </unit>
+      <unit id="setup.dns.check.role">
+        <segment><source>The node runs the dns role: roles = "controller,dns" in tenko.toml.</source></segment>
+      </unit>
+      <unit id="setup.dns.check.port">
+        <segment><source>Port 53 (UDP and TCP) is free on the listen addresses: no other resolver such as systemd-resolved, dnsmasq or the Windows DNS Server role holds it.</source></segment>
+      </unit>
+      <unit id="setup.dns.check.capability">
+        <segment><source>On Linux the process may bind port 53: the systemd unit grants CAP_NET_BIND_SERVICE, or setcap cap_net_bind_service+ep on the binary.</source></segment>
+      </unit>
+      <unit id="setup.dns.check.firewall">
+        <segment><source>The firewall lets UDP and TCP 53 in from the networks of the clients.</source></segment>
+      </unit>
+      <unit id="setup.dns.check.tls_ports">
+        <segment><source>Ports 853 and 443 are free and open for DNS over TLS and HTTPS, and need the same capability on Linux.</source></segment>
+      </unit>
+      <unit id="setup.done.dns">
+        <segment><source>DNS upstreams</source></segment>
+      </unit>
+      <unit id="setup.done.dns_none">
+        <segment><source>None yet: names outside the zones are refused</source></segment>
+      </unit>
+      <unit id="setup.gate.dns_upstreams">
+        <segment><source>Fix the upstreams: each is an IP address with an optional port.</source></segment>
+      </unit>
+      <unit id="setup.gate.dns_tls_name">
+        <segment><source>Give the TLS name of the resolvers for DNS over TLS or HTTPS.</source></segment>
+      </unit>
+      <unit id="setup.gate.dns_entries">
+        <segment><source>The cache takes 1 to 10000000 entries.</source></segment>
+      </unit>
+      <unit id="setup.result.dns.title">
+        <segment><source>DNS</source></segment>
+      </unit>
+      <unit id="setup.result.dns.saved">
+        <segment><source>The upstreams are the default forwarder of the store now; the forwarders page changes them.</source></segment>
+      </unit>
+      <unit id="setup.result.dns.failed">
+        <segment><source>The upstreams were not stored as the default forwarder ({reason}). Add them on the forwarders page, or put the section below in tenko.toml.</source></segment>
+      </unit>
+      <unit id="setup.result.dns.none">
+        <segment><source>No upstream was entered: names outside the zones are refused until a forwarder exists.</source></segment>
+      </unit>
+      <unit id="setup.result.dns.config_help">
+        <segment><source>Put this section in tenko.toml of the node and restart it: the cache, the served transports and the query log are read at start, and the forwarders apply while no rule of the store covers a name.</source></segment>
+      </unit>
+      <unit id="setup.result.dns.copy">
+        <segment><source>Copy the section</source></segment>
+      </unit>
+      <unit id="setup.result.dns.copied">
+        <segment><source>Section copied</source></segment>
+      </unit>
+      <unit id="setup.result.dns.copy_failed">
+        <segment><source>The section could not be copied</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

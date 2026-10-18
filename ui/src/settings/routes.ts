@@ -45,6 +45,12 @@ const PAGE_ROUTES: readonly AppRoute[] = [
     title: "guardrails.title",
   },
   {
+    path: "/settings/dns",
+    component: lazy(withPacks(["settings", "dns"], () => import("./dns/DnsSettingsPage"))),
+    access: "admin",
+    title: "dns.node.title",
+  },
+  {
     path: "/settings/languages",
     component: lazy(withPacks(["settings", "languages"], () => import("./languages/LanguagesPage"))),
     access: "admin",

@@ -214,3 +214,10 @@ table.wz-tg { width: 100%; border-collapse: collapse; font-size: var(--fs-12); }
   .wz-choice .r { grid-column: 2; text-align: start; max-width: none; }
   .wz-pk { flex-wrap: wrap; }
 }
+
+/* The DNS step (WP5.5): the upstreams, the well-known resolver offer, the generated section. */
+.wz-dns-upstreams { width: 100%; }
+.wz-dns-known { display: flex; align-items: center; gap: var(--sp-4); margin-top: var(--sp-4); }
+.wz-dns-tls, .wz-dns-entries { margin-top: var(--sp-4); max-width: 420px; }
+.wz-dns-checklist { margin: 0; padding-inline-start: var(--sp-6); display: grid; gap: var(--sp-2); font-size: var(--fs-12); color: var(--ink-2); }
+.wz-dns-config { margin: var(--sp-3) 0; padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface-2); font-size: var(--fs-12); overflow-x: auto; white-space: pre; }

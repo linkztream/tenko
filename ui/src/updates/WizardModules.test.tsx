@@ -77,6 +77,9 @@ function module(name: string): HTMLInputElement {
 
 async function finish() {
   next();
+  // The DNS upstreams step (WP5.5) comes between the roles and the review.
+  await heading("Where DNS asks next");
+  next();
   await heading("Review and finish");
   next();
   await heading("Setup complete");
@@ -124,7 +127,7 @@ describe("the module choice of the first-run wizard", () => {
 
     fireEvent.click(module("dns"));
     next();
-    await heading("Review and finish");
+    await heading("Where DNS asks next");
   });
 
   it("refuses to jump past the roles step with no module selected", async () => {

@@ -2,6 +2,9 @@ import { Show, type JSX } from "solid-js";
 import { NODE_ROLES, type TlsMode } from "../../api/types";
 import { formatList, t } from "../../i18n";
 import { parseProxyList } from "../validate";
+import { stepIndex } from "../gates";
+import { upstreamText } from "../../dns/forwarders/model";
+import { dnsChoice } from "../controller";
 import { ProblemNotice } from "../parts";
 import { useWizard } from "../controller";
 
@@ -38,7 +41,7 @@ function Row(props: { label: string; change?: { step: number; item: string }; ch
   );
 }
 
-/** Step 7: the choices at a glance, before anything is written. */
+/** Step 8: the choices at a glance, before anything is written. */
 export function Review() {
   const w = useWizard();
   const roleNames = () => NODE_ROLES.filter((r) => w.state.roles[r]).map((r) => t(ROLE_NAME[r]));
@@ -46,7 +49,7 @@ export function Review() {
   return (
     <div>
       <p class="wz-lede">{t("setup.done.lede")}</p>
-      <ProblemNotice step={6} />
+      <ProblemNotice step={stepIndex("done")} />
 
       <div class="wz-blk tight">
         <h2>{t("setup.done.choices")}</h2>
@@ -105,6 +108,19 @@ export function Review() {
               </div>
             </Show>
           </Row>
+          <Show when={w.dnsWanted()}>
+            <Row label={t("setup.done.dns")} change={{ step: stepIndex("dns"), item: t("setup.done.dns") }}>
+              <span data-testid="setup-review-dns" data-count={dnsChoice(w.state.dns, w.state.profile).upstreams.length}>
+                <Show when={dnsChoice(w.state.dns, w.state.profile).upstreams.length > 0} fallback={<span class="muted">{t("setup.done.dns_none")}</span>}>
+                  <span class="mono">{dnsChoice(w.state.dns, w.state.profile).upstreams.map(upstreamText).join(", ")}</span>
+                </Show>
+              </span>
+              <div class="wz-help">
+                {t(`setup.dns.transport.${w.state.dns.transport}`)}
+                <Show when={w.state.dns.transport !== "plain" && w.state.dns.tlsName.trim()}>{(name) => <span class="mono"> {name()}</span>}</Show>
+              </div>
+            </Row>
+          </Show>
           <Row label={t("setup.done.cluster")}>{t("setup.cluster.new")}</Row>
         </dl>
         <Show when={w.state.profile === "lab"}>

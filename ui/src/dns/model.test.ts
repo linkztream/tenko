@@ -369,7 +369,8 @@ describe("zone predicates", () => {
     expect(servedNow("forward")).toBe(true);
     expect(servedNow("rpz")).toBe(true);
     expect(servedNow("secondary")).toBe(false);
-    expect(servedNow("stub")).toBe(false);
+    // A stub zone is answered through the forwarder since WP5.1.
+    expect(servedNow("stub")).toBe(true);
   });
   it("tells a reverse zone by name or by its IPAM prefix", () => {
     expect(isReverse({ name: "2.0.192.in-addr.arpa", reverse_of: null })).toBe(true);

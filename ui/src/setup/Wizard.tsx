@@ -11,6 +11,7 @@ import { themeLabel } from "../shell/TopBar";
 import { firstBlockedStep, FOCUS, gateFor, LAST_STEP, STEP_COUNT, STEP_IDS, type Gate, type StepId } from "./gates";
 import { Admin } from "./steps/Admin";
 import { DataDir } from "./steps/DataDir";
+import { Dns } from "./steps/Dns";
 import { Host } from "./steps/Host";
 import { ProfileStep } from "./steps/Profile";
 import { Result } from "./steps/Result";
@@ -18,6 +19,7 @@ import { Review } from "./steps/Review";
 import { Roles } from "./steps/Roles";
 import { Welcome } from "./steps/Welcome";
 import { isValidUserName, validateHostName } from "./validate";
+import { splitUpstreams } from "../dns/forwarders/model";
 import { createWizard, WizardProvider } from "./controller";
 import "./wizard.css";
 
@@ -28,6 +30,7 @@ const STEP_NAME = {
   host: "setup.step.host.name",
   disk: "setup.step.disk.name",
   roles: "setup.step.roles.name",
+  dns: "setup.step.dns.name",
   done: "setup.step.done.name",
 } as const satisfies Record<StepId, string>;
 
@@ -38,6 +41,7 @@ const STEP_TITLE = {
   host: "setup.step.host.title",
   disk: "setup.step.disk.title",
   roles: "setup.step.roles.title",
+  dns: "setup.step.dns.title",
   done: "setup.step.done.title",
 } as const satisfies Record<StepId, string>;
 
@@ -47,7 +51,7 @@ interface Meta {
 }
 
 /**
- * First-run setup (API-10, design/mockups/wizard.html): seven steps and one request at the
+ * First-run setup (API-10, design/mockups/wizard.html): eight steps and one request at the
  * end. The page is a focused page without the shell; it stays mounted after the request
  * signs the new administrator in, to show the recovery codes and what to do next.
  */
@@ -124,6 +128,10 @@ export default function Wizard() {
       }
       case "roles":
         return { text: t("setup.steps.roles_meta", { count: Object.values(w.state.roles).filter(Boolean).length }) };
+      case "dns":
+        return w.dnsWanted()
+          ? { text: t("setup.steps.dns_meta", { count: splitUpstreams(w.state.dns.upstreams).length }) }
+          : { text: t("setup.steps.dns_skipped") };
       default:
         return null;
     }
@@ -301,6 +309,9 @@ export default function Wizard() {
                       <Roles />
                     </Match>
                     <Match when={w.state.step === 6}>
+                      <Dns />
+                    </Match>
+                    <Match when={w.state.step === 7}>
                       <Review />
                     </Match>
                   </Switch>

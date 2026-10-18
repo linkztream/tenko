@@ -7,11 +7,11 @@
         <segment><source>DNS</source><target>DNS</target></segment>
       </unit>
       <unit id="dns.coming.title">
-        <notes><note category="description">Heading of a DNS page whose view is not built yet (views, forwarders, block lists).</note></notes>
+        <notes><note category="description">Heading of a DNS page whose view is not built yet (views).</note></notes>
         <segment><source>Coming in a later slice</source><target>Kommer i en senare etapp</target></segment>
       </unit>
       <unit id="dns.coming.body">
-        <segment><source>Views, forwarders and block lists are managed here once they are built. Zones, records, access lists and keys work already.</source><target>Vyer, vidarebefordringar och blocklistor hanteras här när de är byggda. Zoner, poster, åtkomstlistor och nycklar fungerar redan.</target></segment>
+        <segment><source>Views are managed here once they are built. Zones, records, forwarders, block lists, access lists and keys work already.</source><target>Vyer hanteras här när de är byggda. Zoner, poster, vidarebefordrare, blocklistor, åtkomstlistor och nycklar fungerar redan.</target></segment>
       </unit>
       <unit id="dns.coming.zones">
         <segment><source>Go to the zones</source><target>Gå till zonerna</target></segment>
@@ -208,11 +208,11 @@
         <segment><source>Reverse</source><target>Omvänd</target></segment>
       </unit>
       <unit id="dns.zone.not_served">
-        <notes><note category="description">Tag of a secondary or stub zone, which Phase 2 does not serve.</note></notes>
+        <notes><note category="description">Tag of a secondary zone, which Phase 2 does not serve yet (transfers in come with WP6.1).</note></notes>
         <segment><source>Not served yet</source><target>Tillhandahålls inte än</target></segment>
       </unit>
       <unit id="dns.zone.not_served_hint">
-        <segment><source>Tenko keeps this zone but does not answer for it yet: transfers in and stub zones come in a later slice.</source><target>Tenko sparar zonen men svarar inte för den än: överföringar in och stubzoner kommer i en senare etapp.</target></segment>
+        <segment><source>Tenko keeps this zone but does not answer for it yet: transfers in come in a later slice.</source><target>Tenko sparar zonen men svarar inte för den än: överföringar in kommer i en senare etapp.</target></segment>
       </unit>
       <unit id="dns.zone.serial">
         <segment><source>Serial {serial}</source><target>Serienummer {serial}</target></segment>
@@ -1131,6 +1131,578 @@
       </unit>
       <unit id="errors.dns.module.disabled">
         <segment><source>The DNS module is switched off.</source><target>DNS-modulen är avstängd.</target></segment>
+      </unit>
+      <unit id="dns.nav.forwarders">
+        <segment><source>Forwarders</source><target>Vidarebefordrare</target></segment>
+      </unit>
+      <unit id="dns.nav.lists">
+        <segment><source>Block lists</source><target>Blocklistor</target></segment>
+      </unit>
+      <unit id="settings.nav.dns">
+        <notes><note category="description">Tab of the settings navigation: the read-only DNS settings of the node.</note></notes>
+        <segment><source>DNS</source><target>DNS</target></segment>
+      </unit>
+      <unit id="dns.zone.stub">
+        <notes><note category="description">Tag of a stub zone: its names are answered by asking the servers its NS set names (WP5.1).</note></notes>
+        <segment><source>Stub, served through the forwarder</source><target>Stubb, besvaras via vidarebefordraren</target></segment>
+      </unit>
+      <unit id="dns.zone.stub_hint">
+        <segment><source>Tenko asks the servers of this zone for its name servers and sends the queries for names in the zone to them.</source><target>Tenko frågar zonens servrar efter dess namnservrar och skickar frågorna om namn i zonen till dem.</target></segment>
+      </unit>
+      <unit id="dns.settings.source_stub">
+        <segment><source>Servers to ask</source><target>Servrar att fråga</target></segment>
+      </unit>
+      <unit id="dns.settings.source_stub_body">
+        <segment><source>Tenko asks these servers for the name servers of the zone, without recursion, and sends the queries for names in the zone to the name servers they name.</source><target>Tenko frågar de här servrarna efter zonens namnservrar, utan rekursion, och skickar frågorna om namn i zonen till de namnservrar som de anger.</target></segment>
+      </unit>
+      <unit id="dns.settings.source_primaries">
+        <segment><source>Primary servers</source><target>Primära servrar</target></segment>
+      </unit>
+      <unit id="dns.settings.source_primaries_body">
+        <segment><source>The servers the zone comes from, tried in order.</source><target>Servrarna som zonen kommer från, i tur och ordning.</target></segment>
+      </unit>
+      <unit id="dns.settings.source_invalid">
+        <segment><source>Give addresses, each with an optional port, for example 192.0.2.53 or [2001:db8::53]:5353.</source><target>Ange adresser, var och en med valfri port, till exempel 192.0.2.53 eller [2001:db8::53]:5353.</target></segment>
+      </unit>
+      <unit id="dns.fwd.title">
+        <notes><note category="description">Title of the forwarding rules page and its entry in the browser tab.</note></notes>
+        <segment><source>Forwarders</source><target>Vidarebefordrare</target></segment>
+      </unit>
+      <unit id="dns.fwd.sub">
+        <segment><source>Names outside the zones go to the upstreams of the rule with the longest matching suffix.</source><target>Namn utanför zonerna går till uppströmsservrarna i regeln med det längsta matchande suffixet.</target></segment>
+      </unit>
+      <unit id="dns.fwd.col.suffix">
+        <segment><source>Suffix</source><target>Suffix</target></segment>
+      </unit>
+      <unit id="dns.fwd.col.transport">
+        <segment><source>Transport</source><target>Transport</target></segment>
+      </unit>
+      <unit id="dns.fwd.col.upstreams">
+        <segment><source>Upstreams</source><target>Uppströmsservrar</target></segment>
+      </unit>
+      <unit id="dns.fwd.col.tls_name">
+        <segment><source>TLS name</source><target>TLS-namn</target></segment>
+      </unit>
+      <unit id="dns.fwd.col.view">
+        <segment><source>View</source><target>Vy</target></segment>
+      </unit>
+      <unit id="dns.fwd.default">
+        <notes><note category="description">Tag of the root rule (suffix .), which covers every name no longer rule covers.</note></notes>
+        <segment><source>Default forwarder</source><target>Standardvidarebefordrare</target></segment>
+      </unit>
+      <unit id="dns.fwd.all_views">
+        <segment><source>All views</source><target>Alla vyer</target></segment>
+      </unit>
+      <unit id="dns.fwd.transport.plain">
+        <segment><source>Plain DNS</source><target>Vanlig DNS</target></segment>
+      </unit>
+      <unit id="dns.fwd.transport.dot">
+        <segment><source>DNS over TLS</source><target>DNS över TLS</target></segment>
+      </unit>
+      <unit id="dns.fwd.transport.doh">
+        <segment><source>DNS over HTTPS</source><target>DNS över HTTPS</target></segment>
+      </unit>
+      <unit id="dns.fwd.create">
+        <segment><source>New rule</source><target>Ny regel</target></segment>
+      </unit>
+      <unit id="dns.fwd.create_title">
+        <segment><source>New forwarding rule</source><target>Ny vidarebefordringsregel</target></segment>
+      </unit>
+      <unit id="dns.fwd.edit_title">
+        <segment><source>Forwarding rule {suffix}</source><target>Vidarebefordringsregel {suffix}</target></segment>
+      </unit>
+      <unit id="dns.fwd.save">
+        <segment><source>Save rule</source><target>Spara regeln</target></segment>
+      </unit>
+      <unit id="dns.fwd.created">
+        <segment><source>Rule for {suffix} created</source><target>Regeln för {suffix} skapades</target></segment>
+      </unit>
+      <unit id="dns.fwd.saved">
+        <segment><source>Rule for {suffix} saved</source><target>Regeln för {suffix} sparades</target></segment>
+      </unit>
+      <unit id="dns.fwd.deleted">
+        <segment><source>Rule for {suffix} deleted</source><target>Regeln för {suffix} raderades</target></segment>
+      </unit>
+      <unit id="dns.fwd.delete_title">
+        <segment><source>Delete the rule for {suffix}?</source><target>Radera regeln för {suffix}?</target></segment>
+      </unit>
+      <unit id="dns.fwd.delete_body">
+        <segment><source>Names under the suffix go to the next shorter rule, or the default forwarder, from the next revision the node applies.</source><target>Namn under suffixet går till närmast kortare regel, eller till standardvidarebefordraren, från nästa revision som noden tillämpar.</target></segment>
+      </unit>
+      <unit id="dns.fwd.delete_root">
+        <segment><source>This is the default forwarder. Without it, names no other rule covers go to the forwarders of the configuration file, or are refused.</source><target>Det här är standardvidarebefordraren. Utan den går namn som ingen annan regel täcker till vidarebefordrarna i konfigurationsfilen, eller nekas.</target></segment>
+      </unit>
+      <unit id="dns.fwd.delete_confirm">
+        <segment><source>Delete rule</source><target>Radera regel</target></segment>
+      </unit>
+      <unit id="dns.fwd.empty">
+        <segment><source>No forwarding rules</source><target>Inga vidarebefordringsregler</target></segment>
+      </unit>
+      <unit id="dns.fwd.empty_body">
+        <segment><source>A rule for the suffix . is the default forwarder; rules for longer suffixes send their names elsewhere, for example to the domain controllers.</source><target>En regel för suffixet . är standardvidarebefordraren; regler för längre suffix skickar sina namn någon annanstans, till exempel till domänkontrollanterna.</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.suffix">
+        <segment><source>Suffix</source><target>Suffix</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.suffix_help">
+        <segment><source>The names at or below it, for example corp.example.test; . (or empty) for the default forwarder.</source><target>Namnen på eller under det, till exempel corp.example.test; . (eller tomt) för standardvidarebefordraren.</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.suffix_placeholder">
+        <segment><source>.</source><target>.</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.transport">
+        <segment><source>Transport</source><target>Transport</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.upstreams">
+        <segment><source>Upstreams</source><target>Uppströmsservrar</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.upstreams_help_plain">
+        <segment><source>One address per line, with an optional port: 192.0.2.1, 192.0.2.1:5353 or [2001:db8::53]:53. At most 16.</source><target>En adress per rad, med valfri port: 192.0.2.1, 192.0.2.1:5353 eller [2001:db8::53]:53. Högst 16.</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.upstreams_help_dot">
+        <segment><source>One address per line; port 853 when none is given. At most 16.</source><target>En adress per rad; port 853 om ingen anges. Högst 16.</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.upstreams_help_doh">
+        <segment><source>One address per line with an optional port and path: 192.0.2.80:443/dns-query. Port 443 and /dns-query when none are given.</source><target>En adress per rad med valfri port och sökväg: 192.0.2.80:443/dns-query. Port 443 och /dns-query om inget anges.</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.tls_name">
+        <segment><source>TLS name</source><target>TLS-namn</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.tls_name_help">
+        <segment><source>The name in the certificates of the upstreams, for example dns.quad9.net. Tenko checks it against the system roots or the configured CA.</source><target>Namnet i uppströmsservrarnas certifikat, till exempel dns.quad9.net. Tenko kontrollerar det mot systemets rotcertifikat eller den konfigurerade certifikatutfärdaren.</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.all_views">
+        <segment><source>Apply in every view</source><target>Gäller i alla vyer</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.all_views_help">
+        <segment><source>The rule applies in the view {view} only now.</source><target>Regeln gäller nu bara i vyn {view}.</target></segment>
+      </unit>
+      <unit id="dns.fwd.known">
+        <segment><source>These are addresses of {name}, which also answers over DNS over TLS as {tls}.</source><target>Det här är adresser till {name}, som också svarar via DNS över TLS som {tls}.</target></segment>
+      </unit>
+      <unit id="dns.fwd.use_dot">
+        <segment><source>Use DNS over TLS</source><target>Använd DNS över TLS</target></segment>
+      </unit>
+      <unit id="dns.fwd.check.suffix">
+        <segment><source>Not a DNS name.</source><target>Inte ett DNS-namn.</target></segment>
+      </unit>
+      <unit id="dns.fwd.check.tls_required">
+        <segment><source>DNS over TLS and DNS over HTTPS need the TLS name of the upstreams.</source><target>DNS över TLS och DNS över HTTPS behöver uppströmsservrarnas TLS-namn.</target></segment>
+      </unit>
+      <unit id="dns.fwd.check.tls_name">
+        <segment><source>Give a DNS name or an IP address.</source><target>Ange ett DNS-namn eller en IP-adress.</target></segment>
+      </unit>
+      <unit id="dns.fwd.check.none">
+        <segment><source>Give at least one upstream.</source><target>Ange minst en uppströmsserver.</target></segment>
+      </unit>
+      <unit id="dns.fwd.check.too_many">
+        <segment><source>A rule has at most 16 upstreams.</source><target>En regel har högst 16 uppströmsservrar.</target></segment>
+      </unit>
+      <unit id="dns.fwd.check.duplicate">
+        <segment><source>An upstream is listed twice.</source><target>En uppströmsserver står med två gånger.</target></segment>
+      </unit>
+      <unit id="dns.fwd.check.address">
+        <segment><source>{entry} is not an IP address.</source><target>{entry} är inte en IP-adress.</target></segment>
+      </unit>
+      <unit id="dns.fwd.check.port">
+        <segment><source>{entry}: the port is 1 to 65535.</source><target>{entry}: porten är 1 till 65535.</target></segment>
+      </unit>
+      <unit id="dns.fwd.check.path">
+        <segment><source>{entry}: a path starts with / and has no spaces.</source><target>{entry}: en sökväg börjar med / och har inga mellanslag.</target></segment>
+      </unit>
+      <unit id="dns.fwd.check.path_transport">
+        <segment><source>{entry}: only DNS over HTTPS takes a path.</source><target>{entry}: bara DNS över HTTPS tar en sökväg.</target></segment>
+      </unit>
+      <unit id="dns.fwd.check.taken">
+        <segment><source>A rule for this suffix exists in this view.</source><target>Det finns redan en regel för suffixet i den här vyn.</target></segment>
+      </unit>
+      <unit id="dns.fwd.check.view">
+        <segment><source>The view does not exist.</source><target>Vyn finns inte.</target></segment>
+      </unit>
+      <unit id="dns.fwd.no_default_title">
+        <segment><source>No default forwarder in the store.</source><target>Ingen standardvidarebefordrare i lagret.</target></segment>
+      </unit>
+      <unit id="dns.fwd.no_default_body">
+        <segment><source>Names that no rule here covers go to the forwarders of [dns] forwarders in tenko.toml of the node; without them they are refused. The node status does not list the forwarders of the file: look in the configuration file, or create a rule for the suffix . here.</source><target>Namn som ingen regel här täcker går till vidarebefordrarna i [dns] forwarders i nodens tenko.toml; utan dem nekas de. Nodens status visar inte filens vidarebefordrare: titta i konfigurationsfilen, eller skapa en regel för suffixet . här.</target></segment>
+      </unit>
+      <unit id="dns.fwd.no_default_link">
+        <segment><source>DNS settings of the node</source><target>Nodens DNS-inställningar</target></segment>
+      </unit>
+      <unit id="dns.fwd.problems_title">
+        <segment><source>The node reports problems:</source><target>Noden rapporterar problem:</target></segment>
+      </unit>
+      <unit id="dns.fwd.recursion.title">
+        <segment><source>Who may recurse</source><target>Vem som får rekursera</target></segment>
+      </unit>
+      <unit id="dns.fwd.recursion.known">
+        <segment><source>The implicit default view follows the profile {profile}: the prefixes IPAM knows and loopback may recurse; other clients are refused.</source><target>Den implicita standardvyn följer profilen {profile}: prefixen som IPAM känner till och loopback får rekursera; andra klienter nekas.</target></segment>
+      </unit>
+      <unit id="dns.fwd.recursion.hardened">
+        <segment><source>The implicit default view follows the profile {profile}: no client may recurse until a view names an access list.</source><target>Den implicita standardvyn följer profilen {profile}: ingen klient får rekursera förrän en vy anger en åtkomstlista.</target></segment>
+      </unit>
+      <unit id="dns.fwd.recursion.lab">
+        <segment><source>The implicit default view follows the profile {profile}: every client may recurse (an open resolver).</source><target>Den implicita standardvyn följer profilen {profile}: alla klienter får rekursera (en öppen resolver).</target></segment>
+      </unit>
+      <unit id="dns.fwd.recursion.views">
+        <segment><source>To widen or narrow this, a view with a recursion access list is needed; views are managed in a later version.</source><target>För att vidga eller begränsa detta behövs en vy med en åtkomstlista för rekursion; vyer hanteras i en senare version.</target></segment>
+      </unit>
+      <unit id="dns.lists.title">
+        <notes><note category="description">Title of the block lists page and its entry in the browser tab.</note></notes>
+        <segment><source>Block lists</source><target>Blocklistor</target></segment>
+      </unit>
+      <unit id="dns.lists.sub">
+        <segment><source>Names on an enabled list get the answer of the list instead of the answer of the upstream, with the extended error of RFC 8914.</source><target>Namn på en aktiv lista får listans svar i stället för uppströmsserverns, med det utökade felet i RFC 8914.</target></segment>
+      </unit>
+      <unit id="dns.lists.empty">
+        <segment><source>No block lists</source><target>Inga blocklistor</target></segment>
+      </unit>
+      <unit id="dns.lists.empty_body">
+        <segment><source>Add a list from a URL in hosts or domain-list form, or upload a file of your own.</source><target>Lägg till en lista från en URL i hosts- eller domänlisteformat, eller ladda upp en egen fil.</target></segment>
+      </unit>
+      <unit id="dns.list.col.source">
+        <segment><source>Source</source><target>Källa</target></segment>
+      </unit>
+      <unit id="dns.list.col.format">
+        <segment><source>Format</source><target>Format</target></segment>
+      </unit>
+      <unit id="dns.list.col.interval">
+        <segment><source>Fetched</source><target>Hämtas</target></segment>
+      </unit>
+      <unit id="dns.list.col.action">
+        <segment><source>Answer</source><target>Svar</target></segment>
+      </unit>
+      <unit id="dns.list.col.entries">
+        <segment><source>Names</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dns.list.col.fetched">
+        <segment><source>Read</source><target>Läst</target></segment>
+      </unit>
+      <unit id="dns.list.col.etag">
+        <segment><source>ETag</source><target>ETag</target></segment>
+      </unit>
+      <unit id="dns.list.col.last_error">
+        <segment><source>Last error</source><target>Senaste fel</target></segment>
+      </unit>
+      <unit id="dns.list.source.url">
+        <segment><source>URL</source><target>URL</target></segment>
+      </unit>
+      <unit id="dns.list.source.upload">
+        <segment><source>Upload</source><target>Uppladdad</target></segment>
+      </unit>
+      <unit id="dns.list.format.hosts">
+        <segment><source>Hosts file</source><target>Hosts-fil</target></segment>
+      </unit>
+      <unit id="dns.list.format.domains">
+        <segment><source>Domain list</source><target>Domänlista</target></segment>
+      </unit>
+      <unit id="dns.list.format.hosts_help">
+        <segment><source>Lines of an address and names, as in /etc/hosts: 0.0.0.0 ads.example.test. Comments start with #.</source><target>Rader med en adress och namn, som i /etc/hosts: 0.0.0.0 ads.example.test. Kommentarer börjar med #.</target></segment>
+      </unit>
+      <unit id="dns.list.format.domains_help">
+        <segment><source>One name per line: ads.example.test. Comments start with #.</source><target>Ett namn per rad: ads.example.test. Kommentarer börjar med #.</target></segment>
+      </unit>
+      <unit id="dns.list.action.nxdomain">
+        <segment><source>Name does not exist</source><target>Namnet finns inte</target></segment>
+      </unit>
+      <unit id="dns.list.action.nodata">
+        <segment><source>No data</source><target>Inga data</target></segment>
+      </unit>
+      <unit id="dns.list.action.redirect">
+        <segment><source>Redirect to</source><target>Omdirigera till</target></segment>
+      </unit>
+      <unit id="dns.list.every">
+        <segment><source>{hours, plural, one {every hour} other {every # hours}}</source><target>{hours, plural, one {varje timme} other {var #:e timme}}</target></segment>
+      </unit>
+      <unit id="dns.list.disabled">
+        <notes><note category="description">Tag of a block list that is not applied.</note></notes>
+        <segment><source>Off</source><target>Av</target></segment>
+      </unit>
+      <unit id="dns.list.no_version">
+        <segment><source>Not read yet</source><target>Inte läst än</target></segment>
+      </unit>
+      <unit id="dns.list.fetch">
+        <segment><source>Fetch now</source><target>Hämta nu</target></segment>
+      </unit>
+      <unit id="dns.list.fetch_started">
+        <segment><source>Fetching {name}</source><target>Hämtar {name}</target></segment>
+      </unit>
+      <unit id="dns.list.fetch_failed">
+        <segment><source>{name} was not fetched</source><target>{name} hämtades inte</target></segment>
+      </unit>
+      <unit id="dns.list.upload">
+        <segment><source>Upload a file</source><target>Ladda upp en fil</target></segment>
+      </unit>
+      <unit id="dns.list.upload_title">
+        <segment><source>Upload a file into {name}</source><target>Ladda upp en fil till {name}</target></segment>
+      </unit>
+      <unit id="dns.list.uploaded">
+        <segment><source>File of {name} sent</source><target>Filen för {name} skickades</target></segment>
+      </unit>
+      <unit id="dns.list.upload_hint">
+        <segment><source>The file of an uploaded list is sent with Upload a file in the list menu.</source><target>Filen för en uppladdad lista skickas med Ladda upp en fil i listans meny.</target></segment>
+      </unit>
+      <unit id="dns.list.file_chosen">
+        <segment><source>{name} is sent when you save.</source><target>{name} skickas när du sparar.</target></segment>
+      </unit>
+      <unit id="dns.list.job">
+        <segment><source>The list {name} is being read and compiled.</source><target>Listan {name} läses och kompileras.</target></segment>
+      </unit>
+      <unit id="dns.list.open_job">
+        <segment><source>Open the job</source><target>Öppna jobbet</target></segment>
+      </unit>
+      <unit id="dns.list.create">
+        <segment><source>New list</source><target>Ny lista</target></segment>
+      </unit>
+      <unit id="dns.list.create_title">
+        <segment><source>New block list</source><target>Ny blocklista</target></segment>
+      </unit>
+      <unit id="dns.list.edit_title">
+        <segment><source>Block list {name}</source><target>Blocklistan {name}</target></segment>
+      </unit>
+      <unit id="dns.list.save">
+        <segment><source>Save list</source><target>Spara listan</target></segment>
+      </unit>
+      <unit id="dns.list.created">
+        <segment><source>List {name} created</source><target>Listan {name} skapades</target></segment>
+      </unit>
+      <unit id="dns.list.saved">
+        <segment><source>List {name} saved</source><target>Listan {name} sparades</target></segment>
+      </unit>
+      <unit id="dns.list.deleted">
+        <segment><source>List {name} deleted</source><target>Listan {name} raderades</target></segment>
+      </unit>
+      <unit id="dns.list.delete_title">
+        <segment><source>Delete the list {name}?</source><target>Radera listan {name}?</target></segment>
+      </unit>
+      <unit id="dns.list.delete_body">
+        <segment><source>The names of the list are no longer blocked from the next revision the nodes apply.</source><target>Listans namn blockeras inte längre från nästa revision som noderna tillämpar.</target></segment>
+      </unit>
+      <unit id="dns.list.delete_confirm">
+        <segment><source>Delete list</source><target>Radera lista</target></segment>
+      </unit>
+      <unit id="dns.list.field.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dns.list.field.source">
+        <segment><source>Source</source><target>Källa</target></segment>
+      </unit>
+      <unit id="dns.list.field.url">
+        <segment><source>URL</source><target>URL</target></segment>
+      </unit>
+      <unit id="dns.list.field.url_help">
+        <segment><source>An https:// or http:// address that a controller fetches; the nodes need no internet access.</source><target>En https://- eller http://-adress som en kontrollant hämtar; noderna behöver ingen internetåtkomst.</target></segment>
+      </unit>
+      <unit id="dns.list.field.interval">
+        <segment><source>Fetch every (hours)</source><target>Hämta var (timmar)</target></segment>
+      </unit>
+      <unit id="dns.list.field.interval_help">
+        <segment><source>{min} to {max} hours; the ETag of the file spares a fetch that would bring nothing new.</source><target>{min} till {max} timmar; filens ETag sparar en hämtning som inte skulle ge något nytt.</target></segment>
+      </unit>
+      <unit id="dns.list.field.format">
+        <segment><source>Format</source><target>Format</target></segment>
+      </unit>
+      <unit id="dns.list.field.action">
+        <segment><source>A blocked name answers</source><target>Ett blockerat namn svarar</target></segment>
+      </unit>
+      <unit id="dns.list.field.redirect">
+        <segment><source>Address</source><target>Adress</target></segment>
+      </unit>
+      <unit id="dns.list.field.redirect_help">
+        <segment><source>The address an A or AAAA query for a blocked name gets, for example a page that says why.</source><target>Adressen som en A- eller AAAA-fråga om ett blockerat namn får, till exempel en sida som förklarar varför.</target></segment>
+      </unit>
+      <unit id="dns.list.field.enabled">
+        <segment><source>Apply the list</source><target>Tillämpa listan</target></segment>
+      </unit>
+      <unit id="dns.list.field.file">
+        <segment><source>File</source><target>Fil</target></segment>
+      </unit>
+      <unit id="dns.list.field.file_help">
+        <segment><source>A text file in the format above; it is compiled into the next version of the list.</source><target>En textfil i formatet ovan; den kompileras till listans nästa version.</target></segment>
+      </unit>
+      <unit id="dns.list.check.name">
+        <segment><source>1 to 64 letters, digits, spaces, dots, dashes or underscores.</source><target>1 till 64 bokstäver, siffror, mellanslag, punkter, bindestreck eller understreck.</target></segment>
+      </unit>
+      <unit id="dns.list.check.url">
+        <segment><source>Give an https:// or http:// URL.</source><target>Ange en https://- eller http://-URL.</target></segment>
+      </unit>
+      <unit id="dns.list.check.interval">
+        <segment><source>A whole number of hours from {min} to {max}.</source><target>Ett heltal timmar från {min} till {max}.</target></segment>
+      </unit>
+      <unit id="dns.list.check.redirect">
+        <segment><source>Not an IP address.</source><target>Inte en IP-adress.</target></segment>
+      </unit>
+      <unit id="dns.list.check.file">
+        <segment><source>Choose a file.</source><target>Välj en fil.</target></segment>
+      </unit>
+      <unit id="jobs.title.dns_list_fetch">
+        <notes><note category="description">Title of the job that fetches and compiles a URL block list.</note></notes>
+        <segment><source>Fetch a block list</source><target>Hämta en blocklista</target></segment>
+      </unit>
+      <unit id="jobs.title.dns_list_upload">
+        <segment><source>Compile an uploaded block list</source><target>Kompilera en uppladdad blocklista</target></segment>
+      </unit>
+      <unit id="jobs.step.dns_list_fetch">
+        <segment><source>Fetch the file</source><target>Hämta filen</target></segment>
+      </unit>
+      <unit id="jobs.step.dns_list_read">
+        <segment><source>Read the uploaded file</source><target>Läs den uppladdade filen</target></segment>
+      </unit>
+      <unit id="jobs.step.dns_list_compile">
+        <segment><source>Compile the names</source><target>Kompilera namnen</target></segment>
+      </unit>
+      <unit id="dns.node.title">
+        <notes><note category="description">Title of the read-only settings page of the DNS role of the node.</note></notes>
+        <segment><source>DNS settings</source><target>DNS-inställningar</target></segment>
+      </unit>
+      <unit id="dns.node.lede">
+        <segment><source>What the DNS role of this node runs with, read from the node. The settings are read from tenko.toml when the node starts: change them in the file and restart the node. Forwarding rules, zones and lists live in the store and change without a restart.</source><target>Det som nodens DNS-roll körs med, läst från noden. Inställningarna läses från tenko.toml när noden startar: ändra dem i filen och starta om noden. Vidarebefordringsregler, zoner och listor finns i lagret och ändras utan omstart.</target></segment>
+      </unit>
+      <unit id="dns.node.refresh">
+        <segment><source>Read again</source><target>Läs igen</target></segment>
+      </unit>
+      <unit id="dns.node.doc">
+        <segment><source>Explained in</source><target>Förklaras i</target></segment>
+      </unit>
+      <unit id="dns.node.forwarders_hint">
+        <segment><source>The upstreams of the forwarder are rules of the store:</source><target>Vidarebefordrarens uppströmsservrar är regler i lagret:</target></segment>
+      </unit>
+      <unit id="dns.node.forwarders_link">
+        <segment><source>Forwarders</source><target>Vidarebefordrare</target></segment>
+      </unit>
+      <unit id="dns.node.no_node">
+        <segment><source>This server has no node id yet, so there is no DNS role to read.</source><target>Servern har inget nod-id än, så det finns ingen DNS-roll att läsa.</target></segment>
+      </unit>
+      <unit id="dns.node.off_body">
+        <segment><source>The DNS module is switched off, so the node does not answer DNS. It is chosen in first-run setup, or with modules in tenko.toml.</source><target>DNS-modulen är avstängd, så noden svarar inte på DNS. Den väljs vid första start, eller med modules i tenko.toml.</target></segment>
+      </unit>
+      <unit id="dns.node.no_role_title">
+        <segment><source>This node does not run the dns role.</source><target>Noden kör inte dns-rollen.</target></segment>
+      </unit>
+      <unit id="dns.node.no_role_body">
+        <segment><source>Add dns to the roles in tenko.toml ({roles}) and restart the node; deploy/README.md says what port 53 needs.</source><target>Lägg till dns bland rollerna i tenko.toml ({roles}) och starta om noden; deploy/README.md beskriver vad port 53 kräver.</target></segment>
+      </unit>
+      <unit id="dns.node.problems">
+        <segment><source>The node reports problems:</source><target>Noden rapporterar problem:</target></segment>
+      </unit>
+      <unit id="dns.node.log_off">
+        <segment><source>The query log is off ([dns.log] enabled, or the profile default).</source><target>Frågeloggen är avstängd ([dns.log] enabled, eller profilens standard).</target></segment>
+      </unit>
+      <unit id="dns.node.unknown">
+        <segment><source>Not reported</source><target>Rapporteras inte</target></segment>
+      </unit>
+      <unit id="dns.node.yes">
+        <segment><source>Yes</source><target>Ja</target></segment>
+      </unit>
+      <unit id="dns.node.no">
+        <segment><source>No</source><target>Nej</target></segment>
+      </unit>
+      <unit id="dns.node.served">
+        <segment><source>served</source><target>tillhandahålls</target></segment>
+      </unit>
+      <unit id="dns.node.not_served">
+        <segment><source>not served</source><target>tillhandahålls inte</target></segment>
+      </unit>
+      <unit id="dns.node.tls">
+        <segment><source>DNS over TLS {dot}, DNS over HTTPS {doh} ([dns.tls] dot and doh).</source><target>DNS över TLS {dot}, DNS över HTTPS {doh} ([dns.tls] dot och doh).</target></segment>
+      </unit>
+      <unit id="dns.node.group.listeners">
+        <segment><source>Listeners</source><target>Lyssnare</target></segment>
+      </unit>
+      <unit id="dns.node.group.role">
+        <segment><source>The role</source><target>Rollen</target></segment>
+      </unit>
+      <unit id="dns.node.group.cache">
+        <segment><source>Cache</source><target>Cache</target></segment>
+      </unit>
+      <unit id="dns.node.group.tcp">
+        <segment><source>TCP connections</source><target>TCP-anslutningar</target></segment>
+      </unit>
+      <unit id="dns.node.group.log">
+        <segment><source>Query log</source><target>Frågelogg</target></segment>
+      </unit>
+      <unit id="dns.node.col.address">
+        <segment><source>Address</source><target>Adress</target></segment>
+      </unit>
+      <unit id="dns.node.col.transport">
+        <segment><source>Transport</source><target>Transport</target></segment>
+      </unit>
+      <unit id="dns.node.col.workers">
+        <segment><source>Workers</source><target>Arbetare</target></segment>
+      </unit>
+      <unit id="dns.node.col.key">
+        <segment><source>Set by</source><target>Sätts av</target></segment>
+      </unit>
+      <unit id="dns.node.row.serving">
+        <segment><source>Answers queries</source><target>Svarar på frågor</target></segment>
+      </unit>
+      <unit id="dns.node.row.started">
+        <segment><source>Started</source><target>Startad</target></segment>
+      </unit>
+      <unit id="dns.node.row.zones">
+        <segment><source>Zones served</source><target>Zoner som besvaras</target></segment>
+      </unit>
+      <unit id="dns.node.row.rrsets">
+        <segment><source>RRsets served</source><target>RRset som besvaras</target></segment>
+      </unit>
+      <unit id="dns.node.row.lag">
+        <segment><source>Revisions behind the store</source><target>Revisioner efter lagret</target></segment>
+      </unit>
+      <unit id="dns.node.row.workers">
+        <segment><source>UDP workers</source><target>UDP-arbetare</target></segment>
+      </unit>
+      <unit id="dns.node.row.socket_mode">
+        <segment><source>UDP sockets</source><target>UDP-socketar</target></segment>
+      </unit>
+      <unit id="dns.node.row.cache_entries">
+        <segment><source>Entries</source><target>Poster</target></segment>
+      </unit>
+      <unit id="dns.node.row.cache_bytes">
+        <segment><source>Octets accounted for</source><target>Räknade oktetter</target></segment>
+      </unit>
+      <unit id="dns.node.row.cache_hit_ratio">
+        <segment><source>Hit ratio</source><target>Träffandel</target></segment>
+      </unit>
+      <unit id="dns.node.row.cache_hits">
+        <segment><source>Hits since the start</source><target>Träffar sedan start</target></segment>
+      </unit>
+      <unit id="dns.node.row.cache_misses">
+        <segment><source>Misses since the start</source><target>Missar sedan start</target></segment>
+      </unit>
+      <unit id="dns.node.row.cache_stale">
+        <segment><source>Stale answers since the start</source><target>Inaktuella svar sedan start</target></segment>
+      </unit>
+      <unit id="dns.node.row.tcp_open">
+        <segment><source>Open now</source><target>Öppna nu</target></segment>
+      </unit>
+      <unit id="dns.node.row.tcp_refused">
+        <segment><source>Refused since the start</source><target>Nekade sedan start</target></segment>
+      </unit>
+      <unit id="dns.node.row.log_state">
+        <segment><source>State</source><target>Läge</target></segment>
+      </unit>
+      <unit id="dns.node.row.log_format">
+        <segment><source>Format</source><target>Format</target></segment>
+      </unit>
+      <unit id="dns.node.row.log_client">
+        <segment><source>Client written as</source><target>Klient skrivs som</target></segment>
+      </unit>
+      <unit id="dns.node.row.log_sample">
+        <segment><source>One query in</source><target>En fråga av</target></segment>
+      </unit>
+      <unit id="dns.node.row.log_days">
+        <segment><source>Days kept</source><target>Dagar som sparas</target></segment>
+      </unit>
+      <unit id="dns.node.row.log_size_mb">
+        <segment><source>MiB at most</source><target>MiB som mest</target></segment>
+      </unit>
+      <unit id="dns.node.row.log_written">
+        <segment><source>Written since the start</source><target>Skrivna sedan start</target></segment>
+      </unit>
+      <unit id="dns.node.row.log_dropped">
+        <segment><source>Dropped since the start</source><target>Bortkastade sedan start</target></segment>
+      </unit>
+      <unit id="dns.node.row.log_write_errors">
+        <segment><source>Failed writes since the start</source><target>Misslyckade skrivningar sedan start</target></segment>
       </unit>
     </group>
   </file>

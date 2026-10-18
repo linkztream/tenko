@@ -4,7 +4,7 @@ import { t } from "../i18n";
 import { DnsNav } from "./DnsNav";
 import { dnsPaths } from "./paths";
 
-/** Every DNS path no view claims yet (views, forwarders and block lists come in later slices). */
+/** Every DNS path no view claims yet (views come in a later slice, WP6.4). */
 export default function DnsPage() {
   return (
     <div class="page" data-testid="page-dns-later">

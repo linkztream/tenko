@@ -41,7 +41,9 @@ import {
   type GateInput,
   type PasswordCheckStatus,
 } from "./gates";
-import { generatePassword, generatorFor, type GeneratorKind } from "./generate";
+import { createForwarder } from "../dns/forwarders/api";
+import { checkRule, splitUpstreams, type ForwardTransport, type Upstream } from "../dns/forwarders/model";
+import { generatePassword, generatorFor, type DnsChoice, type GeneratorKind } from "./generate";
 import { parseProxyList, validateHostName } from "./validate";
 
 /** How long the password must rest before it is sent to the server for judging. */
@@ -58,6 +60,57 @@ const PRESET_OF: Readonly<Record<Profile, PasswordPolicy>> = {
 function scrollToTop(): void {
   document.documentElement.scrollTop = 0;
   document.body.scrollTop = 0;
+}
+
+/** The DNS step as typed: the upstreams, their transport and TLS name, and the preset's switches. */
+export interface DnsStepState {
+  upstreams: string;
+  transport: ForwardTransport;
+  tlsName: string;
+  cache: boolean;
+  /** Empty: the profile's bound (10,000 under Home, 100,000 otherwise). */
+  cacheEntries: string;
+  dot: boolean;
+  doh: boolean;
+  log: boolean;
+  /** The operator changed a switch, so a change of profile no longer resets them. */
+  touched: boolean;
+}
+
+/** The cache bound each profile starts with (`[dns.cache] entries` when it is not set). */
+export function profileCacheEntries(profile: Profile): number {
+  return profile === "home" ? 10_000 : 100_000;
+}
+
+/**
+ * The switches a profile starts with. Home is the Home preset of P2-Q5: the cache on with its
+ * bound, DoT and DoH served off, the query log off (TGL-15 makes it opt-in at home); the other
+ * profiles log by default. The upstreams are never preset: the person enters them.
+ */
+export function dnsPreset(profile: Profile): Pick<DnsStepState, "cache" | "cacheEntries" | "dot" | "doh" | "log"> {
+  return { cache: true, cacheEntries: String(profileCacheEntries(profile)), dot: false, doh: false, log: profile !== "home" };
+}
+
+function initialDns(profile: Profile): DnsStepState {
+  return { upstreams: "", transport: "plain", tlsName: "", ...dnsPreset(profile), touched: false };
+}
+
+/** The choice of the DNS step as the generated configuration and the root rule take it. */
+export function dnsChoice(dns: DnsStepState, profile: Profile): DnsChoice {
+  const checked = checkRule({ suffix: ".", upstreams: dns.upstreams, transport: dns.transport, tlsName: dns.tlsName });
+  const upstreams: Upstream[] = checked.ok ? checked.upstreams : [];
+  const entries = Number(dns.cacheEntries.trim());
+  const bound = dns.cacheEntries.trim() === "" || entries === profileCacheEntries(profile) ? null : entries;
+  return {
+    upstreams,
+    transport: dns.transport,
+    tlsName: checked.ok ? checked.tlsName : null,
+    cache: dns.cache,
+    cacheEntries: dns.cache ? bound : null,
+    dot: dns.dot,
+    doh: dns.doh,
+    log: dns.log,
+  };
 }
 
 /** Roles a profile starts with: Hardened scans passively only, so Probe starts unticked. */
@@ -86,6 +139,8 @@ export interface WizardState {
   modules: Record<ModuleName, boolean>;
   /** Probe networks by id: ticked or not. */
   networks: Record<string, boolean>;
+  /** The DNS step (P2-Q5). */
+  dns: DnsStepState;
   submitting: boolean;
   /** A reason the request was refused, shown on the step it belongs to. */
   problem: { step: number; error: unknown } | null;
@@ -111,6 +166,7 @@ function initialState(): WizardState {
     rolesTouched: false,
     modules: allModules(),
     networks: {},
+    dns: initialDns("home"),
     submitting: false,
     problem: null,
   };
@@ -130,8 +186,12 @@ export interface CodesState {
   error: unknown;
 }
 
+/** What became of the upstreams after setup: stored as the root forwarding rule, or not. */
+export type DnsOutcome = { status: "none" } | { status: "saved" } | { status: "failed"; error: unknown };
+
 export interface AfterState {
   done: boolean;
+  dns: DnsOutcome;
   caFingerprint: string | null;
   codes: CodesState;
   codesSaved: boolean;
@@ -141,6 +201,7 @@ export interface AfterState {
 function initialAfter(): AfterState {
   return {
     done: false,
+    dns: { status: "none" },
     caFingerprint: null,
     codes: { status: "loading", codes: [], error: null },
     codesSaved: false,
@@ -208,6 +269,11 @@ export interface Wizard {
   setRole: (role: NodeRole, on: boolean) => void;
   setModule: (module: ModuleName, on: boolean) => void;
   selectedNetworks: Accessor<string[]>;
+  /** Whether the DNS step applies: the DNS module and the `dns` role are chosen. */
+  dnsWanted: Accessor<boolean>;
+  setDns: <K extends keyof DnsStepState>(key: K, value: DnsStepState[K]) => void;
+  /** Sets the switches of the Home preset (or of the chosen profile). */
+  applyDnsPreset: () => void;
   // Finishing
   submit: () => Promise<void>;
   finished: Accessor<boolean>;
@@ -332,6 +398,7 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
   // ---- Gates and navigation
 
   const selectedNetworks = createMemo(() => networks().filter((n) => state.networks[n.id]).map((n) => n.id));
+  const dnsWanted = createMemo(() => state.modules.dns && state.roles.dns);
 
   const gateInput = createMemo<GateInput>(() => ({
     token: state.token,
@@ -350,6 +417,14 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
     roles: state.roles,
     probeNetworks: selectedNetworks(),
     hasNetworks: networks().length > 0,
+    dns: {
+      wanted: dnsWanted(),
+      upstreams: state.dns.upstreams,
+      transport: state.dns.transport,
+      tlsName: state.dns.tlsName,
+      cache: state.dns.cache,
+      cacheEntries: state.dns.cacheEntries,
+    },
   }));
 
   // The roles step also holds the module choice, which has its own gate (src/updates/wizardModules.ts).
@@ -436,6 +511,7 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
       setState("profile", profile);
       if (profile === "lab") setState("labAck", false);
       if (!state.rolesTouched) setState("roles", defaultRoles(profile));
+      if (!state.dns.touched) setState("dns", { ...state.dns, ...dnsPreset(profile) });
       // Plain HTTP exists only in the Lab profile.
       if (profile !== "lab" && state.tlsMode === "plain") setState("tlsMode", "internal_ca");
       setState("problem", null);
@@ -444,6 +520,17 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
 
   function setModule(module: ModuleName, on: boolean): void {
     setState("modules", module, on);
+  }
+
+  function setDns<K extends keyof DnsStepState>(key: K, value: DnsStepState[K]): void {
+    batch(() => {
+      setState("dns", key, value);
+      if (key === "cache" || key === "cacheEntries" || key === "dot" || key === "doh" || key === "log") setState("dns", "touched", true);
+    });
+  }
+
+  function applyDnsPreset(): void {
+    setState("dns", { ...state.dns, ...dnsPreset("home"), touched: true });
   }
 
   function setRole(role: NodeRole, on: boolean): void {
@@ -519,6 +606,7 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
     });
     await establish(result);
     await saveModules();
+    await saveDns();
     scrollToTop();
     focusHeading();
     await loadCodes();
@@ -537,6 +625,30 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
     } catch (err) {
       if (isApiError(err, "modules.pinned")) return;
       toast({ kind: "bad", title: t("setup.modules.save_failed"), body: errorMessage(err) });
+    }
+  }
+
+  /**
+   * Stores the upstreams of the DNS step as the root forwarding rule (the default forwarder of
+   * the store, which wins over `[dns] forwarders` of the file), with the new session. A refusal
+   * (the DNS module not running yet, a rule that exists) leaves the generated configuration and
+   * the forwarders page as the way; the result step says which.
+   */
+  async function saveDns(): Promise<void> {
+    if (!dnsWanted() || splitUpstreams(state.dns.upstreams).length === 0) return;
+    const choice = dnsChoice(state.dns, state.profile);
+    if (choice.upstreams.length === 0) return;
+    try {
+      await createForwarder({
+        suffix: ".",
+        upstreams: [...choice.upstreams],
+        transport: choice.transport,
+        tls_name: choice.tlsName,
+        description: null,
+      });
+      setAfter("dns", { status: "saved" });
+    } catch (error) {
+      setAfter("dns", { status: "failed", error });
     }
   }
 
@@ -636,6 +748,9 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
     setRole,
     setModule,
     selectedNetworks,
+    dnsWanted,
+    setDns,
+    applyDnsPreset,
     submit,
     finished,
     openGate,

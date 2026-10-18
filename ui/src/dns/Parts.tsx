@@ -84,7 +84,7 @@ export function checkMessage(code: CheckCode): string {
   return t(`dns.check.${code}`);
 }
 
-/** The kind of a zone with its serving state: secondary and stub zones are not served yet. */
+/** The kind of a zone with its serving state: stub zones go through the forwarder, secondary zones are not served yet. */
 export function ZoneChips(props: { zone: Pick<Zone, "kind" | "name" | "reverse_of"> }) {
   return (
     <span class="dns-chips">
@@ -94,6 +94,11 @@ export function ZoneChips(props: { zone: Pick<Zone, "kind" | "name" | "reverse_o
       <Show when={isReverse(props.zone)}>
         <span class="tag accent" data-testid="zone-reverse">
           {t("dns.zone.reverse")}
+        </span>
+      </Show>
+      <Show when={props.zone.kind === "stub"}>
+        <span class="tag accent" data-testid="zone-stub" title={t("dns.zone.stub_hint")}>
+          {t("dns.zone.stub")}
         </span>
       </Show>
       <Show when={!servedNow(props.zone.kind)}>

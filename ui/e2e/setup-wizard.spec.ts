@@ -6,6 +6,9 @@
 // - Under the Lab profile over plain HTTP: the Lab warning needs an acknowledgement, a
 //   passkey added on the result step (virtual platform authenticator) brings the recovery
 //   codes, which must be confirmed before the application opens; there is no CA root.
+// - The DNS step (P2-Q5, WP5.5): under Home the upstream is entered and DNS over TLS taken from
+//   the well-known resolver offer; the review shows it and the result step shows whether it was
+//   stored as the default forwarder with the generated [dns] section. Under Lab it is left empty.
 
 import type { Locator, Page } from "@playwright/test";
 import { ADMIN, type Schemas } from "./support/api";
@@ -20,7 +23,7 @@ async function next(page: Page, card: Locator, step: string): Promise<void> {
   await expect(card).toHaveAttribute("data-key", step);
 }
 
-/** Walks the seven steps with the administrator of the tests and finishes. */
+/** Walks the eight steps with the administrator of the tests and finishes. */
 async function completeWizard(page: Page, token: string, profile: "home" | "lab"): Promise<Locator> {
   const card = page.getByTestId("setup-card");
   await expect(card).toHaveAttribute("data-key", "welcome");
@@ -55,10 +58,36 @@ async function completeWizard(page: Page, token: string, profile: "home" | "lab"
   // The node reports no networks to probe, so the probe role is left out.
   await withKey(page, "setup-role", "probe").uncheck();
   await expect(withKey(page, "setup-role", "controller")).toBeChecked();
+  await next(page, card, "dns");
+
+  await expect(page.getByTestId("setup-dns")).toHaveAttribute("data-state", "wanted");
+  if (profile === "home") {
+    // No upstream is preset (P2-Q5); a well-known public resolver gets the DoT offer.
+    await expect(page.getByTestId("field-dns-upstreams")).toHaveValue("");
+    await page.getByTestId("field-dns-upstreams").fill("9.9.9.9");
+    await page.getByTestId("setup-dns-use-dot").click();
+    await expect(withKey(page, "setup-dns-transport", "dot")).toBeChecked();
+    await expect(page.getByTestId("field-dns-tls-name")).toHaveValue("dns.quad9.net");
+    // The Home preset: no query log, nothing served over TLS.
+    await expect(withKey(page, "setup-dns-switch", "log")).not.toBeChecked();
+    await expect(withKey(page, "setup-dns-switch", "dot")).not.toBeChecked();
+  }
   await next(page, card, "done");
+  if (profile === "home") await expect(page.getByTestId("setup-review-dns")).toHaveAttribute("data-count", "1");
 
   await page.getByTestId("setup-next").click();
   await expect(card).toHaveAttribute("data-key", "result");
+  const dns = page.getByTestId("setup-result-dns");
+  await expect(dns).toBeVisible();
+  if (profile === "home") {
+    // Stored as the root rule when the DNS module runs, else the section says what to put in the file.
+    await expect(dns).toHaveAttribute("data-state", /^(saved|failed)$/);
+    test.info().annotations.push({ type: "setup-dns", description: (await dns.getAttribute("data-state")) ?? "" });
+    await expect(page.getByTestId("setup-dns-config")).toContainText('tls_name = "dns.quad9.net"');
+  } else {
+    await expect(dns).toHaveAttribute("data-state", "none");
+    await expect(page.getByTestId("setup-dns-config")).toContainText("forwarders = []");
+  }
   return card;
 }
 

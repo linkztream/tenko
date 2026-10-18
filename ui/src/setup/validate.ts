@@ -1,5 +1,7 @@
 // Client-side checks of the wizard's text fields. They only spare the operator a round trip;
-// the server checks everything again (`auth.setup.invalid_host_name`, `auth.invalid_request`).
+// the server checks everything again (`auth.setup.invalid_host_name`, `auth.invalid_request`,
+// `dns.forwarder.invalid` for the upstreams of the DNS step).
+import { checkRule, needsTlsName, splitUpstreams, validTlsName, type ForwardTransport } from "../dns/forwarders/model";
 
 const OCTET = "(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
 const IPV4 = new RegExp(`^${OCTET}(?:\\.${OCTET}){3}$`);
@@ -94,4 +96,40 @@ export const USER_NAME_PATTERN = /^[a-z][a-z0-9._-]{2,30}$/;
 
 export function isValidUserName(raw: string): boolean {
   return USER_NAME_PATTERN.test(raw.trim());
+}
+
+// ---------------------------------------------------------------------------------
+// The DNS step (P2-Q5)
+
+export type DnsStepProblem = "upstreams" | "tls_name" | "entries";
+
+/** The upstreams of the DNS step and the cache bound as typed. */
+export interface DnsStepInput {
+  upstreams: string;
+  transport: ForwardTransport;
+  tlsName: string;
+  cache: boolean;
+  cacheEntries: string;
+}
+
+/** The most entries the cache takes (`[dns.cache] entries`, 1 to 10,000,000). */
+export const MAX_CACHE_ENTRIES = 10_000_000;
+
+/**
+ * What keeps the DNS step from being left: an upstream that is no address (with an optional
+ * port, and a path for DoH), DoT or DoH without a valid TLS name, or a cache bound out of range.
+ * No upstream at all is allowed: names outside the zones are then refused until a rule exists.
+ */
+export function dnsStepProblem(input: DnsStepInput): DnsStepProblem | null {
+  if (splitUpstreams(input.upstreams).length > 0) {
+    const checked = checkRule({ suffix: ".", upstreams: input.upstreams, transport: input.transport, tlsName: input.tlsName });
+    if (!checked.ok) return checked.problems.some((p) => p.field === "upstreams") ? "upstreams" : "tls_name";
+  } else if (needsTlsName(input.transport) && input.tlsName.trim() !== "" && !validTlsName(input.tlsName)) {
+    return "tls_name";
+  }
+  if (input.cache && input.cacheEntries.trim() !== "") {
+    const n = Number(input.cacheEntries.trim());
+    if (!/^\d+$/.test(input.cacheEntries.trim()) || n < 1 || n > MAX_CACHE_ENTRIES) return "entries";
+  }
+  return null;
 }

@@ -92,6 +92,7 @@ describe("the secrets page under Settings", () => {
       "backup",
       "reconciler",
       "guardrails",
+      "dns",
       "languages",
     ]);
     fireEvent.click(within(nav).getByRole("link", { name: "Secrets" }));

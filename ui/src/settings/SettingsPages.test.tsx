@@ -29,8 +29,8 @@ async function renderApp(url: string, roles?: string[]) {
 
 afterEach(() => setSessionForTest(null, "loading"));
 
-const TABS = ["security", "users", "updates", "secrets", "access", "audit-export", "vault", "backup", "reconciler", "guardrails", "languages"];
-const TAB_NAMES = ["Security", "Users", "Updates", "Secrets", "Access", "Audit export", "Vault", "Backup", "Reconciler", "Guardrails", "Languages"];
+const TABS = ["security", "users", "updates", "secrets", "access", "audit-export", "vault", "backup", "reconciler", "guardrails", "dns", "languages"];
+const TAB_NAMES = ["Security", "Users", "Updates", "Secrets", "Access", "Audit export", "Vault", "Backup", "Reconciler", "Guardrails", "DNS", "Languages"];
 
 /** The sub-pages of WP3.11b, each with a part only the page itself shows. */
 const PAGES = [

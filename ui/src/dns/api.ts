@@ -186,3 +186,22 @@ export function createKey(body: KeyCreate): Promise<KeyCreated> {
 export async function deleteKey(name: string): Promise<void> {
   await api.delete("/api/v1/dns/keys/{key}", { path: { key: name } });
 }
+
+// ---------------------------------------------------------------------------------
+// Block lists: the file of an uploaded list
+
+/** The route of `upload_dns_list`; the mock's handler listens on it too. */
+export const LIST_FILE_PATH = "/api/v1/dns/lists/{id}/file";
+
+/**
+ * Sends the file of an uploaded block list (`PUT /dns/lists/{id}/file`, `text/plain` in the
+ * list's format, at most `[dns.lists] max_upload`); the answer is the job that compiles it.
+ */
+export async function uploadBlockList(list: { id: string; revision: number }, text: string): Promise<string> {
+  const started = (await api.put(LIST_FILE_PATH, {
+    path: { id: list.id },
+    body: new Blob([text], { type: "text/plain" }),
+    ifMatch: list.revision,
+  })) as components["schemas"]["DnsJobStarted"];
+  return started.job_id;
+}

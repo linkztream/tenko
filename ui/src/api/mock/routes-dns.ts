@@ -8,7 +8,10 @@
 // what the server answers until WP4.2 lands, for the tests of that state. The DNS role of node 1
 // (WP5.4): its status with the query log, the log read with its filters and cursor (audited as
 // `dns.log.read`; addresses only for administrators, who may update the node), and the kill
-// switch; the log itself is dns-log-model.ts.
+// switch; the log itself is dns-log-model.ts. The resolver side (WP5.5): forwarding rules, block
+// lists with "fetch now" and the file upload of `PUT /dns/lists/{id}/file` (granted by the lead for
+// WP5.2, not in the document yet, so a plain msw handler), both as jobs, and the cache figures
+// and problems of the node status; the service is dns-resolver-model.ts.
 import { http, type HttpHandler } from "msw";
 import { encodeImportReport } from "../../dns/api";
 import type { ObjectRef } from "../types";
@@ -38,6 +41,24 @@ import {
   type DnsState,
 } from "./dns-model";
 import { DnsLogFailure, logStatus, readLog, seedDnsLog, switchLog, type DnsLogState } from "./dns-log-model";
+import {
+  createForwarder,
+  createList,
+  deleteForwarder,
+  deleteList,
+  fetchList,
+  findForwarder,
+  findList,
+  listForwarders,
+  listLists,
+  resolverStatus,
+  seedResolver,
+  updateForwarder,
+  updateList,
+  uploadList,
+  type ResolverState,
+} from "./dns-resolver-model";
+import { LIST_FILE_PATH } from "../../dns/api";
 import { createJob } from "./job-store";
 import { created, noContent, notImplemented, ok, Problem, Reply } from "./reply";
 import { mswPath, paginate, route, wholePage } from "./route";
@@ -55,11 +76,18 @@ const context: DnsContext = {
 
 let state: DnsState = seedDns(context);
 let logState: DnsLogState = seedDnsLog();
+let resolver: ResolverState = seedResolver(context);
 
 onMockReset(() => {
   state = seedDns(context);
   logState = seedDnsLog();
+  resolver = seedResolver(context);
 });
+
+/** The resolver side of the mock (forwarders, lists, node figures), for tests that arrange or inspect it. */
+export function dnsResolverState(): ResolverState {
+  return resolver;
+}
 
 /** The query log of the mock's DNS node, for tests that arrange or inspect it. */
 export function dnsLogState(): DnsLogState {
@@ -305,6 +333,11 @@ const node = [
         ],
         cache_entries: 0,
         started: "2026-10-17T11:58:00Z",
+        socket_mode: "shared",
+        tcp_open: 1,
+        tcp_refused: 0,
+        udp_workers: [0, 1].map((index) => ({ index, listen: "192.0.2.53:53", socket: 0, received: 0, sent: 0, dropped: 0, forwarded: 0, recv_errors: 0, send_errors: 0 })),
+        ...resolverStatus(resolver),
       };
       const log = logStatus(logState);
       if (log) status.query_log = log;
@@ -351,7 +384,131 @@ const node = [
   ),
 ];
 
-export const dnsRoutes: HttpHandler[] = [...zones, ...records, ...acls, ...keys, ...node];
+// ---------------------------------------------------------------------------------
+// Forwarding rules
+
+const forwarderRef = (id: string): ObjectRef => ({ kind: "dns_forwarder", id });
+
+const forwarders = [
+  route("get", "/api/v1/dns/forwarders", (ctx) => guard("dns.read", () => ok(paginate(listForwarders(resolver), ctx.url, db.revision)))),
+  route("post", "/api/v1/dns/forwarders", async (ctx) => {
+    const body = await ctx.body();
+    return guard("dns.write", () => {
+      const rule = createForwarder(resolver, context, body as Record<string, unknown>);
+      write("dns.forwarder.create", [forwarderRef(rule.id)], "dns.forwarder.changed", ["dns.forwarders"], { suffix: rule.suffix });
+      return created(rule, etag(rule.revision));
+    });
+  }),
+  route("get", "/api/v1/dns/forwarders/{id}", (ctx) =>
+    guard("dns.read", () => {
+      const rule = findForwarder(resolver, ctx.params.id);
+      return ok(rule, etag(rule.revision));
+    }),
+  ),
+  route("patch", "/api/v1/dns/forwarders/{id}", async (ctx) => {
+    const body = await ctx.body();
+    return guard("dns.write", () => {
+      const rule = updateForwarder(resolver, context, ctx.params.id, body as Record<string, unknown>, ctx.ifMatch());
+      write("dns.forwarder.update", [forwarderRef(rule.id)], "dns.forwarder.changed", ["dns.forwarders"], { suffix: rule.suffix });
+      return ok(rule, etag(rule.revision));
+    });
+  }),
+  route("delete", "/api/v1/dns/forwarders/{id}", (ctx) =>
+    guard("dns.write", () => {
+      const rule = deleteForwarder(resolver, ctx.params.id, ctx.ifMatch());
+      commit("dns", { deleted: [forwarderRef(rule.id)], tables: ["dns.forwarders"], kind: "dns.forwarder.changed" });
+      appendAudit({ action: "dns.forwarder.delete", objects: [forwarderRef(rule.id)], context: { suffix: rule.suffix } });
+      return noContent();
+    }),
+  ),
+];
+
+// ---------------------------------------------------------------------------------
+// Block lists
+
+const listRef = (id: string): ObjectRef => ({ kind: "dns_list", id });
+
+/** The job of a fetch or an upload: it has already run when it is answered. */
+function listJob(id: string, kind: "fetch" | "upload"): string {
+  return createJob({
+    kind: `dns.list.${kind}`,
+    title: `jobs.title.dns_list_${kind}`,
+    targets: [listRef(id)],
+    timeoutSecs: 600,
+    preview: false,
+    steps: [
+      { kind: kind === "fetch" ? "dns.list.fetch" : "dns.list.read", automatic: true },
+      { kind: "dns.list.compile", automatic: true },
+    ],
+  });
+}
+
+/** The `If-Match` of a plain handler, as `route` reads it. */
+function ifMatchOf(raw: string | null): number | "*" | null {
+  if (raw === null) return null;
+  if (raw.trim() === "*") return "*";
+  const match = /^(?:W\/)?"?(\d+)"?$/.exec(raw.trim());
+  return match ? Number(match[1]) : null;
+}
+
+const lists = [
+  route("get", "/api/v1/dns/lists", (ctx) => guard("dns.read", () => ok(paginate(listLists(resolver), ctx.url, db.revision) as never))),
+  route("post", "/api/v1/dns/lists", async (ctx) => {
+    const body = await ctx.body();
+    return guard("dns.write", () => {
+      const list = createList(resolver, context, body as Record<string, unknown>);
+      write("dns.list.create", [listRef(list.id)], "dns.list.changed", ["dns.lists"], { name: list.name });
+      return created(list as never, etag(list.revision));
+    });
+  }),
+  route("get", "/api/v1/dns/lists/{id}", (ctx) =>
+    guard("dns.read", () => {
+      const list = findList(resolver, ctx.params.id);
+      return ok(list as never, etag(list.revision));
+    }),
+  ),
+  route("patch", "/api/v1/dns/lists/{id}", async (ctx) => {
+    const body = await ctx.body();
+    return guard("dns.write", () => {
+      const list = updateList(resolver, context, ctx.params.id, body as Record<string, unknown>, ctx.ifMatch());
+      write("dns.list.update", [listRef(list.id)], "dns.list.changed", ["dns.lists"], { name: list.name });
+      return ok(list as never, etag(list.revision));
+    });
+  }),
+  route("delete", "/api/v1/dns/lists/{id}", (ctx) =>
+    guard("dns.write", () => {
+      const list = deleteList(resolver, ctx.params.id, ctx.ifMatch());
+      commit("dns", { deleted: [listRef(list.id)], tables: ["dns.lists"], kind: "dns.list.changed" });
+      appendAudit({ action: "dns.list.delete", objects: [listRef(list.id)], context: { name: list.name } });
+      return noContent();
+    }),
+  ),
+  route("post", "/api/v1/dns/lists/{id}/fetch", (ctx) =>
+    guard("dns.write", () => {
+      const list = fetchList(resolver, context, ctx.params.id);
+      write("dns.list.fetch", [listRef(list.id)], "dns.list.changed", ["dns.lists", "dns.list_versions"], { name: list.name });
+      const jobId = listJob(list.id, "fetch");
+      return new Reply(202, { job_id: jobId }, { Location: `/api/v1/jobs/${jobId}` }) as never;
+    }),
+  ),
+  // Not in the document yet (WP5.2 adds it): a plain handler, the file as text.
+  http.put(mswPath(LIST_FILE_PATH), async ({ request, params }) => {
+    const text = await request.text();
+    try {
+      return guard("dns.write", () => {
+        const list = uploadList(resolver, context, String(params.id), text, ifMatchOf(request.headers.get("if-match")));
+        write("dns.list.upload", [listRef(list.id)], "dns.list.changed", ["dns.lists", "dns.list_versions"], { name: list.name });
+        const jobId = listJob(list.id, "upload");
+        return new Reply(202, { job_id: jobId }, { Location: `/api/v1/jobs/${jobId}` }).toResponse();
+      });
+    } catch (error) {
+      if (error instanceof Problem) return error.reply.toResponse();
+      throw error;
+    }
+  }),
+];
+
+export const dnsRoutes: HttpHandler[] = [...zones, ...records, ...acls, ...keys, ...forwarders, ...lists, ...node];
 
 /** Every DNS operation answering 501, as the server does until WP4.2 lands (for `server.use`). */
 export const dnsStubs: HttpHandler[] = apiOperations

@@ -1,7 +1,9 @@
-// Generated passwords for the first administrator. Everything draws from
-// `crypto.getRandomValues` with rejection sampling, so no character is likelier than another.
-// The result never contains the words in `avoid` (the user name, the host name, the product).
+// What the wizard generates. Passwords for the first administrator: everything draws from
+// `crypto.getRandomValues` with rejection sampling, so no character is likelier than another, and
+// the result never contains the words in `avoid` (the user name, the host name, the product).
+// And the `[dns]` section of `tenko.toml` from the DNS step (`generateDnsConfig`).
 import type { PasswordPolicy } from "../api/types";
+import type { ForwardTransport, Upstream } from "../dns/forwarders/model";
 import { WORDS } from "./words";
 
 /** Letters and digits without the look-alikes 0 O 1 l I. */
@@ -96,4 +98,52 @@ export function generatePassword(kind: GeneratorKind, options: GenerateOptions =
     return out;
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------------
+// The [dns] section of tenko.toml (P2-Q5)
+
+/** What the DNS step chose: the upstreams as typed, their transport, and the Home preset's switches. */
+export interface DnsChoice {
+  upstreams: readonly Upstream[];
+  transport: ForwardTransport;
+  tlsName: string | null;
+  cache: boolean;
+  /** Cache entries at most; null keeps the profile's bound. */
+  cacheEntries: number | null;
+  dot: boolean;
+  doh: boolean;
+  log: boolean;
+}
+
+/** The transport word of the configuration file: `udp` for plain, as `[dns] forwarders` reads it. */
+const FILE_TRANSPORT: Readonly<Record<ForwardTransport, string>> = { plain: "udp", dot: "dot", doh: "doh" };
+
+function tomlString(text: string): string {
+  return JSON.stringify(text);
+}
+
+function forwarderEntry(u: Upstream, choice: DnsChoice): string {
+  const parts = [`address = ${tomlString(u.address)}`];
+  if (u.port) parts.push(`port = ${u.port}`);
+  if (choice.transport !== "plain") parts.push(`transport = ${tomlString(FILE_TRANSPORT[choice.transport])}`);
+  if (choice.tlsName && choice.transport !== "plain") parts.push(`tls_name = ${tomlString(choice.tlsName)}`);
+  if (u.path) parts.push(`path = ${tomlString(u.path)}`);
+  return `  { ${parts.join(", ")} },`;
+}
+
+/**
+ * The `[dns]`, `[dns.cache]`, `[dns.tls]` and `[dns.log]` keys of the choice, for `tenko.toml`
+ * (deploy/tenko.example.toml). The forwarders of the file apply only while no root rule of
+ * the store covers a name; the wizard also stores them as that rule. Comments are part of the
+ * file, so they are English like the example file.
+ */
+export function generateDnsConfig(choice: DnsChoice): string {
+  const lines = ["[dns]", "# The default forwarder while no root rule of the store covers a name (P2-Q5: chosen in setup)."];
+  if (choice.upstreams.length === 0) lines.push("forwarders = []");
+  else lines.push("forwarders = [", ...choice.upstreams.map((u) => forwarderEntry(u, choice)), "]");
+  lines.push("", "[dns.cache]", `enabled = ${choice.cache}`);
+  if (choice.cacheEntries !== null) lines.push(`entries = ${choice.cacheEntries}`);
+  lines.push("", "[dns.tls]", `dot = ${choice.dot}`, `doh = ${choice.doh}`, "", "[dns.log]", `enabled = ${choice.log}`, "");
+  return lines.join("\n");
 }

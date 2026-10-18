@@ -1,4 +1,5 @@
 import { A } from "@solidjs/router";
+import { errorMessage } from "../../api/problem";
 import { For, Show } from "solid-js";
 import { paths } from "../../app/paths";
 import { session } from "../../auth/session";
@@ -11,9 +12,15 @@ import { t } from "../../i18n";
 import { fingerprintRows, fingerprintText } from "../format";
 import { CaRootLink } from "../../components/CaRootLink";
 import { FOCUS } from "../gates";
-import { useWizard } from "../controller";
+import { dnsChoice, useWizard } from "../controller";
+import { dnsChecklist } from "../checklist";
+import { generateDnsConfig } from "../generate";
 
-/** After the request succeeded: recovery codes, the passkey, the CA fingerprint, what to do next. */
+/**
+ * After the request succeeded: recovery codes, the passkey, the CA fingerprint, the DNS upstreams
+ * (stored as the root forwarding rule or not) with the `[dns]` section for `tenko.toml` and the
+ * DNS checklist, what to do next.
+ */
 export function Result() {
   const w = useWizard();
   const needsPasskey = () => session()?.strength === "pin" && w.after.passkey.status !== "added";
@@ -46,6 +53,16 @@ export function Result() {
         kind: "info",
       });
     });
+
+  const dnsConfig = () => generateDnsConfig(dnsChoice(w.state.dns, w.state.profile));
+  const copyDns = async () => {
+    try {
+      await navigator.clipboard.writeText(dnsConfig());
+      toast({ title: t("setup.result.dns.copied"), kind: "ok" });
+    } catch {
+      toast({ title: t("setup.result.dns.copy_failed"), kind: "bad" });
+    }
+  };
 
   /** Leaving through a link would skip the recovery codes: ask for them first. */
   const guard = (e: MouseEvent) => {
@@ -160,6 +177,46 @@ export function Result() {
             <p class="wz-help">{t("setup.result.ca.compare")}</p>
           </div>
         )}
+      </Show>
+
+      <Show when={w.dnsWanted()}>
+        <div class="wz-blk" data-testid="setup-result-dns" data-state={w.after.dns.status}>
+          <h2 id="wz-dns-config-title">{t("setup.result.dns.title")}</h2>
+          <Show when={w.after.dns.status === "saved"}>
+            <Notice kind="ok" role="status" testid="setup-dns-saved">
+              {t("setup.result.dns.saved")}
+            </Notice>
+          </Show>
+          <Show when={w.after.dns.status === "failed" ? w.after.dns : undefined}>
+            {(failed) => (
+              <Notice kind="warn" role="status" testid="setup-dns-failed">
+                {t("setup.result.dns.failed", { reason: errorMessage(failed().error) })}
+              </Notice>
+            )}
+          </Show>
+          <Show when={w.after.dns.status === "none"}>
+            <p class="wz-help ink">{t("setup.result.dns.none")}</p>
+          </Show>
+          <p class="wz-help ink">{t("setup.result.dns.config_help")}</p>
+          <pre class="wz-dns-config mono" aria-labelledby="wz-dns-config-title" data-testid="setup-dns-config">
+            {dnsConfig()}
+          </pre>
+          <div class="form-row">
+            <button type="button" class="btn sm" data-testid="setup-dns-copy" onClick={() => void copyDns()}>
+              <Icon name="copy" size="sm" />
+              {t("setup.result.dns.copy")}
+            </button>
+          </div>
+          <ul class="wz-dns-checklist" data-testid="setup-dns-checklist">
+            <For each={dnsChecklist(w.state.dns)}>
+              {(id) => (
+                <li data-testid="setup-dns-check" data-key={id}>
+                  {t(`setup.dns.check.${id}`)}
+                </li>
+              )}
+            </For>
+          </ul>
+        </div>
       </Show>
 
       <div class="wz-blk">

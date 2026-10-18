@@ -1,9 +1,14 @@
 // Why Continue is blocked on a step, and which control fixes it. Pure functions of plain
 // data, so the logic is tested without rendering (the mockup's `gate()`).
 import type { DataDirFacts, NodeRole, Profile, TlsMode } from "../api/types";
-import { isValidUserName, parseProxyList, validateHostName } from "./validate";
+import type { ForwardTransport } from "../dns/forwarders/model";
+import { dnsStepProblem, isValidUserName, parseProxyList, validateHostName } from "./validate";
 
-export const STEP_IDS = ["welcome", "profile", "admin", "host", "disk", "roles", "done"] as const;
+/**
+ * The steps in order. The DNS step (P2-Q5) is always in the list; when the DNS module or the
+ * `dns` role is not chosen it says so and has nothing to set.
+ */
+export const STEP_IDS = ["welcome", "profile", "admin", "host", "disk", "roles", "dns", "done"] as const;
 export type StepId = (typeof STEP_IDS)[number];
 export const STEP_COUNT = STEP_IDS.length;
 export const LAST_STEP = STEP_COUNT - 1;
@@ -26,6 +31,9 @@ export const FOCUS = {
   roleProbe: "wz-role-probe",
   tlsPlain: "wz-tls-plain",
   firstNetwork: "wz-net-first",
+  dnsUpstreams: "wz-dns-upstreams",
+  dnsTlsName: "wz-dns-tls",
+  dnsEntries: "wz-dns-entries",
   passkey: "wz-passkey",
   codesAck: "wz-codes",
 } as const;
@@ -54,6 +62,9 @@ export type GateMessage =
   | "setup.gate.roles_none"
   | "setup.gate.roles_controller"
   | "setup.gate.probe_networks"
+  | "setup.gate.dns_upstreams"
+  | "setup.gate.dns_tls_name"
+  | "setup.gate.dns_entries"
   | "setup.gate.codes_loading"
   | "setup.gate.codes_ack"
   | "setup.gate.passkey_waiting"
@@ -87,6 +98,15 @@ export interface GateInput {
   probeNetworks: readonly string[];
   /** Whether the node reported any networks to probe. */
   hasNetworks: boolean;
+  /** The DNS step: whether it applies (the module and the role are chosen) and what it holds. */
+  dns: {
+    wanted: boolean;
+    upstreams: string;
+    transport: ForwardTransport;
+    tlsName: string;
+    cache: boolean;
+    cacheEntries: string;
+  };
 }
 
 export function rolesSelected(roles: Record<NodeRole, boolean>): number {
@@ -137,6 +157,19 @@ export function gateFor(step: number, g: GateInput): Gate | null {
         return { message: "setup.gate.probe_networks", focus: g.hasNetworks ? FOCUS.firstNetwork : FOCUS.roleProbe };
       }
       return null;
+    case "dns": {
+      if (!g.dns.wanted) return null;
+      switch (dnsStepProblem(g.dns)) {
+        case "upstreams":
+          return { message: "setup.gate.dns_upstreams", focus: FOCUS.dnsUpstreams };
+        case "tls_name":
+          return { message: "setup.gate.dns_tls_name", focus: FOCUS.dnsTlsName };
+        case "entries":
+          return { message: "setup.gate.dns_entries", focus: FOCUS.dnsEntries };
+        default:
+          return null;
+      }
+    }
     default:
       return null;
   }

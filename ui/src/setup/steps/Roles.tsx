@@ -34,7 +34,7 @@ const ROLE_HINT = {
 /** The networks with a VLAN color of their own in the design; the rest get the neutral swatch. */
 const VLAN_CLASS = ["lan", "lab", "iot", "dmz"];
 
-/** Step 6: roles, probe networks and the cluster. */
+/** Step 6: roles, probe networks and the cluster; the DNS step follows. */
 export function Roles() {
   const w = useWizard();
   const selectedMb = () => NODE_ROLES.filter((r) => w.state.roles[r]).reduce((sum, r) => sum + ROLE_MEMORY[r], 0);

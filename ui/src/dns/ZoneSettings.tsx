@@ -1,6 +1,6 @@
-// The settings and history tabs of the zone page. Settings: the SOA values, the serial policy
-// and the description (one PATCH with the zone's revision) and the NS RRset of the apex (one
-// batch change), saved together. History: the serial served now, the last change, and the
+// The settings and history tabs of the zone page. Settings: the SOA values, the serial policy,
+// the description and, for a stub, secondary or forward zone, the servers of `source` (one PATCH
+// with the zone's revision) and the NS RRset of the apex (one batch change), saved together. History: the serial served now, the last change, and the
 // newest audit records of the zone for those who read the audit log (until a journal route
 // exists, the lead's decision for WP4.5).
 import { A } from "@solidjs/router";
@@ -19,17 +19,35 @@ import {
   updateZone,
   zoneAudit,
   type SerialPolicy,
+  type PrimaryServer,
   type SoaDefaults,
   type Zone,
   type ZonePatch,
 } from "./api";
 import { mayWriteDns } from "./access";
-import { canonical, parseTtl, splitList, targetName, validName } from "./model";
+import { canonical, hasSource, parseTtl, splitList, targetName, validName } from "./model";
+import { parseUpstream, upstreamText } from "./forwarders/model";
 import { describedBy, Field, fieldErrors } from "./Parts";
 import { paths } from "../app/paths";
 
 const SOA_NUMBERS = ["refresh", "retry", "expire", "minimum", "ttl"] as const;
 type SoaNumber = (typeof SOA_NUMBERS)[number];
+
+/**
+ * The typed servers as the zone keeps them; a server that was there before keeps its other
+ * settings (key, TLS name, XoT). Null when an entry does not parse.
+ */
+function sourceServers(text: string, before: readonly PrimaryServer[]): PrimaryServer[] | null {
+  const out: PrimaryServer[] = [];
+  for (const entry of splitList(text)) {
+    const parsed = parseUpstream(entry, "plain");
+    if (!parsed.ok) return null;
+    const port = parsed.upstream.port ?? 53;
+    const kept = before.find((p) => p.address === parsed.upstream.address && (p.port || 53) === port);
+    out.push(kept ? { ...kept, port } : { address: parsed.upstream.address, port });
+  }
+  return out;
+}
 
 export function SettingsTab(props: { zone: Zone; onSaved: (zone: Zone) => void }) {
   const zone = untrack(() => props.zone);
@@ -45,6 +63,9 @@ export function SettingsTab(props: { zone: Zone; onSaved: (zone: Zone) => void }
   });
   const [policy, setPolicy] = createSignal<SerialPolicy>(serialPolicy(zone));
   const [description, setDescription] = createSignal(zone.description ?? "");
+  // The servers a stub zone asks for its NS set (or a secondary zone transfers from), as typed.
+  const sourceBefore = (zone.source?.primaries ?? []).map((p) => upstreamText({ address: p.address, port: p.port || null })).join(", ");
+  const [source, setSource] = createSignal(sourceBefore);
   const [errors, setErrors] = createSignal<Record<string, string>>({});
   const [error, setError] = createSignal<unknown>();
   const [busy, setBusy] = createSignal(false);
@@ -63,6 +84,9 @@ export function SettingsTab(props: { zone: Zone; onSaved: (zone: Zone) => void }
     for (const key of SOA_NUMBERS) if (parseTtl(numbers()[key]) === null) e[`soa.${key}`] = t("dns.check.number");
     const hosts = splitList(serverText()).map((h) => targetName(h, zone.name));
     if (hosts.length === 0 || hosts.some((h) => !validName(h))) e.name_servers = t("dns.settings.ns_required");
+    const servers = hasSource(zone.kind) ? sourceServers(source(), zone.source?.primaries ?? []) : [];
+    if (hasSource(zone.kind) && servers === null) e.source = t("dns.settings.source_invalid");
+    else if (hasSource(zone.kind) && servers?.length === 0) e.source = t("dns.zone.create.primaries_required");
     setErrors(e);
     if (Object.keys(e).length > 0) return;
     setBusy(true);
@@ -79,6 +103,7 @@ export function SettingsTab(props: { zone: Zone; onSaved: (zone: Zone) => void }
         ttl: n("ttl"),
       };
       const patch: ZonePatch = { soa, serial: policy(), description: description().trim() || null };
+      if (hasSource(zone.kind) && servers && source() !== sourceBefore) patch.source = { primaries: servers };
       let saved = await updateZone(props.zone, patch);
       const before = (apexNs.latest?.records ?? []).map((r) => (r.type === "NS" ? r.host : "")).sort().join(",");
       if ([...hosts].sort().join(",") !== before) {
@@ -139,6 +164,13 @@ export function SettingsTab(props: { zone: Zone; onSaved: (zone: Zone) => void }
           </For>
         </div>
       </section>
+      <Show when={hasSource(zone.kind)}>
+        <section class="page-section" aria-labelledby="dns-source-title" data-testid="zone-source">
+          <h2 id="dns-source-title">{t(`dns.settings.source_${zone.kind === "stub" ? "stub" : "primaries"}`)}</h2>
+          <p>{t(`dns.settings.source_${zone.kind === "stub" ? "stub" : "primaries"}_body`)}</p>
+          {input("source", t("dns.zone.field.primaries"), source, setSource, t("dns.zone.field.primaries_help"))}
+        </section>
+      </Show>
       <section class="page-section" aria-labelledby="dns-ns-title">
         <h2 id="dns-ns-title">{t("dns.settings.ns")}</h2>
         {input("name_servers", t("dns.zone.field.name_servers"), serverText, setServers, t("dns.zone.field.name_servers_help"))}
