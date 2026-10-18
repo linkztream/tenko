@@ -1,6 +1,6 @@
 //! `GET /nodes/{id}/dns`, `POST /nodes/{id}/dns/cache/flush`, `GET /nodes/{id}/dns/log`,
 //! `POST /nodes/{id}/dns/log/stop` and `/start`: the `dns` role of a node (`docs/dns.md`
-//! section 8, `docs/dns-querylog.md`).
+//! section 8, `docs/dns-resolver.md`).
 //!
 //! In Phase 2 the role runs in the controller's own process (plan section 2.10), so the
 //! routes answer for that one node: the status is the role's report `dns.status`, and the
@@ -32,7 +32,7 @@ use tenko_cluster::{
 };
 use tenko_core::{
     Action, CodedError, NodeId, ObjectKind, ObjectRef, RequestCtx, Timestamp,
-    audit::{AuditAction, AuditDraft},
+    audit::AuditDraft,
     codec::to_cbor,
     dns::{audit, codes as dns_codes},
 };
@@ -54,14 +54,6 @@ use crate::{
     problem::{ApiError, ProblemDetails},
     state::AppState,
 };
-
-/// A page of a node's query log was read (personal data, P2-Q7). Belongs in
-/// `tenko_core::dns::audit` with the other actions of the module.
-pub const LOG_READ_AUDIT: AuditAction = AuditAction::from_static("dns.log.read");
-/// A node's query log was stopped (the kill switch).
-pub const LOG_STOP_AUDIT: AuditAction = AuditAction::from_static("dns.log.stop");
-/// A node's query log was started again.
-pub const LOG_START_AUDIT: AuditAction = AuditAction::from_static("dns.log.start");
 
 /// The `dns` role of this process, filled in by `tenko serve` once the role has started
 /// (the API starts first); empty on a node without the role.
@@ -515,7 +507,7 @@ fn log_read_audit(
     lines: usize,
     next: Option<&str>,
 ) -> AuditDraft {
-    let mut draft = AuditDraft::success(LOG_READ_AUDIT, vec![ObjectRef::node(node)])
+    let mut draft = AuditDraft::success(audit::LOG_READ, vec![ObjectRef::node(node)])
         .with_context("from_cursor", args.cursor.as_deref().unwrap_or("newest"))
         .with_context("to_cursor", next.unwrap_or("end"))
         .with_context("lines", lines.to_string());
@@ -549,9 +541,9 @@ async fn switch_log(
     app.authorize(&cx.principal, Action::Execute, &anywhere(ObjectKind::Zone))?;
     let role = local_role(app, slot, registry, node).await?;
     let (kind, action) = if stop {
-        (status::LOG_STOP, LOG_STOP_AUDIT)
+        (status::LOG_STOP, audit::LOG_STOP)
     } else {
-        (status::LOG_START, LOG_START_AUDIT)
+        (status::LOG_START, audit::LOG_START)
     };
     let result = execute(role, kind, Vec::new()).await;
     let audit = (result.outcome == Outcome::Done).then(|| {

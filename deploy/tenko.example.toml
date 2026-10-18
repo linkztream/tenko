@@ -451,7 +451,7 @@ client = "logged"
 
 [dns.tls]
 # DNS over TLS (RFC 7858) and DNS over HTTPS (RFC 8484) for the clients of this node,
-# both off by default (docs/dns-resolver-served.md). They answer from the same zones,
+# both off by default (docs/dns-resolver.md section 7). They answer from the same zones,
 # views, forwarder and query log as UDP and TCP. Ports 853 and 443 need
 # CAP_NET_BIND_SERVICE on Linux, as 53 does (deploy/README.md).
 # Environment: TENKO_DNS__TLS__DOT=true, TENKO_DNS__TLS__DOH=true

@@ -553,7 +553,7 @@ clients; both are off by default. `[dns.tls] dot = true` listens on each `[dns] 
 address on port 853, `doh = true` on port 443 with the path `/dns-query` (`dot_listen` and
 `doh_listen` choose other addresses). `tenko serve` ends its `dns role answering on ...` line
 with `DoT on ..., DoH on ... with <certificate>`. The details, the limits and the metrics are
-in [../docs/dns-resolver-served.md](../docs/dns-resolver-served.md).
+in [../docs/dns-resolver.md](../docs/dns-resolver.md) section 7.
 
 **Ports and capability.** 853 and 443 are below 1024, like 53: the systemd unit's
 `CAP_NET_BIND_SERVICE` covers them, a container publishes them (`-p 853:853/tcp -p

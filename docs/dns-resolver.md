@@ -217,11 +217,282 @@ The series of an upstream appear with its first exchange and stay for the life o
 
 ## 7. DoT and DoH served to clients
 
-(WP5.3.)
+This page describes how a node serves DNS over TLS and DNS over HTTPS to its clients (DNS-14, WP5.3 of the Phase 2 plan). The engine side is `tenko_dns::tls` (`crates/tenko-dns/src/tls`). The role side is the `[dns.tls]` section of `tenko.toml`, read by the `dns` role start (`crates/tenko/src/serve/dns.rs`). The deployment steps, including the HAProxy snippets, are in [`deploy/README.md`](../deploy/README.md), section "DNS over TLS and DNS over HTTPS".
+
+### 7.1 The transports
+
+Both transports are off by default. `[dns.tls] dot = true` and `doh = true` turn them on. They run on the tokio runtime beside TCP and call the same responder as UDP and TCP, so a query gets the same answer on every transport: the same views (a view can match on `transport` `dot` or `doh`), the same cookie secret, the same forwarder, the same query log and the same metrics, only with another `proto` label.
+
+| Transport | Default address | Framing | ALPN |
+|---|---|---|---|
+| DoT (RFC 7858) | each `[dns] listen` address on port 853 | the two-octet length prefix of RFC 7766 inside TLS | `dot` |
+| DoH (RFC 8484) | each `[dns] listen` address on port 443 | HTTP/2, or HTTP/1.1 for clients that ask for it | `h2`, `http/1.1` |
+
+**DoT** reads messages in arrival order. A client may pipeline queries; queries that were already received are answered before anything is written. The answers go out together, and are flushed, when no further query is buffered or 32 KiB of answers are waiting. A forwarded query is answered when the upstream's answer arrives, out of order with the rest, as RFC 7766 allows. A client that offers ALPN without `dot` fails the handshake. A client that offers no ALPN at all is served.
+
+**DoH** serves one path, `/dns-query`:
+
+| Request | Answer |
+|---|---|
+| `GET /dns-query?dns=<base64url>` (no padding; padding, also percent-encoded, is accepted) | `200`, `application/dns-message` |
+| `POST /dns-query` with `Content-Type: application/dns-message` and the message as the body | `200`, `application/dns-message` |
+| another path | `404` |
+| another method | `405` with `Allow: GET, POST` |
+| `POST` with another media type | `415` |
+| a body over 65,535 octets | `413` |
+| a missing or undecodable `dns` parameter, a message shorter than a header, a response, or a query the resolver drops | `400` |
+| a forwarded query whose answer does not come within 15 s | `504` |
+
+A DNS answer is always `200`, whatever its RCODE (RFC 8484 section 4.2.1). Its `Cache-Control` is `max-age=` the smallest TTL of the answer and authority sections. A negative answer therefore carries the TTL of its SOA, which the resolver has already capped at the SOA minimum (RFC 2308). An answer without records gets `max-age=0`. The answer keeps the query's ID; clients that send ID 0, as RFC 8484 recommends, get 0 back. Nothing else of HTTP is used: no cookies, no redirects, no content negotiation (the `Accept` header is not read), no server push.
+
+### 7.2 The TLS material
+
+There is no ACME (owner decision P2-Q8). DoT and DoH serve one of four sources:
+
+| Setting | Certificate served | Renewal or reload |
+|---|---|---|
+| `[tls] mode = "internal_ca"` (the default), no `[dns.tls] certificate` | The API's server certificate from the internal CA, for the installation's host name, `[tls] alt_names` and `[tls] addresses` | Renewed by the API's renewal task; DoT and DoH follow it |
+| `[tls] mode = "imported"`, no `[dns.tls] certificate` | The API's imported files (`[tls] cert_path`, `key_path`) | The API's watcher reloads changed files every `[tls] watch_interval_secs`; DoT and DoH follow it |
+| `[dns.tls] certificate` and `key` | A PEM chain and key for DNS only, for example a certificate whose name is the resolver's name (`dns.example.test`) rather than the console's | Watched in the same way, every `[tls] watch_interval_secs`; a file that fails to load keeps the previous certificate and logs a warning |
+| `[dns.tls] behind_proxy = true` | None. The reverse proxy ends TLS | In the proxy |
+
+Hot reload works without a restart: the listeners keep one TLS configuration over a certificate resolver that swaps its certificate in place. The next handshake gets the new certificate, the listener is never dropped, and connections that are already open finish on the certificate they started with (`crates/tenko-dns/tests/tls.rs`). TLS 1.3 is preferred. TLS 1.2 is allowed unless `[tls] tls13_only` is set or the profile is Hardened. TLS 1.3 sessions resume with tickets, so a reconnecting client saves a round trip (RFC 7858 section 3.4). There is no early data and no client authentication.
+
+**Clients of the internal CA.** A client must trust the CA root (`<data_dir>/tls/ca-root.pem`, or `GET /api/v1/system/ca-root`) and must ask for a name that is on the certificate. With `kdig`: `kdig @192.0.2.53 +tls-ca=ca-root.pem +tls-hostname=tenko.example.test www.example.test`. Operating systems that take a DoT or DoH resolver by name (Android's private DNS, browsers) only accept a certificate from a CA they trust. For them, use the imported mode or `[dns.tls] certificate` with a certificate from a public CA, or install the root on every client.
+
+**Behind a reverse proxy.** The proxy ends TLS. DoT then reaches Tenko as plain length-prefixed DNS (HAProxy in TCP mode) and DoH as plain HTTP (HAProxy as HTTPS). Both are served on the `dot_listen` and `doh_listen` addresses, which must be listed and must not be wildcards (loopback or an internal address). Only peers in `[tls] trusted_proxies` may connect; any other connection is closed at once and counted as refused. The client address, which the views, the query log and the per-client limits use, is found in this order:
+
+1. With `[dns.tls] proxy_protocol = true`, every connection must start with a PROXY protocol version 2 header (`send-proxy-v2`). The header's source address is the client. A `LOCAL` header (the proxy's own health check) leaves the proxy as the client. A connection without a valid header is closed. Version 1 (the text form) is not read.
+2. Without it, DoH takes the last entry of the last `X-Forwarded-For` header (`option forwardfor`).
+3. Otherwise the client is the proxy.
+
+### 7.3 Limits
+
+Each transport counts its own connections, separately from TCP's. A burst of encrypted connections therefore cannot take TCP 53 away from plain clients, and plain clients cannot take the encrypted transports away either.
+
+| Limit | Default | What happens |
+|---|---|---|
+| `max_connections` | 1,000 per node and transport | A connection over the cap is closed at accept and counted as refused |
+| `per_client` | 10 per client address and transport | The same. Behind a proxy only the node cap applies, because every connection comes from the proxy |
+| `handshake_timeout_secs` | 5 | A TLS handshake or PROXY header that fails or takes longer closes the connection; counted as a handshake failure |
+| `idle_secs` | 30 | A DoT connection with no query for this long is closed with a TLS `close_notify`. A DoH connection with no request in progress for this long is closed: HTTP/2 `GOAWAY`, or the end of the HTTP/1.1 keep-alive |
+| `doh_streams` | 100 | Concurrent requests on one HTTP/2 connection (`SETTINGS_MAX_CONCURRENT_STREAMS`) |
+| fixed | 65,535 octets | The largest message on either transport |
+
+When the server stops, it stops accepting. DoT connections close after the query in hand, and DoH connections get `GOAWAY` and have 2 seconds to finish their requests. Response rate limiting (TGL-11, RRL) and the per-client query limits of the rate limiter apply to the query, not to the transport, and are the same as on TCP.
+
+**Allocation.** Once a DoT connection is up, a query allocates nothing: it runs on the runtime thread's buffers, the same as TCP. Each connection allocates its read buffer, its write buffer and the TLS state. A DoH request allocates its HTTP request and answer (hyper), the decoded query and a copy of the answer. The query path behind them is the allocation-free one that `tests/alloc.rs` checks.
+
+### 7.4 Settings
+
+The `[dns.tls]` section of `tenko.toml` ([`deploy/tenko.example.toml`](../deploy/tenko.example.toml)). Environment variables follow the usual pattern, for example `TENKO_DNS__TLS__DOT=true` and `TENKO_DNS__TLS__DOH_LISTEN=192.0.2.53:443`. `tenko config check` validates the section against the rest of the file. The settings are read at start; a change needs a restart.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `dot`, `doh` | `false` | Serve DoT, DoH |
+| `dot_listen` | each `[dns] listen` address on 853 | DoT addresses |
+| `doh_listen` | each `[dns] listen` address on 443 | DoH addresses |
+| `certificate`, `key` | not set: the API's certificate | A PEM chain (leaf first) and key for DoT and DoH only; both or neither |
+| `behind_proxy` | `false` | Plain DNS and HTTP from `[tls] trusted_proxies`, on listed non-wildcard addresses |
+| `proxy_protocol` | `false` | With `behind_proxy`, every connection starts with a PROXY v2 header |
+| `max_connections` | 1000 | 1 to 100,000 per node and transport |
+| `per_client` | 10 | 1 to 1,000 per client address and transport |
+| `idle_secs` | 30 | 1 to 3,600 |
+| `handshake_timeout_secs` | 5 | 1 to 60 |
+| `doh_streams` | 100 | 1 to 1,000 |
+
+The configuration check refuses the following:
+
+- a DoT or DoH address that takes the port of the API (`[server] listen`) or the TCP port of `[dns] listen`, or DoT and DoH on the same port. DoH on the API's own port and path is not served; give DoH its own address or port, or put both behind the proxy;
+- `behind_proxy` without `[tls] trusted_proxies`, without listed addresses, or with a wildcard address;
+- `behind_proxy` together with `certificate`, and `proxy_protocol` without `behind_proxy`;
+- terminating TLS when the API has no certificate (`[tls] mode = "reverse_proxy"` or `"plain"`) and `[dns.tls] certificate` is not set.
+
+A certificate that does not load fails the start with `start.dns.tls`. An address that cannot be bound fails it with `start.dns.bind`. Ports 853 and 443 are below 1024 and need `CAP_NET_BIND_SERVICE` on Linux, as port 53 does.
+
+### 7.5 Status and metrics
+
+`tenko serve` ends the role's line with the encrypted listeners, for example `dns role answering on 192.0.2.53:53 (UDP and TCP), ...; DoT on 192.0.2.53:853, DoH on 192.0.2.53:443 with the API's certificate (internal_ca)`. The node's status (`GET /api/v1/nodes/{id}/dns`, `listeners`) lists each DoT and DoH address with the transport `dot` or `doh`. `Server::layout` reports, for each transport, its addresses, its open connections, the refused ones and the failed handshakes (`tls` in the worker layout); the API route shows the TCP counters only so far.
+
+| Family | Type | Labels | Meaning |
+|---|---|---|---|
+| `tenko_dns_queries_total` | counter | `proto` = `dot`, `doh` (with `view`, `rcode`) | Queries answered, as on UDP and TCP |
+| `tenko_dns_query_duration_seconds` | histogram | `proto` | Time from a query's arrival to its answer |
+| `tenko_dns_connections` | gauge | `proto` | Open DoT and DoH connections |
+| `tenko_dns_connections_refused_total` | counter | `proto` | Connections refused by a cap, or, behind a proxy, from an untrusted peer |
+| `tenko_dns_tls_handshake_failures_total` | counter | `proto` | TLS handshakes and PROXY headers that failed or timed out |
+
+The last three families are registered when DoT or DoH is on.
+
+### 7.6 Conformance
+
+| RFC | Behaviour | Status |
+|---|---|---|
+| RFC 7858 | DoT on port 853, length-prefixed messages, pipelining, idle close, connection reuse | Implemented |
+| RFC 7858 section 3.4 | TLS session resumption | Implemented (TLS 1.3 tickets) |
+| RFC 8310 | ALPN `dot` | Implemented |
+| RFC 8484 | `GET` with `dns`, `POST` with `application/dns-message`, HTTP/2, HTTP freshness from the smallest TTL | Implemented |
+| RFC 8484 section 5.1 | `max-age` for negative answers from the SOA | Implemented |
+| RFC 7830, RFC 8467 | EDNS(0) padding of encrypted answers | Not done: the answers are not padded |
+| RFC 9250 | DNS over QUIC | Not done |
+| RFC 8484 section 5.2 | HTTP/2 server push | Not done (never used) |
+| PROXY protocol | Version 2 header for the client address | Implemented; version 1 not read |
+
+### 7.7 Known limits
+
+- A change of the API's TLS mode while the process runs (the settings page switching to the reverse-proxy mode) removes the certificate that DoT and DoH share with the API, and their handshakes then fail until the node restarts with a matching `[dns.tls]`. A certificate of their own (`[dns.tls] certificate`) does not have this dependency.
+- The API route of the node status shows the DoT and DoH listeners, but not yet their open and refused counters; `Server::layout` and the metrics have them.
+- Answers are not padded (RFC 8467). A passive observer can guess an answer from its length.
+- DoH is not served under `/dns-query` on the API's own listener (risk R49 of the Phase 2 plan). It needs an address or port of its own, or the reverse proxy in front of both.
 
 ## 8. The query log and dnstap
 
-(WP5.4.)
+This page describes the query log of a node's `dns` role: what it writes, where, for how long, how it protects the clients it names, how it is read, and its limits. It is the work of WP5.4 of [phase-2-plan.md](plans/phase-2-plan.md) (section 2.9 and owner decision P2-Q7) and will be folded into `docs/dns-resolver.md` section 8. The role itself, its settings and its commands are in [dns.md](dns.md) section 8.
+
+The decision behind it (P2-Q7): query logs stay on the node that answered and are read through a node command, so that no controller and no copy in the replicated store ever holds them. An installation that wants them elsewhere sends them there with dnstap.
+
+### 8.1 What is logged
+
+One entry per answered query (or one in N with sampling): when the query arrived, the client, the transport (UDP, TCP, DNS over TLS, DNS over HTTPS), the query name and type, the RCODE answered, the view that matched, the block list that blocked it, whether the answer came from the cache, and the microseconds from arrival to answer. A query that the forwarder answers is logged when its answer leaves.
+
+### 8.2 From the query path to the disk
+
+The query path never waits for the log:
+
+1. **The ring.** The answering thread copies the entry into a ring of 8,192 fixed-size slots under a short lock: no allocation, no system call. When the ring is full the entry is dropped and counted.
+2. **The writer** is a thread of its own. Every 100 ms it swaps the ring with an empty one (the lock is held for the swap only, so recording goes on while the writer formats and writes) and appends the entries to the current segment, then lets the operating system have them.
+3. **A failed write** (a full disk, a directory that was removed or made read-only) drops the batch and counts every entry in it. The segment is cut back to its last whole entry, and the next batch opens a new segment, so a disk that comes back is used again without a restart. The error is logged at most once a minute, with the number of failures since the last line, never once per query.
+4. **The counters**: `dropped` (a full ring or a failed write), `written` and `write_errors`, since the role started. They are in the node's status (`GET /api/v1/nodes/{id}/dns`, `query_log`), in the detail of the node command `dns.stats`, and in the metric `tenko_dns_log_dropped_total` ([observability.md](observability.md) section 8.4).
+
+The answers never depend on the log: under a full disk, a slow disk or a burst that overflows the ring, the node answers as before and the drop counter rises (`crates/tenko-dns/src/querylog/tests.rs` turns the directory into a file under a running writer; `tests/querylog_drain.rs` records from eight threads at once and checks that every entry is written or counted).
+
+### 8.3 Files, rotation and retention
+
+The segments are files in `log.path` (default `<data_dir>/dns/querylog`), named `queries-<microseconds>.<format>` after the arrival of their first entry:
+
+- **Rotation.** A segment holds at most a sixteenth of `log.size_mb` (between 1 and 8 MiB) and one UTC day; the first entry of a new day opens a new segment.
+- **Retention.** At start, after each new segment and once a minute, segments not written for more than `log.days` days are removed, then the oldest while the directory holds more than `log.size_mb`; the segment being written stays.
+- **Recovery.** At start, an unfinished tail of the newest segment (the process stopped in the middle of a write) is cut off: a JSON-lines segment ends after its last newline, a dnstap segment after its last whole frame and gets its STOP frame. A segment with nothing whole left is removed. Nothing about it stops the role.
+
+### 8.4 Formats
+
+#### JSON lines (`format = "jsonl"`, the default)
+
+One object per line:
+
+```json
+{"at":"2026-10-17T12:00:00.123456Z","client":"p:3f2a9c0d81b7e645","transport":"udp","qname":"www.example.test","type":"A","rcode":0,"cached":false,"duration_micros":38}
+```
+
+`client` is absent when the log keeps no client; `view` and `blocked` appear when they are set.
+
+#### dnstap (`format = "dnstap"`)
+
+Frame Streams files (`.dnstap`) that dnstap tools read (`dnstap -r`, `kdig` with its dnstap module, `fstrm_dump`):
+
+```text
+START control frame   00000000 | length | 00000002 | 00000001 | 22 | "protobuf:dnstap.Dnstap"
+data frame            length (4 octets, big endian, never 0) | one Dnstap protobuf message
+...
+STOP control frame    00000000 | 00000004 | 00000003        (when the segment is closed)
+```
+
+Each query is two data frames: a `Message` of type `CLIENT_QUERY` with the query time and the query message, and one of type `CLIENT_RESPONSE` with the query and response times and the response message. Both carry `socket_family` (INET or INET6), `socket_protocol` (UDP, TCP, DOT, DOH) and `query_address`. The `Dnstap` envelope has `type = MESSAGE`, `identity` (`node-<id>`), `version` (the Tenko version) and `extra`, which says how the client was written: `tenko;client=pseudonym`, `tenko;client=address` or `tenko;client=hidden`, with `;cached` for an answer from the cache.
+
+The ring keeps fixed-size slots, not the messages, so the messages are rebuilt from the logged fields: the header (ID 0, QR and the RCODE, an OPT record for an extended RCODE) and the question. The answer sections are not in the log. The protobuf fields are encoded by hand, without a protobuf compiler; `crates/tenko-dns/tests/dnstap.rs` reads the files back with a Frame Streams reader of its own, a decoder that `prost` derives from the field layout of `dnstap.proto`, and `hickory-proto` for the DNS messages.
+
+Rotation, retention, sampling and the client setting apply as for JSON lines, and the reader of section 8.6 reads both formats.
+
+### 8.5 The clients: pseudonyms, addresses or nothing
+
+What the log keeps of the client (TGL-15):
+
+| Setting | Written | Who can read an address |
+|---|---|---|
+| `pseudonymise = true` (the default in every profile) | `p:` and the first 8 octets of HMAC-SHA-256 of the address, in hexadecimal; in dnstap an address of the same family made of the first 4 or 16 octets | Nobody through the API |
+| `pseudonymise = false` | The address | A principal that may update the node; others see no client |
+| `client = "hidden"` | No client field at all; no key is made | Nobody |
+
+**The keys.** Each UTC day has its own random 256-bit key, made by the writer when the first entry of the day arrives. The keys are kept in the file `pseudonym-keys` of the log directory (owner-only on Unix), one line per day, and removed with the last segment of their day.
+
+What this gives:
+
+- A client has the same pseudonym for a whole day, also across a restart of the node, so the queries of one device can be followed within the day.
+- The next day it has another, and two days' pseudonyms cannot be linked by anyone who reads only the log.
+- The files can be read, copied or exported (dnstap) without exposing addresses: a pseudonym cannot be turned back into an address without the key of its day.
+- The node itself can tell which pseudonym an address had on a day still in the log: that is how the reader's client filter finds an address in pseudonymised files.
+
+What it does not protect against:
+
+- Whoever holds `pseudonym-keys` can reverse a pseudonym by trying every address (IPv4 has 2^32): the key file is as sensitive as the addresses. It never leaves the node, the API never returns it, and it is removed with the data it protects. Protect the log directory as you would the addresses.
+- Names reveal what a client asked: pseudonymisation hides who, not what. Sampling and short retention reduce how much is kept.
+- Within a day, the pattern of a pseudonym's queries may identify a device to someone who knows its habits.
+
+### 8.6 Reading the log
+
+`GET /api/v1/nodes/{id}/dns/log` (scope `dns.read` and read on the node) issues the node command `dns.log.read`, which the role executes on the node that holds the files; in Phase 2 that is the controller's own process, in Phase 5 the same command reaches a remote node. Parameters:
+
+| Parameter | Meaning |
+|---|---|
+| `cursor` | The `next_cursor` of the previous page; absent for the newest line. A cursor is `<segment>:<offset>` and reads the entries before that offset, then the older segments |
+| `limit` | Lines per page, 1 to 1,000 (default 100) |
+| `qname` | The name and the names under it, labels compared without case: `example.test` finds `www.example.test`, not `badexample.test` |
+| `client` | A pseudonym, or an address. An address also finds the entries where it was written as a pseudonym, through the key of each entry's day; it needs the right to update the node (403 otherwise) |
+| `rcode` | The RCODE answered, 0 to 4,095 |
+| `from`, `until` | The arrival time window (RFC 3339, both ends included) |
+
+Lines come newest first. One read looks at 64 MiB of segments at most; a narrow filter may therefore answer a page with fewer lines than `limit` and a cursor, and the next read goes on from there. A malformed cursor or filter answers 400 `sys.invalid_value` with the field; a node whose log is off answers 409 `dns.node.not_dns`.
+
+**Audit.** Every page read is recorded as a row of `cluster.node_commands` and audited as `dns.log.read` in the same write, with the principal, the node, the cursor range (`from_cursor`, `to_cursor`), the number of lines and every filter (`filter.qname`, `filter.client`, `filter.rcode`, `filter.from`, `filter.until`). The audit trail therefore says who read whose queries and when.
+
+**Addresses** leave the node only for a principal that may update the node (an administrator): for any other reader the lines of a log that keeps addresses come without a client, and a filter by address is refused. Pseudonyms are shown to every reader of the log.
+
+The web UI shows the log of a node on the DNS page **Query log** (`/dns/log`): the last queries with time, client, transport, name, type, RCODE, latency and the cache and block flags, the filters of the route, paging by cursor, the log's settings and counters, and for administrators the kill switch.
+
+### 8.7 Settings and profiles
+
+The `[dns.log]` section of `tenko.toml` ([deploy/tenko.example.toml](../deploy/tenko.example.toml)); environment variables override it as for every section (`TENKO_DNS__LOG__ENABLED=true`).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | the profile's | Log queries |
+| `path` | `<data_dir>/dns/querylog` | The directory of the segments and the key file |
+| `format` | `jsonl` | `jsonl` or `dnstap` |
+| `days` | the profile's | Days a segment is kept, 1 to 365 |
+| `size_mb` | 256 | MiB the directory may hold, 1 to 102,400 |
+| `sample` | 1 | Log one query in N, 1 to 1,000,000 |
+| `pseudonymise` | `true` | Write pseudonyms instead of addresses |
+| `client` | `logged` | `hidden` writes no client at all |
+
+`enabled` and `days` follow the security profile when they are not set (TGL-15). The profile is the stored one after first-run setup, else `[profile] name`:
+
+| Profile | Log | Days | Clients |
+|---|---|---|---|
+| Home | Off (opt-in) | 7 | Pseudonymised |
+| Standard | On | 30 | Pseudonymised |
+| Hardened | On | 30 | Pseudonymised |
+| Lab | On | 7 | Pseudonymised |
+
+Home is off because TGL-15 makes logging opt-in for the home user. Pseudonymisation is on in every profile, Lab included, although TGL-15 lists Lab as not pseudonymised: a lab that wants addresses sets `pseudonymise = false`. The export of the log with the audit stream that TGL-15 names for Hardened is not built; dnstap files are the path to an external collector. The settings are read at start; a change needs a restart of the node.
+
+### 8.8 The kill switch
+
+Two ways to stop logging:
+
+- **At run time**: `POST /api/v1/nodes/{id}/dns/log/stop` (scope `dns.write` and update on the node), the node command `dns.log.stop`, and `.../start` (`dns.log.start`) to log again; the Stop logging and Start logging buttons of the log page do the same. A stopped log takes nothing from the query path (nothing is dropped, nothing is counted). The state is kept as the marker file `stopped` in the log directory, so the log stays stopped across a restart until it is started again. Both commands are recorded and audited (`dns.log.stop`, `dns.log.start`).
+- **In the settings**: `enabled = false` in `[dns.log]` and a restart. The writer does not start, `GET /api/v1/nodes/{id}/dns` has no `query_log`, and the log page says the log is off.
+
+Stopping keeps the files already written until their retention removes them; to remove them at once, delete the segments in the log directory.
+
+### 8.9 Limits
+
+- Only the header and the question of each message are in the dnstap output (section 8.4); the answer records, the query ID and the client port are not kept.
+- Forwarded queries are `CLIENT_*` messages; `RESOLVER_*` and `FORWARDER_*` messages towards the upstreams are not written.
+- The dnstap identity is `node-<id>`, not the host name.
+- A read scans segments from the newest; a filter that matches nothing looks at 64 MiB per page and needs many pages to cover a large directory.
+- The pseudonym keys are in the log directory; a backup of that directory carries them (section 8.5).
+- The settings need a restart; only the kill switch acts at run time.
+- `tenko dns log` in the command-line client is not built; read the log through the API or the UI.
 
 ## 9. The home cut-over
 

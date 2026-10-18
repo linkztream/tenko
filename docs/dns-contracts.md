@@ -154,6 +154,7 @@ The node routes sit beside the node's other routes, as the scan configuration of
 | `dns.acl.create`, `dns.acl.update`, `dns.acl.delete` | Access lists |
 | `dns.list.create`, `dns.list.update`, `dns.list.delete`, `dns.list.compile` | Block lists and their compiled versions |
 | `dns.transfer.trigger`, `dns.cache.flush` | A transfer started by hand; a node's cache flushed |
+| `dns.log.read`, `dns.log.stop`, `dns.log.start` | A page of a node's query log read (personal data); the log stopped or started again (the kill switch) |
 
 The system component of the DNS services' own writes is `dns`.
 
@@ -165,9 +166,11 @@ The system component of the DNS services' own writes is `dns`.
 |---|---|---|
 | `tenko_dns_queries` | counter | `proto`, `view`, `rcode` |
 | `tenko_dns_query_duration_seconds` | histogram (50 µs to 2 s) | `proto` |
-| `tenko_dns_cache_hits`, `tenko_dns_cache_misses`, `tenko_dns_cache_stale` | counter | |
-| `tenko_dns_upstream_queries` | counter | `upstream`, `outcome` |
-| `tenko_dns_upstream_duration_seconds` | histogram | `upstream` |
+| `tenko_dns_cache_hits_total`, `tenko_dns_cache_misses_total` | counter | `view` |
+| `tenko_dns_cache_stale_total` | counter | |
+| `tenko_dns_cache_entries` | gauge | |
+| `tenko_dns_upstream_queries_total` | counter | `rule`, `upstream`, `transport`, `outcome` |
+| `tenko_dns_upstream_rtt_seconds` | histogram | `upstream` |
 | `tenko_dns_rrl_dropped` | counter | |
 | `tenko_dns_blocked` | counter | `list` |
 | `tenko_dns_zone_serial` | gauge | `zone` |

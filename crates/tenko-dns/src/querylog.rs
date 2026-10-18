@@ -1,6 +1,6 @@
 //! The query log as local files (plan section 2.9, DNS-26, TGL-15, P2-Q7): the
 //! [`QueryLogSink`] of the `dns` role when the log is on, the writer thread that drains it,
-//! and the reader behind the command `dns.log.read` (`docs/dns-querylog.md`).
+//! and the reader behind the command `dns.log.read` (`docs/dns-resolver.md` section 8).
 //!
 //! - **On the query path** [`FileLog::record`] samples (1 in `sample`), copies the entry into
 //!   a preallocated ring of fixed-size slots under a short lock, and drops it (counted in

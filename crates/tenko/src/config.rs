@@ -591,7 +591,7 @@ impl Default for DnsCacheSection {
 /// (DNS-14, WP5.3), both off by default. They serve the certificate of the API's TLS mode
 /// (`[tls]`: the internal CA's, or the imported files with their reload), or a certificate
 /// of their own (`certificate`, `key`), or, with `behind_proxy`, plain DNS and plain HTTP
-/// to a reverse proxy that ends TLS (`docs/dns-resolver-served.md`).
+/// to a reverse proxy that ends TLS (`docs/dns-resolver.md` section 7).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 #[allow(

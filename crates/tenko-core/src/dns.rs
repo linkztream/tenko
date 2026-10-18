@@ -1781,9 +1781,15 @@ pub mod audit {
     pub const TRANSFER_TRIGGER: AuditAction = AuditAction::from_static("dns.transfer.trigger");
     /// A node's cache was flushed.
     pub const CACHE_FLUSH: AuditAction = AuditAction::from_static("dns.cache.flush");
+    /// A page of a node's query log was read (personal data, P2-Q7).
+    pub const LOG_READ: AuditAction = AuditAction::from_static("dns.log.read");
+    /// A node's query log was stopped (the kill switch).
+    pub const LOG_STOP: AuditAction = AuditAction::from_static("dns.log.stop");
+    /// A node's query log was started again.
+    pub const LOG_START: AuditAction = AuditAction::from_static("dns.log.start");
 
     /// Every action of the module, for the contracts document and its test.
-    pub const ALL: [&AuditAction; 27] = [
+    pub const ALL: [&AuditAction; 30] = [
         &ZONE_CREATE,
         &ZONE_UPDATE,
         &ZONE_DELETE,
@@ -1811,6 +1817,9 @@ pub mod audit {
         &LIST_COMPILE,
         &TRANSFER_TRIGGER,
         &CACHE_FLUSH,
+        &LOG_READ,
+        &LOG_STOP,
+        &LOG_START,
     ];
 }
 
