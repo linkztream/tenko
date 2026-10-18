@@ -8,10 +8,13 @@
 //!    first image of the `dns` tables from a local read; the catalog (index, views,
 //!    forwarding rules) is built from it, aside from the async threads.
 //! 3. The query log writer starts when `[dns.log] enabled` (or, unset, the security
-//!    profile: TGL-15) says so, and the forwarder (WP5.1) with
+//!    profile: TGL-15) says so; the policy of RPZ zones and block lists (WP5.2) reads the
+//!    catalog, and the rate limiter takes `[dns.limits]` under the profile in force
+//!    (TGL-11); the forwarder (WP5.1) starts with
 //!    the default upstreams of `[dns] forwarders`, the cache of `[dns.cache]` sized for the
 //!    profile in force, and the recursion policy: the profile's default and the prefixes
-//!    IPAM knows, which a follower keeps current from the store.
+//!    IPAM knows, which a follower keeps current from the store. The forwarder's answers
+//!    pass the policy on their way to the client (`tenko_dns::policy::answer`).
 //! 4. The server binds every listen address for UDP and TCP, and the DoT and DoH addresses
 //!    of `[dns.tls]` with the certificate of the API's TLS mode or one of their own, and
 //!    starts its workers: only now does the node answer, from a complete index.
@@ -36,8 +39,13 @@ use tenko_dns::{
     cookie::CookieMode,
     forward::{ForwardSettings, Forwarder, RecursionDefault, RecursionPolicy},
     log::QueryLogSink,
+    policy::{Policy, PolicyEngine, answer::PolicySink},
     pool::UpstreamSpec,
     querylog::{ClientField, LogFormat, LogSettings, LogWriter},
+    rate::{
+        RateLimiter,
+        limiter::{ClientLimit, LimitSettings, Limiter, RrlSettings},
+    },
     respond::ForwardSink,
     server::{Hooks, Server, ServerConfig},
     status::{DnsNode, LocalNode},
@@ -374,6 +382,64 @@ async fn follow_recursion(
     }
 }
 
+/// The limiter of `[dns.limits]` under `profile`; the clients the recursion policy knows
+/// are exempt with `exempt_known`.
+fn limiter(
+    section: &DnsSection,
+    profile: Profile,
+    recursion: &Arc<RecursionPolicy>,
+) -> Result<(Limiter, String), StartError> {
+    let limits = &section.limits;
+    let effective = limits.effective(profile);
+    let exempt = limits
+        .exempt_prefixes()
+        .map_err(|problem| error("config.invalid", problem.to_string()))?;
+    let rrl = effective.rrl.then_some(RrlSettings {
+        responses_per_second: effective.responses_per_second,
+        errors_per_second: effective.errors_per_second,
+        window_secs: limits.window_secs,
+        slip: limits.slip,
+        ipv4_prefix: limits.ipv4_prefix,
+        ipv6_prefix: limits.ipv6_prefix,
+    });
+    let client = (effective.client_qps > 0).then_some(ClientLimit {
+        queries_per_second: effective.client_qps,
+        burst: effective.client_burst,
+    });
+    let describe = match (&rrl, &client) {
+        (None, None) => "no rate limiting".to_owned(),
+        (rrl, client) => {
+            let mut parts = Vec::new();
+            if let Some(rrl) = rrl {
+                parts.push(format!(
+                    "RRL {}/{} per second, slip {}",
+                    rrl.responses_per_second, rrl.errors_per_second, rrl.slip
+                ));
+            }
+            if let Some(client) = client {
+                parts.push(format!(
+                    "{} queries per second per client",
+                    client.queries_per_second
+                ));
+            }
+            parts.join(", ")
+        }
+    };
+    let mut limiter = Limiter::new(LimitSettings {
+        rrl,
+        client,
+        exempt,
+        table: limits.table,
+    });
+    if limits.exempt_known {
+        let recursion = Arc::clone(recursion);
+        limiter = limiter.with_known_exempt(Arc::new(move |client: std::net::IpAddr| {
+            client.is_loopback() || recursion.known(client)
+        }));
+    }
+    Ok((limiter, describe))
+}
+
 /// Logs the limit of a wildcard listen address (no `IP_PKTINFO`, `docs/dns.md` section 12).
 fn note_wildcard(listen: &[SocketAddr]) {
     if listen.iter().any(|address| address.ip().is_unspecified()) {
@@ -501,6 +567,18 @@ fn describe(
     (announce, summary)
 }
 
+/// The policy's part of the summary: RPZ zones and lists in force.
+fn policy_line(handle: &catalog::CatalogHandle) -> String {
+    let catalog = handle.load();
+    let policy = catalog.policy();
+    format!(
+        "{} RPZ zone(s), {} block list(s) and {} allow list(s) in force",
+        policy.zones().len(),
+        policy.blocks().len(),
+        policy.allows().len()
+    )
+}
+
 #[allow(
     clippy::cast_precision_loss,
     reason = "a size for the log, to a tenth of a MiB"
@@ -539,6 +617,8 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
     }
     tenko_dns::metrics::register(metrics);
     tenko_dns::querylog::register_metrics(metrics);
+    metrics.register(&tenko_dns::policy::counters::BLOCKED_FAMILY);
+    tenko_dns::rate::limiter::register_metrics(metrics);
     let log_profile = log_profile(resolved, store.as_ref()).await;
     let feed_store = Arc::clone(&store);
     let mut feed = tokio::task::spawn_blocking(move || store_feed::register(feed_store))
@@ -556,7 +636,7 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         .await
         .map_err(|store| error("start.dns.feed", store.to_string()))?;
     let log = start_log(section, resolved, log_profile)?;
-    let sink: Option<Arc<dyn QueryLogSink>> = log
+    let log_sink: Option<Arc<dyn QueryLogSink>> = log
         .as_ref()
         .map(|writer| writer.sink() as Arc<dyn QueryLogSink>);
     let recursion = Arc::new(RecursionPolicy::new(recursion_default(profile)));
@@ -564,23 +644,36 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
     let (forwarder, forward_task) = Forwarder::start(
         forward_settings(section, profile, upstream_ca),
         handle.clone(),
-        sink.clone(),
+        log_sink.clone(),
         Arc::clone(&recursion),
         stop.child_token(),
     );
+    let (limiter, limits_line) = limiter(section, profile, &recursion)?;
     let recursion_task = tokio::spawn(follow_recursion(
         Arc::clone(&store),
         bootstrap,
         recursion,
         stop.child_token(),
     ));
+    // The policy decides on every name outside the zones and on every forwarded answer.
+    let policy: Arc<dyn PolicyEngine> = Arc::new(Policy);
+    let rate: Arc<dyn RateLimiter> = Arc::new(limiter);
+    let sink = PolicySink::new(
+        Arc::clone(&forwarder) as Arc<dyn ForwardSink>,
+        handle.clone(),
+        Arc::clone(&policy),
+        tokio::runtime::Handle::current(),
+    );
     // Every name outside the zones goes to the forwarder, which refuses it when no rule,
     // stub zone or default upstream covers it, or the client may not recurse.
-    let resolver = Authoritative::new(handle.clone()).with_settings(Settings {
-        recursion_available: true,
-        default_forwarder: true,
-        ..Settings::default()
-    });
+    let resolver = Authoritative::new(handle.clone())
+        .with_settings(Settings {
+            recursion_available: true,
+            default_forwarder: true,
+            ..Settings::default()
+        })
+        .with_policy(policy)
+        .with_rate_limiter(rate);
     let mut config = server_config(section, listen);
     let mut certificates = None;
     let mut watchers = Vec::new();
@@ -594,8 +687,8 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         encrypted_line = Some(encrypted.describe);
     }
     let hooks = Hooks {
-        log: sink,
-        forward: Some(Arc::clone(&forwarder) as Arc<dyn ForwardSink>),
+        log: log_sink,
+        forward: Some(Arc::new(sink) as Arc<dyn ForwardSink>),
         cookies: None,
         certificates,
     };
@@ -629,6 +722,7 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         }
     });
     let (mut announce, mut summary) = describe(&handle, &server, &forwarder, log.as_ref());
+    summary = format!("{summary}; {limits_line}; {}", policy_line(&handle));
     if let Some(line) = encrypted_line {
         announce = format!("{announce}; {line}");
         summary = format!("{summary}; {line}");

@@ -75,13 +75,28 @@ pub const UPSTREAM_RTT: Desc = Desc::histogram(
 )
 .labels(&["upstream"]);
 
-/// Responses dropped by response rate limiting.
+/// Responses dropped by response rate limiting, by response kind (`answer`, `nodata`,
+/// `nxdomain`, `referral`, `error`); read from the limiter ([`crate::rate::limiter`]).
 pub const RRL_DROPPED: Desc = Desc::counter(
     "tenko_dns_rrl_dropped",
     "DNS responses dropped by rate limiting",
+)
+.labels(&["kind"]);
+
+/// Responses rate limiting sent as an empty truncated answer (the slip).
+pub const RRL_SLIPPED: Desc = Desc::counter(
+    "tenko_dns_rrl_slipped",
+    "DNS responses rate limiting sent truncated",
 );
 
-/// Queries blocked by a block list or an RPZ zone, by list.
+/// Queries dropped by the per-client query limit.
+pub const CLIENT_LIMITED: Desc = Desc::counter(
+    "tenko_dns_client_limited",
+    "DNS queries dropped by the per-client limit",
+);
+
+/// Queries blocked by a block list or an RPZ zone, by list (an RPZ zone under its zone
+/// name); read from the policy's counters ([`crate::policy::counters`]).
 pub const BLOCKED: Desc =
     Desc::counter("tenko_dns_blocked", "DNS queries blocked by policy").labels(&["list"]);
 
@@ -106,7 +121,7 @@ pub const LOG_DROPPED: Desc =
     Desc::counter("tenko_dns_log_dropped", "DNS query log entries dropped");
 
 /// Every family of the engine, for registration and the contracts document.
-pub const ALL: [&Desc; 14] = [
+pub const ALL: [&Desc; 16] = [
     &QUERIES,
     &QUERY_DURATION,
     &CACHE_HITS,
@@ -116,6 +131,8 @@ pub const ALL: [&Desc; 14] = [
     &UPSTREAM_QUERIES,
     &UPSTREAM_RTT,
     &RRL_DROPPED,
+    &RRL_SLIPPED,
+    &CLIENT_LIMITED,
     &BLOCKED,
     &ZONE_SERIAL,
     &SIGNING_RUNS,

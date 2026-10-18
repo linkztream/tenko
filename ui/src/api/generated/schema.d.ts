@@ -1070,13 +1070,13 @@ export interface paths {
         };
         /**
          * List block lists
-         * @description Scope: `dns.read`.
+         * @description Scope: `dns.read`. Block and allow lists by name, each with its newest version and the outcome of its last fetch or compile on this controller.
          */
         get: operations["list_dns_lists"];
         put?: never;
         /**
          * Create a block list
-         * @description Scope: `dns.write`.
+         * @description Scope: `dns.write`. A `block` list (the default) answers the names it holds and the names under them with its action and the extended error `Blocked`; an `allow` list keeps them from being blocked, and exempts its `exempt` clients from every list and RPZ zone. A URL list is fetched within a minute; an uploaded list waits for its file (`PUT /dns/lists/{id}/file`).
          */
         post: operations["create_dns_list"];
         delete?: never;
@@ -1108,7 +1108,7 @@ export interface paths {
         head?: never;
         /**
          * Change a block list
-         * @description Scope: `dns.write`.
+         * @description Scope: `dns.write`. A new `source` or `format` drops the list's versions: a URL list is fetched again within a minute, an uploaded list waits for its next file. `exempt` replaces the prefixes; an empty `description` clears it.
          */
         patch: operations["update_dns_list"];
         trace?: never;
@@ -1124,9 +1124,29 @@ export interface paths {
         put?: never;
         /**
          * Fetch and compile a block list now
-         * @description Scope: `dns.write`.
+         * @description Scope: `dns.write`. Starts the compile job `dns.list.compile`: the URL is read with `If-None-Match` and the entity tag of the newest version; a source that did not change writes nothing, a failed fetch keeps the version and shows in `last_error`. Audited as `dns.list.fetch`.
          */
         post: operations["fetch_dns_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/lists/{id}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Upload the file of a block list
+         * @description Scope: `dns.write`. The body is the list's text in its `format` (a hosts file or one domain per line), at most `[dns.lists] max_upload` MiB (64 by default). Starts the compile job `dns.list.compile`, which writes the next version. Audited as `dns.list.upload`.
+         */
+        put: operations["upload_dns_list"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4788,6 +4808,14 @@ export interface components {
             description?: string | null;
             /** @description Whether the list is applied. */
             enabled?: boolean;
+            /**
+             * @description Clients exempt from the list (at most 1,000 prefixes): a block list does not block
+             *     them; an allow list exempts them from every list and RPZ zone.
+             * @example [
+             *       "192.0.2.10/32"
+             *     ]
+             */
+            exempt?: string[];
             /** @description The file format. */
             format: components["schemas"]["ListFormat"];
             /** @description Identifier. */
@@ -4797,6 +4825,8 @@ export interface components {
              * @description How often a URL list is fetched, in hours (1 to 168).
              */
             interval_hours?: number;
+            /** @description A block list or an allow list. */
+            kind?: components["schemas"]["ListKind"];
             /** @description A unique name, 1 to 64 characters. */
             name: string;
             /** @description Where it comes from. */
@@ -4804,6 +4834,16 @@ export interface components {
         };
         /** Format: uuid */
         BlockListId: string;
+        /** @description The queries one block list or RPZ zone blocked since the node's role started. */
+        BlockedCountItem: {
+            /**
+             * Format: int64
+             * @description Queries blocked.
+             */
+            count: number;
+            /** @description The list's name, or the RPZ zone's name. */
+            list: string;
+        };
         /**
          * @description Where the breached-password check looks (TGL-06).
          * @enum {string}
@@ -5702,6 +5742,11 @@ export interface components {
         DnsName: string;
         /** @description `GET /nodes/{id}/dns`: the DNS role of one node (the report `dns.status`). */
         DnsNodeStatus: {
+            /**
+             * @description Queries blocked since the role started, per enabled block list and RPZ zone, by
+             *     name.
+             */
+            blocked?: components["schemas"]["BlockedCountItem"][];
             /**
              * Format: int64
              * @description Octets the cache accounts for (keys, answers, bookkeeping), a lower bound of its
@@ -7706,12 +7751,19 @@ export interface components {
         };
         /** @description `POST /dns/lists`. */
         ListCreate: {
-            /** @description What a blocked name answers. */
-            action: components["schemas"]["BlockAction"];
+            action?: components["schemas"]["BlockAction"] | null;
             /** @description Free text. */
             description?: string | null;
             /** @description Whether it is applied; `true` when absent. */
             enabled?: boolean | null;
+            /**
+             * @description Clients exempt from the list (at most 1,000 prefixes); an allow list exempts them
+             *     from every list and RPZ zone.
+             * @example [
+             *       "192.0.2.10/32"
+             *     ]
+             */
+            exempt?: string[];
             /** @description The file format. */
             format: components["schemas"]["ListFormat"];
             /**
@@ -7719,6 +7771,7 @@ export interface components {
              * @description How often a URL list is fetched, in hours.
              */
             interval_hours?: number | null;
+            kind?: components["schemas"]["ListKind"] | null;
             /** @description A unique name. */
             name: string;
             /** @description Where it comes from. */
@@ -7731,25 +7784,39 @@ export interface components {
         ListFormat: "hosts" | "domains";
         /** @description A block list as the API reads it. */
         ListItem: components["schemas"]["BlockList"] & {
-            /** @description The stable code of the last failed fetch. */
+            last_checked?: components["schemas"]["Timestamp"] | null;
+            /**
+             * @description The stable code of the last failed fetch or compile (`dns.list.fetch_failed`,
+             *     `dns.list.invalid`, `dns.list.upload_missing`); the list keeps its version.
+             */
             last_error?: string | null;
+            /** @description English detail of the last failure. */
+            last_error_detail?: string | null;
             /** @description The store revision of the row. */
             revision: components["schemas"]["Revision"];
             version?: components["schemas"]["ListVersionItem"] | null;
         };
+        /**
+         * @description What a list does with the names it holds.
+         * @enum {string}
+         */
+        ListKind: "block" | "allow";
         /** @description `PATCH /dns/lists/{id}`. */
         ListPatch: {
             action?: components["schemas"]["BlockAction"] | null;
-            /** @description Free text. */
+            /** @description Free text; an empty string clears it. */
             description?: string | null;
             /** @description Whether it is applied. */
             enabled?: boolean | null;
+            /** @description The exempt client prefixes, replaced whole. */
+            exempt?: string[] | null;
             format?: components["schemas"]["ListFormat"] | null;
             /**
              * Format: int32
              * @description How often a URL list is fetched, in hours.
              */
             interval_hours?: number | null;
+            kind?: components["schemas"]["ListKind"] | null;
             /** @description The name. */
             name?: string | null;
             source?: components["schemas"]["ListSource"] | null;
@@ -7768,9 +7835,16 @@ export interface components {
         ListVersionItem: {
             /**
              * Format: int64
-             * @description How many names it blocks.
+             * @description Octets of the compiled form.
+             */
+            bytes?: number;
+            /**
+             * Format: int64
+             * @description How many names it holds (after duplicates and names under a listed name).
              */
             entries: number;
+            /** @description The HTTP entity tag of the fetched source. */
+            etag?: string | null;
             /** @description When the source was read. */
             fetched: components["schemas"]["Timestamp"];
             /**
@@ -9991,8 +10065,14 @@ export interface components {
         Page_ListItem: {
             /** @description The items of this page, at most `limit` of them. */
             items: (components["schemas"]["BlockList"] & {
-                /** @description The stable code of the last failed fetch. */
+                last_checked?: components["schemas"]["Timestamp"] | null;
+                /**
+                 * @description The stable code of the last failed fetch or compile (`dns.list.fetch_failed`,
+                 *     `dns.list.invalid`, `dns.list.upload_missing`); the list keeps its version.
+                 */
                 last_error?: string | null;
+                /** @description English detail of the last failure. */
+                last_error_detail?: string | null;
                 /** @description The store revision of the row. */
                 revision: components["schemas"]["Revision"];
                 version?: components["schemas"]["ListVersionItem"] | null;
@@ -20970,7 +21050,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_ListItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -20990,15 +21070,6 @@ export interface operations {
             };
             /** @description The principal lacks the scope `dns.read` */
             403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -21030,7 +21101,7 @@ export interface operations {
                     "application/json": components["schemas"]["ListItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the list is invalid (`dns.list.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the list is invalid (`dns.list.invalid`, parameters `field` and `reason`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21057,15 +21128,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     get_dns_list: {
@@ -21080,7 +21142,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The block list with its newest version */
+            /** @description The block list with its newest version and its `ETag` */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -21089,7 +21151,7 @@ export interface operations {
                     "application/json": components["schemas"]["ListItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21125,21 +21187,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     delete_dns_list: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Block list identifier (UUID) */
                 id: string;
@@ -21155,79 +21211,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description No valid session or token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description The principal lacks the scope `dns.write` */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description No such list (`dns.list.not_found`) */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-        };
-    };
-    update_dns_list: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Block list identifier (UUID) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ListPatch"];
-            };
-        };
-        responses: {
-            /** @description The changed block list */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ListItem"];
-                };
-            };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21272,39 +21256,37 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
-    fetch_dns_list: {
+    update_dns_list: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Block list identifier (UUID) */
                 id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListPatch"];
+            };
+        };
         responses: {
-            /** @description The fetch job */
-            202: {
+            /** @description The changed block list */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DnsJobStarted"];
+                    "application/json": components["schemas"]["ListItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the list is invalid (`dns.list.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21340,7 +21322,75 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The list is uploaded, not fetched */
+            /** @description The list changed since it was read (`If-Match`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    fetch_dns_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Block list identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The fetch job; follow it at the `Location` */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DnsJobStarted"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such list (`dns.list.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The list is uploaded, not fetched (`dns.list.invalid`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -21349,8 +21399,80 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+        };
+    };
+    upload_dns_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Block list identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/plain": string;
+            };
+        };
+        responses: {
+            /** @description The compile job; follow it at the `Location` */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DnsJobStarted"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such list (`dns.list.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The list is fetched from a URL, not uploaded (`dns.list.invalid`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The file is larger than `[dns.lists] max_upload` (`sys.body_too_large`) */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

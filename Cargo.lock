@@ -3371,6 +3371,7 @@ dependencies = [
  "aws-lc-rs",
  "bytes",
  "domain",
+ "flate2",
  "h2",
  "hickory-proto",
  "http",

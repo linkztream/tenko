@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs --phase 2`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --phase 2 --check`
 
-29 Phase 2 requirements; 6 named by at least one test, 23 not; 0 named by no test, measurement or document.
+29 Phase 2 requirements; 8 named by at least one test, 21 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -25,14 +25,14 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 | DNS-11 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/zone/keys.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>and 4 more |
 | DNS-12 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 1 more |
 | DNS-14 | Must | `crates/tenko/tests/acceptance_dns_tls.rs` | - | `crates/tenko-dns/src/tls/mod.rs`<br>`crates/tenko/src/config.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dns-resolver.md`<br>and 1 more |
-| DNS-15 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/policy.rs`<br>`crates/tenko-dns/src/upstream.rs`<br>`docs/CONFORMANCE.md`<br>and 4 more |
-| DNS-17 | Must | - | - | `crates/tenko-dns/src/rate.rs`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/plans/phase-2-plan.md` |
+| DNS-15 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/upstream.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 3 more |
+| DNS-17 | Must | - | - | `crates/tenko-dns/src/rate.rs`<br>`crates/tenko/src/config.rs`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/dns-resolver.md`<br>and 1 more |
 | DNS-18 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-19 | Must | - | - | `crates/tenko-core/src/dns.rs`<br>`docs/SECURITY-PROFILES.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-20 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-core/src/dns/name.rs`<br>`crates/tenko-core/src/dns/rrset.rs`<br>`crates/tenko-dns/src/catalog.rs`<br>and 9 more |
-| DNS-21 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
+| DNS-21 | Must | `crates/tenko-dns/tests/policy.rs` | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/dns/lists.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/lists.rs`<br>`crates/tenko-dns/src/policy.rs`<br>and 5 more |
 | DNS-22 | Must | `crates/tenko/tests/acceptance_reverse.rs` | - | `crates/tenko-core/src/ipam.rs`<br>`crates/tenko-ipam/src/dns/mod.rs`<br>`crates/tenko-ipam/src/dns/reverse.rs`<br>`crates/tenko-ipam/src/lib.rs`<br>`docs/CONFORMANCE.md`<br>and 4 more |
-| DNS-23 | Must | - | - | `crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/cache.rs`<br>`crates/tenko-dns/src/forward.rs`<br>`crates/tenko-dns/src/policy.rs`<br>`crates/tenko/src/config.rs`<br>and 4 more |
+| DNS-23 | Must | `crates/tenko-dns/tests/policy.rs` | - | `crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/cache.rs`<br>`crates/tenko-dns/src/forward.rs`<br>`crates/tenko-dns/src/policy.rs`<br>`crates/tenko/src/config.rs`<br>and 4 more |
 | DNS-24 | Must | `crates/tenko-core/tests/dns_model.rs` | - | `crates/tenko-core/src/dns.rs`<br>`crates/tenko-core/src/dns/rdata.rs`<br>`docs/adr/0017-dns-data-model-and-serving-path.md`<br>`docs/dns-contracts.md`<br>`docs/dns.md`<br>and 1 more |
 | DNS-25 | Could | - | - | `docs/plans/phase-2-plan.md` |
 | DNS-26 | Should | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-dns/src/log.rs`<br>`crates/tenko-dns/src/querylog.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>and 3 more |
@@ -77,8 +77,6 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 - DNS-18 (Must)
 - DNS-19 (Must)
 - DNS-20 (Must)
-- DNS-21 (Must)
-- DNS-23 (Must)
 - DNS-25 (Could)
 - DNS-26 (Should)
 - DNS-27 (Should)

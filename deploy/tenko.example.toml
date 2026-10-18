@@ -486,6 +486,45 @@ handshake_timeout_secs = 5
 # Concurrent requests on one HTTP/2 connection (1 to 1000).
 doh_streams = 100
 
+[dns.limits]
+# Response rate limiting and the per-client query limit (docs/dns-resolver.md section 6),
+# read at start. Keys not set follow the security profile (TGL-11): RRL on under Home and
+# Standard (20 and 10 per second) and Hardened (5 and 5), off under Lab; the per-client
+# limit on only under Hardened (200 queries per second, a burst of 400).
+# rrl = true
+# Identical answers, NODATA and referrals per second to one client prefix (1 to 10000).
+# responses_per_second = 20
+# NXDOMAIN and error responses per second to one client prefix (1 to 10000).
+# errors_per_second = 10
+# Seconds a client prefix may run into debt (1 to 3600).
+window_secs = 15
+# Every n-th limited response is sent as an empty truncated answer, so that a real client
+# retries over TCP (0 to 10; 0 drops every limited response).
+slip = 2
+# The prefix lengths clients are grouped by.
+ipv4_prefix = 24
+ipv6_prefix = 56
+# Never limit the clients in the prefixes IPAM knows and loopback.
+exempt_known = true
+# Prefixes never limited.
+exempt = []
+# Queries per second one client address may send (0 to 100000; 0 is off), and the burst
+# above it (not set: twice the rate).
+# client_qps = 200
+# client_burst = 400
+# Slots of each limiter table (1024 to 16777216).
+table = 65536
+
+[dns.lists]
+# The fetch and the upload of block lists (docs/dns-resolver.md section 5). The lists are
+# rows of the store; the leader service dns.lists fetches the URL lists on their intervals.
+# Seconds a fetch may take (5 to 600).
+fetch_timeout_secs = 60
+# MiB a fetched list may have (1 to 1024).
+max_download = 64
+# MiB an uploaded list may have (1 to 1024): the body limit of PUT /api/v1/dns/lists/{id}/file.
+max_upload = 64
+
 [scan]
 # The scanner of the probe role (SCAN-01 to SCAN-09). A probe reads this section of its own
 # tenko.toml until the controller hands out scan configuration (a later release).

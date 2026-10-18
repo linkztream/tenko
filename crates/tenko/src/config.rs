@@ -519,6 +519,10 @@ pub struct DnsSection {
     pub log: DnsLogSection,
     /// DNS over TLS and DNS over HTTPS served to clients.
     pub tls: DnsTlsSection,
+    /// Response rate limiting and the per-client query limit.
+    pub limits: DnsLimitsSection,
+    /// The fetch and the upload of block lists.
+    pub lists: DnsListsSection,
 }
 
 impl Default for DnsSection {
@@ -537,7 +541,255 @@ impl Default for DnsSection {
             cache: DnsCacheSection::default(),
             log: DnsLogSection::default(),
             tls: DnsTlsSection::default(),
+            limits: DnsLimitsSection::default(),
+            lists: DnsListsSection::default(),
         }
+    }
+}
+
+/// `[dns.limits]`: response rate limiting (RRL, TGL-11) and the per-client query limit
+/// (DNS-17) of this node, read at start (`docs/dns-resolver.md` section 6). The keys that
+/// are not set follow the security profile in force when the role starts: RRL on under
+/// Home and Standard (20 identical responses and 10 NXDOMAIN or error responses per second
+/// to a client prefix) and Hardened (5 and 5), off under Lab; the per-client limit on only
+/// under Hardened (200 queries per second, a burst of 400).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DnsLimitsSection {
+    /// Response rate limiting. Not set: the profile's default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rrl: Option<bool>,
+    /// Identical answers, NODATA and referrals per second to one client prefix, 1 to
+    /// 10,000. Not set: the profile's default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub responses_per_second: Option<u32>,
+    /// NXDOMAIN and error responses per second to one client prefix, 1 to 10,000. Not
+    /// set: the profile's default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub errors_per_second: Option<u32>,
+    /// Seconds a client prefix may run into debt, 1 to 3,600 (default 15).
+    pub window_secs: u32,
+    /// Every n-th limited response is sent as an empty truncated answer, 0 to 10 (default
+    /// 2; 0 drops every limited response, 1 truncates every one).
+    pub slip: u32,
+    /// The IPv4 prefix length clients are grouped by, 8 to 32 (default 24).
+    pub ipv4_prefix: u8,
+    /// The IPv6 prefix length clients are grouped by, 16 to 128 (default 56).
+    pub ipv6_prefix: u8,
+    /// Never limit the clients in the prefixes IPAM knows and loopback (default true).
+    pub exempt_known: bool,
+    /// Prefixes never limited (`"192.0.2.0/24"`).
+    #[serde(deserialize_with = "string_or_list")]
+    pub exempt: Vec<String>,
+    /// Queries per second one client address (an IPv6 client by its /64) may send, 0 to
+    /// 100,000; 0 turns the limit off. Not set: the profile's default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_qps: Option<u32>,
+    /// Queries a client may send at once above `client_qps`, 0 to 1,000,000. Not set:
+    /// twice `client_qps`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_burst: Option<u32>,
+    /// Slots of each limiter table, 1,024 to 16,777,216 (default 65,536).
+    pub table: usize,
+}
+
+impl Default for DnsLimitsSection {
+    fn default() -> Self {
+        Self {
+            rrl: None,
+            responses_per_second: None,
+            errors_per_second: None,
+            window_secs: 15,
+            slip: 2,
+            ipv4_prefix: 24,
+            ipv6_prefix: 56,
+            exempt_known: true,
+            exempt: Vec::new(),
+            client_qps: None,
+            client_burst: None,
+            table: 65_536,
+        }
+    }
+}
+
+/// What `[dns.limits]` comes to under a profile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DnsLimitsEffective {
+    /// RRL is on.
+    pub rrl: bool,
+    /// Identical answers per second.
+    pub responses_per_second: u32,
+    /// NXDOMAIN and errors per second.
+    pub errors_per_second: u32,
+    /// Queries per second per client; 0 is off.
+    pub client_qps: u32,
+    /// The burst above it.
+    pub client_burst: u32,
+}
+
+impl DnsLimitsSection {
+    /// The defaults of a profile (TGL-11): RRL on except under Lab, stricter under
+    /// Hardened; the per-client limit only under Hardened.
+    pub const fn profile_default(profile: Profile) -> DnsLimitsEffective {
+        match profile {
+            Profile::Home | Profile::Standard => DnsLimitsEffective {
+                rrl: true,
+                responses_per_second: 20,
+                errors_per_second: 10,
+                client_qps: 0,
+                client_burst: 0,
+            },
+            Profile::Hardened => DnsLimitsEffective {
+                rrl: true,
+                responses_per_second: 5,
+                errors_per_second: 5,
+                client_qps: 200,
+                client_burst: 400,
+            },
+            Profile::Lab => DnsLimitsEffective {
+                rrl: false,
+                responses_per_second: 20,
+                errors_per_second: 10,
+                client_qps: 0,
+                client_burst: 0,
+            },
+        }
+    }
+
+    /// The settings under `profile`: the keys that are set win.
+    pub fn effective(&self, profile: Profile) -> DnsLimitsEffective {
+        let default = Self::profile_default(profile);
+        let client_qps = self.client_qps.unwrap_or(default.client_qps);
+        let client_burst = match (self.client_burst, self.client_qps) {
+            (Some(burst), _) => burst,
+            (None, Some(qps)) => qps.saturating_mul(2),
+            (None, None) => default.client_burst,
+        };
+        DnsLimitsEffective {
+            rrl: self.rrl.unwrap_or(default.rrl),
+            responses_per_second: self
+                .responses_per_second
+                .unwrap_or(default.responses_per_second),
+            errors_per_second: self.errors_per_second.unwrap_or(default.errors_per_second),
+            client_qps,
+            client_burst,
+        }
+    }
+
+    /// The exempt prefixes (an address is its host prefix).
+    ///
+    /// # Errors
+    ///
+    /// `config.invalid` for an entry that is no prefix.
+    pub fn exempt_prefixes(&self) -> Result<Vec<ipnet::IpNet>, ConfigError> {
+        self.exempt
+            .iter()
+            .map(|text| {
+                text.parse::<ipnet::IpNet>()
+                    .or_else(|_| text.parse::<IpAddr>().map(ipnet::IpNet::from))
+                    .map(|prefix| prefix.trunc())
+                    .map_err(|_| {
+                        ConfigError::invalid(format!(
+                            "dns.limits.exempt: `{text}` is not a prefix such as 192.0.2.0/24"
+                        ))
+                    })
+            })
+            .collect()
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        fn check(ok: bool, message: &str) -> Result<(), ConfigError> {
+            if ok {
+                Ok(())
+            } else {
+                Err(ConfigError::invalid(message.to_owned()))
+            }
+        }
+        check(
+            self.responses_per_second
+                .is_none_or(|rate| (1..=10_000).contains(&rate)),
+            "dns.limits.responses_per_second must be between 1 and 10000",
+        )?;
+        check(
+            self.errors_per_second
+                .is_none_or(|rate| (1..=10_000).contains(&rate)),
+            "dns.limits.errors_per_second must be between 1 and 10000",
+        )?;
+        check(
+            (1..=3_600).contains(&self.window_secs),
+            "dns.limits.window_secs must be between 1 and 3600",
+        )?;
+        check(self.slip <= 10, "dns.limits.slip must be between 0 and 10")?;
+        check(
+            (8..=32).contains(&self.ipv4_prefix),
+            "dns.limits.ipv4_prefix must be between 8 and 32",
+        )?;
+        check(
+            (16..=128).contains(&self.ipv6_prefix),
+            "dns.limits.ipv6_prefix must be between 16 and 128",
+        )?;
+        check(
+            self.client_qps.is_none_or(|rate| rate <= 100_000),
+            "dns.limits.client_qps must be between 0 and 100000",
+        )?;
+        check(
+            self.client_burst.is_none_or(|burst| burst <= 1_000_000),
+            "dns.limits.client_burst must be between 0 and 1000000",
+        )?;
+        check(
+            (1_024..=16_777_216).contains(&self.table),
+            "dns.limits.table must be between 1024 and 16777216",
+        )?;
+        check(
+            self.exempt.len() <= 1_000,
+            "dns.limits.exempt holds at most 1000 prefixes",
+        )?;
+        self.exempt_prefixes().map(|_| ())
+    }
+}
+
+/// `[dns.lists]`: how block lists are fetched (by the leader service `dns.lists`) and
+/// uploaded (`docs/dns-resolver.md` section 5).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DnsListsSection {
+    /// Seconds a fetch may take, 5 to 600 (default 60).
+    pub fetch_timeout_secs: u64,
+    /// MiB a fetched list may have, 1 to 1,024 (default 64).
+    pub max_download: u64,
+    /// MiB an uploaded list may have, 1 to 1,024 (default 64): the body limit of
+    /// `PUT /api/v1/dns/lists/{id}/file`.
+    pub max_upload: u64,
+}
+
+impl Default for DnsListsSection {
+    fn default() -> Self {
+        Self {
+            fetch_timeout_secs: 60,
+            max_download: 64,
+            max_upload: 64,
+        }
+    }
+}
+
+impl DnsListsSection {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if !(5..=600).contains(&self.fetch_timeout_secs) {
+            return Err(ConfigError::invalid(
+                "dns.lists.fetch_timeout_secs must be between 5 and 600",
+            ));
+        }
+        if !(1..=1_024).contains(&self.max_download) {
+            return Err(ConfigError::invalid(
+                "dns.lists.max_download must be between 1 and 1024",
+            ));
+        }
+        if !(1..=1_024).contains(&self.max_upload) {
+            return Err(ConfigError::invalid(
+                "dns.lists.max_upload must be between 1 and 1024",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -1350,6 +1602,8 @@ impl DnsSection {
             (1..=1_000_000).contains(&self.log.sample),
             "dns.log.sample must be between 1 and 1000000",
         )?;
+        self.limits.validate()?;
+        self.lists.validate()?;
         self.tls.validate()
     }
 }

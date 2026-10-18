@@ -1,5 +1,5 @@
 //! `tenko dns ...`: the DNS endpoints of the public API (`/api/v1/dns/...`): zones, records,
-//! zone file import and export, access lists, TSIG keys and forwarding rules.
+//! zone file import and export, access lists, TSIG keys, forwarding rules and block lists.
 //!
 //! # Names
 //!
@@ -34,14 +34,16 @@
 
 use std::{
     fmt::Write as _,
+    io::Read as _,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     path::PathBuf,
     str::FromStr as _,
     time::Duration,
 };
 
-use clap::{Args, Subcommand, ValueEnum};
+use clap::{ArgGroup, Args, Subcommand, ValueEnum};
 use ipnet::IpNet;
+use reqwest::header::CONTENT_TYPE;
 use serde_json::{Map, Value, json};
 use tenko_api::{client::Client, dto::Page, problem::ProblemDetails};
 use tenko_core::Revision;
@@ -87,6 +89,230 @@ pub enum DnsCommand {
         #[command(subcommand)]
         action: ForwarderCommand,
     },
+    /// Block lists and allow lists: list, create, show, change, delete, fetch, upload.
+    List {
+        /// The `list` subcommand to run.
+        #[command(subcommand)]
+        action: BlockListCommand,
+    },
+}
+
+/// Subcommands of `tenko dns list`.
+#[derive(Debug, Clone, Subcommand)]
+pub enum BlockListCommand {
+    /// List the block lists and allow lists.
+    List(ListArgs),
+    /// Create a list.
+    Create(BlockListCreateArgs),
+    /// Show one list (its identifier or its name).
+    Get(BlockListRefArgs),
+    /// Change a list.
+    Update(BlockListUpdateArgs),
+    /// Delete a list and its versions.
+    Delete(BlockListDeleteArgs),
+    /// Fetch and compile a URL list now; prints the job.
+    Fetch(BlockListRefArgs),
+    /// Send the file of an uploaded list; prints the job.
+    Upload(BlockListUploadArgs),
+}
+
+/// The file format of a list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ListFormatArg {
+    /// A hosts file (`0.0.0.0 ads.example.test`).
+    Hosts,
+    /// One domain per line.
+    Domains,
+}
+
+impl ListFormatArg {
+    const fn api(self) -> &'static str {
+        match self {
+            Self::Hosts => "hosts",
+            Self::Domains => "domains",
+        }
+    }
+}
+
+/// What a list does with the names it holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ListKindArg {
+    /// Answer the names with the list's action.
+    Block,
+    /// Keep the names from being blocked, and exempt the list's clients.
+    Allow,
+}
+
+impl ListKindArg {
+    const fn api(self) -> &'static str {
+        match self {
+            Self::Block => "block",
+            Self::Allow => "allow",
+        }
+    }
+}
+
+/// What a blocked name answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum BlockActionArg {
+    /// NXDOMAIN.
+    Nxdomain,
+    /// NOERROR without data.
+    Nodata,
+    /// An address record of the `--redirect` address.
+    Redirect,
+}
+
+/// Arguments of `tenko dns list create`.
+#[derive(Debug, Clone, Args)]
+#[command(group(ArgGroup::new("source").required(true).args(["source_url", "upload"])))]
+pub struct BlockListCreateArgs {
+    /// Connection options.
+    #[command(flatten)]
+    pub client: ClientOpts,
+    /// A unique name, 1 to 64 characters.
+    #[arg(long, value_name = "NAME")]
+    pub name: String,
+    /// Fetch the list from this `https://` or `http://` URL (`--url` is the controller).
+    #[arg(long, value_name = "URL")]
+    pub source_url: Option<String>,
+    /// The list is uploaded (`tenko dns list upload`), not fetched.
+    #[arg(long)]
+    pub upload: bool,
+    /// The file format; `domains` when absent.
+    #[arg(long, value_enum)]
+    pub format: Option<ListFormatArg>,
+    /// A block list or an allow list; `block` when absent.
+    #[arg(long, value_enum)]
+    pub kind: Option<ListKindArg>,
+    /// How often a URL list is fetched, in hours (1 to 168); the server's default (24)
+    /// when absent.
+    #[arg(
+        long,
+        value_name = "N",
+        value_parser = clap::value_parser!(u16).range(1..=168)
+    )]
+    pub interval_hours: Option<u16>,
+    /// What a blocked name answers; `nxdomain` when absent.
+    #[arg(long, value_enum)]
+    pub action: Option<BlockActionArg>,
+    /// The address `--action redirect` answers.
+    #[arg(long, value_name = "ADDRESS", requires = "action")]
+    pub redirect: Option<IpAddr>,
+    /// A client prefix (or address) exempt from the list; an allow list exempts it from
+    /// every list and RPZ zone. Repeat for more, up to 1,000.
+    #[arg(long = "exempt", value_name = "PREFIX")]
+    pub exempt: Vec<String>,
+    /// Create the list switched off.
+    #[arg(long)]
+    pub disabled: bool,
+    /// Free text.
+    #[arg(long, value_name = "TEXT")]
+    pub description: Option<String>,
+}
+
+/// Arguments of the list commands that take one list.
+#[derive(Debug, Clone, Args)]
+pub struct BlockListRefArgs {
+    /// Connection options.
+    #[command(flatten)]
+    pub client: ClientOpts,
+    /// The list: its identifier or its name.
+    #[arg(value_name = "LIST")]
+    pub list: String,
+}
+
+/// Arguments of `tenko dns list delete`.
+#[derive(Debug, Clone, Args)]
+pub struct BlockListDeleteArgs {
+    /// Connection options.
+    #[command(flatten)]
+    pub client: ClientOpts,
+    /// The list: its identifier or its name.
+    #[arg(value_name = "LIST")]
+    pub list: String,
+    /// Refuse the change when the list is no longer at this revision.
+    #[arg(long, value_name = "REV")]
+    pub if_match: Option<u64>,
+}
+
+/// Arguments of `tenko dns list update`.
+#[derive(Debug, Clone, Args)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "command line switches, each of its own"
+)]
+pub struct BlockListUpdateArgs {
+    /// Connection options.
+    #[command(flatten)]
+    pub client: ClientOpts,
+    /// The list: its identifier or its name.
+    #[arg(value_name = "LIST")]
+    pub list: String,
+    /// Refuse the change when the list is no longer at this revision.
+    #[arg(long, value_name = "REV")]
+    pub if_match: Option<u64>,
+    /// A new name.
+    #[arg(long, value_name = "NAME")]
+    pub name: Option<String>,
+    /// A new source URL; the versions of the list are dropped and it is fetched again.
+    #[arg(long, value_name = "URL", conflicts_with = "upload")]
+    pub source_url: Option<String>,
+    /// Make the list an uploaded one; its versions are dropped.
+    #[arg(long)]
+    pub upload: bool,
+    /// The file format; the versions of the list are dropped.
+    #[arg(long, value_enum)]
+    pub format: Option<ListFormatArg>,
+    /// A block list or an allow list.
+    #[arg(long, value_enum)]
+    pub kind: Option<ListKindArg>,
+    /// How often a URL list is fetched, in hours (1 to 168).
+    #[arg(
+        long,
+        value_name = "N",
+        value_parser = clap::value_parser!(u16).range(1..=168)
+    )]
+    pub interval_hours: Option<u16>,
+    /// What a blocked name answers.
+    #[arg(long, value_enum)]
+    pub action: Option<BlockActionArg>,
+    /// The address `--action redirect` answers.
+    #[arg(long, value_name = "ADDRESS", requires = "action")]
+    pub redirect: Option<IpAddr>,
+    /// The exempt client prefixes, replacing all of them. Repeat for more.
+    #[arg(
+        long = "exempt",
+        value_name = "PREFIX",
+        conflicts_with = "clear_exempt"
+    )]
+    pub exempt: Vec<String>,
+    /// Remove every exempt prefix.
+    #[arg(long)]
+    pub clear_exempt: bool,
+    /// Switch the list on.
+    #[arg(long, conflicts_with = "disable")]
+    pub enable: bool,
+    /// Switch the list off.
+    #[arg(long)]
+    pub disable: bool,
+    /// Free text; an empty text clears it.
+    #[arg(long, value_name = "TEXT")]
+    pub description: Option<String>,
+}
+
+/// Arguments of `tenko dns list upload`.
+#[derive(Debug, Clone, Args)]
+pub struct BlockListUploadArgs {
+    /// Connection options.
+    #[command(flatten)]
+    pub client: ClientOpts,
+    /// The list: its identifier or its name.
+    #[arg(value_name = "LIST")]
+    pub list: String,
+    /// The file to send, or `-` for standard input.
+    #[arg(value_name = "FILE")]
+    pub file: PathBuf,
 }
 
 /// Subcommands of `tenko dns forwarder`.
@@ -280,6 +506,14 @@ impl DnsCommand {
                 ForwarderCommand::Get(a) | ForwarderCommand::Delete(a) => &a.client,
                 ForwarderCommand::Update(a) => &a.client,
             },
+            Self::List { action } => match action {
+                BlockListCommand::List(a) => &a.client,
+                BlockListCommand::Create(a) => &a.client,
+                BlockListCommand::Get(a) | BlockListCommand::Fetch(a) => &a.client,
+                BlockListCommand::Update(a) => &a.client,
+                BlockListCommand::Delete(a) => &a.client,
+                BlockListCommand::Upload(a) => &a.client,
+            },
         }
     }
 
@@ -321,6 +555,15 @@ impl DnsCommand {
                 ForwarderCommand::Get(_) => "dns forwarder get",
                 ForwarderCommand::Update(_) => "dns forwarder update",
                 ForwarderCommand::Delete(_) => "dns forwarder delete",
+            },
+            Self::List { action } => match action {
+                BlockListCommand::List(_) => "dns list list",
+                BlockListCommand::Create(_) => "dns list create",
+                BlockListCommand::Get(_) => "dns list get",
+                BlockListCommand::Update(_) => "dns list update",
+                BlockListCommand::Delete(_) => "dns list delete",
+                BlockListCommand::Fetch(_) => "dns list fetch",
+                BlockListCommand::Upload(_) => "dns list upload",
             },
         }
     }
@@ -715,6 +958,15 @@ pub async fn run(command: &DnsCommand) -> Result<Output, Failure> {
             ForwarderCommand::Get(args) => forwarder_get(&target, args).await,
             ForwarderCommand::Update(args) => forwarder_update(&target, args).await,
             ForwarderCommand::Delete(args) => forwarder_delete(&target, args).await,
+        },
+        DnsCommand::List { action } => match action {
+            BlockListCommand::List(_) => block_list_list(&target).await,
+            BlockListCommand::Create(args) => block_list_create(&target, args).await,
+            BlockListCommand::Get(args) => block_list_get(&target, args).await,
+            BlockListCommand::Update(args) => block_list_update(&target, args).await,
+            BlockListCommand::Delete(args) => block_list_delete(&target, args).await,
+            BlockListCommand::Fetch(args) => block_list_fetch(&target, args).await,
+            BlockListCommand::Upload(args) => block_list_upload(&target, args).await,
         },
     }
 }
@@ -2115,6 +2367,429 @@ async fn forwarder_delete(target: &Target, args: &NamedArgs) -> Result<Output, F
 }
 
 // ---------------------------------------------------------------------------------------
+// Block lists and allow lists
+
+/// The `action` of a list as the API takes it, from `--action` and `--redirect`; `None`
+/// when neither is given.
+fn action_body(
+    action: Option<BlockActionArg>,
+    redirect: Option<IpAddr>,
+) -> Result<Option<Value>, Failure> {
+    match (action, redirect) {
+        (None, None) => Ok(None),
+        (Some(BlockActionArg::Nxdomain), None) => Ok(Some(json!({ "kind": "nxdomain" }))),
+        (Some(BlockActionArg::Nodata), None) => Ok(Some(json!({ "kind": "nodata" }))),
+        (Some(BlockActionArg::Redirect), Some(address)) => Ok(Some(json!({
+            "kind": "redirect",
+            "address": address.to_string(),
+        }))),
+        (Some(BlockActionArg::Redirect), None) => {
+            Err(usage("--action redirect needs the address in --redirect"))
+        }
+        (_, Some(_)) => Err(usage("--redirect goes with --action redirect only")),
+    }
+}
+
+/// The exempt prefixes of a request; an address is its host prefix.
+fn exempt_body(prefixes: &[String]) -> Result<Vec<String>, Failure> {
+    prefixes
+        .iter()
+        .map(|text| {
+            let text = text.trim();
+            IpNet::from_str(text)
+                .ok()
+                .or_else(|| IpAddr::from_str(text).ok().map(IpNet::from))
+                .map(|net| net.trunc().to_string())
+                .ok_or_else(|| {
+                    usage(format!(
+                        "`{text}` is not a prefix such as 192.0.2.0/24 or an address"
+                    ))
+                })
+        })
+        .collect()
+}
+
+/// The `source` of a list as the API takes it.
+fn source_body(url: Option<&str>, upload: bool) -> Option<Value> {
+    match (url, upload) {
+        (Some(url), _) => Some(json!({ "kind": "url", "url": url.trim() })),
+        (None, true) => Some(json!({ "kind": "upload" })),
+        (None, false) => None,
+    }
+}
+
+/// The body of `POST /dns/lists`.
+fn block_list_create_body(args: &BlockListCreateArgs) -> Result<Value, Failure> {
+    let source = source_body(args.source_url.as_deref(), args.upload)
+        .ok_or_else(|| usage("give --source-url URL or --upload"))?;
+    let mut body = json!({
+        "name": args.name.trim(),
+        "kind": args.kind.unwrap_or(ListKindArg::Block).api(),
+        "source": source,
+        "format": args.format.unwrap_or(ListFormatArg::Domains).api(),
+        "exempt": exempt_body(&args.exempt)?,
+    });
+    if let Some(hours) = args.interval_hours {
+        body["interval_hours"] = json!(hours);
+    }
+    if let Some(action) = action_body(args.action, args.redirect)? {
+        body["action"] = action;
+    }
+    if args.disabled {
+        body["enabled"] = json!(false);
+    }
+    if let Some(description) = &args.description {
+        body["description"] = json!(description);
+    }
+    Ok(body)
+}
+
+/// The body of `PATCH /dns/lists/{id}`; empty when nothing is to change.
+fn block_list_update_body(args: &BlockListUpdateArgs) -> Result<Map<String, Value>, Failure> {
+    let mut body = Map::new();
+    if let Some(name) = &args.name {
+        body.insert("name".to_owned(), json!(name.trim()));
+    }
+    if let Some(source) = source_body(args.source_url.as_deref(), args.upload) {
+        body.insert("source".to_owned(), source);
+    }
+    if let Some(format) = args.format {
+        body.insert("format".to_owned(), json!(format.api()));
+    }
+    if let Some(kind) = args.kind {
+        body.insert("kind".to_owned(), json!(kind.api()));
+    }
+    if let Some(hours) = args.interval_hours {
+        body.insert("interval_hours".to_owned(), json!(hours));
+    }
+    if let Some(action) = action_body(args.action, args.redirect)? {
+        body.insert("action".to_owned(), action);
+    }
+    if args.clear_exempt {
+        body.insert("exempt".to_owned(), json!([]));
+    } else if !args.exempt.is_empty() {
+        body.insert("exempt".to_owned(), json!(exempt_body(&args.exempt)?));
+    }
+    if args.enable {
+        body.insert("enabled".to_owned(), json!(true));
+    }
+    if args.disable {
+        body.insert("enabled".to_owned(), json!(false));
+    }
+    if let Some(description) = &args.description {
+        body.insert("description".to_owned(), json!(description));
+    }
+    Ok(body)
+}
+
+/// The list `reference` names: its identifier or its name, read from the server.
+async fn resolve_block_list(client: &Client, reference: &str) -> Result<Value, Failure> {
+    if Uuid::parse_str(reference).is_ok() {
+        return Ok(client.get(&format!("/dns/lists/{reference}")).await?);
+    }
+    let wanted = reference.trim().to_lowercase();
+    let lists = list_all(client, "/dns/lists", &[]).await?;
+    lists
+        .into_iter()
+        .find(|list| text(list, &["name"]).to_lowercase() == wanted)
+        .ok_or_else(|| not_found("dns.list.not_found", "block list", reference))
+}
+
+fn block_list_path(list: &Value) -> String {
+    format!("/dns/lists/{}", text(list, &["id"]))
+}
+
+/// Where a list comes from: its URL, or `upload`.
+fn present_source(list: &Value) -> String {
+    match text(list, &["source", "kind"]) {
+        "url" => text(list, &["source", "url"]).to_owned(),
+        other => other.to_owned(),
+    }
+}
+
+/// What a list answers: `nxdomain`, `nodata` or `redirect ADDRESS`.
+fn present_action(list: &Value) -> String {
+    match text(list, &["action", "kind"]) {
+        "redirect" => format!("redirect {}", text(list, &["action", "address"])),
+        other => other.to_owned(),
+    }
+}
+
+/// The kind of a list; `block` when the answer has none.
+fn present_kind(list: &Value) -> String {
+    match text(list, &["kind"]) {
+        "" => "block".to_owned(),
+        kind => kind.to_owned(),
+    }
+}
+
+/// `yes` unless the list is switched off.
+fn present_enabled(list: &Value) -> String {
+    if list.get("enabled").and_then(Value::as_bool) == Some(false) {
+        "no".to_owned()
+    } else {
+        "yes".to_owned()
+    }
+}
+
+fn exempt_of(list: &Value) -> Vec<String> {
+    list.get("exempt")
+        .and_then(Value::as_array)
+        .map(|prefixes| {
+            prefixes
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn describe_block_list(list: &Value) -> String {
+    let mut lines: Vec<(&str, String)> = vec![
+        ("name", text(list, &["name"]).to_owned()),
+        ("id", text(list, &["id"]).to_owned()),
+        ("kind", present_kind(list)),
+        ("source", present_source(list)),
+        ("format", text(list, &["format"]).to_owned()),
+        (
+            "interval",
+            format!("{} h", number(list, &["interval_hours"])),
+        ),
+        ("action", present_action(list)),
+        ("enabled", present_enabled(list)),
+    ];
+    let exempt = exempt_of(list);
+    if !exempt.is_empty() {
+        lines.push(("exempt", exempt.join(" ")));
+    }
+    let description = text(list, &["description"]);
+    if !description.is_empty() {
+        lines.push(("description", description.to_owned()));
+    }
+    if list
+        .get("version")
+        .is_some_and(|version| !version.is_null())
+    {
+        lines.push(("version", number(list, &["version", "revision"])));
+        lines.push(("entries", number(list, &["version", "entries"])));
+        lines.push(("bytes", number(list, &["version", "bytes"])));
+        lines.push(("fetched", text(list, &["version", "fetched"]).to_owned()));
+        let etag = text(list, &["version", "etag"]);
+        if !etag.is_empty() {
+            lines.push(("etag", etag.to_owned()));
+        }
+    } else {
+        lines.push(("version", "none yet".to_owned()));
+    }
+    let checked = text(list, &["last_checked"]);
+    if !checked.is_empty() {
+        lines.push(("last checked", checked.to_owned()));
+    }
+    let error = text(list, &["last_error"]);
+    if !error.is_empty() {
+        lines.push(("last error", error.to_owned()));
+        let detail = text(list, &["last_error_detail"]);
+        if !detail.is_empty() {
+            lines.push(("", detail.to_owned()));
+        }
+    }
+    lines.push(("revision", number(list, &["revision"])));
+    let width = lines.iter().map(|(key, _)| key.len()).max().unwrap_or(0);
+    let mut out = String::new();
+    for (key, value) in lines {
+        let _ = writeln!(out, "{key:<width$}  {value}");
+    }
+    out
+}
+
+/// The rows of `tenko dns list list`.
+fn block_list_rows(lists: &[Value]) -> Vec<Vec<String>> {
+    lists
+        .iter()
+        .map(|list| {
+            vec![
+                text(list, &["name"]).to_owned(),
+                present_kind(list),
+                present_source(list),
+                text(list, &["format"]).to_owned(),
+                present_action(list),
+                present_enabled(list),
+                number(list, &["version", "entries"]),
+                number(list, &["version", "revision"]),
+                text(list, &["version", "fetched"]).to_owned(),
+                text(list, &["last_error"]).to_owned(),
+                text(list, &["id"]).to_owned(),
+            ]
+        })
+        .collect()
+}
+
+async fn block_list_list(target: &Target) -> Result<Output, Failure> {
+    let client = target.connect().await?;
+    let items = list_all(&client, "/dns/lists", &[]).await?;
+    if target.json {
+        return Ok(Output::json(&json!({ "items": items })));
+    }
+    Ok(Output::text(table(
+        &[
+            "NAME",
+            "KIND",
+            "SOURCE",
+            "FORMAT",
+            "ACTION",
+            "ENABLED",
+            "ENTRIES",
+            "VERSION",
+            "FETCHED",
+            "LAST ERROR",
+            "ID",
+        ],
+        &block_list_rows(&items),
+    )))
+}
+
+async fn block_list_create(target: &Target, args: &BlockListCreateArgs) -> Result<Output, Failure> {
+    let body = block_list_create_body(args)?;
+    let client = target.connect().await?;
+    let answer: Value = client.post("/dns/lists", &body, Some(&key())).await?;
+    if target.json {
+        return Ok(Output::json(&answer));
+    }
+    let mut out = format!(
+        "created list {} ({}) at revision {}\n",
+        text(&answer, &["name"]),
+        text(&answer, &["id"]),
+        number(&answer, &["revision"]),
+    );
+    if args.upload {
+        let _ = writeln!(
+            out,
+            "send its file with `tenko dns list upload {} FILE`",
+            text(&answer, &["name"])
+        );
+    }
+    Ok(Output::text(out))
+}
+
+async fn block_list_get(target: &Target, args: &BlockListRefArgs) -> Result<Output, Failure> {
+    let client = target.connect().await?;
+    let list = resolve_block_list(&client, &args.list).await?;
+    if target.json {
+        return Ok(Output::json(&list));
+    }
+    Ok(Output::text(describe_block_list(&list)))
+}
+
+async fn block_list_update(target: &Target, args: &BlockListUpdateArgs) -> Result<Output, Failure> {
+    let body = block_list_update_body(args)?;
+    if body.is_empty() {
+        return Err(usage(
+            "nothing to change: give --name, --source-url, --upload, --format, --kind, \
+             --interval-hours, --action, --exempt, --clear-exempt, --enable, --disable or \
+             --description",
+        ));
+    }
+    let client = target.connect().await?;
+    let list = resolve_block_list(&client, &args.list).await?;
+    let answer: Value = client
+        .patch(
+            &block_list_path(&list),
+            &Value::Object(body),
+            revision(args.if_match),
+        )
+        .await?;
+    if target.json {
+        return Ok(Output::json(&answer));
+    }
+    Ok(Output::text(format!(
+        "updated list {} at revision {}\n",
+        text(&answer, &["name"]),
+        number(&answer, &["revision"]),
+    )))
+}
+
+async fn block_list_delete(target: &Target, args: &BlockListDeleteArgs) -> Result<Output, Failure> {
+    let client = target.connect().await?;
+    let list = resolve_block_list(&client, &args.list).await?;
+    client
+        .delete(&block_list_path(&list), revision(args.if_match))
+        .await?;
+    if target.json {
+        return Ok(Output::json(&json!({ "deleted": text(&list, &["id"]) })));
+    }
+    Ok(Output::text(format!(
+        "deleted list {} ({})\n",
+        text(&list, &["name"]),
+        text(&list, &["id"]),
+    )))
+}
+
+/// What `fetch` and `upload` print for the job they started. The CLI has no jobs command
+/// yet, so the line names the API route.
+fn job_started(answer: &Value, list: &Value) -> Result<Output, Failure> {
+    let job_id = text(answer, &["job_id"]);
+    if job_id.is_empty() {
+        return Err(Failure::other(
+            "unexpected answer: the request has no job_id",
+        ));
+    }
+    let name = text(list, &["name"]);
+    Ok(Output::text(format!(
+        "started job {job_id} for list {name}\n\
+         follow it with GET /api/v1/jobs/{job_id}; the outcome shows in `tenko dns list get \
+         {name}` (version and last error)\n",
+    )))
+}
+
+async fn block_list_fetch(target: &Target, args: &BlockListRefArgs) -> Result<Output, Failure> {
+    let client = target.connect().await?;
+    let list = resolve_block_list(&client, &args.list).await?;
+    let path = format!("{}/fetch", block_list_path(&list));
+    let answer: Value = client.post(&path, &json!({}), Some(&key())).await?;
+    if target.json {
+        return Ok(Output::json(&answer));
+    }
+    job_started(&answer, &list)
+}
+
+/// The bytes of the file, or of standard input for `-`.
+fn read_upload(file: &std::path::Path) -> Result<Vec<u8>, Failure> {
+    if file.as_os_str() == "-" {
+        let mut bytes = Vec::new();
+        std::io::stdin()
+            .lock()
+            .read_to_end(&mut bytes)
+            .map_err(|error| usage(format!("cannot read standard input: {error}")))?;
+        return Ok(bytes);
+    }
+    std::fs::read(file).map_err(|error| usage(format!("cannot read {}: {error}", file.display())))
+}
+
+async fn block_list_upload(target: &Target, args: &BlockListUploadArgs) -> Result<Output, Failure> {
+    let bytes = read_upload(&args.file)?;
+    let client = target.connect().await?;
+    let list = resolve_block_list(&client, &args.list).await?;
+    // The typed client sends JSON only: the file goes as `text/plain` through the raw helper,
+    // without an `Idempotency-Key` (keyed requests are buffered under a smaller limit than an
+    // upload may have).
+    let raw = target.raw()?;
+    let mut request = raw
+        .http
+        .put(raw.url(&format!("{}/file", block_list_path(&list))))
+        .header(CONTENT_TYPE, "text/plain; charset=utf-8")
+        .body(bytes);
+    if let Some(token) = &raw.token {
+        request = request.bearer_auth(token);
+    }
+    let answer: Value = raw.send(request).await?.json()?;
+    if target.json {
+        return Ok(Output::json(&answer));
+    }
+    job_started(&answer, &list)
+}
+
+// ---------------------------------------------------------------------------------------
 // TSIG keys
 
 fn describe_key(key: &Value) -> String {
@@ -2611,5 +3286,335 @@ mod tests {
             present_upstream(&json!({ "address": "192.0.2.1" })),
             "192.0.2.1"
         );
+    }
+
+    const URL: &str = "https://lists.example.test/h";
+
+    #[test]
+    fn list_commands_are_parsed() {
+        let cases: &[(&[&str], &str)] = &[
+            (&["list", "list"], "dns list list"),
+            (
+                &["list", "create", "--name", "ads", "--source-url", URL],
+                "dns list create",
+            ),
+            (
+                &["list", "create", "--name", "mine", "--upload"],
+                "dns list create",
+            ),
+            (&["list", "get", "ads"], "dns list get"),
+            (&["list", "update", "ads", "--disable"], "dns list update"),
+            (
+                &["list", "delete", "ads", "--if-match", "4"],
+                "dns list delete",
+            ),
+            (&["list", "fetch", "ads"], "dns list fetch"),
+            (&["list", "upload", "ads", "-"], "dns list upload"),
+        ];
+        for (args, name) in cases {
+            let command = parse(args).unwrap_or_else(|error| panic!("{args:?}: {error}"));
+            assert_eq!(command.name(), *name);
+        }
+        let refused: &[&[&str]] = &[
+            &["list", "create", "--name", "x"],
+            &[
+                "list",
+                "create",
+                "--name",
+                "x",
+                "--source-url",
+                URL,
+                "--upload",
+            ],
+            &["list", "create", "--source-url", URL],
+            &[
+                "list", "create", "--name", "x", "--upload", "--format", "csv",
+            ],
+            &[
+                "list", "create", "--name", "x", "--upload", "--kind", "deny",
+            ],
+            &[
+                "list",
+                "create",
+                "--name",
+                "x",
+                "--upload",
+                "--interval-hours",
+                "0",
+            ],
+            &[
+                "list",
+                "create",
+                "--name",
+                "x",
+                "--upload",
+                "--interval-hours",
+                "169",
+            ],
+            &[
+                "list",
+                "create",
+                "--name",
+                "x",
+                "--upload",
+                "--redirect",
+                "192.0.2.1",
+            ],
+            &["list", "update", "x", "--enable", "--disable"],
+            &[
+                "list",
+                "update",
+                "x",
+                "--exempt",
+                "192.0.2.0/24",
+                "--clear-exempt",
+            ],
+            &["list", "update", "x", "--source-url", URL, "--upload"],
+            &["list", "upload", "x"],
+        ];
+        for args in refused {
+            assert!(parse(args).is_err(), "{args:?}");
+        }
+    }
+
+    fn create_args(args: &[&str]) -> BlockListCreateArgs {
+        let mut line = vec!["list", "create"];
+        line.extend_from_slice(args);
+        match parse(&line).expect("valid") {
+            DnsCommand::List {
+                action: BlockListCommand::Create(args),
+            } => args,
+            other => panic!("not a list create: {other:?}"),
+        }
+    }
+
+    fn update_args(args: &[&str]) -> BlockListUpdateArgs {
+        let mut line = vec!["list", "update", "ads"];
+        line.extend_from_slice(args);
+        match parse(&line).expect("valid") {
+            DnsCommand::List {
+                action: BlockListCommand::Update(args),
+            } => args,
+            other => panic!("not a list update: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_create_bodies_have_the_defaults() {
+        let body = block_list_create_body(&create_args(&["--name", "ads", "--source-url", URL]))
+            .expect("body");
+        assert_eq!(
+            body,
+            json!({
+                "name": "ads",
+                "kind": "block",
+                "source": { "kind": "url", "url": URL },
+                "format": "domains",
+                "exempt": [],
+            })
+        );
+        let body = block_list_create_body(&create_args(&[
+            "--name",
+            "hosts",
+            "--upload",
+            "--format",
+            "hosts",
+            "--kind",
+            "allow",
+            "--interval-hours",
+            "12",
+            "--action",
+            "redirect",
+            "--redirect",
+            "192.0.2.80",
+            "--exempt",
+            "192.0.2.10",
+            "--exempt",
+            "198.51.100.77/24",
+            "--exempt",
+            "2001:db8::/32",
+            "--disabled",
+            "--description",
+            "kids",
+        ]))
+        .expect("body");
+        assert_eq!(
+            body,
+            json!({
+                "name": "hosts",
+                "kind": "allow",
+                "source": { "kind": "upload" },
+                "format": "hosts",
+                "interval_hours": 12,
+                "action": { "kind": "redirect", "address": "192.0.2.80" },
+                "exempt": ["192.0.2.10/32", "198.51.100.0/24", "2001:db8::/32"],
+                "enabled": false,
+                "description": "kids",
+            })
+        );
+    }
+
+    #[test]
+    fn list_actions_and_prefixes_are_checked() {
+        assert_eq!(action_body(None, None).expect("none"), None);
+        assert_eq!(
+            action_body(Some(BlockActionArg::Nodata), None).expect("nodata"),
+            Some(json!({ "kind": "nodata" }))
+        );
+        assert!(action_body(Some(BlockActionArg::Redirect), None).is_err());
+        assert!(
+            action_body(
+                Some(BlockActionArg::Nxdomain),
+                Some("192.0.2.1".parse().expect("address"))
+            )
+            .is_err()
+        );
+        assert!(exempt_body(&strings(&["192.0.2.0/33"])).is_err());
+        assert!(exempt_body(&strings(&["kids.example.test"])).is_err());
+        let bad = block_list_create_body(&create_args(&[
+            "--name", "x", "--upload", "--exempt", "nonsense",
+        ]));
+        assert_eq!(bad.expect_err("prefix").status, exit::USAGE);
+    }
+
+    #[test]
+    fn list_update_bodies_hold_only_what_is_given() {
+        assert!(
+            block_list_update_body(&update_args(&[]))
+                .expect("body")
+                .is_empty()
+        );
+        let body = block_list_update_body(&update_args(&[
+            "--name",
+            "ads2",
+            "--source-url",
+            URL,
+            "--format",
+            "hosts",
+            "--kind",
+            "block",
+            "--interval-hours",
+            "6",
+            "--action",
+            "nxdomain",
+            "--exempt",
+            "192.0.2.0/24",
+            "--disable",
+            "--description",
+            "",
+        ]))
+        .expect("body");
+        assert_eq!(
+            Value::Object(body),
+            json!({
+                "name": "ads2",
+                "source": { "kind": "url", "url": URL },
+                "format": "hosts",
+                "kind": "block",
+                "interval_hours": 6,
+                "action": { "kind": "nxdomain" },
+                "exempt": ["192.0.2.0/24"],
+                "enabled": false,
+                "description": "",
+            })
+        );
+        let body =
+            block_list_update_body(&update_args(&["--clear-exempt", "--enable", "--upload"]))
+                .expect("body");
+        assert_eq!(
+            Value::Object(body),
+            json!({ "source": { "kind": "upload" }, "exempt": [], "enabled": true })
+        );
+        assert_eq!(update_args(&["--if-match", "9"]).if_match, Some(9));
+    }
+
+    #[test]
+    fn lists_are_shown_in_tables_and_details() {
+        let lists = vec![
+            json!({
+                "id": "0191f9a0-0000-7000-8000-000000000001",
+                "name": "ads",
+                "kind": "block",
+                "source": { "kind": "url", "url": URL },
+                "format": "hosts",
+                "interval_hours": 24,
+                "action": { "kind": "redirect", "address": "192.0.2.80" },
+                "enabled": true,
+                "exempt": ["192.0.2.10/32"],
+                "version": {
+                    "revision": 3,
+                    "entries": 1200,
+                    "fetched": "2026-10-09T12:00:00Z",
+                    "etag": "\"abc\"",
+                    "bytes": 20480
+                },
+                "last_error": "dns.list.fetch_failed",
+                "last_error_detail": "the server answered 503",
+                "last_checked": "2026-10-09T13:00:00Z",
+                "revision": 17,
+            }),
+            json!({
+                "id": "0191f9a0-0000-7000-8000-000000000002",
+                "name": "mine",
+                "kind": "allow",
+                "source": { "kind": "upload" },
+                "format": "domains",
+                "interval_hours": 24,
+                "action": { "kind": "nxdomain" },
+                "enabled": false,
+                "revision": 18,
+            }),
+        ];
+        let rows = block_list_rows(&lists);
+        assert_eq!(
+            rows[0],
+            strings(&[
+                "ads",
+                "block",
+                URL,
+                "hosts",
+                "redirect 192.0.2.80",
+                "yes",
+                "1200",
+                "3",
+                "2026-10-09T12:00:00Z",
+                "dns.list.fetch_failed",
+                "0191f9a0-0000-7000-8000-000000000001",
+            ])
+        );
+        assert_eq!(
+            rows[1],
+            strings(&[
+                "mine",
+                "allow",
+                "upload",
+                "domains",
+                "nxdomain",
+                "no",
+                "",
+                "",
+                "",
+                "",
+                "0191f9a0-0000-7000-8000-000000000002",
+            ])
+        );
+        let first = describe_block_list(&lists[0]);
+        for want in [
+            "source        https://lists.example.test/h",
+            "action        redirect 192.0.2.80",
+            "exempt        192.0.2.10/32",
+            "entries       1200",
+            "last error    dns.list.fetch_failed",
+            "              the server answered 503",
+            "revision      17",
+        ] {
+            assert!(first.contains(want), "{want}\n{first}");
+        }
+        let second = describe_block_list(&lists[1]);
+        assert!(second.contains("version   none yet"), "{second}");
+        assert!(second.contains("enabled   no"), "{second}");
+        let job = job_started(&json!({ "job_id": "j1" }), &lists[0]).expect("job");
+        assert!(job.stdout.contains("started job j1 for list ads"));
+        assert!(job_started(&json!({}), &lists[0]).is_err());
     }
 }

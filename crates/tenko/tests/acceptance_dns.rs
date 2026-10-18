@@ -13,6 +13,10 @@
 //!   to its own upstream; the second answer comes from the cache (the upstream is not asked
 //!   again and the status counts the hit); a flush by suffix empties it; and a client that is
 //!   not on loopback is refused until IPAM knows a prefix that holds its address.
+//! - Block lists (WP5.2): a hosts list fetched from an HTTP server in the test blocks its
+//!   names and the names under them with NXDOMAIN and the extended error "Blocked"; a second
+//!   fetch sends the entity tag, gets 304 and keeps the version; the node status counts the
+//!   blocked queries of the list; a disabled list blocks nothing.
 
 mod serve_support;
 
@@ -525,5 +529,175 @@ fn the_forwarder_follows_rules_caches_flushes_and_refuses_strangers() {
     } else {
         eprintln!("acceptance_dns: no address but loopback; the recursion check is not run");
     }
+    server.stop().assert_graceful_shutdown();
+}
+
+/// The extended DNS error info code of an answer's OPT record, if any.
+fn ede(answer: &[u8]) -> Option<u16> {
+    let header = wire::parse_header(answer)?;
+    let mut pos = wire::questions_end(answer, header.qdcount)?;
+    let records = u32::from(header.ancount) + u32::from(header.nscount) + u32::from(header.arcount);
+    for _ in 0..records {
+        let record = wire::read_record(answer, pos)?;
+        pos = record.end();
+        if record.rtype == wire::TYPE_OPT {
+            return wire::options(record.data(answer))
+                .find(|(code, _)| *code == wire::OPTION_EXTENDED_ERROR)
+                .and_then(|(_, value)| value.get(..2))
+                .map(|code| u16::from_be_bytes([code[0], code[1]]));
+        }
+    }
+    None
+}
+
+/// What the list server of the test saw.
+#[derive(Default)]
+struct Served {
+    requests: AtomicUsize,
+    not_modified: AtomicUsize,
+}
+
+/// An HTTP server in the test that serves `body` as a hosts file with the entity tag
+/// `"v1"`, and answers `304 Not Modified` to a request that sends that tag.
+fn list_server(body: &'static str) -> (SocketAddr, Arc<Served>) {
+    let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind");
+    let address = listener.local_addr().expect("address");
+    let served = Arc::new(Served::default());
+    let seen = Arc::clone(&served);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else {
+                continue;
+            };
+            let mut request = Vec::new();
+            let mut buf = [0u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(len) => request.extend_from_slice(&buf[..len]),
+                }
+            }
+            seen.requests.fetch_add(1, Ordering::Relaxed);
+            let text = String::from_utf8_lossy(&request).to_ascii_lowercase();
+            let reply = if text.contains("if-none-match: \"v1\"") {
+                seen.not_modified.fetch_add(1, Ordering::Relaxed);
+                "HTTP/1.1 304 Not Modified\r\nETag: \"v1\"\r\nConnection: close\r\n\r\n".to_owned()
+            } else {
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nETag: \"v1\"\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+            };
+            let _ = stream.write_all(reply.as_bytes());
+        }
+    });
+    (address, served)
+}
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "one scenario, read top to bottom")]
+fn a_fetched_block_list_blocks_its_names_with_the_extended_error() {
+    let (upstream, _) = upstream();
+    let (lists, fetches) = list_server(
+        "# a hosts file\n127.0.0.1 localhost\n0.0.0.0 ads.example.org\n\
+         0.0.0.0 tracker.example.org metrics.example.org\n",
+    );
+    let port = free_port();
+    let dns: SocketAddr = (Ipv4Addr::LOCALHOST, port).into();
+    let mut node = Node::new()
+        .with_args(&["--roles", "controller,dns"])
+        .with_config(&format!(
+            "[dns]\nlisten = [\"{dns}\"]\nworkers = 1\nforwarders = [\"{upstream}\"]\n\
+             forward_timeout_ms = 1000\n"
+        ));
+    let mut server = node.start();
+    server
+        .wait_stdout_line(Duration::from_secs(5), |line| {
+            line.starts_with("dns role answering on")
+        })
+        .unwrap_or_else(|| panic!("no dns line\n{}", server.diagnostics()));
+    let token = wait_for_setup_token(&server);
+    let mut api = Api::new(&node);
+    api.setup(&token);
+
+    // A URL list in hosts form, fetched now as a job.
+    let list = api
+        .post(
+            "/dns/lists",
+            &json!({
+                "name": "ads",
+                "source": {"kind": "url", "url": format!("http://{lists}/hosts")},
+                "format": "hosts",
+                "action": {"kind": "nxdomain"},
+            }),
+        )
+        .expect(201);
+    let id = list["id"].as_str().expect("a list id").to_owned();
+    let started = api
+        .post(&format!("/dns/lists/{id}/fetch"), &json!({}))
+        .expect(202);
+    let job = started["job_id"].as_str().expect("a job id").to_owned();
+    let done = api.wait_for_job(&job, Duration::from_secs(20));
+    assert_eq!(done["job"]["state"], "succeeded", "{done}");
+    let read = api.get(&format!("/dns/lists/{id}")).expect(200);
+    assert_eq!(read["version"]["revision"], 1, "{read}");
+    assert_eq!(read["version"]["entries"], 3, "{read}");
+    assert_eq!(read["version"]["etag"], "\"v1\"", "{read}");
+
+    // A listed name and a name under it answer NXDOMAIN with "Blocked"; others are forwarded.
+    let blocked = until(
+        Duration::from_secs(3),
+        || udp(dns, "ads.example.org", TYPE_A),
+        |answer| header(answer).rcode == NXDOMAIN,
+    );
+    assert_eq!(header(&blocked).rcode, NXDOMAIN, "the list blocks");
+    assert_eq!(ede(&blocked), Some(15), "the extended error Blocked");
+    let below = udp(dns, "cdn.tracker.example.org", TYPE_A);
+    assert_eq!((header(&below).rcode, ede(&below)), (NXDOMAIN, Some(15)));
+    let clean = udp(dns, "www.example.org", TYPE_A);
+    assert!(holds(&clean, [203, 0, 113, 9]), "a clean name is forwarded");
+    assert_eq!(ede(&clean), None);
+
+    // A second fetch sends the entity tag, sees 304 and keeps the version.
+    let started = api
+        .post(&format!("/dns/lists/{id}/fetch"), &json!({}))
+        .expect(202);
+    let job = started["job_id"].as_str().expect("a job id").to_owned();
+    let done = api.wait_for_job(&job, Duration::from_secs(20));
+    assert_eq!(done["job"]["state"], "succeeded", "{done}");
+    assert_eq!(fetches.not_modified.load(Ordering::Relaxed), 1);
+    assert_eq!(fetches.requests.load(Ordering::Relaxed), 2);
+    let read = api.get(&format!("/dns/lists/{id}")).expect(200);
+    assert_eq!(read["version"]["revision"], 1, "{read}");
+    assert!(read.get("last_error").is_none(), "{read}");
+    assert!(read["last_checked"].is_string(), "{read}");
+
+    // The node counts the blocked queries per list.
+    let node_id = api.get("/system/status").expect(200)["node"]["id"]
+        .as_u64()
+        .expect("a node id");
+    let report = api.get(&format!("/nodes/{node_id}/dns")).expect(200);
+    let ads = report["blocked"]
+        .as_array()
+        .and_then(|lists| lists.iter().find(|entry| entry["list"] == "ads"))
+        .cloned()
+        .unwrap_or_else(|| panic!("no count for the list: {report}"));
+    assert!(ads["count"].as_u64().unwrap_or(0) >= 2, "{report}");
+
+    // A disabled list blocks nothing.
+    let revision = read["revision"].as_u64();
+    api.patch(
+        &format!("/dns/lists/{id}"),
+        &json!({"enabled": false}),
+        revision,
+    )
+    .expect(200);
+    let open = until(
+        Duration::from_secs(3),
+        || udp(dns, "ads.example.org", TYPE_A),
+        |answer| header(answer).rcode == NOERROR,
+    );
+    assert!(holds(&open, [203, 0, 113, 9]), "forwarded once disabled");
     server.stop().assert_graceful_shutdown();
 }

@@ -98,6 +98,7 @@ export const apiOperations = [
   { id: "update_dns_list", method: "patch", path: "/api/v1/dns/lists/{id}", tags: ["dns"], summary: "Change a block list" },
   { id: "delete_dns_list", method: "delete", path: "/api/v1/dns/lists/{id}", tags: ["dns"], summary: "Delete a block list" },
   { id: "fetch_dns_list", method: "post", path: "/api/v1/dns/lists/{id}/fetch", tags: ["dns"], summary: "Fetch and compile a block list now" },
+  { id: "upload_dns_list", method: "put", path: "/api/v1/dns/lists/{id}/file", tags: ["dns"], summary: "Upload the file of a block list" },
   { id: "list_dns_views", method: "get", path: "/api/v1/dns/views", tags: ["dns"], summary: "List DNS views" },
   { id: "create_dns_view", method: "post", path: "/api/v1/dns/views", tags: ["dns"], summary: "Create a DNS view" },
   { id: "get_dns_view", method: "get", path: "/api/v1/dns/views/{id}", tags: ["dns"], summary: "Get a DNS view" },

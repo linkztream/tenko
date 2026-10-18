@@ -12,6 +12,10 @@
 //! at the same revision (WP5.1): the forwarding rules, the views (their recursion access
 //! list), the access lists and the stub zones (`ZoneKind::Stub`, whose name servers the
 //! forwarder learns from the zone's `source`).
+//!
+//! The policy (WP5.2) is compiled here too ([`PolicyData`]): the RPZ zones from their
+//! RRsets and the matcher of the newest version of every list, so that the query path reads
+//! the zones, the views and the policy of one revision through one swap.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -34,6 +38,7 @@ use crate::{
     feed::{Change, Delta, DnsData, FeedError, FeedEvent, ZoneFeed},
     index::{Index, ScopeOf},
     name,
+    policy::PolicyData,
     tree::ZoneIndex,
 };
 
@@ -304,6 +309,7 @@ pub struct Catalog {
     forward_rows: BTreeMap<ForwardRuleId, ForwardRule>,
     stub_rows: BTreeMap<ZoneId, Zone>,
     acl_rows: BTreeMap<AclId, Acl>,
+    policy: PolicyData,
 }
 
 /// The stub zones of a set of zone rows.
@@ -326,6 +332,7 @@ impl Catalog {
             forward_rows: data.forwarders.clone(),
             stub_rows: stubs(&data.zones),
             acl_rows: data.acls.clone(),
+            policy: PolicyData::build(data),
         }
     }
 
@@ -344,6 +351,7 @@ impl Catalog {
             forward_rows: self.forward_rows.clone(),
             stub_rows: self.stub_rows.clone(),
             acl_rows: self.acl_rows.clone(),
+            policy: self.policy.apply(&delta.changes),
         };
         let (mut views, mut forwarders) = (false, false);
         for change in &delta.changes {
@@ -441,6 +449,11 @@ impl Catalog {
     /// The forwarding rules, in id order.
     pub fn forward_rules(&self) -> impl Iterator<Item = &ForwardRule> {
         self.forward_rows.values()
+    }
+
+    /// The compiled policy: RPZ zones and lists.
+    pub fn policy(&self) -> &PolicyData {
+        &self.policy
     }
 }
 

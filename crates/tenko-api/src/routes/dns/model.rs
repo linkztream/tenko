@@ -8,9 +8,9 @@ use tenko_core::{
     dns::{
         Acl, AclEntry, BlockAction, BlockList, DnsKeyId, DnsName, DnssecAlgorithm, DnssecMode,
         DnssecPolicy, ForwardRule, ForwardTransport, KeyName, KeyRole, KeyState, ListFormat,
-        ListSource, MatchRule, Origin, QueryTransport, RecordData, Rtype, ScopeName, ScopeWeight,
-        SecondarySource, SerialPolicy, SoaDefaults, TransferPolicy, TsigAlgorithm, UpdatePolicy,
-        Upstream, View, ViewId, Zone, ZoneId, ZoneKind, ZoneScope,
+        ListKind, ListSource, MatchRule, Origin, QueryTransport, RecordData, Rtype, ScopeName,
+        ScopeWeight, SecondarySource, SerialPolicy, SoaDefaults, TransferPolicy, TsigAlgorithm,
+        UpdatePolicy, Upstream, View, ViewId, Zone, ZoneId, ZoneKind, ZoneScope,
     },
     ipam::Stamp,
 };
@@ -590,10 +590,16 @@ pub struct KeyCreated {
 pub struct ListVersionItem {
     /// The version.
     pub revision: u64,
-    /// How many names it blocks.
+    /// How many names it holds (after duplicates and names under a listed name).
     pub entries: u64,
     /// When the source was read.
     pub fetched: Timestamp,
+    /// The HTTP entity tag of the fetched source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub etag: Option<String>,
+    /// Octets of the compiled form.
+    #[serde(default)]
+    pub bytes: u64,
 }
 
 /// A block list as the API reads it.
@@ -605,9 +611,17 @@ pub struct ListItem {
     /// The newest compiled version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<ListVersionItem>,
-    /// The stable code of the last failed fetch.
+    /// The stable code of the last failed fetch or compile (`dns.list.fetch_failed`,
+    /// `dns.list.invalid`, `dns.list.upload_missing`); the list keeps its version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    /// English detail of the last failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error_detail: Option<String>,
+    /// When the last fetch or compile ran on this controller (a fetch that found the source
+    /// unchanged included).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_checked: Option<Timestamp>,
     /// The store revision of the row.
     pub revision: Revision,
 }
@@ -617,6 +631,9 @@ pub struct ListItem {
 pub struct ListCreate {
     /// A unique name.
     pub name: String,
+    /// `block` (the default) or `allow`.
+    #[serde(default)]
+    pub kind: Option<ListKind>,
     /// Where it comes from.
     pub source: ListSource,
     /// The file format.
@@ -624,11 +641,17 @@ pub struct ListCreate {
     /// How often a URL list is fetched, in hours.
     #[serde(default)]
     pub interval_hours: Option<u16>,
-    /// What a blocked name answers.
-    pub action: BlockAction,
+    /// What a blocked name answers; NXDOMAIN when absent (an allow list blocks nothing).
+    #[serde(default)]
+    pub action: Option<BlockAction>,
     /// Whether it is applied; `true` when absent.
     #[serde(default)]
     pub enabled: Option<bool>,
+    /// Clients exempt from the list (at most 1,000 prefixes); an allow list exempts them
+    /// from every list and RPZ zone.
+    #[schema(value_type = Vec<String>, example = json!(["192.0.2.10/32"]))]
+    #[serde(default)]
+    pub exempt: Vec<String>,
     /// Free text.
     #[serde(default)]
     pub description: Option<String>,
@@ -640,7 +663,10 @@ pub struct ListPatch {
     /// The name.
     #[serde(default)]
     pub name: Option<String>,
-    /// Where it comes from.
+    /// `block` or `allow`.
+    #[serde(default)]
+    pub kind: Option<ListKind>,
+    /// Where it comes from; a new source or format drops the list's versions.
     #[serde(default)]
     pub source: Option<ListSource>,
     /// The file format.
@@ -655,7 +681,11 @@ pub struct ListPatch {
     /// Whether it is applied.
     #[serde(default)]
     pub enabled: Option<bool>,
-    /// Free text.
+    /// The exempt client prefixes, replaced whole.
+    #[schema(value_type = Option<Vec<String>>)]
+    #[serde(default)]
+    pub exempt: Option<Vec<String>>,
+    /// Free text; an empty string clears it.
     #[serde(default)]
     pub description: Option<String>,
 }
@@ -733,6 +763,19 @@ pub struct DnsNodeStatus {
     /// The node's query log; absent while it is off (`[dns.log]`, TGL-15).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query_log: Option<QueryLogStatus>,
+    /// Queries blocked since the role started, per enabled block list and RPZ zone, by
+    /// name.
+    #[serde(default)]
+    pub blocked: Vec<BlockedCountItem>,
+}
+
+/// The queries one block list or RPZ zone blocked since the node's role started.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BlockedCountItem {
+    /// The list's name, or the RPZ zone's name.
+    pub list: String,
+    /// Queries blocked.
+    pub count: u64,
 }
 
 /// The query log of a node's DNS role: its settings and its counters since the start.

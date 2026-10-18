@@ -22,9 +22,8 @@ use support::{
 use tenko_core::{
     Revision,
     dns::{
-        BlockAction, BlockListId, ForwardRule, ForwardRuleId, ForwardTransport, MatchRule,
-        QueryTransport, RecordData, RrSet, Rtype, ScopeName, ScopeWeight, Upstream, View, ViewId,
-        Zone,
+        BlockListId, ForwardRule, ForwardRuleId, ForwardTransport, MatchRule, QueryTransport,
+        RecordData, RrSet, ScopeName, ScopeWeight, Upstream, View, ViewId, Zone,
     },
     serde_util::HexBytes,
 };
@@ -33,8 +32,8 @@ use tenko_dns::{
     authoritative::{Authoritative, EDE_NOT_AUTHORITATIVE, EDE_PROHIBITED, Settings, rcode},
     catalog::{Catalog, CatalogHandle},
     cookie::{CookieMode, CookieSecret},
-    policy::{EDE_BLOCKED, PolicyEngine, Verdict},
-    rate::{RateDecision, RateLimiter, ResponseKind},
+    policy::{Action, EDE_BLOCKED, Hit, PolicyEngine, PolicyQuery, Source, Verdict},
+    rate::{RateDecision, RateLimiter, ResponseKey, ResponseKind},
     respond::{Clock, Conn, ForwardQuery, ForwardSink, Reply, Responder, Scratch},
 };
 
@@ -786,29 +785,28 @@ impl ForwardSink for Sink {
 struct Blocker;
 
 impl PolicyEngine for Blocker {
-    fn check<'a>(
-        &'a self,
-        _view: Option<ViewId>,
-        _client: IpAddr,
-        qname: &[u8],
-        _qtype: Rtype,
-    ) -> Verdict<'a> {
-        static NX: BlockAction = BlockAction::Nxdomain;
-        static REDIRECT: std::sync::LazyLock<BlockAction> =
-            std::sync::LazyLock::new(|| BlockAction::Redirect {
-                address: "192.0.2.80".parse().expect("address"),
-            });
-        let list = BlockListId::generate();
-        if qname.starts_with(b"\x07blocked") {
-            Verdict::Block { list, action: &NX }
-        } else if qname.starts_with(b"\x08redirect") {
-            Verdict::Block {
+    fn check<'a>(&self, _catalog: &'a Catalog, query: &PolicyQuery<'_>) -> Verdict<'a> {
+        let list = Source::List(BlockListId::generate());
+        if query.qname.starts_with(b"blocked") {
+            Verdict::Block(Hit::new(list, "test", Action::Nxdomain))
+        } else if query.qname.starts_with(b"redirect") {
+            Verdict::Block(Hit::new(
                 list,
-                action: &REDIRECT,
-            }
+                "test",
+                Action::Redirect("192.0.2.80".parse().expect("address")),
+            ))
         } else {
             Verdict::Pass
         }
+    }
+
+    fn check_answer<'a>(
+        &self,
+        _catalog: &'a Catalog,
+        _query: &PolicyQuery<'_>,
+        _message: &[u8],
+    ) -> Verdict<'a> {
+        Verdict::Pass
     }
 }
 
@@ -819,18 +817,12 @@ impl RateLimiter for Limiter {
         client != "203.0.113.66".parse::<IpAddr>().expect("address")
     }
 
-    fn admit_response(
-        &self,
-        client: IpAddr,
-        kind: ResponseKind,
-        zone: &[u8],
-        _now: Instant,
-    ) -> RateDecision {
-        assert!(zone.ends_with(b"\x00"));
+    fn admit_response(&self, client: IpAddr, key: &ResponseKey<'_>, _now: Instant) -> RateDecision {
+        assert!(key.name.ends_with(b" "));
         if client == "203.0.113.67".parse::<IpAddr>().expect("address") {
             return RateDecision::Drop;
         }
-        if kind == ResponseKind::NxDomain {
+        if key.kind == ResponseKind::NxDomain {
             RateDecision::Slip
         } else {
             RateDecision::Send

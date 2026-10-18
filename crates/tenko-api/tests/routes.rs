@@ -434,6 +434,7 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("PATCH", "/dns/lists/{id}", "update_dns_list"),
     ("DELETE", "/dns/lists/{id}", "delete_dns_list"),
     ("POST", "/dns/lists/{id}/fetch", "fetch_dns_list"),
+    ("PUT", "/dns/lists/{id}/file", "upload_dns_list"),
     ("GET", "/nodes/{id}/dns", "get_node_dns_status"),
     (
         "POST",

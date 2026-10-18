@@ -55,6 +55,9 @@ pub mod forwarders;
 pub mod outbound;
 pub mod pool;
 
+// RPZ, block lists and rate limiting (WP5.2).
+pub mod lists;
+
 pub use codec::{AnswerBuf, Codec, CodecError, DomainCodec, Request};
 pub use feed::{DnsData, MemFeed, ZoneFeed};
 pub use index::{Index, Lookup, MemIndex};

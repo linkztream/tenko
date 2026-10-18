@@ -10,8 +10,9 @@
 //! Every operation is declared with its request and answer types so that the OpenAPI
 //! document, the typed client of the UI and the mock server have them. The zones, records,
 //! zone files, the zone journal, access lists and TSIG keys are built (WP4.2, files
-//! `dns/zones.rs`, `dns/records.rs`, `dns/acls.rs`, `dns/keys.rs`), and the forwarding
-//! rules (WP5.1, `dns/forwarders.rs`), on the zone service
+//! `dns/zones.rs`, `dns/records.rs`, `dns/acls.rs`, `dns/keys.rs`), the forwarding
+//! rules (WP5.1, `dns/forwarders.rs`) and the block lists (WP5.2, `dns/lists.rs`), on the
+//! zone service
 //! (`tenko_dns::zone`), which the server adds as the request extension
 //! `Arc<ZoneService>`. Until its package builds it, any other operation checks the
 //! caller's scope and answers `501` with `sys.not_implemented`. The routes belong to the
@@ -59,6 +60,7 @@
 //! | `PATCH /dns/lists/{id}` | `dns.write` | Change a block list |
 //! | `DELETE /dns/lists/{id}` | `dns.write` | Delete a block list |
 //! | `POST /dns/lists/{id}/fetch` | `dns.write` | Fetch and compile a block list now |
+//! | `PUT /dns/lists/{id}/file` | `dns.write` | Upload the file of a block list |
 //! | `GET /nodes/{id}/dns` | `dns.read` | Get the DNS role of a node |
 //! | `POST /nodes/{id}/dns/cache/flush` | `dns.write` | Flush a node's DNS cache |
 //! | `GET /nodes/{id}/dns/log` | `dns.read` | Read a node's DNS query log |
@@ -77,6 +79,7 @@
 mod acls;
 mod forwarders;
 mod keys;
+mod lists;
 mod model;
 mod nodes;
 mod records;
@@ -98,7 +101,7 @@ use tenko_auth::authz::anywhere;
 use tenko_core::Revision;
 use tenko_core::{
     Action, CodedError, NodeId, ObjectKind, ObjectRef,
-    dns::{BlockListId, DnsName, ViewId, ZoneId},
+    dns::{DnsName, ViewId, ZoneId},
     error::codes,
 };
 use tenko_dns::zone::ZoneService;
@@ -107,18 +110,19 @@ use utoipa_axum::{
     routes,
 };
 
+pub use lists::ListUploadLimit;
 pub use nodes::DnsNodeSlot;
 pub use zones::{JournalItem, JournalParams};
 
 pub use model::{
-    AclCreate, AclItem, AclPatch, CacheFlushParams, DnsCommandAccepted, DnsJobStarted,
-    DnsNodeStatus, DnssecKeyItem, DnssecStatus, DryRunParams, ExportParams, ForwarderCreate,
-    ForwarderItem, ForwarderPatch, ImportLoss, ImportTypeCount, KeyCreate, KeyCreated, KeyItem,
-    ListCreate, ListItem, ListPatch, ListVersionItem, ListenerItem, OriginCount, PrimaryState,
-    QueryLogLine, QueryLogParams, QueryLogState, QueryLogStatus, RecordBatch, RecordBatchResult,
-    RecordChange, RecordDiff, RecordFilters, RecordOp, RolloverRequest, RrSetItem, TransferStatus,
-    UdpWorkerItem, ViewCreate, ViewItem, ViewPatch, ZoneCreate, ZoneFileImport,
-    ZoneFileImportReport, ZoneItem, ZonePatch,
+    AclCreate, AclItem, AclPatch, BlockedCountItem, CacheFlushParams, DnsCommandAccepted,
+    DnsJobStarted, DnsNodeStatus, DnssecKeyItem, DnssecStatus, DryRunParams, ExportParams,
+    ForwarderCreate, ForwarderItem, ForwarderPatch, ImportLoss, ImportTypeCount, KeyCreate,
+    KeyCreated, KeyItem, ListCreate, ListItem, ListPatch, ListVersionItem, ListenerItem,
+    OriginCount, PrimaryState, QueryLogLine, QueryLogParams, QueryLogState, QueryLogStatus,
+    RecordBatch, RecordBatchResult, RecordChange, RecordDiff, RecordFilters, RecordOp,
+    RolloverRequest, RrSetItem, TransferStatus, UdpWorkerItem, ViewCreate, ViewItem, ViewPatch,
+    ZoneCreate, ZoneFileImport, ZoneFileImportReport, ZoneItem, ZonePatch,
 };
 
 use super::not_implemented;
@@ -273,9 +277,14 @@ fn acl_key_and_list_routes() -> OpenApiRouter<AppState> {
         ))
         .routes(routes!(keys::list_dns_keys, keys::create_dns_key))
         .routes(routes!(keys::get_dns_key, keys::delete_dns_key))
-        .routes(routes!(list_dns_lists, create_dns_list))
-        .routes(routes!(get_dns_list, update_dns_list, delete_dns_list))
-        .routes(routes!(fetch_dns_list))
+        .routes(routes!(lists::list_dns_lists, lists::create_dns_list))
+        .routes(routes!(
+            lists::get_dns_list,
+            lists::update_dns_list,
+            lists::delete_dns_list
+        ))
+        .routes(routes!(lists::fetch_dns_list))
+        .routes(routes!(lists::upload_dns_list).layer(DefaultBodyLimit::disable()))
 }
 
 #[inline(never)]
@@ -548,173 +557,4 @@ async fn delete_dns_view(
         &ObjectRef::from(parse_id::<ViewId>(&id)?),
     )?;
     Err(not_implemented("DELETE", "/dns/views/{id}"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dns/lists",
-    tag = "dns",
-    operation_id = "list_dns_lists",
-    summary = "List block lists",
-    description = "Scope: `dns.read`.",
-    params(PageParams),
-    responses(
-        (status = 200, description = "A page of block lists by name", body = Page<ListItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dns_lists(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
-    app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::DnsList))?;
-    Err(not_implemented("GET", "/dns/lists"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dns/lists",
-    tag = "dns",
-    operation_id = "create_dns_list",
-    summary = "Create a block list",
-    description = "Scope: `dns.write`.",
-    request_body(content = ListCreate, content_type = "application/json"),
-    responses(
-        (status = 201, description = "The block list", body = ListItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the list is invalid (`dns.list.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn create_dns_list(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Create,
-        &anywhere(ObjectKind::DnsList),
-    )?;
-    Err(not_implemented("POST", "/dns/lists"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dns/lists/{id}",
-    tag = "dns",
-    operation_id = "get_dns_list",
-    summary = "Get a block list",
-    description = "Scope: `dns.read`.",
-    params(("id" = String, Path, description = "Block list identifier (UUID)")),
-    responses(
-        (status = 200, description = "The block list with its newest version", body = ListItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such list (`dns.list.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dns_list(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &ObjectRef::from(parse_id::<BlockListId>(&id)?),
-    )?;
-    Err(not_implemented("GET", "/dns/lists/{id}"))
-}
-
-#[utoipa::path(
-    patch,
-    path = "/dns/lists/{id}",
-    tag = "dns",
-    operation_id = "update_dns_list",
-    summary = "Change a block list",
-    description = "Scope: `dns.write`.",
-    params(("id" = String, Path, description = "Block list identifier (UUID)")),
-    request_body(content = ListPatch, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The changed block list", body = ListItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such list (`dns.list.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 412, description = "The list changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn update_dns_list(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Update,
-        &ObjectRef::from(parse_id::<BlockListId>(&id)?),
-    )?;
-    Err(not_implemented("PATCH", "/dns/lists/{id}"))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/dns/lists/{id}",
-    tag = "dns",
-    operation_id = "delete_dns_list",
-    summary = "Delete a block list",
-    description = "Scope: `dns.write`.",
-    params(("id" = String, Path, description = "Block list identifier (UUID)")),
-    responses(
-        (status = 204, description = "The list and its versions are gone"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such list (`dns.list.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn delete_dns_list(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Delete,
-        &ObjectRef::from(parse_id::<BlockListId>(&id)?),
-    )?;
-    Err(not_implemented("DELETE", "/dns/lists/{id}"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dns/lists/{id}/fetch",
-    tag = "dns",
-    operation_id = "fetch_dns_list",
-    summary = "Fetch and compile a block list now",
-    description = "Scope: `dns.write`.",
-    params(("id" = String, Path, description = "Block list identifier (UUID)")),
-    responses(
-        (status = 202, description = "The fetch job", body = DnsJobStarted),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such list (`dns.list.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The list is uploaded, not fetched", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn fetch_dns_list(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Execute,
-        &ObjectRef::from(parse_id::<BlockListId>(&id)?),
-    )?;
-    Err(not_implemented("POST", "/dns/lists/{id}/fetch"))
 }

@@ -1,7 +1,7 @@
 # DNS: the resolver side
 
-- Scope: how a node answers names outside the zones it serves: the forwarder, its rules and stub zones, the recursion access lists, the cache with serve-stale and prefetch, and the upstreams over plain DNS, DNS over TLS and DNS over HTTPS (Phase 2, plan section 2.8; DNS-02, DNS-08, DNS-15, DNS-23, TGL-14, TGL-22). For operators who make a node the resolver of their clients, and for the builders of the later Phase 2 packages.
-- The authoritative side (zones, records, the `dns` role, the engine) is [dns.md](dns.md); the contracts are [dns-contracts.md](dns-contracts.md). The code is `crates/tenko-dns` (`forward`, `cache`, `pool`, `upstream`, `outbound`, `forwarders`).
+- Scope: how a node answers names outside the zones it serves: the forwarder, its rules and stub zones, the recursion access lists, the cache with serve-stale and prefetch, the upstreams over plain DNS, DNS over TLS and DNS over HTTPS, RPZ zones and block lists, and rate limiting (Phase 2, plan section 2.8; DNS-02, DNS-08, DNS-15, DNS-17, DNS-21, DNS-23, TGL-11, TGL-14, TGL-22). For operators who make a node the resolver of their clients, and for the builders of the later Phase 2 packages.
+- The authoritative side (zones, records, the `dns` role, the engine) is [dns.md](dns.md); the contracts are [dns-contracts.md](dns-contracts.md). The code is `crates/tenko-dns` (`forward`, `cache`, `pool`, `upstream`, `outbound`, `forwarders`; the policy and the limits in `policy`, `lists`, `rate`).
 
 Contents:
 
@@ -23,14 +23,14 @@ A node with the `dns` role answers from its zones first and forwards the rest: T
 |---|---|---|
 | 1. Header, rate limiter, view | `authoritative` | As for every query ([dns.md](dns.md) section 12.4): the opcode, the class, the meta types, the rate limiter's admission, then the view whose rules match first, else the implicit default view |
 | 2. Zones | `authoritative` | A name in a primary or secondary zone is answered from the index, whatever the client asked for; stub and forward zones are not answered from |
-| 3. Policy | `authoritative` (`PolicyEngine`) | Outside the zones the policy decides first: RPZ and block lists (WP5.2, section 5) |
+| 3. Policy | `authoritative` (`PolicyEngine`) | Outside the zones the policy decides first: exemptions and allow lists, the RPZ zones, the block lists; a blocked name is answered here with the extended error "Blocked", and the answer of a name that passed is looked at again in steps 7 and 8 (section 5) |
 | 4. Recursion desired | `authoritative` | A query without RD gets REFUSED with the extended error "Not Authoritative" (20) |
 | 5. Recursion check | `forward` (on the query path) | The view's recursion access list, or the profile's default (section 2.3); a client that may not recurse gets REFUSED with the extended error "Prohibited" (18) |
 | 6. A route | `forward` (on the query path) | A forwarding rule, a stub zone or the default forwarder covers the name, else REFUSED with "Not Authoritative" |
 | 7. The cache | `cache` (on the query path) | A fresh entry answers at once, with the TTLs lowered by the entry's age (section 3) |
 | 8. The upstreams | `forward`, `pool`, `upstream` (off the query path) | The query is copied and handed to the forwarder, which asks the route's upstreams, fills the cache, answers stale when the upstreams fail (section 3.3) and answers the client through the transport's reply path |
 
-Steps 1 to 7 run on the worker that received the query and allocate nothing (ADR 0009; `crates/tenko-dns/tests/alloc.rs` runs cache hits in a view with a recursion access list and refused queries through the counting allocator). Step 8 runs on the tokio runtime, up to 1,024 queries at once, from a queue of 4,096; a full queue drops the query and the client retries.
+Steps 1 to 7 run on the worker that received the query and allocate nothing (ADR 0009; `crates/tenko-dns/tests/alloc.rs` runs cache hits in a view with a recursion access list, refused queries, and blocked names, rewritten cache hits and a rate-limited flood with the policy and the limiter installed, through the counting allocator). Step 8 runs on the tokio runtime, up to 1,024 queries at once, from a queue of 4,096; a full queue drops the query and the client retries.
 
 Every name outside the zones reaches the forwarder, which decides; so a node sets RA in every answer. The forwarded answers are counted in `tenko_dns_queries_total` with the RCODE relayed and timed from the hand-over to the answer; cache hits are counted and timed as any answer of the query path.
 
@@ -209,11 +209,121 @@ The series of an upstream appear with its first exchange and stay for the life o
 
 ## 5. Response policy zones and block lists
 
-(WP5.2.)
+The policy blocks names for the clients of a node (DNS-21): response policy zones (RPZ) for threat feeds and the operator's own rules, and block lists in hosts-file and domain-list form for the Pi-hole style use at home. Both are rows of the store; the catalog of the role compiles them at the revision it serves, so a change reaches the query path through the feed like a zone change (plan sections 2.8 and 2.10). The code is `crates/tenko-dns/src/policy` (the engine), `src/lists` (the compiler, the rows, the compile job) and `crates/tenko/src/serve/lists.rs` (the fetcher and the leader service).
+
+### 5.1 The order
+
+The policy runs for every name outside the zones (step 3 of section 1), before the forwarder, in this order; the first that decides ends it:
+
+1. **Exempt clients.** A client in the `exempt` prefixes of an enabled allow list is never blocked, by any list or RPZ zone.
+2. **Allow lists.** A name on an enabled allow list, or below a name on it, is never blocked.
+3. **RPZ zones**, in the view's order: the RPZ zones the view's scope map names, in that order, then the others by name (the implicit default view takes them all by name). In each zone the client-IP triggers, then the QNAME triggers; the first zone with a match decides, and a PASSTHRU match ends the policy for the query.
+4. **Block lists**, the enabled ones by name: a name on a list or below a name on it is answered with the list's action, unless the list's `exempt` prefixes hold the client.
+
+A query that passed is looked at again when its answer comes back from the cache or from an upstream (`tenko_dns::policy::answer`): the RPZ zones in the same order look at the CNAME targets of the answer (QNAME triggers), its A and AAAA records (response-IP triggers), the NS records of the answer or the authority section (NSDNAME triggers) and the addresses of those name servers in the additional section (NSIP triggers); then the block lists look at the CNAME targets, so that a tracker behind a CNAME of an allowed-looking name is blocked too. A CNAME target on an allow list is not blocked by name. A blocked answer is rewritten before it leaves: the header and question of the answer, the records of the action, and the answer's OPT record with the extended error. The answer of a cache hit is looked at on the query path without an allocation; the answer of an upstream on the runtime, before the client gets it.
+
+### 5.2 RPZ zones
+
+An RPZ zone is a zone of kind `rpz` ([dns.md](dns.md) section 1). In Phase 2 its records come from a zone file uploaded with the zone file import (`POST /dns/zones/{id}/records/import`) or from the API; zone transfers in are Slice 6. The owner names, relative to the zone's apex, are the triggers of draft-vixie-dnsop-dns-rpz, and the records at a trigger are its action. The default scope is read.
+
+| Owner (relative to the apex) | Trigger |
+|---|---|
+| `bad.example.org` | QNAME: the query name, or a CNAME target of the answer, is `bad.example.org` |
+| `*.bad.example.org` | QNAME: a name below `bad.example.org` (not the name itself); an exact trigger wins over a wildcard, a closer wildcard over one further up |
+| `32.1.2.0.192.rpz-ip` | Response IP: an A record of the answer is 192.0.2.1; `24.0.2.0.192.rpz-ip` is 192.0.2.0/24; IPv6 groups are reversed with `zz` for the zero run (`48.zz.db8.2001.rpz-ip` is 2001:db8::/48); the longest prefix wins |
+| `ns1.example.org.rpz-nsdname`, `*.example.org.rpz-nsdname` | NSDNAME: a name server of the answer is that name, or below it |
+| `32.53.2.0.192.rpz-nsip` | NSIP: an address of a name server in the additional section is in the prefix |
+| `32.10.113.0.203.rpz-client-ip` | Client IP: the client's address is in the prefix |
+
+| Records | Action |
+|---|---|
+| `CNAME .` | NXDOMAIN |
+| `CNAME *.` | NODATA (NOERROR, no records) |
+| `CNAME rpz-passthru.` | PASSTHRU: not rewritten, by this zone or any after it (an exemption) |
+| `CNAME rpz-drop.` | DROP: no answer at all |
+| `CNAME rpz-tcp-only.` | Over UDP an empty answer with TC, so the client asks again over TCP; over TCP the real answer |
+| any other records | Local data: the records of the type asked (or a CNAME, for any type) instead of the real answer; NODATA when none fits |
+
+An owner that is no valid trigger (an address label out of range, an unknown prefix length) is skipped and logged when the zone is compiled. What a forwarding resolver cannot see is not matched: the NSDNAME and NSIP triggers look only at the NS records and addresses that the upstream's answer carries (most recursive resolvers send none with a positive answer), and Tenko does not resolve the name servers of a name to find them.
+
+### 5.3 Block lists and allow lists
+
+A list (`dns.lists`) has a unique name, a kind (`block`, the default, or `allow`), a source (a URL fetched on its interval, or an uploaded file), a format (`hosts` or `domains`), an interval of 1 to 168 hours (24 by default), an action for its names (`nxdomain`, the default, `nodata`, or `redirect` with an address, answered for A or AAAA as the address is and NODATA for the other type, TTL 60), up to 1,000 `exempt` client prefixes, a switch and a description. Every list matches its names and every name below them: `example.org` on a list blocks `ads.example.org` as well. The `exempt` prefixes of a block list skip that list; the `exempt` prefixes of an allow list skip the whole policy, so an allow list with no names and some prefixes is the per-client exemption of a node. A change of a list's source or format drops its versions: the list serves nothing until its next fetch or upload.
+
+The formats, as the compiler reads them (`crates/tenko-dns/src/lists/compile.rs`):
+
+- `#` starts a comment anywhere on a line, `!` at the start of a line too; blank lines and CRLF line ends are fine.
+- A hosts file has an address and one or more names on a line (`0.0.0.0 ads.example.org`, `127.0.0.1 a.example.org b.example.org`); the address is ignored, and the boilerplate names (`localhost`, `localhost.localdomain`, `local`, `broadcasthost`, the `ip6-*` names) are skipped.
+- A domain list has one name per line; a line in hosts form is read as one, and the Adblock forms `||name^` and `*.name` are read as `name`.
+- Names are folded to lowercase; a label outside ASCII is lowercased and written in Punycode (`bücher.example.org` is `xn--bcher-kva.example.org`). A line that holds no valid name (a URL, a label over 63 octets, a name over 255) is counted and skipped, never an error.
+
+Lists that work in these forms: the hosts files of the common ad and tracker list projects, Pi-hole's gravity sources, and domain lists of one name per line. Wildcard and regular-expression rules beyond `||name^` and `*.name` are not read. Pi-hole matches the names of a hosts file exactly; Tenko blocks the names below them as well.
+
+### 5.4 Fetches, uploads and versions
+
+Each list compiles to a version (`dns.list_versions`): the names as one sorted suffix set, its entry count, when the source was read and the source's HTTP entity tag. The compiled form is the keys of the names (their labels from the right, each with its length), sorted, duplicates and names below a listed name dropped, front-coded, and deflated above 64 KiB; a million random names take 10.8 MiB, one store value (at most 12 MiB; a larger list is refused with `dns.list.invalid` and keeps its version). Only the newest version is kept. The catalog builds the matcher of the query path from it: a hash of every listed name, computed label by label from the right, so a lookup probes once per label of the query name (M25, section 5.7).
+
+- **The compile job** `dns.list.compile` has one step. For a URL list it sends `If-None-Match` with the entity tag of the newest version and reads at most `[dns.lists] max_download` MiB within `fetch_timeout_secs`; `304 Not Modified` ends the job without a write. The text is parsed and compiled, and the next version, the removal of the one before and the audit record `dns.list.compile` (with the entries and the skipped lines) commit with the step. A failure (the server unreachable, an HTTP error, a list too large) keeps the version the list has and is shown in the list's `last_error` (`dns.list.fetch_failed`, `dns.list.invalid`, `dns.list.upload_missing`) with `last_error_detail` and `last_checked`.
+- **The leader service** `dns.lists` looks at the lists every minute and submits the job for every enabled URL list whose newest version and last attempt are older than its interval: a new list within a minute, a list whose last attempt failed again after 15 minutes (or its interval, when shorter). It runs on the leader only (P2-Q6), so one controller fetches for the installation and the nodes need no internet access; in Phase 5 the versions reach the nodes through node sync.
+- **By hand**: `POST /dns/lists/{id}/fetch` submits the job of a URL list at once (audited `dns.list.fetch`); `PUT /dns/lists/{id}/file` hands in the file of an uploaded list as `text/plain`, at most `[dns.lists] max_upload` MiB (64 by default), and submits the job with the file as its source (audited `dns.list.upload`). Both answer 202 with the job (`GET /jobs/{id}`); a fetch of an uploaded list, or an upload to a URL list, is 409 `dns.list.invalid`.
+- The command line: `tenko dns list list|create|get|update|delete|fetch|upload`.
+
+The outcome of the last attempt (`last_error`, `last_checked`) is kept by the controller that ran the job; on the single node of Phase 2 that is the node itself, and the job record keeps every failure.
+
+### 5.5 The answer
+
+A blocked query is answered per its action with the extended error "Blocked" (RFC 8914, info code 15) in the OPT record, when the client sent EDNS: NXDOMAIN, NODATA, the redirect address, the local data, nothing (DROP), or an empty truncated answer (TCP-only over UDP). The query log records the answer as it leaves the query path; for a forwarded answer the policy rewrote, the log shows the upstream's RCODE (section 8).
+
+### 5.6 Settings and status
+
+`[dns.lists]` of `tenko.toml` sets the fetch: `fetch_timeout_secs` (60, 5 to 600), `max_download` (64 MiB, 1 to 1,024) and `max_upload` (64 MiB, 1 to 1,024). The lists and RPZ zones themselves are rows of the store and need no restart.
+
+The node status (`GET /api/v1/nodes/{id}/dns`) lists `blocked: [{ "list": "<name>", "count": n }]`: the queries each enabled block list and each RPZ zone (under its zone name) blocked since the role started, by name. The command `dns.stats` reports the same counts in its detail. The metric `tenko_dns_blocked_total{list}` counts the same per list and zone name since the process started (section 6.4).
+
+### 5.7 M25
+
+`bench/phase2-dns/scripts/run-m25-lists.sh` runs the example `lists_bench` (the compiler and matcher the binary links) on a generated list of a million names: compile and matcher together in 1.0 s on Windows and 1.6 s with the static musl build on Linux (threshold 2 s), and a lookup in about 100 ns for a name of 2 labels, 160 ns for 4 and 250 ns for 8, so the cost per label does not grow with the labels or the list. The figures and the machine are in `bench/phase2-dns/results/2026-10-18-m25-lists.md`.
 
 ## 6. Rate limiting
 
-(WP5.2.)
+Two limits protect a node and the networks around it (DNS-17, TGL-11), both in `crates/tenko-dns/src/rate` and called by the resolver: response rate limiting (RRL) against reflection attacks with spoofed sources, and a per-client query limit against a client that floods the node.
+
+### 6.1 Response rate limiting
+
+RRL works like BIND's. Identical responses to one client prefix (a /24 for IPv4 and a /56 for IPv6 by default) are counted: positive answers and NODATA by query name and type, NXDOMAIN and referrals by zone (so a flood of random names under one zone shares one count), errors by kind alone. Each count is a token bucket that fills at `responses_per_second` (`errors_per_second` for NXDOMAIN and errors) up to one second's worth and may run up to `window_secs` into debt; a response without a token is limited, and is debited as well, so a source that keeps asking above the rate gets only slips until it slows down for the window. Every `slip`-th limited response (2 by default) is sent as an empty answer with TC set, so that a real client whose address was spoofed asks again over TCP; the other limited responses are dropped.
+
+RRL applies to the answers of the resolver (zones, policy answers, refusals) over UDP. TCP, DoT and DoH are not limited: their source cannot be spoofed. Forwarded answers are not limited either, since only clients the recursion access list allows get them (section 2.3). With `exempt_known` (the default) the clients in the prefixes IPAM knows and loopback are never limited, so a home network's own clients are untouched; `exempt` adds prefixes.
+
+### 6.2 The per-client query limit
+
+`client_qps` queries per second per client address (an IPv6 client by its /64) with a burst of `client_burst` above it; a query over the limit is dropped before the lookup. It applies to every transport. Exempt clients are not limited.
+
+### 6.3 Settings and profiles
+
+The keys of `[dns.limits]` ([`deploy/tenko.example.toml`](../deploy/tenko.example.toml)), read at start; the keys that are not set follow the security profile in force when the role starts (TGL-11):
+
+| Key | Home and Standard | Hardened | Lab | Meaning |
+|---|---|---|---|---|
+| `rrl` | on | on | off | Response rate limiting |
+| `responses_per_second` | 20 | 5 | (20) | Identical answers, NODATA and referrals per second per client prefix, 1 to 10,000 |
+| `errors_per_second` | 10 | 5 | (10) | NXDOMAIN and errors per second per client prefix, 1 to 10,000 |
+| `client_qps` | 0 (off) | 200 | 0 (off) | Queries per second per client, 0 to 100,000 |
+| `client_burst` | | 400 | | The burst above `client_qps`; not set: twice `client_qps` |
+
+The other keys are the same in every profile: `window_secs` (15, 1 to 3,600), `slip` (2, 0 to 10; 0 drops every limited response, 1 truncates every one), `ipv4_prefix` (24, 8 to 32), `ipv6_prefix` (56, 16 to 128), `exempt_known` (`true`), `exempt` (none, at most 1,000 prefixes) and `table` (65,536 slots per table, 1,024 to 16,777,216). TGL-11 puts RRL on under Home: with `exempt_known` it limits only sources outside the home's own prefixes.
+
+The tables are fixed at start: a slot per key hash, sharded behind short locks, so the query path allocates nothing (`crates/tenko-dns/tests/alloc.rs` runs a limited flood with the policy installed). A new key takes over its slot with a full bucket; with 65,536 slots per table a flood from many sources may push out the bucket of another, which then starts full again.
+
+### 6.4 Metrics
+
+| Family | Labels | What |
+|---|---|---|
+| `tenko_dns_blocked_total` | `list` (a block list's name, an RPZ zone's name, `other` beyond 1,024 names) | Queries blocked by the policy, since the process started |
+| `tenko_dns_rrl_dropped_total` | `kind` (`answer`, `nodata`, `nxdomain`, `referral`, `error`) | Responses RRL dropped |
+| `tenko_dns_rrl_slipped_total` | | Responses RRL sent as an empty truncated answer |
+| `tenko_dns_client_limited_total` | | Queries the per-client limit dropped |
+
+The node status does not repeat the rate counters; `dns.stats` reports them in its detail.
 
 ## 7. DoT and DoH served to clients
 

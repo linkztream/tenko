@@ -16,6 +16,9 @@ bytes = { workspace = true }
 # `zonefile` adds the zone file scanner (`domain::zonefile::inplace`) for the import; it
 # brings no crate the workspace does not already build (`bytes`, `serde`).
 domain = { workspace = true, features = ["zonefile"] }
+# Block list versions above 64 KiB of entries are deflated (src/lists); the version
+# tenko-api and tenko-cluster already build.
+flate2 = "1.1.10"
 # DoH upstreams (WP5.1): HTTP/2 over the rustls stream; both crates are already in the
 # graph through hyper and tonic.
 h2 = "0.4.20"

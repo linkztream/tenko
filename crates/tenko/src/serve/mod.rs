@@ -27,9 +27,11 @@
 //! [`leader::LeaderRegistry`] that the start sequence hands around: the online KEK rotation
 //! (`vault.kek_rotation`, step `vault`), the reconciler with its purge (`ipam.reconcile`,
 //! step `ipam`, which also seeds its settings in the store), the job runner (`jobs.runner`,
-//! step `jobs`), the poll schedule of the connectors (`connect.poll`, step `connectors`), the
-//! prune of the node registry (`cluster.prune`, step `nodes`), the purge of expired
-//! idempotency records (`api.idempotency_purge`, step `api`) and the scheduled backups
+//! step `jobs`), the fetches of the URL block lists (`dns.lists`, with the zone service
+//! of the DNS module), the poll schedule of the connectors (`connect.poll`, step
+//! `connectors`), the prune of the node registry (`cluster.prune`, step `nodes`), the
+//! purge of expired idempotency records (`api.idempotency_purge`, step `api`) and the
+//! scheduled backups
 //! (`backup.schedule`, step `api`, which also records a restore at the first start after it).
 //!
 //! The cluster step comes before the vault because a controller that was offline during an
@@ -63,6 +65,7 @@ pub mod cluster_key;
 mod dns;
 mod imports;
 pub(crate) mod leader;
+mod lists;
 mod maintenance;
 mod metrics;
 pub mod queue;
@@ -1310,9 +1313,23 @@ async fn start(
     }
     // The zone service of the DNS module (WP4.2): its import steps join the engine before it
     // starts; without the module the DNS routes are not registered and nothing is built.
+    // The block lists (WP5.2) add the step of their compile job, with the HTTP fetcher and
+    // the staging of uploaded files.
+    let list_staging = Arc::new(tenko_dns::lists::ListStaging::default());
     let zones = modules.contains(crate::modules::Module::Dns).then(|| {
         let staging = Arc::new(tenko_dns::zone::ImportStaging::default());
         tenko_dns::zone::register_steps(&mut engine, &staging);
+        let fetcher = match lists::HttpFetcher::new(&resolved.config.dns.lists) {
+            Ok(fetcher) => Some(Arc::new(fetcher) as Arc<dyn tenko_dns::lists::ListFetcher>),
+            Err(error) => {
+                tracing::warn!(%error, "block lists cannot be fetched");
+                None
+            }
+        };
+        engine.register(Arc::new(tenko_dns::lists::CompileStep::new(
+            fetcher,
+            Arc::clone(&list_staging),
+        )));
         tenko_dns::zone::ZoneService::new(
             Arc::clone(&store_dyn),
             Arc::new(engine.clone()),
@@ -1321,6 +1338,14 @@ async fn start(
             tenko_dns::zone::ZoneConfig::default(),
         )
     });
+    // The fetches of the URL block lists on their intervals (`dns.lists`, P2-Q6).
+    if let Some(zones) = &zones {
+        leaders.register(Arc::new(lists::ListService::new(
+            Arc::clone(zones),
+            Arc::clone(&list_staging),
+            lists::PERIOD,
+        )));
+    }
     // The DNS actuator of IPAM (WP4.4): the automatic move step joins the engine, and the
     // reconciler writes the records of the intent through the zone service.
     let dns_actuator = match (&zones, &ipam) {
@@ -1640,6 +1665,14 @@ async fn start(
             server.extensions.insert(engine.clone());
             if let Some(zones) = &zones {
                 server.extensions.insert(Arc::clone(zones));
+                server.extensions.insert(Arc::clone(&list_staging));
+                server
+                    .extensions
+                    .insert(tenko_api::routes::dns::ListUploadLimit(
+                        usize::try_from(resolved.config.dns.lists.max_upload)
+                            .unwrap_or(usize::MAX)
+                            .saturating_mul(1024 * 1024),
+                    ));
             }
             server.extensions.insert(dns_slot.clone());
             let module_switch: Arc<dyn tenko_api::routes::system::modules::ModuleService> =

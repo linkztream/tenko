@@ -1,0 +1,7 @@
+# A hosts file
+127.0.0.1 localhost
+::1 localhost ip6-localhost
+0.0.0.0 ads.example.test
+0.0.0.0 tracker.example.test metrics.example.test # two names
+127.0.0.1 ADS.Example.TEST.
+

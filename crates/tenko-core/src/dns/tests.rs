@@ -477,6 +477,7 @@ fn keys_and_lists_round_trip() {
     let mut list = BlockList {
         id: BlockListId::generate(),
         name: "ads".to_owned(),
+        kind: ListKind::Block,
         source: ListSource::Url {
             url: "https://lists.example.net/hosts".to_owned(),
         },
@@ -486,9 +487,22 @@ fn keys_and_lists_round_trip() {
             address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 80)),
         },
         enabled: true,
+        exempt: vec!["192.0.2.10/32".parse().expect("prefix")],
         description: None,
     };
     list.validate().expect("valid");
+    let json = serde_json::to_value(&list).expect("json");
+    assert_eq!(json["kind"], "block");
+    assert_eq!(json["exempt"][0], "192.0.2.10/32");
+    let mut bare = json.clone();
+    bare.as_object_mut().expect("object").remove("kind");
+    bare.as_object_mut().expect("object").remove("exempt");
+    let read: BlockList = serde_json::from_value(bare).expect("json");
+    assert_eq!((read.kind, read.exempt.len()), (ListKind::Block, 0));
+    assert_eq!(
+        from_cbor::<BlockList>(&to_cbor(&list).expect("cbor")).expect("cbor"),
+        list
+    );
     assert_eq!(
         serde_json::to_value(&list).expect("json")["action"]["kind"],
         "redirect"

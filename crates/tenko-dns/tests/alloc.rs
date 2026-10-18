@@ -4,8 +4,11 @@
 //! their buffers have capacity; nor must the whole path of a query through the responder,
 //! the authoritative resolver, the production index and the codec, with metrics and
 //! cookies on; nor must a query the forwarder's cache answers (WP5.1), in a view whose
-//! recursion access list allows the client, nor one the recursion check refuses. The first
-//! test proves that the counter sees an allocation, so a pass means something.
+//! recursion access list allows the client, nor one the recursion check refuses; nor, with
+//! the policy and the rate limiter of WP5.2 installed, a name an RPZ zone or a block list
+//! blocks, an allowed name, a cache hit the policy rewrites (an answer address in an RPZ
+//! IP trigger) or passes, and a flood that RRL drops and slips. The first test proves that
+//! the counter sees an allocation, so a pass means something.
 //!
 //! The allocator counts every thread of the process, so the file has one test that runs
 //! the measured sections one after another: no other test of the binary runs beside them.
@@ -16,7 +19,8 @@ use stats_alloc::{INSTRUMENTED_SYSTEM, Region, StatsAlloc};
 use tenko_core::{
     Revision,
     dns::{
-        Acl, AclEntry, AclId, DnsName, ForwardTransport, MatchRule, Origin, QueryTransport, Rdata,
+        Acl, AclEntry, AclId, BlockAction, BlockList, BlockListId, DnsName, ForwardTransport,
+        ListFormat, ListKind, ListSource, ListVersion, MatchRule, Origin, QueryTransport, Rdata,
         RecordData, RrSet, ScopeName, SoaDefaults, View, ViewId, Zone, ZoneId, ZoneKind,
     },
     ipam::Stamp,
@@ -31,7 +35,10 @@ use tenko_dns::{
     cookie::CookieSecret,
     forward::{ForwardSettings, Forwarder, RecursionDefault, RecursionPolicy},
     index::DefaultScopes,
+    lists::compile_text,
+    policy::{Policy, answer::PolicySink},
     pool::UpstreamSpec,
+    rate::limiter::{ClientLimit, LimitSettings, Limiter, RrlSettings},
     respond::ForwardSink,
     respond::{Clock, Conn, Reply, Responder, Scratch},
     wire::{self, MAX_MESSAGE_LEN, TsigRecord},
@@ -574,6 +581,211 @@ fn the_cache_hit_path_does_not_allocate() {
     stop.cancel();
 }
 
+/// An RRset of `zone` in its default scope.
+fn rrset_of(zone: &Zone, owner: &str, data: &RecordData) -> RrSet {
+    RrSet {
+        zone: zone.id,
+        scope: ScopeName::DEFAULT,
+        name: dns_name(owner),
+        rtype: data.rtype(),
+        ttl: 300,
+        rdata: vec![Rdata::from_data(data)],
+        origin: Origin::Manual,
+        key: None,
+        updated: stamp(),
+    }
+}
+
+/// An upstream's answer to `name` A with the address `192.0.2.<last>`, TTL 300.
+fn answer_for(name: &str, last: u8) -> Vec<u8> {
+    let mut answer = Vec::new();
+    wire::write_query(&mut answer, 0, name, 1, None);
+    answer[2] = 0x81;
+    answer[3] = 0x80;
+    answer[7] = 1;
+    answer.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 1, 44, 0, 4, 192, 0, 2, last]);
+    answer
+}
+
+/// The full image with an RPZ zone (a QNAME trigger, local data and an IP trigger), a block
+/// list and an allow list with their versions.
+fn policy_image() -> DnsData {
+    let mut image = full_image();
+    let mut rpz = zone_row();
+    rpz.id = ZoneId::generate();
+    rpz.name = dns_name("rpz.test");
+    rpz.kind = ZoneKind::Rpz;
+    let nxdomain = RecordData::Cname {
+        target: DnsName::root(),
+    };
+    for set in [
+        rrset_of(&rpz, "blocked.example.org.rpz.test", &nxdomain),
+        rrset_of(&rpz, "local.example.org.rpz.test", &address(99)),
+        rrset_of(&rpz, "32.80.2.0.192.rpz-ip.rpz.test", &nxdomain),
+    ] {
+        image.rrsets.insert(set.key(), set);
+    }
+    image.zones.insert(rpz.id, rpz);
+    let lists: [(&str, ListKind, &[u8]); 2] = [
+        (
+            "ads",
+            ListKind::Block,
+            b"ads.example.org\nredirect.example.org\n",
+        ),
+        ("allowed", ListKind::Allow, b"fine.ads.example.org\n"),
+    ];
+    for (name, kind, text) in lists {
+        let list = BlockList {
+            id: BlockListId::generate(),
+            name: name.to_owned(),
+            kind,
+            source: ListSource::Upload,
+            format: ListFormat::Domains,
+            interval_hours: 24,
+            action: BlockAction::Nxdomain,
+            enabled: true,
+            exempt: Vec::new(),
+            description: None,
+        };
+        let (compiled, _) = compile_text(text, ListFormat::Domains).expect("compile");
+        image.list_versions.insert(
+            (list.id, 1),
+            ListVersion {
+                list: list.id,
+                revision: 1,
+                compiled: tenko_core::serde_util::HexBytes(compiled.bytes),
+                entries: compiled.entries,
+                fetched: "2026-10-18T12:00:00Z".parse().expect("time"),
+                etag: None,
+            },
+        );
+        image.lists.insert(list.id, list);
+    }
+    image
+}
+
+#[allow(clippy::too_many_lines, reason = "one setup and one measured loop")]
+fn the_policy_and_the_limiter_do_not_allocate() {
+    let catalog = CatalogHandle::new(Catalog::build(&policy_image()));
+    assert_eq!(catalog.load().policy().blocks().len(), 1);
+    assert_eq!(catalog.load().policy().zones().len(), 1);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let stop = tokio_util::sync::CancellationToken::new();
+    let (forwarder, _task) = runtime.block_on(async {
+        Forwarder::start(
+            ForwardSettings {
+                upstreams: vec![UpstreamSpec {
+                    address: "192.0.2.1:53".parse().expect("address"),
+                    transport: ForwardTransport::Plain,
+                    tcp_only: false,
+                    tls_name: None,
+                    path: None,
+                }],
+                ..ForwardSettings::default()
+            },
+            catalog.clone(),
+            None,
+            Arc::new(RecursionPolicy::new(RecursionDefault::Anyone)),
+            stop.clone(),
+        )
+    });
+    let cache = forwarder.cache().expect("a cache");
+    for (name, last) in [("www.example.org", 80), ("clean.example.org", 81)] {
+        let wire_name = NameBuf::from_dns_name(&dns_name(name));
+        let key = CacheKey::new(None, wire_name.as_wire(), 1, 1, false, false);
+        assert!(cache.insert(&key, &answer_for(name, last), Instant::now(), None));
+    }
+    let limiter = Limiter::new(LimitSettings {
+        rrl: Some(RrlSettings {
+            responses_per_second: 5,
+            ..RrlSettings::default()
+        }),
+        client: Some(ClientLimit {
+            queries_per_second: 1_000_000,
+            burst: 1_000_000,
+        }),
+        exempt: Vec::new(),
+        table: 65_536,
+    });
+    let policy = Arc::new(Policy);
+    let sink = PolicySink::new(
+        Arc::clone(&forwarder) as Arc<dyn ForwardSink>,
+        catalog.clone(),
+        Arc::clone(&policy) as Arc<dyn tenko_dns::PolicyEngine>,
+        runtime.handle().clone(),
+    );
+    let responder = Responder::new(
+        Authoritative::new(catalog)
+            .with_settings(Settings {
+                recursion_available: true,
+                default_forwarder: true,
+                ..Settings::default()
+            })
+            .with_policy(policy)
+            .with_rate_limiter(Arc::new(limiter)),
+        CookieSecret::with_secret([5; 16]),
+    )
+    .with_metrics(true)
+    .with_forwarder(Arc::new(sink) as Arc<dyn ForwardSink>);
+    let mut queries = full_queries();
+    for name in [
+        "blocked.example.org",
+        "local.example.org",
+        "ads.example.org",
+        "x.ads.example.org",
+        "fine.ads.example.org",
+        "redirect.example.org",
+    ] {
+        let mut query = Vec::new();
+        wire::write_query(&mut query, 7, name, 1, Some(1232));
+        queries.push(query);
+    }
+    // Cache hits: one the IP trigger rewrites, one the policy passes.
+    let mut hits = Vec::new();
+    for name in ["www.example.org", "clean.example.org"] {
+        let mut query = Vec::new();
+        wire::write_query(&mut query, 3, name, 1, Some(1232));
+        query[2] |= 0x01;
+        hits.push(query);
+    }
+    let client = Conn {
+        client: "198.51.100.77:40000".parse().expect("client"),
+        local: "192.0.2.53:53".parse().expect("local"),
+        transport: QueryTransport::Udp,
+    };
+    // The role registers the limiter's families at its start, which seals them.
+    tenko_dns::rate::limiter::register_metrics(&tenko_core::metrics::Registry::new());
+    let mut scratch = Scratch::new();
+    let clock = Clock::now();
+    let mut rewritten = 0u32;
+    let (allocations, reallocations, bytes) = measure(500, || {
+        for query in queries.iter().chain(&hits) {
+            let reply = responder.respond(query, &client, &clock, Instant::now(), &mut scratch);
+            black_box((reply, &scratch.out));
+        }
+        // The cache hit of www.example.org: its address is in the IP trigger.
+        let reply = responder.respond(&hits[0], &client, &clock, Instant::now(), &mut scratch);
+        if reply == Reply::Send && scratch.out[3] & 0x0f == 3 {
+            rewritten += 1;
+        }
+    });
+    assert_eq!(
+        (allocations, reallocations, bytes),
+        (0, 0, 0),
+        "the policy or the limiter allocated"
+    );
+    assert!(rewritten > 0, "the cache hit was rewritten to NXDOMAIN");
+    // The flood was limited, and the policy blocked.
+    let counts = tenko_dns::status::RateCounts::read();
+    assert!(counts.dropped > 0 && counts.slipped > 0, "{counts:?}");
+    assert!(tenko_dns::policy::counters::total_of("ads") > 0);
+    assert!(tenko_dns::policy::counters::total_of("rpz.test") > 0);
+    stop.cancel();
+}
+
 #[test]
 fn the_query_path_allocates_nothing() {
     // First: a pass of the checks below means something.
@@ -583,4 +795,5 @@ fn the_query_path_allocates_nothing() {
     index_lookups_do_not_allocate();
     the_full_query_path_does_not_allocate();
     the_cache_hit_path_does_not_allocate();
+    the_policy_and_the_limiter_do_not_allocate();
 }

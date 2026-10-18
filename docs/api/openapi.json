@@ -6566,7 +6566,7 @@
           "dns"
         ],
         "summary": "List block lists",
-        "description": "Scope: `dns.read`.",
+        "description": "Scope: `dns.read`. Block and allow lists by name, each with its newest version and the outcome of its last fetch or compile on this controller.",
         "operationId": "list_dns_lists",
         "parameters": [
           {
@@ -6613,7 +6613,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6641,16 +6641,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -6659,7 +6649,7 @@
           "dns"
         ],
         "summary": "Create a block list",
-        "description": "Scope: `dns.write`.",
+        "description": "Scope: `dns.write`. A `block` list (the default) answers the names it holds and the names under them with its action and the extended error `Blocked`; an `allow` list keeps them from being blocked, and exempts its `exempt` clients from every list and RPZ zone. A URL list is fetched within a minute; an uploaded list waits for its file (`PUT /dns/lists/{id}/file`).",
         "operationId": "create_dns_list",
         "requestBody": {
           "content": {
@@ -6683,7 +6673,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the list is invalid (`dns.list.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the list is invalid (`dns.list.invalid`, parameters `field` and `reason`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6704,16 +6694,6 @@
           },
           "403": {
             "description": "The principal lacks the scope `dns.write`",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6746,7 +6726,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The block list with its newest version",
+            "description": "The block list with its newest version and its `ETag`",
             "content": {
               "application/json": {
                 "schema": {
@@ -6756,7 +6736,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6794,16 +6774,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -6823,6 +6793,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -6830,98 +6812,7 @@
             "description": "The list and its versions are gone"
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No valid session or token",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The principal lacks the scope `dns.write`",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "No such list (`dns.list.not_found`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "tags": [
-          "dns"
-        ],
-        "summary": "Change a block list",
-        "description": "Scope: `dns.write`.",
-        "operationId": "update_dns_list",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Block list identifier (UUID)",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ListPatch"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "The changed block list",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListItem"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6969,9 +6860,102 @@
                 }
               }
             }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Change a block list",
+        "description": "Scope: `dns.write`. A new `source` or `format` drops the list's versions: a URL list is fetched again within a minute, an uploaded list waits for its next file. `exempt` replaces the prefixes; an empty `description` clears it.",
+        "operationId": "update_dns_list",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Block list identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The changed block list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the list is invalid (`dns.list.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.write`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such list (`dns.list.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The list changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6989,7 +6973,7 @@
           "dns"
         ],
         "summary": "Fetch and compile a block list now",
-        "description": "Scope: `dns.write`.",
+        "description": "Scope: `dns.write`. Starts the compile job `dns.list.compile`: the URL is read with `If-None-Match` and the entity tag of the newest version; a source that did not change writes nothing, a failed fetch keeps the version and shows in `last_error`. Audited as `dns.list.fetch`.",
         "operationId": "fetch_dns_list",
         "parameters": [
           {
@@ -7004,7 +6988,7 @@
         ],
         "responses": {
           "202": {
-            "description": "The fetch job",
+            "description": "The fetch job; follow it at the `Location`",
             "content": {
               "application/json": {
                 "schema": {
@@ -7014,7 +6998,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7054,7 +7038,60 @@
             }
           },
           "409": {
-            "description": "The list is uploaded, not fetched",
+            "description": "The list is uploaded, not fetched (`dns.list.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dns/lists/{id}/file": {
+      "put": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Upload the file of a block list",
+        "description": "Scope: `dns.write`. The body is the list's text in its `format` (a hosts file or one domain per line), at most `[dns.lists] max_upload` MiB (64 by default). Starts the compile job `dns.list.compile`, which writes the next version. Audited as `dns.list.upload`.",
+        "operationId": "upload_dns_list",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Block list identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The compile job; follow it at the `Location`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsJobStarted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7063,8 +7100,48 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.write`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such list (`dns.list.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The list is fetched from a URL, not uploaded (`dns.list.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The file is larger than `[dns.lists] max_upload` (`sys.body_too_large`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -29291,6 +29368,16 @@
             "type": "boolean",
             "description": "Whether the list is applied."
           },
+          "exempt": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Clients exempt from the list (at most 1,000 prefixes): a block list does not block\nthem; an allow list exempts them from every list and RPZ zone.",
+            "example": [
+              "192.0.2.10/32"
+            ]
+          },
           "format": {
             "$ref": "#/components/schemas/ListFormat",
             "description": "The file format."
@@ -29305,6 +29392,10 @@
             "description": "How often a URL list is fetched, in hours (1 to 168).",
             "minimum": 0
           },
+          "kind": {
+            "$ref": "#/components/schemas/ListKind",
+            "description": "A block list or an allow list."
+          },
           "name": {
             "type": "string",
             "description": "A unique name, 1 to 64 characters."
@@ -29318,6 +29409,26 @@
       "BlockListId": {
         "type": "string",
         "format": "uuid"
+      },
+      "BlockedCountItem": {
+        "type": "object",
+        "description": "The queries one block list or RPZ zone blocked since the node's role started.",
+        "required": [
+          "list",
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Queries blocked.",
+            "minimum": 0
+          },
+          "list": {
+            "type": "string",
+            "description": "The list's name, or the RPZ zone's name."
+          }
+        }
       },
       "BreachMode": {
         "type": "string",
@@ -31592,6 +31703,13 @@
           "cache_entries"
         ],
         "properties": {
+          "blocked": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockedCountItem"
+            },
+            "description": "Queries blocked since the role started, per enabled block list and RPZ zone, by\nname."
+          },
           "cache_bytes": {
             "type": "integer",
             "format": "int64",
@@ -37202,13 +37320,19 @@
         "required": [
           "name",
           "source",
-          "format",
-          "action"
+          "format"
         ],
         "properties": {
           "action": {
-            "$ref": "#/components/schemas/BlockAction",
-            "description": "What a blocked name answers."
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlockAction",
+                "description": "What a blocked name answers; NXDOMAIN when absent (an allow list blocks nothing)."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "description": {
             "type": [
@@ -37224,6 +37348,16 @@
             ],
             "description": "Whether it is applied; `true` when absent."
           },
+          "exempt": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Clients exempt from the list (at most 1,000 prefixes); an allow list exempts them\nfrom every list and RPZ zone.",
+            "example": [
+              "192.0.2.10/32"
+            ]
+          },
           "format": {
             "$ref": "#/components/schemas/ListFormat",
             "description": "The file format."
@@ -37236,6 +37370,17 @@
             "format": "int32",
             "description": "How often a URL list is fetched, in hours.",
             "minimum": 0
+          },
+          "kind": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ListKind",
+                "description": "`block` (the default) or `allow`."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "name": {
             "type": "string",
@@ -37267,12 +37412,30 @@
               "revision"
             ],
             "properties": {
+              "last_checked": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Timestamp",
+                    "description": "When the last fetch or compile ran on this controller (a fetch that found the source\nunchanged included)."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "last_error": {
                 "type": [
                   "string",
                   "null"
                 ],
-                "description": "The stable code of the last failed fetch."
+                "description": "The stable code of the last failed fetch or compile (`dns.list.fetch_failed`,\n`dns.list.invalid`, `dns.list.upload_missing`); the list keeps its version."
+              },
+              "last_error_detail": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "English detail of the last failure."
               },
               "revision": {
                 "$ref": "#/components/schemas/Revision",
@@ -37294,6 +37457,14 @@
         ],
         "description": "A block list as the API reads it."
       },
+      "ListKind": {
+        "type": "string",
+        "description": "What a list does with the names it holds.",
+        "enum": [
+          "block",
+          "allow"
+        ]
+      },
       "ListPatch": {
         "type": "object",
         "description": "`PATCH /dns/lists/{id}`.",
@@ -37314,7 +37485,7 @@
               "string",
               "null"
             ],
-            "description": "Free text."
+            "description": "Free text; an empty string clears it."
           },
           "enabled": {
             "type": [
@@ -37322,6 +37493,16 @@
               "null"
             ],
             "description": "Whether it is applied."
+          },
+          "exempt": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The exempt client prefixes, replaced whole."
           },
           "format": {
             "oneOf": [
@@ -37343,6 +37524,17 @@
             "description": "How often a URL list is fetched, in hours.",
             "minimum": 0
           },
+          "kind": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ListKind",
+                "description": "`block` or `allow`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "name": {
             "type": [
               "string",
@@ -37354,7 +37546,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/ListSource",
-                "description": "Where it comes from."
+                "description": "Where it comes from; a new source or format drops the list's versions."
               },
               {
                 "type": "null"
@@ -37412,11 +37604,24 @@
           "fetched"
         ],
         "properties": {
+          "bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Octets of the compiled form.",
+            "minimum": 0
+          },
           "entries": {
             "type": "integer",
             "format": "int64",
-            "description": "How many names it blocks.",
+            "description": "How many names it holds (after duplicates and names under a listed name).",
             "minimum": 0
+          },
+          "etag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The HTTP entity tag of the fetched source."
           },
           "fetched": {
             "$ref": "#/components/schemas/Timestamp",
@@ -42985,12 +43190,30 @@
                     "revision"
                   ],
                   "properties": {
+                    "last_checked": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/Timestamp",
+                          "description": "When the last fetch or compile ran on this controller (a fetch that found the source\nunchanged included)."
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "last_error": {
                       "type": [
                         "string",
                         "null"
                       ],
-                      "description": "The stable code of the last failed fetch."
+                      "description": "The stable code of the last failed fetch or compile (`dns.list.fetch_failed`,\n`dns.list.invalid`, `dns.list.upload_missing`); the list keeps its version."
+                    },
+                    "last_error_detail": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "English detail of the last failure."
                     },
                     "revision": {
                       "$ref": "#/components/schemas/Revision",

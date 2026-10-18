@@ -12,11 +12,15 @@
 //! 4. The index: the zone of the longest apex, then the answer, a CNAME chain followed
 //!    inside the index (at most [`MAX_CHAIN`] steps, DNAMEs included, a loop stops the
 //!    chain), a referral at a zone cut, or a negative answer.
-//! 5. Outside the zones: the policy ([`PolicyEngine::check`]), then a forwarding rule by
-//!    longest suffix or the default forwarder when the client asked for recursion
-//!    ([`Resolution::Forward`]), else REFUSED with the extended error "Not Authoritative".
-//! 6. The rate limiter decides on the response ([`RateLimiter::admit_response`]): send it,
-//!    slip it (an empty answer with TC) or drop it.
+//! 5. Outside the zones: the policy ([`PolicyEngine::check`]: allow lists and exemptions,
+//!    the RPZ zones, the block lists) may block the name with its action and the extended
+//!    error "Blocked", or drop the query; then a forwarding rule by longest suffix or the
+//!    default forwarder when the client asked for recursion ([`Resolution::Forward`]), else
+//!    REFUSED with the extended error "Not Authoritative".
+//! 6. The rate limiter decides on the response ([`RateLimiter::admit_response`], keyed by
+//!    the client's prefix, the response kind and its name: the query name for answers and
+//!    NODATA, the zone for NXDOMAIN and referrals): send it, slip it (an empty answer with
+//!    TC) or drop it.
 //!
 //! The answer sections follow minimal responses: a positive answer carries no NS in the
 //! authority section; the additional section carries the addresses of the targets of MX,
@@ -32,15 +36,15 @@
 
 use std::{net::IpAddr, sync::Arc};
 
-use tenko_core::dns::{BlockAction, Rdata, Rtype, ViewId, ZoneKind};
+use tenko_core::dns::{QueryTransport, Rdata, Rtype, ViewId, ZoneKind};
 
 use crate::{
     catalog::{Catalog, CatalogHandle, CompiledView, ViewQuery, ViewScopes},
     codec::{AnswerBuf, Owner, Section},
     index::{Chain, Index, Lookup, MAX_CHAIN, RrSetView, ZoneView},
     name::{self, MAX_NAME_LEN, NameBuf},
-    policy::{EDE_BLOCKED, NoPolicy, PolicyEngine, Verdict},
-    rate::{RateDecision, RateLimiter, ResponseKind, Unlimited},
+    policy::{Action, EDE_BLOCKED, Hit, NoPolicy, PolicyEngine, PolicyQuery, Verdict},
+    rate::{RateDecision, RateLimiter, ResponseKey, ResponseKind, Unlimited},
     resolver::{QueryContext, Resolution, Resolver},
     tree::ZoneIndex,
 };
@@ -163,6 +167,58 @@ impl Authoritative {
         &self.catalog
     }
 
+    /// The answer of a blocked name, into `answer`.
+    fn blocked(&self, hit: &Hit<'_>, qtype: Rtype, answer: &mut AnswerBuf) {
+        match hit.action {
+            Action::Nxdomain => answer.rcode = rcode::NXDOMAIN,
+            Action::Nodata | Action::Drop => {}
+            Action::TcpOnly => answer.truncated = true,
+            Action::Redirect(address) => {
+                let (v4, v6);
+                let (rtype, octets): (Rtype, &[u8]) = match address {
+                    IpAddr::V4(address) => {
+                        v4 = address.octets();
+                        (Rtype::A, &v4)
+                    }
+                    IpAddr::V6(address) => {
+                        v6 = address.octets();
+                        (Rtype::AAAA, &v6)
+                    }
+                };
+                if qtype == rtype || qtype == Rtype::ANY {
+                    let _ = answer.push(
+                        Section::Answer,
+                        Owner::Qname,
+                        rtype.0,
+                        self.settings.redirect_ttl,
+                        octets,
+                    );
+                }
+            }
+            Action::Local(records) => {
+                let cname = records.iter().find(|record| record.rtype == Rtype::CNAME);
+                for record in cname.into_iter().chain(records.iter().filter(|record| {
+                    cname.is_none() && (record.rtype == qtype || qtype == Rtype::ANY)
+                })) {
+                    if answer
+                        .push(
+                            Section::Answer,
+                            Owner::Qname,
+                            record.rtype.0,
+                            record.ttl,
+                            &record.rdata,
+                        )
+                        .is_err()
+                    {
+                        answer.truncated = true;
+                        break;
+                    }
+                }
+            }
+        }
+        let _ = answer.set_extended_error(EDE_BLOCKED, "");
+    }
+
     /// Names outside the zones: the policy, then the forwarder, else REFUSED.
     fn outside(
         &self,
@@ -174,36 +230,18 @@ impl Authoritative {
         let request = query.request;
         let qname = request.qname.as_wire();
         let qtype = Rtype(request.qtype);
-        if let Verdict::Block { action, .. } =
-            self.policy.check(view, query.client.ip(), qname, qtype)
-        {
-            match action {
-                BlockAction::Nxdomain => answer.rcode = rcode::NXDOMAIN,
-                BlockAction::Nodata => {}
-                BlockAction::Redirect { address } => {
-                    let (v4, v6);
-                    let (rtype, octets): (Rtype, &[u8]) = match address {
-                        IpAddr::V4(address) => {
-                            v4 = address.octets();
-                            (Rtype::A, &v4)
-                        }
-                        IpAddr::V6(address) => {
-                            v6 = address.octets();
-                            (Rtype::AAAA, &v6)
-                        }
-                    };
-                    if qtype == rtype || qtype == Rtype::ANY {
-                        let _ = answer.push(
-                            Section::Answer,
-                            Owner::Qname,
-                            rtype.0,
-                            self.settings.redirect_ttl,
-                            octets,
-                        );
-                    }
-                }
+        let check = PolicyQuery {
+            view,
+            client: query.client.ip(),
+            qname,
+            qtype,
+            transport: query.transport,
+        };
+        if let Verdict::Block(hit) = self.policy.check(catalog, &check) {
+            if hit.action == Action::Drop {
+                return Some(Resolution::Drop);
             }
-            let _ = answer.set_extended_error(EDE_BLOCKED, "");
+            self.blocked(&hit, qtype, answer);
             return None;
         }
         if request.rd {
@@ -278,6 +316,8 @@ impl Resolver for Authoritative {
                 if let Some(resolution) = self.outside(&catalog, query, view_id, answer) {
                     return resolution;
                 }
+                // A refusal is an error; a policy answer (NXDOMAIN included) counts as
+                // an answer of the name.
                 let kind = if answer.rcode == rcode::REFUSED {
                     ResponseKind::Error
                 } else {
@@ -286,7 +326,17 @@ impl Resolver for Authoritative {
                 (kind, &[0u8][..])
             }
         };
-        match self.rate.admit_response(client, kind, zone, query.now) {
+        let key = ResponseKey {
+            kind,
+            name: match kind {
+                ResponseKind::Answer | ResponseKind::NoData => qname,
+                ResponseKind::NxDomain | ResponseKind::Referral => zone,
+                ResponseKind::Error => &[0],
+            },
+            qtype: request.qtype,
+            udp: query.transport == QueryTransport::Udp,
+        };
+        match self.rate.admit_response(client, &key, query.now) {
             RateDecision::Send => {}
             RateDecision::Slip => {
                 let recursion = answer.recursion_available;

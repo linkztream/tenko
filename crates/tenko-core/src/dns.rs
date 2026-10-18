@@ -1523,6 +1523,31 @@ pub enum BlockAction {
     },
 }
 
+/// What a list does with the names it holds.
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ListKind {
+    /// The names and the names under them are blocked with the list's action.
+    #[default]
+    Block,
+    /// The names and the names under them are never blocked, by any list or RPZ zone;
+    /// the clients of its `exempt` prefixes are never blocked at all.
+    Allow,
+}
+
 /// A block list (DNS-15, DNS-23).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct BlockList {
@@ -1530,6 +1555,9 @@ pub struct BlockList {
     pub id: BlockListId,
     /// A unique name, 1 to 64 characters.
     pub name: String,
+    /// A block list or an allow list.
+    #[serde(default)]
+    pub kind: ListKind,
     /// Where it comes from.
     pub source: ListSource,
     /// The file format.
@@ -1542,6 +1570,11 @@ pub struct BlockList {
     /// Whether the list is applied.
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// Clients exempt from the list (at most 1,000 prefixes): a block list does not block
+    /// them; an allow list exempts them from every list and RPZ zone.
+    #[schema(value_type = Vec<String>, example = json!(["192.0.2.10/32"]))]
+    #[serde(default, with = "text::list", skip_serializing_if = "Vec::is_empty")]
+    pub exempt: Vec<IpNet>,
     /// Free text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -1552,7 +1585,8 @@ const fn default_interval() -> u16 {
 }
 
 impl BlockList {
-    /// Checks a list: the name, an `http` or `https` URL, an interval of 1 to 168 hours.
+    /// Checks a list: the name, an `http` or `https` URL, an interval of 1 to 168 hours, at
+    /// most 1,000 exempt prefixes.
     ///
     /// # Errors
     ///
@@ -1573,6 +1607,13 @@ impl BlockList {
                 codes::LIST_INVALID,
                 "interval_hours",
                 "1 to 168 hours",
+            ));
+        }
+        if self.exempt.len() > 1_000 {
+            return Err(DnsError::invalid(
+                codes::LIST_INVALID,
+                "exempt",
+                "at most 1000 prefixes",
             ));
         }
         Ok(())
@@ -1777,6 +1818,10 @@ pub mod audit {
     pub const LIST_DELETE: AuditAction = AuditAction::from_static("dns.list.delete");
     /// A new version of a block list was compiled.
     pub const LIST_COMPILE: AuditAction = AuditAction::from_static("dns.list.compile");
+    /// A fetch of a block list was started by hand.
+    pub const LIST_FETCH: AuditAction = AuditAction::from_static("dns.list.fetch");
+    /// The file of an uploaded block list was handed in.
+    pub const LIST_UPLOAD: AuditAction = AuditAction::from_static("dns.list.upload");
     /// A zone transfer in was started by hand.
     pub const TRANSFER_TRIGGER: AuditAction = AuditAction::from_static("dns.transfer.trigger");
     /// A node's cache was flushed.
@@ -1789,7 +1834,7 @@ pub mod audit {
     pub const LOG_START: AuditAction = AuditAction::from_static("dns.log.start");
 
     /// Every action of the module, for the contracts document and its test.
-    pub const ALL: [&AuditAction; 30] = [
+    pub const ALL: [&AuditAction; 32] = [
         &ZONE_CREATE,
         &ZONE_UPDATE,
         &ZONE_DELETE,
@@ -1815,6 +1860,8 @@ pub mod audit {
         &LIST_UPDATE,
         &LIST_DELETE,
         &LIST_COMPILE,
+        &LIST_FETCH,
+        &LIST_UPLOAD,
         &TRANSFER_TRIGGER,
         &CACHE_FLUSH,
         &LOG_READ,

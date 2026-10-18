@@ -45,8 +45,8 @@ use tenko_dns::{
 use tenko_store::WriteBatch;
 
 use super::{
-    CacheFlushParams, DnsCommandAccepted, DnsNodeStatus, ListenerItem, QueryLogLine,
-    QueryLogParams, QueryLogState, QueryLogStatus, UdpWorkerItem, Zones, parse_node,
+    BlockedCountItem, CacheFlushParams, DnsCommandAccepted, DnsNodeStatus, ListenerItem,
+    QueryLogLine, QueryLogParams, QueryLogState, QueryLogStatus, UdpWorkerItem, Zones, parse_node,
 };
 use crate::{
     dto::Page,
@@ -246,6 +246,14 @@ fn status_dto(status: DnsStatus) -> DnsNodeStatus {
         problems: status.problems,
         started: Some(status.started),
         query_log: status.log.map(log_status_dto),
+        blocked: status
+            .blocked
+            .into_iter()
+            .map(|blocked| BlockedCountItem {
+                list: blocked.list,
+                count: blocked.count,
+            })
+            .collect(),
     }
 }
 

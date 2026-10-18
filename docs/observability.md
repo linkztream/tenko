@@ -130,7 +130,18 @@ The `dns` role, while it runs on the node ([dns.md](dns.md) sections 8 and 12.8)
 
 `proto` is `dot` and `doh` for queries that come over DNS over TLS and DNS over HTTPS, also when a reverse proxy ends their TLS; the last three families are registered only when DoT or DoH is on.
 
-The other families of the DNS module (`tenko_dns_rrl_dropped_total`, `tenko_dns_blocked_total`, `tenko_dns_zone_serial`, `tenko_dns_signing_*`, `tenko_dns_log_dropped_total`; [dns-contracts.md](dns-contracts.md) section 7) are declared and registered by the packages that count them. The health of the role is in `GET /api/v1/nodes/{id}/dns` and in the warnings of `GET /api/v1/system/status`: `dns.role.not_serving` (the role stopped answering) and `dns.role.lagging` (its index is more than 1,000 revisions behind the store).
+The policy and the rate limiter of the role ([dns-resolver.md](dns-resolver.md) sections 5 and 6), registered when the role starts:
+
+| Name | Type | Labels | Meaning |
+|---|---|---|---|
+| `tenko_dns_blocked_total` | counter | `list` | Queries the policy blocked, by block list name or RPZ zone name (`other` beyond 1,024 names), since the process started; a series appears with the first list or zone of its name. The node status lists the same counts for the enabled lists and zones (`blocked`) |
+| `tenko_dns_rrl_dropped_total` | counter | `kind` | Responses response rate limiting dropped, by kind (`answer`, `nodata`, `nxdomain`, `referral`, `error`) |
+| `tenko_dns_rrl_slipped_total` | counter | | Responses response rate limiting sent as an empty truncated answer (the slip), so that a real client retries over TCP |
+| `tenko_dns_client_limited_total` | counter | | Queries the per-client query limit dropped before the lookup |
+
+A rising `tenko_dns_rrl_dropped_total` with a steady query rate is a reflection attempt being refused; a rising `tenko_dns_client_limited_total` is one client asking faster than `[dns.limits] client_qps`.
+
+The other families of the DNS module (`tenko_dns_zone_serial`, `tenko_dns_signing_*`, `tenko_dns_log_dropped_total`; [dns-contracts.md](dns-contracts.md) section 7) are declared and registered by the packages that count them. The health of the role is in `GET /api/v1/nodes/{id}/dns` and in the warnings of `GET /api/v1/system/status`: `dns.role.not_serving` (the role stopped answering) and `dns.role.lagging` (its index is more than 1,000 revisions behind the store).
 The query log of the role ([dns-resolver.md](dns-resolver.md) section 8), registered when the role starts:
 
 | Name | Type | Labels | Meaning |
@@ -139,7 +150,7 @@ The query log of the role ([dns-resolver.md](dns-resolver.md) section 8), regist
 
 The node's status (`GET /api/v1/nodes/{id}/dns`, member `query_log`) adds the log's state (`on` or `stopped` by the kill switch), its settings and its counters since the role started: `written`, `dropped` and `write_errors` (batches that could not be written; the error itself is logged at most once a minute). The node command `dns.stats` carries the same counters in its detail. The logging-ring drop counter of OPS-20 is this counter.
 
-The other families of the DNS module (`tenko_dns_cache_*`, `tenko_dns_upstream_*`, `tenko_dns_rrl_dropped_total`, `tenko_dns_blocked_total`, `tenko_dns_zone_serial`, `tenko_dns_signing_*`; [dns-contracts.md](dns-contracts.md) section 7) are declared and registered by the packages that count them. The health of the role is in `GET /api/v1/nodes/{id}/dns` and in the warnings of `GET /api/v1/system/status`: `dns.role.not_serving` (the role stopped answering) and `dns.role.lagging` (its index is more than 1,000 revisions behind the store).
+The other families of the DNS module (`tenko_dns_cache_*`, `tenko_dns_upstream_*`, `tenko_dns_blocked_total`, `tenko_dns_rrl_*`, `tenko_dns_client_limited_total`, `tenko_dns_zone_serial`, `tenko_dns_signing_*`; [dns-contracts.md](dns-contracts.md) section 7) are declared and registered by the packages that count them. The health of the role is in `GET /api/v1/nodes/{id}/dns` and in the warnings of `GET /api/v1/system/status`: `dns.role.not_serving` (the role stopped answering) and `dns.role.lagging` (its index is more than 1,000 revisions behind the store).
 
 Every controller reports its own values: in a cluster, scrape each controller. The Raft lag of every member and the leader services in state `running` come from the leader.
 

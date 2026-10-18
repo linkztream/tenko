@@ -106,6 +106,7 @@ The object kinds of authorization and audit are `zone` (records authorize as the
 | `PATCH /api/v1/dns/lists/{id}` | `update_dns_list` | `dns.write` | Change a block list |
 | `DELETE /api/v1/dns/lists/{id}` | `delete_dns_list` | `dns.write` | Delete a block list |
 | `POST /api/v1/dns/lists/{id}/fetch` | `fetch_dns_list` | `dns.write` | Fetch and compile a block list now |
+| `PUT /api/v1/dns/lists/{id}/file` | `upload_dns_list` | `dns.write` | Upload the file of a block list (`text/plain`, at most `[dns.lists] max_upload` MiB) |
 | `GET /api/v1/nodes/{id}/dns` | `get_node_dns_status` | `dns.read` | Get the DNS role of a node |
 | `POST /api/v1/nodes/{id}/dns/cache/flush` | `flush_node_dns_cache` | `dns.write` | Flush a node's DNS cache |
 | `GET /api/v1/nodes/{id}/dns/log` | `read_node_dns_log` | `dns.read` | Read a node's DNS query log |
@@ -152,7 +153,7 @@ The node routes sit beside the node's other routes, as the scan configuration of
 | `dns.view.create`, `dns.view.update`, `dns.view.delete` | Views |
 | `dns.forwarder.create`, `dns.forwarder.update`, `dns.forwarder.delete` | Forwarding rules |
 | `dns.acl.create`, `dns.acl.update`, `dns.acl.delete` | Access lists |
-| `dns.list.create`, `dns.list.update`, `dns.list.delete`, `dns.list.compile` | Block lists and their compiled versions |
+| `dns.list.create`, `dns.list.update`, `dns.list.delete`, `dns.list.compile`, `dns.list.fetch`, `dns.list.upload` | Block lists, their compiled versions, a fetch started by hand and an uploaded file |
 | `dns.transfer.trigger`, `dns.cache.flush` | A transfer started by hand; a node's cache flushed |
 | `dns.log.read`, `dns.log.stop`, `dns.log.start` | A page of a node's query log read (personal data); the log stopped or started again (the kill switch) |
 
@@ -171,7 +172,9 @@ The system component of the DNS services' own writes is `dns`.
 | `tenko_dns_cache_entries` | gauge | |
 | `tenko_dns_upstream_queries_total` | counter | `rule`, `upstream`, `transport`, `outcome` |
 | `tenko_dns_upstream_rtt_seconds` | histogram | `upstream` |
-| `tenko_dns_rrl_dropped` | counter | |
+| `tenko_dns_rrl_dropped` | counter | `kind` |
+| `tenko_dns_rrl_slipped` | counter | |
+| `tenko_dns_client_limited` | counter | |
 | `tenko_dns_blocked` | counter | `list` |
 | `tenko_dns_zone_serial` | gauge | `zone` |
 | `tenko_dns_signing_runs` | counter | `outcome` |

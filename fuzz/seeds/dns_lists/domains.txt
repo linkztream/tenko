@@ -1,0 +1,9 @@
+! An Adblock-style comment
+# a comment
+ads.example.test
+||tracker.example.test^
+*.wild.example.test
+bücher.example.test
+sub.ads.example.test
+http://not-a-name.example.test/path
+0.0.0.0 hosts-form.example.test

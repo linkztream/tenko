@@ -2,7 +2,7 @@
 
 The measurement harness of Phase 2 (DNS) of the Tenko DDI project: a load generator for any DNS
 server, a generator for the zone files and query files of the Phase 2 data sets, a report
-renderer, and the procedure scripts of the measurements M16, M17, M18, M22 and M24
+renderer, and the procedure scripts of the measurements M16, M17, M18, M22, M24 and M25
 (`docs/plans/phase-2-plan.md`, sections 2.10 and 6, work package WP4.6). It contains no server
 code: the target is the Tenko engine, the Spike B responder, BIND, NSD or anything else that
 answers DNS.
@@ -52,6 +52,7 @@ engine is measured against.
 | `scripts/run-dnsperf.sh` | M17: dnsperf from another host |
 | `scripts/run-flamethrower.sh` | M17: flamethrower from another host (UDP, TCP, DoT, DoH) |
 | `scripts/run-m24-cache.sh` | M24: the resolver's cache (`tenko serve` forwarding to the engine's example server) in a 1 M-name mixed run at two cache bounds, and serve-stale under an upstream cut |
+| `scripts/run-m25-lists.sh` | M25: the block list compiler and matcher (the engine's example `lists_bench`) on a generated list of 1 M names: compile time, the size of the version, the time per lookup and per label |
 | `scripts/server-cpu.sh` | CPU seconds and RSS of a server pid on a Linux host, for the runs where the harness cannot sample the server |
 | `scripts/lib.sh` | Shared helpers: machine line, musl linkage check, readiness probe |
 | `data/` | Generated zone and query files (git-ignored) |
@@ -214,6 +215,14 @@ supplies the data and its sizes above.
 A skeleton until the resolver exists (WP5.1): it prints the plan (warm pass, measured pass over a
 1 M-name mixed run, serve-stale under an upstream cut) and the harness gaps to close by then (a
 per-second time series, a popularity-skewed query file), and exits with 3.
+
+### M25: block list compile and match (`scripts/run-m25-lists.sh`)
+
+Not a harness run: the example `lists_bench` of `tenko-dns` (built like the shipped binary: the
+static musl build on Linux, the release build on Windows) generates 1,000,000 names, compiles them
+in hosts and in domain-list form and builds the matcher (threshold: under 2 s together), then
+times 100,000 lookups of names with 2, 4 and 8 labels. The script writes the JSON lines to
+`results/raw/` and prints the Verdict line. Write-up: `results/2026-10-18-m25-lists.md`.
 
 ## Caveats
 

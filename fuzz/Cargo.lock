@@ -3161,6 +3161,7 @@ dependencies = [
  "aws-lc-rs",
  "bytes",
  "domain",
+ "flate2",
  "h2",
  "http",
  "http-body-util",

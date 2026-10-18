@@ -81,11 +81,8 @@ async fn the_commands_answer_in_place() {
     assert_eq!(stats.outcome, Outcome::Done);
     assert!(stats.detail.contains("2 UDP worker(s)"), "{}", stats.detail);
     assert!(matches!(
-        stats.output,
-        Output::Stats(DnsStats {
-            layout: Some(_),
-            ..
-        })
+        &stats.output,
+        Output::Stats(stats) if matches!(**stats, DnsStats { layout: Some(_), .. })
     ));
     let log = node.execute(LOG_READ, &[]);
     assert_eq!(log.outcome, Outcome::Rejected);

@@ -6,10 +6,10 @@
 //! | Kind | Arguments (CBOR) | What the role does |
 //! |---|---|---|
 //! | `dns.cache.flush` | [`CacheFlushArgs`] (optional; none flushes all) | Empties the cache, or the entries at or below a name suffix; `done` with the count removed |
-//! | `dns.stats` | none | Answers `done` with the counters of the workers, the forwarder and the query log in its detail |
+//! | `dns.stats` | none | Answers `done` with the counters of the workers, the forwarder, the policy (blocked queries per list and RPZ zone), rate limiting and the query log in its detail |
 //! | `dns.log.read` | [`LogReadArgs`] | Answers `done` with a page of the local query log, newest first, filtered, and the cursor of the next page; `rejected` when the log is off or a filter cannot be applied |
 //! | `dns.log.stop`, `dns.log.start` | none | The kill switch: the log takes no entry until it is started again (kept across a restart); `rejected` when the log is off |
-//! | `dns.status` (report) | | [`DnsStatus`]: serving, the revision held and the lag, zones, RRsets, listeners, the cache's entries and hits, the problems of stub zones and recursion lists, the start |
+//! | `dns.status` (report) | | [`DnsStatus`]: serving, the revision held and the lag, zones, RRsets, listeners, the cache's entries and hits, the queries blocked per list and RPZ zone, the problems of stub zones and recursion lists, the start |
 //!
 //! In Phase 2 the role runs in the controller's own process, so [`LocalNode`] executes a
 //! command in place and the API records it as a row of `cluster.node_commands` in the state
@@ -112,6 +112,56 @@ pub struct Listener {
     pub workers: u16,
 }
 
+/// The queries one block list or RPZ zone blocked since the role started.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockedCount {
+    /// The list's name, or the RPZ zone's name.
+    pub list: String,
+    /// Queries blocked.
+    pub count: u64,
+}
+
+/// The blocked counts of the enabled block lists and the RPZ zones of a catalog, by name.
+pub fn blocked_counts(catalog: &CatalogHandle) -> Vec<BlockedCount> {
+    let catalog = catalog.load();
+    let mut counts: Vec<BlockedCount> = catalog
+        .policy()
+        .counted()
+        .map(|(list, slot)| BlockedCount {
+            list: list.to_owned(),
+            count: crate::policy::counters::total(slot),
+        })
+        .collect();
+    counts.sort_by(|a, b| a.list.cmp(&b.list));
+    counts.dedup_by(|a, b| a.list == b.list);
+    counts
+}
+
+/// The counters of rate limiting since the process started.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RateCounts {
+    /// Responses RRL dropped.
+    pub dropped: u64,
+    /// Responses RRL sent truncated.
+    pub slipped: u64,
+    /// Queries the per-client limit dropped.
+    pub client_limited: u64,
+}
+
+impl RateCounts {
+    /// The counters now.
+    pub fn read() -> Self {
+        use crate::rate::limiter::{
+            CLIENT_LIMITED_COUNTER, RRL_DROPPED_COUNTER, RRL_SLIPPED_COUNTER,
+        };
+        Self {
+            dropped: (0..5).map(|kind| RRL_DROPPED_COUNTER.get(kind)).sum(),
+            slipped: RRL_SLIPPED_COUNTER.get(),
+            client_limited: CLIENT_LIMITED_COUNTER.get(),
+        }
+    }
+}
+
 /// The report `dns.status` of a node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DnsStatus {
@@ -153,6 +203,8 @@ pub struct DnsStatus {
     pub layout: Option<WorkerLayout>,
     /// The query log, when it is on.
     pub log: Option<LogFigures>,
+    /// Queries blocked per enabled block list and RPZ zone, by name.
+    pub blocked: Vec<BlockedCount>,
 }
 
 /// The counters `dns.stats` reports.
@@ -164,6 +216,10 @@ pub struct DnsStats {
     pub forward: Option<ForwardStats>,
     /// The query log's counters and state, when the log is on.
     pub log: Option<LogFigures>,
+    /// Queries blocked per enabled block list and RPZ zone, by name.
+    pub blocked: Vec<BlockedCount>,
+    /// Rate limiting.
+    pub rate: RateCounts,
 }
 
 impl DnsStats {
@@ -201,6 +257,18 @@ impl DnsStats {
                 forward.prefetched
             ));
         }
+        if !self.blocked.is_empty() {
+            let lists: Vec<String> = self
+                .blocked
+                .iter()
+                .map(|blocked| format!("{} {}", blocked.list, blocked.count))
+                .collect();
+            parts.push(format!("blocked: {}", lists.join(", ")));
+        }
+        parts.push(format!(
+            "rate limiting: {} dropped, {} slipped, {} client-limited",
+            self.rate.dropped, self.rate.slipped, self.rate.client_limited
+        ));
         if let Some(log) = &self.log {
             parts.push(format!(
                 "query log{}: {} written, {} dropped, {} failed write(s)",
@@ -231,7 +299,7 @@ pub enum Output {
     /// Nothing.
     None,
     /// The counters (`dns.stats`).
-    Stats(DnsStats),
+    Stats(Box<DnsStats>),
     /// A page of the query log (`dns.log.read`).
     Log(LogPage),
 }
@@ -341,6 +409,8 @@ impl LocalNode {
             layout: self.layout(),
             forward: self.forwarder.as_ref().map(|forwarder| forwarder.stats()),
             log: self.log.as_ref().map(|(log, _)| log.figures()),
+            blocked: blocked_counts(&self.catalog),
+            rate: RateCounts::read(),
         }
     }
 
@@ -531,6 +601,7 @@ impl DnsNode for LocalNode {
             started: self.started,
             layout,
             log: self.log.as_ref().map(|(log, _)| log.figures()),
+            blocked: blocked_counts(&self.catalog),
         }
     }
 
@@ -539,7 +610,7 @@ impl DnsNode for LocalNode {
             CACHE_FLUSH => self.flush(args),
             STATS => {
                 let stats = self.stats();
-                CommandResult::done(stats.detail(), Output::Stats(stats))
+                CommandResult::done(stats.detail(), Output::Stats(Box::new(stats)))
             }
             LOG_READ => self.read_log(args),
             LOG_STOP => self.switch_log(true),
