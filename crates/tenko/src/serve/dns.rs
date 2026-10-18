@@ -11,8 +11,9 @@
 //!    the default upstreams of `[dns] forwarders`, the cache of `[dns.cache]` sized for the
 //!    profile in force, and the recursion policy: the profile's default and the prefixes
 //!    IPAM knows, which a follower keeps current from the store.
-//! 4. The server binds every listen address for UDP and TCP and starts its workers: only now
-//!    does the node answer, from a complete index.
+//! 4. The server binds every listen address for UDP and TCP, and the DoT and DoH addresses
+//!    of `[dns.tls]` with the certificate of the API's TLS mode or one of their own, and
+//!    starts its workers: only now does the node answer, from a complete index.
 //! 5. The writer of the catalog follows the feed: deltas in revision order, a reset after a
 //!    snapshot install, each swapped in whole.
 //!
@@ -23,7 +24,9 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use futures::StreamExt as _;
+use rustls::server::ResolvesServerCert;
 use tenko_auth::{model::SETTINGS, settings::Profile};
+use tenko_cluster::ca::{TlsMode, TlsPolicy, TlsService, TrustedProxies};
 use tenko_core::{Role, dns::ForwardTransport, metrics::Registry};
 use tenko_dns::{
     authoritative::{Authoritative, Settings},
@@ -38,6 +41,7 @@ use tenko_dns::{
     server::{Hooks, Server, ServerConfig},
     status::{DnsNode, LocalNode},
     store_feed,
+    tls::{Termination, TlsListen},
     transport::{SocketMode, tcp::TcpSettings, udp::UdpSettings},
 };
 use tenko_store::{KeyRange, ReadConsistency, ReadViewExt as _, Store, WatchFilter};
@@ -61,6 +65,8 @@ pub(crate) struct DnsRole {
     stop: CancellationToken,
     tasks: Vec<JoinHandle<()>>,
     log: Option<LogWriter>,
+    /// The file watcher of a certificate of DoT and DoH's own; aborted at the stop.
+    watchers: Vec<JoinHandle<()>>,
     announce: String,
 }
 
@@ -77,6 +83,10 @@ pub(crate) struct Parts<'a> {
     pub(crate) resolved: &'a Resolved,
     pub(crate) store: Arc<dyn Store>,
     pub(crate) metrics: &'a Registry,
+    /// The API's TLS service: its certificate is DoT and DoH's unless they have their own.
+    pub(crate) api_tls: TlsService,
+    /// The protocol policy of the API (TLS 1.3 only under the Hardened profile).
+    pub(crate) tls_policy: TlsPolicy,
 }
 
 fn error(code: &str, message: impl Into<String>) -> StartError {
@@ -109,7 +119,122 @@ fn server_config(section: &DnsSection, listen: Vec<SocketAddr>) -> ServerConfig 
             DnsCookies::Off => CookieMode::Off,
         },
         edns_udp_size: section.edns.udp_size,
+        tls: None,
     }
+}
+
+/// The DoT and DoH side of the role, when `[dns.tls]` turns either on.
+struct Encrypted {
+    listen: TlsListen,
+    certificates: Option<Arc<dyn ResolvesServerCert>>,
+    watchers: Vec<JoinHandle<()>>,
+    describe: String,
+}
+
+/// The listeners and the certificate of `[dns.tls]`: behind a proxy none; a certificate
+/// of their own, loaded now and watched like the imported files of mode b; else the API's,
+/// which follows its renewal or reload.
+fn encrypted(
+    resolved: &Resolved,
+    listen: &[SocketAddr],
+    api_tls: &TlsService,
+    policy: TlsPolicy,
+) -> Result<Option<Encrypted>, StartError> {
+    let section = &resolved.config.dns.tls;
+    if !section.enabled() {
+        return Ok(None);
+    }
+    let (dot, doh) = section
+        .addresses(listen)
+        .map_err(|problem| error("config.invalid", problem.to_string()))?;
+    let mut watchers = Vec::new();
+    let (termination, certificates, source) = if section.behind_proxy {
+        let trusted = TrustedProxies::parse(&resolved.config.tls.trusted_proxies)
+            .map_err(|problem| error("config.invalid", problem.to_string()))?;
+        (
+            Termination::Proxy {
+                trusted: trusted.networks().to_vec(),
+                proxy_protocol: section.proxy_protocol,
+            },
+            None,
+            if section.proxy_protocol {
+                "TLS ends in the reverse proxy (PROXY protocol)".to_owned()
+            } else {
+                "TLS ends in the reverse proxy".to_owned()
+            },
+        )
+    } else {
+        let termination = Termination::Tls {
+            tls13_only: policy.tls13_only,
+        };
+        if let (Some(cert_path), Some(key_path)) = (&section.certificate, &section.key) {
+            let mode = TlsMode::Imported {
+                cert_path: cert_path.clone(),
+                key_path: key_path.clone(),
+            };
+            let service = TlsService::new(mode.clone(), policy)
+                .and_then(|service| service.set_mode(mode).map(|()| service))
+                .map_err(|problem| {
+                    error(
+                        "start.dns.tls",
+                        format!("the certificate of dns.tls.certificate: {problem}"),
+                    )
+                })?;
+            watchers.push(service.spawn_watcher(Duration::from_secs(
+                resolved.config.tls.watch_interval_secs.max(1),
+            )));
+            let own: Arc<dyn ResolvesServerCert> = service.resolver();
+            (
+                termination,
+                Some(own),
+                format!("certificate {}", cert_path.display()),
+            )
+        } else if api_tls.status().mode.terminates_tls() {
+            let api: Arc<dyn ResolvesServerCert> = api_tls.resolver();
+            (
+                termination,
+                Some(api),
+                format!("the API's certificate ({})", api_tls.status().mode.name()),
+            )
+        } else {
+            return Err(error(
+                "start.dns.tls",
+                "the API serves no certificate (its TLS ends in a reverse proxy), so DoT and \
+                 DoH have none either; set dns.tls.certificate and dns.tls.key, or \
+                 dns.tls.behind_proxy = true",
+            ));
+        }
+    };
+    let join = |addrs: &[SocketAddr]| {
+        addrs
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut parts = Vec::new();
+    if !dot.is_empty() {
+        parts.push(format!("DoT on {}", join(&dot)));
+    }
+    if !doh.is_empty() {
+        parts.push(format!("DoH on {}", join(&doh)));
+    }
+    let describe = format!("{} with {source}", parts.join(", "));
+    Ok(Some(Encrypted {
+        listen: TlsListen {
+            dot,
+            doh,
+            termination,
+            max_connections: section.max_connections,
+            per_client: section.per_client,
+            idle: Duration::from_secs(section.idle_secs),
+            handshake_timeout: Duration::from_secs(section.handshake_timeout_secs),
+            doh_streams: section.doh_streams,
+        },
+        certificates,
+        watchers,
+        describe,
+    }))
 }
 
 fn upstreams(section: &DnsSection) -> Vec<UpstreamSpec> {
@@ -352,12 +477,19 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         resolved,
         store,
         metrics,
+        api_tls,
+        tls_policy,
     } = parts;
     let section = &resolved.config.dns;
     let listen = section
         .listen_addrs()
         .map_err(|problem| error("config.invalid", problem.to_string()))?;
     note_wildcard(&listen);
+    // Before anything starts: a certificate that does not load stops the start here.
+    let encrypted = encrypted(resolved, &listen, &api_tls, tls_policy)?;
+    if encrypted.is_some() {
+        tenko_dns::tls::register(metrics);
+    }
     tenko_dns::metrics::register(metrics);
     let feed_store = Arc::clone(&store);
     let mut feed = tokio::task::spawn_blocking(move || store_feed::register(feed_store))
@@ -400,16 +532,31 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         default_forwarder: true,
         ..Settings::default()
     });
-    let config = server_config(section, listen);
+    let mut config = server_config(section, listen);
+    let mut certificates = None;
+    let mut watchers = Vec::new();
+    let mut listening = section.listen.join(", ");
+    let mut encrypted_line = None;
+    if let Some(encrypted) = encrypted {
+        listening = format!("{listening} ({})", encrypted.describe);
+        config.tls = Some(encrypted.listen);
+        certificates = encrypted.certificates;
+        watchers = encrypted.watchers;
+        encrypted_line = Some(encrypted.describe);
+    }
     let hooks = Hooks {
         log: sink,
         forward: Some(Arc::clone(&forwarder) as Arc<dyn ForwardSink>),
         cookies: None,
+        certificates,
     };
     let server = match Server::start(config, handle.clone(), resolver, hooks).await {
         Ok(server) => server,
         Err(io) => {
             stop.cancel();
+            for watcher in &watchers {
+                watcher.abort();
+            }
             let _ = forward_task.await;
             let _ = recursion_task.await;
             if let Some(log) = log {
@@ -418,10 +565,9 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
             return Err(error(
                 "start.dns.bind",
                 format!(
-                    "the dns role cannot listen on {}: {io}; port 53 needs \
-                     CAP_NET_BIND_SERVICE on Linux (deploy/README.md), and another DNS server \
-                     may hold the port",
-                    section.listen.join(", ")
+                    "the dns role cannot listen on {listening}: {io}; ports below 1024 (53, \
+                     853, 443) need CAP_NET_BIND_SERVICE on Linux (deploy/README.md), and \
+                     another server may hold the port"
                 ),
             ));
         }
@@ -433,7 +579,11 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
             tracing::error!(%error, "the dns role stopped following the store; it keeps serving the rows it holds");
         }
     });
-    let (announce, summary) = describe(&handle, &server, &forwarder, log.as_ref());
+    let (mut announce, mut summary) = describe(&handle, &server, &forwarder, log.as_ref());
+    if let Some(line) = encrypted_line {
+        announce = format!("{announce}; {line}");
+        summary = format!("{summary}; {line}");
+    }
     let node = Arc::new(LocalNode::new(
         resolved.node_id,
         server,
@@ -448,6 +598,7 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
             stop,
             tasks: vec![follower, forward_task, recursion_task],
             log,
+            watchers,
             announce,
         },
         summary,
@@ -472,10 +623,14 @@ impl DnsRole {
             stop,
             tasks,
             log,
+            watchers,
             ..
         } = self;
         if let Some(server) = node.take_server() {
             server.stop().await;
+        }
+        for watcher in watchers {
+            watcher.abort();
         }
         stop.cancel();
         for mut task in tasks {

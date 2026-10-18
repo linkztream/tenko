@@ -116,6 +116,8 @@ pub struct WorkerLayout {
     pub tcp_open: usize,
     /// TCP connections refused by the per-node or per-client cap.
     pub tcp_refused: u64,
+    /// The DoT and DoH listeners and their connections, when they run.
+    pub tls: Option<Box<crate::tls::TlsLayout>>,
 }
 
 /// The fixed facts of one UDP worker, kept by the server for the layout.

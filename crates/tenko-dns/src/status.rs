@@ -408,6 +408,18 @@ impl DnsNode for LocalNode {
                         workers: 0,
                     });
                 }
+                for (addresses, transport) in [
+                    (server.dot_addresses(), QueryTransport::Dot),
+                    (server.doh_addresses(), QueryTransport::Doh),
+                ] {
+                    for address in addresses {
+                        listeners.push(Listener {
+                            address: *address,
+                            transport,
+                            workers: 0,
+                        });
+                    }
+                }
                 layout = Some(server.layout());
                 true
             }

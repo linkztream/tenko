@@ -61,6 +61,7 @@ fn config(listen: Vec<SocketAddr>, tcp: TcpSettings) -> ServerConfig {
         metrics: true,
         cookies: tenko_dns::cookie::CookieMode::On,
         edns_udp_size: 1232,
+        tls: None,
     }
 }
 

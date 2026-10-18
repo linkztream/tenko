@@ -79,7 +79,11 @@ impl Limits {
     }
 
     /// A place for a connection from `client`, or `None` over a cap.
-    fn acquire(self: &Arc<Self>, client: IpAddr, settings: &TcpSettings) -> Option<Permit> {
+    pub(crate) fn acquire(
+        self: &Arc<Self>,
+        client: IpAddr,
+        settings: &TcpSettings,
+    ) -> Option<Permit> {
         let mut clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
         let count = clients.entry(client).or_insert(0);
         if self.open.load(Ordering::Relaxed) >= settings.max_connections
@@ -101,7 +105,7 @@ impl Limits {
 }
 
 /// One open connection, given back when dropped.
-struct Permit {
+pub(crate) struct Permit {
     limits: Arc<Limits>,
     client: IpAddr,
 }
@@ -147,8 +151,9 @@ pub(crate) fn bind(address: SocketAddr) -> io::Result<TcpListener> {
 const FLUSH_AT: usize = 32 * 1024;
 
 thread_local! {
-    /// The query buffers of a runtime thread; borrowed only between two awaits.
-    static SCRATCH: RefCell<Option<Scratch>> = const { RefCell::new(None) };
+    /// The query buffers of a runtime thread; borrowed only between two awaits (DoT and DoH
+    /// share them, `crate::tls`).
+    pub(crate) static SCRATCH: RefCell<Option<Scratch>> = const { RefCell::new(None) };
 }
 
 /// Accepts connections until `stop` is cancelled.

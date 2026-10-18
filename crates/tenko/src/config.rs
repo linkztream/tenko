@@ -517,6 +517,8 @@ pub struct DnsSection {
     pub cache: DnsCacheSection,
     /// The query log of this node.
     pub log: DnsLogSection,
+    /// DNS over TLS and DNS over HTTPS served to clients.
+    pub tls: DnsTlsSection,
 }
 
 impl Default for DnsSection {
@@ -534,6 +536,7 @@ impl Default for DnsSection {
             upstream_ca: None,
             cache: DnsCacheSection::default(),
             log: DnsLogSection::default(),
+            tls: DnsTlsSection::default(),
         }
     }
 }
@@ -584,6 +587,73 @@ impl Default for DnsCacheSection {
     }
 }
 
+/// `[dns.tls]`: DNS over TLS (RFC 7858) and DNS over HTTPS (RFC 8484) served to clients
+/// (DNS-14, WP5.3), both off by default. They serve the certificate of the API's TLS mode
+/// (`[tls]`: the internal CA's, or the imported files with their reload), or a certificate
+/// of their own (`certificate`, `key`), or, with `behind_proxy`, plain DNS and plain HTTP
+/// to a reverse proxy that ends TLS (`docs/dns-resolver-served.md`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "configuration keys, each a switch of its own"
+)]
+pub struct DnsTlsSection {
+    /// Serve DNS over TLS (default false).
+    pub dot: bool,
+    /// Serve DNS over HTTPS (default false).
+    pub doh: bool,
+    /// Addresses of DoT; empty (the default): each `[dns] listen` address on port 853.
+    #[serde(deserialize_with = "string_or_list")]
+    pub dot_listen: Vec<String>,
+    /// Addresses of DoH; empty (the default): each `[dns] listen` address on port 443.
+    #[serde(deserialize_with = "string_or_list")]
+    pub doh_listen: Vec<String>,
+    /// A PEM certificate chain of DoT and DoH's own (leaf first), reloaded when it
+    /// changes; not set (the default): the API's certificate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub certificate: Option<PathBuf>,
+    /// The PEM private key of `certificate`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<PathBuf>,
+    /// A reverse proxy ends TLS: DoT takes plain DNS over TCP and DoH plain HTTP, only
+    /// from `[tls] trusted_proxies`, on the addresses listed (default false).
+    pub behind_proxy: bool,
+    /// With `behind_proxy`: every connection starts with a PROXY protocol version 2
+    /// header carrying the client's address (default false).
+    pub proxy_protocol: bool,
+    /// Open connections of the node per transport, 1 to 100,000 (default 1,000).
+    pub max_connections: usize,
+    /// Open connections from one client address per transport, 1 to 1,000 (default 10).
+    pub per_client: usize,
+    /// Seconds without a query before a connection is closed, 1 to 3,600 (default 30).
+    pub idle_secs: u64,
+    /// Seconds for the TLS handshake and the PROXY header, 1 to 60 (default 5).
+    pub handshake_timeout_secs: u64,
+    /// Concurrent requests on one HTTP/2 connection, 1 to 1,000 (default 100).
+    pub doh_streams: u32,
+}
+
+impl Default for DnsTlsSection {
+    fn default() -> Self {
+        Self {
+            dot: false,
+            doh: false,
+            dot_listen: Vec::new(),
+            doh_listen: Vec::new(),
+            certificate: None,
+            key: None,
+            behind_proxy: false,
+            proxy_protocol: false,
+            max_connections: 1_000,
+            per_client: 10,
+            idle_secs: 30,
+            handshake_timeout_secs: 5,
+            doh_streams: 100,
+        }
+    }
+}
+
 impl DnsCacheSection {
     /// The entry bound under `profile`.
     pub fn entries_for(&self, profile: Profile) -> usize {
@@ -601,6 +671,196 @@ impl DnsCacheSection {
         } else {
             128 * 1024 * 1024
         })
+    }
+}
+
+/// Whether two TCP listen addresses take the same port: the same family and port, and the
+/// same address or a wildcard on either side.
+fn overlaps(a: SocketAddr, b: SocketAddr) -> bool {
+    a.port() == b.port()
+        && a.is_ipv4() == b.is_ipv4()
+        && (a.ip() == b.ip() || a.ip().is_unspecified() || b.ip().is_unspecified())
+}
+
+impl DnsTlsSection {
+    /// Whether DoT or DoH is on.
+    pub fn enabled(&self) -> bool {
+        self.dot || self.doh
+    }
+
+    /// The DoT and DoH addresses, each empty when its transport is off.
+    ///
+    /// # Errors
+    ///
+    /// `config.invalid` for an entry that is not an address with a port, an address listed
+    /// twice, or, behind a proxy, no address or a wildcard one.
+    pub fn addresses(
+        &self,
+        listen: &[SocketAddr],
+    ) -> Result<(Vec<SocketAddr>, Vec<SocketAddr>), ConfigError> {
+        let dot = self.one(
+            self.dot,
+            "dot_listen",
+            &self.dot_listen,
+            tenko_dns::tls::DOT_PORT,
+            listen,
+        )?;
+        let doh = self.one(
+            self.doh,
+            "doh_listen",
+            &self.doh_listen,
+            tenko_dns::tls::DOH_PORT,
+            listen,
+        )?;
+        Ok((dot, doh))
+    }
+
+    fn one(
+        &self,
+        on: bool,
+        key: &str,
+        texts: &[String],
+        port: u16,
+        listen: &[SocketAddr],
+    ) -> Result<Vec<SocketAddr>, ConfigError> {
+        if !on {
+            return Ok(Vec::new());
+        }
+        if texts.is_empty() {
+            if self.behind_proxy {
+                return Err(ConfigError::invalid(format!(
+                    "dns.tls.behind_proxy needs dns.tls.{key}: the internal address the proxy \
+                     connects to, such as 127.0.0.1:{}",
+                    port + 8000
+                )));
+            }
+            return Ok(listen
+                .iter()
+                .map(|address| SocketAddr::new(address.ip(), port))
+                .collect());
+        }
+        let mut addrs: Vec<SocketAddr> = Vec::with_capacity(texts.len());
+        for text in texts {
+            let addr: SocketAddr = text.parse().map_err(|_| {
+                ConfigError::invalid(format!(
+                    "dns.tls.{key}: `{text}` is not an address with a port, such as \
+                     0.0.0.0:{port} or [::]:{port}"
+                ))
+            })?;
+            if addrs.contains(&addr) {
+                return Err(ConfigError::invalid(format!(
+                    "dns.tls.{key}: `{text}` is listed twice"
+                )));
+            }
+            if self.behind_proxy && addr.ip().is_unspecified() {
+                return Err(ConfigError::invalid(format!(
+                    "dns.tls.{key}: behind a proxy DoT and DoH speak plain DNS and HTTP, so \
+                     `{text}` must be a loopback or internal address, not a wildcard"
+                )));
+            }
+            addrs.push(addr);
+        }
+        Ok(addrs)
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        fn check(ok: bool, message: &str) -> Result<(), ConfigError> {
+            if ok {
+                Ok(())
+            } else {
+                Err(ConfigError::invalid(message.to_owned()))
+            }
+        }
+        check(
+            self.certificate.is_some() == self.key.is_some(),
+            "dns.tls.certificate and dns.tls.key go together",
+        )?;
+        check(
+            !(self.behind_proxy && self.certificate.is_some()),
+            "dns.tls.behind_proxy: the proxy ends TLS, so dns.tls.certificate is not used; \
+             remove one of them",
+        )?;
+        check(
+            self.behind_proxy || !self.proxy_protocol,
+            "dns.tls.proxy_protocol needs dns.tls.behind_proxy = true",
+        )?;
+        check(
+            (1..=100_000).contains(&self.max_connections),
+            "dns.tls.max_connections must be between 1 and 100000",
+        )?;
+        check(
+            (1..=1_000).contains(&self.per_client),
+            "dns.tls.per_client must be between 1 and 1000",
+        )?;
+        check(
+            (1..=3_600).contains(&self.idle_secs),
+            "dns.tls.idle_secs must be between 1 and 3600",
+        )?;
+        check(
+            (1..=60).contains(&self.handshake_timeout_secs),
+            "dns.tls.handshake_timeout_secs must be between 1 and 60",
+        )?;
+        check(
+            (1..=1_000).contains(&self.doh_streams),
+            "dns.tls.doh_streams must be between 1 and 1000",
+        )
+    }
+
+    /// The checks against the rest of the file: the ports of `[dns] listen` and of the API,
+    /// the trusted proxies, and a certificate to serve.
+    fn check_with(
+        &self,
+        dns_listen: &[SocketAddr],
+        api_listen: &[SocketAddr],
+        tls: &TlsSection,
+    ) -> Result<(), ConfigError> {
+        if !self.enabled() {
+            return Ok(());
+        }
+        let (dot, doh) = self.addresses(dns_listen)?;
+        for (key, addrs) in [("dot_listen", &dot), ("doh_listen", &doh)] {
+            for addr in addrs {
+                if let Some(api) = api_listen.iter().find(|api| overlaps(**api, *addr)) {
+                    return Err(ConfigError::invalid(format!(
+                        "dns.tls.{key}: {addr} takes the port of the API (server.listen \
+                         {api}); give DoT and DoH another address or port, or move the API"
+                    )));
+                }
+                if let Some(dns) = dns_listen.iter().find(|dns| overlaps(**dns, *addr)) {
+                    return Err(ConfigError::invalid(format!(
+                        "dns.tls.{key}: {addr} takes the TCP port of dns.listen {dns}"
+                    )));
+                }
+            }
+        }
+        if let Some(addr) = dot
+            .iter()
+            .find(|dot| doh.iter().any(|doh| overlaps(**dot, *doh)))
+        {
+            return Err(ConfigError::invalid(format!(
+                "dns.tls: DoT and DoH both take {addr}"
+            )));
+        }
+        if self.behind_proxy {
+            if tls.trusted_proxies.is_empty() {
+                return Err(ConfigError::invalid(
+                    "dns.tls.behind_proxy needs tls.trusted_proxies, the addresses of the \
+                     proxies; without them every connection is refused",
+                ));
+            }
+            TrustedProxies::parse(&tls.trusted_proxies)
+                .map_err(|error| ConfigError::invalid(format!("tls.trusted_proxies: {error}")))?;
+        } else if self.certificate.is_none()
+            && matches!(tls.mode, TlsModeName::ReverseProxy | TlsModeName::Plain)
+        {
+            return Err(ConfigError::invalid(format!(
+                "dns.tls: the API serves no certificate (tls.mode = \"{}\"), so DoT and DoH \
+                 have none either; set dns.tls.certificate and dns.tls.key, or \
+                 dns.tls.behind_proxy = true behind the reverse proxy",
+                tls.mode.as_str()
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -1032,7 +1292,8 @@ impl DnsSection {
         check(
             (1..=1_000_000).contains(&self.log.sample),
             "dns.log.sample must be between 1 and 1000000",
-        )
+        )?;
+        self.tls.validate()
     }
 }
 
@@ -2130,6 +2391,9 @@ impl Config {
         self.backup.validate()?;
         self.audit_export.validate()?;
         self.dns.validate()?;
+        self.dns
+            .tls
+            .check_with(&self.dns.listen_addrs()?, &listen, &self.tls)?;
         self.scan
             .validate()
             .map_err(|error| ConfigError::invalid(error.detail().to_owned()))?;
@@ -3000,5 +3264,112 @@ retired = [\"tenko_kek_old\"]
             Path::new("/d").join("tls").join("ca-root.pem")
         );
         assert!(layout.is_fresh());
+    }
+
+    fn dns_tls(text: &str, vars: &[(&str, &str)]) -> Result<Resolved, ConfigError> {
+        let dir = std::env::temp_dir().join("tenko-config-dns-tls");
+        let text = format!("data_dir = {:?}\n{text}", dir.display().to_string());
+        from_text(&text, vars).and_then(|loaded| loaded.config.resolve())
+    }
+
+    #[test]
+    fn dot_and_doh_are_off_by_default_and_take_the_dns_addresses() {
+        let resolved = dns_tls("", &[]).expect("defaults");
+        let section = &resolved.config.dns.tls;
+        assert!(!section.enabled());
+        let listen = resolved.config.dns.listen_addrs().expect("listen");
+        assert_eq!(section.addresses(&listen).expect("none"), (vec![], vec![]));
+        let resolved = dns_tls(
+            "[dns]\nlisten = [\"192.0.2.53:53\", \"[2001:db8::53]:53\"]\n",
+            &[
+                ("TENKO_DNS__TLS__DOT", "true"),
+                ("TENKO_DNS__TLS__DOH", "true"),
+            ],
+        )
+        .expect("both on");
+        let listen = resolved.config.dns.listen_addrs().expect("listen");
+        let (dot, doh) = resolved
+            .config
+            .dns
+            .tls
+            .addresses(&listen)
+            .expect("addresses");
+        let parse = |text: &str| text.parse::<SocketAddr>().expect("address");
+        assert_eq!(
+            dot,
+            vec![parse("192.0.2.53:853"), parse("[2001:db8::53]:853")]
+        );
+        assert_eq!(
+            doh,
+            vec![parse("192.0.2.53:443"), parse("[2001:db8::53]:443")]
+        );
+    }
+
+    #[test]
+    fn dns_tls_conflicts_are_refused() {
+        let refused = |text: &str, needle: &str| {
+            let error = dns_tls(text, &[]).expect_err(text);
+            assert!(error.message.contains(needle), "{text}: {error}");
+        };
+        refused(
+            "[server]\nlisten = [\"192.0.2.53:443\"]\n[dns.tls]\ndoh = true\n",
+            "takes the port of the API",
+        );
+        refused(
+            "[dns.tls]\ndot = true\ndot_listen = [\"0.0.0.0:53\"]\n",
+            "TCP port of dns.listen",
+        );
+        refused(
+            "[dns.tls]\ndot = true\ndoh = true\ndot_listen = [\"127.0.0.1:8853\"]\n\
+             doh_listen = [\"127.0.0.1:8853\"]\n",
+            "both take",
+        );
+        refused(
+            "[dns.tls]\ndot = true\ncertificate = \"/etc/tenko/dns.pem\"\n",
+            "go together",
+        );
+        refused(
+            "[dns.tls]\ndot = true\nbehind_proxy = true\ndot_listen = [\"127.0.0.1:8853\"]\n",
+            "tls.trusted_proxies",
+        );
+        refused(
+            "[tls]\ntrusted_proxies = [\"127.0.0.1\"]\n[dns.tls]\ndot = true\n\
+             behind_proxy = true\n",
+            "needs dns.tls.dot_listen",
+        );
+        refused(
+            "[tls]\ntrusted_proxies = [\"127.0.0.1\"]\n[dns.tls]\ndoh = true\n\
+             behind_proxy = true\ndoh_listen = [\"0.0.0.0:8443\"]\n",
+            "not a wildcard",
+        );
+        refused(
+            "[dns.tls]\ndot = true\nproxy_protocol = true\n",
+            "needs dns.tls.behind_proxy",
+        );
+        refused(
+            "[tls]\nmode = \"reverse_proxy\"\npublic_host = \"tenko.example.test\"\n\
+             trusted_proxies = [\"127.0.0.1\"]\n[dns.tls]\ndot = true\n",
+            "the API serves no certificate",
+        );
+        refused("[dns.tls]\ndot = true\nidle_secs = 0\n", "idle_secs");
+    }
+
+    #[test]
+    fn dns_tls_behind_a_proxy_or_with_its_own_certificate_resolves() {
+        dns_tls(
+            "[tls]\nmode = \"reverse_proxy\"\npublic_host = \"tenko.example.test\"\n\
+             trusted_proxies = [\"127.0.0.1\"]\n[dns.tls]\ndot = true\ndoh = true\n\
+             behind_proxy = true\nproxy_protocol = true\ndot_listen = \"127.0.0.1:8853\"\n\
+             doh_listen = \"127.0.0.1:8443\"\n[server]\nlisten = [\"127.0.0.1:9443\"]\n",
+            &[],
+        )
+        .expect("behind the proxy");
+        dns_tls(
+            "[tls]\nmode = \"reverse_proxy\"\npublic_host = \"tenko.example.test\"\n\
+             trusted_proxies = [\"127.0.0.1\"]\n[dns.tls]\ndot = true\n\
+             certificate = \"/etc/tenko/dns.pem\"\nkey = \"/etc/tenko/dns.key\"\n",
+            &[],
+        )
+        .expect("a certificate of its own");
     }
 }

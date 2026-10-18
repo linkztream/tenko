@@ -443,6 +443,43 @@ sample = 1
 # Replace client addresses with a keyed hash whose key changes every day (GDPR, TGL-15).
 pseudonymise = true
 
+[dns.tls]
+# DNS over TLS (RFC 7858) and DNS over HTTPS (RFC 8484) for the clients of this node,
+# both off by default (docs/dns-resolver-served.md). They answer from the same zones,
+# views, forwarder and query log as UDP and TCP. Ports 853 and 443 need
+# CAP_NET_BIND_SERVICE on Linux, as 53 does (deploy/README.md).
+# Environment: TENKO_DNS__TLS__DOT=true, TENKO_DNS__TLS__DOH=true
+dot = false
+doh = false
+# Addresses. Empty: each [dns] listen address on port 853 (DoT) and 443 (DoH). DoH must
+# not take the API's port (server.listen): give it another address or port.
+dot_listen = []
+doh_listen = []
+# The certificate: not set, DoT and DoH serve the API's ([tls]: the internal CA's, or the
+# imported files, renewed or reloaded without a restart). A chain and key of their own
+# (PEM, leaf first), for a certificate in the resolver's name, are watched for changes
+# every tls.watch_interval_secs the same way.
+# certificate = "/etc/tenko/dns-cert.pem"
+# key = "/etc/tenko/dns-key.pem"
+# Behind a reverse proxy that ends TLS (HAProxy in TCP mode for DoT, as HTTPS for DoH):
+# plain DNS and plain HTTP on the listed internal addresses, only from tls.trusted_proxies.
+# proxy_protocol: every connection starts with a PROXY protocol v2 header (send-proxy-v2)
+# with the client's address; without it DoH reads X-Forwarded-For.
+behind_proxy = false
+proxy_protocol = false
+# dot_listen = ["127.0.0.1:8853"]
+# doh_listen = ["127.0.0.1:8443"]
+# Open connections of the node (1 to 100000) and from one client address (1 to 1000),
+# per transport and apart from [dns.tcp]; behind a proxy only the node cap applies.
+max_connections = 1000
+per_client = 10
+# Seconds without a query before a connection is closed (1 to 3600).
+idle_secs = 30
+# Seconds for the TLS handshake and the PROXY header (1 to 60).
+handshake_timeout_secs = 5
+# Concurrent requests on one HTTP/2 connection (1 to 1000).
+doh_streams = 100
+
 [scan]
 # The scanner of the probe role (SCAN-01 to SCAN-09). A probe reads this section of its own
 # tenko.toml until the controller hands out scan configuration (a later release).

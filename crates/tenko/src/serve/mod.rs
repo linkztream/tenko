@@ -1757,6 +1757,7 @@ async fn start(
         })
         .await?;
     running.tasks.extend(metrics_tasks);
+    let (api_tls, tls_policy) = (tls.service.clone(), tls.policy);
     let dns_role = steps
         .run("dns", async {
             if !dns_on {
@@ -1774,6 +1775,8 @@ async fn start(
                 resolved,
                 store: Arc::clone(&store_dyn),
                 metrics: warnings_state.metrics(),
+                api_tls,
+                tls_policy,
             })
             .await?;
             Ok((Some(role), summary))

@@ -124,6 +124,11 @@ The `dns` role, while it runs on the node ([dns.md](dns.md) sections 8 and 12.8)
 | `tenko_dns_cache_entries` | gauge | | Entries in the cache |
 | `tenko_dns_upstream_queries_total` | counter | `rule`, `upstream`, `transport`, `outcome` | Exchanges with upstream resolvers, by forwarding rule (its suffix, `default` for `[dns] forwarders`, `stub:<zone>` and `stub-source:<zone>` for stub zones), upstream (`address:port`), transport (`plain`, `dot`, `doh`) and outcome (`ok`, `servfail`, `timeout`, `unreachable`, `malformed`); a series appears with the first exchange ([dns-resolver.md](dns-resolver.md) section 4) |
 | `tenko_dns_upstream_rtt_seconds` | histogram | `upstream` | Round-trip time of the answered exchanges with an upstream, over every rule that names it; the buckets of `tenko_dns_query_duration_seconds` |
+| `tenko_dns_connections` | gauge | `proto` | Open DoT and DoH connections (`dot`, `doh`), while `[dns.tls]` serves either ([dns-resolver-served.md](dns-resolver-served.md) section 5) |
+| `tenko_dns_connections_refused_total` | counter | `proto` | DoT and DoH connections closed at once: over `[dns.tls] max_connections` or `per_client`, or, behind a proxy, from a peer that is not a trusted proxy |
+| `tenko_dns_tls_handshake_failures_total` | counter | `proto` | DoT and DoH TLS handshakes and PROXY protocol headers that failed or took longer than `[dns.tls] handshake_timeout_secs` |
+
+`proto` is `dot` and `doh` for queries that come over DNS over TLS and DNS over HTTPS, also when a reverse proxy ends their TLS; the last three families are registered only when DoT or DoH is on.
 
 The other families of the DNS module (`tenko_dns_rrl_dropped_total`, `tenko_dns_blocked_total`, `tenko_dns_zone_serial`, `tenko_dns_signing_*`, `tenko_dns_log_dropped_total`; [dns-contracts.md](dns-contracts.md) section 7) are declared and registered by the packages that count them. The health of the role is in `GET /api/v1/nodes/{id}/dns` and in the warnings of `GET /api/v1/system/status`: `dns.role.not_serving` (the role stopped answering) and `dns.role.lagging` (its index is more than 1,000 revisions behind the store).
 

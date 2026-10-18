@@ -546,6 +546,92 @@ layout, see windows/README.md), and narrow the rules with
 `-RemoteAddress` to the client networks. On Windows the UDP workers of an address share one
 socket; `[dns] workers` sets how many threads read it.
 
+## DNS over TLS and DNS over HTTPS
+
+The dns role can serve DNS over TLS (DoT, RFC 7858) and DNS over HTTPS (DoH, RFC 8484) to its
+clients; both are off by default. `[dns.tls] dot = true` listens on each `[dns] listen`
+address on port 853, `doh = true` on port 443 with the path `/dns-query` (`dot_listen` and
+`doh_listen` choose other addresses). `tenko serve` ends its `dns role answering on ...` line
+with `DoT on ..., DoH on ... with <certificate>`. The details, the limits and the metrics are
+in [../docs/dns-resolver-served.md](../docs/dns-resolver-served.md).
+
+**Ports and capability.** 853 and 443 are below 1024, like 53: the systemd unit's
+`CAP_NET_BIND_SERVICE` covers them, a container publishes them (`-p 853:853/tcp -p
+443:443/tcp`), and the firewall opens TCP 853 and TCP 443 to the clients, for example
+`nft add rule inet filter input tcp dport { 853, 443 } accept`, narrowed to their networks.
+On Windows add two `New-NetFirewallRule` lines as for port 53 with `-Protocol TCP
+-LocalPort 853` and `443`. DoH cannot share the API's port: with the API on `0.0.0.0:443`,
+give DoH another address or port (`tenko config check` says so).
+
+**The certificate** is the API's unless `[dns.tls] certificate` and `key` name one of their
+own (PEM, leaf first, watched for changes like the imported mode):
+
+- `[tls] mode = "internal_ca"`: the internal CA's certificate for the host name. Clients
+  must trust `<data_dir>/tls/ca-root.pem` and ask for a name on the certificate (add the
+  resolver's name to `[tls] alt_names`, its address to `[tls] addresses`). Phones and
+  browsers that take a resolver by name only trust a public CA: use the imported mode or a
+  certificate of DoT and DoH's own for them. Check with
+  `kdig @192.0.2.53 +tls-ca=ca-root.pem +tls-hostname=tenko.example.test www.example.test`
+  and `kdig @192.0.2.53 +https +tls-ca=ca-root.pem +tls-hostname=tenko.example.test
+  www.example.test`.
+- `[tls] mode = "imported"`: the imported files; a renewed certificate written over them
+  (by an ACME client outside Tenko, for example) is served on the next handshake without a
+  restart, and open connections keep the old one until they close.
+- `[tls] mode = "reverse_proxy"`: the API has no certificate. Either give DoT and DoH their
+  own (`[dns.tls] certificate`, `key`), or let the proxy end their TLS too (below).
+
+**Behind HAProxy.** With `[dns.tls] behind_proxy = true` the proxy ends TLS and Tenko serves
+plain DNS (DoT) and plain HTTP (DoH) on internal addresses, only to `[tls] trusted_proxies`;
+with `proxy_protocol = true` every connection starts with a PROXY protocol v2 header that
+carries the client's address (else DoH reads `X-Forwarded-For`, DoT sees the proxy):
+
+```toml
+[tls]
+trusted_proxies = ["192.0.2.10"]
+
+[dns.tls]
+dot = true
+doh = true
+behind_proxy = true
+proxy_protocol = true
+dot_listen = ["192.0.2.53:8853"]
+doh_listen = ["192.0.2.53:8443"]
+```
+
+```
+# DoT: TCP mode, TLS ends here, the DNS stream goes on in plain.
+frontend dot
+    mode tcp
+    bind :853 ssl crt /etc/haproxy/certs/dns.example.test.pem alpn dot
+    timeout client 60s
+    default_backend tenko_dot
+
+backend tenko_dot
+    mode tcp
+    timeout server 60s
+    server tenko 192.0.2.53:8853 send-proxy-v2 check check-send-proxy
+
+# DoH: HTTPS, /dns-query only.
+frontend doh
+    mode http
+    bind :443 ssl crt /etc/haproxy/certs/dns.example.test.pem alpn h2,http/1.1
+    acl dns_query path /dns-query
+    http-request deny unless dns_query
+    default_backend tenko_doh
+
+backend tenko_doh
+    mode http
+    server tenko 192.0.2.53:8443 send-proxy-v2 check check-send-proxy
+```
+
+Without `send-proxy-v2` (and with `proxy_protocol = false`), add `option forwardfor` to the
+DoH backend so the client's address reaches the query log and the views.
+`check-send-proxy` makes the health check send a PROXY header too (a `LOCAL` one, which
+Tenko accepts); a bare `check` connects without it and is counted as a failed handshake in
+`tenko_dns_tls_handshake_failures_total`. When the console's
+frontend already holds `:443`, route `/dns-query` there to `tenko_doh` with a
+`use_backend tenko_doh if { path /dns-query }` line instead of a second frontend.
+
 ## Windows
 
 `tenko service install` registers `tenko serve` as a Windows service; see

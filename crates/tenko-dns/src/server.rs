@@ -2,12 +2,13 @@
 //! secret in one value with a start and a graceful stop (the role start step of WP4.3 calls
 //! them).
 //!
-//! [`Server::start`] binds every listen address for UDP and TCP before it starts anything,
-//! so a port in use fails the start and leaves nothing running; then it starts the UDP
-//! workers, the TCP accept loops and the daily rotation of the cookie secret.
+//! [`Server::start`] binds every listen address for UDP and TCP, and the DoT and DoH
+//! addresses ([`crate::tls`]), before it starts anything, so a port in use fails the start
+//! and leaves nothing running; then it starts the UDP workers, the TCP, DoT and DoH accept
+//! loops and the daily rotation of the cookie secret.
 //! [`Server::stop`] stops accepting, lets the UDP workers finish the query in hand (they
 //! see the stop within [`udp::STOP_POLL`]), closes the TCP connections after their current
-//! query, and waits for all of it.
+//! query (a DoH connection after its requests in hand), and waits for all of it.
 
 use std::{
     io,
@@ -20,6 +21,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use rustls::server::ResolvesServerCert;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -29,6 +31,7 @@ use crate::{
     log::QueryLogSink,
     resolver::Resolver,
     respond::{ForwardSink, Responder},
+    tls::{self, TlsListen},
     transport::{
         WorkerLayout, WorkerSlot,
         tcp::{self, Limits, TcpSettings},
@@ -40,7 +43,7 @@ use crate::{
 /// rotates daily and keeps the previous secret valid).
 pub const COOKIE_ROTATION: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// How long [`Server::stop`] waits for open TCP connections to close.
+/// How long [`Server::stop`] waits for open TCP, DoT and DoH connections to close.
 const DRAIN: Duration = Duration::from_secs(2);
 
 /// The settings of a server; the `[dns]` keys of the configuration (WP4.3) map onto them.
@@ -60,6 +63,8 @@ pub struct ServerConfig {
     /// The EDNS UDP size (`edns.udp_size`): the largest UDP answer and the size advertised,
     /// 512 to 4096, 1232 by default (DNS flag day 2020).
     pub edns_udp_size: u16,
+    /// The DoT and DoH listeners (`[dns.tls]`); `None` serves neither.
+    pub tls: Option<TlsListen>,
 }
 
 impl Default for ServerConfig {
@@ -74,6 +79,7 @@ impl Default for ServerConfig {
             metrics: true,
             cookies: CookieMode::On,
             edns_udp_size: crate::wire::SERVER_UDP_PAYLOAD,
+            tls: None,
         }
     }
 }
@@ -87,6 +93,9 @@ pub struct Hooks {
     pub forward: Option<Arc<dyn ForwardSink>>,
     /// The cookie secret; a random one when absent.
     pub cookies: Option<CookieSecret>,
+    /// The certificates of DoT and DoH when they end TLS ([`tls::Termination::Tls`]): a
+    /// resolver that may swap its certificate while the listeners run.
+    pub certificates: Option<Arc<dyn ResolvesServerCert>>,
 }
 
 impl std::fmt::Debug for Hooks {
@@ -95,6 +104,7 @@ impl std::fmt::Debug for Hooks {
             .field("log", &self.log.is_some())
             .field("forward", &self.forward.is_some())
             .field("cookies", &self.cookies.is_some())
+            .field("certificates", &self.certificates.is_some())
             .finish()
     }
 }
@@ -113,6 +123,7 @@ pub struct Server {
     udp: Vec<SocketAddr>,
     tcp: Vec<SocketAddr>,
     limits: Arc<Limits>,
+    tls: Option<tls::Running>,
 }
 
 fn invalid(reason: &str) -> io::Error {
@@ -139,8 +150,9 @@ impl Server {
     ///
     /// # Errors
     ///
-    /// An address that cannot be bound, no listen address, no worker, or a failing random
-    /// generator for the cookie secret; nothing keeps running then.
+    /// An address that cannot be bound, no listen address, no worker, DoT or DoH that end
+    /// TLS without [`Hooks::certificates`], or a failing random generator for the cookie
+    /// secret; nothing keeps running then.
     pub async fn start<R: Resolver + 'static>(
         config: ServerConfig,
         catalog: CatalogHandle,
@@ -179,6 +191,10 @@ impl Server {
             }
             bound.push(udp);
         }
+        let encrypted = match config.tls.clone() {
+            Some(settings) => Some(tls::Prepared::bind(settings, hooks.certificates.as_ref())?),
+            None => None,
+        };
         let stop_flag = Arc::new(AtomicBool::new(false));
         let cancel = CancellationToken::new();
         let limits = Arc::new(Limits::default());
@@ -197,6 +213,7 @@ impl Server {
             slots: Vec::new(),
             tasks: Vec::new(),
             limits,
+            tls: None,
         };
         for socket_set in &bound {
             match udp::spawn(
@@ -229,6 +246,11 @@ impl Server {
                 )));
             }
         }
+        if let Some(prepared) = encrypted {
+            let (running, tasks) = prepared.spawn(&responder, &server.cancel);
+            server.tasks.extend(tasks);
+            server.tls = Some(running);
+        }
         server.tasks.push(tokio::spawn(rotate_cookies(
             server.cookies.clone(),
             server.cancel.clone(),
@@ -246,6 +268,16 @@ impl Server {
         &self.tcp
     }
 
+    /// The DoT addresses bound.
+    pub fn dot_addresses(&self) -> &[SocketAddr] {
+        self.tls.as_ref().map_or(&[], tls::Running::dot_addresses)
+    }
+
+    /// The DoH addresses bound.
+    pub fn doh_addresses(&self) -> &[SocketAddr] {
+        self.tls.as_ref().map_or(&[], tls::Running::doh_addresses)
+    }
+
     /// The catalog swap the server answers from: the role's writer stores into it.
     pub fn catalog(&self) -> &CatalogHandle {
         &self.catalog
@@ -261,7 +293,8 @@ impl Server {
         &self.config
     }
 
-    /// The workers, their sockets and counters, and the TCP connections (ADR 0009).
+    /// The workers, their sockets and counters, and the TCP, DoT and DoH connections
+    /// (ADR 0009).
     pub fn layout(&self) -> WorkerLayout {
         WorkerLayout {
             mode: self.config.udp.mode,
@@ -275,6 +308,7 @@ impl Server {
             tcp: self.tcp.clone(),
             tcp_open: self.limits.open(),
             tcp_refused: self.limits.refused(),
+            tls: self.tls.as_ref().map(|tls| Box::new(tls.layout())),
         }
     }
 
@@ -293,7 +327,10 @@ impl Server {
             let _ = task.await;
         }
         let deadline = Instant::now() + DRAIN;
-        while self.limits.open() > 0 && Instant::now() < deadline {
+        let open = |server: &Self| {
+            server.limits.open() + server.tls.as_ref().map_or(0, tls::Running::open)
+        };
+        while open(&self) > 0 && Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }

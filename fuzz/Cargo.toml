@@ -190,3 +190,10 @@ path = "fuzz_targets/dns_zonefile.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "dns_tls_wire"
+path = "fuzz_targets/dns_tls_wire.rs"
+test = false
+doc = false
+bench = false

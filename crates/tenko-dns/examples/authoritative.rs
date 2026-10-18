@@ -243,6 +243,7 @@ async fn run(args: Args) -> Result<(), String> {
         metrics: args.metrics,
         cookies: CookieMode::On,
         edns_udp_size: 1232,
+        tls: None,
     };
     let server = Server::start_authoritative(config, handle, Hooks::default())
         .await

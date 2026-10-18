@@ -88,6 +88,11 @@ tracing-layer-win-eventlog = "1.0.1"
 sd-notify = "0.5.0"
 
 [dev-dependencies]
+# The DoH client of tests/acceptance_dns_tls.rs: HTTP/2 over rustls (versions and features
+# of tenko-dns and tenko-api).
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", features = ["client", "http1", "http2"] }
+hyper-util = { version = "0.1.21", features = ["tokio"] }
 # The OTLP receiver of the trace tests (`tests/serve_support/otlp.rs`), on loopback.
 opentelemetry-proto = { workspace = true, features = ["gen-tonic", "trace"] }
 # The imported-certificate transport of `tests/serve_support` (a test CA and a leaf for
@@ -99,6 +104,8 @@ tenko-auth = { workspace = true, features = ["online", "testing"] }
 # The in-process cluster fixtures and the memory vault of the leader supervisor tests.
 tenko-store = { workspace = true, features = ["raft", "testing"] }
 tenko-vault = { workspace = true, features = ["testing"] }
+# The DoT and DoH clients of tests/acceptance_dns_tls.rs.
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "logging", "tls12"] }
 
 [lints]
 workspace = true

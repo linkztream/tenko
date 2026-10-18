@@ -42,6 +42,7 @@ pub mod respond;
 pub mod server;
 pub mod status;
 pub mod store_feed;
+pub mod tls;
 pub mod transport;
 pub mod tree;
 pub mod upstream;

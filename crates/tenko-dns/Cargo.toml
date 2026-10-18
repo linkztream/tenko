@@ -20,12 +20,18 @@ domain = { workspace = true, features = ["zonefile"] }
 # graph through hyper and tonic.
 h2 = "0.4.20"
 http = "1.5.0"
+# DNS over HTTPS served to clients (src/tls, WP5.3): HTTP/1.1 and HTTP/2 on hyper with the
+# features and versions tenko-api already builds.
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", features = ["http1", "http2", "server"] }
+hyper-util = { version = "0.1.21", features = ["http1", "http2", "server", "server-auto", "tokio"] }
 ipnet = { workspace = true }
+# DNS over TLS and HTTPS served to clients (src/tls): the rustls server over the process's
+# certificate resolver, same version and features as tenko-api and tenko-cluster.
+rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-# DoT and DoH upstreams (WP5.1): rustls with aws-lc-rs and the system roots, as the rest
-# of the process.
-rustls = { workspace = true }
+# DoT and DoH upstreams (WP5.1): the same rustls with aws-lc-rs and the system roots.
 rustls-native-certs = "0.8.4"
 socket2 = { workspace = true }
 tenko-core = { workspace = true }
@@ -42,13 +48,18 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 hickory-proto = { workspace = true }
+# The DoH client of tests/tls*.rs (HTTP/2 and HTTP/1.1 over a rustls client).
+hyper = { version = "1.12.0", features = ["client", "http1", "http2"] }
 proptest = { workspace = true }
-# The certificates of the in-test DoT and DoH upstreams.
+# The certificates of the in-test DoT and DoH upstreams and the test CA and leaves of tests/tls*.rs.
 rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "crypto", "pem"] }
 stats_alloc = { workspace = true }
 tenko-core = { workspace = true, features = ["testing"] }
+# The TLS service of the process (imported files with hot reload) in tests/tls*.rs.
+tenko-cluster = { workspace = true }
 tenko-jobs = { workspace = true, features = ["testing"] }
 tenko-vault = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }
 time = { workspace = true }
 
 [lints]
