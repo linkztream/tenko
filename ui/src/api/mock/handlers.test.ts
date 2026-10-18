@@ -762,9 +762,9 @@ describe("password", () => {
 
     const pin = await check("4821", "home");
     expect(pin.status).toBe(200);
-    expect(pin.body).toMatchObject({ acceptable: true, violations: [], breach_check: "clean", policy: { preset: "pin" } });
+    expect(pin.body).toMatchObject({ acceptable: true, violations: [], breach_check: "not_applicable", policy: { preset: "pin" } });
 
-    expect((await check("0000", "home")).body.violations).toEqual([{ kind: "trivial" }, { kind: "breached" }]);
+    expect((await check("0000", "home")).body).toMatchObject({ violations: [{ kind: "trivial" }], breach_check: "not_applicable" });
     expect((await check("12ab", "home")).body.violations).toEqual([{ kind: "pin_digits_only" }]);
     expect((await check("12", "home")).body.violations).toEqual([{ kind: "too_short", min: 4 }, { kind: "trivial" }]);
 
@@ -1941,7 +1941,7 @@ describe("password policy", () => {
     const fullWidth = String.fromCodePoint(0xff11, 0xff12, 0xff13, 0xff14);
     expect(check(`${accented}-${accented}-${accented}!`, { preset: "standard" })).toEqual([]);
     expect(check(`${accented}-${accented}-${accented}`, { preset: "standard" })).toEqual([{ kind: "too_short", min: 12 }]);
-    expect(check(fullWidth, { preset: "pin" })).toEqual([{ kind: "trivial" }, { kind: "breached" }]);
+    expect(check(fullWidth, { preset: "pin" })).toEqual([{ kind: "trivial" }]);
     expect(check("ab\ncdefghijkl", { preset: "standard" })).toContainEqual({ kind: "invalid_characters" });
   });
 

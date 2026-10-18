@@ -4853,7 +4853,7 @@ export interface components {
          * @description The result of the breached-password check (IAM-04).
          * @enum {string}
          */
-        BreachStatus: "clean" | "breached" | "unavailable" | "off";
+        BreachStatus: "clean" | "breached" | "unavailable" | "off" | "not_applicable";
         /** @description `PUT /system/break-glass` (IAM-09). */
         BreakGlassChange: {
             /** @description Make it the break-glass account, or a normal account again. */

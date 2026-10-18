@@ -4233,6 +4233,7 @@ export type MessageKey =
   | "setup.admin.check.breach_found"
   | "setup.admin.check.breach_off"
   | "setup.admin.check.breach_pending"
+  | "setup.admin.check.breach_pin"
   | "setup.admin.check.breach_unavailable"
   | "setup.admin.check.context"
   | "setup.admin.check.state.bad"
@@ -10252,6 +10253,7 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.admin.check.breach_found",
   "setup.admin.check.breach_off",
   "setup.admin.check.breach_pending",
+  "setup.admin.check.breach_pin",
   "setup.admin.check.breach_unavailable",
   "setup.admin.check.context",
   "setup.admin.check.state.bad",

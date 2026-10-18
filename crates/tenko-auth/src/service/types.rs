@@ -333,6 +333,8 @@ pub enum BreachStatus {
     Unavailable,
     /// TGL-06 is off.
     Off,
+    /// A PIN: short numeric codes are not checked against the corpus (every one of them is in it); the PIN preset's protection is the coupling rule of IAM-07.
+    NotApplicable,
 }
 
 /// The answer of `POST /auth/password/check`.

@@ -128,7 +128,8 @@ fn label(field: &'static str, input: Option<&str>, fallback: &str) -> Result<Str
 impl AuthService {
     /// Checks a candidate password against the settings: the preset's rules and, per
     /// TGL-06, the breached-password corpus. An unavailable breach check fails open and is
-    /// reported.
+    /// reported. A PIN-like secret under a preset that admits a PIN is not looked up (every
+    /// short numeric code is in the corpus) and reports [`BreachStatus::NotApplicable`].
     pub(super) async fn evaluate_password(
         &self,
         settings: &SecuritySettings,
@@ -147,6 +148,9 @@ impl AuthService {
             BreachStatus::Off
         } else {
             let normalized = normalize(password);
+            if is_pin_like(&normalized) && admits_pin(&settings.password_policy) {
+                return (violations, BreachStatus::NotApplicable);
+            }
             match self.breach_checker(settings).check(&normalized).await {
                 BreachOutcome::Clean => BreachStatus::Clean,
                 BreachOutcome::Breached { count } => {

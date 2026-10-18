@@ -153,6 +153,11 @@ export function policyViolations(
   return violations;
 }
 
+/** A PIN in substance: digits only and under 12 characters (the server's rule, IAM-07). */
+export function isPinLike(normalized: string): boolean {
+  return normalized.length > 0 && normalized.length < 12 && /^[0-9]+$/.test(normalized);
+}
+
 /** Whether the breached-password corpus holds the password. */
 export function isBreached(password: string): boolean {
   return BREACHED.has(password) || BREACHED.has(normalizePassword(password));
@@ -163,7 +168,10 @@ export function checkPassword(password: string, input: PasswordCheckInput): Pass
   const violations = policyViolations(password, input.policy, input);
   let breachCheck: BreachStatus = "off";
   if (input.breach !== "off") {
-    if (isBreached(password)) {
+    if (isPinLike(normalizePassword(password)) && input.policy.preset === "pin") {
+      // As the server: every short numeric code is in the corpus, so a PIN is not looked up.
+      breachCheck = "not_applicable";
+    } else if (isBreached(password)) {
       breachCheck = "breached";
       violations.push({ kind: "breached" });
     } else {

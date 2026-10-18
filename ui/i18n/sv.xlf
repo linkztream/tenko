@@ -2569,6 +2569,9 @@
       <unit id="setup.admin.check.breach_off">
         <segment><source>The breached-password check is switched off in the {profile} profile</source><target>Kontrollen mot läckta lösenord är avstängd i profilen {profile}</target></segment>
       </unit>
+      <unit id="setup.admin.check.breach_pin">
+        <segment><source>Not checked against known breaches: every short numeric code is in them. A PIN relies on the profile's second factor instead.</source><target>Kontrolleras inte mot kända läckor: varje kort sifferkod finns i dem. En PIN-kod förlitar sig på profilens andra faktor i stället.</target></segment>
+      </unit>
       <unit id="setup.admin.check.breach_unavailable">
         <segment><source>The breached-password service could not be reached, so this password was not checked against known breaches</source><target>Tjänsten för läckta lösenord kunde inte nås, så lösenordet har inte kontrollerats mot kända läckor</target></segment>
       </unit>

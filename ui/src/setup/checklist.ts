@@ -14,6 +14,8 @@ export interface ChecklistItem {
   state: ItemState;
   /** The violations that make this row fail, for the explanation under it. */
   violations: PolicyViolation[];
+  /** Why the row does not apply, when it does not: a PIN is not checked against breaches. */
+  note?: "pin";
 }
 
 const RULE_KINDS: readonly PolicyViolation["kind"][] = [
@@ -63,6 +65,9 @@ export function buildChecklist(input: ChecklistInput): ChecklistItem[] {
             return { id, state: "ok", violations: [] };
           case "breached":
             return { id, state: "bad", violations: own };
+          case "not_applicable":
+            // A PIN: every short numeric code is in the corpus, so it is not looked up.
+            return { id, state: "off", violations: [], note: "pin" };
           default:
             // "off" (the profile) and "unavailable" (the lookup failed): not a failure, but not a pass.
             return { id, state: "off", violations: [] };

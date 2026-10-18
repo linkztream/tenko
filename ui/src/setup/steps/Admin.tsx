@@ -38,6 +38,7 @@ export function Admin() {
       case "breach":
         if (item.state === "bad") return t("setup.admin.check.breach_found");
         if (item.state === "pending") return t("setup.admin.check.breach_pending");
+        if (item.note === "pin") return t("setup.admin.check.breach_pin");
         if (w.breachOff()) return t("setup.admin.check.breach_off", { profile });
         if (item.state === "off") return t("setup.admin.check.breach_unavailable");
         return t("setup.admin.check.breach");

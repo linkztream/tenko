@@ -675,6 +675,57 @@ async fn without_any_source_the_check_is_unavailable_not_clean() {
 }
 
 #[tokio::test]
+async fn a_pin_under_the_pin_preset_is_not_checked_against_the_corpus() {
+    const PIN: &str = "73915862";
+    const LONG_CODE: &str = "739158624017";
+    // Every short numeric code is in the corpus, so the source reports them all.
+    let source = FakeSource::new(&[(PIN, 5_000_000), (LONG_CODE, 7)]);
+    let (env, session) = env_with(&source, Profile::Home).await;
+    let pin_ctx = ctx(&env, &session).await;
+    let result = env
+        .service
+        .check_password(Some(&pin_ctx), &check(PIN))
+        .await
+        .expect("check");
+    assert_eq!(result.policy, PasswordPolicy::Pin);
+    assert!(result.acceptable, "violations: {:?}", result.violations);
+    assert_eq!(result.breach_check, BreachStatus::NotApplicable);
+    assert!(
+        !result
+            .violations
+            .iter()
+            .any(|violation| matches!(violation, PolicyViolation::Breached { .. }))
+    );
+    let changed = env
+        .service
+        .change_password(&pin_ctx, &change(Some(ADMIN_PIN), PIN))
+        .await
+        .expect("a PIN is accepted without the corpus lookup");
+    assert_eq!(changed.breach_check, BreachStatus::NotApplicable);
+    assert_eq!(
+        source.seen(),
+        Vec::<String>::new(),
+        "the PIN was never looked up"
+    );
+
+    // A 12-digit code is no PIN: under the Standard preset it is still checked.
+    let (env, session) = env_with(&source, Profile::Standard).await;
+    let standard_ctx = ctx(&env, &session).await;
+    let result = env
+        .service
+        .check_password(Some(&standard_ctx), &check(LONG_CODE))
+        .await
+        .expect("check");
+    assert!(!result.acceptable);
+    assert_eq!(result.breach_check, BreachStatus::Breached);
+    assert!(
+        result
+            .violations
+            .contains(&PolicyViolation::Breached { count: Some(7) })
+    );
+}
+
+#[tokio::test]
 async fn the_lab_profile_reports_off_and_never_contacts_the_source() {
     let source = FakeSource::new(&[("1357", 99)]);
     let (env, session) = env_with(&source, Profile::Lab).await;

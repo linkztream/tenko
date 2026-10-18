@@ -2569,6 +2569,9 @@
       <unit id="setup.admin.check.breach_off">
         <segment><source>The breached-password check is switched off in the {profile} profile</source></segment>
       </unit>
+      <unit id="setup.admin.check.breach_pin">
+        <segment><source>Not checked against known breaches: every short numeric code is in them. A PIN relies on the profile's second factor instead.</source></segment>
+      </unit>
       <unit id="setup.admin.check.breach_unavailable">
         <segment><source>The breached-password service could not be reached, so this password was not checked against known breaches</source></segment>
       </unit>
