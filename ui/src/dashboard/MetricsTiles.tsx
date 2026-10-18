@@ -7,34 +7,41 @@
 //
 // Test ids: `metrics-tiles` (`data-state` the stream's connection state, `data-controllers`
 // once a sample arrived), `metrics-waiting` until then, `metrics-tile-<name>` with `data-value`
-// (the raw number, absent while unknown), `metrics-sparkline-<name>`, and on the Raft tile
+// (the raw number, absent while unknown), `metrics-sparkline-<name>` (the ratio tiles draw `metrics-bars` instead,
+// with `metrics-window` for the line that says the window), and on the Raft tile
 // `metrics-raft-node` per controller (`data-node`, `data-role`, `data-lag`, `data-state`
 // current, stale or unsupported).
 //
 // While the cluster's sample has `dns` (a controller runs the `dns` role) the DNS tiles follow:
 // `metrics-tile-dns-queries` (with `metrics-dns-log-dropped`, always present: `data-state` dropping
-// or idle, hidden while idle so the tile keeps its height), `-dns-cache` (the hit ratio in percent),
-// `-dns-answers` (the NOERROR share, and `metrics-dns-rcode` per RCODE with `data-rcode` and `data-rate`), `-dns-blocked` (the top
+// or idle, hidden while idle so the tile keeps its height), `-dns-cache` (the hit ratio of the last 30 seconds in percent, and a `metrics-bars` chart of 12 buckets of 5 seconds),
+// `-dns-answers` (the NOERROR share of the last 30 seconds, with the same `metrics-bars`, and `metrics-dns-rcode` per RCODE with `data-rcode` and `data-rate`), `-dns-blocked` (the top
 // three lists as `metrics-dns-list` with `data-list` and `data-rate`), `-dns-upstreams`, and
 // `-dns-encrypted` while the role serves DoT or DoH.
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { EventStream, type EventStreamOptions } from "../api/events";
 import { si } from "../app/format/si";
 import { Si } from "../components/Si";
+import { Bars } from "../components/Bars";
 import { Sparkline } from "../components/Sparkline";
 import { formatList, formatNumber, locale, t } from "../i18n";
 import { storeRoleLabel } from "../shell/TopBar";
 import {
+  BUCKET_SECONDS,
+  BUCKETS,
   droppedBatches,
   emptyHistory,
   lagOf,
   pushSnapshot,
+  ratioBuckets,
   RCODES,
   sampleState,
   snapshotOf,
   tileValue,
+  windowRatio,
   topLists,
   type MetricsHistory,
+  type RatioTile,
   type MetricsSample,
   type TileName,
 } from "./metrics";
@@ -50,7 +57,11 @@ function Tile(props: {
   title: string;
   value: number | null | undefined;
   unit?: string;
-  series: readonly (number | null)[];
+  series?: readonly (number | null)[];
+  /** The bars of a ratio tile (fractions, oldest first) instead of the sparkline; then `windowHint` says the window. */
+  bars?: readonly (number | null)[];
+  windowHint?: string;
+  /** The line under the figure; none when empty. With a `windowHint` both are short and share the area of the hint on one line each. */
   hint: string;
   /** `list` for a tile with a list under the hint, `grows` for one whose height follows its content. */
   shape?: "list" | "grows";
@@ -58,7 +69,12 @@ function Tile(props: {
 }) {
   const values = () =>
     formatList(
-      props.series.filter((v): v is number => v !== null).map((v) => si(v, locale())),
+      (props.series ?? []).filter((v): v is number => v !== null).map((v) => si(v, locale())),
+      "unit",
+    );
+  const shares = () =>
+    formatList(
+      (props.bars ?? []).filter((v): v is number => v !== null).map((v) => formatNumber(v, { style: "percent", maximumFractionDigits: 0 })),
       "unit",
     );
   return (
@@ -70,8 +86,29 @@ function Tile(props: {
           <span class="metrics-unit">{props.unit}</span>
         </Show>
       </div>
-      <Sparkline values={props.series} title={t("metrics.sparkline", { name: props.title, values: values() })} testId={`metrics-sparkline-${props.name}`} />
-      <p class="muted">{props.hint}</p>
+      <Show
+        when={props.bars}
+        fallback={<Sparkline values={props.series ?? []} title={t("metrics.sparkline", { name: props.title, values: values() })} testId={`metrics-sparkline-${props.name}`} />}
+      >
+        {(bars) => <Bars values={bars()} buckets={BUCKETS} title={t("metrics.bars", { name: props.title, seconds: BUCKET_SECONDS, values: shares() })} testId="metrics-bars" />}
+      </Show>
+      <Show
+        when={props.windowHint && props.hint}
+        fallback={
+          <Show when={props.windowHint || props.hint}>
+            <p class="muted" data-testid={props.windowHint ? "metrics-window" : undefined}>
+              {props.windowHint || props.hint}
+            </p>
+          </Show>
+        }
+      >
+        <div class="metrics-lines">
+          <p class="muted" data-testid="metrics-window">
+            {props.windowHint}
+          </p>
+          <p class="muted">{props.hint}</p>
+        </div>
+      </Show>
       {props.children}
     </section>
   );
@@ -98,6 +135,8 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
   const latest = () => history().latest;
   const cluster = (): MetricsSample | undefined => latest()?.cluster;
   const series = (name: TileName) => history().cluster.map((sample) => tileValue(name, sample));
+  const ratioValue = (name: RatioTile) => (cluster()?.dns ? windowRatio(history(), name) : null);
+  const ratioBars = (name: RatioTile) => ratioBuckets(history(), BUCKET_SECONDS, BUCKETS, name);
   const value = (name: TileName) => {
     const sample = cluster();
     return sample ? tileValue(name, sample) : null;
@@ -240,12 +279,22 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
               <Tile
                 name="dns-cache"
                 title={t("metrics.dns.cache")}
-                value={value("dns-cache")}
+                value={ratioValue("dns-cache")}
                 unit={t("metrics.unit.percent")}
-                series={series("dns-cache")}
+                bars={ratioBars("dns-cache")}
+                windowHint={t("metrics.dns.cache_window")}
                 hint={t("metrics.dns.cache_hint", { entries: si(d().cache.entries, locale()), stale: decimal(d().cache.stale_per_second) })}
               />
-              <Tile name="dns-answers" shape="list" title={t("metrics.dns.answers")} value={value("dns-answers")} unit={t("metrics.unit.percent")} series={series("dns-answers")} hint={t("metrics.dns.answers_hint")}>
+              <Tile
+                name="dns-answers"
+                shape="list"
+                title={t("metrics.dns.answers")}
+                value={ratioValue("dns-answers")}
+                unit={t("metrics.unit.percent")}
+                bars={ratioBars("dns-answers")}
+                windowHint={t("metrics.dns.answers_hint")}
+                hint=""
+              >
                 <ul class="metrics-rows metrics-rows-5">
                   <For each={RCODES}>
                     {(rcode) => (

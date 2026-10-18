@@ -3442,6 +3442,7 @@ export type MessageKey =
   | "languages.version.not_previewed"
   | "languages.version.percent"
   | "languages.version.previewed"
+  | "metrics.bars"
   | "metrics.dns.answers"
   | "metrics.dns.answers_hint"
   | "metrics.dns.blocked"
@@ -3449,6 +3450,7 @@ export type MessageKey =
   | "metrics.dns.blocked_none"
   | "metrics.dns.cache"
   | "metrics.dns.cache_hint"
+  | "metrics.dns.cache_window"
   | "metrics.dns.encrypted"
   | "metrics.dns.encrypted_hint"
   | "metrics.dns.log_dropped"
@@ -5924,6 +5926,7 @@ export interface MessageArgs {
   "languages.version.by": { when: string | number; who: string | number };
   "languages.version.label": { version: string | number };
   "languages.version.percent": { percent: string | number };
+  "metrics.bars": { name: string | number; seconds: string | number; values: string | number };
   "metrics.dns.blocked_hint": { lists: number };
   "metrics.dns.cache_hint": { entries: string | number; stale: string | number };
   "metrics.dns.encrypted_hint": { doh: number; dot: number };
@@ -9698,6 +9701,7 @@ export const messageKeys: readonly MessageKey[] = [
   "languages.version.not_previewed",
   "languages.version.percent",
   "languages.version.previewed",
+  "metrics.bars",
   "metrics.dns.answers",
   "metrics.dns.answers_hint",
   "metrics.dns.blocked",
@@ -9705,6 +9709,7 @@ export const messageKeys: readonly MessageKey[] = [
   "metrics.dns.blocked_none",
   "metrics.dns.cache",
   "metrics.dns.cache_hint",
+  "metrics.dns.cache_window",
   "metrics.dns.encrypted",
   "metrics.dns.encrypted_hint",
   "metrics.dns.log_dropped",

@@ -156,3 +156,65 @@ export function sampleState(sample: MetricsSample): "current" | "stale" | "unsup
   if (sample.unsupported) return "unsupported";
   return sample.stale ? "stale" : "current";
 }
+
+/** The tiles whose figure is a share over a window rather than the share of one second. */
+export type RatioTile = "dns-cache" | "dns-answers";
+/** Seconds (samples) behind the headline of a ratio tile. */
+export const RATIO_WINDOW = 30;
+/** Seconds per bar of a ratio tile's bar chart. */
+export const BUCKET_SECONDS = 5;
+/** Bars of a ratio tile's bar chart: the last minute. */
+export const BUCKETS = HISTORY / BUCKET_SECONDS;
+
+/**
+ * What a sample adds to the share of a ratio tile: the rate that counts (hits, NOERROR answers)
+ * and the rate of everything (hits and misses, all answers). A sample without the `dns` part adds nothing.
+ */
+function ratioParts(tile: RatioTile, sample: MetricsSample): readonly [number, number] {
+  const dns = sample.dns;
+  if (!dns) return [0, 0];
+  if (tile === "dns-cache") return [dns.cache.hits_per_second, dns.cache.hits_per_second + dns.cache.misses_per_second];
+  return [dns.rcodes.noerror, RCODES.reduce((sum, code) => sum + dns.rcodes[code], 0)];
+}
+
+/**
+ * The share over `samples` as a fraction: the sum of the counting rates over the sum of all rates,
+ * never an average of per-second shares, so a quiet second weighs nothing. Null when no query fell in them.
+ */
+function sharedRatio(tile: RatioTile, samples: readonly MetricsSample[]): number | null {
+  let part = 0;
+  let all = 0;
+  for (const sample of samples) {
+    const [p, a] = ratioParts(tile, sample);
+    part += p;
+    all += a;
+  }
+  return all > 0 ? part / all : null;
+}
+
+/** The share of a ratio tile over the last `seconds` samples of the cluster, in percent; null without queries. */
+export function windowRatio(history: MetricsHistory, tile: RatioTile, seconds = RATIO_WINDOW): number | null {
+  const ratio = sharedRatio(tile, history.cluster.slice(-seconds));
+  return ratio === null ? null : ratio * 100;
+}
+
+/**
+ * The share per bucket as a fraction (0 to 1), oldest bucket first, always `buckets` long. The newest
+ * bucket ends at the newest sample and each holds `bucketSeconds` samples; a bucket without queries
+ * (or without samples, early in the page's life) is null. Defaults to the cache tile.
+ */
+export function ratioBuckets(
+  history: MetricsHistory,
+  bucketSeconds: number,
+  buckets: number,
+  tile: RatioTile = "dns-cache",
+): (number | null)[] {
+  const samples = history.cluster;
+  const out: (number | null)[] = [];
+  for (let i = buckets - 1; i >= 0; i--) {
+    const end = samples.length - i * bucketSeconds;
+    const start = Math.max(0, end - bucketSeconds);
+    out.push(end > 0 ? sharedRatio(tile, samples.slice(start, end)) : null);
+  }
+  return out;
+}

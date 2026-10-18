@@ -268,7 +268,16 @@ describe("DNS tiles", () => {
     expect(screen.getByTestId("metrics-dns-log-dropped").dataset.state).toBe("idle");
     expect(screen.getByTestId("metrics-dns-log-dropped").textContent).toBe("");
     expect(tile("dns-cache").dataset.value).toBe("82");
-    expect(tile("dns-cache").textContent).toContain("8.4K entries, 1.5 stale answers per second");
+    expect(tile("dns-cache").textContent).toContain("8.4K entries, 1.5 stale/s");
+    expect(tile("dns-cache").textContent).toContain("Last 30 s; bars per 5 s");
+    expect(within(tile("dns-cache")).queryByTestId("metrics-sparkline-dns-cache")).toBeNull();
+    const bars = within(tile("dns-cache")).getByTestId("metrics-bars");
+    expect(bars.getAttribute("data-buckets")).toBe("12");
+    expect(bars.getAttribute("aria-hidden")).toBe("true");
+    expect(bars.querySelectorAll("rect")).toHaveLength(1);
+    expect(tile("dns-answers").textContent).toContain("NOERROR share, last 30 s; bars per 5 s");
+    expect(within(tile("dns-answers")).getByTestId("metrics-bars").getAttribute("data-buckets")).toBe("12");
+    expect(within(tile("dns-queries")).queryByTestId("metrics-bars")).toBeNull();
     expect(tile("dns-answers").dataset.value).toBe("80");
     const rcodes = within(tile("dns-answers")).getAllByTestId("metrics-dns-rcode");
     expect(rcodes.map((row) => [row.dataset.rcode, row.dataset.rate])).toEqual([
@@ -326,6 +335,24 @@ describe("DNS tiles", () => {
     expect(screen.queryByTestId("metrics-tile-dns-encrypted")).toBeNull();
   });
 
+  it("show the share of the last 30 seconds, not of the newest second, and keep it through quiet seconds", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const source = FakeSource.last();
+    const cache = (hits: number, misses: number) => ({ hit_ratio: hits + misses > 0 ? hits / (hits + misses) : null, hits_per_second: hits, misses_per_second: misses, stale_per_second: 0, entries: 10 });
+    const rcodes = (noerror: number, nxdomain: number) => ({ noerror, nxdomain, servfail: 0, refused: 0, other: 0 });
+    for (const [hits, misses, ok, nx] of [[1, 0, 1, 0], [0, 3, 1, 2], [0, 0, 0, 0]] as const) {
+      const own = sample(1, { dns: dnsPart({ cache: cache(hits, misses), rcodes: rcodes(ok, nx) }) });
+      send(source, snapshot([own], own));
+    }
+    // The newest second is quiet, so its own ratio is absent, yet the window has queries: 1 hit of 4.
+    await waitFor(() => expect(tile("dns-cache").dataset.value).toBe("25"));
+    expect(tile("dns-answers").dataset.value).toBe("50");
+    // The newest bucket holds all three samples: a bar of a quarter of the height.
+    const [bar] = within(tile("dns-cache")).getByTestId("metrics-bars").querySelectorAll("rect");
+    expect(bar?.getAttribute("height")).toBe("5");
+  });
+
   it("speak Swedish", async () => {
     await setLocale("sv");
     mount();
@@ -336,6 +363,8 @@ describe("DNS tiles", () => {
     expect(tile("dns-queries").textContent).toContain("DNS-frågor");
     expect(screen.getByTestId("metrics-dns-log-dropped").textContent).toContain("poster i frågeloggen kastade per sekund");
     expect(tile("dns-cache").textContent).toContain("Träffandel i cachen");
+    expect(tile("dns-cache").textContent).toContain("Senaste 30 s; staplar per 5 s");
+    expect(tile("dns-answers").textContent).toContain("Andel NOERROR, senaste 30 s; staplar per 5 s");
     expect(tile("dns-answers").textContent).toContain("Övriga");
     expect(tile("dns-blocked").textContent).toContain("5 listor har blockerat frågor");
     expect(tile("dns-upstreams").textContent).toContain("Svarstid p99 42 ms");

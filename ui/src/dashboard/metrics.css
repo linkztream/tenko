@@ -19,8 +19,11 @@
 .metrics-tile.metrics-tile-list { block-size: var(--m-list); }
 .metrics-tile.metrics-tile-grows { block-size: auto; min-block-size: var(--m-base); overflow: visible; }
 .metrics-tile .tile-value { min-block-size: calc(var(--fs-24) * var(--lh-tight)); font-variant-numeric: tabular-nums; }
-.metrics-tile .sparkline { inline-size: 100%; block-size: 28px; }
+.metrics-tile .sparkline, .metrics-tile .bars { inline-size: 100%; block-size: 28px; }
 .metrics-tile > p.muted { min-block-size: calc(2 * var(--fs-12) * var(--lh-ui)); overflow: hidden; }
+/* The cache tile fits its two short lines (the window, the entries) in the area of the two-line hint, one line each. */
+.metrics-lines { display: grid; grid-template-columns: minmax(0, 1fr); min-block-size: calc(2 * var(--fs-12) * var(--lh-ui)); overflow: hidden; }
+.metrics-lines > p.muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .metrics-tile h3 { font-size: var(--fs-12); font-weight: var(--fw-medium); color: var(--ink-3); }
 .metrics-unit { margin-inline-start: var(--sp-2); font-size: var(--fs-14); font-weight: var(--fw-regular); color: var(--ink-3); }
 .metrics-raft { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); font-size: var(--fs-12); min-block-size: calc(var(--fs-12) * var(--lh-ui)); }

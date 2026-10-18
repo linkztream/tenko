@@ -1,0 +1,4 @@
+/* The bar chart beside the number of a metrics tile (Bars.tsx). Token colors only; the newest
+   bucket sits at the inline end, so the drawing mirrors right to left. */
+.bars { display: block; inline-size: 100%; block-size: 28px; overflow: visible; transform: scaleX(var(--inline-sign, 1)); }
+.bars rect { fill: var(--accent); }

@@ -205,6 +205,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - A node refuses a configuration message whose bytes declare a length far beyond what the message holds with `node.config.payload`, instead of trying to reserve that much memory and stopping; the same holds for every byte value Tenko reads from CBOR, such as keys, MAC addresses and DUIDs.
 - The breached-password check no longer runs on a PIN under the PIN preset: every short numeric code is in the corpus, so the first-run wizard's generated PIN always failed; the checklist now says the check does not apply (`not_applicable`).
 - The live metrics tiles of the start page keep a fixed height: the value, the sparkline, a two-line hint, the warning line and the list rows have reserved room and digits are tabular, so the grid below no longer moves when a sample changes.
+- The cache hit ratio and the answers tiles of the start page show their share over the last 30 seconds (summed hits over hits and misses, NOERROR over all answers) with a bar per 5-second bucket of the last minute, instead of a per-second ratio that was empty or jumped between 0 and 100 with few queries.
 
 ### Security
 
