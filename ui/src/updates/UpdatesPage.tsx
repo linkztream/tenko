@@ -9,6 +9,7 @@ import { paths } from "../app/paths";
 import { ErrorNotice, Notice } from "../components/Notice";
 import { PageHead } from "../components/PageHead";
 import { t } from "../i18n";
+import { SettingsNav } from "../settings/SettingsNav";
 import { readUpdates, type InstallStarted, type UpdateStatus } from "./api";
 import { CheckPanel } from "./CheckPanel";
 import { InstallPanel } from "./InstallPanel";
@@ -84,6 +85,7 @@ export default function UpdatesPage() {
   return (
     <div class="page" data-testid="page-updates">
       <PageHead title={t("updates.title")} sub={status() ? t("updates.sub", { version: status()?.running ?? "" }) : undefined} />
+      <SettingsNav />
       <div class="page-body">
         <Show when={state() === "loading"}>
           <p class="muted" role="status">

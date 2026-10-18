@@ -123,6 +123,14 @@ describe("the updates page", () => {
     expect((await screen.findByTestId("updates-unavailable")).textContent).toContain("does not offer updates");
     expect(screen.queryByTestId("updates-running")).toBeNull();
   });
+
+  it("shows the settings navigation with the updates tab, like the other settings pages", async () => {
+    await signInAdmin();
+    renderRoute(UpdatesPage, { url: "/updates", path: "/updates" });
+    const nav = await screen.findByTestId("settings-nav");
+    const keys = within(nav).getAllByTestId("settings-nav-link").map((a) => a.dataset.key);
+    expect(keys).toContain("updates");
+  });
 });
 
 describe("the update check", () => {
