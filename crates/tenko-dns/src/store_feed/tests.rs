@@ -53,6 +53,7 @@ fn new_zone(apex: &str) -> NewZone {
         source: None,
         description: None,
         reverse_of: None,
+        catalog: false,
     }
 }
 

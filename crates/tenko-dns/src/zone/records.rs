@@ -180,6 +180,8 @@ pub(crate) fn plan(
     limits: JournalLimits,
     max_changes: usize,
 ) -> ZoneResult<BatchPlan> {
+    // WP6.1: a secondary zone's records come from its transfers only.
+    super::secondary::check_writable(zone)?;
     if !holds_data(zone.kind) {
         return Err(ZoneError::zone_invalid(
             "kind",
@@ -261,6 +263,13 @@ pub(crate) fn plan(
             continue;
         };
         let existing = entry.after.get(&change.rtype).cloned();
+        // WP6.1: what a transfer wrote (the members of a catalog zone) is read-only.
+        if let Some(existing) = &existing
+            && existing.origin == Origin::Transfer
+            && change.origin != Origin::Transfer
+        {
+            return Err(super::secondary::read_only(zone));
+        }
         if let Some(existing) = &existing
             && existing.origin != change.origin
         {
@@ -548,6 +557,7 @@ pub fn origin_name(origin: Origin) -> &'static str {
         Origin::Dynamic => "dynamic",
         Origin::Dhcp => "dhcp",
         Origin::Ad => "ad",
+        Origin::Transfer => "transfer",
     }
 }
 

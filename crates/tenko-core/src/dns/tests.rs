@@ -34,6 +34,7 @@ fn zone() -> Zone {
         dnssec: DnssecPolicy::default(),
         source: None,
         reverse_of: None,
+        catalog: false,
         description: None,
         created: stamp(),
         updated: stamp(),
@@ -323,6 +324,9 @@ fn origins_follow_the_ownership_rules() {
     assert!(Origin::Dynamic.may_replace(Origin::Ipam, &lenient));
     assert!(Origin::Dynamic.may_replace(Origin::Manual, &strict));
     assert!(!Origin::Dhcp.may_replace(Origin::Ipam, &strict));
+    assert!(!Origin::Manual.may_replace(Origin::Transfer, &lenient));
+    assert!(!Origin::Ipam.may_replace(Origin::Transfer, &lenient));
+    assert!(Origin::Transfer.may_replace(Origin::Manual, &strict));
     assert_eq!(
         serde_json::to_value(Origin::Dynamic).expect("json"),
         "dynamic"

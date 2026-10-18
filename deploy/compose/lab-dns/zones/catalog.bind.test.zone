@@ -1,0 +1,7 @@
+; BIND's catalog zone (RFC 9432, schema version 2) with one member, member.bind.test.
+; smoke.sh removes the member with nsupdate; Tenko then deletes its secondary zone.
+$TTL 60
+@         IN SOA  invalid. invalid. ( 1 60 10 3600 5 )
+          IN NS   invalid.
+version   IN TXT  "2"
+m1.zones  IN PTR  member.bind.test.

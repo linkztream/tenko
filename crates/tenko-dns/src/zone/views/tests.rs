@@ -67,6 +67,7 @@ async fn zone_with(service: &ZoneService, apex: &str, scopes: &[&str]) -> Zone {
                 source: None,
                 description: None,
                 reverse_of: None,
+                catalog: false,
             },
         )
         .await

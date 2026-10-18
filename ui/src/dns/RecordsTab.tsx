@@ -10,6 +10,7 @@ import type { PathsWith } from "../api/client";
 import { errorMessage } from "../api/problem";
 import { Icon } from "../components/Icon";
 import { ConfirmDialog } from "../components/Dialog";
+import { Notice } from "../components/Notice";
 import { toast } from "../components/toast";
 import { DataGrid, type CellEditor } from "../grid/DataGrid";
 import { createListSource } from "../grid/source";
@@ -63,8 +64,12 @@ export function RecordsTab(props: { zone: Zone; onWritten: () => void }) {
   const rows = createMemo(() => recordRows(source.rows()));
   const pending = createMemo(() => new Set(draft().map((c) => rrsetKey({ scope: "default", name: c.name, type: c.type }))));
 
+  // WP6.1: the records of a secondary zone come from its zone transfers; an RRset of origin
+  // `transfer` is read-only for everyone (no take-over), and nothing is added or changed in a secondary zone.
+  const secondary = () => props.zone.kind === "secondary";
+  const fixed = (set: RrSet) => secondary() || set.origin === "transfer";
   const owned = (set: RrSet) => isOwned(set.origin) || taken().has(rrsetKey(set));
-  const editable = (set: RrSet) => mayWriteDns() && owned(set) && set.type !== "SOA";
+  const editable = (set: RrSet) => mayWriteDns() && !fixed(set) && owned(set) && set.type !== "SOA";
   const takeOver = (set: RrSet) => (isOwned(set.origin) ? {} : { take_over: true });
 
   /** Sends one change now, or adds it to the batch. */
@@ -212,7 +217,7 @@ export function RecordsTab(props: { zone: Zone; onWritten: () => void }) {
     {
       id: "takeover",
       label: () => t("dns.do.take_over"),
-      hidden: (r) => !mayWriteDns() || owned(r.rrset) || r.rrset.type === "SOA",
+      hidden: (r) => !mayWriteDns() || fixed(r.rrset) || owned(r.rrset) || r.rrset.type === "SOA",
       run: (r) => setDialog({ kind: "takeover", rrset: r.rrset }),
     },
   ];
@@ -240,7 +245,7 @@ export function RecordsTab(props: { zone: Zone; onWritten: () => void }) {
           <option value="">{t("dns.records.any_origin")}</option>
           <For each={ORIGINS}>{(o) => <option value={o}>{originWord(o)}</option>}</For>
         </select>
-        <Show when={mayWriteDns()}>
+        <Show when={mayWriteDns() && !secondary()}>
           <span class="grow" />
           <label class="dns-toggle">
             <input
@@ -261,6 +266,11 @@ export function RecordsTab(props: { zone: Zone; onWritten: () => void }) {
           </button>
         </Show>
       </div>
+      <Show when={secondary()}>
+        <Notice kind="info" role="status" testid="zone-records-readonly">
+          {t("dns.transfer.records_readonly")}
+        </Notice>
+      </Show>
       <Show when={batch()}>
         <div class="dns-batchbar" role="status" data-testid="dns-batch" data-count={draft().length}>
           <span>{t("dns.batch.count", { count: draft().length, changes: formatNumber(draft().length) })}</span>

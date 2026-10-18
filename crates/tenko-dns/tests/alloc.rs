@@ -214,6 +214,7 @@ fn index_lookups_do_not_allocate() {
         dnssec: tenko_core::dns::DnssecPolicy::default(),
         source: None,
         reverse_of: None,
+        catalog: false,
         description: None,
         created: stamp(),
         updated: stamp(),
@@ -298,6 +299,7 @@ fn zone_row() -> Zone {
         dnssec: tenko_core::dns::DnssecPolicy::default(),
         source: None,
         reverse_of: None,
+        catalog: false,
         description: None,
         created: stamp(),
         updated: stamp(),
@@ -796,4 +798,46 @@ fn the_query_path_allocates_nothing() {
     the_full_query_path_does_not_allocate();
     the_cache_hit_path_does_not_allocate();
     the_policy_and_the_limiter_do_not_allocate();
+    tsig_verify_and_sign_do_not_allocate();
+}
+
+/// TSIG on the transfer path (WP6.1): once the key is in the keyring, verifying a signed
+/// request and signing an answer allocate nothing.
+fn tsig_verify_and_sign_do_not_allocate() {
+    use tenko_dns::tsig::{Keyring, Signer, TsigKey, find, verify_request};
+    let key = TsigKey::new(
+        &dns_name("transfer.example.test"),
+        tenko_core::dns::TsigAlgorithm::HmacSha256,
+        b"0123456789abcdef0123456789abcdef",
+    );
+    let ring = Keyring::new([key]);
+    let now = 1_790_000_000;
+    let mut request = Vec::new();
+    wire::write_query(&mut request, 7, "example.test", 252, None);
+    let shared = ring
+        .by_name(&dns_name("transfer.example.test"))
+        .expect("the key");
+    assert!(Signer::request(std::sync::Arc::clone(&shared)).sign(
+        &mut request,
+        now,
+        0,
+        &[],
+        MAX_MESSAGE_LEN
+    ));
+    let mut answer = Vec::with_capacity(4096);
+    let (allocations, reallocations, _) = measure(1000, || {
+        let tsig = find(black_box(&request)).expect("parse").expect("signed");
+        let verified = verify_request(&ring, &request, &tsig, now).expect("verifies");
+        answer.clear();
+        answer.extend_from_slice(&request[..tsig.record_start]);
+        answer[2] |= 0x80;
+        let mut signer = Signer::answer(verified.key, verified.mac);
+        assert!(signer.sign(&mut answer, now, 0, &[], MAX_MESSAGE_LEN));
+        black_box(&answer);
+    });
+    assert_eq!(
+        (allocations, reallocations),
+        (0, 0),
+        "TSIG verify and sign allocated"
+    );
 }

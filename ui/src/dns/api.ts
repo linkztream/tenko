@@ -11,7 +11,7 @@
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
 import { fetchAll } from "../api/paginate";
-import type { Acl, AclCreate, AclPatch, AuditRecord, BatchResult, DnsKey, ImportReport, KeyCreate, KeyCreated, Origin, RecordChange, RrSet, Zone, ZoneCreate, ZonePatch } from "./types";
+import type { Acl, AclCreate, AclPatch, AuditRecord, BatchResult, DnsKey, ImportReport, KeyCreate, KeyCreated, Origin, RecordChange, RrSet, TransferStatus, Zone, ZoneCreate, ZonePatch } from "./types";
 
 export * from "./types";
 
@@ -46,6 +46,19 @@ export async function deleteZone(id: string): Promise<void> {
 export async function hasOrigin(id: string, origin: Origin, signal?: AbortSignal): Promise<boolean> {
   const page = await api.get("/api/v1/dns/zones/{id}/records", { path: { id }, query: { origin, limit: 1 }, signal });
   return page.items.length > 0;
+}
+
+// ---------------------------------------------------------------------------------
+// Zone transfers (WP6.1)
+
+/** The transfer state of a zone: the serial held, the sources with their last success and error, the timers. */
+export function getZoneTransfer(zoneId: string, signal?: AbortSignal): Promise<TransferStatus> {
+  return api.get("/api/v1/dns/zones/{id}/transfer", { path: { id: zoneId }, signal });
+}
+
+/** Queues a transfer of a secondary zone now (202); the answer is the state with `running` set. */
+export function triggerZoneTransfer(zoneId: string): Promise<TransferStatus> {
+  return api.post("/api/v1/dns/zones/{id}/transfer", { path: { id: zoneId }, body: {} as never });
 }
 
 // ---------------------------------------------------------------------------------

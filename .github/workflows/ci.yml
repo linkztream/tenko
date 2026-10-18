@@ -323,6 +323,11 @@ jobs:
       - name: Compose lab smoke (not there yet)
         if: ${{ hashFiles('deploy/compose/lab-cluster/smoke.sh') == '' }}
         run: echo "::notice::deploy/compose/lab-cluster/smoke.sh does not exist yet; WP3.1c adds the compose lab."
+      # WP6.1: the DNS lab with BIND 9 (deploy/compose/lab-dns): the resolver rounds over
+      # plain DNS, DoT and DoH and the round of zone transfers both ways. It builds the image
+      # (the static musl binary) and needs openssl, curl and python3 on the runner.
+      - name: DNS compose lab smoke
+        run: bash deploy/compose/lab-dns/smoke.sh
 
   # Weekly Windows service smoke (OPS-10, E10). The hosted Windows runner runs elevated,
   # which the Service Control Manager needs. WP3.6 adds deploy/windows/smoke.ps1 (install,

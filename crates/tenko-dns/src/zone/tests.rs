@@ -63,6 +63,7 @@ fn new_zone(apex: &str) -> NewZone {
         source: None,
         description: None,
         reverse_of: None,
+        catalog: false,
     }
 }
 
@@ -1007,6 +1008,7 @@ async fn a_zone_carries_the_prefix_whose_reverse_zone_it_is() {
             &cx(),
             NewZone {
                 reverse_of: Some(prefix),
+                catalog: false,
                 ..new_zone("2.0.192.in-addr.arpa")
             },
         )
@@ -1020,6 +1022,7 @@ async fn a_zone_carries_the_prefix_whose_reverse_zone_it_is() {
             &cx(),
             NewZone {
                 reverse_of: Some(prefix),
+                catalog: false,
                 ..new_zone("example.test")
             },
         )

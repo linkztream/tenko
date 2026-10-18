@@ -1,0 +1,6 @@
+; A zone BIND holds as the primary and Tenko as a secondary zone (WP6.1). smoke.sh adds
+; a record with nsupdate; BIND notifies Tenko, which transfers the change by IXFR.
+$TTL 60
+@       IN SOA  ns.example.test. hostmaster.example.test. ( 1 60 10 3600 5 )
+        IN NS   ns.example.test.
+www     IN A    192.0.2.50

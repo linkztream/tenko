@@ -3,22 +3,25 @@
 BIND 9 as the authoritative upstream of one Tenko DDI node, over plain DNS, DNS over TLS and
 DNS over HTTPS, on one Docker host: the upstream transports, the cache, the negative cache
 and serve-stale of the resolver of [docs/dns.md](../../../docs/dns.md) (WP5.1) against a real
-server, for the check of deliverable 6 of the plan and for trying things by hand. It is a
+server, for the check of deliverable 6 of the plan and for trying things by hand. A fourth
+round, `xfr` (WP6.1), has BIND and Tenko transfer zones to each other, with TSIG, NOTIFY,
+IXFR, XoT and catalog zones. It is a
 lab, not a deployment example: `smoke.sh` generates the certificate for one run, the Lab
 profile makes the resolver open to every client, and every name and address is a
 documentation value (`203.0.113.0/24`, `example.test`).
 
 It is a Linux Docker host lab. It runs on Docker Desktop too; the maintainer's host is WSL
 Ubuntu 24.04 with Docker as root. It needs Docker with the compose plugin (and buildx to
-build the image) and `openssl` on the host. `dig` comes from the BIND image.
+build the image) and `openssl` on the host; the round `xfr` also needs `curl` and `python3`
+on the host (see the transfer round below). `dig` and `nsupdate` come from the BIND image.
 
 ## What runs
 
 | Service | What | Reached at |
 |---|---|---|
-| `bind` | The official ISC image (`internetsystemsconsortium/bind9:9.20`), authoritative for `example.test` (`named.conf`, `example.test.zone`), no recursion. Plain DNS on 53, DNS over TLS on 853, DNS over HTTPS on 443 (`/dns-query`), the last two with the lab certificate for `bind.example.test` and `203.0.113.2`. The query log goes to its standard error | `203.0.113.2`; `bind` on the lab network |
-| `tenko` | One node with `--roles controller,dns`, the DNS module on and the Lab profile. The default forwarder is BIND over the transport of the round. The DNS role listens on `0.0.0.0:5300` (above 1024, so the container has no capability); the API is plain HTTP on 8443 (the Lab profile allows it), on the lab network only | `203.0.113.3:5300` (UDP and TCP) |
-| `client` | The BIND image again, for `dig`; it asks Tenko and BIND | `docker compose exec client dig ...` |
+| `bind` | The official ISC image (`internetsystemsconsortium/bind9:9.20`), authoritative for `example.test` (`named.conf`, `example.test.zone`), no recursion. Plain DNS on 53, DNS over TLS on 853, DNS over HTTPS on 443 (`/dns-query`), the last two with the lab certificate for `bind.example.test` and `203.0.113.2`. For the round `xfr` it is also the secondary and the primary of the zones in `transfer.conf`, with the TSIG key of the run in `keys.conf` and the primary zone files from `zones/`. The query log goes to its standard error | `203.0.113.2`; `bind` on the lab network |
+| `tenko` | One node with `--roles controller,dns`, the DNS module on and the Lab profile. The default forwarder is BIND over the transport of the round. The DNS role listens on `0.0.0.0:5300` (above 1024, so the container has no capability); the API is plain HTTP on 8443 (the Lab profile allows it), on the lab network only. In the round `xfr` it also serves DNS over TLS and zone transfers over TLS (XoT) on 8530, with the lab certificate for `tenko.example.test` | `203.0.113.3:5300` (UDP and TCP), `203.0.113.3:8530` (TLS, round `xfr`) |
+| `client` | The BIND image again, for `dig` and `nsupdate`; it asks Tenko and BIND, and changes BIND's zones in the round `xfr` | `docker compose exec client dig ...` |
 
 The zone has `www.example.test A 192.0.2.10`, `api.example.test A 192.0.2.11`, the apex SOA
 and NS, and `ns` and `bind` at `203.0.113.2`. Every TTL is 5 seconds, the SOA's negative
@@ -60,7 +63,7 @@ It builds the image from `deploy/Dockerfile` (a while: the web UI bundle and a r
 binary), generates a lab CA, the BIND certificate and a key-encryption key with `openssl`
 into a temporary directory, starts BIND and the client, and asks BIND over its three
 transports (`dig`, `dig +tls`, `dig +https`) before Tenko is involved. Then three rounds,
-`plain`, `dot` and `doh`. Each writes `tenko.toml`, recreates the `tenko` container on it
+`plain`, `dot` and `doh` (the fourth, `xfr`, is described below). Each writes `tenko.toml`, recreates the `tenko` container on it
 (`docker compose up -d --force-recreate tenko`, the data volume stays), waits until it
 answers, and checks:
 
@@ -83,15 +86,50 @@ volume, network, work directory), also when a step fails, after printing the log
 service and the last `tenko.toml`.
 
 Settings: `IMAGE`, `BIND_IMAGE` (the BIND image, for the server and for `dig`), `ROUNDS`
-(default `plain dot doh`; the serve-stale steps run after `doh`), `WAIT_SECS` (300),
-`KEEP`. The lab network is fixed at `203.0.113.0/24`, so two labs, or this one and a
+(default `plain dot doh xfr`; the serve-stale steps run after `doh`, the transfer rows in
+`xfr`), `WAIT_SECS` (300), `KEEP`. The lab network is fixed at `203.0.113.0/24`, so two labs, or this one and a
 leftover of an earlier run, cannot run at the same time unless `COMPOSE_PROJECT_NAME`
 differs and the network of the other is gone.
 
+## The transfer round (WP6.1)
+
+The round `xfr` checks the zone transfers of [docs/dns.md](../../../docs/dns.md) section 10 against BIND in both directions: BIND as the secondary of zones Tenko holds as primary zones, and Tenko as the secondary of zones BIND holds as primary zones. Besides the tools above it needs `curl` and `python3` on the host, and a host that reaches the lab network `203.0.113.0/24` (a Linux Docker host does; Docker Desktop usually does not route to container addresses, so the round wants a Linux Docker host; it was run on WSL Ubuntu 24.04 with Docker as root). The host uses Tenko's API only; `dig` and `nsupdate` run in the `client` container.
+
+What it sets up:
+
+- **Tenko.** The configuration of the round is the one of the plain round plus `[dns.tls]`: DNS over TLS, and with it zone transfers over TLS (XoT), on `0.0.0.0:8530` with the lab certificate for `tenko.example.test` (`tenko.pem` and `tenko.key` in the work directory, signed by the lab CA). Port 8530 is above 1024, so the container still needs no capability.
+- **The API.** The first-run setup under the Lab profile runs through the API with curl from the host (`POST /api/v1/setup` with the token that `tenko setup token` prints in the container), and the session cookie of the new administrator signs the later requests.
+- **The key.** A TSIG key `xfr.example.test` (`hmac-sha256`) is generated for the run. Its secret is written to `LAB_DIR/bind/keys.conf`, which `named.conf` includes, and imported into Tenko (`POST /dns/keys` with the secret). Nothing of it is in the repository.
+- **The access list.** `lab-secondaries` has one entry, the key `xfr.example.test`. The primary zones of Tenko name it in `transfer.allow` with `require_tsig`, and name BIND (`203.0.113.2`, port 53, the key) as the NOTIFY target.
+- **The zones.** Tenko holds the primary zones `out.example.test` (with 300 records of about 100 octets, so that a transfer spans several messages), `xot.example.test` (`xot` on: TLS only), `catalog.tenko.test` (a catalog zone) and `member.tenko.test`; and the secondary zones `in.example.test` (from BIND, port 53), `inxot.example.test` (from BIND's DNS over TLS port 853, with `xot` and the `tls_name` `bind.example.test`) and `catalog.bind.test` (a catalog zone). BIND holds the other side.
+- **BIND.** `transfer.conf` (included by `named.conf`) lists the zones of the round: the secondary zones of Tenko's, with the key and a `tls` block for XoT; the primary zones `in.example.test`, `inxot.example.test`, `catalog.bind.test` and `member.bind.test`, with `allow-transfer` for the key, `allow-update` for the key (so that the smoke can change them with `nsupdate`) and NOTIFY to Tenko, signed; and the secondary zone `big.example.test` of the measurement M19. The zone files of the primary zones are in `zones/`; the smoke copies them to `LAB_DIR/zones`, writable for BIND, which runs as an unprivileged user. `named.conf` also lists Tenko's catalog zone under `catalog-zones`.
+
+The round prints one `PASS` or `FAIL` line per row and fails the smoke when a row fails (the check is repeated with a trace in the log):
+
+| Row | What is checked | How |
+|---|---|---|
+| `out.axfr` | BIND takes `out.example.test` from Tenko with TSIG | BIND answers `www.out.example.test` with `192.0.2.30` within 60 s |
+| `out.tsig` | Tenko refuses an unsigned AXFR and serves a signed one in the MAC chain | `dig AXFR` without a key fails and lists no record; with `-y` it verifies and lists all 300 records |
+| `out.notify_ixfr` | A change on Tenko reaches BIND by NOTIFY and IXFR | A record added through the API is answered by BIND within 5 s (the time is printed), and BIND's log shows a transfer of fewer than 20 records, the delta only |
+| `out.xot` | BIND takes `xot.example.test` over TLS, and plain TCP is refused | BIND answers `www.xot.example.test` with `192.0.2.32` within 60 s; a signed `dig AXFR` over plain TCP fails |
+| `out.catalog` | BIND makes a zone of a member of Tenko's catalog zone | BIND answers `www.member.tenko.test` with `192.0.2.40` within 60 s |
+| `in.axfr` | Tenko takes `in.example.test` from BIND with TSIG | Tenko answers `www.in.example.test` with `192.0.2.50` within 60 s |
+| `in.notify_ixfr` | A change on BIND reaches Tenko by NOTIFY and IXFR | A signed `nsupdate` adds a record on BIND, Tenko answers it within 5 s (the time is printed), and the zone's journal on Tenko holds an entry that adds one record and removes none |
+| `in.xot` | Tenko takes `inxot.example.test` from BIND over TLS | Tenko answers `www.inxot.example.test` with `192.0.2.60` within 60 s |
+| `in.catalog` | Tenko makes a zone of a member of BIND's catalog zone, and deletes it when it leaves | Tenko answers `www.member.bind.test` with `192.0.2.70` within 60 s; after `nsupdate` removes the member from the catalog, the zone is gone from Tenko's list within 30 s |
+| `in.read_only` | A secondary zone refuses record changes | A batch change of `in.example.test` answers 409 `dns.zone.secondary` |
+| `in.status` | The transfer state of the API shows a successful transfer | `GET /dns/zones/{id}/transfer` of `inxot.example.test` has a `serial`, a `last_success` for the primary and no `last_error` |
+
+The measurement M19 (a change of 100 records on a zone of 100,000 records reaches BIND within 5 seconds, and only the change is transferred) runs on the same lab: `bench/phase2-dns/scripts/run-m19-xfr.sh` starts the smoke with `KEEP=1` and reads `LAB_DIR/session.env` (below). Its results are in `bench/phase2-dns/results/2026-10-18-m19-xfr.md`.
+
 ## Keeping the lab for hand tests
 
-`KEEP=1` leaves the lab running after a successful smoke (with the configuration of the last
-round) and prints the work directory and the command that tears it down:
+`KEEP=1` leaves the lab running after the smoke, also after a failure (with the configuration of
+the last round), and prints the work directory and the command that tears it down. After the
+round `xfr` the work directory also holds `session.env` (mode 0600), which a shell reads with
+`. "$LAB_DIR/session.env"`: the session `cookie` of the API, the name of the TSIG key (`xfr_key`)
+and its secret (`xfr_secret`), the identifier of the access list (`acl`) and the address of
+the API (`api_base`), for hand tests and for the measurement M19:
 
 ```sh
 KEEP=1 IMAGE=tenko:lab bash deploy/compose/lab-dns/smoke.sh

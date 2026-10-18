@@ -11,9 +11,9 @@
 //! document, the typed client of the UI and the mock server have them. The zones, records,
 //! zone files, the zone journal, access lists and TSIG keys are built (WP4.2, files
 //! `dns/zones.rs`, `dns/records.rs`, `dns/acls.rs`, `dns/keys.rs`), the forwarding
-//! rules (WP5.1, `dns/forwarders.rs`), the block lists (WP5.2, `dns/lists.rs`) and the views
-//! (WP6.4, `dns/views.rs`), on the
-//! zone service
+//! rules (WP5.1, `dns/forwarders.rs`), the block lists (WP5.2, `dns/lists.rs`) and the
+//! transfer state with its refresh now (WP6.1, `dns/transfer.rs`, on the extension
+//! `SecondaryService` of the leader's transfer service), on the zone service, and the views (WP6.4, `dns/views.rs`)
 //! (`tenko_dns::zone`), which the server adds as the request extension
 //! `Arc<ZoneService>`. Until its package builds it, any other operation checks the
 //! caller's scope and answers `501` with `sys.not_implemented`. The routes belong to the
@@ -84,6 +84,8 @@ mod lists;
 mod model;
 mod nodes;
 mod records;
+// WP6.1: the two transfer routes.
+mod transfer;
 // WP6.4: the view routes.
 mod views;
 mod zones;
@@ -236,7 +238,11 @@ fn zone_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(zones::list_dns_zone_journal))
         .routes(routes!(get_dns_zone_dnssec))
         .routes(routes!(start_dns_key_rollover))
-        .routes(routes!(get_dns_zone_transfer, trigger_dns_zone_transfer))
+        // WP6.1: the transfer state and a refresh now.
+        .routes(routes!(
+            transfer::get_dns_zone_transfer,
+            transfer::trigger_dns_zone_transfer
+        ))
 }
 
 #[inline(never)]
@@ -254,7 +260,6 @@ fn record_routes() -> OpenApiRouter<AppState> {
 #[inline(never)]
 fn view_and_forwarder_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        // WP6.4: the view routes.
         .routes(routes!(views::list_dns_views, views::create_dns_view))
         .routes(routes!(
             views::get_dns_view,
@@ -366,63 +371,3 @@ async fn start_dns_key_rollover(
     Err(not_implemented("POST", "/dns/zones/{id}/dnssec/rollover"))
 }
 
-#[utoipa::path(
-    get,
-    path = "/dns/zones/{id}/transfer",
-    tag = "dns",
-    operation_id = "get_dns_zone_transfer",
-    summary = "Get the transfer state of a zone",
-    description = "Scope: `dns.read`.",
-    params(("id" = String, Path, description = "Zone identifier (UUID)")),
-    responses(
-        (status = 200, description = "The serial, the sources and the refresh timers", body = TransferStatus),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dns_zone_transfer(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &ObjectRef::from(parse_id::<ZoneId>(&id)?),
-    )?;
-    Err(not_implemented("GET", "/dns/zones/{id}/transfer"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dns/zones/{id}/transfer",
-    tag = "dns",
-    operation_id = "trigger_dns_zone_transfer",
-    summary = "Transfer a secondary zone now",
-    description = "Scope: `dns.write`.",
-    params(("id" = String, Path, description = "Zone identifier (UUID)")),
-    responses(
-        (status = 202, description = "The transfer is queued", body = TransferStatus),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The zone is not a secondary zone", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn trigger_dns_zone_transfer(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Execute,
-        &ObjectRef::from(parse_id::<ZoneId>(&id)?),
-    )?;
-    Err(not_implemented("POST", "/dns/zones/{id}/transfer"))
-}

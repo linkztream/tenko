@@ -3372,6 +3372,7 @@ dependencies = [
  "bytes",
  "domain",
  "flate2",
+ "futures",
  "h2",
  "hickory-proto",
  "http",

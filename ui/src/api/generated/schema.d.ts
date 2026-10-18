@@ -1220,7 +1220,7 @@ export interface paths {
         put?: never;
         /**
          * Create a DNS zone
-         * @description Scope: `dns.write`. A primary or RPZ zone gets the apex SOA (from `soa` and the first serial of the policy) and the NS set of `name_servers` in every scope; a secondary, stub or forward zone is a row only until transfers come (WP6.1).
+         * @description Scope: `dns.write`. A primary or RPZ zone gets the apex SOA (from `soa` and the first serial of the policy) and the NS set of `name_servers` in every scope; a secondary zone is filled by zone transfers from its `source`; a stub or forward zone is a row only.
          */
         post: operations["create_dns_zone"];
         delete?: never;
@@ -1406,13 +1406,13 @@ export interface paths {
         };
         /**
          * Get the transfer state of a zone
-         * @description Scope: `dns.read`.
+         * @description Scope: `dns.read`. The serial held, each primary's last success and the stable code of its last failure (`dns.transfer.failed`, `dns.transfer.tsig`, `dns.transfer.refused`), the next refresh and the expiry, as the leader's transfer service sees them; a zone it has not seen shows the serial in the store.
          */
         get: operations["get_dns_zone_transfer"];
         put?: never;
         /**
          * Transfer a secondary zone now
-         * @description Scope: `dns.write`.
+         * @description Scope: `dns.write`. Queues a refresh of a secondary zone on the leader's transfer service at once (IXFR with the AXFR fallback), audited as `dns.transfer.trigger`; the answer is the state when the refresh was queued.
          */
         post: operations["trigger_dns_zone_transfer"];
         delete?: never;
@@ -9536,7 +9536,7 @@ export interface components {
          * @description Who owns an RRset (plan section 2.5, P2-Q12).
          * @enum {string}
          */
-        Origin: "manual" | "ipam" | "dynamic" | "dhcp" | "ad";
+        Origin: "manual" | "ipam" | "dynamic" | "dhcp" | "ad" | "transfer";
         /** @description How many RRsets of a zone one origin owns. */
         OriginCount: {
             /** @description The origin. */
@@ -16076,6 +16076,13 @@ export interface components {
          *     `dns.rrsets`.
          */
         Zone: {
+            /**
+             * @description A catalog zone (RFC 9432). On a secondary zone: its members become secondary zones
+             *     of this installation with the catalog's primaries and leave with it. On a primary
+             *     zone: Tenko writes its members, every primary zone of the same tenant (or without a
+             *     tenant) whose `transfer.allow` is not empty, catalog zones excepted.
+             */
+            catalog?: boolean;
             /** @description Creation. */
             created: components["schemas"]["Stamp"];
             /** @description Free text. */
@@ -16106,6 +16113,11 @@ export interface components {
         };
         /** @description `POST /dns/zones`. */
         ZoneCreate: {
+            /**
+             * @description A catalog zone (RFC 9432): on a secondary zone its members become secondary zones;
+             *     on a primary zone Tenko writes the members. False when absent.
+             */
+            catalog?: boolean;
             /** @description Free text. */
             description?: string | null;
             dnssec?: components["schemas"]["DnssecPolicy"] | null;
@@ -16192,6 +16204,8 @@ export interface components {
         ZoneKind: "primary" | "secondary" | "stub" | "forward" | "rpz";
         /** @description `PATCH /dns/zones/{id}`: the fields to change; the name and the kind do not change. */
         ZonePatch: {
+            /** @description Whether the zone is a catalog zone (RFC 9432). */
+            catalog?: boolean | null;
             /** @description Free text; an empty string clears it. */
             description?: string | null;
             dnssec?: components["schemas"]["DnssecPolicy"] | null;
@@ -22862,15 +22876,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     trigger_dns_zone_transfer: {
@@ -22930,17 +22935,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The zone is not a secondary zone */
+            /** @description The zone is not a secondary zone (`dns.zone.invalid`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };

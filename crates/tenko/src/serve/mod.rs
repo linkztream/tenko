@@ -1346,6 +1346,11 @@ async fn start(
             lists::PERIOD,
         )));
     }
+    // WP6.1: transfers in for secondary and catalog zones (`dns.transfer`) and NOTIFY out
+    // (`dns.notify`) on the leader.
+    let secondaries = zones
+        .as_ref()
+        .map(|zones| dns::transfer_services(zones, &resolved.config.dns, &leaders));
     // The DNS actuator of IPAM (WP4.4): the automatic move step joins the engine, and the
     // reconciler writes the records of the intent through the zone service.
     let dns_actuator = match (&zones, &ipam) {
@@ -1665,6 +1670,10 @@ async fn start(
             server.extensions.insert(engine.clone());
             if let Some(zones) = &zones {
                 server.extensions.insert(Arc::clone(zones));
+                // WP6.1: the transfer state and the transfer-now route.
+                if let Some(transfers) = &secondaries {
+                    server.extensions.insert(transfers.secondaries().clone());
+                }
                 server.extensions.insert(Arc::clone(&list_staging));
                 server
                     .extensions
@@ -1810,6 +1819,8 @@ async fn start(
                 metrics: warnings_state.metrics(),
                 api_tls,
                 tls_policy,
+                // WP6.1: the transfer path reads the zones and keys through the zone service.
+                transfers: secondaries.clone(),
             })
             .await?;
             Ok((Some(role), summary))

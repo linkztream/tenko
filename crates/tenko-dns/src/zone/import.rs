@@ -447,6 +447,8 @@ fn purged(zone: &Zone, rrset: &RrSet, file_apex_ns: bool) -> bool {
 }
 
 fn check_target(zone: &Zone, scope: &ScopeName) -> ZoneResult<()> {
+    // WP6.1: a secondary zone's records come from its transfers only.
+    super::secondary::check_writable(zone)?;
     if !holds_data(zone.kind) {
         return Err(ZoneError::zone_invalid(
             "kind",

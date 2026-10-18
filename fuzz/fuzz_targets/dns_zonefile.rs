@@ -84,6 +84,7 @@ fn fixture() -> &'static Fixture {
             dnssec: Default::default(),
             source: None,
             reverse_of: None,
+            catalog: false,
             description: None,
             created: stamp.clone(),
             updated: stamp.clone(),

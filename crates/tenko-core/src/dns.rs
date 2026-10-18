@@ -156,8 +156,20 @@ pub mod codes {
     /// forwarding rule, a zone scope or a zone named by a view. Params: `id`, `by`.
     pub const VIEW_IN_USE: &str = "dns.view.in_use";
 
+    // WP6.1: the codes of zone transfers.
+    /// The zone's records come from a zone transfer and are read-only (409): a secondary
+    /// zone, or the generated members of a catalog zone. Params: `zone`.
+    pub const ZONE_SECONDARY: &str = "dns.zone.secondary";
+    /// A zone transfer in failed: no answer, a refusal, a malformed or incomplete answer;
+    /// the last error of a primary in the transfer status. Params: `zone`, `server`,
+    /// `reason`.
+    pub const TRANSFER_FAILED: &str = "dns.transfer.failed";
+    /// The answer of a primary failed TSIG verification (BADKEY, BADSIG, BADTIME or an
+    /// unsigned message). Params: `zone`, `server`, `reason`.
+    pub const TRANSFER_TSIG: &str = "dns.transfer.tsig";
+
     /// Every code of the namespace, for the contracts document and its test.
-    pub const ALL: [&str; 22] = [
+    pub const ALL: [&str; 25] = [
         ZONE_NOT_FOUND,
         ZONE_EXISTS,
         ZONE_INVALID,
@@ -181,6 +193,9 @@ pub mod codes {
         MODULE_DISABLED,
         // WP6.4
         VIEW_IN_USE,
+        ZONE_SECONDARY,
+        TRANSFER_FAILED,
+        TRANSFER_TSIG,
     ];
 }
 
@@ -763,6 +778,13 @@ pub struct Zone {
     /// The IPAM prefix whose reverse zone this is (plan section 2.6).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reverse_of: Option<PrefixId>,
+    // WP6.1: catalog zones (RFC 9432).
+    /// A catalog zone (RFC 9432). On a secondary zone: its members become secondary zones
+    /// of this installation with the catalog's primaries and leave with it. On a primary
+    /// zone: Tenko writes its members, every primary zone of the same tenant (or without a
+    /// tenant) whose `transfer.allow` is not empty, catalog zones excepted.
+    #[serde(default)]
+    pub catalog: bool,
     /// Free text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -834,6 +856,13 @@ impl Zone {
         if self.dnssec.mode == DnssecMode::Online && self.kind != ZoneKind::Primary {
             return invalid("dnssec.mode", "only a primary zone is signed online");
         }
+        // WP6.1: a catalog zone is a primary or a secondary zone.
+        if self.catalog && !matches!(self.kind, ZoneKind::Primary | ZoneKind::Secondary) {
+            return invalid(
+                "catalog",
+                "only a primary or a secondary zone is a catalog zone",
+            );
+        }
         if self.dnssec.resign_before_days >= self.dnssec.signature_validity_days {
             return invalid(
                 "dnssec.resign_before_days",
@@ -877,6 +906,9 @@ pub enum Origin {
     Dhcp,
     /// Active Directory (Phase 4).
     Ad,
+    /// A zone transfer in (WP6.1): the records of a secondary zone, and the members Tenko
+    /// writes into a primary catalog zone; read-only for every other writer.
+    Transfer,
 }
 
 impl Origin {
@@ -885,8 +917,15 @@ impl Origin {
     /// `ipam` RRset that a person changed. The actuator touches `ipam` RRsets only. Dynamic
     /// updates, DHCP and AD replace `ipam` RRsets only when the zone policy allows.
     pub fn may_replace(self, existing: Origin, policy: &UpdatePolicy) -> bool {
+        // WP6.1: what a transfer wrote only a transfer replaces, and it replaces anything.
+        if self == Origin::Transfer {
+            return true;
+        }
+        if existing == Origin::Transfer {
+            return false;
+        }
         match self {
-            Origin::Manual => true,
+            Origin::Manual | Origin::Transfer => true,
             Origin::Ipam => existing == Origin::Ipam,
             Origin::Dynamic | Origin::Dhcp | Origin::Ad => {
                 existing != Origin::Ipam || policy.may_replace_ipam
@@ -1838,9 +1877,15 @@ pub mod audit {
     pub const LOG_STOP: AuditAction = AuditAction::from_static("dns.log.stop");
     /// A node's query log was started again.
     pub const LOG_START: AuditAction = AuditAction::from_static("dns.log.start");
+    // WP6.1: zone transfers.
+    /// A zone was transferred out (AXFR or IXFR) to a client: the client, the key and the
+    /// serials.
+    pub const ZONE_TRANSFER_OUT: AuditAction = AuditAction::from_static("dns.zone.transfer_out");
+    /// A zone transfer in was written (secondary zones, the members of a catalog zone).
+    pub const ZONE_TRANSFER_IN: AuditAction = AuditAction::from_static("dns.zone.transfer_in");
 
     /// Every action of the module, for the contracts document and its test.
-    pub const ALL: [&AuditAction; 32] = [
+    pub const ALL: [&AuditAction; 34] = [
         &ZONE_CREATE,
         &ZONE_UPDATE,
         &ZONE_DELETE,
@@ -1873,6 +1918,8 @@ pub mod audit {
         &LOG_READ,
         &LOG_STOP,
         &LOG_START,
+        &ZONE_TRANSFER_OUT,
+        &ZONE_TRANSFER_IN,
     ];
 }
 

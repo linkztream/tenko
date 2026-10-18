@@ -56,6 +56,10 @@ use crate::exit;
 // WP6.4: `tenko dns view`.
 #[path = "dns_view.rs"]
 pub mod view;
+// WP6.1: `tenko dns transfer status|now`.
+#[path = "dns_transfer.rs"]
+mod transfer;
+pub use transfer::{TransferArgs, TransferCommand};
 
 /// Subcommands of `tenko dns`.
 #[derive(Debug, Clone, Subcommand)]
@@ -106,6 +110,12 @@ pub enum DnsCommand {
         /// The `view` subcommand to run.
         #[command(subcommand)]
         action: view::ViewCommand,
+    },
+    /// Zone transfers: the state of a zone, a refresh of a secondary zone now.
+    Transfer {
+        /// The `transfer` subcommand to run.
+        #[command(subcommand)]
+        action: TransferCommand,
     },
 }
 
@@ -528,6 +538,7 @@ impl DnsCommand {
             },
             // WP6.4
             Self::View { action } => action.client(),
+            Self::Transfer { action } => action.client(),
         }
     }
 
@@ -581,6 +592,10 @@ impl DnsCommand {
             },
             // WP6.4
             Self::View { action } => action.name(),
+            Self::Transfer { action } => match action {
+                TransferCommand::Status(_) => "dns transfer status",
+                TransferCommand::Now(_) => "dns transfer now",
+            },
         }
     }
 }
@@ -686,6 +701,10 @@ pub struct ZoneCreateArgs {
     /// Free text.
     #[arg(long, value_name = "TEXT")]
     pub description: Option<String>,
+    /// A catalog zone (RFC 9432): Tenko writes the primary zones with transfers allowed
+    /// into it.
+    #[arg(long)]
+    pub catalog: bool,
 }
 
 /// Arguments of the commands that take a zone and maybe a revision.
@@ -741,6 +760,9 @@ pub struct ZoneUpdateArgs {
     /// TTL of the SOA record and the default TTL of new RRsets, in seconds.
     #[arg(long, value_name = "N")]
     pub ttl: Option<u32>,
+    /// Whether the zone is a catalog zone (RFC 9432).
+    #[arg(long, value_name = "BOOL")]
+    pub catalog: Option<bool>,
 }
 
 /// Arguments of `tenko dns record list`.
@@ -986,6 +1008,7 @@ pub async fn run(command: &DnsCommand) -> Result<Output, Failure> {
         },
         // WP6.4
         DnsCommand::View { action } => view::run(&target, action).await,
+        DnsCommand::Transfer { action } => transfer::run(&target, action).await,
     }
 }
 
@@ -1232,6 +1255,9 @@ async fn zone_create(target: &Target, args: &ZoneCreateArgs) -> Result<Output, F
     if let Some(description) = &args.description {
         body["description"] = json!(description);
     }
+    if args.catalog {
+        body["catalog"] = json!(true);
+    }
     let answer: Value = client.post("/dns/zones", &body, Some(&key())).await?;
     if target.json {
         return Ok(Output::json(&answer));
@@ -1263,6 +1289,9 @@ async fn zone_update(target: &Target, args: &ZoneUpdateArgs) -> Result<Output, F
     if let Some(description) = &args.description {
         body.insert("description".to_owned(), json!(description));
     }
+    if let Some(catalog) = args.catalog {
+        body.insert("catalog".to_owned(), json!(catalog));
+    }
     let soa_flags = [
         ("refresh", args.refresh),
         ("retry", args.retry),
@@ -1289,7 +1318,7 @@ async fn zone_update(target: &Target, args: &ZoneUpdateArgs) -> Result<Output, F
     }
     if body.is_empty() {
         return Err(usage(
-            "nothing to change: give --serial, --description or an SOA option",
+            "nothing to change: give --serial, --description, --catalog or an SOA option",
         ));
     }
     let answer: Value = client

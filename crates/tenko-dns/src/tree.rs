@@ -1022,6 +1022,41 @@ impl ZoneIndex {
     }
 }
 
+// WP6.1: what zone transfers read from the index.
+/// One RRset of a zone scope as a transfer copies it: the owner in lowercase wire form,
+/// the type, the TTL and the records.
+pub type ScopeRrSet = (Box<[u8]>, Rtype, u32, Box<[Rdata]>);
+
+impl ZoneIndex {
+    /// The zone whose apex encloses `qname` most closely, with its kind, whether or not the
+    /// index holds data for it (a secondary zone before its first transfer or after it
+    /// expired holds none).
+    pub fn enclosing_zone(&self, qname: &[u8]) -> Option<(ZoneId, ZoneKind)> {
+        self.zone_of(qname).map(|entry| (entry.id, entry.kind))
+    }
+
+    /// Every RRset of one scope of a zone in canonical order of the owners (RFC 4034
+    /// section 6.1), the types of an owner in type order; `None` when the index holds no
+    /// data for the scope. Copies the owners and shares the record data; for AXFR, off the
+    /// query path.
+    pub fn scope_rrsets(&self, zone: ZoneId, scope: &ScopeName) -> Option<Vec<ScopeRrSet>> {
+        let entry = self.entry(zone)?;
+        let (_, tree) = entry.scopes.iter().find(|(name, _)| name == scope)?;
+        let mut owners: Vec<(Vec<u8>, Vec<OwnedSet>)> = tree.rows().into_iter().collect();
+        owners.sort_by(|a, b| canonical_cmp(&a.0, &b.0));
+        Some(
+            owners
+                .into_iter()
+                .flat_map(|(owner, sets)| {
+                    let owner: Box<[u8]> = owner.into();
+                    sets.into_iter()
+                        .map(move |set| (owner.clone(), set.rtype, set.ttl, set.rdata))
+                })
+                .collect(),
+        )
+    }
+}
+
 fn owned_set(rtype: Rtype, rrset: &RrSet) -> OwnedSet {
     OwnedSet {
         rtype,

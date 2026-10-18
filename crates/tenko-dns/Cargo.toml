@@ -19,6 +19,9 @@ domain = { workspace = true, features = ["zonefile"] }
 # Block list versions above 64 KiB of entries are deflated (src/lists); the version
 # tenko-api and tenko-cluster already build.
 flate2 = "1.1.10"
+# The store's change streams (WP6.1: the transfer path, NOTIFY out and the secondary
+# service follow the zones); already in the graph through tenko-store.
+futures = { workspace = true }
 # DoH upstreams (WP5.1): HTTP/2 over the rustls stream; both crates are already in the
 # graph through hyper and tonic.
 h2 = "0.4.20"

@@ -1690,6 +1690,7 @@ export type MessageKey =
   | "dns.origin.dynamic"
   | "dns.origin.ipam"
   | "dns.origin.manual"
+  | "dns.origin.transfer"
   | "dns.record.line_error"
   | "dns.records.any_origin"
   | "dns.records.any_type"
@@ -1751,6 +1752,55 @@ export type MessageKey =
   | "dns.takeover.tag"
   | "dns.takeover.title"
   | "dns.title"
+  | "dns.transfer.address"
+  | "dns.transfer.allow"
+  | "dns.transfer.allow_add"
+  | "dns.transfer.allow_help"
+  | "dns.transfer.allow_none"
+  | "dns.transfer.allow_remove"
+  | "dns.transfer.body"
+  | "dns.transfer.catalog"
+  | "dns.transfer.catalog_help_other"
+  | "dns.transfer.catalog_help_primary"
+  | "dns.transfer.catalog_help_secondary"
+  | "dns.transfer.check.address"
+  | "dns.transfer.check.key"
+  | "dns.transfer.check.port"
+  | "dns.transfer.check.tls_name"
+  | "dns.transfer.error.failed"
+  | "dns.transfer.error.refused"
+  | "dns.transfer.error.tsig"
+  | "dns.transfer.expires"
+  | "dns.transfer.from_primary"
+  | "dns.transfer.key"
+  | "dns.transfer.last_error"
+  | "dns.transfer.last_success"
+  | "dns.transfer.next_refresh"
+  | "dns.transfer.not_queued"
+  | "dns.transfer.notify"
+  | "dns.transfer.notify_add"
+  | "dns.transfer.notify_none"
+  | "dns.transfer.notify_remove"
+  | "dns.transfer.now"
+  | "dns.transfer.port"
+  | "dns.transfer.primary"
+  | "dns.transfer.primary_add"
+  | "dns.transfer.primary_remove"
+  | "dns.transfer.queued"
+  | "dns.transfer.records_readonly"
+  | "dns.transfer.require_tsig"
+  | "dns.transfer.require_tsig_help"
+  | "dns.transfer.serial"
+  | "dns.transfer.state"
+  | "dns.transfer.state_idle"
+  | "dns.transfer.state_running"
+  | "dns.transfer.status"
+  | "dns.transfer.title"
+  | "dns.transfer.tls_name"
+  | "dns.transfer.unavailable"
+  | "dns.transfer.xot"
+  | "dns.transfer.xot_help"
+  | "dns.transfer.xot_short"
   | "dns.view.action.down"
   | "dns.view.action.up"
   | "dns.view.check.address"
@@ -2004,6 +2054,7 @@ export type MessageKey =
   | "errors.dns.zone.exists"
   | "errors.dns.zone.invalid"
   | "errors.dns.zone.not_found"
+  | "errors.dns.zone.secondary"
   | "errors.dns.zonefile.invalid"
   | "errors.generic.client"
   | "errors.generic.field"
@@ -2343,6 +2394,7 @@ export type MessageKey =
   | "hosts.dns.origin.dynamic"
   | "hosts.dns.origin.ipam"
   | "hosts.dns.origin.manual"
+  | "hosts.dns.origin.transfer"
   | "hosts.dns.title"
   | "hosts.do.create"
   | "hosts.do.lock"
@@ -5466,6 +5518,10 @@ export interface MessageArgs {
   "dns.settings.saved": { name: string | number };
   "dns.takeover.body": { origin: string | number };
   "dns.takeover.title": { name: string | number; type: string | number };
+  "dns.transfer.allow_remove": { name: string | number };
+  "dns.transfer.notify_remove": { n: string | number };
+  "dns.transfer.primary_remove": { n: string | number };
+  "dns.transfer.queued": { name: string | number };
   "dns.view.check.address": { entry: string | number; n: string | number };
   "dns.view.check.name": { entry: string | number; n: string | number };
   "dns.view.check.no_scope": { scope: string | number; zone: string | number };
@@ -7848,6 +7904,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.origin.dynamic",
   "dns.origin.ipam",
   "dns.origin.manual",
+  "dns.origin.transfer",
   "dns.record.line_error",
   "dns.records.any_origin",
   "dns.records.any_type",
@@ -7909,6 +7966,55 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.takeover.tag",
   "dns.takeover.title",
   "dns.title",
+  "dns.transfer.address",
+  "dns.transfer.allow",
+  "dns.transfer.allow_add",
+  "dns.transfer.allow_help",
+  "dns.transfer.allow_none",
+  "dns.transfer.allow_remove",
+  "dns.transfer.body",
+  "dns.transfer.catalog",
+  "dns.transfer.catalog_help_other",
+  "dns.transfer.catalog_help_primary",
+  "dns.transfer.catalog_help_secondary",
+  "dns.transfer.check.address",
+  "dns.transfer.check.key",
+  "dns.transfer.check.port",
+  "dns.transfer.check.tls_name",
+  "dns.transfer.error.failed",
+  "dns.transfer.error.refused",
+  "dns.transfer.error.tsig",
+  "dns.transfer.expires",
+  "dns.transfer.from_primary",
+  "dns.transfer.key",
+  "dns.transfer.last_error",
+  "dns.transfer.last_success",
+  "dns.transfer.next_refresh",
+  "dns.transfer.not_queued",
+  "dns.transfer.notify",
+  "dns.transfer.notify_add",
+  "dns.transfer.notify_none",
+  "dns.transfer.notify_remove",
+  "dns.transfer.now",
+  "dns.transfer.port",
+  "dns.transfer.primary",
+  "dns.transfer.primary_add",
+  "dns.transfer.primary_remove",
+  "dns.transfer.queued",
+  "dns.transfer.records_readonly",
+  "dns.transfer.require_tsig",
+  "dns.transfer.require_tsig_help",
+  "dns.transfer.serial",
+  "dns.transfer.state",
+  "dns.transfer.state_idle",
+  "dns.transfer.state_running",
+  "dns.transfer.status",
+  "dns.transfer.title",
+  "dns.transfer.tls_name",
+  "dns.transfer.unavailable",
+  "dns.transfer.xot",
+  "dns.transfer.xot_help",
+  "dns.transfer.xot_short",
   "dns.view.action.down",
   "dns.view.action.up",
   "dns.view.check.address",
@@ -8162,6 +8268,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.dns.zone.exists",
   "errors.dns.zone.invalid",
   "errors.dns.zone.not_found",
+  "errors.dns.zone.secondary",
   "errors.dns.zonefile.invalid",
   "errors.generic.client",
   "errors.generic.field",
@@ -8501,6 +8608,7 @@ export const messageKeys: readonly MessageKey[] = [
   "hosts.dns.origin.dynamic",
   "hosts.dns.origin.ipam",
   "hosts.dns.origin.manual",
+  "hosts.dns.origin.transfer",
   "hosts.dns.title",
   "hosts.do.create",
   "hosts.do.lock",

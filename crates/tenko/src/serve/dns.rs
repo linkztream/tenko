@@ -99,6 +99,93 @@ pub(crate) struct Parts<'a> {
     pub(crate) api_tls: TlsService,
     /// The protocol policy of the API (TLS 1.3 only under the Hardened profile).
     pub(crate) tls_policy: TlsPolicy,
+    // WP6.1: zone transfers.
+    /// The zone service and the secondary service the transfer path reads and notifies.
+    pub(crate) transfers: Option<Transfers>,
+}
+
+// WP6.1: zone transfers out, NOTIFY in and the leader services of transfers.
+/// What the transfer path reads and tells: the zone service, the secondary service, and
+/// where NOTIFY out learns the revision the role serves.
+#[derive(Clone)]
+pub(crate) struct Transfers {
+    zones: Arc<tenko_dns::zone::ZoneService>,
+    secondaries: tenko_dns::zone::secondary::SecondaryService,
+    served: tenko_dns::xfr::notify::ServedRevision,
+}
+
+impl Transfers {
+    /// The secondary service, for the API.
+    pub(crate) fn secondaries(&self) -> &tenko_dns::zone::secondary::SecondaryService {
+        &self.secondaries
+    }
+}
+
+/// Registers the leader services `dns.transfer` and `dns.notify` and returns what the API
+/// and the role reach.
+pub(crate) fn transfer_services(
+    zones: &Arc<tenko_dns::zone::ZoneService>,
+    section: &DnsSection,
+    leaders: &super::leader::LeaderRegistry,
+) -> Transfers {
+    use tenko_dns::{xfr::notify, zone::secondary};
+    let upstream_ca = section.upstream_ca.as_ref().and_then(|path| {
+        std::fs::read(path)
+            .map_err(|io| {
+                tracing::warn!(path = %path.display(), %io, "dns.upstream_ca cannot be read; XoT primaries are checked against the system roots");
+            })
+            .ok()
+    });
+    let keys = Arc::new(secondary::KeyLoader::new(Arc::clone(zones)));
+    let service = secondary::SecondaryService::new(
+        Arc::clone(zones),
+        Arc::clone(&keys),
+        secondary::SecondarySettings {
+            upstream_ca,
+            ..secondary::SecondarySettings::default()
+        },
+    );
+    leaders.register(Arc::new(service.clone()));
+    let served = notify::ServedRevision::default();
+    leaders.register(Arc::new(notify::NotifyService::new(
+        Arc::clone(zones),
+        keys,
+        served.clone(),
+        notify::NotifySettings::default(),
+    )));
+    Transfers {
+        zones: Arc::clone(zones),
+        secondaries: service,
+        served,
+    }
+}
+
+/// The transfer path of the role's listeners: the directory of zones and keys kept current
+/// from the store, the index for AXFR, the journal for IXFR, NOTIFY to the secondary
+/// service; and the task that keeps the directory current.
+fn transfer_path(
+    transfers: Option<&Transfers>,
+    handle: &catalog::CatalogHandle,
+    store: &Arc<dyn Store>,
+    stop: CancellationToken,
+) -> Option<(Arc<dyn tenko_dns::xfr::TransferSink>, JoinHandle<()>)> {
+    use tenko_dns::xfr::{self, out::XfrOut};
+    let Transfers {
+        zones,
+        secondaries,
+        served,
+    } = transfers?;
+    served.set(handle.clone());
+    let directory = Arc::new(xfr::Directory::default());
+    let task = tokio::spawn(Arc::clone(&directory).follow(Arc::clone(zones), stop));
+    let path = XfrOut::new(
+        handle.clone(),
+        directory,
+        Arc::new(xfr::StoreJournal::new(Arc::clone(store))),
+        Arc::new(xfr::StoreAudit::new(Arc::clone(store))),
+        Some(Arc::new(secondaries.clone()) as Arc<dyn xfr::NotifyHandler>),
+    );
+    Some((Arc::new(path) as Arc<dyn xfr::TransferSink>, task))
 }
 
 fn error(code: &str, message: impl Into<String>) -> StartError {
@@ -604,6 +691,7 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         metrics,
         api_tls,
         tls_policy,
+        transfers,
     } = parts;
     let section = &resolved.config.dns;
     let listen = section
@@ -619,6 +707,7 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
     tenko_dns::querylog::register_metrics(metrics);
     metrics.register(&tenko_dns::policy::counters::BLOCKED_FAMILY);
     tenko_dns::rate::limiter::register_metrics(metrics);
+    tenko_dns::xfr::register_metrics(metrics);
     let log_profile = log_profile(resolved, store.as_ref()).await;
     let feed_store = Arc::clone(&store);
     let mut feed = tokio::task::spawn_blocking(move || store_feed::register(feed_store))
@@ -686,11 +775,13 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         watchers = encrypted.watchers;
         encrypted_line = Some(encrypted.describe);
     }
+    let transfer_path = transfer_path(transfers.as_ref(), &handle, &store, stop.child_token());
     let hooks = Hooks {
         log: log_sink,
         forward: Some(Arc::new(sink) as Arc<dyn ForwardSink>),
         cookies: None,
         certificates,
+        transfers: transfer_path.as_ref().map(|(path, _)| Arc::clone(path)),
     };
     let server = match Server::start(config, handle.clone(), resolver, hooks).await {
         Ok(server) => server,
@@ -739,7 +830,10 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         DnsRole {
             node,
             stop,
-            tasks: vec![follower, forward_task, recursion_task],
+            tasks: [follower, forward_task, recursion_task]
+                .into_iter()
+                .chain(transfer_path.map(|(_, task)| task))
+                .collect(),
             log,
             watchers,
             announce,

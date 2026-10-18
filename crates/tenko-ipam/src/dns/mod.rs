@@ -238,6 +238,7 @@ impl DnsActuator {
                     create.source
                 )),
                 reverse_of: Some(create.prefix),
+                catalog: false,
             };
             match self.zones.create(cx, new).await {
                 Ok(written) => {

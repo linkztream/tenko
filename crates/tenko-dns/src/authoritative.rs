@@ -579,6 +579,14 @@ fn walk<'a>(
                 .or_else(|| zone_of(&lookup));
             match zone {
                 Some(zone) if served(zone.kind) => apex = zone.apex,
+                // WP6.1: a secondary zone without its copy (before the first transfer, or
+                // expired) answers SERVFAIL for its names.
+                None if matches!(lookup, Lookup::NotAuthoritative)
+                    && matches!(index.enclosing_zone(name), Some((_, ZoneKind::Secondary))) =>
+                {
+                    answer.rcode = rcode::SERVFAIL;
+                    return done(ResponseKind::Error, &[0]);
+                }
                 _ => return Walk::Outside,
             }
             answer.authoritative = true;

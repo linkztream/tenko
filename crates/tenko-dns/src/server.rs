@@ -96,6 +96,9 @@ pub struct Hooks {
     /// The certificates of DoT and DoH when they end TLS ([`tls::Termination::Tls`]): a
     /// resolver that may swap its certificate while the listeners run.
     pub certificates: Option<Arc<dyn ResolvesServerCert>>,
+    // WP6.1: zone transfers out and NOTIFY in.
+    /// The transfer path; without one, AXFR and IXFR are refused and NOTIFY is NOTIMP.
+    pub transfers: Option<Arc<dyn crate::xfr::TransferSink>>,
 }
 
 impl std::fmt::Debug for Hooks {
@@ -105,6 +108,7 @@ impl std::fmt::Debug for Hooks {
             .field("forward", &self.forward.is_some())
             .field("cookies", &self.cookies.is_some())
             .field("certificates", &self.certificates.is_some())
+            .field("transfers", &self.transfers.is_some())
             .finish()
     }
 }
@@ -153,6 +157,10 @@ impl Server {
     /// An address that cannot be bound, no listen address, no worker, DoT or DoH that end
     /// TLS without [`Hooks::certificates`], or a failing random generator for the cookie
     /// secret; nothing keeps running then.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the start in its order: bind everything, then spawn every listener"
+    )]
     pub async fn start<R: Resolver + 'static>(
         config: ServerConfig,
         catalog: CatalogHandle,
@@ -179,6 +187,9 @@ impl Server {
         }
         if let Some(forward) = hooks.forward {
             responder = responder.with_forwarder(forward);
+        }
+        if let Some(transfers) = hooks.transfers {
+            responder = responder.with_transfers(transfers);
         }
         let responder = Arc::new(responder);
         // Bind everything first: a failure leaves nothing running.

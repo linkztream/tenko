@@ -597,6 +597,7 @@ mod tests {
             dnssec: tenko_core::dns::DnssecPolicy::default(),
             source,
             reverse_of: None,
+            catalog: false,
             description: None,
             created: stamp(),
             updated: stamp(),

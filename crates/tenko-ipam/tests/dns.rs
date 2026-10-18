@@ -75,6 +75,7 @@ fn zone(apex: &str, servers: &str) -> NewZone {
         source: None,
         description: None,
         reverse_of: None,
+        catalog: false,
     }
 }
 

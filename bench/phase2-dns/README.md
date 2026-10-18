@@ -2,7 +2,7 @@
 
 The measurement harness of Phase 2 (DNS) of the Tenko DDI project: a load generator for any DNS
 server, a generator for the zone files and query files of the Phase 2 data sets, a report
-renderer, and the procedure scripts of the measurements M16, M17, M18, M22, M24 and M25
+renderer, and the procedure scripts of the measurements M16, M17, M18, M19, M22, M24 and M25
 (`docs/plans/phase-2-plan.md`, sections 2.10 and 6, work package WP4.6). It contains no server
 code: the target is the Tenko engine, the Spike B responder, BIND, NSD or anything else that
 answers DNS.
@@ -52,6 +52,7 @@ engine is measured against.
 | `scripts/run-dnsperf.sh` | M17: dnsperf from another host |
 | `scripts/run-flamethrower.sh` | M17: flamethrower from another host (UDP, TCP, DoT, DoH) |
 | `scripts/run-m24-cache.sh` | M24: the resolver's cache (`tenko serve` forwarding to the engine's example server) in a 1 M-name mixed run at two cache bounds, and serve-stale under an upstream cut |
+| `scripts/run-m19-xfr.sh` | M19: a 100-record change on a 100,000-record Tenko zone reaching BIND 9 by NOTIFY and IXFR on the compose DNS lab (`deploy/compose/lab-dns`), the latency and the size of the delta |
 | `scripts/run-m25-lists.sh` | M25: the block list compiler and matcher (the engine's example `lists_bench`) on a generated list of 1 M names: compile time, the size of the version, the time per lookup and per label |
 | `scripts/server-cpu.sh` | CPU seconds and RSS of a server pid on a Linux host, for the runs where the harness cannot sample the server |
 | `scripts/lib.sh` | Shared helpers: machine line, musl linkage check, readiness probe |
@@ -223,6 +224,15 @@ static musl build on Linux, the release build on Windows) generates 1,000,000 na
 in hosts and in domain-list form and builds the matcher (threshold: under 2 s together), then
 times 100,000 lookups of names with 2, 4 and 8 labels. The script writes the JSON lines to
 `results/raw/` and prints the Verdict line. Write-up: `results/2026-10-18-m25-lists.md`.
+
+### M19: IXFR delta and NOTIFY latency (`scripts/run-m19-xfr.sh`)
+
+Not a harness run: the compose DNS lab with the release image (the static musl binary) and BIND 9
+as the secondary. The script keeps the lab of the smoke's transfer round, imports a zone of
+100,000 records into Tenko, waits for BIND's AXFR, then writes five batches of 100 changed
+records and times each from the commit to BIND's answer for the last changed name, with the
+NOTIFY's arrival and the transfer's size from BIND's log (threshold: within 5 s, the delta only).
+Run as root on a Linux Docker host. Write-up: `results/2026-10-18-m19-xfr.md`.
 
 ## Caveats
 

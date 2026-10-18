@@ -1,8 +1,9 @@
 # DNS: zones, records, zone files, keys, the dns role, the forwarder and the engine
 
+This page describes how Tenko DDI holds DNS data and answers for it: zones and their kinds, RRsets and the rules they keep, batch changes with a dry run, zone file import and export, SOA serials and the journal that zone transfers read, access lists and TSIG keys, the `dns` role that serves the zones, the forwarder for names outside them (in [dns-resolver.md](dns-resolver.md)), and the engine underneath. It is for an operator who manages zones through the API, the command line or the web UI and runs a node that answers DNS, and for a developer who builds on the zone service or the engine. It describes the zone service `tenko_dns::zone`, the role (`tenko_dns::store_feed`, `forward`, `querylog`, `status` and `tenko serve`), the engine (`crates/tenko-dns`), the model `tenko_core::dns` and the `/dns` and `/nodes/{id}/dns` routes of `tenko-api`; where this page and the code differ, the code is right. The requirements are DNS-01, DNS-07, DNS-09, DNS-11, DNS-19, DNS-24, TGL-10 and MIG-15 in [REQUIREMENTS.md](REQUIREMENTS.md); the decisions are in [ADR 0017](adr/0017-dns-data-model-and-serving-path.md) and section 2 of the [Phase 2 plan](plans/phase-2-plan.md). The contracts every Phase 2 package shares (tables, routes, codes, audit actions) are listed in [dns-contracts.md](dns-contracts.md). Views, block lists, dynamic updates and DNSSEC get their sections when their packages land.
 This page describes how Tenko DDI holds DNS data and answers for it: zones and their kinds, RRsets and the rules they keep, batch changes with a dry run, zone file import and export, SOA serials and the journal that zone transfers read, access lists and TSIG keys, the `dns` role that serves the zones, the forwarder for names outside them (in [dns-resolver.md](dns-resolver.md)), and the engine underneath. It is for an operator who manages zones through the API, the command line or the web UI and runs a node that answers DNS, and for a developer who builds on the zone service or the engine. It describes the zone service `tenko_dns::zone`, the role (`tenko_dns::store_feed`, `forward`, `querylog`, `status` and `tenko serve`), the engine (`crates/tenko-dns`), the model `tenko_core::dns` and the `/dns` and `/nodes/{id}/dns` routes of `tenko-api`; where this page and the code differ, the code is right. The requirements are DNS-01, DNS-07, DNS-09, DNS-11, DNS-20, DNS-24 and MIG-15 in [REQUIREMENTS.md](REQUIREMENTS.md); the decisions are in [ADR 0017](adr/0017-dns-data-model-and-serving-path.md) and section 2 of the [Phase 2 plan](plans/phase-2-plan.md). The contracts every Phase 2 package shares (tables, routes, codes, audit actions) are listed in [dns-contracts.md](dns-contracts.md). Views have section 11; transfers, dynamic updates and DNSSEC get their sections when their packages land.
 
-Terms used below: an **RRset** is the records of one owner name and type in one scope of a zone. A **scope** is one version of a zone's data that views choose (DNS-20); every zone has the scope `default`. The **apex** is the zone's own name. An RRset's **origin** says who owns it: `manual` (API, UI, zone file), `ipam` (the DNS actuator of IPAM), `dynamic` (RFC 2136), `dhcp` and `ad`.
+Terms used below: an **RRset** is the records of one owner name and type in one scope of a zone. A **scope** is one version of a zone's data that views choose (DNS-20); every zone has the scope `default`. The **apex** is the zone's own name. An RRset's **origin** says who owns it: `manual` (API, UI, zone file), `ipam` (the DNS actuator of IPAM), `dynamic` (RFC 2136), `transfer` (zone transfers, section 10), `dhcp` and `ad`.
 
 Contents:
 
@@ -15,6 +16,10 @@ Contents:
 7. [Reverse zones and the IPAM link](#7-reverse-zones-and-the-ipam-link)
 8. [The dns role](#8-the-dns-role)
 9. [The forwarder](#9-the-forwarder)
+10. [Zone transfers and NOTIFY](#10-zone-transfers-and-notify)
+12. [The engine](#12-the-engine)
+
+Section 11 is kept for the package that writes it (views); the resolver side has its own page, [dns-resolver.md](dns-resolver.md).
 11. [Views, scopes and weights](#11-views-scopes-and-weights)
 12. [The engine](#12-the-engine)
 
@@ -28,7 +33,7 @@ All routes are under `/api/v1` and exist only while the DNS module runs (OPS-25)
 |---|---|---|
 | `primary` | yes | Tenko is the source of the zone |
 | `rpz` | yes | a response policy zone (the policy engine is WP5.2) |
-| `secondary` | no | the row only; transfers in are WP6.1 |
+| `secondary` | yes, the copy | filled by zone transfers from `source.primaries` (section 10); the records are read-only |
 | `stub` | no | the row only; it names the servers to ask (WP5.1) |
 | `forward` | no | the row only; queries go to `source.primaries` (WP5.1) |
 
@@ -137,7 +142,8 @@ POST /api/v1/dns/zones/{id}/records/batch?dry_run=true
 | `dns.record.invalid` | 400 | A record or RRset breaks a rule of its type, an owner outside the zone, the SOA in a batch, no records for `set`/`add`/`remove` |
 | `dns.record.conflict` | 409 | RRsets of one owner conflict (a CNAME beside data, data beside a delegation) |
 | `dns.record.origin` | 409 | An RRset of another origin without `take_over` |
-| `dns.zone.invalid` | 400 | A zone without data (secondary, stub, forward), a scope the zone lacks |
+| `dns.zone.invalid` | 400 | A zone without data (stub, forward), a scope the zone lacks |
+| `dns.zone.secondary` | 409 | A secondary zone, whose records come from transfers (section 10.7) |
 
 ## 4. Zone files: import, export, limits
 
@@ -452,6 +458,221 @@ Binding port 53 needs `CAP_NET_BIND_SERVICE` on Linux (the systemd unit grants i
 
 Names outside the zones a node serves go to the forwarder of the resolver side: forwarding rules by longest suffix and view, stub zones, the default forwarder of `[dns] forwarders`, the recursion access list of each view, the cache with serve-stale and prefetch, and upstreams over plain DNS, DoT and DoH with health, round-trip choice, random source ports and 0x20. [dns-resolver.md](dns-resolver.md) describes all of it (sections 1 to 4). The plain forwarder of Slice 4 (P2-Q16) that stood here was replaced by it in WP5.1, behind the same `ForwardSink` and `Upstream` traits (`tenko_dns::forward`, `tenko_dns::upstream`).
 
+## 10. Zone transfers and NOTIFY
+
+Tenko moves zones to and from other servers with the standard mechanisms: AXFR (RFC 5936) and IXFR (RFC 1995) to copy a zone, NOTIFY (RFC 1996) to say that it changed, TSIG (RFC 8945) to authenticate both, XoT (RFC 9103) to carry them over TLS, and catalog zones (RFC 9432) to hand over the list of zones itself (DNS-09, DNS-19, TGL-10). The same mechanism serves a BIND or Windows DNS server that copies a zone from Tenko, a Tenko node that copies a zone from one of them, and the migration of zones (MIG-02). The code is `tenko_dns::tsig`, `tenko_dns::xfr` (the transfer path and NOTIFY) and `tenko_dns::zone::secondary` (the secondary service); the routes are in `tenko-api` (`routes/dns/transfer.rs`) and the commands in `tenko` (`client/dns_transfer.rs`). In Phase 2 all of it runs in the controller's own process, beside the `dns` role of section 8.
+
+### 10.1 The transfer policy and the access lists
+
+A primary zone has a transfer policy, `transfer`:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `allow` | none | The access lists (section 6) whose clients may transfer the zone. None means nobody |
+| `notify` | none | The servers told when the serial changes: `address`, `port` (default 53) and the TSIG `key` that signs the NOTIFY |
+| `require_tsig` | `true` | A transfer must be signed with a key that an access list names |
+| `xot` | `false` | A transfer is served over TLS only |
+
+```
+PATCH /api/v1/dns/zones/{id}
+{"transfer": {"allow": ["0190d1c2-..."], "require_tsig": true, "xot": false,
+              "notify": [{"address": "192.0.2.54", "port": 53, "key": "transfer.example.test"}]}}
+```
+
+A request for AXFR or IXFR is checked in this order, and the first failure answers:
+
+1. The message must parse. When it carries a TSIG record, the key must be known and the MAC and the time must verify (section 10.2); a failure answers NOTAUTH (RCODE 9) with the TSIG error.
+2. A class other than IN is REFUSED.
+3. A name that is not the apex of a zone this node serves is NOTAUTH.
+4. The policy decides, and a failure is REFUSED (RCODE 5): the zone has no `allow` list; `xot` is set and the connection is not TLS ended by this node; or no list allows the client. A list allows a client when its first matching entry is not a `deny`; an entry matches by prefix, by the TSIG key of the request, or as `any`. With `require_tsig` the request must also be signed with a key that an allowing `key` entry of the zone's lists names, so a client inside the allowed prefix but without the key is refused.
+5. A secondary zone that holds no copy yet, or whose copy has expired, answers SERVFAIL.
+
+A refusal of a signed request is signed. The scope that is transferred is the one the client's view chooses (DNS-20), as for a query. `require_tsig` is on by default and the lists are empty by default, so a new zone transfers to nobody.
+
+### 10.2 TSIG on the wire
+
+The algorithms are `hmac-sha256` (the default), `hmac-sha384`, `hmac-sha512` and, for peers that know nothing better, `hmac-sha1`. The fudge is 300 seconds, the value RFC 8945 recommends, both for what Tenko signs and for what it accepts. A request is verified in the order of RFC 8945 section 5.2:
+
+| Check | Failure | Answer |
+|---|---|---|
+| The key is known and is the one the algorithm names | BADKEY (17) | NOTAUTH, the TSIG record with an empty MAC |
+| The MAC verifies (a MAC shorter than half the hash or 10 octets is not accepted) | BADSIG (16); FORMERR for a short MAC | NOTAUTH with an empty MAC; FORMERR |
+| The time signed is within the fudge | BADTIME (18) | NOTAUTH, signed, with the server's time in Other Data |
+
+An answer of several messages (AXFR, IXFR) is signed message by message in the MAC chain of RFC 8945 section 5.3.1: the first covers the request's MAC, and each later one covers the previous MAC, the messages since and the timers. Tenko signs every message it sends. When Tenko verifies an answer (the transfer of a secondary zone) it accepts up to 99 unsigned messages between two signed ones, as the RFC lets a server send them, and requires the last message to be signed. A TSIG-signed SOA query, which a secondary sends to check the serial, is answered and signed by the transfer path; the resolver answers every signed query NOTAUTH (section 12.4).
+
+The keys are the TSIG keys of section 6: the row in `dns.keys.meta` and the secret in the vault, read through the zone service. The transfer path holds them in a keyring that it reads without a lock, and verifying or signing allocates nothing once a key is resolved. Both sides of a transfer need the same name, algorithm and secret: create the key on one side and import the secret on the other (`POST /dns/keys` takes `secret`, section 6).
+
+### 10.3 AXFR and IXFR out
+
+The transfer path takes the messages AXFR, IXFR, NOTIFY and a signed SOA query before the resolver does; `tenko_dns::xfr::classify` decides from the header and the type of the question alone. It answers over TCP on the `[dns] listen` ports and over the DoT listener (section 10.4). Over UDP it answers NOTIFY, a signed SOA query, and IXFR with the SOA only (RFC 1995 section 2, which tells the client to ask again over TCP); AXFR over UDP is refused.
+
+- **AXFR** is the SOA, every other RRset in canonical order (section 4), and the SOA again. A message holds at most 16 KiB, repeats the question and compresses owner names against it.
+- **IXFR** compares the serial in the request with the zone. A client that is current gets the single SOA. A client whose serial is in the journal of the scope (section 5) gets the steps from its serial to the served one: for each step the old SOA, the records removed, the new SOA and the records added, then the current SOA. Any other client gets the zone in AXFR form.
+- A secondary zone that Tenko holds transfers on to its own secondaries from its own journal (section 10.6), so a chain of Tenko nodes, or of other servers, carries IXFR.
+- Every transfer is audited and counted (section 10.10).
+
+### 10.4 XoT
+
+Zone transfers over TLS (RFC 9103) use the DoT listener of [dns-resolver.md](dns-resolver.md) section 7: `[dns.tls] dot = true`, by default port 853 on each `[dns] listen` address or the addresses of `dot_listen`, ALPN `dot`, and the certificate of the node (the internal CA's, an imported one, or the DNS-only certificate). XoT is served only where the node ends TLS itself. A node with `behind_proxy = true` receives plain DNS from the proxy and refuses a zone that has `xot`. The access rules and TSIG are the same as over TCP, and a zone with `xot` refuses TCP on port 53 (REFUSED), so a `dig AXFR` without `+tls` fails.
+
+A secondary zone sets `xot` on the primary. The port is 853 when `port` is 53 (the default) and the given port otherwise. Tenko checks the primary's certificate against the system roots or against the CA file `[dns] upstream_ca` (the setting of the forwarder, [dns-resolver.md](dns-resolver.md) section 4.5), for the name `tls_name` of the primary, or its address when `tls_name` is absent. A lab or internal CA therefore goes into `upstream_ca`, and the primary's certificate must carry the `tls_name` (or the address) as a subject alternative name.
+
+### 10.5 NOTIFY out and in
+
+**Out.** The leader service `dns.notify` follows the store's commits of the RRsets. A commit that writes a zone's SOA marks the zone, because every change set of the zone service moves the serial in the same write. For a marked zone the service:
+
+1. waits 250 ms, so that a burst of changes becomes one NOTIFY;
+2. waits until the `dns` role of the process serves that commit, so that the SOA query a secondary sends on receiving the NOTIFY sees the new serial;
+3. reads the serial and sends one NOTIFY to each target of `transfer.notify`, over UDP, signed with the target's `key` when it has one;
+4. waits 2 seconds for the answer, and sends the NOTIFY again after 15, 30, 60 and 120 seconds if none came (five attempts in all). A newer serial meanwhile replaces the one being retried.
+
+It applies to primary zones and to secondary zones: a copy that changed notifies its own targets.
+
+**In.** A NOTIFY for a secondary zone is accepted over UDP or TCP when it comes from the address of one of the zone's primaries and, when that primary has a `key`, is signed with it. It is acknowledged (signed when the request was) and refreshes the zone at once; a NOTIFY that names the serial already held is ignored. Any other NOTIFY is answered REFUSED.
+
+### 10.6 Secondary zones
+
+A zone of kind `secondary` is a copy of a zone on one or more primaries, named in `source.primaries` (`address`, `port`, `key`, `xot`, `tls_name`) and tried in order. The leader service `dns.transfer` keeps it fresh on the timers of the SOA it holds:
+
+| Moment | When |
+|---|---|
+| First refresh | At once, when the service starts or first sees the zone |
+| Refresh | After the SOA's `refresh` seconds |
+| Retry | After the SOA's `retry` seconds while every primary fails (at most 60 seconds before the first copy exists) |
+| NOTIFY | At once, from a primary (section 10.5) |
+| Transfer now | At once, from the API (section 10.9) |
+| Expire | After the SOA's `expire` seconds without a success: the records of the copy are removed and the zone answers SERVFAIL until the next transfer |
+
+A refresh sends IXFR with the copy's SOA. A primary that answers with the single current SOA leaves the copy as it is. A primary that answers NOTIMP or FORMERR, or with a newer single SOA, is asked for AXFR on a new connection, and a zone without a copy is asked for AXFR at once. With a `key` the request is signed and the answer must verify in the MAC chain; with `xot` the connection is TLS (section 10.4).
+
+The result is one change set through the store, fenced with the leader's epoch like every write of a leader service:
+
+- the RRsets of the transfer replace those of the copy and have the origin `transfer` (section 2); the SOA keeps the serial as received;
+- the journal gets one entry with the net change (the SOA pair, the records removed, the records added) when the change has at most 10,000 records and a copy existed before; a first transfer or a larger change resets the journal, so the secondaries of this zone get AXFR;
+- the audit record `dns.zone.transfer_in` names the zone, the kind (`axfr` or `ixfr`), the primary, the serial, the serial before, the number of records, and whether the journal got an entry or was reset;
+- a change of more than 20,000 RRsets is written in chunks with the SOA last, which is not one commit (section 10.12).
+
+Because the copy is written through the store, the index of the `dns` role follows it like any other change and the zone is served as soon as it is written. The SOA and the name servers of a secondary zone come from the primary and are read-only in the API and the UI.
+
+The state of each zone (the serial held, the last success and the last error of each primary, the next refresh, the expiry, and whether a transfer is running) lives in the memory of the service on the leader. After a restart a copy counts as fresh from the time its SOA was written and is refreshed at once. The state shows in the API (section 10.9); `last_error` is one of these stable codes:
+
+| Code | Meaning |
+|---|---|
+| `dns.transfer.failed` | No answer, a malformed or incomplete answer, or the store refused the result |
+| `dns.transfer.tsig` | The answer did not verify, or the key named in `source` is unknown |
+| `dns.transfer.refused` | The primary answered REFUSED or NOTAUTH |
+
+These are codes in the transfer status, not HTTP answers of a route.
+
+### 10.7 The read-only rule
+
+The records of a secondary zone come from the primary, so every other write is refused with 409 `dns.zone.secondary` (parameter `zone`): the batch (section 3), the zone file import (section 4) and the actuator of IPAM (section 7). The same code refuses a write to an RRset of origin `transfer` in a primary zone, which are the generated members of a catalog zone (section 10.8); `take_over` does not apply to them. The UI shows the records of a secondary zone with a notice and without edit controls.
+
+### 10.8 Catalog zones
+
+A catalog zone (RFC 9432, schema version 2) is a zone that lists other zones, so that a secondary learns the zones to serve from one transfer instead of one line of configuration each. The setting is `catalog` on the zone, allowed on primary and secondary zones only (400 `dns.zone.invalid` with the field `catalog` otherwise).
+
+- **A secondary catalog zone** (Tenko reads the catalog of another server). After each transfer the members of the catalog become secondary zones of the installation. A member is a PTR record at `<label>.zones.<catalog>`, and the TXT record `version` at the apex must be `"2"`. The new zones take the catalog's primaries and its SOA defaults and carry the description `Member of the catalog zone <name>`. A zone with that description that has left the catalog is deleted with its records.
+- **A primary catalog zone** (Tenko writes a catalog for others). Tenko writes the members itself, with the origin `transfer`: one for every primary zone of the same tenant (or without a tenant) whose `transfer.allow` is not empty, catalog zones excepted. The label is the zone's identifier without dashes, and the apex carries the version TXT. When the set of zones changes the catalog gets a serial step and a journal entry, so its secondaries follow by NOTIFY and IXFR. A tenant has at most one primary catalog zone (a second is refused with `dns.zone.invalid` on `catalog`).
+
+The catalog zone transfers like any other zone, so it needs its own `transfer` policy for the secondaries that read it. A member zone transfers only if its own policy allows it: the catalog lists a zone, it does not grant access to it.
+
+### 10.9 Routes and the command line
+
+| Operation | Route | Scope |
+|---|---|---|
+| `get_dns_zone_transfer` | `GET /dns/zones/{id}/transfer` | `dns.read` |
+| `trigger_dns_zone_transfer` | `POST /dns/zones/{id}/transfer` | `dns.write` |
+
+`GET` answers the state of the transfer service for the zone:
+
+```
+GET /api/v1/dns/zones/{id}/transfer
+
+200 OK
+{"zone": "0190d1c2-...", "serial": 2026101801,
+ "primaries": [{"address": "192.0.2.10:53", "last_success": "2026-10-18T10:00:00Z"}],
+ "next_refresh": "2026-10-18T11:00:00Z", "expires": "2026-11-01T10:00:00Z", "running": false}
+```
+
+A zone the service has not seen (a primary zone, or a controller that does not lead) shows the serial in the store and its primaries without results. `POST` queues a refresh of a secondary zone at once, writes the audit record `dns.transfer.trigger` and answers 202 with the state; a zone of another kind is refused with 409 `dns.zone.invalid`.
+
+```
+tenko dns transfer status ad.example.test
+tenko dns transfer now ad.example.test
+tenko dns zone create example.test --kind primary --ns ns1.example.test --catalog
+tenko dns zone update example.test --catalog true
+```
+
+`tenko dns transfer status` prints the serial, the timers and a table of the primaries with their last success and last error; `now` queues the refresh and prints the same. `--catalog` on `zone create` and `--catalog true|false` on `zone update` set the catalog flag. The command line creates primary and RPZ zones only; a secondary zone, a transfer policy and the NOTIFY targets are set through the API or the web UI. In the UI the settings tab of a zone has the section "Zone transfers" (the access lists, the NOTIFY targets with their key, `require_tsig`, `xot` and the catalog setting) and, for a secondary zone, the primaries with port, key, XoT and TLS name, the transfer state and the button "Transfer now".
+
+### 10.10 Audit and metrics
+
+| Audit action | When |
+|---|---|
+| `dns.zone.transfer_out` | A zone was transferred out: the client, the key, the kind (`axfr` or `ixfr`) and the kind requested, the serial, the serial before, the records and the messages. A refusal is recorded as a denied action with its reason, at most once a minute per client |
+| `dns.zone.transfer_in` | A transfer in was written (section 10.6) |
+| `dns.transfer.trigger` | A transfer was started by hand |
+
+| Metric | Labels | Counts |
+|---|---|---|
+| `tenko_dns_xfr_total` | `kind`: `axfr_out`, `ixfr_out`, `axfr_in`, `ixfr_in`, `notify_out`, `notify_in`; `outcome`: `ok`, `current`, `refused`, `failed` | Transfers and NOTIFY messages (an IXFR answered in AXFR form counts as `axfr_out`) |
+| `tenko_dns_xfr_bytes_total` | `direction`: `out`, `in` | Octets of transfer messages |
+
+### 10.11 The lab
+
+[`deploy/compose/lab-dns`](../deploy/compose/lab-dns/README.md) has a round, `xfr`, that checks all of this against BIND 9 in both directions: TSIG, NOTIFY, IXFR, XoT and catalog zones, the read-only rule and the transfer state of the API. `bench/phase2-dns/scripts/run-m19-xfr.sh` measures M19 (a change of 100 records on a zone of 100,000 records reaches BIND within 5 seconds, and only the change is transferred) on the same lab.
+
+### 10.12 Limits
+
+- The transfer state is in the memory of the leader's service. Another controller does not see it and a restart loses it (the copy is then refreshed at once). Phase 5 or a status row may keep it.
+- NOTIFY out waits for the `dns` role of its own process. In Phase 5 a remote `dns` node reports the revision it serves.
+- The transfer path reads the journal and writes its audit records through the store of its process, which holds while the role runs in the controller's process (Phase 2).
+- A transfer in of more than 20,000 changed RRsets is written in chunks, so it is not one commit and the zone may be served half changed while the write runs. One transfer holds at most 10 million records.
+- TSIG is a shared secret per key. GSS-TSIG is not supported (section 10.13).
+- Catalog member properties (`group`, `coo`) are not used. Member zones get the catalog's SOA defaults and no transfer policy of their own.
+- A zone deleted and created again gets a new catalog label.
+
+### 10.13 The Windows DNS half (owner's checklist)
+
+This is the manual half of the interoperability check with Windows DNS (E15). A domain controller allows the transfer of one Active Directory-integrated zone to the Tenko node and to nothing else, and Tenko holds the zone as a secondary zone. Nothing here is automated. The access is read only (a secondary can read the zone and never change it) and revocable. The names are placeholders: the zone `ad.example.test`, the domain controller `192.0.2.10`, the Tenko node `192.0.2.53`.
+
+**On the domain controller.** Allow the zone transfer to the node's address only.
+
+1. In DNS Manager, open the properties of the zone `ad.example.test` and the tab Zone Transfers. Tick "Allow zone transfers", choose "Only to the following servers" and add `192.0.2.53`. Do not choose "To any server".
+2. On the same tab, under Notify, tick "Automatically notify", choose "The following servers" and add `192.0.2.53`.
+3. The same in PowerShell on the domain controller:
+
+   ```powershell
+   Set-DnsServerPrimaryZone -Name ad.example.test `
+     -SecureSecondaries TransferToSecureServers -SecondaryServers 192.0.2.53 `
+     -Notify NotifyServers -NotifyServers 192.0.2.53
+   ```
+
+4. TCP 53 from the node to the domain controller must be open for the transfer, and UDP 53 from the domain controller to the node for NOTIFY.
+
+**On the Tenko node.** Create the zone as a secondary zone with the domain controller as its primary. In the web UI: DNS, Zones, new zone, kind "secondary", name `ad.example.test`, primary `192.0.2.10`. Or through the API:
+
+```
+POST /api/v1/dns/zones
+{"name": "ad.example.test", "kind": "secondary",
+ "soa": {"mname": "dc1.ad.example.test", "rname": "hostmaster.ad.example.test"},
+ "source": {"primaries": [{"address": "192.0.2.10", "port": 53}]}}
+```
+
+The SOA and the name servers of the zone come from the domain controller with the first transfer.
+
+**Without a key.** Windows DNS does not sign zone transfers with TSIG (it secures dynamic updates with GSS-TSIG, which Tenko supports from Phase 4, and restricts transfers by address). This zone therefore transfers without a TSIG key, and the access rests on the address restriction on both sides: the domain controller lists only `192.0.2.53`, and Tenko accepts a NOTIFY for the zone only from `192.0.2.10`. `require_tsig` is a setting of zones Tenko serves as primary, not of secondary zones, so it plays no part here. A transfer without a key can be read by anyone who can use the node's address on the path between the two servers, and it carries every record of the zone, including the hosts that registered themselves, so keep that path to the two servers.
+
+**What to check.**
+
+1. `tenko dns transfer status ad.example.test`, or `GET /api/v1/dns/zones/{id}/transfer`: a `serial`, a `last_success` for `192.0.2.10:53` and no `last_error`. A `dns.transfer.refused` means the domain controller refused the node's address (check the Zone Transfers tab); `dns.transfer.failed` means no connection or a malformed answer (check the firewall).
+2. Ask the node for a record of the zone: `dig @192.0.2.53 dc1.ad.example.test A`, or `Resolve-DnsName dc1.ad.example.test -Server 192.0.2.53`.
+3. Compare the serial of the SOA on both servers: `dig @192.0.2.10 ad.example.test SOA +short` and `dig @192.0.2.53 ad.example.test SOA +short`, or `Resolve-DnsName ad.example.test -Type SOA -Server 192.0.2.10` and the same with `-Server 192.0.2.53`. The serials must be equal.
+4. Add a record on the domain controller, for example `Add-DnsServerResourceRecordA -ZoneName ad.example.test -Name xfrtest -IPv4Address 192.0.2.77`. It reaches the node within seconds when the NOTIFY of the domain controller arrives, and within the SOA's `refresh` seconds when it does not (a domain controller with several addresses may send NOTIFY from one that is not `192.0.2.10`, and Tenko ignores it). `tenko dns transfer now ad.example.test` forces the transfer. Remove the test record afterwards.
+
+**To revoke.** On the domain controller remove `192.0.2.53` from the zone's transfer list (the Zone Transfers tab, or `Set-DnsServerPrimaryZone -Name ad.example.test -SecureSecondaries NoTransfer`) and from its notify list (`-Notify NoNotify`). Then delete the secondary zone in Tenko (`DELETE /api/v1/dns/zones/{id}`, or the delete action of the zone in the UI), which removes the copy at once. Without that, the copy keeps answering until the SOA's `expire` seconds have passed and then answers SERVFAIL.
 ## 11. Views, scopes and weights
 
 A **view** (DNS-20) decides, per query, which version of each zone the query sees and whether the client may recurse. It is a row of `dns.views`: a unique name, match rules, a scope map, a position `order` and an optional recursion access list. One model covers the simple internal and external split, BIND views and Windows zone scopes with Query Resolution Policies (the mapping is below). The service is `tenko_dns::zone::views`, the selection is the view table of the catalog (`tenko_dns::catalog`), and the routes are `/dns/views`.
@@ -618,7 +839,7 @@ The reference implementation `MemIndex` is the test oracle: the tests build both
 
 The order of one query (plan sections 2.2 and 2.3):
 
-1. **Header.** An opcode other than QUERY is NOTIMP. A signed query is NOTAUTH until the TSIG keys reach the engine (WP6.2). A class other than IN is REFUSED. The meta types OPT, TKEY and TSIG are FORMERR; AXFR and IXFR are REFUSED with the extended error "Prohibited" until transfers exist (WP6.1); MAILA and MAILB are NOTIMP.
+1. **Header.** An opcode other than QUERY is NOTIMP. A signed query is NOTAUTH (the resolver verifies no TSIG; a signed SOA query of a secondary is answered by the transfer path before the resolver, section 10.3). A class other than IN is REFUSED. The meta types OPT, TKEY and TSIG are FORMERR; AXFR and IXFR go to the transfer path of section 10.3 first, and a resolver reached without it answers them REFUSED with the extended error "Prohibited"; MAILA and MAILB are NOTIMP.
 2. **Rate limiter**: the query is admitted or dropped (`RateLimiter::admit_query`; WP5.2 implements RRL).
 3. **View** (DNS-20): the first view in `order` whose rules all match (client subnet, transport, local address, query type, time of day, query name) wins; none matching is the implicit default view, which sees the default scope of every zone. A view's weights pick one scope per zone, with a value derived from the client address so that one client keeps seeing the same scope.
 4. **Zone**: the served zone (primary or secondary) with the longest apex at or above the name. A stub, forward or RPZ zone is not answered from.

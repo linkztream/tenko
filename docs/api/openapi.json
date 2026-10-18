@@ -7659,7 +7659,7 @@
           "dns"
         ],
         "summary": "Create a DNS zone",
-        "description": "Scope: `dns.write`. A primary or RPZ zone gets the apex SOA (from `soa` and the first serial of the policy) and the NS set of `name_servers` in every scope; a secondary, stub or forward zone is a row only until transfers come (WP6.1).",
+        "description": "Scope: `dns.write`. A primary or RPZ zone gets the apex SOA (from `soa` and the first serial of the policy) and the NS set of `name_servers` in every scope; a secondary zone is filled by zone transfers from its `source`; a stub or forward zone is a row only.",
         "operationId": "create_dns_zone",
         "requestBody": {
           "content": {
@@ -8726,7 +8726,7 @@
           "dns"
         ],
         "summary": "Get the transfer state of a zone",
-        "description": "Scope: `dns.read`.",
+        "description": "Scope: `dns.read`. The serial held, each primary's last success and the stable code of its last failure (`dns.transfer.failed`, `dns.transfer.tsig`, `dns.transfer.refused`), the next refresh and the expiry, as the leader's transfer service sees them; a zone it has not seen shows the serial in the store.",
         "operationId": "get_dns_zone_transfer",
         "parameters": [
           {
@@ -8789,16 +8789,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -8807,7 +8797,7 @@
           "dns"
         ],
         "summary": "Transfer a secondary zone now",
-        "description": "Scope: `dns.write`.",
+        "description": "Scope: `dns.write`. Queues a refresh of a secondary zone on the leader's transfer service at once (IXFR with the AXFR fallback), audited as `dns.transfer.trigger`; the answer is the state when the refresh was queued.",
         "operationId": "trigger_dns_zone_transfer",
         "parameters": [
           {
@@ -8872,17 +8862,7 @@
             }
           },
           "409": {
-            "description": "The zone is not a secondary zone",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+            "description": "The zone is not a secondary zone (`dns.zone.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -41764,7 +41744,8 @@
           "ipam",
           "dynamic",
           "dhcp",
-          "ad"
+          "ad",
+          "transfer"
         ]
       },
       "OriginCount": {
@@ -58427,6 +58408,10 @@
           "updated"
         ],
         "properties": {
+          "catalog": {
+            "type": "boolean",
+            "description": "A catalog zone (RFC 9432). On a secondary zone: its members become secondary zones\nof this installation with the catalog's primaries and leave with it. On a primary\nzone: Tenko writes its members, every primary zone of the same tenant (or without a\ntenant) whose `transfer.allow` is not empty, catalog zones excepted."
+          },
           "created": {
             "$ref": "#/components/schemas/Stamp",
             "description": "Creation."
@@ -58525,6 +58510,10 @@
           "soa"
         ],
         "properties": {
+          "catalog": {
+            "type": "boolean",
+            "description": "A catalog zone (RFC 9432): on a secondary zone its members become secondary zones;\non a primary zone Tenko writes the members. False when absent."
+          },
           "description": {
             "type": [
               "string",
@@ -58786,6 +58775,13 @@
         "type": "object",
         "description": "`PATCH /dns/zones/{id}`: the fields to change; the name and the kind do not change.",
         "properties": {
+          "catalog": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the zone is a catalog zone (RFC 9432)."
+          },
           "description": {
             "type": [
               "string",

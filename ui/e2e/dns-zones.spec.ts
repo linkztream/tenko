@@ -131,6 +131,40 @@ test("edits the SOA values and the name servers on the settings tab", async ({ p
   await expect(page.getByTestId("zone-serial")).toHaveText(String(fake.zone("example.test")?.soa_serial));
 });
 
+// WP6.1: who may transfer the zone and who is notified, saved in the one PATCH of the settings tab.
+test("sets an access list and a NOTIFY target on the settings tab and finds them after a reload", async ({ page, signedIn }) => {
+  void signedIn;
+  const fake = await FakeDns.install(page);
+  const internal = fake.state.acls.find((a) => a.name === "internal")?.id ?? "";
+  const peers = fake.state.acls.find((a) => a.name === "transfer-peers")?.id ?? "";
+  await page.goto(`/dns/zones/${fake.zone("example.test")?.id}/settings`);
+  const form = page.getByTestId("zone-settings");
+  const transfer = form.getByTestId("zone-transfer");
+  await expect(form.getByTestId("field-name_servers")).toHaveValue("ns1.example.test");
+  await expect(transfer.getByTestId("transfer-allow")).toHaveText(["transfer-peers"]);
+  await transfer.getByTestId("field-allow-add").selectOption(internal);
+  await expect(transfer.getByTestId("transfer-allow")).toHaveText(["transfer-peers", "internal"]);
+  await transfer.getByTestId("transfer-notify-add").click();
+  await transfer.getByTestId("field-notify.0.address").fill("192.0.2.54");
+  await transfer.getByTestId("field-notify.0.port").fill("5353");
+  await transfer.getByTestId("field-notify.0.key").fill("xfr.example.test");
+  await form.getByTestId("form-submit").click();
+  await expect(page.getByTestId("toast").first()).toBeVisible();
+  const patches = fake.sent.filter((s) => s.method === "PATCH");
+  expect(patches).toHaveLength(1);
+  expect(patches[0]?.body).toMatchObject({
+    transfer: { allow: [peers, internal], notify: [{ address: "192.0.2.54", port: 5353, key: "xfr.example.test" }], require_tsig: true, xot: false },
+  });
+  expect(patches[0]?.body).not.toHaveProperty("catalog");
+
+  await page.reload();
+  const again = page.getByTestId("zone-settings").getByTestId("zone-transfer");
+  await expect(again.getByTestId("transfer-allow")).toHaveText(["transfer-peers", "internal"]);
+  await expect(again.getByTestId("field-notify.0.address")).toHaveValue("192.0.2.54");
+  await expect(again.getByTestId("field-notify.0.port")).toHaveValue("5353");
+  await expect(again.getByTestId("field-notify.0.key")).toHaveValue("xfr.example.test");
+});
+
 test("offers a viewer the zones to read and nothing to change", async ({ page, api, signedIn }) => {
   void signedIn;
   const fake = await FakeDns.install(page);

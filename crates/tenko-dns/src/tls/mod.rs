@@ -620,6 +620,8 @@ where
                 Arc::clone(&shared.responder),
                 shared.caps.idle,
                 stop,
+                // WP6.1: XoT only where this node ends TLS, never behind a proxy.
+                shared.acceptor.is_some(),
             )
             .await;
         }

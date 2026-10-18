@@ -43,8 +43,8 @@ Keys of owner names sort by labels from the root down with the octet 0x01 betwee
 | `DnsName` | Canonical lowercase name without the trailing dot, `.` for the root; labels of `a-z`, `0-9`, `-`, `_`, `/` (RFC 2317) and a leftmost `*` |
 | `ScopeName`, `Rtype` | A zone scope (`default` always exists); a record type, printed as its mnemonic or `TYPEnnn` |
 | `Rdata`, `RecordData` | The stored uncompressed wire form of a record's data; its typed view of A, AAAA, CNAME, DNAME, MX, NS, PTR, SOA, SRV, TXT, CAA, DS, DNSKEY, RRSIG, NSEC, NSEC3, NSEC3PARAM, TLSA, SVCB, HTTPS and RFC 3597 data for every other type |
-| `RrSet`, `RrSetKey` | The records of one owner and type in one scope, with `origin` (`manual`, `ipam`, `dynamic`, `dhcp`, `ad`) and the TSIG key of a dynamic update |
-| `Zone` | Name, `ZoneKind` (primary, secondary, stub, forward, rpz), tenant, scopes, `SerialPolicy`, `SoaDefaults`, `TransferPolicy`, `UpdatePolicy`, `DnssecPolicy`, `SecondarySource`, `reverse_of` |
+| `RrSet`, `RrSetKey` | The records of one owner and type in one scope, with `origin` (`manual`, `ipam`, `dynamic`, `dhcp`, `ad`, and `transfer` for what zone transfers write, read-only to every other writer, WP6.1) and the TSIG key of a dynamic update |
+| `Zone` | Name, `ZoneKind` (primary, secondary, stub, forward, rpz), tenant, scopes, `SerialPolicy`, `SoaDefaults`, `TransferPolicy`, `UpdatePolicy`, `DnssecPolicy`, `SecondarySource`, `reverse_of`, `catalog` (RFC 9432, WP6.1: on a secondary zone its members become secondary zones; on a primary zone Tenko writes the members, the primary zones of its tenant with `transfer.allow`; one primary catalog zone per tenant) |
 | `View`, `MatchRule`, `ScopeWeight` | Views with the six tests of DNS-20 and the weighted scopes per zone |
 | `ForwardRule`, `Upstream` | Forwarding by longest suffix, plain, DoT or DoH |
 | `Acl`, `AclEntry` | Access lists of prefixes, keys and `any`, first match decides |
@@ -137,9 +137,12 @@ The node routes sit beside the node's other routes, as the scan configuration of
 | `dns.key.not_found`, `dns.key.exists` | 404, 409 | TSIG keys |
 | `dns.list.not_found`, `dns.list.invalid` | 404, 400 | Block lists |
 | `dns.update.refused` | 403 | A dynamic update was refused (key, ACL, prerequisite) |
-| `dns.transfer.refused` | 403 | A zone transfer was refused (ACL, key) |
+| `dns.transfer.refused` | 403 | A zone transfer was refused (ACL, key); also the last error of a primary that refused a transfer in |
 | `dns.node.not_dns` | 409 | The node does not run the `dns` role |
 | `dns.module.disabled` | 409 | The DNS module is switched off (for the role and the services; the routes answer 404) |
+| `dns.zone.secondary` | 409 | The records come from zone transfers and are read-only: a secondary zone, the members of a primary catalog zone (WP6.1) |
+| `dns.transfer.failed` | — | A transfer in failed (no answer, a malformed or incomplete answer, the store refused it); the last error of a primary in the transfer state |
+| `dns.transfer.tsig` | — | The answer of a primary failed TSIG verification, or its key cannot be read; the last error of a primary in the transfer state |
 
 ## 6. Audit actions
 
@@ -157,6 +160,7 @@ The node routes sit beside the node's other routes, as the scan configuration of
 | `dns.list.create`, `dns.list.update`, `dns.list.delete`, `dns.list.compile`, `dns.list.fetch`, `dns.list.upload` | Block lists, their compiled versions, a fetch started by hand and an uploaded file |
 | `dns.transfer.trigger`, `dns.cache.flush` | A transfer started by hand; a node's cache flushed |
 | `dns.log.read`, `dns.log.stop`, `dns.log.start` | A page of a node's query log read (personal data); the log stopped or started again (the kill switch) |
+| `dns.zone.transfer_out`, `dns.zone.transfer_in` | A zone transferred out to a client (the client, the key, the kind, the serials; refusals at most once a minute per client); a transfer in written, a catalog zone's members written, an expired copy removed (WP6.1) |
 
 The system component of the DNS services' own writes is `dns`.
 
@@ -181,6 +185,8 @@ The system component of the DNS services' own writes is `dns`.
 | `tenko_dns_signing_runs` | counter | `outcome` |
 | `tenko_dns_signing_duration_seconds` | histogram (1 ms to 5 min) | |
 | `tenko_dns_log_dropped` | counter | |
+| `tenko_dns_xfr` | counter | `kind` (`axfr_out`, `ixfr_out`, `axfr_in`, `ixfr_in`, `notify_out`, `notify_in`), `outcome` (`ok`, `current`, `refused`, `failed`) |
+| `tenko_dns_xfr_bytes` | counter | `direction` (`out`, `in`) |
 
 ## 8. Node sync
 

@@ -1,0 +1,5 @@
+; A zone BIND transfers to Tenko over TLS only (XoT, RFC 9103).
+$TTL 60
+@       IN SOA  ns.example.test. hostmaster.example.test. ( 1 60 10 3600 5 )
+        IN NS   ns.example.test.
+www     IN A    192.0.2.60

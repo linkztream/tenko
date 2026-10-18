@@ -708,6 +708,7 @@ fn stub_zone(apex: &str, source: SocketAddr) -> Zone {
             }],
         }),
         reverse_of: None,
+        catalog: false,
         description: None,
         created: stamp(),
         updated: stamp(),

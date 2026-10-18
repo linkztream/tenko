@@ -58,6 +58,10 @@ pub mod pool;
 // RPZ, block lists and rate limiting (WP5.2).
 pub mod lists;
 
+// WP6.1: zone transfers, NOTIFY and TSIG on the wire.
+pub mod tsig;
+pub mod xfr;
+
 pub use codec::{AnswerBuf, Codec, CodecError, DomainCodec, Request};
 pub use feed::{DnsData, MemFeed, ZoneFeed};
 pub use index::{Index, Lookup, MemIndex};

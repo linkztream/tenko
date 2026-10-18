@@ -103,7 +103,7 @@ pub(super) async fn list_dns_zones(
     tag = "dns",
     operation_id = "create_dns_zone",
     summary = "Create a DNS zone",
-    description = "Scope: `dns.write`. A primary or RPZ zone gets the apex SOA (from `soa` and the first serial of the policy) and the NS set of `name_servers` in every scope; a secondary, stub or forward zone is a row only until transfers come (WP6.1).",
+    description = "Scope: `dns.write`. A primary or RPZ zone gets the apex SOA (from `soa` and the first serial of the policy) and the NS set of `name_servers` in every scope; a secondary zone is filled by zone transfers from its `source`; a stub or forward zone is a row only.",
     request_body(content = ZoneCreate, content_type = "application/json"),
     responses(
         (status = 201, description = "The zone, with its SOA and NS set; the `ETag` is its revision", body = ZoneItem),
@@ -138,6 +138,7 @@ pub(super) async fn create_dns_zone(
                 source: body.source,
                 description: body.description,
                 reverse_of: None,
+                catalog: body.catalog,
             },
         )
         .await?;
@@ -228,6 +229,7 @@ pub(super) async fn update_dns_zone(
                 source: body.source,
                 description: body.description,
                 reverse_of: None,
+                catalog: body.catalog,
             },
             expect,
         )

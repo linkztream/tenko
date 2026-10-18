@@ -239,6 +239,30 @@ async fn connection<R: Resolver + 'static>(
         let now = Instant::now();
         clock.refresh(now);
         let query = &message[..len];
+        // WP6.1: a transfer streams its messages after the answers already waiting.
+        if let Some(mut transfer) = responder.transfer_stream(query, &conn, false) {
+            let mut writer = writer.lock().await;
+            if !pending.is_empty() {
+                if writer.write_all(&pending).await.is_err() {
+                    break;
+                }
+                pending.clear();
+            }
+            let mut failed = false;
+            while let Some(answer) = transfer.recv().await {
+                pending.clear();
+                frame(&mut pending, &answer);
+                if writer.write_all(&pending).await.is_err() {
+                    failed = true;
+                    break;
+                }
+            }
+            pending.clear();
+            if failed {
+                break;
+            }
+            continue;
+        }
         let reply = SCRATCH.with(|cell| {
             let mut slot = cell.borrow_mut();
             let scratch = slot.get_or_insert_with(Scratch::new);

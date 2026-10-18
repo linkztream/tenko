@@ -246,6 +246,8 @@ pub struct Responder<R> {
     forward: Option<Arc<dyn ForwardSink>>,
     metrics: bool,
     udp_size: u16,
+    // WP6.1: zone transfers, NOTIFY and signed SOA queries.
+    transfers: Option<Arc<dyn crate::xfr::TransferSink>>,
 }
 
 impl<R> std::fmt::Debug for Responder<R> {
@@ -272,6 +274,7 @@ impl<R: Resolver> Responder<R> {
             forward: None,
             metrics: true,
             udp_size: SERVER_UDP_PAYLOAD,
+            transfers: None,
         }
     }
 
@@ -316,6 +319,28 @@ impl<R: Resolver> Responder<R> {
         self
     }
 
+    // WP6.1: the transfer path.
+    /// The same responder with the transfer path: AXFR, IXFR, NOTIFY and signed SOA
+    /// queries go to it instead of the resolver (`crate::xfr::classify`).
+    #[must_use]
+    pub fn with_transfers(mut self, transfers: Arc<dyn crate::xfr::TransferSink>) -> Self {
+        self.transfers = Some(transfers);
+        self
+    }
+
+    /// The transfer path, for the stream transports: the message's answer as a stream of
+    /// messages when the path takes it.
+    pub fn transfer_stream(
+        &self,
+        message: &[u8],
+        conn: &Conn,
+        tls: bool,
+    ) -> Option<tokio::sync::mpsc::Receiver<Vec<u8>>> {
+        let transfers = self.transfers.as_ref()?;
+        crate::xfr::classify(message)?;
+        Some(Arc::clone(transfers).stream(message.to_vec(), *conn, tls))
+    }
+
     /// The resolver.
     pub fn resolver(&self) -> &R {
         &self.resolver
@@ -344,6 +369,17 @@ impl<R: Resolver> Responder<R> {
             answer,
             out,
         } = scratch;
+        // WP6.1: NOTIFY, IXFR (the SOA only) and signed SOA queries over UDP.
+        if conn.transport == QueryTransport::Udp
+            && let Some(transfers) = &self.transfers
+            && crate::xfr::classify(message).is_some()
+        {
+            return if transfers.datagram(message, conn, out) {
+                Reply::Send
+            } else {
+                Reply::Drop
+            };
+        }
         let query = match self.codec.parse(message, request) {
             Ok(query) => query,
             Err(CodecError::NotAQuery) => return Reply::Drop,

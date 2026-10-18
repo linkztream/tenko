@@ -19,13 +19,15 @@
 //! | [`keys`] | TSIG keys, the secret in the vault |
 //! | [`jobs`] | the inline job of every change and the job runner stand-in |
 //! | [`views`] | views, their positions and the scope rule (WP6.4) |
+//! | [`secondary`] | secondary and catalog zones: transfers in as a leader service (WP6.1) |
 //!
 //! # Zones
 //!
 //! A primary or RPZ zone holds data: on creation each scope gets the apex SOA (from
 //! [`SoaDefaults`] and the first serial of the policy) and the NS set of the name servers
-//! given. A secondary, stub or forward zone is a row only in Phase 2 (transfers are
-//! WP6.1). A change of the SOA values rewrites the SOA of every scope with the next
+//! given. A secondary zone is created empty and filled by zone transfers ([`secondary`]),
+//! whose RRsets carry the origin `transfer` and are read-only to every other writer
+//! (`dns.zone.secondary`); a stub or forward zone is a row only. A change of the SOA values rewrites the SOA of every scope with the next
 //! serial; a new scope gets an SOA and a copy of the default scope's NS set; a removed
 //! scope loses its RRsets and journal. Deleting a zone removes its RRsets and journal in
 //! the same batch when they fit in one; a larger zone loses its row first (the engine stops
@@ -42,6 +44,8 @@ pub mod jobs;
 pub mod journal;
 pub mod keys;
 pub mod records;
+// WP6.1: the leader service of secondary and catalog zones, and the read-only rule.
+pub mod secondary;
 pub mod serial;
 // WP6.4: views and the scope rule.
 pub mod views;
@@ -132,6 +136,9 @@ pub struct NewZone {
     /// The IPAM prefix whose reverse zone this is (plan section 2.6); set by the DNS
     /// actuator of IPAM, never by the API.
     pub reverse_of: Option<PrefixId>,
+    // WP6.1: catalog zones.
+    /// A catalog zone (RFC 9432, [`Zone::catalog`]).
+    pub catalog: bool,
 }
 
 /// Changes to a zone; the name and the kind do not change.
@@ -156,6 +163,9 @@ pub struct ZoneChange {
     /// The IPAM prefix whose reverse zone this is; `Some(None)` clears it (the DNS actuator
     /// of IPAM adopts a zone with it, never the API).
     pub reverse_of: Option<Option<PrefixId>>,
+    // WP6.1: catalog zones.
+    /// Whether the zone is a catalog zone (RFC 9432).
+    pub catalog: Option<bool>,
 }
 
 /// What a zone list shows besides the row.
@@ -189,12 +199,13 @@ pub struct ZoneWritten {
     pub job: Option<tenko_core::JobId>,
 }
 
-const ORIGINS: [Origin; 5] = [
+const ORIGINS: [Origin; 6] = [
     Origin::Manual,
     Origin::Ipam,
     Origin::Dynamic,
     Origin::Dhcp,
     Origin::Ad,
+    Origin::Transfer,
 ];
 
 fn origin_index(origin: Origin) -> u8 {
@@ -204,6 +215,7 @@ fn origin_index(origin: Origin) -> u8 {
         Origin::Dynamic => 2,
         Origin::Dhcp => 3,
         Origin::Ad => 4,
+        Origin::Transfer => 5,
     }
 }
 
@@ -644,6 +656,7 @@ impl ZoneService {
             dnssec: new.dnssec.clone(),
             source: new.source.clone(),
             reverse_of: new.reverse_of,
+            catalog: new.catalog,
             description: clean_description(new.description.clone()),
             created: stamp.clone(),
             updated: stamp.clone(),
@@ -698,6 +711,7 @@ impl ZoneService {
                     )
                     .param("name", zone.name.as_str()));
                 }
+                secondary::check_catalog_unique(view, &zone)?;
                 let mut batch = WriteBatch::for_request(cx);
                 stage_acl_refs(&mut batch, view, &zone)?;
                 batch.expect_counter(zone_names(), view.counter(&zone_names())?);
@@ -788,7 +802,12 @@ impl ZoneService {
                     zone.reverse_of = reverse_of;
                     fields.push("reverse_of");
                 }
+                if let Some(catalog) = change.catalog {
+                    zone.catalog = catalog;
+                    fields.push("catalog");
+                }
                 zone.validate()?;
+                secondary::check_catalog_unique(view, &zone)?;
                 if zone == before {
                     return Ok(Planned::nothing(zone));
                 }

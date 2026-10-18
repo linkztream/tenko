@@ -2011,6 +2011,168 @@
       <unit id="errors.dns.view.in_use">
         <segment><source>Still named by {by}.</source></segment>
       </unit>
+      <unit id="dns.origin.transfer">
+        <notes><note category="description">Origin of an RRset: written by a zone transfer from the primary (WP6.1); read-only for everyone.</note></notes>
+        <segment><source>Zone transfer</source></segment>
+      </unit>
+      <unit id="hosts.dns.origin.transfer">
+        <segment><source>from a zone transfer</source></segment>
+      </unit>
+      <unit id="errors.dns.zone.secondary">
+        <segment><source>The records of a secondary zone come from its primary and cannot be changed here.</source></segment>
+      </unit>
+      <unit id="dns.transfer.title">
+        <notes><note category="description">Heading of the transfer section on the settings tab of a zone (WP6.1).</note></notes>
+        <segment><source>Zone transfers</source></segment>
+      </unit>
+      <unit id="dns.transfer.body">
+        <segment><source>Who may transfer this zone, which servers are told when it changes, and how transfers are secured.</source></segment>
+      </unit>
+      <unit id="dns.transfer.from_primary">
+        <segment><source>This is a secondary zone: its SOA record and its records come from the primary and cannot be changed here.</source></segment>
+      </unit>
+      <unit id="dns.transfer.records_readonly">
+        <segment><source>The records of a secondary zone come from zone transfers and are read-only.</source></segment>
+      </unit>
+      <unit id="dns.transfer.allow">
+        <segment><source>Access lists that may transfer the zone</source></segment>
+      </unit>
+      <unit id="dns.transfer.allow_none">
+        <segment><source>No access list is chosen: nobody may transfer this zone.</source></segment>
+      </unit>
+      <unit id="dns.transfer.allow_add">
+        <notes><note category="description">Label of the select that adds an access list to the transfer policy, and its first option.</note></notes>
+        <segment><source>Add an access list</source></segment>
+      </unit>
+      <unit id="dns.transfer.allow_remove">
+        <segment><source>Remove the access list {name}</source></segment>
+      </unit>
+      <unit id="dns.transfer.allow_help">
+        <segment><source>Hosts and keys that match one of these lists may ask for a transfer of the zone.</source></segment>
+      </unit>
+      <unit id="dns.transfer.notify">
+        <notes><note category="description">Label of the NOTIFY targets (RFC 1996).</note></notes>
+        <segment><source>Servers to notify</source></segment>
+      </unit>
+      <unit id="dns.transfer.notify_none">
+        <segment><source>No server is told when the zone changes.</source></segment>
+      </unit>
+      <unit id="dns.transfer.notify_add">
+        <segment><source>Add a server</source></segment>
+      </unit>
+      <unit id="dns.transfer.notify_remove">
+        <segment><source>Remove server {n} from the notifications</source></segment>
+      </unit>
+      <unit id="dns.transfer.address">
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="dns.transfer.port">
+        <segment><source>Port</source></segment>
+      </unit>
+      <unit id="dns.transfer.key">
+        <segment><source>TSIG key name</source></segment>
+      </unit>
+      <unit id="dns.transfer.tls_name">
+        <notes><note category="description">The name in the certificate of a primary server (XoT).</note></notes>
+        <segment><source>TLS name</source></segment>
+      </unit>
+      <unit id="dns.transfer.xot_short">
+        <segment><source>Over TLS (XoT)</source></segment>
+      </unit>
+      <unit id="dns.transfer.primary_add">
+        <segment><source>Add a primary</source></segment>
+      </unit>
+      <unit id="dns.transfer.primary_remove">
+        <segment><source>Remove primary server {n}</source></segment>
+      </unit>
+      <unit id="dns.transfer.require_tsig">
+        <segment><source>Require a TSIG key for transfers</source></segment>
+      </unit>
+      <unit id="dns.transfer.require_tsig_help">
+        <segment><source>A request without a valid TSIG signature is refused. Switch this off in a lab only.</source></segment>
+      </unit>
+      <unit id="dns.transfer.xot">
+        <segment><source>Transfer over TLS (XoT)</source></segment>
+      </unit>
+      <unit id="dns.transfer.xot_help">
+        <segment><source>Zone transfers run over TLS (RFC 9103) instead of plain TCP.</source></segment>
+      </unit>
+      <unit id="dns.transfer.catalog">
+        <segment><source>Catalog zone</source></segment>
+      </unit>
+      <unit id="dns.transfer.catalog_help_primary">
+        <segment><source>Tenko lists the primary zones that allow transfers in this zone, so a secondary server that follows the catalog picks them up by itself.</source></segment>
+      </unit>
+      <unit id="dns.transfer.catalog_help_secondary">
+        <segment><source>The members of this catalog become secondary zones here, with the primaries of the catalog, and leave when the catalog drops them.</source></segment>
+      </unit>
+      <unit id="dns.transfer.catalog_help_other">
+        <segment><source>Marks the zone as a catalog zone (RFC 9432).</source></segment>
+      </unit>
+      <unit id="dns.transfer.check.address">
+        <segment><source>Give an IPv4 or IPv6 address.</source></segment>
+      </unit>
+      <unit id="dns.transfer.check.port">
+        <segment><source>Give a port from 1 to 65535.</source></segment>
+      </unit>
+      <unit id="dns.transfer.check.key">
+        <segment><source>Give the name of a TSIG key, for example xfr.example.test.</source></segment>
+      </unit>
+      <unit id="dns.transfer.check.tls_name">
+        <segment><source>Give a host name, for example ns1.example.test.</source></segment>
+      </unit>
+      <unit id="dns.transfer.status">
+        <notes><note category="description">Heading of the state of a secondary zone's transfers.</note></notes>
+        <segment><source>Transfer state</source></segment>
+      </unit>
+      <unit id="dns.transfer.serial">
+        <segment><source>Serial held</source></segment>
+      </unit>
+      <unit id="dns.transfer.next_refresh">
+        <segment><source>Next refresh</source></segment>
+      </unit>
+      <unit id="dns.transfer.expires">
+        <segment><source>Expires</source></segment>
+      </unit>
+      <unit id="dns.transfer.state">
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="dns.transfer.state_running">
+        <segment><source>A transfer is running</source></segment>
+      </unit>
+      <unit id="dns.transfer.state_idle">
+        <segment><source>Idle</source></segment>
+      </unit>
+      <unit id="dns.transfer.primary">
+        <segment><source>Primary server</source></segment>
+      </unit>
+      <unit id="dns.transfer.last_success">
+        <segment><source>Last success</source></segment>
+      </unit>
+      <unit id="dns.transfer.last_error">
+        <segment><source>Last error</source></segment>
+      </unit>
+      <unit id="dns.transfer.error.failed">
+        <segment><source>The transfer failed.</source></segment>
+      </unit>
+      <unit id="dns.transfer.error.tsig">
+        <segment><source>The TSIG signature was not accepted.</source></segment>
+      </unit>
+      <unit id="dns.transfer.error.refused">
+        <segment><source>The primary refused the transfer.</source></segment>
+      </unit>
+      <unit id="dns.transfer.now">
+        <segment><source>Transfer now</source></segment>
+      </unit>
+      <unit id="dns.transfer.queued">
+        <segment><source>Transfer of {name} queued</source></segment>
+      </unit>
+      <unit id="dns.transfer.not_queued">
+        <segment><source>The transfer could not be queued</source></segment>
+      </unit>
+      <unit id="dns.transfer.unavailable">
+        <segment><source>The transfer state is not available on this server.</source></segment>
+      </unit>
     </group>
   </file>
 </xliff>

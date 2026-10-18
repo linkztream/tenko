@@ -14,8 +14,11 @@
 // and problems of the node status; the service is dns-resolver-model.ts. The views (WP6.4): the
 // five view routes on dns-views-model.ts, and the view side of the in-use rules on the zone
 // change, the zone deletion and the access list deletion.
+// and problems of the node status; the service is dns-resolver-model.ts. The zone transfers
+// (WP6.1): the state of a zone (`GET .../transfer`) and "Transfer now" (`POST`, secondary zones
+// only) are answered here, with a state per zone kept beside the DNS state.
 import { http, type HttpHandler } from "msw";
-import { encodeImportReport } from "../../dns/api";
+import { encodeImportReport, type TransferStatus } from "../../dns/api";
 import type { ObjectRef } from "../types";
 import { apiOperations } from "../generated/operations";
 import { appendAudit, principalNow } from "./audit-store";
@@ -84,7 +87,11 @@ let resolver: ResolverState = seedResolver(context);
 // WP6.4: the views, seeded after the zones (they add two scopes to example.test).
 let views: ViewsState = seedViews(context, state);
 
+/** The transfer state of each secondary zone by zone id; a running transfer ends with the next read. */
+const transfers = new Map<string, TransferStatus>();
+
 onMockReset(() => {
+  transfers.clear();
   state = seedDns(context);
   logState = seedDnsLog();
   resolver = seedResolver(context);
@@ -178,6 +185,8 @@ const zones = [
         checkZoneScopes(views, findZone(state, ctx.params.id), scopes.map((x) => String((x as { name?: unknown }).name ?? "")));
       }
       const zone = updateZone(state, context, ctx.params.id, body as Record<string, unknown>, ctx.ifMatch());
+      // The catalog flag is not part of the shared model yet; the mock keeps what the PATCH says.
+      if (typeof (body as Record<string, unknown>).catalog === "boolean") zone.catalog = (body as { catalog: boolean }).catalog;
       write("dns.zone.update", [zoneRef(zone.id)], "dns.zone.serial", ["dns.zones", "dns.rrsets"]);
       return ok(zone, etag(zone.revision)) as never;
     });
@@ -190,6 +199,62 @@ const zones = [
       commit("dns", { deleted: [zoneRef(zone.id)], tables: ["dns.zones", "dns.rrsets"], kind: "dns.zone.changed" });
       appendAudit({ action: "dns.zone.delete", objects: [zoneRef(zone.id)], context: { name: zone.name } });
       return noContent();
+    }),
+  ),
+];
+
+// ---------------------------------------------------------------------------------
+// Zone transfers
+
+const iso = (at: number): string => new Date(at).toISOString();
+const endpoint = (p: { address: string; port?: number }): string => (p.address.includes(":") ? `[${p.address}]:${p.port ?? 53}` : `${p.address}:${p.port ?? 53}`);
+
+/** The state of a zone: a primary zone answers its serial and no sources, a secondary zone its primaries. */
+function transferStatus(id: string): TransferStatus {
+  const zone = findZone(state, id);
+  if (zone.kind !== "secondary") return { zone: zone.id, serial: zone.soa_serial, primaries: [], running: false };
+  let held = transfers.get(zone.id);
+  if (!held) {
+    const now = context.now();
+    held = {
+      zone: zone.id,
+      serial: zone.soa_serial,
+      primaries: (zone.source?.primaries ?? []).map((p) => ({ address: endpoint(p), last_success: iso(now - 10 * 60_000) })),
+      next_refresh: iso(now + 50 * 60_000),
+      expires: iso(now + 14 * 86_400_000),
+      running: false,
+    };
+    transfers.set(zone.id, held);
+  }
+  if (held.running) {
+    // The transfer queued by the POST has finished by the next read: a higher serial, a fresh success.
+    const now = context.now();
+    zone.soa_serial = (held.serial ?? zone.soa_serial) + 1;
+    held = {
+      ...held,
+      serial: zone.soa_serial,
+      primaries: held.primaries.map((p) => ({ address: p.address, last_success: iso(now) })),
+      next_refresh: iso(now + 60 * 60_000),
+      running: false,
+    };
+    transfers.set(zone.id, held);
+  }
+  return held;
+}
+
+const transfer = [
+  route("get", "/api/v1/dns/zones/{id}/transfer", (ctx) => guard("dns.read", () => ok(transferStatus(ctx.params.id)))),
+  route("post", "/api/v1/dns/zones/{id}/transfer", (ctx) =>
+    guard("dns.write", () => {
+      const zone = findZone(state, ctx.params.id);
+      if (zone.kind !== "secondary") {
+        throw new DnsFailure(409, "dns.zone.invalid", { field: "kind", reason: "only a secondary zone is transferred" });
+      }
+      const idle = transferStatus(zone.id);
+      const running = { ...idle, running: true };
+      transfers.set(zone.id, running);
+      write("dns.zone.transfer", [zoneRef(zone.id)], "dns.zone.transfer", ["dns.zones"]);
+      return new Reply(202, running) as never;
     }),
   ),
 ];
@@ -569,7 +634,7 @@ const viewRoutes = [
   ),
 ];
 
-export const dnsRoutes: HttpHandler[] = [...zones, ...records, ...acls, ...keys, ...forwarders, ...lists, ...node, ...viewRoutes];
+export const dnsRoutes: HttpHandler[] = [...zones, ...transfer, ...records, ...acls, ...keys, ...forwarders, ...lists, ...node, ...viewRoutes];
 
 /** Every DNS operation answering 501, as the server does until WP4.2 lands (for `server.use`). */
 export const dnsStubs: HttpHandler[] = apiOperations

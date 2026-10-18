@@ -79,6 +79,10 @@ pub struct ZoneCreate {
     /// Free text.
     #[serde(default)]
     pub description: Option<String>,
+    /// A catalog zone (RFC 9432): on a secondary zone its members become secondary zones;
+    /// on a primary zone Tenko writes the members. False when absent.
+    #[serde(default)]
+    pub catalog: bool,
 }
 
 /// `PATCH /dns/zones/{id}`: the fields to change; the name and the kind do not change.
@@ -108,6 +112,9 @@ pub struct ZonePatch {
     /// Free text; an empty string clears it.
     #[serde(default)]
     pub description: Option<String>,
+    /// Whether the zone is a catalog zone (RFC 9432).
+    #[serde(default)]
+    pub catalog: Option<bool>,
 }
 
 /// An RRset as the API reads and writes it: the records typed.

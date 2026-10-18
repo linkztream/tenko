@@ -50,6 +50,7 @@ fn catalog() -> CatalogHandle {
         dnssec: tenko_core::dns::DnssecPolicy::default(),
         source: None,
         reverse_of: None,
+        catalog: false,
         description: None,
         created: stamp.clone(),
         updated: stamp.clone(),

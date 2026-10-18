@@ -14,7 +14,11 @@
 #   volume stays. The DNS role listens on 5300 (UDP and TCP), above 1024, so the container
 #   needs no capability. The API is plain HTTP (the Lab profile) on 8443, on the lab network
 #   only.
-# - client: the BIND image again, for `dig`. It asks Tenko; nothing else.
+# - client: the BIND image again, for `dig` and `nsupdate`. It asks Tenko and BIND.
+# - The transfer round (WP6.1): BIND is the secondary of Tenko's zones and the primary of
+#   zones Tenko holds as secondary zones (transfer.conf), with the TSIG key of the run in
+#   LAB_DIR/bind/keys.conf and its primary zone files in LAB_DIR/zones; Tenko serves DoT
+#   and XoT on 8530 with the lab certificate for tenko.example.test.
 #
 # Nothing is published on the host. Variables (smoke.sh sets them): LAB_DIR (the work
 # directory with tls/, secrets/ and tenko.toml, required), TENKO_IMAGE (default tenko:lab),
@@ -38,6 +42,11 @@ services:
       - "./named.conf:/etc/bind/named.conf:ro"
       - "./example.test.zone:/etc/bind/zones/example.test.zone:ro"
       - "${LAB_DIR:?set LAB_DIR}/tls:/etc/bind/tls:ro"
+      # The transfer round (WP6.1): the zones with Tenko, the TSIG key of the run, and the
+      # zone files BIND holds as the primary, writable for nsupdate (copied by smoke.sh).
+      - "./transfer.conf:/etc/bind/transfer.conf:ro"
+      - "${LAB_DIR:?set LAB_DIR}/bind:/etc/bind/lab:ro"
+      - "${LAB_DIR:?set LAB_DIR}/zones:/var/lib/lab-zones"
     networks:
       lab:
         ipv4_address: 203.0.113.2
@@ -52,6 +61,8 @@ services:
       - "5300/tcp"
       - "5300/udp"
       - "8443/tcp"
+      # DNS over TLS and zone transfers over TLS (XoT) in the transfer round.
+      - "8530/tcp"
     environment:
       TENKO_KEK__PROVIDER: file
       TENKO_KEK__PATH: /run/secrets/kek
@@ -70,6 +81,9 @@ services:
       - "tenko-data:/var/lib/tenko"
       - "${LAB_DIR:?set LAB_DIR}/tenko.toml:/lab/tenko.toml:ro"
       - "${LAB_DIR:?set LAB_DIR}/tls/ca.pem:/lab/ca.pem:ro"
+      # The certificate of DoT and XoT in the transfer round (tenko.example.test).
+      - "${LAB_DIR:?set LAB_DIR}/tls/tenko.pem:/lab/tenko.pem:ro"
+      - "${LAB_DIR:?set LAB_DIR}/tls/tenko.key:/lab/tenko.key:ro"
     read_only: true
     tmpfs:
       - /tmp

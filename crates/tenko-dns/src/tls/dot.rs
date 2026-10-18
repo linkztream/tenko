@@ -37,13 +37,14 @@ fn frame(pending: &mut Vec<u8>, message: &[u8]) {
 }
 
 /// Serves one connection until the client closes it, a message is cut, it stays idle for
-/// `idle`, or the server stops.
+/// `idle`, or the server stops. `tls` when this node ended TLS: a transfer over it is XoT.
 pub(super) async fn connection<R, S>(
     stream: S,
     conn: Conn,
     responder: Arc<Responder<R>>,
     idle: Duration,
     stop: CancellationToken,
+    tls: bool,
 ) where
     R: Resolver + 'static,
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -74,6 +75,30 @@ pub(super) async fn connection<R, S>(
         let now = Instant::now();
         clock.refresh(now);
         let query = &message[..len];
+        // WP6.1: a transfer streams its messages after the answers already waiting.
+        if let Some(mut transfer) = responder.transfer_stream(query, &conn, tls) {
+            let mut writer = writer.lock().await;
+            if !pending.is_empty() {
+                if writer.write_all(&pending).await.is_err() {
+                    break;
+                }
+                pending.clear();
+            }
+            let mut failed = false;
+            while let Some(answer) = transfer.recv().await {
+                pending.clear();
+                frame(&mut pending, &answer);
+                if writer.write_all(&pending).await.is_err() || writer.flush().await.is_err() {
+                    failed = true;
+                    break;
+                }
+            }
+            pending.clear();
+            if failed {
+                break;
+            }
+            continue;
+        }
         let reply = SCRATCH.with(|cell| {
             let mut slot = cell.borrow_mut();
             let scratch = slot.get_or_insert_with(Scratch::new);
