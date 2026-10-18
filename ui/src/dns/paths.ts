@@ -15,6 +15,8 @@ export const dnsPaths = {
   log: () => "/dns/log",
   forwarders: () => "/dns/forwarders",
   lists: () => "/dns/lists",
+  // WP6.4
+  views: () => "/dns/views",
   /** The DNS settings of a node (read-only, administrators): settings/dns. */
   settings: () => "/settings/dns",
 } as const;

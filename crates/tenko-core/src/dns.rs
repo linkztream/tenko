@@ -151,9 +151,13 @@ pub mod codes {
     pub const NODE_NOT_DNS: &str = "dns.node.not_dns";
     /// The DNS module is switched off in this installation (409, OPS-25).
     pub const MODULE_DISABLED: &str = "dns.module.disabled";
+    // WP6.4: the view codes the view service adds.
+    /// The view, its zone scope or the zone is still named (409): a view named by a
+    /// forwarding rule, a zone scope or a zone named by a view. Params: `id`, `by`.
+    pub const VIEW_IN_USE: &str = "dns.view.in_use";
 
     /// Every code of the namespace, for the contracts document and its test.
-    pub const ALL: [&str; 21] = [
+    pub const ALL: [&str; 22] = [
         ZONE_NOT_FOUND,
         ZONE_EXISTS,
         ZONE_INVALID,
@@ -175,6 +179,8 @@ pub mod codes {
         TRANSFER_REFUSED,
         NODE_NOT_DNS,
         MODULE_DISABLED,
+        // WP6.4
+        VIEW_IN_USE,
     ];
 }
 

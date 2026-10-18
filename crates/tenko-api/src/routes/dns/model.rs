@@ -6,11 +6,11 @@ use serde::{Deserialize, Serialize};
 use tenko_core::{
     JobId, NodeId, Revision, TenantId, Timestamp,
     dns::{
-        Acl, AclEntry, BlockAction, BlockList, DnsKeyId, DnsName, DnssecAlgorithm, DnssecMode,
-        DnssecPolicy, ForwardRule, ForwardTransport, KeyName, KeyRole, KeyState, ListFormat,
-        ListKind, ListSource, MatchRule, Origin, QueryTransport, RecordData, Rtype, ScopeName,
-        ScopeWeight, SecondarySource, SerialPolicy, SoaDefaults, TransferPolicy, TsigAlgorithm,
-        UpdatePolicy, Upstream, View, ViewId, Zone, ZoneId, ZoneKind, ZoneScope,
+        Acl, AclEntry, AclId, BlockAction, BlockList, DnsKeyId, DnsName, DnssecAlgorithm,
+        DnssecMode, DnssecPolicy, ForwardRule, ForwardTransport, KeyName, KeyRole, KeyState,
+        ListFormat, ListKind, ListSource, MatchRule, Origin, QueryTransport, RecordData, Rtype,
+        ScopeName, ScopeWeight, SecondarySource, SerialPolicy, SoaDefaults, TransferPolicy,
+        TsigAlgorithm, UpdatePolicy, Upstream, View, ViewId, Zone, ZoneId, ZoneKind, ZoneScope,
     },
     ipam::Stamp,
 };
@@ -422,8 +422,13 @@ pub struct ViewCreate {
     /// The scopes per zone.
     #[serde(default)]
     pub scope_map: Vec<ScopeWeight>,
-    /// The position, lower first.
+    /// The position, from 1; the views from there move one down, and a position past the
+    /// end is the end.
     pub order: u32,
+    /// The access list of the clients that may recurse (WP6.4); the profile's default when
+    /// absent.
+    #[serde(default)]
+    pub recursion: Option<AclId>,
     /// Free text.
     #[serde(default)]
     pub description: Option<String>,
@@ -441,10 +446,16 @@ pub struct ViewPatch {
     /// The scopes per zone.
     #[serde(default)]
     pub scope_map: Option<Vec<ScopeWeight>>,
-    /// The position.
+    /// The position, from 1; the other views move to make room.
     #[serde(default)]
     pub order: Option<u32>,
-    /// Free text.
+    /// The access list of the clients that may recurse (WP6.4).
+    #[serde(default)]
+    pub recursion: Option<AclId>,
+    /// Follow the profile's default for recursion (clears `recursion`, WP6.4).
+    #[serde(default)]
+    pub default_recursion: bool,
+    /// Free text; an empty string clears it.
     #[serde(default)]
     pub description: Option<String>,
 }

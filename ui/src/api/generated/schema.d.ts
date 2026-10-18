@@ -1162,13 +1162,13 @@ export interface paths {
         };
         /**
          * List DNS views
-         * @description Scope: `dns.read`.
+         * @description Scope: `dns.read`. The views in the order they are tried (`order` from 1); a query no view matches is in the implicit default view, which is not listed.
          */
         get: operations["list_dns_views"];
         put?: never;
         /**
          * Create a DNS view
-         * @description Scope: `dns.write`.
+         * @description Scope: `dns.write`. The view goes to `order` (from 1) and the views from there move one down; a position past the end is the end. Every zone scope of `scope_map` must exist, weights are 1 to 1000, and `recursion` names an access list.
          */
         post: operations["create_dns_view"];
         delete?: never;
@@ -1193,14 +1193,14 @@ export interface paths {
         post?: never;
         /**
          * Delete a DNS view
-         * @description Scope: `dns.write`.
+         * @description Scope: `dns.write`. The views after it move up one. A view a forwarding rule names is refused.
          */
         delete: operations["delete_dns_view"];
         options?: never;
         head?: never;
         /**
          * Change a DNS view
-         * @description Scope: `dns.write`.
+         * @description Scope: `dns.write`. `rules` and `scope_map` replace the view's; `order` moves the view and the others make room; `default_recursion` makes the view follow the profile's default; an empty `description` clears it.
          */
         patch: operations["update_dns_view"];
         trace?: never;
@@ -15424,9 +15424,11 @@ export interface components {
             name: string;
             /**
              * Format: int32
-             * @description The position, lower first.
+             * @description The position, from 1; the views from there move one down, and a position past the
+             *     end is the end.
              */
             order: number;
+            recursion?: components["schemas"]["AclId"] | null;
             /** @description The tests. */
             rules?: components["schemas"]["MatchRule"][];
             /** @description The scopes per zone. */
@@ -15441,15 +15443,18 @@ export interface components {
         };
         /** @description `PATCH /dns/views/{id}`. */
         ViewPatch: {
-            /** @description Free text. */
+            /** @description Follow the profile's default for recursion (clears `recursion`, WP6.4). */
+            default_recursion?: boolean;
+            /** @description Free text; an empty string clears it. */
             description?: string | null;
             /** @description The name. */
             name?: string | null;
             /**
              * Format: int32
-             * @description The position.
+             * @description The position, from 1; the other views move to make room.
              */
             order?: number | null;
+            recursion?: components["schemas"]["AclId"] | null;
             /** @description The tests. */
             rules?: components["schemas"]["MatchRule"][] | null;
             /** @description The scopes per zone. */
@@ -20550,7 +20555,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description A zone names the access list (`dns.acl.in_use`, parameter `by`) */
+            /** @description A zone or a view names the access list (`dns.acl.in_use`, parameter `by`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -21665,7 +21670,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_ViewItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21685,15 +21690,6 @@ export interface operations {
             };
             /** @description The principal lacks the scope `dns.read` */
             403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -21725,7 +21721,7 @@ export interface operations {
                     "application/json": components["schemas"]["ViewItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the view is invalid (`dns.view.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the view is invalid (`dns.view.invalid`, parameters `field` and `reason`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21745,15 +21741,6 @@ export interface operations {
             };
             /** @description The principal lacks the scope `dns.write` */
             403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -21784,7 +21771,7 @@ export interface operations {
                     "application/json": components["schemas"]["ViewItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21820,21 +21807,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     delete_dns_view: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description View identifier (UUID) */
                 id: string;
@@ -21850,7 +21831,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21886,8 +21867,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description A forwarding rule names the view (`dns.view.in_use`, parameter `by`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The view changed since it was read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -21900,7 +21890,10 @@ export interface operations {
     update_dns_view: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description View identifier (UUID) */
                 id: string;
@@ -21922,7 +21915,7 @@ export interface operations {
                     "application/json": components["schemas"]["ViewItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the view is invalid (`dns.view.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -21960,15 +21953,6 @@ export interface operations {
             };
             /** @description The view changed since it was read (`If-Match`) */
             412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -22209,6 +22193,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description A view names the zone (`dns.view.in_use`, parameter `by`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description The zone changed since it was read (`If-Match`) */
             412: {
                 headers: {
@@ -22277,6 +22270,15 @@ export interface operations {
             };
             /** @description No such zone (`dns.zone.not_found`) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A view names a scope the change removes (`dns.view.in_use`, parameters `scope` and `by`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

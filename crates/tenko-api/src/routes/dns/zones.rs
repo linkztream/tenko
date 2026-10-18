@@ -198,6 +198,7 @@ pub(super) async fn get_dns_zone(
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "A view names a scope the change removes (`dns.view.in_use`, parameters `scope` and `by`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 412, description = "The zone changed since it was read (`If-Match`, `sys.store.precondition_failed`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
@@ -255,6 +256,7 @@ pub(super) async fn update_dns_zone(
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "A view names the zone (`dns.view.in_use`, parameter `by`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 412, description = "The zone changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]

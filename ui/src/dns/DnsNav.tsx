@@ -1,5 +1,5 @@
-// The sub-navigation of the DNS area: zones, forwarders, block lists, access lists, for holders
-// of `dns.keys` the TSIG keys, and the query log. Views join in a later slice (WP6.4).
+// The sub-navigation of the DNS area: zones, views (WP6.4), forwarders, block lists, access
+// lists, for holders of `dns.keys` the TSIG keys, and the query log.
 import { A, useLocation } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import { t, type MessageKey } from "../i18n";
@@ -22,6 +22,8 @@ const TABS: readonly Tab[] = [
     match: (p) => p === "/dns" || p.startsWith("/dns/zones") || p.startsWith("/dns/import"),
     shown: () => true,
   },
+  // WP6.4
+  { id: "views", href: dnsPaths.views(), label: "dns.nav.views", match: (p) => p.startsWith("/dns/views"), shown: () => true },
   { id: "forwarders", href: dnsPaths.forwarders(), label: "dns.nav.forwarders", match: (p) => p.startsWith("/dns/forwarders"), shown: () => true },
   { id: "lists", href: dnsPaths.lists(), label: "dns.nav.lists", match: (p) => p.startsWith("/dns/lists"), shown: () => true },
   { id: "acls", href: dnsPaths.acls(), label: "dns.nav.acls", match: (p) => p.startsWith("/dns/acls"), shown: () => true },

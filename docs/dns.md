@@ -1,6 +1,6 @@
 # DNS: zones, records, zone files, keys, the dns role, the forwarder and the engine
 
-This page describes how Tenko DDI holds DNS data and answers for it: zones and their kinds, RRsets and the rules they keep, batch changes with a dry run, zone file import and export, SOA serials and the journal that zone transfers read, access lists and TSIG keys, the `dns` role that serves the zones, the forwarder for names outside them (in [dns-resolver.md](dns-resolver.md)), and the engine underneath. It is for an operator who manages zones through the API, the command line or the web UI and runs a node that answers DNS, and for a developer who builds on the zone service or the engine. It describes the zone service `tenko_dns::zone`, the role (`tenko_dns::store_feed`, `forward`, `querylog`, `status` and `tenko serve`), the engine (`crates/tenko-dns`), the model `tenko_core::dns` and the `/dns` and `/nodes/{id}/dns` routes of `tenko-api`; where this page and the code differ, the code is right. The requirements are DNS-01, DNS-07, DNS-09, DNS-11, DNS-24 and MIG-15 in [REQUIREMENTS.md](REQUIREMENTS.md); the decisions are in [ADR 0017](adr/0017-dns-data-model-and-serving-path.md) and section 2 of the [Phase 2 plan](plans/phase-2-plan.md). The contracts every Phase 2 package shares (tables, routes, codes, audit actions) are listed in [dns-contracts.md](dns-contracts.md). Views, forwarders, block lists, transfers, dynamic updates and DNSSEC get their sections when their packages land.
+This page describes how Tenko DDI holds DNS data and answers for it: zones and their kinds, RRsets and the rules they keep, batch changes with a dry run, zone file import and export, SOA serials and the journal that zone transfers read, access lists and TSIG keys, the `dns` role that serves the zones, the forwarder for names outside them (in [dns-resolver.md](dns-resolver.md)), and the engine underneath. It is for an operator who manages zones through the API, the command line or the web UI and runs a node that answers DNS, and for a developer who builds on the zone service or the engine. It describes the zone service `tenko_dns::zone`, the role (`tenko_dns::store_feed`, `forward`, `querylog`, `status` and `tenko serve`), the engine (`crates/tenko-dns`), the model `tenko_core::dns` and the `/dns` and `/nodes/{id}/dns` routes of `tenko-api`; where this page and the code differ, the code is right. The requirements are DNS-01, DNS-07, DNS-09, DNS-11, DNS-20, DNS-24 and MIG-15 in [REQUIREMENTS.md](REQUIREMENTS.md); the decisions are in [ADR 0017](adr/0017-dns-data-model-and-serving-path.md) and section 2 of the [Phase 2 plan](plans/phase-2-plan.md). The contracts every Phase 2 package shares (tables, routes, codes, audit actions) are listed in [dns-contracts.md](dns-contracts.md). Views have section 11; transfers, dynamic updates and DNSSEC get their sections when their packages land.
 
 Terms used below: an **RRset** is the records of one owner name and type in one scope of a zone. A **scope** is one version of a zone's data that views choose (DNS-20); every zone has the scope `default`. The **apex** is the zone's own name. An RRset's **origin** says who owns it: `manual` (API, UI, zone file), `ipam` (the DNS actuator of IPAM), `dynamic` (RFC 2136), `dhcp` and `ad`.
 
@@ -15,9 +15,10 @@ Contents:
 7. [Reverse zones and the IPAM link](#7-reverse-zones-and-the-ipam-link)
 8. [The dns role](#8-the-dns-role)
 9. [The forwarder](#9-the-forwarder)
+11. [Views, scopes and weights](#11-views-scopes-and-weights)
 12. [The engine](#12-the-engine)
 
-Sections 10 and 11 are kept for the packages that write them (transfers, dynamic updates and views); the resolver side gets its own page with Slice 5.
+Section 10 is kept for the package that writes it (transfers and dynamic updates); the resolver side has its own page, [dns-resolver.md](dns-resolver.md).
 
 All routes are under `/api/v1` and exist only while the DNS module runs (OPS-25); otherwise they answer 404 `sys.route_not_found`. Reads need the scope `dns.read`, changes `dns.write`, everything on keys `dns.keys` (section 6). Every change is committed with its audit record in one write, and every change of the DNS data appears on the event topic `dns`.
 
@@ -237,7 +238,7 @@ The journal is bounded per scope: 1,000 entries and 30 days. Every write drops, 
 
 ### Access lists
 
-An access list has a unique name (1 to 64 characters, compared without case), at most 1,000 entries and a description. An entry is a prefix (`{"kind": "prefix", "prefix": "192.0.2.0/24"}`), a TSIG key (`{"kind": "key", "name": "transfer.example.test"}`) or `any`, each optionally `"deny": true`; the first entry that matches decides, and no match refuses. Zones name lists in their transfer policy (`transfer.allow`) and update policy (`update.allowed`); a list a zone names cannot be deleted (409 `dns.acl.in_use`, parameter `by`). A list read carries `used_by` (`zone:<name>`) and its revision as the `ETag`.
+An access list has a unique name (1 to 64 characters, compared without case), at most 1,000 entries and a description. An entry is a prefix (`{"kind": "prefix", "prefix": "192.0.2.0/24"}`), a TSIG key (`{"kind": "key", "name": "transfer.example.test"}`) or `any`, each optionally `"deny": true`; the first entry that matches decides, and no match refuses. Zones name lists in their transfer policy (`transfer.allow`) and update policy (`update.allowed`), views as their recursion access list ([section 11](#11-views-scopes-and-weights)); a list a zone or a view names cannot be deleted (409 `dns.acl.in_use`, parameter `by`). A list read carries `used_by` (`zone:<name>`, `view:<name>`) and its revision as the `ETag`.
 
 ```
 tenko dns acl create secondaries --entry 192.0.2.0/24 --entry key:transfer.example.test --entry any,deny
@@ -450,6 +451,124 @@ Binding port 53 needs `CAP_NET_BIND_SERVICE` on Linux (the systemd unit grants i
 ## 9. The forwarder
 
 Names outside the zones a node serves go to the forwarder of the resolver side: forwarding rules by longest suffix and view, stub zones, the default forwarder of `[dns] forwarders`, the recursion access list of each view, the cache with serve-stale and prefetch, and upstreams over plain DNS, DoT and DoH with health, round-trip choice, random source ports and 0x20. [dns-resolver.md](dns-resolver.md) describes all of it (sections 1 to 4). The plain forwarder of Slice 4 (P2-Q16) that stood here was replaced by it in WP5.1, behind the same `ForwardSink` and `Upstream` traits (`tenko_dns::forward`, `tenko_dns::upstream`).
+
+## 11. Views, scopes and weights
+
+A **view** (DNS-20) decides, per query, which version of each zone the query sees and whether the client may recurse. It is a row of `dns.views`: a unique name, match rules, a scope map, a position `order` and an optional recursion access list. One model covers the simple internal and external split, BIND views and Windows zone scopes with Query Resolution Policies (the mapping is below). The service is `tenko_dns::zone::views`, the selection is the view table of the catalog (`tenko_dns::catalog`), and the routes are `/dns/views`.
+
+### The model
+
+| Field | What |
+|---|---|
+| `name` | 1 to 64 characters without surrounding spaces, unique without case |
+| `rules` | The match rules; every rule must hold. No rule: the view matches every query that reaches it |
+| `scope_map` | `{zone, scope, weight}` entries: the zone scopes the view sees. A zone not in the map is seen in its `default` scope |
+| `order` | The position, from 1; the views are tried in this order |
+| `recursion` | The access list of the view's clients that may recurse; absent: the profile's default |
+| `description` | Free text, at most 1,000 characters |
+
+A **scope** is one version of a zone's data: every zone has `default`, and more are given when the zone is created or changed through the API (`scopes` of `POST /dns/zones` and `PATCH /dns/zones/{id}`, for example `{"scopes": [{"name": "default"}, {"name": "internal"}, {"name": "external"}]}`; the zone command and the zone settings of the UI do not set scopes yet). A new scope starts with the apex SOA and a copy of the default scope's NS set. Each scope has its own RRsets, SOA serial and journal; a record batch names the scope it changes (`scope`, `default` when absent; `tenko dns record add --scope internal ...`).
+
+### The six tests
+
+A rule is one test with one or more values; any value matches. The rules of a view are and-ed.
+
+| Test | JSON | Matches when | Example |
+|---|---|---|---|
+| Client subnet | `{"test": "client_subnet", "prefixes": [...]}` | The client address is in one of the prefixes; an IPv4-mapped IPv6 address is its IPv4 address | `["192.0.2.0/24", "2001:db8:10::/48"]` |
+| Transport | `{"test": "transport", "transports": [...]}` | The query arrived over one of `udp`, `tcp`, `dot`, `doh` | `["dot", "doh"]` |
+| Interface | `{"test": "interface", "addresses": [...]}` | The query arrived on one of the server's addresses | `["192.0.2.53"]` |
+| Query type | `{"test": "qtype", "types": [...]}` | The query type is one of these | `["A", "AAAA"]` |
+| Query name | `{"test": "qname", "suffixes": [...]}` | The query name is one of these names or below one | `["example.test"]` |
+| Time of day | `{"test": "time_of_day", "from_minute": 1320, "to_minute": 360}` | The minute of the day in UTC is in the window, both ends included; a window whose start is after its end runs over midnight | 22:00 to 06:00 |
+
+The client subnet is the source address of the query, not an EDNS Client Subnet option. The interface is the local address the socket received the query on, so a node that listens on two addresses can answer each with a view of its own.
+
+### The order and the first match
+
+The views are tried in `order`; the first whose rules all hold wins, and no other view is consulted for that query. A query no view matches is in the **implicit default view**, which is no row: it sees the `default` scope of every zone and recurses as the profile's default allows. A view without rules, last in order, catches every query the views before it left, and so replaces the implicit default view where its scopes or its recursion list should differ.
+
+Positions are unique and without gaps. A view created at a position, or moved to one by a change of `order`, pushes the views from that position one down; a deleted view closes its gap; a position past the end is the end. The rows whose position moves are written in the same batch as the view, so their revisions move too (a client holding an older `ETag` of another view gets 412 and reads again).
+
+### Scopes and weights
+
+A view's scope map lists, per zone, the scopes the view sees. With one scope of a zone the view sees that scope. With several scopes of one zone, the weights (1 to 1,000) split the view's clients among them: a client gets one scope of the zone, chosen by a hash of its address, in proportion to the weights. The rule, in `tenko_dns::catalog`:
+
+1. The client address as 128 bits (an IPv4 address and an IPv4-mapped IPv6 address are the same 32 bits), its two 64-bit halves xor-ed, then one xorshift-multiply-xorshift round of MurmurHash3's 64-bit finalizer (shift 33, multiplier `0xff51afd7ed558ccd`), cut to its low 32 bits: the client's *pick*.
+2. Per zone, the entries in map order with their cumulative weights; the pick modulo the zone's total weight falls into one entry, and that is the scope.
+
+The split is stable: a client sees one answer set, on every node and after every restart, and two clients split as the weights say. It is a split of clients, not of queries: one client is never sent to both scopes of a pair in turn. Measured with a 700/300 pair: 69.3 % of 10,000 IPv6 clients of `2001:db8::/32` and 70.3 % of the 762 IPv4 addresses of the three documentation ranges got the 700 scope (`crates/tenko-dns/tests/views.rs`), and 356 of 500 loopback clients (71.2 %) on the wire (`crates/tenko/tests/acceptance_dns_views.rs`); a 200/500/300 triple gave 19.6, 49.7 and 30.7 %. Several devices behind one NAT address count as one client; an IPv6 client with temporary addresses may change its scope when its address changes.
+
+A scope named by a view must exist in its zone: the view is refused (`dns.view.invalid`, field `scope_map`, parameters `zone` and `scope`) otherwise, and a zone change that removes a scope a view names, or the deletion of a zone a view names, is refused with 409 `dns.view.in_use` (parameter `by`, the views as `view:<name>`). Free the scope by changing or deleting the view first.
+
+### Recursion per view
+
+Who may recurse is decided per view before the cache is read ([dns-resolver.md](dns-resolver.md) section 2.3, TGL-22). A view with `recursion` names an access list ([section 6](#6-access-lists-and-tsig-keys)): the first matching entry decides, and no match refuses with REFUSED and the extended error 18. A view without it, and the implicit default view, follow the profile in force: Home and Standard allow the prefixes IPAM knows and loopback, Hardened nobody, Lab every client. An access list a view names is in use: its deletion is refused (409 `dns.acl.in_use`, `by` lists `view:<name>`), and a list read names the view in `used_by`. `PATCH` with `default_recursion: true` returns a view to the profile's default. The implicit default view has no row and nothing to edit: to widen or narrow its recursion, add a view without rules, last in order, with a list.
+
+The cache is per view: its key carries the view, so an answer a client of one view caused never reaches a client of another, even for the same name (`dns-resolver.md` section 3.1; proven in `views.rs` and on the wire in `acceptance_dns_views.rs`). Forwarding rules can be bound to one view (`view` of a rule); a view a forwarding rule names cannot be deleted (409 `dns.view.in_use`, `by` lists `forwarder:<suffix>`).
+
+### The API and the command line
+
+| Operation | Route | Scope |
+|---|---|---|
+| `list_dns_views` | `GET /dns/views` | `dns.read` |
+| `create_dns_view` | `POST /dns/views` | `dns.write` |
+| `get_dns_view` | `GET /dns/views/{id}` | `dns.read` |
+| `update_dns_view` | `PATCH /dns/views/{id}` | `dns.write` |
+| `delete_dns_view` | `DELETE /dns/views/{id}` | `dns.write` |
+
+The list is in order, paged with a cursor. A read carries the row's revision as the `ETag`; `PATCH` and `DELETE` take `If-Match`. `PATCH` replaces `rules` and `scope_map` when given, moves the view with `order`, sets `recursion` or, with `default_recursion: true`, clears it, and clears `description` with an empty text. Every change is one batch with its audit record (`dns.view.create`, `dns.view.update`, `dns.view.delete`); the role's catalog follows the rows through the store feed, so a change is answered within the feed's delay (milliseconds on one node). Errors: 400 `dns.view.invalid` (parameters `field` and `reason`), 404 `dns.view.not_found`, 409 `dns.view.in_use`, 412 for a stale `If-Match`.
+
+```
+tenko dns acl create office --entry 192.0.2.0/24 --entry 2001:db8:10::/48
+tenko dns view create office --client-subnet 192.0.2.0/24 --client-subnet 2001:db8:10::/48 \
+    --scope example.test:internal --recursion office
+tenko dns view create canary --transport dot --transport doh \
+    --scope example.test:internal:700 --scope example.test:external:300
+tenko dns view create everyone --scope example.test:external
+tenko dns view update everyone --order 1
+tenko dns view list
+tenko dns view update office --default-recursion
+tenko dns view delete canary
+```
+
+`--client-subnet`, `--transport`, `--interface`, `--qtype` and `--qname` repeat (the values of one flag form one rule), `--time 22:00-06:00` is the window in UTC, `--scope <zone>:<scope>[:<weight>]` repeats (weight 1 when absent), `--order` is the position (last when absent on `create`). On `update`, rule flags replace all rules, `--no-rules` removes them, `--scope` replaces the scope map and `--no-scopes` empties it. A view is named by its name or its identifier. The web UI has the views at `/dns/views`: the list in order with the rules in words and the scopes with their shares, up and down buttons and drag and drop for the order, the dialogs with an editor per test.
+
+### Mapping from Windows and BIND
+
+What the migration adapters of Phase 4 map onto views ([MIGRATION.md](MIGRATION.md), the views and policies note):
+
+| Source | Tenko | Notes |
+|---|---|---|
+| Windows zone scope (`Add-DnsServerZoneScope`) | A scope of the zone | The scope's records go to the scope; the zone's own records to `default` |
+| Windows client subnet (`Add-DnsServerClientSubnet`) | The prefixes of a `client_subnet` rule | A named subnet becomes the values of the rules that name it |
+| Query Resolution Policy, criteria `ClientSubnet`, `TransportProtocol`, `ServerInterfaceIP`, `QType`, `TimeOfDay`, `FQDN` with `EQ` | One view with one rule per criterion | `TimeOfDay` is server local time on Windows: converted to UTC at migration (a window across a change of daylight saving time drifts by an hour) |
+| QRP `-Condition OR` | One view per criterion, adjacent in order | Tenko and-s the rules of one view |
+| QRP `-ZoneScope "a,3;b,1"` (weighted) | `scope_map` with weights 3 and 1 | Windows picks per query, Tenko per client: the share holds, one client sees one scope |
+| QRP processing order | `order` | Server-level policies first, then the zone-level ones |
+| Zone-level QRP | A view with the policy's criteria and a `qname` rule of the zone's apex | Tenko's order is global: the `qname` rule keeps the view to the zone's names, as the zone-level policy was |
+| Recursion scope (`Add-DnsServerRecursionScope`) with its forwarders | The view's `recursion` access list, and forwarding rules bound to the view | `EnableRecursion $false` maps to a list that denies `any` |
+| BIND `view` | A view, in the order of `named.conf` | |
+| BIND `match-clients` with an `acl` of prefixes | `client_subnet` | Negated elements (`!`) and TSIG keys in `match-clients` go to the loss report |
+| BIND `match-destinations` | `interface` | |
+| BIND `match-clients { any; }` | A view without rules, last | |
+| BIND `allow-recursion` and `recursion no` in a view | The view's `recursion` access list | `recursion no` maps to a list that denies `any` |
+| BIND zone in several views with different data | One zone, one scope per view | The data of the first view goes to `default` when that view is the catch-all |
+
+What goes to the loss report: `NE` criteria and negated ACL elements (a view in front with the complement is the manual way), QRP actions `DENY` and `IGNORE` (block lists and response policy are the Tenko tools, [dns-resolver.md](dns-resolver.md) sections 5 and 6), `match-recursive-only`, TSIG keys as view criteria, EDNS Client Subnet criteria, and a zone that exists in only some BIND views (in Tenko every zone exists in every view; its `default` scope can hold only the apex, so other views get NXDOMAIN for its names).
+
+### Limits
+
+| What | Limit |
+|---|---|
+| Views | 1,000 |
+| Rules per view | 32 |
+| Values per rule | 1,000 |
+| Scope map entries per view | 256 |
+| Weight | 1 to 1,000 |
+| Name, description | 64, 1,000 characters |
+
+The view table is compiled when the rows change and tried for every query: a view costs one pass over its rules, and a client subnet rule a pass over its prefixes, so a long list of views with long prefix lists slows every query a little; the views table in the catalog is rebuilt as a whole on each change of `dns.views`. The rules have no negation and no regular expressions; time windows are in UTC only.
 
 ## 12. The engine
 

@@ -3,9 +3,10 @@
 // transport and the TLS name, and the view a rule applies in. Create, edit (with the rule's
 // revision) and delete. Without a root rule the note says where the remaining names go: the
 // configuration file's `[dns] forwarders`, which the node status does not list. Below the
-// rules, who may recurse: the profile's default for the implicit default view, read-only until
-// views can be managed (WP6.4; `PATCH /dns/views/{id}` answers 501), and the problems the
-// node reports for stub zones and recursion lists.
+// rules, who may recurse: the profile's default for the implicit default view, which is no
+// row and so has nothing to edit (WP6.4: each view names its own recursion access list on the
+// views page, linked here), and the problems the node reports for stub zones and recursion
+// lists.
 import { A } from "@solidjs/router";
 import { createResource, createSignal, For, Show } from "solid-js";
 import { createLiveQuery, latest } from "../../api/live";
@@ -48,7 +49,13 @@ function Recursion() {
     <section class="page-section dns-fwd-side" aria-labelledby="dns-recursion-title" data-testid="dns-recursion" data-state="default" data-key={profile()}>
       <h2 id="dns-recursion-title">{t("dns.fwd.recursion.title")}</h2>
       <p>{t(`dns.fwd.recursion.${rule()}`, { profile: t(`profile.${profile()}.name`) })}</p>
-      <p class="muted">{t("dns.fwd.recursion.views")}</p>
+      <p class="muted">
+        {t("dns.fwd.recursion.views")}{" "}
+        {/* WP6.4: the recursion list of each view is edited on the views page. */}
+        <A href={dnsPaths.views()} data-testid="fwd-views-link">
+          {t("dns.fwd.recursion.views_link")}
+        </A>
+      </p>
     </section>
   );
 }

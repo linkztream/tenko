@@ -11,7 +11,8 @@
 //! document, the typed client of the UI and the mock server have them. The zones, records,
 //! zone files, the zone journal, access lists and TSIG keys are built (WP4.2, files
 //! `dns/zones.rs`, `dns/records.rs`, `dns/acls.rs`, `dns/keys.rs`), the forwarding
-//! rules (WP5.1, `dns/forwarders.rs`) and the block lists (WP5.2, `dns/lists.rs`), on the
+//! rules (WP5.1, `dns/forwarders.rs`), the block lists (WP5.2, `dns/lists.rs`) and the views
+//! (WP6.4, `dns/views.rs`), on the
 //! zone service
 //! (`tenko_dns::zone`), which the server adds as the request extension
 //! `Arc<ZoneService>`. Until its package builds it, any other operation checks the
@@ -83,6 +84,8 @@ mod lists;
 mod model;
 mod nodes;
 mod records;
+// WP6.4: the view routes.
+mod views;
 mod zones;
 
 #[cfg(test)]
@@ -101,7 +104,7 @@ use tenko_auth::authz::anywhere;
 use tenko_core::Revision;
 use tenko_core::{
     Action, CodedError, NodeId, ObjectKind, ObjectRef,
-    dns::{DnsName, ViewId, ZoneId},
+    dns::{DnsName, ZoneId},
     error::codes,
 };
 use tenko_dns::zone::ZoneService;
@@ -127,9 +130,7 @@ pub use model::{
 
 use super::not_implemented;
 use crate::{
-    dto::Page,
     extract::Ctx,
-    list::PageParams,
     problem::{ApiError, ProblemDetails},
     state::AppState,
 };
@@ -253,8 +254,13 @@ fn record_routes() -> OpenApiRouter<AppState> {
 #[inline(never)]
 fn view_and_forwarder_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list_dns_views, create_dns_view))
-        .routes(routes!(get_dns_view, update_dns_view, delete_dns_view))
+        // WP6.4: the view routes.
+        .routes(routes!(views::list_dns_views, views::create_dns_view))
+        .routes(routes!(
+            views::get_dns_view,
+            views::update_dns_view,
+            views::delete_dns_view
+        ))
         .routes(routes!(
             forwarders::list_dns_forwarders,
             forwarders::create_dns_forwarder
@@ -419,142 +425,4 @@ async fn trigger_dns_zone_transfer(
         &ObjectRef::from(parse_id::<ZoneId>(&id)?),
     )?;
     Err(not_implemented("POST", "/dns/zones/{id}/transfer"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dns/views",
-    tag = "dns",
-    operation_id = "list_dns_views",
-    summary = "List DNS views",
-    description = "Scope: `dns.read`.",
-    params(PageParams),
-    responses(
-        (status = 200, description = "A page of views in order", body = Page<ViewItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dns_views(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
-    app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::DnsView))?;
-    Err(not_implemented("GET", "/dns/views"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dns/views",
-    tag = "dns",
-    operation_id = "create_dns_view",
-    summary = "Create a DNS view",
-    description = "Scope: `dns.write`.",
-    request_body(content = ViewCreate, content_type = "application/json"),
-    responses(
-        (status = 201, description = "The view", body = ViewItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the view is invalid (`dns.view.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn create_dns_view(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Create,
-        &anywhere(ObjectKind::DnsView),
-    )?;
-    Err(not_implemented("POST", "/dns/views"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dns/views/{id}",
-    tag = "dns",
-    operation_id = "get_dns_view",
-    summary = "Get a DNS view",
-    description = "Scope: `dns.read`.",
-    params(("id" = String, Path, description = "View identifier (UUID)")),
-    responses(
-        (status = 200, description = "The view with its `ETag`", body = ViewItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such view (`dns.view.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dns_view(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &ObjectRef::from(parse_id::<ViewId>(&id)?),
-    )?;
-    Err(not_implemented("GET", "/dns/views/{id}"))
-}
-
-#[utoipa::path(
-    patch,
-    path = "/dns/views/{id}",
-    tag = "dns",
-    operation_id = "update_dns_view",
-    summary = "Change a DNS view",
-    description = "Scope: `dns.write`.",
-    params(("id" = String, Path, description = "View identifier (UUID)")),
-    request_body(content = ViewPatch, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The changed view", body = ViewItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such view (`dns.view.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 412, description = "The view changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn update_dns_view(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Update,
-        &ObjectRef::from(parse_id::<ViewId>(&id)?),
-    )?;
-    Err(not_implemented("PATCH", "/dns/views/{id}"))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/dns/views/{id}",
-    tag = "dns",
-    operation_id = "delete_dns_view",
-    summary = "Delete a DNS view",
-    description = "Scope: `dns.write`.",
-    params(("id" = String, Path, description = "View identifier (UUID)")),
-    responses(
-        (status = 204, description = "The view is gone"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such view (`dns.view.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn delete_dns_view(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Delete,
-        &ObjectRef::from(parse_id::<ViewId>(&id)?),
-    )?;
-    Err(not_implemented("DELETE", "/dns/views/{id}"))
 }

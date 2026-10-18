@@ -11,7 +11,7 @@
         <segment><source>Coming in a later slice</source></segment>
       </unit>
       <unit id="dns.coming.body">
-        <segment><source>Views are managed here once they are built. Zones, records, forwarders, block lists, access lists and keys work already.</source></segment>
+        <segment><source>This DNS page does not exist. Zones, views, forwarders, block lists, access lists and keys are in the sections above.</source></segment>
       </unit>
       <unit id="dns.coming.zones">
         <segment><source>Go to the zones</source></segment>
@@ -1106,7 +1106,7 @@
         <segment><source>The access list does not exist (any more).</source></segment>
       </unit>
       <unit id="errors.dns.acl.in_use">
-        <segment><source>The access list is in use by a zone.</source></segment>
+        <segment><source>The access list is in use by a zone or a view.</source></segment>
       </unit>
       <unit id="errors.dns.key.not_found">
         <segment><source>The key does not exist (any more).</source></segment>
@@ -1344,7 +1344,7 @@
         <segment><source>The implicit default view follows the profile {profile}: every client may recurse (an open resolver).</source></segment>
       </unit>
       <unit id="dns.fwd.recursion.views">
-        <segment><source>To widen or narrow this, a view with a recursion access list is needed; views are managed in a later version.</source></segment>
+        <segment><source>To widen or narrow this, give a view a recursion access list, or create a view without rules, last in order, with a list.</source></segment>
       </unit>
       <unit id="dns.lists.title">
         <notes><note category="description">Title of the block lists page and its entry in the browser tab.</note></notes>
@@ -1703,6 +1703,313 @@
       </unit>
       <unit id="dns.node.row.log_write_errors">
         <segment><source>Failed writes since the start</source></segment>
+      </unit>
+      <unit id="dns.nav.views">
+        <segment><source>Views</source></segment>
+      </unit>
+      <unit id="dns.view.title">
+        <notes><note category="description">Title of the views page and its entry in the browser tab.</note></notes>
+        <segment><source>Views</source></segment>
+      </unit>
+      <unit id="dns.view.sub">
+        <segment><source>Queries are tried against the views in order; the first view whose rules all hold decides which zone scopes the query sees and who may recurse.</source></segment>
+      </unit>
+      <unit id="dns.view.create">
+        <segment><source>Create view</source></segment>
+      </unit>
+      <unit id="dns.view.create_title">
+        <segment><source>Create a view</source></segment>
+      </unit>
+      <unit id="dns.view.edit_title">
+        <segment><source>Edit view {name}</source></segment>
+      </unit>
+      <unit id="dns.view.save">
+        <segment><source>Save view</source></segment>
+      </unit>
+      <unit id="dns.view.saved">
+        <segment><source>View {name} saved</source></segment>
+      </unit>
+      <unit id="dns.view.created">
+        <segment><source>View {name} created</source></segment>
+      </unit>
+      <unit id="dns.view.moved">
+        <segment><source>View {name} moved to position {order}</source></segment>
+      </unit>
+      <unit id="dns.view.deleted">
+        <segment><source>View {name} deleted</source></segment>
+      </unit>
+      <unit id="dns.view.delete_title">
+        <segment><source>Delete view {name}?</source></segment>
+      </unit>
+      <unit id="dns.view.delete_confirm">
+        <segment><source>Delete view</source></segment>
+      </unit>
+      <unit id="dns.view.delete_body">
+        <segment><source>The views after it move up one place. Its clients fall to the next view that matches them, or to the implicit default view.</source></segment>
+      </unit>
+      <unit id="dns.view.in_use">
+        <segment><source>The view cannot be deleted while these still name it:</source></segment>
+      </unit>
+      <unit id="dns.view.col.order">
+        <notes><note category="description">Column of the views grid: the position in which the views are tried.</note></notes>
+        <segment><source>Order</source></segment>
+      </unit>
+      <unit id="dns.view.col.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="dns.view.col.rules">
+        <segment><source>Rules</source></segment>
+      </unit>
+      <unit id="dns.view.col.scopes">
+        <segment><source>Zone scopes</source></segment>
+      </unit>
+      <unit id="dns.view.col.recursion">
+        <segment><source>Recursion</source></segment>
+      </unit>
+      <unit id="dns.view.drag">
+        <segment><source>Drag {name} onto another view to take its place</source></segment>
+      </unit>
+      <unit id="dns.view.move_up">
+        <segment><source>Move {name} up</source></segment>
+      </unit>
+      <unit id="dns.view.move_down">
+        <segment><source>Move {name} down</source></segment>
+      </unit>
+      <unit id="dns.view.action.up">
+        <segment><source>Move up</source></segment>
+      </unit>
+      <unit id="dns.view.action.down">
+        <segment><source>Move down</source></segment>
+      </unit>
+      <unit id="dns.view.every_query">
+        <notes><note category="description">Shown for a view without rules: it matches every query.</note></notes>
+        <segment><source>Every query</source></segment>
+      </unit>
+      <unit id="dns.view.default_scopes">
+        <segment><source>The default scope of every zone</source></segment>
+      </unit>
+      <unit id="dns.view.scope_chip">
+        <segment><source>{zone}: {scope}, weight {weight} ({share} %)</source></segment>
+      </unit>
+      <unit id="dns.view.share">
+        <notes><note category="description">The share of clients a weight gives among the scopes of one zone.</note></notes>
+        <segment><source>{share} %</source></segment>
+      </unit>
+      <unit id="dns.view.recursion.default">
+        <segment><source>Profile default</source></segment>
+      </unit>
+      <unit id="dns.view.recursion.missing">
+        <segment><source>List missing: nobody may recurse</source></segment>
+      </unit>
+      <unit id="dns.view.empty">
+        <segment><source>No views</source></segment>
+      </unit>
+      <unit id="dns.view.empty_body">
+        <segment><source>Every query is in the implicit default view. Create a view to answer some clients from another zone scope or to let them recurse.</source></segment>
+      </unit>
+      <unit id="dns.view.default.title">
+        <segment><source>The implicit default view</source></segment>
+      </unit>
+      <unit id="dns.view.default.body">
+        <segment><source>A query no view matches sees the default scope of every zone, and recursion follows the profile {profile}.</source></segment>
+      </unit>
+      <unit id="dns.view.rule.words.client_subnet">
+        <segment><source>Client in {values}</source></segment>
+      </unit>
+      <unit id="dns.view.rule.words.transport">
+        <segment><source>Over {values}</source></segment>
+      </unit>
+      <unit id="dns.view.rule.words.interface">
+        <segment><source>Arrives on {values}</source></segment>
+      </unit>
+      <unit id="dns.view.rule.words.qtype">
+        <segment><source>Type {values}</source></segment>
+      </unit>
+      <unit id="dns.view.rule.words.qname">
+        <segment><source>Name in {values}</source></segment>
+      </unit>
+      <unit id="dns.view.rule.words.time_of_day">
+        <segment><source>From {from} to {to} UTC</source></segment>
+      </unit>
+      <unit id="dns.view.transport.udp">
+        <segment><source>UDP</source></segment>
+      </unit>
+      <unit id="dns.view.transport.tcp">
+        <segment><source>TCP</source></segment>
+      </unit>
+      <unit id="dns.view.transport.dot">
+        <segment><source>DNS over TLS</source></segment>
+      </unit>
+      <unit id="dns.view.transport.doh">
+        <segment><source>DNS over HTTPS</source></segment>
+      </unit>
+      <unit id="dns.view.rule.kind.client_subnet">
+        <segment><source>Client subnet</source></segment>
+      </unit>
+      <unit id="dns.view.rule.kind.transport">
+        <segment><source>Transport</source></segment>
+      </unit>
+      <unit id="dns.view.rule.kind.interface">
+        <segment><source>Server address</source></segment>
+      </unit>
+      <unit id="dns.view.rule.kind.qtype">
+        <segment><source>Query type</source></segment>
+      </unit>
+      <unit id="dns.view.rule.kind.qname">
+        <segment><source>Query name</source></segment>
+      </unit>
+      <unit id="dns.view.rule.kind.time_of_day">
+        <segment><source>Time of day</source></segment>
+      </unit>
+      <unit id="dns.view.rule.kind_label">
+        <segment><source>Kind of the next rule</source></segment>
+      </unit>
+      <unit id="dns.view.rule.add">
+        <segment><source>Add rule</source></segment>
+      </unit>
+      <unit id="dns.view.rule.remove">
+        <segment><source>Remove rule {n}</source></segment>
+      </unit>
+      <unit id="dns.view.rule.from">
+        <segment><source>From</source></segment>
+      </unit>
+      <unit id="dns.view.rule.to">
+        <segment><source>To</source></segment>
+      </unit>
+      <unit id="dns.view.rule.help.client_subnet">
+        <segment><source>Prefixes such as 192.0.2.0/24 or 2001:db8::/32; the client address is in one of them.</source></segment>
+      </unit>
+      <unit id="dns.view.rule.help.transport">
+        <segment><source>The query arrives on one of the transports.</source></segment>
+      </unit>
+      <unit id="dns.view.rule.help.interface">
+        <segment><source>Addresses of this server such as 192.0.2.53; the query arrives on one of them.</source></segment>
+      </unit>
+      <unit id="dns.view.rule.help.qtype">
+        <segment><source>Types such as A, AAAA or MX.</source></segment>
+      </unit>
+      <unit id="dns.view.rule.help.qname">
+        <segment><source>Names such as example.test; the query name is the name or below it.</source></segment>
+      </unit>
+      <unit id="dns.view.rule.help.time_of_day">
+        <segment><source>In UTC, both minutes included; a window that ends before it starts runs over midnight.</source></segment>
+      </unit>
+      <unit id="dns.view.check.name_required">
+        <segment><source>Give the view a name.</source></segment>
+      </unit>
+      <unit id="dns.view.check.name_long">
+        <segment><source>A name has at most 64 characters.</source></segment>
+      </unit>
+      <unit id="dns.view.check.description">
+        <segment><source>A description has at most 1000 characters.</source></segment>
+      </unit>
+      <unit id="dns.view.check.too_many_rules">
+        <segment><source>A view has at most 32 rules.</source></segment>
+      </unit>
+      <unit id="dns.view.check.rule_empty">
+        <segment><source>Rule {n} lists no value.</source></segment>
+      </unit>
+      <unit id="dns.view.check.rule_too_many">
+        <segment><source>Rule {n} lists more than 1000 values.</source></segment>
+      </unit>
+      <unit id="dns.view.check.time">
+        <segment><source>Rule {n}: {entry} is not a time of day such as 08:00.</source></segment>
+      </unit>
+      <unit id="dns.view.check.prefix">
+        <segment><source>Rule {n}: {entry} is not a prefix.</source></segment>
+      </unit>
+      <unit id="dns.view.check.address">
+        <segment><source>Rule {n}: {entry} is not an address.</source></segment>
+      </unit>
+      <unit id="dns.view.check.type">
+        <segment><source>Rule {n}: {entry} is not a record type.</source></segment>
+      </unit>
+      <unit id="dns.view.check.name">
+        <segment><source>Rule {n}: {entry} is not a DNS name.</source></segment>
+      </unit>
+      <unit id="dns.view.check.too_many_scopes">
+        <segment><source>A view maps at most 256 zone scopes.</source></segment>
+      </unit>
+      <unit id="dns.view.check.scope_zone">
+        <segment><source>Zone scope {n}: choose a zone and a scope.</source></segment>
+      </unit>
+      <unit id="dns.view.check.scope_weight">
+        <segment><source>Zone scope {n}: the weight is a whole number from 1 to 1000.</source></segment>
+      </unit>
+      <unit id="dns.view.check.scope_twice">
+        <segment><source>Zone scope {n} is in the list twice.</source></segment>
+      </unit>
+      <unit id="dns.view.check.taken">
+        <segment><source>A view of this name exists already.</source></segment>
+      </unit>
+      <unit id="dns.view.check.no_scope">
+        <segment><source>The zone {zone} has no scope {scope}.</source></segment>
+      </unit>
+      <unit id="dns.view.check.no_zone">
+        <segment><source>One of the zones does not exist any more.</source></segment>
+      </unit>
+      <unit id="dns.view.check.no_acl">
+        <segment><source>The access list does not exist any more.</source></segment>
+      </unit>
+      <unit id="dns.view.field.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="dns.view.field.order">
+        <segment><source>Position</source></segment>
+      </unit>
+      <unit id="dns.view.field.order_help">
+        <segment><source>The views from this position move one down.</source></segment>
+      </unit>
+      <unit id="dns.view.field.order_last">
+        <segment><source>{n}, last</source></segment>
+      </unit>
+      <unit id="dns.view.field.order_at">
+        <segment><source>{n}</source></segment>
+      </unit>
+      <unit id="dns.view.field.rules">
+        <segment><source>Rules</source></segment>
+      </unit>
+      <unit id="dns.view.field.rules_none">
+        <segment><source>No rules: the view matches every query that reaches it.</source></segment>
+      </unit>
+      <unit id="dns.view.field.rules_help">
+        <segment><source>Every rule must hold; within a rule, any value matches.</source></segment>
+      </unit>
+      <unit id="dns.view.field.scopes">
+        <segment><source>Zone scopes</source></segment>
+      </unit>
+      <unit id="dns.view.field.scopes_help">
+        <segment><source>The scopes this view sees. A zone not listed is seen in its default scope; among the scopes of one zone each client gets one, in proportion to the weights.</source></segment>
+      </unit>
+      <unit id="dns.view.field.zone">
+        <segment><source>Zone of zone scope {n}</source></segment>
+      </unit>
+      <unit id="dns.view.field.scope">
+        <segment><source>Scope of zone scope {n}</source></segment>
+      </unit>
+      <unit id="dns.view.field.weight">
+        <segment><source>Weight of zone scope {n}</source></segment>
+      </unit>
+      <unit id="dns.view.field.recursion">
+        <segment><source>Who may recurse</source></segment>
+      </unit>
+      <unit id="dns.view.field.recursion_help">
+        <segment><source>The access list of the clients of this view that may recurse; the profile default when none is chosen.</source></segment>
+      </unit>
+      <unit id="dns.view.scope.add">
+        <segment><source>Add zone scope</source></segment>
+      </unit>
+      <unit id="dns.view.scope.remove">
+        <segment><source>Remove zone scope {n}</source></segment>
+      </unit>
+      <unit id="dns.view.scope.no_zones">
+        <segment><source>There are no zones yet.</source></segment>
+      </unit>
+      <unit id="dns.fwd.recursion.views_link">
+        <segment><source>Go to the views</source></segment>
+      </unit>
+      <unit id="errors.dns.view.in_use">
+        <segment><source>Still named by {by}.</source></segment>
       </unit>
     </group>
   </file>

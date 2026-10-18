@@ -1,7 +1,7 @@
 //! Route tests of the DNS operations that stay 501 until their package: each checks the
 //! scope of its action on the right object before it answers, and refuses a malformed path
 //! first. The built operations (zones, records, access lists, keys, forwarding rules, block
-//! lists) have their tests in `tests/dns_zones.rs`, `tests/dns_records.rs`,
+//! lists, views) have their tests in `tests/dns_zones.rs`, `tests/dns_records.rs`,
 //! `tests/dns_keys.rs`, `tests/dns_forwarders.rs` and `tests/dns_lists.rs`; here they only
 //! show that a path, then the scope, is checked before the zone service is needed.
 
@@ -92,7 +92,7 @@ async fn a_reader_reads_and_is_refused_writes() {
     let (router, policy) = with_policy(true, false);
     send(&router, "GET", "/dns/views")
         .await
-        .assert_problem(501, "sys.not_implemented");
+        .assert_problem(409, "dns.module.disabled");
     send(&router, "DELETE", &format!("/dns/forwarders/{ZONE}"))
         .await
         .assert_problem(403, "auth.forbidden");

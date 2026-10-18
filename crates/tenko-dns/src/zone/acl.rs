@@ -2,16 +2,16 @@
 //! updates and queries; the first entry that matches decides.
 //!
 //! A list has a unique name (1 to 64 characters, compared without case) and at most
-//! [`MAX_ENTRIES`] entries. A list named by a zone (transfer or update policy) cannot be
-//! deleted (`dns.acl.in_use`). Every change is an inline job with its `dns.acl.*` audit
+//! [`MAX_ENTRIES`] entries. A list named by a zone (transfer or update policy) or by a view
+//! (its recursion access list) cannot be deleted (`dns.acl.in_use`). Every change is an inline job with its `dns.acl.*` audit
 //! record.
 
 use tenko_core::{
     ObjectRef, RequestCtx, Revision,
     audit::AuditDraft,
     dns::{
-        Acl, AclEntry, AclId, Zone, audit, codes,
-        tables::{ACLS, ZONES},
+        Acl, AclEntry, AclId, View, Zone, audit, codes,
+        tables::{ACLS, VIEWS, ZONES},
     },
     error::codes as sys,
 };
@@ -49,7 +49,7 @@ pub struct AclChange {
 pub struct AclRow {
     /// The list.
     pub acl: Acl,
-    /// The zones that name it (`zone:<name>`).
+    /// The zones and views that name it (`zone:<name>`, `view:<name>`).
     pub used_by: Vec<String>,
     /// The revision of the row.
     pub revision: Revision,
@@ -106,11 +106,12 @@ impl ZoneService {
             .into_iter()
             .map(|(_, zone, _)| zone)
             .collect();
+        let views = recursion_views(view)?;
         let mut rows: Vec<AclRow> = view
             .scan_typed(&ACLS, KeyRange::all(), usize::MAX, false)?
             .into_iter()
             .map(|(_, acl, revision)| AclRow {
-                used_by: used_by(&zones, acl.id),
+                used_by: used_by(&zones, &views, acl.id),
                 acl,
                 revision,
             })
@@ -137,8 +138,9 @@ impl ZoneService {
             .into_iter()
             .map(|(_, zone, _)| zone)
             .collect();
+        let views = recursion_views(view)?;
         Ok(AclRow {
-            used_by: used_by(&zones, id),
+            used_by: used_by(&zones, &views, id),
             acl,
             revision,
         })
@@ -232,7 +234,7 @@ impl ZoneService {
         .await
     }
 
-    /// Deletes an access list no zone names.
+    /// Deletes an access list no zone and no view names.
     ///
     /// # Errors
     ///
@@ -270,6 +272,12 @@ impl ZoneService {
                 {
                     batch.expect_typed(&ZONES, &zone_id, Some(revision));
                 }
+                // WP6.4: and so does a view that starts to name it for recursion.
+                for (view_id, _, revision) in
+                    view.scan_typed(&VIEWS, KeyRange::all(), usize::MAX, false)?
+                {
+                    batch.expect_typed(&VIEWS, &view_id, Some(revision));
+                }
                 batch.audit(
                     AuditDraft::success(audit::ACL_DELETE, vec![ObjectRef::from(id)])
                         .with_source_ip(cx.source_ip)
@@ -287,14 +295,31 @@ impl ZoneService {
     }
 }
 
-fn used_by(zones: &[Zone], id: AclId) -> Vec<String> {
+fn used_by(zones: &[Zone], views: &[View], id: AclId) -> Vec<String> {
     let mut names: Vec<String> = zones
         .iter()
         .filter(|zone| names_acl(zone, id))
         .map(|zone| format!("zone:{}", zone.name))
         .collect();
     names.sort();
+    // WP6.4: the views that name the list for recursion (`View.recursion`).
+    let mut by_views: Vec<String> = views
+        .iter()
+        .filter(|view| view.recursion == Some(id))
+        .map(|view| format!("view:{}", view.name))
+        .collect();
+    by_views.sort();
+    names.extend(by_views);
     names
+}
+
+// WP6.4: the views, for `used_by`.
+fn recursion_views(view: &dyn ReadView) -> ZoneResult<Vec<View>> {
+    Ok(view
+        .scan_typed(&VIEWS, KeyRange::all(), usize::MAX, false)?
+        .into_iter()
+        .map(|(_, row, _)| row)
+        .collect())
 }
 
 fn unique_name(view: &dyn ReadView, acl: &Acl) -> ZoneResult<()> {

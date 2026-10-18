@@ -1,5 +1,6 @@
 //! `tenko dns ...`: the DNS endpoints of the public API (`/api/v1/dns/...`): zones, records,
-//! zone file import and export, access lists, TSIG keys, forwarding rules and block lists.
+//! zone file import and export, access lists, TSIG keys, forwarding rules, block lists and
+//! views (`tenko dns view`, in `dns_view.rs`).
 //!
 //! # Names
 //!
@@ -52,6 +53,10 @@ use uuid::Uuid;
 use super::{ClientOpts, Failure, Output, Target, table};
 use crate::exit;
 
+// WP6.4: `tenko dns view`.
+#[path = "dns_view.rs"]
+pub mod view;
+
 /// Subcommands of `tenko dns`.
 #[derive(Debug, Clone, Subcommand)]
 pub enum DnsCommand {
@@ -94,6 +99,13 @@ pub enum DnsCommand {
         /// The `list` subcommand to run.
         #[command(subcommand)]
         action: BlockListCommand,
+    },
+    // WP6.4
+    /// Views: list, create, show, change, delete.
+    View {
+        /// The `view` subcommand to run.
+        #[command(subcommand)]
+        action: view::ViewCommand,
     },
 }
 
@@ -514,6 +526,8 @@ impl DnsCommand {
                 BlockListCommand::Delete(a) => &a.client,
                 BlockListCommand::Upload(a) => &a.client,
             },
+            // WP6.4
+            Self::View { action } => action.client(),
         }
     }
 
@@ -565,6 +579,8 @@ impl DnsCommand {
                 BlockListCommand::Fetch(_) => "dns list fetch",
                 BlockListCommand::Upload(_) => "dns list upload",
             },
+            // WP6.4
+            Self::View { action } => action.name(),
         }
     }
 }
@@ -968,6 +984,8 @@ pub async fn run(command: &DnsCommand) -> Result<Output, Failure> {
             BlockListCommand::Fetch(args) => block_list_fetch(&target, args).await,
             BlockListCommand::Upload(args) => block_list_upload(&target, args).await,
         },
+        // WP6.4
+        DnsCommand::View { action } => view::run(&target, action).await,
     }
 }
 

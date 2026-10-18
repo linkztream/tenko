@@ -5736,7 +5736,7 @@
             }
           },
           "409": {
-            "description": "A zone names the access list (`dns.acl.in_use`, parameter `by`)",
+            "description": "A zone or a view names the access list (`dns.acl.in_use`, parameter `by`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7159,7 +7159,7 @@
           "dns"
         ],
         "summary": "List DNS views",
-        "description": "Scope: `dns.read`.",
+        "description": "Scope: `dns.read`. The views in the order they are tried (`order` from 1); a query no view matches is in the implicit default view, which is not listed.",
         "operationId": "list_dns_views",
         "parameters": [
           {
@@ -7206,7 +7206,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7234,16 +7234,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -7252,7 +7242,7 @@
           "dns"
         ],
         "summary": "Create a DNS view",
-        "description": "Scope: `dns.write`.",
+        "description": "Scope: `dns.write`. The view goes to `order` (from 1) and the views from there move one down; a position past the end is the end. Every zone scope of `scope_map` must exist, weights are 1 to 1000, and `recursion` names an access list.",
         "operationId": "create_dns_view",
         "requestBody": {
           "content": {
@@ -7276,7 +7266,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the view is invalid (`dns.view.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the view is invalid (`dns.view.invalid`, parameters `field` and `reason`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7297,16 +7287,6 @@
           },
           "403": {
             "description": "The principal lacks the scope `dns.write`",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7349,7 +7329,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7387,16 +7367,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -7405,7 +7375,7 @@
           "dns"
         ],
         "summary": "Delete a DNS view",
-        "description": "Scope: `dns.write`.",
+        "description": "Scope: `dns.write`. The views after it move up one. A view a forwarding rule names is refused.",
         "operationId": "delete_dns_view",
         "parameters": [
           {
@@ -7416,6 +7386,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -7423,7 +7405,7 @@
             "description": "The view is gone"
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7462,8 +7444,18 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "A forwarding rule names the view (`dns.view.in_use`, parameter `by`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The view changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7479,7 +7471,7 @@
           "dns"
         ],
         "summary": "Change a DNS view",
-        "description": "Scope: `dns.write`.",
+        "description": "Scope: `dns.write`. `rules` and `scope_map` replace the view's; `order` moves the view and the others make room; `default_recursion` makes the view follow the profile's default; an empty `description` clears it.",
         "operationId": "update_dns_view",
         "parameters": [
           {
@@ -7489,6 +7481,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -7514,7 +7518,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the view is invalid (`dns.view.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7555,16 +7559,6 @@
           },
           "412": {
             "description": "The view changed since it was read (`If-Match`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7877,6 +7871,16 @@
               }
             }
           },
+          "409": {
+            "description": "A view names the zone (`dns.view.in_use`, parameter `by`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "412": {
             "description": "The zone changed since it was read (`If-Match`)",
             "content": {
@@ -7972,6 +7976,16 @@
           },
           "404": {
             "description": "No such zone (`dns.zone.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A view names a scope the change removes (`dns.view.in_use`, parameters `scope` and `by`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -56370,8 +56384,19 @@
           "order": {
             "type": "integer",
             "format": "int32",
-            "description": "The position, lower first.",
+            "description": "The position, from 1; the views from there move one down, and a position past the\nend is the end.",
             "minimum": 0
+          },
+          "recursion": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AclId",
+                "description": "The access list of the clients that may recurse (WP6.4); the profile's default when\nabsent."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "rules": {
             "type": "array",
@@ -56418,12 +56443,16 @@
         "type": "object",
         "description": "`PATCH /dns/views/{id}`.",
         "properties": {
+          "default_recursion": {
+            "type": "boolean",
+            "description": "Follow the profile's default for recursion (clears `recursion`, WP6.4)."
+          },
           "description": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Free text."
+            "description": "Free text; an empty string clears it."
           },
           "name": {
             "type": [
@@ -56438,8 +56467,19 @@
               "null"
             ],
             "format": "int32",
-            "description": "The position.",
+            "description": "The position, from 1; the other views move to make room.",
             "minimum": 0
+          },
+          "recursion": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AclId",
+                "description": "The access list of the clients that may recurse (WP6.4)."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "rules": {
             "type": [

@@ -216,7 +216,7 @@ pub(super) async fn update_dns_acl(
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such access list (`dns.acl.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "A zone names the access list (`dns.acl.in_use`, parameter `by`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "A zone or a view names the access list (`dns.acl.in_use`, parameter `by`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 412, description = "The access list changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]

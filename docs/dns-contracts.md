@@ -23,7 +23,7 @@ All in the namespace `dns` of the replicated store; the constants are `tenko_cor
 |---|---|---|---|---|
 | `dns.zones` | `ZoneId` | `Zone` | the zone service (WP4.2), the reverse-zone planner (WP4.4) | yes |
 | `dns.rrsets` | zone, scope, owner name, type (`RrSetKey`) | `RrSet` | the zone service, the actuator, dynamic updates, transfers in | yes |
-| `dns.views` | `ViewId` | `View` | WP6.4 | yes |
+| `dns.views` | `ViewId` | `View` | the view service (WP6.4): positions from 1 without gaps; `ViewCreate` and `ViewPatch` carry `recursion`, `ViewPatch` also `default_recursion` | yes |
 | `dns.forwarders` | `ForwardRuleId` | `ForwardRule` | WP5.1 | yes |
 | `dns.acls` | `AclId` | `Acl` | WP4.2 | yes |
 | `dns.keys.meta` | key name (`KeyName`) | `KeyMeta` (the secret is a vault secret, purpose `tsig`) | WP4.2 | yes |
@@ -131,6 +131,7 @@ The node routes sit beside the node's other routes, as the scan configuration of
 | `dns.record.origin` | 409 | The writer may not replace an RRset of another origin |
 | `dns.zonefile.invalid` | 422 | A zone file does not parse (`line`, `reason`) |
 | `dns.view.not_found`, `dns.view.invalid` | 404, 400 | Views |
+| `dns.view.in_use` | 409 | A view named by a forwarding rule, or a zone or zone scope named by a view (`id`, `by`; WP6.4) |
 | `dns.forwarder.not_found`, `dns.forwarder.invalid` | 404, 400 | Forwarding rules |
 | `dns.acl.not_found`, `dns.acl.in_use` | 404, 409 | Access lists |
 | `dns.key.not_found`, `dns.key.exists` | 404, 409 | TSIG keys |

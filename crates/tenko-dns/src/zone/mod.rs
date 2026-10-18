@@ -18,6 +18,7 @@
 //! | [`acl`] | access lists |
 //! | [`keys`] | TSIG keys, the secret in the vault |
 //! | [`jobs`] | the inline job of every change and the job runner stand-in |
+//! | [`views`] | views, their positions and the scope rule (WP6.4) |
 //!
 //! # Zones
 //!
@@ -42,6 +43,8 @@ pub mod journal;
 pub mod keys;
 pub mod records;
 pub mod serial;
+// WP6.4: views and the scope rule.
+pub mod views;
 pub mod zonefile;
 
 #[cfg(test)]
@@ -792,6 +795,8 @@ impl ZoneService {
                 zone.updated = stamp.clone();
                 let mut batch = WriteBatch::for_request(cx);
                 stage_acl_refs(&mut batch, view, &zone)?;
+                // WP6.4: a scope a view names is not removed.
+                views::stage_zone_refs(&mut batch, view, &before, Some(&zone))?;
                 batch.expect_typed(&ZONES, &id, Some(row.revision));
                 batch.put_typed(&ZONES, &id, &zone)?;
                 if holds_data(zone.kind) {
@@ -932,6 +937,8 @@ impl ZoneService {
                 let mut batch = WriteBatch::for_request(cx);
                 batch.expect_typed(&ZONES, &id, Some(row.revision));
                 batch.delete_typed(&ZONES, &id);
+                // WP6.4: a zone a view names is not deleted.
+                views::stage_zone_refs(&mut batch, view, &zone, None)?;
                 batch.expect_counter(zone_names(), view.counter(&zone_names())?);
                 batch.bump(zone_names());
                 let rows =

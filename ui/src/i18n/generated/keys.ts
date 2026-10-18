@@ -1405,6 +1405,7 @@ export type MessageKey =
   | "dns.fwd.recursion.lab"
   | "dns.fwd.recursion.title"
   | "dns.fwd.recursion.views"
+  | "dns.fwd.recursion.views_link"
   | "dns.fwd.save"
   | "dns.fwd.saved"
   | "dns.fwd.sub"
@@ -1627,6 +1628,7 @@ export type MessageKey =
   | "dns.nav.label"
   | "dns.nav.lists"
   | "dns.nav.log"
+  | "dns.nav.views"
   | "dns.nav.zones"
   | "dns.node.col.address"
   | "dns.node.col.key"
@@ -1749,6 +1751,104 @@ export type MessageKey =
   | "dns.takeover.tag"
   | "dns.takeover.title"
   | "dns.title"
+  | "dns.view.action.down"
+  | "dns.view.action.up"
+  | "dns.view.check.address"
+  | "dns.view.check.description"
+  | "dns.view.check.name"
+  | "dns.view.check.name_long"
+  | "dns.view.check.name_required"
+  | "dns.view.check.no_acl"
+  | "dns.view.check.no_scope"
+  | "dns.view.check.no_zone"
+  | "dns.view.check.prefix"
+  | "dns.view.check.rule_empty"
+  | "dns.view.check.rule_too_many"
+  | "dns.view.check.scope_twice"
+  | "dns.view.check.scope_weight"
+  | "dns.view.check.scope_zone"
+  | "dns.view.check.taken"
+  | "dns.view.check.time"
+  | "dns.view.check.too_many_rules"
+  | "dns.view.check.too_many_scopes"
+  | "dns.view.check.type"
+  | "dns.view.col.name"
+  | "dns.view.col.order"
+  | "dns.view.col.recursion"
+  | "dns.view.col.rules"
+  | "dns.view.col.scopes"
+  | "dns.view.create"
+  | "dns.view.create_title"
+  | "dns.view.created"
+  | "dns.view.default.body"
+  | "dns.view.default.title"
+  | "dns.view.default_scopes"
+  | "dns.view.delete_body"
+  | "dns.view.delete_confirm"
+  | "dns.view.delete_title"
+  | "dns.view.deleted"
+  | "dns.view.drag"
+  | "dns.view.edit_title"
+  | "dns.view.empty"
+  | "dns.view.empty_body"
+  | "dns.view.every_query"
+  | "dns.view.field.name"
+  | "dns.view.field.order"
+  | "dns.view.field.order_at"
+  | "dns.view.field.order_help"
+  | "dns.view.field.order_last"
+  | "dns.view.field.recursion"
+  | "dns.view.field.recursion_help"
+  | "dns.view.field.rules"
+  | "dns.view.field.rules_help"
+  | "dns.view.field.rules_none"
+  | "dns.view.field.scope"
+  | "dns.view.field.scopes"
+  | "dns.view.field.scopes_help"
+  | "dns.view.field.weight"
+  | "dns.view.field.zone"
+  | "dns.view.in_use"
+  | "dns.view.move_down"
+  | "dns.view.move_up"
+  | "dns.view.moved"
+  | "dns.view.recursion.default"
+  | "dns.view.recursion.missing"
+  | "dns.view.rule.add"
+  | "dns.view.rule.from"
+  | "dns.view.rule.help.client_subnet"
+  | "dns.view.rule.help.interface"
+  | "dns.view.rule.help.qname"
+  | "dns.view.rule.help.qtype"
+  | "dns.view.rule.help.time_of_day"
+  | "dns.view.rule.help.transport"
+  | "dns.view.rule.kind.client_subnet"
+  | "dns.view.rule.kind.interface"
+  | "dns.view.rule.kind.qname"
+  | "dns.view.rule.kind.qtype"
+  | "dns.view.rule.kind.time_of_day"
+  | "dns.view.rule.kind.transport"
+  | "dns.view.rule.kind_label"
+  | "dns.view.rule.remove"
+  | "dns.view.rule.to"
+  | "dns.view.rule.words.client_subnet"
+  | "dns.view.rule.words.interface"
+  | "dns.view.rule.words.qname"
+  | "dns.view.rule.words.qtype"
+  | "dns.view.rule.words.time_of_day"
+  | "dns.view.rule.words.transport"
+  | "dns.view.save"
+  | "dns.view.saved"
+  | "dns.view.scope.add"
+  | "dns.view.scope.no_zones"
+  | "dns.view.scope.remove"
+  | "dns.view.scope_chip"
+  | "dns.view.share"
+  | "dns.view.sub"
+  | "dns.view.title"
+  | "dns.view.transport.doh"
+  | "dns.view.transport.dot"
+  | "dns.view.transport.tcp"
+  | "dns.view.transport.udp"
   | "dns.zone.create.action"
   | "dns.zone.create.done"
   | "dns.zone.create.primaries_required"
@@ -1898,6 +1998,7 @@ export type MessageKey =
   | "errors.dns.record.origin"
   | "errors.dns.transfer.refused"
   | "errors.dns.update.refused"
+  | "errors.dns.view.in_use"
   | "errors.dns.view.invalid"
   | "errors.dns.view.not_found"
   | "errors.dns.zone.exists"
@@ -5365,6 +5466,42 @@ export interface MessageArgs {
   "dns.settings.saved": { name: string | number };
   "dns.takeover.body": { origin: string | number };
   "dns.takeover.title": { name: string | number; type: string | number };
+  "dns.view.check.address": { entry: string | number; n: string | number };
+  "dns.view.check.name": { entry: string | number; n: string | number };
+  "dns.view.check.no_scope": { scope: string | number; zone: string | number };
+  "dns.view.check.prefix": { entry: string | number; n: string | number };
+  "dns.view.check.rule_empty": { n: string | number };
+  "dns.view.check.rule_too_many": { n: string | number };
+  "dns.view.check.scope_twice": { n: string | number };
+  "dns.view.check.scope_weight": { n: string | number };
+  "dns.view.check.scope_zone": { n: string | number };
+  "dns.view.check.time": { entry: string | number; n: string | number };
+  "dns.view.check.type": { entry: string | number; n: string | number };
+  "dns.view.created": { name: string | number };
+  "dns.view.default.body": { profile: string | number };
+  "dns.view.delete_title": { name: string | number };
+  "dns.view.deleted": { name: string | number };
+  "dns.view.drag": { name: string | number };
+  "dns.view.edit_title": { name: string | number };
+  "dns.view.field.order_at": { n: string | number };
+  "dns.view.field.order_last": { n: string | number };
+  "dns.view.field.scope": { n: string | number };
+  "dns.view.field.weight": { n: string | number };
+  "dns.view.field.zone": { n: string | number };
+  "dns.view.move_down": { name: string | number };
+  "dns.view.move_up": { name: string | number };
+  "dns.view.moved": { name: string | number; order: string | number };
+  "dns.view.rule.remove": { n: string | number };
+  "dns.view.rule.words.client_subnet": { values: string | number };
+  "dns.view.rule.words.interface": { values: string | number };
+  "dns.view.rule.words.qname": { values: string | number };
+  "dns.view.rule.words.qtype": { values: string | number };
+  "dns.view.rule.words.time_of_day": { from: string | number; to: string | number };
+  "dns.view.rule.words.transport": { values: string | number };
+  "dns.view.saved": { name: string | number };
+  "dns.view.scope.remove": { n: string | number };
+  "dns.view.scope_chip": { scope: string | number; share: string | number; weight: string | number; zone: string | number };
+  "dns.view.share": { share: string | number };
   "dns.zone.create.done": { name: string | number };
   "dns.zone.delete.body": { count: number; name: string | number; rrsets: string | number };
   "dns.zone.delete.done": { name: string | number };
@@ -5383,6 +5520,7 @@ export interface MessageArgs {
   "errors.dns.record.conflict": { name: string | number };
   "errors.dns.record.invalid": { name: string | number; type: string | number };
   "errors.dns.record.origin": { name: string | number; type: string | number };
+  "errors.dns.view.in_use": { by: string | number };
   "errors.dns.zone.invalid": { field: string | number };
   "errors.ipam.address.duplicate": { ip: string | number };
   "errors.ipam.address.full": { cidr: string | number };
@@ -7425,6 +7563,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.fwd.recursion.lab",
   "dns.fwd.recursion.title",
   "dns.fwd.recursion.views",
+  "dns.fwd.recursion.views_link",
   "dns.fwd.save",
   "dns.fwd.saved",
   "dns.fwd.sub",
@@ -7647,6 +7786,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.nav.label",
   "dns.nav.lists",
   "dns.nav.log",
+  "dns.nav.views",
   "dns.nav.zones",
   "dns.node.col.address",
   "dns.node.col.key",
@@ -7769,6 +7909,104 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.takeover.tag",
   "dns.takeover.title",
   "dns.title",
+  "dns.view.action.down",
+  "dns.view.action.up",
+  "dns.view.check.address",
+  "dns.view.check.description",
+  "dns.view.check.name",
+  "dns.view.check.name_long",
+  "dns.view.check.name_required",
+  "dns.view.check.no_acl",
+  "dns.view.check.no_scope",
+  "dns.view.check.no_zone",
+  "dns.view.check.prefix",
+  "dns.view.check.rule_empty",
+  "dns.view.check.rule_too_many",
+  "dns.view.check.scope_twice",
+  "dns.view.check.scope_weight",
+  "dns.view.check.scope_zone",
+  "dns.view.check.taken",
+  "dns.view.check.time",
+  "dns.view.check.too_many_rules",
+  "dns.view.check.too_many_scopes",
+  "dns.view.check.type",
+  "dns.view.col.name",
+  "dns.view.col.order",
+  "dns.view.col.recursion",
+  "dns.view.col.rules",
+  "dns.view.col.scopes",
+  "dns.view.create",
+  "dns.view.create_title",
+  "dns.view.created",
+  "dns.view.default.body",
+  "dns.view.default.title",
+  "dns.view.default_scopes",
+  "dns.view.delete_body",
+  "dns.view.delete_confirm",
+  "dns.view.delete_title",
+  "dns.view.deleted",
+  "dns.view.drag",
+  "dns.view.edit_title",
+  "dns.view.empty",
+  "dns.view.empty_body",
+  "dns.view.every_query",
+  "dns.view.field.name",
+  "dns.view.field.order",
+  "dns.view.field.order_at",
+  "dns.view.field.order_help",
+  "dns.view.field.order_last",
+  "dns.view.field.recursion",
+  "dns.view.field.recursion_help",
+  "dns.view.field.rules",
+  "dns.view.field.rules_help",
+  "dns.view.field.rules_none",
+  "dns.view.field.scope",
+  "dns.view.field.scopes",
+  "dns.view.field.scopes_help",
+  "dns.view.field.weight",
+  "dns.view.field.zone",
+  "dns.view.in_use",
+  "dns.view.move_down",
+  "dns.view.move_up",
+  "dns.view.moved",
+  "dns.view.recursion.default",
+  "dns.view.recursion.missing",
+  "dns.view.rule.add",
+  "dns.view.rule.from",
+  "dns.view.rule.help.client_subnet",
+  "dns.view.rule.help.interface",
+  "dns.view.rule.help.qname",
+  "dns.view.rule.help.qtype",
+  "dns.view.rule.help.time_of_day",
+  "dns.view.rule.help.transport",
+  "dns.view.rule.kind.client_subnet",
+  "dns.view.rule.kind.interface",
+  "dns.view.rule.kind.qname",
+  "dns.view.rule.kind.qtype",
+  "dns.view.rule.kind.time_of_day",
+  "dns.view.rule.kind.transport",
+  "dns.view.rule.kind_label",
+  "dns.view.rule.remove",
+  "dns.view.rule.to",
+  "dns.view.rule.words.client_subnet",
+  "dns.view.rule.words.interface",
+  "dns.view.rule.words.qname",
+  "dns.view.rule.words.qtype",
+  "dns.view.rule.words.time_of_day",
+  "dns.view.rule.words.transport",
+  "dns.view.save",
+  "dns.view.saved",
+  "dns.view.scope.add",
+  "dns.view.scope.no_zones",
+  "dns.view.scope.remove",
+  "dns.view.scope_chip",
+  "dns.view.share",
+  "dns.view.sub",
+  "dns.view.title",
+  "dns.view.transport.doh",
+  "dns.view.transport.dot",
+  "dns.view.transport.tcp",
+  "dns.view.transport.udp",
   "dns.zone.create.action",
   "dns.zone.create.done",
   "dns.zone.create.primaries_required",
@@ -7918,6 +8156,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.dns.record.origin",
   "errors.dns.transfer.refused",
   "errors.dns.update.refused",
+  "errors.dns.view.in_use",
   "errors.dns.view.invalid",
   "errors.dns.view.not_found",
   "errors.dns.zone.exists",

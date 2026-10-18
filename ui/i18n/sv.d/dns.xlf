@@ -11,7 +11,7 @@
         <segment><source>Coming in a later slice</source><target>Kommer i en senare etapp</target></segment>
       </unit>
       <unit id="dns.coming.body">
-        <segment><source>Views are managed here once they are built. Zones, records, forwarders, block lists, access lists and keys work already.</source><target>Vyer hanteras här när de är byggda. Zoner, poster, vidarebefordrare, blocklistor, åtkomstlistor och nycklar fungerar redan.</target></segment>
+        <segment><source>This DNS page does not exist. Zones, views, forwarders, block lists, access lists and keys are in the sections above.</source><target>Den här DNS-sidan finns inte. Zoner, vyer, vidarebefordrare, blocklistor, åtkomstlistor och nycklar finns under avsnitten ovan.</target></segment>
       </unit>
       <unit id="dns.coming.zones">
         <segment><source>Go to the zones</source><target>Gå till zonerna</target></segment>
@@ -1106,7 +1106,7 @@
         <segment><source>The access list does not exist (any more).</source><target>Åtkomstlistan finns inte (längre).</target></segment>
       </unit>
       <unit id="errors.dns.acl.in_use">
-        <segment><source>The access list is in use by a zone.</source><target>Åtkomstlistan används av en zon.</target></segment>
+        <segment><source>The access list is in use by a zone or a view.</source><target>Åtkomstlistan används av en zon eller en vy.</target></segment>
       </unit>
       <unit id="errors.dns.key.not_found">
         <segment><source>The key does not exist (any more).</source><target>Nyckeln finns inte (längre).</target></segment>
@@ -1344,7 +1344,7 @@
         <segment><source>The implicit default view follows the profile {profile}: every client may recurse (an open resolver).</source><target>Den implicita standardvyn följer profilen {profile}: alla klienter får rekursera (en öppen resolver).</target></segment>
       </unit>
       <unit id="dns.fwd.recursion.views">
-        <segment><source>To widen or narrow this, a view with a recursion access list is needed; views are managed in a later version.</source><target>För att vidga eller begränsa detta behövs en vy med en åtkomstlista för rekursion; vyer hanteras i en senare version.</target></segment>
+        <segment><source>To widen or narrow this, give a view a recursion access list, or create a view without rules, last in order, with a list.</source><target>För att vidga eller begränsa detta, ge en vy en åtkomstlista för rekursion, eller skapa en vy utan regler, sist i ordningen, med en lista.</target></segment>
       </unit>
       <unit id="dns.lists.title">
         <notes><note category="description">Title of the block lists page and its entry in the browser tab.</note></notes>
@@ -1703,6 +1703,313 @@
       </unit>
       <unit id="dns.node.row.log_write_errors">
         <segment><source>Failed writes since the start</source><target>Misslyckade skrivningar sedan start</target></segment>
+      </unit>
+      <unit id="dns.nav.views">
+        <segment><source>Views</source><target>Vyer</target></segment>
+      </unit>
+      <unit id="dns.view.title">
+        <notes><note category="description">Title of the views page and its entry in the browser tab.</note></notes>
+        <segment><source>Views</source><target>Vyer</target></segment>
+      </unit>
+      <unit id="dns.view.sub">
+        <segment><source>Queries are tried against the views in order; the first view whose rules all hold decides which zone scopes the query sees and who may recurse.</source><target>Frågor prövas mot vyerna i ordning; den första vyn vars regler alla gäller avgör vilka zon-scopes frågan ser och vem som får rekursera.</target></segment>
+      </unit>
+      <unit id="dns.view.create">
+        <segment><source>Create view</source><target>Skapa vy</target></segment>
+      </unit>
+      <unit id="dns.view.create_title">
+        <segment><source>Create a view</source><target>Skapa en vy</target></segment>
+      </unit>
+      <unit id="dns.view.edit_title">
+        <segment><source>Edit view {name}</source><target>Redigera vyn {name}</target></segment>
+      </unit>
+      <unit id="dns.view.save">
+        <segment><source>Save view</source><target>Spara vyn</target></segment>
+      </unit>
+      <unit id="dns.view.saved">
+        <segment><source>View {name} saved</source><target>Vyn {name} har sparats</target></segment>
+      </unit>
+      <unit id="dns.view.created">
+        <segment><source>View {name} created</source><target>Vyn {name} har skapats</target></segment>
+      </unit>
+      <unit id="dns.view.moved">
+        <segment><source>View {name} moved to position {order}</source><target>Vyn {name} har flyttats till plats {order}</target></segment>
+      </unit>
+      <unit id="dns.view.deleted">
+        <segment><source>View {name} deleted</source><target>Vyn {name} har tagits bort</target></segment>
+      </unit>
+      <unit id="dns.view.delete_title">
+        <segment><source>Delete view {name}?</source><target>Ta bort vyn {name}?</target></segment>
+      </unit>
+      <unit id="dns.view.delete_confirm">
+        <segment><source>Delete view</source><target>Ta bort vyn</target></segment>
+      </unit>
+      <unit id="dns.view.delete_body">
+        <segment><source>The views after it move up one place. Its clients fall to the next view that matches them, or to the implicit default view.</source><target>Vyerna efter den flyttas upp en plats. Dess klienter hamnar i nästa vy som matchar dem, eller i den implicita standardvyn.</target></segment>
+      </unit>
+      <unit id="dns.view.in_use">
+        <segment><source>The view cannot be deleted while these still name it:</source><target>Vyn kan inte tas bort så länge dessa fortfarande anger den:</target></segment>
+      </unit>
+      <unit id="dns.view.col.order">
+        <notes><note category="description">Column of the views grid: the position in which the views are tried.</note></notes>
+        <segment><source>Order</source><target>Ordning</target></segment>
+      </unit>
+      <unit id="dns.view.col.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dns.view.col.rules">
+        <segment><source>Rules</source><target>Regler</target></segment>
+      </unit>
+      <unit id="dns.view.col.scopes">
+        <segment><source>Zone scopes</source><target>Zon-scopes</target></segment>
+      </unit>
+      <unit id="dns.view.col.recursion">
+        <segment><source>Recursion</source><target>Rekursion</target></segment>
+      </unit>
+      <unit id="dns.view.drag">
+        <segment><source>Drag {name} onto another view to take its place</source><target>Dra {name} till en annan vy för att ta dess plats</target></segment>
+      </unit>
+      <unit id="dns.view.move_up">
+        <segment><source>Move {name} up</source><target>Flytta upp {name}</target></segment>
+      </unit>
+      <unit id="dns.view.move_down">
+        <segment><source>Move {name} down</source><target>Flytta ned {name}</target></segment>
+      </unit>
+      <unit id="dns.view.action.up">
+        <segment><source>Move up</source><target>Flytta upp</target></segment>
+      </unit>
+      <unit id="dns.view.action.down">
+        <segment><source>Move down</source><target>Flytta ned</target></segment>
+      </unit>
+      <unit id="dns.view.every_query">
+        <notes><note category="description">Shown for a view without rules: it matches every query.</note></notes>
+        <segment><source>Every query</source><target>Varje fråga</target></segment>
+      </unit>
+      <unit id="dns.view.default_scopes">
+        <segment><source>The default scope of every zone</source><target>Standard-scopet för varje zon</target></segment>
+      </unit>
+      <unit id="dns.view.scope_chip">
+        <segment><source>{zone}: {scope}, weight {weight} ({share} %)</source><target>{zone}: {scope}, vikt {weight} ({share} %)</target></segment>
+      </unit>
+      <unit id="dns.view.share">
+        <notes><note category="description">The share of clients a weight gives among the scopes of one zone.</note></notes>
+        <segment><source>{share} %</source><target>{share} %</target></segment>
+      </unit>
+      <unit id="dns.view.recursion.default">
+        <segment><source>Profile default</source><target>Profilens standard</target></segment>
+      </unit>
+      <unit id="dns.view.recursion.missing">
+        <segment><source>List missing: nobody may recurse</source><target>Listan saknas: ingen får rekursera</target></segment>
+      </unit>
+      <unit id="dns.view.empty">
+        <segment><source>No views</source><target>Inga vyer</target></segment>
+      </unit>
+      <unit id="dns.view.empty_body">
+        <segment><source>Every query is in the implicit default view. Create a view to answer some clients from another zone scope or to let them recurse.</source><target>Varje fråga hamnar i den implicita standardvyn. Skapa en vy för att svara vissa klienter ur ett annat zon-scope eller låta dem rekursera.</target></segment>
+      </unit>
+      <unit id="dns.view.default.title">
+        <segment><source>The implicit default view</source><target>Den implicita standardvyn</target></segment>
+      </unit>
+      <unit id="dns.view.default.body">
+        <segment><source>A query no view matches sees the default scope of every zone, and recursion follows the profile {profile}.</source><target>En fråga som ingen vy matchar ser standard-scopet för varje zon, och rekursion följer profilen {profile}.</target></segment>
+      </unit>
+      <unit id="dns.view.rule.words.client_subnet">
+        <segment><source>Client in {values}</source><target>Klient i {values}</target></segment>
+      </unit>
+      <unit id="dns.view.rule.words.transport">
+        <segment><source>Over {values}</source><target>Via {values}</target></segment>
+      </unit>
+      <unit id="dns.view.rule.words.interface">
+        <segment><source>Arrives on {values}</source><target>Når {values}</target></segment>
+      </unit>
+      <unit id="dns.view.rule.words.qtype">
+        <segment><source>Type {values}</source><target>Typ {values}</target></segment>
+      </unit>
+      <unit id="dns.view.rule.words.qname">
+        <segment><source>Name in {values}</source><target>Namn i {values}</target></segment>
+      </unit>
+      <unit id="dns.view.rule.words.time_of_day">
+        <segment><source>From {from} to {to} UTC</source><target>Från {from} till {to} UTC</target></segment>
+      </unit>
+      <unit id="dns.view.transport.udp">
+        <segment><source>UDP</source><target>UDP</target></segment>
+      </unit>
+      <unit id="dns.view.transport.tcp">
+        <segment><source>TCP</source><target>TCP</target></segment>
+      </unit>
+      <unit id="dns.view.transport.dot">
+        <segment><source>DNS over TLS</source><target>DNS över TLS</target></segment>
+      </unit>
+      <unit id="dns.view.transport.doh">
+        <segment><source>DNS over HTTPS</source><target>DNS över HTTPS</target></segment>
+      </unit>
+      <unit id="dns.view.rule.kind.client_subnet">
+        <segment><source>Client subnet</source><target>Klientnät</target></segment>
+      </unit>
+      <unit id="dns.view.rule.kind.transport">
+        <segment><source>Transport</source><target>Transport</target></segment>
+      </unit>
+      <unit id="dns.view.rule.kind.interface">
+        <segment><source>Server address</source><target>Serveradress</target></segment>
+      </unit>
+      <unit id="dns.view.rule.kind.qtype">
+        <segment><source>Query type</source><target>Frågetyp</target></segment>
+      </unit>
+      <unit id="dns.view.rule.kind.qname">
+        <segment><source>Query name</source><target>Frågenamn</target></segment>
+      </unit>
+      <unit id="dns.view.rule.kind.time_of_day">
+        <segment><source>Time of day</source><target>Tid på dygnet</target></segment>
+      </unit>
+      <unit id="dns.view.rule.kind_label">
+        <segment><source>Kind of the next rule</source><target>Typ av nästa regel</target></segment>
+      </unit>
+      <unit id="dns.view.rule.add">
+        <segment><source>Add rule</source><target>Lägg till regel</target></segment>
+      </unit>
+      <unit id="dns.view.rule.remove">
+        <segment><source>Remove rule {n}</source><target>Ta bort regel {n}</target></segment>
+      </unit>
+      <unit id="dns.view.rule.from">
+        <segment><source>From</source><target>Från</target></segment>
+      </unit>
+      <unit id="dns.view.rule.to">
+        <segment><source>To</source><target>Till</target></segment>
+      </unit>
+      <unit id="dns.view.rule.help.client_subnet">
+        <segment><source>Prefixes such as 192.0.2.0/24 or 2001:db8::/32; the client address is in one of them.</source><target>Prefix som 192.0.2.0/24 eller 2001:db8::/32; klientens adress ligger i något av dem.</target></segment>
+      </unit>
+      <unit id="dns.view.rule.help.transport">
+        <segment><source>The query arrives on one of the transports.</source><target>Frågan kommer via någon av transporterna.</target></segment>
+      </unit>
+      <unit id="dns.view.rule.help.interface">
+        <segment><source>Addresses of this server such as 192.0.2.53; the query arrives on one of them.</source><target>Adresser hos den här servern som 192.0.2.53; frågan når någon av dem.</target></segment>
+      </unit>
+      <unit id="dns.view.rule.help.qtype">
+        <segment><source>Types such as A, AAAA or MX.</source><target>Typer som A, AAAA eller MX.</target></segment>
+      </unit>
+      <unit id="dns.view.rule.help.qname">
+        <segment><source>Names such as example.test; the query name is the name or below it.</source><target>Namn som example.test; frågenamnet är namnet eller ligger under det.</target></segment>
+      </unit>
+      <unit id="dns.view.rule.help.time_of_day">
+        <segment><source>In UTC, both minutes included; a window that ends before it starts runs over midnight.</source><target>I UTC, båda minuterna inräknade; ett fönster som slutar innan det börjar går över midnatt.</target></segment>
+      </unit>
+      <unit id="dns.view.check.name_required">
+        <segment><source>Give the view a name.</source><target>Ge vyn ett namn.</target></segment>
+      </unit>
+      <unit id="dns.view.check.name_long">
+        <segment><source>A name has at most 64 characters.</source><target>Ett namn har högst 64 tecken.</target></segment>
+      </unit>
+      <unit id="dns.view.check.description">
+        <segment><source>A description has at most 1000 characters.</source><target>En beskrivning har högst 1000 tecken.</target></segment>
+      </unit>
+      <unit id="dns.view.check.too_many_rules">
+        <segment><source>A view has at most 32 rules.</source><target>En vy har högst 32 regler.</target></segment>
+      </unit>
+      <unit id="dns.view.check.rule_empty">
+        <segment><source>Rule {n} lists no value.</source><target>Regel {n} anger inget värde.</target></segment>
+      </unit>
+      <unit id="dns.view.check.rule_too_many">
+        <segment><source>Rule {n} lists more than 1000 values.</source><target>Regel {n} anger fler än 1000 värden.</target></segment>
+      </unit>
+      <unit id="dns.view.check.time">
+        <segment><source>Rule {n}: {entry} is not a time of day such as 08:00.</source><target>Regel {n}: {entry} är ingen tid på dygnet som 08:00.</target></segment>
+      </unit>
+      <unit id="dns.view.check.prefix">
+        <segment><source>Rule {n}: {entry} is not a prefix.</source><target>Regel {n}: {entry} är inget prefix.</target></segment>
+      </unit>
+      <unit id="dns.view.check.address">
+        <segment><source>Rule {n}: {entry} is not an address.</source><target>Regel {n}: {entry} är ingen adress.</target></segment>
+      </unit>
+      <unit id="dns.view.check.type">
+        <segment><source>Rule {n}: {entry} is not a record type.</source><target>Regel {n}: {entry} är ingen posttyp.</target></segment>
+      </unit>
+      <unit id="dns.view.check.name">
+        <segment><source>Rule {n}: {entry} is not a DNS name.</source><target>Regel {n}: {entry} är inget DNS-namn.</target></segment>
+      </unit>
+      <unit id="dns.view.check.too_many_scopes">
+        <segment><source>A view maps at most 256 zone scopes.</source><target>En vy anger högst 256 zon-scopes.</target></segment>
+      </unit>
+      <unit id="dns.view.check.scope_zone">
+        <segment><source>Zone scope {n}: choose a zone and a scope.</source><target>Zon-scope {n}: välj en zon och ett scope.</target></segment>
+      </unit>
+      <unit id="dns.view.check.scope_weight">
+        <segment><source>Zone scope {n}: the weight is a whole number from 1 to 1000.</source><target>Zon-scope {n}: vikten är ett heltal från 1 till 1000.</target></segment>
+      </unit>
+      <unit id="dns.view.check.scope_twice">
+        <segment><source>Zone scope {n} is in the list twice.</source><target>Zon-scope {n} finns två gånger i listan.</target></segment>
+      </unit>
+      <unit id="dns.view.check.taken">
+        <segment><source>A view of this name exists already.</source><target>Det finns redan en vy med det namnet.</target></segment>
+      </unit>
+      <unit id="dns.view.check.no_scope">
+        <segment><source>The zone {zone} has no scope {scope}.</source><target>Zonen {zone} har inget scope {scope}.</target></segment>
+      </unit>
+      <unit id="dns.view.check.no_zone">
+        <segment><source>One of the zones does not exist any more.</source><target>En av zonerna finns inte längre.</target></segment>
+      </unit>
+      <unit id="dns.view.check.no_acl">
+        <segment><source>The access list does not exist any more.</source><target>Åtkomstlistan finns inte längre.</target></segment>
+      </unit>
+      <unit id="dns.view.field.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dns.view.field.order">
+        <segment><source>Position</source><target>Plats</target></segment>
+      </unit>
+      <unit id="dns.view.field.order_help">
+        <segment><source>The views from this position move one down.</source><target>Vyerna från den här platsen flyttas ned ett steg.</target></segment>
+      </unit>
+      <unit id="dns.view.field.order_last">
+        <segment><source>{n}, last</source><target>{n}, sist</target></segment>
+      </unit>
+      <unit id="dns.view.field.order_at">
+        <segment><source>{n}</source><target>{n}</target></segment>
+      </unit>
+      <unit id="dns.view.field.rules">
+        <segment><source>Rules</source><target>Regler</target></segment>
+      </unit>
+      <unit id="dns.view.field.rules_none">
+        <segment><source>No rules: the view matches every query that reaches it.</source><target>Inga regler: vyn matchar varje fråga som når den.</target></segment>
+      </unit>
+      <unit id="dns.view.field.rules_help">
+        <segment><source>Every rule must hold; within a rule, any value matches.</source><target>Alla regler måste gälla; inom en regel räcker det att ett värde matchar.</target></segment>
+      </unit>
+      <unit id="dns.view.field.scopes">
+        <segment><source>Zone scopes</source><target>Zon-scopes</target></segment>
+      </unit>
+      <unit id="dns.view.field.scopes_help">
+        <segment><source>The scopes this view sees. A zone not listed is seen in its default scope; among the scopes of one zone each client gets one, in proportion to the weights.</source><target>De scopes som vyn ser. En zon som inte finns i listan ses i sitt standard-scope; bland en zons scopes får varje klient ett, i proportion till vikterna.</target></segment>
+      </unit>
+      <unit id="dns.view.field.zone">
+        <segment><source>Zone of zone scope {n}</source><target>Zon för zon-scope {n}</target></segment>
+      </unit>
+      <unit id="dns.view.field.scope">
+        <segment><source>Scope of zone scope {n}</source><target>Scope för zon-scope {n}</target></segment>
+      </unit>
+      <unit id="dns.view.field.weight">
+        <segment><source>Weight of zone scope {n}</source><target>Vikt för zon-scope {n}</target></segment>
+      </unit>
+      <unit id="dns.view.field.recursion">
+        <segment><source>Who may recurse</source><target>Vem som får rekursera</target></segment>
+      </unit>
+      <unit id="dns.view.field.recursion_help">
+        <segment><source>The access list of the clients of this view that may recurse; the profile default when none is chosen.</source><target>Åtkomstlistan för de klienter i vyn som får rekursera; profilens standard när ingen är vald.</target></segment>
+      </unit>
+      <unit id="dns.view.scope.add">
+        <segment><source>Add zone scope</source><target>Lägg till zon-scope</target></segment>
+      </unit>
+      <unit id="dns.view.scope.remove">
+        <segment><source>Remove zone scope {n}</source><target>Ta bort zon-scope {n}</target></segment>
+      </unit>
+      <unit id="dns.view.scope.no_zones">
+        <segment><source>There are no zones yet.</source><target>Det finns inga zoner än.</target></segment>
+      </unit>
+      <unit id="dns.fwd.recursion.views_link">
+        <segment><source>Go to the views</source><target>Gå till vyerna</target></segment>
+      </unit>
+      <unit id="errors.dns.view.in_use">
+        <segment><source>Still named by {by}.</source><target>Anges fortfarande av {by}.</target></segment>
       </unit>
     </group>
   </file>

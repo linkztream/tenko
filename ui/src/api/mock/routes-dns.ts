@@ -11,7 +11,9 @@
 // switch; the log itself is dns-log-model.ts. The resolver side (WP5.5): forwarding rules, block
 // lists with "fetch now" and the file upload of `PUT /dns/lists/{id}/file` (granted by the lead for
 // WP5.2, not in the document yet, so a plain msw handler), both as jobs, and the cache figures
-// and problems of the node status; the service is dns-resolver-model.ts.
+// and problems of the node status; the service is dns-resolver-model.ts. The views (WP6.4): the
+// five view routes on dns-views-model.ts, and the view side of the in-use rules on the zone
+// change, the zone deletion and the access list deletion.
 import { http, type HttpHandler } from "msw";
 import { encodeImportReport } from "../../dns/api";
 import type { ObjectRef } from "../types";
@@ -58,6 +60,8 @@ import {
   uploadList,
   type ResolverState,
 } from "./dns-resolver-model";
+// WP6.4
+import { checkZoneScopes, createView, deleteView, findView, listViews, seedViews, updateView, viewsUsingAcl, type ViewsState } from "./dns-views-model";
 import { LIST_FILE_PATH } from "../../dns/api";
 import { createJob } from "./job-store";
 import { created, noContent, notImplemented, ok, Problem, Reply } from "./reply";
@@ -77,12 +81,20 @@ const context: DnsContext = {
 let state: DnsState = seedDns(context);
 let logState: DnsLogState = seedDnsLog();
 let resolver: ResolverState = seedResolver(context);
+// WP6.4: the views, seeded after the zones (they add two scopes to example.test).
+let views: ViewsState = seedViews(context, state);
 
 onMockReset(() => {
   state = seedDns(context);
   logState = seedDnsLog();
   resolver = seedResolver(context);
+  views = seedViews(context, state);
 });
+
+/** The views of the mock, for tests that arrange or inspect them. */
+export function dnsViewsState(): ViewsState {
+  return views;
+}
 
 /** The resolver side of the mock (forwarders, lists, node figures), for tests that arrange or inspect it. */
 export function dnsResolverState(): ResolverState {
@@ -160,6 +172,11 @@ const zones = [
   route("patch", "/api/v1/dns/zones/{id}", async (ctx) => {
     const body = await ctx.body();
     return guard("dns.write", () => {
+      // WP6.4: a scope a view names stays.
+      const scopes = (body as Record<string, unknown>).scopes;
+      if (Array.isArray(scopes)) {
+        checkZoneScopes(views, findZone(state, ctx.params.id), scopes.map((x) => String((x as { name?: unknown }).name ?? "")));
+      }
       const zone = updateZone(state, context, ctx.params.id, body as Record<string, unknown>, ctx.ifMatch());
       write("dns.zone.update", [zoneRef(zone.id)], "dns.zone.serial", ["dns.zones", "dns.rrsets"]);
       return ok(zone, etag(zone.revision)) as never;
@@ -167,6 +184,8 @@ const zones = [
   }),
   route("delete", "/api/v1/dns/zones/{id}", (ctx) =>
     guard("dns.write", () => {
+      // WP6.4: a zone a view names stays.
+      checkZoneScopes(views, findZone(state, ctx.params.id));
       const zone = deleteZone(state, context, ctx.params.id);
       commit("dns", { deleted: [zoneRef(zone.id)], tables: ["dns.zones", "dns.rrsets"], kind: "dns.zone.changed" });
       appendAudit({ action: "dns.zone.delete", objects: [zoneRef(zone.id)], context: { name: zone.name } });
@@ -265,6 +284,9 @@ const acls = [
   }),
   route("delete", "/api/v1/dns/acls/{id}", (ctx) =>
     guard("dns.write", () => {
+      // WP6.4: a list a view names for recursion is in use.
+      const byViews = viewsUsingAcl(views, findAcl(state, ctx.params.id).id);
+      if (byViews.length > 0) throw new DnsFailure(409, "dns.acl.in_use", { id: ctx.params.id, by: byViews.join(",") });
       const acl = deleteAcl(state, context, ctx.params.id);
       commit("dns", { deleted: [aclRef(acl.id)], tables: ["dns.acls"], kind: "dns.acl.changed" });
       appendAudit({ action: "dns.acl.delete", objects: [aclRef(acl.id)] });
@@ -508,7 +530,46 @@ const lists = [
   }),
 ];
 
-export const dnsRoutes: HttpHandler[] = [...zones, ...records, ...acls, ...keys, ...forwarders, ...lists, ...node];
+// ---------------------------------------------------------------------------------
+// Views (WP6.4)
+
+const viewRef = (id: string): ObjectRef => ({ kind: "dns_view", id });
+
+const viewRoutes = [
+  route("get", "/api/v1/dns/views", (ctx) => guard("dns.read", () => ok(paginate(listViews(views), ctx.url, db.revision)))),
+  route("post", "/api/v1/dns/views", async (ctx) => {
+    const body = await ctx.body();
+    return guard("dns.write", () => {
+      const view = createView(views, context, state, body as Record<string, unknown>);
+      write("dns.view.create", [viewRef(view.id)], "dns.view.changed", ["dns.views"], { name: view.name });
+      return created(view, etag(view.revision));
+    });
+  }),
+  route("get", "/api/v1/dns/views/{id}", (ctx) =>
+    guard("dns.read", () => {
+      const view = findView(views, ctx.params.id);
+      return ok(view, etag(view.revision));
+    }),
+  ),
+  route("patch", "/api/v1/dns/views/{id}", async (ctx) => {
+    const body = await ctx.body();
+    return guard("dns.write", () => {
+      const view = updateView(views, context, state, ctx.params.id, body as Record<string, unknown>, ctx.ifMatch());
+      write("dns.view.update", [viewRef(view.id)], "dns.view.changed", ["dns.views"], { name: view.name });
+      return ok(view, etag(view.revision));
+    });
+  }),
+  route("delete", "/api/v1/dns/views/{id}", (ctx) =>
+    guard("dns.write", () => {
+      const view = deleteView(views, context, resolver, ctx.params.id, ctx.ifMatch());
+      commit("dns", { deleted: [viewRef(view.id)], tables: ["dns.views"], kind: "dns.view.changed" });
+      appendAudit({ action: "dns.view.delete", objects: [viewRef(view.id)], context: { name: view.name } });
+      return noContent();
+    }),
+  ),
+];
+
+export const dnsRoutes: HttpHandler[] = [...zones, ...records, ...acls, ...keys, ...forwarders, ...lists, ...node, ...viewRoutes];
 
 /** Every DNS operation answering 501, as the server does until WP4.2 lands (for `server.use`). */
 export const dnsStubs: HttpHandler[] = apiOperations
