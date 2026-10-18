@@ -112,9 +112,16 @@ pub fn serve(
             return exit::FAILURE;
         }
     };
-    let status = runtime.block_on(async move { run(resolved, shutdown(), hooks).await });
-    runtime.shutdown_timeout(Duration::from_secs(5));
-    status
+    // The start-up future runs on a thread with a large stack, as the controller's does.
+    crate::serve::on_start_thread("tenko-node-serve", move || {
+        let status = runtime.block_on(async move { run(resolved, shutdown(), hooks).await });
+        runtime.shutdown_timeout(Duration::from_secs(5));
+        status
+    })
+    .unwrap_or_else(|error| {
+        tracing::error!(%error, "the start thread of the node process cannot be spawned");
+        exit::FAILURE
+    })
 }
 
 async fn run(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> u8 {

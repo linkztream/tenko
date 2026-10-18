@@ -43,6 +43,17 @@
 //! services and the job runners stop, the background tasks end, and the
 //! store makes its state durable and closes its files.
 //!
+//! The start-up future runs on its own thread, `tenko-serve`, with an 8 MiB stack
+//! (`START_STACK`), not on the thread that calls [`run_on`]: `block_on` polls the future
+//! on the calling thread, which is the process main thread or the thread the Windows service
+//! manager gives the service, and on Windows that thread has the 1 MiB the executable
+//! states. The start-up future is deep (every start step, the router with every route
+//! module), and a debug build overflowed 1 MiB once one route module registered its
+//! operations in one chain. The thread keeps the start independent of the stack of the
+//! caller, for the command line and the Windows service alike; the exit statuses, the
+//! signals (process-wide) and the logging (a global subscriber) do not change. The node
+//! process without the controller role (`crate::node::agent`) runs the same way.
+//!
 //! The data directory holds `kek/` (key generations), `store/` (`log.redb`, `sm.redb`,
 //! `snapshots/`), `tls/ca-root.pem` (the public root of the internal CA) and `logs/`
 //! (the service log). While first-run setup is open it also holds `setup-token`, the
@@ -469,15 +480,53 @@ pub fn run_on(
     if let Some(telemetry) = &telemetry {
         telemetry.log_start();
     }
-    let result = runtime.block_on(async move {
-        let result = serve(resolved, shutdown(), hooks).await;
-        if let Some(telemetry) = telemetry {
-            telemetry.shutdown().await;
-        }
+    on_start_thread("tenko-serve", move || {
+        let result = runtime.block_on(async move {
+            let result = serve(resolved, shutdown(), hooks).await;
+            if let Some(telemetry) = telemetry {
+                telemetry.shutdown().await;
+            }
+            result
+        });
+        runtime.shutdown_timeout(Duration::from_secs(5));
         result
-    });
-    runtime.shutdown_timeout(Duration::from_secs(5));
-    result
+    })
+    .unwrap_or_else(|error| {
+        Err(ServeError::Runtime(format!(
+            "the start thread cannot be spawned: {error}"
+        )))
+    })
+}
+
+/// The stack of the thread that polls the start-up future, see [`on_start_thread`].
+pub(crate) const START_STACK: usize = 8 * 1024 * 1024;
+
+/// Runs `body` on a thread named `name` with a [`START_STACK`] stack, waits for it and
+/// returns its result. A panic in `body` continues on the calling thread.
+///
+/// `block_on` polls its future on the calling thread, and the start-up future of the server
+/// (all the start steps, the router with every route module) is deep. The calling thread is
+/// the process main thread, or on Windows the thread the service manager gives the service;
+/// both have the stack the executable states, 1 MiB on Windows, and a debug build overflows
+/// it once the router grows. The tasks spawned on the runtime run on its worker threads
+/// and do not depend on this.
+///
+/// # Errors
+///
+/// The error of the operating system when the thread cannot be spawned.
+pub(crate) fn on_start_thread<T: Send>(
+    name: &str,
+    body: impl FnOnce() -> T + Send,
+) -> std::io::Result<T> {
+    std::thread::scope(|scope| {
+        let thread = std::thread::Builder::new()
+            .name(name.to_owned())
+            .stack_size(START_STACK)
+            .spawn_scoped(scope, body)?;
+        Ok(thread
+            .join()
+            .unwrap_or_else(|payload| std::panic::resume_unwind(payload)))
+    })
 }
 
 /// Resolves on Ctrl-C and `SIGTERM`, and on Windows also on Ctrl-Break and when the console
@@ -2126,6 +2175,47 @@ fn public_url(resolved: &Resolved, services: &Services, addrs: &[SocketAddr]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Uses about 4 MiB of stack: more than the 1 MiB of the main thread of a Windows
+    /// executable and the 2 MiB of a test thread, as a deep router does in a debug build.
+    #[inline(never)]
+    #[expect(
+        clippy::large_stack_arrays,
+        reason = "the test needs a deep stack of known size"
+    )]
+    fn deep(depth: usize) -> usize {
+        let mut frame = [0u8; 32 * 1024];
+        std::hint::black_box(&mut frame);
+        if depth == 0 {
+            return usize::from(frame[0]);
+        }
+        usize::from(frame[depth % frame.len()]) + deep(depth - 1)
+    }
+
+    #[test]
+    fn the_start_up_future_runs_on_a_thread_with_a_large_stack() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("a runtime");
+        let (name, sum) = on_start_thread("tenko-serve", move || {
+            runtime.block_on(async {
+                let name = std::thread::current().name().map(str::to_owned);
+                (name, deep(128))
+            })
+        })
+        .expect("the start thread spawns");
+        assert_eq!(name.as_deref(), Some("tenko-serve"));
+        assert_eq!(sum, 0);
+    }
+
+    #[test]
+    fn a_panic_on_the_start_thread_reaches_the_caller() {
+        let payload = std::panic::catch_unwind(|| {
+            on_start_thread::<()>("tenko-serve", || panic!("start failed"))
+        })
+        .expect_err("the panic continues on the caller");
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&"start failed"));
+    }
 
     #[test]
     fn start_order_names_every_step_once() {

@@ -182,6 +182,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ### Fixed
 
+- The start-up of `tenko serve`, and of a node without the controller role, runs on its own thread with an 8 MiB stack instead of the process main thread, whose 1 MiB on Windows a debug build overflowed once a route module registered its operations in one chain. Exit statuses, signals and the Windows service path are unchanged.
 - The dialog that creates a scoped personal token on the account page scrolls when it is taller than the window, so its Create button can be reached with the mouse on a small screen.
 - On a single controller, `GET /cluster/members` and `tenko cluster upgrade-check` report its version, protocol majors, Raft wire version and data formats; they were empty before the first join, and the check showed `-`.
 - The page of a connector, the connectors list and the connectors tile of the start page follow the plugin process from starting to running, and every change of its health, without a reload.
