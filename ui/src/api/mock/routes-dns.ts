@@ -66,6 +66,8 @@ import {
 // WP6.4
 import { checkZoneScopes, createView, deleteView, findView, listViews, seedViews, updateView, viewsUsingAcl, type ViewsState } from "./dns-views-model";
 import { LIST_FILE_PATH } from "../../dns/api";
+// cache-browse: the node's cache.
+import { DnsCacheFailure, flushCache, listCache, seedDnsCache, type DnsCacheState } from "./dns-cache-model";
 import { createJob } from "./job-store";
 import { created, noContent, notImplemented, ok, Problem, Reply } from "./reply";
 import { mswPath, paginate, route, wholePage } from "./route";
@@ -101,6 +103,15 @@ onMockReset(() => {
 /** The views of the mock, for tests that arrange or inspect them. */
 export function dnsViewsState(): ViewsState {
   return views;
+}
+
+// cache-browse: the node's cache, for tests that arrange or inspect it.
+let cacheState: DnsCacheState = seedDnsCache();
+onMockReset(() => {
+  cacheState = seedDnsCache();
+});
+export function dnsCacheState(): DnsCacheState {
+  return cacheState;
 }
 
 /** The resolver side of the mock (forwarders, lists, node figures), for tests that arrange or inspect it. */
@@ -457,6 +468,45 @@ const node = [
       return ok(page as never);
     }),
   ),
+  // cache-browse: the listing of the cache (audited as `dns.cache.read`) and its flush.
+  route("get", "/api/v1/nodes/{id}/dns/cache", (ctx) =>
+    guard("dns.read", () => {
+      dnsNode(ctx.params.id);
+      const query = { suffix: ctx.query("suffix"), view: ctx.query("view"), limit: ctx.query("limit"), cursor: ctx.query("cursor") };
+      if (query.suffix && !/^[a-z0-9_*.-]+\.?$/i.test(query.suffix.trim())) {
+        throw new Problem("sys.invalid_value", { status: 400, detail: `suffix: \`${query.suffix}\` is not a DNS name`, params: { field: "suffix" } });
+      }
+      let page;
+      try {
+        page = listCache(cacheState, query, db.revision);
+      } catch (err) {
+        if (err instanceof DnsCacheFailure) throw new Problem("sys.invalid_value", { status: 400, detail: err.message, params: { field: err.field } });
+        throw err;
+      }
+      const audit: Record<string, string> = {
+        from_cursor: query.cursor ?? "first",
+        to_cursor: page.next_cursor ?? "end",
+        entries: String(page.items.length),
+      };
+      for (const key of ["suffix", "view"] as const) {
+        const value = query[key];
+        if (value) audit[`filter.${key}`] = value;
+      }
+      appendAudit({ action: "dns.cache.read", objects: [nodeRef(ctx.params.id)], context: audit });
+      return ok(page as never);
+    }),
+  ),
+  route("post", "/api/v1/nodes/{id}/dns/cache/flush", (ctx) =>
+    guard("dns.write", () => {
+      dnsNode(ctx.params.id);
+      const suffix = ctx.query("suffix");
+      const removed = flushCache(cacheState, suffix);
+      const detail = suffix ? `${removed} cache entr(ies) at or below ${suffix} removed` : `${removed} cache entr(ies) removed`;
+      appendAudit({ action: "dns.cache.flush", objects: [nodeRef(ctx.params.id)], context: { detail } });
+      return new Reply(202, { command_id: randomId() }) as never;
+    }),
+  ),
+  // cache-browse: end.
   ...(["stop", "start"] as const).map((verb) =>
     route("post", `/api/v1/nodes/{id}/dns/log/${verb}`, (ctx) =>
       guard("dns.write", () => {

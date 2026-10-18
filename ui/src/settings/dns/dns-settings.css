@@ -5,3 +5,7 @@
 .dns-set-doc { font-size: var(--fs-12); }
 .dns-set-kv dd { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: baseline; }
 .dns-set-problems { margin: var(--sp-2) 0 0; padding-inline-start: var(--sp-5); }
+/* cache-browse: what the cache holds. */
+.dns-cache-form { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: end; }
+.dns-cache-actions, .dns-cache-paging { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; }
+.dns-cache-data { overflow-wrap: anywhere; }

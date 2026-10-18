@@ -7,7 +7,7 @@ Contents:
 
 1. [The resolver side and the lookup order](#1-the-resolver-side-and-the-lookup-order)
 2. [Forwarding rules, stub zones and the recursion access list](#2-forwarding-rules-stub-zones-and-the-recursion-access-list)
-3. [The cache, serve-stale, prefetch and the flush](#3-the-cache-serve-stale-prefetch-and-the-flush)
+3. [The cache, serve-stale, prefetch, the flush and the listing](#3-the-cache-serve-stale-prefetch-the-flush-and-the-listing)
 4. [Upstreams: the pool, the transports, TLS, 0x20 and the settings](#4-upstreams-the-pool-the-transports-tls-0x20-and-the-settings)
 5. [Response policy zones and block lists](#5-response-policy-zones-and-block-lists) (WP5.2)
 6. [Rate limiting](#6-rate-limiting) (WP5.2)
@@ -98,7 +98,7 @@ To widen or narrow the default, create a view whose rules match the clients in q
 
 A refused client gets REFUSED with the extended error 18 ("Prohibited"); refusals are counted in `refused` of `dns.stats`.
 
-## 3. The cache, serve-stale, prefetch and the flush
+## 3. The cache, serve-stale, prefetch, the flush and the listing
 
 ### 3.1 Entries and bounds
 
@@ -146,6 +146,30 @@ When a hit finds an entry with less than a tenth of its lifetime left that has b
 | Metrics | `tenko_dns_cache_hits_total{view}`, `tenko_dns_cache_misses_total{view}`, `tenko_dns_cache_stale_total`, `tenko_dns_cache_entries` ([observability.md](observability.md)) |
 
 M24 (`bench/phase2-dns/results/`, the `m24-cache` file) measures the hit ratio, the latency and the memory at the bound, and serve-stale under an upstream cut.
+
+### 3.7 The listing
+
+`GET /api/v1/nodes/{id}/dns/cache` (scope `dns.read` and read on the node) shows what the node's cache holds, as the cache view of Windows DNS and `rndc dumpdb -cache` do. It is the node command `dns.cache.list` (arguments: `suffix`, `view`, `limit`, `cursor`), which the role executes on the node that holds the cache; in Phase 2 that is the controller's own process.
+
+| Parameter | Meaning |
+|---|---|
+| `suffix` | The name and the names under it, as the flush takes it: `example.test` finds `www.example.test`, not `badexample.test` |
+| `view` | One view: its identifier, or `default` for the entries asked outside any view; every view when absent |
+| `limit` | Entries per page, 1 to 1,000 (default 200) |
+| `cursor` | The `next_cursor` of the previous page; absent for the first entry |
+
+The entries come in the canonical order of their names (RFC 4034 section 6.1: label by label from the root, so `example.net` comes before `example.test` and `example.test` before `www.example.test`), then by type, by view (the default view first) and by the DO and CD bits the entry was asked with. Each entry has the name and type asked, the view, the RCODE of the answer (0, or 3 for NXDOMAIN), `ttl`, the seconds it stays fresh (0 once it is stale), `stale` for an expired entry within the stale window that answers only while the upstreams fail, `hits`, the answers it gave since it was stored, `dnssec_ok` and `checking_disabled`, and `records`, the records of the answer section in the typed form of the zone API (a CNAME chain shows the CNAME and the records of its target; a negative answer has none). An entry past its stale window waits for housekeeping and is not listed. A malformed suffix, view, limit or cursor answers 400 `sys.invalid_value` with the field; a node without a cache answers an empty page.
+
+**The query path.** A page is chosen in two steps, so that a listing never holds a shard longer than a flush does: each shard is locked in turn, one at a time, for one pass over its map that keeps the keys of the `limit + 1` first entries after the cursor in a heap reserved before the first lock (the pass allocates nothing under the lock); then each chosen entry is copied under its shard's lock, one lookup each, and its records are decoded with no lock held. Every page is a new pass: an entry stored while the pages are read appears when it sorts after the cursor, one that went is left out, and none is listed twice.
+
+**Audit.** The entries are the names the clients of the node asked, personal data as the query log is (section 8.6), so every page read is recorded as a row of `cluster.node_commands` and audited as `dns.cache.read` in the same write, with the principal, the node, the cursor range (`from_cursor`, `to_cursor`), the number of entries and the filters (`filter.suffix`, `filter.view`).
+
+The DNS settings page (`/settings/dns`) has a section **What the cache holds**: it reads nothing until asked, then shows the table (name, type, TTL left, view, stale, hits, data) a page at a time with the suffix filter, and with a suffix applied a **Flush** button that runs the flush of section 3.5 for it after a confirmation. On the command line:
+
+```text
+tenko dns cache list <node> [--suffix example.test] [--view default] [--limit 200] [--cursor <cursor>]
+tenko dns cache flush <node> [--suffix example.test]
+```
 
 ## 4. Upstreams: the pool, the transports, TLS, 0x20 and the settings
 

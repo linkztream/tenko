@@ -437,6 +437,7 @@ The cache flush and the query log read are node commands (`docs/node-sync.md` se
 | Route | Kind | What it does |
 |---|---|---|
 | `POST /api/v1/nodes/{id}/dns/cache/flush?suffix=` (scope `dns.write`) | `dns.cache.flush` | Answers 202 with the command id: the cache is emptied, or the names at or below `suffix`, and the detail says how many entries went; the flush is audited (`dns.cache.flush`) |
+| `GET /api/v1/nodes/{id}/dns/cache?suffix=&view=&limit=&cursor=` (scope `dns.read`) | `dns.cache.list` | A page of what the cache holds in canonical name order, with the cursor of the next page; every read is audited (`dns.cache.read`), see [dns-resolver.md](dns-resolver.md) section 3.7 |
 | `GET /api/v1/nodes/{id}/dns/log?cursor=&limit=&qname=` (scope `dns.read`) | `dns.log.read` | A page of the query log, newest first: up to `limit` lines (1 to 1,000, default 100) whose query name starts with `qname`, and the cursor of the next page. 409 `dns.node.not_dns` when the node's query log is off |
 | none | `dns.stats` | The counters of the workers, the forwarder and its cache, and the query log in the command's detail, for the remote path of Phase 5 |
 

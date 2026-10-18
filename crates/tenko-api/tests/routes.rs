@@ -441,6 +441,8 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
         "/nodes/{id}/dns/cache/flush",
         "flush_node_dns_cache",
     ),
+    // cache-browse: the listing of a node's cache.
+    ("GET", "/nodes/{id}/dns/cache", "list_node_dns_cache"),
     ("GET", "/nodes/{id}/dns/log", "read_node_dns_log"),
     ("POST", "/nodes/{id}/dns/log/stop", "stop_node_dns_log"),
     ("POST", "/nodes/{id}/dns/log/start", "start_node_dns_log"),

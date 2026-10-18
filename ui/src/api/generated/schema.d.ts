@@ -2230,6 +2230,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes/{id}/dns/cache": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List what a node's DNS cache holds
+         * @description Scope: `dns.read`. Issues the node command `dns.cache.list`: a page of the                    entries of the node's cache in the canonical order of their names, then by                    type and view, with the cursor of the next page; each entry has its name,                    type, view, RCODE, the seconds it stays fresh, the stale flag, its hits and                    the records of a positive answer. `suffix` keeps the names at or below it,                    `view` one view (`default` for the entries asked outside any view). The                    entries reveal the names the clients asked, so the read is recorded in the                    node's commands and audited as `dns.cache.read` with the filters and the                    cursor range. A node without a cache answers an empty page.
+         */
+        get: operations["list_node_dns_cache"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nodes/{id}/dns/cache/flush": {
         parameters: {
             query?: never;
@@ -5713,6 +5733,43 @@ export interface components {
              * @description Reverse zones created.
              */
             zones_created: number;
+        };
+        /** @description One entry of a node's DNS cache: the answer to one question in one view. */
+        DnsCacheEntry: {
+            /** @description Asked with the CD bit. */
+            checking_disabled: boolean;
+            /** @description Asked with the DO bit: the entry holds the signatures. */
+            dnssec_ok: boolean;
+            /**
+             * Format: int32
+             * @description Answers from the entry since it was stored.
+             */
+            hits: number;
+            /** @description The name asked. */
+            name: string;
+            /**
+             * Format: int32
+             * @description The RCODE of the cached answer: 0 (NOERROR, with records or NODATA) or 3 (NXDOMAIN).
+             */
+            rcode: number;
+            /**
+             * @description The records of the answer section, in the order received; empty for a negative
+             *     answer.
+             */
+            records: components["schemas"]["RecordData"][];
+            /**
+             * @description Expired but within the stale window: it answers only when the upstreams fail
+             *     (RFC 8767).
+             */
+            stale: boolean;
+            /**
+             * Format: int32
+             * @description Seconds the entry stays fresh; 0 once it is stale.
+             */
+            ttl: number;
+            /** @description The type asked. */
+            type: components["schemas"]["Rtype"];
+            view?: components["schemas"]["ViewId"] | null;
         };
         /** @description A node command that was recorded. */
         DnsCommandAccepted: {
@@ -9834,6 +9891,57 @@ export interface components {
                 /** @description The label. */
                 label: string;
                 last_used_at?: components["schemas"]["Timestamp"] | null;
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_DnsCacheEntry: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description Asked with the CD bit. */
+                checking_disabled: boolean;
+                /** @description Asked with the DO bit: the entry holds the signatures. */
+                dnssec_ok: boolean;
+                /**
+                 * Format: int32
+                 * @description Answers from the entry since it was stored.
+                 */
+                hits: number;
+                /** @description The name asked. */
+                name: string;
+                /**
+                 * Format: int32
+                 * @description The RCODE of the cached answer: 0 (NOERROR, with records or NODATA) or 3 (NXDOMAIN).
+                 */
+                rcode: number;
+                /**
+                 * @description The records of the answer section, in the order received; empty for a negative
+                 *     answer.
+                 */
+                records: components["schemas"]["RecordData"][];
+                /**
+                 * @description Expired but within the stale window: it answers only when the upstreams fail
+                 *     (RFC 8767).
+                 */
+                stale: boolean;
+                /**
+                 * Format: int32
+                 * @description Seconds the entry stays fresh; 0 once it is stale.
+                 */
+                ttl: number;
+                /** @description The type asked. */
+                type: components["schemas"]["Rtype"];
+                view?: components["schemas"]["ViewId"] | null;
             }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
@@ -26741,6 +26849,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DnsNodeStatus"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not run the dns role (`dns.node.not_dns`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_node_dns_cache: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Only the names equal to this name or under it (`example.test` finds
+                 *     `www.example.test`, not `badexample.test`).
+                 */
+                suffix?: string;
+                /** @description Only one view: its identifier, or `default` for the entries asked outside any view. */
+                view?: string;
+                /** @description Entries per page, 1 to 1000; 200 by default. */
+                limit?: number;
+                /** @description The cursor of the next page. */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of cache entries in canonical name order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_DnsCacheEntry"];
                 };
             };
             /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */

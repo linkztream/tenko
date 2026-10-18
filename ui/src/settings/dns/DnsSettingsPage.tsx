@@ -18,6 +18,8 @@ import { nodeDns } from "../../dns/log/api";
 import { moduleOff, notBuilt } from "../../dns/Parts";
 import { dnsPaths } from "../../dns/paths";
 import { SettingsNav } from "../SettingsNav";
+// cache-browse: what the cache holds.
+import { CacheSection } from "./CacheSection";
 import { listenerDoc, listenerKey, serves, settingGroups, type DnsNodeStatus, type SettingRow } from "./model";
 import "./dns-settings.css";
 
@@ -213,6 +215,8 @@ export default function DnsSettingsPage() {
                   </A>
                 </p>
                 <Status status={shown()} />
+                {/* cache-browse: what the cache holds. */}
+                <CacheSection node={shown().node} />
               </>
             )}
           </Match>

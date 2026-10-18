@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="dns-cache">
+      <unit id="dns.cache.title">
+        <notes><note category="description">Heading of the section of the DNS settings page that lists what the node's cache holds.</note></notes>
+        <segment><source>What the cache holds</source><target>Vad cachen innehåller</target></segment>
+      </unit>
+      <unit id="dns.cache.lede">
+        <segment><source>The entries of the node's cache in name order: the answer each name and type got, how long it stays fresh and how often it answered. They are the names the clients asked, so every page read is recorded in the audit log.</source><target>Posterna i nodens cache i namnordning: svaret som varje namn och typ fick, hur länge det är färskt och hur ofta det har svarat. Det är namnen som klienterna frågade efter, så varje sida som läses registreras i granskningsloggen.</target></segment>
+      </unit>
+      <unit id="dns.cache.suffix">
+        <segment><source>Name or suffix</source><target>Namn eller suffix</target></segment>
+      </unit>
+      <unit id="dns.cache.suffix_placeholder">
+        <notes><note category="description">Placeholder of the suffix filter: a name under the reserved test domain.</note></notes>
+        <segment><source>example.test</source><target>example.test</target></segment>
+      </unit>
+      <unit id="dns.cache.suffix_invalid">
+        <segment><source>Enter a DNS name, such as example.test.</source><target>Ange ett DNS-namn, till exempel example.test.</target></segment>
+      </unit>
+      <unit id="dns.cache.show">
+        <notes><note category="description">Button that reads the first page of the cache; the read is audited.</note></notes>
+        <segment><source>Show the entries</source><target>Visa posterna</target></segment>
+      </unit>
+      <unit id="dns.cache.reload">
+        <segment><source>Read again</source><target>Läs igen</target></segment>
+      </unit>
+      <unit id="dns.cache.flush">
+        <notes><note category="description">Button that flushes the entries of the suffix shown; {suffix} is a DNS name.</note></notes>
+        <segment><source>Flush {suffix}</source><target>Töm {suffix}</target></segment>
+      </unit>
+      <unit id="dns.cache.flush_title">
+        <segment><source>Flush {suffix} from the cache?</source><target>Tömma {suffix} ur cachen?</target></segment>
+      </unit>
+      <unit id="dns.cache.flush_body">
+        <segment><source>The entries of {suffix} and of the names under it go in every view; the next queries for them ask the upstreams again.</source><target>Posterna för {suffix} och för namnen under det tas bort i alla vyer; nästa frågor om dem ställs till uppströmsservrarna igen.</target></segment>
+      </unit>
+      <unit id="dns.cache.flush_confirm">
+        <segment><source>Flush</source><target>Töm</target></segment>
+      </unit>
+      <unit id="dns.cache.flush_cancel">
+        <segment><source>Cancel</source><target>Avbryt</target></segment>
+      </unit>
+      <unit id="dns.cache.flushed">
+        <segment><source>The entries of {suffix} were flushed</source><target>Posterna för {suffix} tömdes</target></segment>
+      </unit>
+      <unit id="dns.cache.flush_failed">
+        <segment><source>The cache could not be flushed</source><target>Cachen kunde inte tömmas</target></segment>
+      </unit>
+      <unit id="dns.cache.col.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dns.cache.col.type">
+        <segment><source>Type</source><target>Typ</target></segment>
+      </unit>
+      <unit id="dns.cache.col.ttl">
+        <notes><note category="description">Column of the seconds an entry stays fresh.</note></notes>
+        <segment><source>TTL left</source><target>TTL kvar</target></segment>
+      </unit>
+      <unit id="dns.cache.col.view">
+        <segment><source>View</source><target>Vy</target></segment>
+      </unit>
+      <unit id="dns.cache.col.stale">
+        <segment><source>Stale</source><target>Inaktuell</target></segment>
+      </unit>
+      <unit id="dns.cache.col.hits">
+        <segment><source>Hits</source><target>Träffar</target></segment>
+      </unit>
+      <unit id="dns.cache.col.data">
+        <segment><source>Data</source><target>Data</target></segment>
+      </unit>
+      <unit id="dns.cache.view_default">
+        <notes><note category="description">The view of the entries asked outside any view.</note></notes>
+        <segment><source>Default</source><target>Standard</target></segment>
+      </unit>
+      <unit id="dns.cache.stale">
+        <notes><note category="description">Tag of an expired entry that answers only while the upstreams fail.</note></notes>
+        <segment><source>Stale</source><target>Inaktuell</target></segment>
+      </unit>
+      <unit id="dns.cache.stale_hint">
+        <segment><source>Expired: answers only while the upstreams fail (serve-stale)</source><target>Utgången: svarar bara medan uppströmsservrarna inte svarar (serve-stale)</target></segment>
+      </unit>
+      <unit id="dns.cache.ttl_s">
+        <segment><source>{value} s</source><target>{value} s</target></segment>
+      </unit>
+      <unit id="dns.cache.ttl_min">
+        <segment><source>{value} min</source><target>{value} min</target></segment>
+      </unit>
+      <unit id="dns.cache.ttl_h">
+        <segment><source>{value} h</source><target>{value} h</target></segment>
+      </unit>
+      <unit id="dns.cache.ttl_none">
+        <notes><note category="description">The time left of a stale entry: none.</note></notes>
+        <segment><source>–</source><target>–</target></segment>
+      </unit>
+      <unit id="dns.cache.empty">
+        <segment><source>The cache holds no entries.</source><target>Cachen innehåller inga poster.</target></segment>
+      </unit>
+      <unit id="dns.cache.empty_suffix">
+        <segment><source>No entries for {suffix} or the names under it.</source><target>Inga poster för {suffix} eller namnen under det.</target></segment>
+      </unit>
+      <unit id="dns.cache.previous">
+        <segment><source>Previous</source><target>Föregående</target></segment>
+      </unit>
+      <unit id="dns.cache.next">
+        <segment><source>Next</source><target>Nästa</target></segment>
+      </unit>
+      <unit id="dns.cache.page">
+        <segment><source>Page {page}</source><target>Sida {page}</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

@@ -109,6 +109,7 @@ The object kinds of authorization and audit are `zone` (records authorize as the
 | `PUT /api/v1/dns/lists/{id}/file` | `upload_dns_list` | `dns.write` | Upload the file of a block list (`text/plain`, at most `[dns.lists] max_upload` MiB) |
 | `GET /api/v1/nodes/{id}/dns` | `get_node_dns_status` | `dns.read` | Get the DNS role of a node |
 | `POST /api/v1/nodes/{id}/dns/cache/flush` | `flush_node_dns_cache` | `dns.write` | Flush a node's DNS cache |
+| `GET /api/v1/nodes/{id}/dns/cache` | `list_node_dns_cache` | `dns.read` | List what a node's DNS cache holds (a page in canonical name order, audited as `dns.cache.read`) |
 | `GET /api/v1/nodes/{id}/dns/log` | `read_node_dns_log` | `dns.read` | Read a node's DNS query log |
 
 The node routes sit beside the node's other routes, as the scan configuration of the Discovery module does, and also need the action on the node.
@@ -159,6 +160,7 @@ The node routes sit beside the node's other routes, as the scan configuration of
 | `dns.acl.create`, `dns.acl.update`, `dns.acl.delete` | Access lists |
 | `dns.list.create`, `dns.list.update`, `dns.list.delete`, `dns.list.compile`, `dns.list.fetch`, `dns.list.upload` | Block lists, their compiled versions, a fetch started by hand and an uploaded file |
 | `dns.transfer.trigger`, `dns.cache.flush` | A transfer started by hand; a node's cache flushed |
+| `dns.cache.read` | A page of a node's cache read (the names clients asked, personal data like the query log) |
 | `dns.log.read`, `dns.log.stop`, `dns.log.start` | A page of a node's query log read (personal data); the log stopped or started again (the kill switch) |
 | `dns.zone.transfer_out`, `dns.zone.transfer_in` | A zone transferred out to a client (the client, the key, the kind, the serials; refusals at most once a minute per client); a transfer in written, a catalog zone's members written, an expired copy removed (WP6.1) |
 
@@ -190,7 +192,7 @@ The system component of the DNS services' own writes is `dns`.
 
 ## 8. Node sync
 
-Declared for Phase 5 and consumed by no node in Phase 2 (plan section 2.10): `Subset::new(node, &[Role::Dns]).role_tables()` lists every `dns.*` table except `dns.sign_state`, and `purpose_allowed("tsig" | "dnssec", &[Role::Dns])` holds (`tenko_cluster::node_sync`). The configuration stream of `Config.Watch` does not carry the role tables yet. The node commands `dns.cache.flush`, `dns.log.read`, `dns.stats` and the report `dns.status` are WP4.3's, behind the node-command interface; `Dns.Update` is Phase 5.
+Declared for Phase 5 and consumed by no node in Phase 2 (plan section 2.10): `Subset::new(node, &[Role::Dns]).role_tables()` lists every `dns.*` table except `dns.sign_state`, and `purpose_allowed("tsig" | "dnssec", &[Role::Dns])` holds (`tenko_cluster::node_sync`). The configuration stream of `Config.Watch` does not carry the role tables yet. The node commands `dns.cache.flush`, `dns.log.read`, `dns.stats` and the report `dns.status` are WP4.3's, behind the node-command interface, and `dns.cache.list` (a page of the cache, `tenko_dns::status::CacheListArgs`) sits beside `dns.cache.flush`; `Dns.Update` is Phase 5.
 
 ## 9. Engine contracts
 

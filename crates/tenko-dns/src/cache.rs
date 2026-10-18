@@ -964,5 +964,11 @@ fn push_opt(out: &mut Vec<u8>, edns: &ClientEdns) {
     out[10..12].copy_from_slice(&arcount.to_be_bytes());
 }
 
+// cache-browse: the listing of what the cache holds (`cache/list.rs`).
+mod list;
+
+pub use list::{CachePage, CachedEntry, DEFAULT_LIST, ListCursor, MAX_LIST, ViewFilter};
+// cache-browse: end.
+
 #[cfg(test)]
 mod tests;

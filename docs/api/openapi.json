@@ -14088,6 +14088,129 @@
         }
       }
     },
+    "/api/v1/nodes/{id}/dns/cache": {
+      "get": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "List what a node's DNS cache holds",
+        "description": "Scope: `dns.read`. Issues the node command `dns.cache.list`: a page of the                    entries of the node's cache in the canonical order of their names, then by                    type and view, with the cursor of the next page; each entry has its name,                    type, view, RCODE, the seconds it stays fresh, the stale flag, its hits and                    the records of a positive answer. `suffix` keeps the names at or below it,                    `view` one view (`default` for the entries asked outside any view). The                    entries reveal the names the clients asked, so the read is recorded in the                    node's commands and audited as `dns.cache.read` with the filters and the                    cursor range. A node without a cache answers an empty page.",
+        "operationId": "list_node_dns_cache",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "suffix",
+            "in": "query",
+            "description": "Only the names equal to this name or under it (`example.test` finds\n`www.example.test`, not `badexample.test`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "description": "Only one view: its identifier, or `default` for the entries asked outside any view.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Entries per page, 1 to 1000; 200 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The cursor of the next page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of cache entries in canonical name order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_DnsCacheEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.read`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node (`cluster.node.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The node does not run the dns role (`dns.node.not_dns`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/nodes/{id}/dns/cache/flush": {
       "post": {
         "tags": [
@@ -31626,6 +31749,79 @@
           }
         }
       },
+      "DnsCacheEntry": {
+        "type": "object",
+        "description": "One entry of a node's DNS cache: the answer to one question in one view.",
+        "required": [
+          "name",
+          "type",
+          "rcode",
+          "ttl",
+          "stale",
+          "hits",
+          "dnssec_ok",
+          "checking_disabled",
+          "records"
+        ],
+        "properties": {
+          "checking_disabled": {
+            "type": "boolean",
+            "description": "Asked with the CD bit."
+          },
+          "dnssec_ok": {
+            "type": "boolean",
+            "description": "Asked with the DO bit: the entry holds the signatures."
+          },
+          "hits": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Answers from the entry since it was stored.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "The name asked."
+          },
+          "rcode": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The RCODE of the cached answer: 0 (NOERROR, with records or NODATA) or 3 (NXDOMAIN).",
+            "minimum": 0
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecordData"
+            },
+            "description": "The records of the answer section, in the order received; empty for a negative\nanswer."
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "Expired but within the stale window: it answers only when the upstreams fail\n(RFC 8767)."
+          },
+          "ttl": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds the entry stays fresh; 0 once it is stale.",
+            "minimum": 0
+          },
+          "type": {
+            "$ref": "#/components/schemas/Rtype",
+            "description": "The type asked."
+          },
+          "view": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ViewId",
+                "description": "The view the entry belongs to; absent for the entries asked outside any view."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "DnsCommandAccepted": {
         "type": "object",
         "description": "A node command that was recorded.",
@@ -42475,6 +42671,104 @@
                     {
                       "$ref": "#/components/schemas/Timestamp",
                       "description": "The last use."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
+      "Page_DnsCacheEntry": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One entry of a node's DNS cache: the answer to one question in one view.",
+              "required": [
+                "name",
+                "type",
+                "rcode",
+                "ttl",
+                "stale",
+                "hits",
+                "dnssec_ok",
+                "checking_disabled",
+                "records"
+              ],
+              "properties": {
+                "checking_disabled": {
+                  "type": "boolean",
+                  "description": "Asked with the CD bit."
+                },
+                "dnssec_ok": {
+                  "type": "boolean",
+                  "description": "Asked with the DO bit: the entry holds the signatures."
+                },
+                "hits": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "Answers from the entry since it was stored.",
+                  "minimum": 0
+                },
+                "name": {
+                  "type": "string",
+                  "description": "The name asked."
+                },
+                "rcode": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "The RCODE of the cached answer: 0 (NOERROR, with records or NODATA) or 3 (NXDOMAIN).",
+                  "minimum": 0
+                },
+                "records": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RecordData"
+                  },
+                  "description": "The records of the answer section, in the order received; empty for a negative\nanswer."
+                },
+                "stale": {
+                  "type": "boolean",
+                  "description": "Expired but within the stale window: it answers only when the upstreams fail\n(RFC 8767)."
+                },
+                "ttl": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "Seconds the entry stays fresh; 0 once it is stale.",
+                  "minimum": 0
+                },
+                "type": {
+                  "$ref": "#/components/schemas/Rtype",
+                  "description": "The type asked."
+                },
+                "view": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ViewId",
+                      "description": "The view the entry belongs to; absent for the entries asked outside any view."
                     },
                     {
                       "type": "null"

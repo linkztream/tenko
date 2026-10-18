@@ -1,11 +1,12 @@
 //! The report `dns.status` and the local command handlers of the `dns` role (plan sections
 //! 2.9 and 2.10, `docs/node-sync.md` section 5).
 //!
-//! A node's DNS role answers five commands and one report:
+//! A node's DNS role answers six commands and one report:
 //!
 //! | Kind | Arguments (CBOR) | What the role does |
 //! |---|---|---|
 //! | `dns.cache.flush` | [`CacheFlushArgs`] (optional; none flushes all) | Empties the cache, or the entries at or below a name suffix; `done` with the count removed |
+//! | `dns.cache.list` | [`CacheListArgs`] (optional) | Answers `done` with a page of the cache in canonical name order and the cursor of the next page (`crate::cache::Cache::list`); `rejected` when a filter or the cursor is not valid |
 //! | `dns.stats` | none | Answers `done` with the counters of the workers, the forwarder, the policy (blocked queries per list and RPZ zone), rate limiting and the query log in its detail |
 //! | `dns.log.read` | [`LogReadArgs`] | Answers `done` with a page of the local query log, newest first, filtered, and the cursor of the next page; `rejected` when the log is off or a filter cannot be applied |
 //! | `dns.log.stop`, `dns.log.start` | none | The kill switch: the log takes no entry until it is started again (kept across a restart); `rejected` when the log is off |
@@ -51,6 +52,27 @@ pub const LOG_STOP: &str = "dns.log.stop";
 pub const LOG_START: &str = "dns.log.start";
 /// The name of the role's report.
 pub const STATUS: &str = "dns.status";
+// cache-browse: the listing of the cache.
+/// Read a page of what the node's cache holds.
+pub const CACHE_LIST: &str = "dns.cache.list";
+
+/// The arguments of `dns.cache.list`; empty arguments list the first page of every entry.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CacheListArgs {
+    /// Only the names at or below this suffix.
+    #[serde(default)]
+    pub suffix: Option<String>,
+    /// Only one view: its identifier, or `default` for the entries asked outside any view.
+    #[serde(default)]
+    pub view: Option<String>,
+    /// Entries, 1 to [`crate::cache::MAX_LIST`]; [`crate::cache::DEFAULT_LIST`] when 0.
+    #[serde(default)]
+    pub limit: u32,
+    /// The cursor of the page, from the previous page; the first entry when absent.
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+// cache-browse: end.
 
 /// Lines a page of the query log holds at most.
 pub const MAX_LOG_PAGE: u32 = 1_000;
@@ -302,6 +324,9 @@ pub enum Output {
     Stats(Box<DnsStats>),
     /// A page of the query log (`dns.log.read`).
     Log(LogPage),
+    // cache-browse: a page of the cache (`dns.cache.list`).
+    /// A page of what the cache holds (`dns.cache.list`).
+    Cache(Box<crate::cache::CachePage>),
 }
 
 /// The result of one command.
@@ -481,6 +506,17 @@ impl LocalNode {
         }
     }
 
+    // cache-browse: the listing of the cache.
+    fn list_cache(&self, args: &[u8]) -> CommandResult {
+        list_cache(
+            self.forwarder
+                .as_ref()
+                .and_then(|forwarder| forwarder.cache()),
+            args,
+        )
+    }
+    // cache-browse: end.
+
     fn read_log(&self, args: &[u8]) -> CommandResult {
         let Some((_, dir)) = &self.log else {
             return CommandResult::rejected("the query log is off on this node");
@@ -511,6 +547,52 @@ impl LocalNode {
         }
     }
 }
+
+// cache-browse: the listing of the cache.
+/// Runs `dns.cache.list` on `cache` (`None`: the node keeps none) with the CBOR `args`.
+pub fn list_cache(cache: Option<&crate::cache::Cache>, args: &[u8]) -> CommandResult {
+    use crate::cache::{DEFAULT_LIST, ListCursor, ViewFilter};
+    let args: CacheListArgs = if args.is_empty() {
+        CacheListArgs::default()
+    } else {
+        match tenko_core::codec::from_cbor(args) {
+            Ok(args) => args,
+            Err(error) => return CommandResult::rejected(format!("the arguments: {error}")),
+        }
+    };
+    let suffix = match args.suffix.as_deref().map(DnsName::new) {
+        None => None,
+        Some(Ok(suffix)) => Some(suffix.to_wire()),
+        Some(Err(error)) => return CommandResult::rejected(format!("the suffix: {error}")),
+    };
+    let Some(view) = ViewFilter::parse(args.view.as_deref().unwrap_or_default()) else {
+        return CommandResult::rejected("the view is neither `default` nor a view's identifier");
+    };
+    let cursor = match args.cursor.as_deref().map(ListCursor::parse) {
+        None => None,
+        Some(Some(cursor)) => Some(cursor),
+        Some(None) => return CommandResult::rejected("the cursor is not valid"),
+    };
+    let limit = match usize::try_from(args.limit) {
+        Ok(0) | Err(_) => DEFAULT_LIST,
+        Ok(limit) => limit,
+    };
+    let Some(cache) = cache else {
+        return CommandResult::done("this node keeps no cache", Output::Cache(Box::default()));
+    };
+    let page = cache.list(
+        view,
+        suffix.as_deref(),
+        limit,
+        cursor.as_ref(),
+        std::time::Instant::now(),
+    );
+    CommandResult::done(
+        format!("{} cache entr(ies) listed", page.entries.len()),
+        Output::Cache(Box::new(page)),
+    )
+}
+// cache-browse: end.
 
 impl DnsNode for LocalNode {
     fn node(&self) -> NodeId {
@@ -613,6 +695,8 @@ impl DnsNode for LocalNode {
                 CommandResult::done(stats.detail(), Output::Stats(Box::new(stats)))
             }
             LOG_READ => self.read_log(args),
+            // cache-browse: the listing.
+            CACHE_LIST => self.list_cache(args),
             LOG_STOP => self.switch_log(true),
             LOG_START => self.switch_log(false),
             other => CommandResult::rejected(format!("`{other}` is not a command of the dns role")),

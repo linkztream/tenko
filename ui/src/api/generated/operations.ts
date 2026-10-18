@@ -175,6 +175,7 @@ export const apiOperations = [
   { id: "get_node", method: "get", path: "/api/v1/nodes/{id}", tags: ["nodes"], summary: "Get a cluster node" },
   { id: "revoke_node", method: "delete", path: "/api/v1/nodes/{id}", tags: ["nodes"], summary: "Revoke a cluster node" },
   { id: "get_node_dns_status", method: "get", path: "/api/v1/nodes/{id}/dns", tags: ["dns"], summary: "Get the DNS role of a node" },
+  { id: "list_node_dns_cache", method: "get", path: "/api/v1/nodes/{id}/dns/cache", tags: ["dns"], summary: "List what a node's DNS cache holds" },
   { id: "flush_node_dns_cache", method: "post", path: "/api/v1/nodes/{id}/dns/cache/flush", tags: ["dns"], summary: "Flush a node's DNS cache" },
   { id: "read_node_dns_log", method: "get", path: "/api/v1/nodes/{id}/dns/log", tags: ["dns"], summary: "Read a node's DNS query log" },
   { id: "start_node_dns_log", method: "post", path: "/api/v1/nodes/{id}/dns/log/start", tags: ["dns"], summary: "Start a node's DNS query log again" },

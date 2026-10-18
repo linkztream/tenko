@@ -60,6 +60,9 @@ pub mod view;
 #[path = "dns_transfer.rs"]
 mod transfer;
 pub use transfer::{TransferArgs, TransferCommand};
+// cache-browse: `tenko dns cache`, a child module so that it shares the record presentation.
+#[path = "dns_cache.rs"]
+mod cache;
 
 /// Subcommands of `tenko dns`.
 #[derive(Debug, Clone, Subcommand)]
@@ -116,6 +119,13 @@ pub enum DnsCommand {
         /// The `transfer` subcommand to run.
         #[command(subcommand)]
         action: TransferCommand,
+    },
+    // cache-browse: `tenko dns cache` (`client/dns_cache.rs`).
+    /// A node's cache: list what it holds, flush it.
+    Cache {
+        /// The `cache` subcommand to run.
+        #[command(subcommand)]
+        action: cache::CacheCommand,
     },
 }
 
@@ -539,6 +549,8 @@ impl DnsCommand {
             // WP6.4
             Self::View { action } => action.client(),
             Self::Transfer { action } => action.client(),
+            // cache-browse: `tenko dns cache`.
+            Self::Cache { action } => action.client(),
         }
     }
 
@@ -596,6 +608,8 @@ impl DnsCommand {
                 TransferCommand::Status(_) => "dns transfer status",
                 TransferCommand::Now(_) => "dns transfer now",
             },
+            // cache-browse: `tenko dns cache`.
+            Self::Cache { action } => action.name(),
         }
     }
 }
@@ -1009,6 +1023,8 @@ pub async fn run(command: &DnsCommand) -> Result<Output, Failure> {
         // WP6.4
         DnsCommand::View { action } => view::run(&target, action).await,
         DnsCommand::Transfer { action } => transfer::run(&target, action).await,
+        // cache-browse: `tenko dns cache`.
+        DnsCommand::Cache { action } => cache::run(&target, action).await,
     }
 }
 

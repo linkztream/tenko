@@ -1884,8 +1884,12 @@ pub mod audit {
     /// A zone transfer in was written (secondary zones, the members of a catalog zone).
     pub const ZONE_TRANSFER_IN: AuditAction = AuditAction::from_static("dns.zone.transfer_in");
 
+    // cache-browse: the listing of a node's cache.
+    /// A page of a node's cache was read (the names clients asked, personal data, P2-Q7).
+    pub const CACHE_READ: AuditAction = AuditAction::from_static("dns.cache.read");
+
     /// Every action of the module, for the contracts document and its test.
-    pub const ALL: [&AuditAction; 34] = [
+    pub const ALL: [&AuditAction; 35] = [
         &ZONE_CREATE,
         &ZONE_UPDATE,
         &ZONE_DELETE,
@@ -1920,6 +1924,8 @@ pub mod audit {
         &LOG_START,
         &ZONE_TRANSFER_OUT,
         &ZONE_TRANSFER_IN,
+        // cache-browse: the listing of a node's cache.
+        &CACHE_READ,
     ];
 }
 

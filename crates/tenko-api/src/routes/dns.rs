@@ -64,6 +64,7 @@
 //! | `PUT /dns/lists/{id}/file` | `dns.write` | Upload the file of a block list |
 //! | `GET /nodes/{id}/dns` | `dns.read` | Get the DNS role of a node |
 //! | `POST /nodes/{id}/dns/cache/flush` | `dns.write` | Flush a node's DNS cache |
+//! | `GET /nodes/{id}/dns/cache` | `dns.read` | List what a node's DNS cache holds |
 //! | `GET /nodes/{id}/dns/log` | `dns.read` | Read a node's DNS query log |
 //! | `POST /nodes/{id}/dns/log/stop` | `dns.write` | Stop a node's DNS query log |
 //! | `POST /nodes/{id}/dns/log/start` | `dns.write` | Start a node's DNS query log again |
@@ -118,6 +119,8 @@ use utoipa_axum::{
 pub use lists::ListUploadLimit;
 pub use nodes::DnsNodeSlot;
 pub use zones::{JournalItem, JournalParams};
+// cache-browse: the listing of a node's cache.
+pub use model::{DnsCacheEntry, DnsCacheParams};
 
 pub use model::{
     AclCreate, AclItem, AclPatch, BlockedCountItem, CacheFlushParams, DnsCommandAccepted,
@@ -304,6 +307,8 @@ fn node_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(nodes::get_node_dns_status))
         .routes(routes!(nodes::flush_node_dns_cache))
         .routes(routes!(nodes::read_node_dns_log))
+        // cache-browse: the listing of a node's cache.
+        .routes(routes!(nodes::list_node_dns_cache))
         .routes(routes!(nodes::stop_node_dns_log))
         .routes(routes!(nodes::start_node_dns_log))
 }

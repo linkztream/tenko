@@ -6,6 +6,8 @@
 // THE FIRST SCENARIOS FAKE THE NODE'S DNS STATUS (support/dns-resolver-mock.ts, which says why);
 // the last one runs against the real server.
 
+// cache-browse: the cache section fakes the cache routes too (support/dns-cache-mock.ts).
+import { FakeCache } from "./support/dns-cache-mock";
 import { FakeResolver } from "./support/dns-resolver-mock";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
@@ -30,6 +32,41 @@ test("shows the effective settings and figures of a node with the dns role", asy
 
   await page.getByTestId("dns-settings-forwarders").click();
   await expect(page.getByTestId("page-dns-forwarders")).toBeVisible();
+});
+
+// cache-browse: what the cache holds, read when asked, narrowed to a suffix and flushed.
+test("lists what the cache holds and flushes a suffix (faked status)", async ({ page, signedIn }) => {
+  void signedIn;
+  await FakeResolver.install(page);
+  const cache = await FakeCache.install(page);
+  await page.goto("/settings/dns");
+  const section = page.getByTestId("dns-cache");
+  await expect(section).toBeVisible();
+  await expect(section.getByTestId("dns-cache-audit-note")).toContainText("audit log");
+  expect(cache.requests).toEqual([]);
+
+  await section.getByTestId("dns-cache-show").click();
+  const rows = section.getByTestId("dns-cache-row");
+  await expect(rows).toHaveCount(7);
+  await expect(rows.first()).toHaveAttribute("data-key", "example.net");
+  await expect(section.locator('[data-testid="dns-cache-row"][data-stale="true"]')).toHaveAttribute("data-key", "missing.example.test");
+
+  await section.getByTestId("field-cache-suffix").fill("www.example.test");
+  await section.getByTestId("field-cache-suffix").press("Enter");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first().getByTestId("dns-cache-data")).toHaveText("CNAME cdn.example.test, 192.0.2.80");
+
+  await section.getByTestId("dns-cache-flush").click();
+  const dialog = page.getByTestId("dns-cache-flush-dialog");
+  await expect(dialog).toContainText("Flush www.example.test from the cache?");
+  await dialog.getByTestId("confirm-ok").click();
+  await expect(dialog).toHaveCount(0);
+  await expect(section.getByTestId("dns-cache-empty")).toBeVisible();
+  expect(cache.requests.filter((r) => r.method === "POST")).toEqual([
+    { method: "POST", path: "/api/v1/nodes/1/dns/cache/flush", query: { suffix: "www.example.test" } },
+  ]);
+  expect(cache.requests.filter((r) => r.method === "GET").map((r) => r.query.suffix ?? "")).toEqual(["", "www.example.test", "www.example.test"]);
+  expect(cache.state.entries).toHaveLength(5);
 });
 
 test("says what to set when the node has no dns role or the module is off", async ({ page, signedIn }) => {

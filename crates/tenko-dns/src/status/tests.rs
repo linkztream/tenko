@@ -186,3 +186,102 @@ async fn the_log_is_read_through_the_command() {
     node.take_server().expect("the server").stop().await;
     let _ = std::fs::remove_dir_all(dir);
 }
+
+// cache-browse: the listing through the command.
+#[tokio::test]
+async fn the_cache_is_listed_through_the_command() {
+    use crate::{
+        cache::CacheKey,
+        forward::{ForwardSettings, RecursionDefault, RecursionPolicy},
+    };
+    let bare = LocalNode::new(
+        NodeId(1),
+        server().await,
+        FeedProgress::default(),
+        None,
+        None,
+    );
+    let empty = bare.execute(CACHE_LIST, &[]);
+    assert_eq!(empty.outcome, Outcome::Done);
+    assert!(empty.detail.contains("no cache"), "{}", empty.detail);
+    assert_eq!(empty.output, Output::Cache(Box::default()));
+    for args in [
+        CacheListArgs {
+            suffix: Some("not a name".to_owned()),
+            ..CacheListArgs::default()
+        },
+        CacheListArgs {
+            view: Some("lan".to_owned()),
+            ..CacheListArgs::default()
+        },
+        CacheListArgs {
+            cursor: Some("zz".to_owned()),
+            ..CacheListArgs::default()
+        },
+    ] {
+        let encoded = tenko_core::codec::to_cbor(&args).expect("cbor");
+        let result = bare.execute(CACHE_LIST, &encoded);
+        assert_eq!(result.outcome, Outcome::Rejected, "{args:?}");
+    }
+    bare.take_server().expect("the server").stop().await;
+
+    let stop = tokio_util::sync::CancellationToken::new();
+    let catalog = CatalogHandle::new(Catalog::default());
+    let (forwarder, _task) = Forwarder::start(
+        ForwardSettings {
+            cache: Some(crate::cache::CacheSettings::default()),
+            ..ForwardSettings::default()
+        },
+        catalog,
+        None,
+        Arc::new(RecursionPolicy::new(RecursionDefault::KnownPrefixes)),
+        stop.clone(),
+    );
+    let cache = forwarder.cache().expect("a cache");
+    let now = std::time::Instant::now();
+    for name in ["www.example.test", "api.example.test", "www.example.net"] {
+        let qname = DnsName::new(name).expect("name").to_wire();
+        let mut answer = vec![0, 0, 0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0];
+        answer.extend_from_slice(&qname);
+        answer.extend_from_slice(&[0, 1, 0, 1, 0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 1, 0x2c, 0, 4]);
+        answer.extend_from_slice(&[192, 0, 2, 1]);
+        let key = CacheKey::new(None, &qname, 1, 1, false, false);
+        assert!(cache.insert(&key, &answer, now, None));
+    }
+    let node = LocalNode::new(
+        NodeId(1),
+        server().await,
+        FeedProgress::default(),
+        Some(forwarder),
+        None,
+    );
+    let args = CacheListArgs {
+        suffix: Some("example.test".to_owned()),
+        limit: 1,
+        ..CacheListArgs::default()
+    };
+    let first = node.execute(
+        CACHE_LIST,
+        &tenko_core::codec::to_cbor(&args).expect("cbor"),
+    );
+    assert_eq!(first.outcome, Outcome::Done, "{}", first.detail);
+    let Output::Cache(page) = first.output else {
+        panic!("not a page: {:?}", first.output);
+    };
+    assert_eq!(page.entries[0].name.as_str(), "api.example.test");
+    let next = CacheListArgs {
+        cursor: page.next.map(|cursor| cursor.encode()),
+        ..args
+    };
+    let second = node.execute(
+        CACHE_LIST,
+        &tenko_core::codec::to_cbor(&next).expect("cbor"),
+    );
+    let Output::Cache(page) = second.output else {
+        panic!("not a page: {:?}", second.output);
+    };
+    assert_eq!(page.entries[0].name.as_str(), "www.example.test");
+    assert!(page.next.is_none());
+    stop.cancel();
+    node.take_server().expect("the server").stop().await;
+}

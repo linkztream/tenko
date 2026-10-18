@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="dns-cache">
+      <unit id="dns.cache.title">
+        <notes><note category="description">Heading of the section of the DNS settings page that lists what the node's cache holds.</note></notes>
+        <segment><source>What the cache holds</source></segment>
+      </unit>
+      <unit id="dns.cache.lede">
+        <segment><source>The entries of the node's cache in name order: the answer each name and type got, how long it stays fresh and how often it answered. They are the names the clients asked, so every page read is recorded in the audit log.</source></segment>
+      </unit>
+      <unit id="dns.cache.suffix">
+        <segment><source>Name or suffix</source></segment>
+      </unit>
+      <unit id="dns.cache.suffix_placeholder">
+        <notes><note category="description">Placeholder of the suffix filter: a name under the reserved test domain.</note></notes>
+        <segment><source>example.test</source></segment>
+      </unit>
+      <unit id="dns.cache.suffix_invalid">
+        <segment><source>Enter a DNS name, such as example.test.</source></segment>
+      </unit>
+      <unit id="dns.cache.show">
+        <notes><note category="description">Button that reads the first page of the cache; the read is audited.</note></notes>
+        <segment><source>Show the entries</source></segment>
+      </unit>
+      <unit id="dns.cache.reload">
+        <segment><source>Read again</source></segment>
+      </unit>
+      <unit id="dns.cache.flush">
+        <notes><note category="description">Button that flushes the entries of the suffix shown; {suffix} is a DNS name.</note></notes>
+        <segment><source>Flush {suffix}</source></segment>
+      </unit>
+      <unit id="dns.cache.flush_title">
+        <segment><source>Flush {suffix} from the cache?</source></segment>
+      </unit>
+      <unit id="dns.cache.flush_body">
+        <segment><source>The entries of {suffix} and of the names under it go in every view; the next queries for them ask the upstreams again.</source></segment>
+      </unit>
+      <unit id="dns.cache.flush_confirm">
+        <segment><source>Flush</source></segment>
+      </unit>
+      <unit id="dns.cache.flush_cancel">
+        <segment><source>Cancel</source></segment>
+      </unit>
+      <unit id="dns.cache.flushed">
+        <segment><source>The entries of {suffix} were flushed</source></segment>
+      </unit>
+      <unit id="dns.cache.flush_failed">
+        <segment><source>The cache could not be flushed</source></segment>
+      </unit>
+      <unit id="dns.cache.col.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="dns.cache.col.type">
+        <segment><source>Type</source></segment>
+      </unit>
+      <unit id="dns.cache.col.ttl">
+        <notes><note category="description">Column of the seconds an entry stays fresh.</note></notes>
+        <segment><source>TTL left</source></segment>
+      </unit>
+      <unit id="dns.cache.col.view">
+        <segment><source>View</source></segment>
+      </unit>
+      <unit id="dns.cache.col.stale">
+        <segment><source>Stale</source></segment>
+      </unit>
+      <unit id="dns.cache.col.hits">
+        <segment><source>Hits</source></segment>
+      </unit>
+      <unit id="dns.cache.col.data">
+        <segment><source>Data</source></segment>
+      </unit>
+      <unit id="dns.cache.view_default">
+        <notes><note category="description">The view of the entries asked outside any view.</note></notes>
+        <segment><source>Default</source></segment>
+      </unit>
+      <unit id="dns.cache.stale">
+        <notes><note category="description">Tag of an expired entry that answers only while the upstreams fail.</note></notes>
+        <segment><source>Stale</source></segment>
+      </unit>
+      <unit id="dns.cache.stale_hint">
+        <segment><source>Expired: answers only while the upstreams fail (serve-stale)</source></segment>
+      </unit>
+      <unit id="dns.cache.ttl_s">
+        <segment><source>{value} s</source></segment>
+      </unit>
+      <unit id="dns.cache.ttl_min">
+        <segment><source>{value} min</source></segment>
+      </unit>
+      <unit id="dns.cache.ttl_h">
+        <segment><source>{value} h</source></segment>
+      </unit>
+      <unit id="dns.cache.ttl_none">
+        <notes><note category="description">The time left of a stale entry: none.</note></notes>
+        <segment><source>–</source></segment>
+      </unit>
+      <unit id="dns.cache.empty">
+        <segment><source>The cache holds no entries.</source></segment>
+      </unit>
+      <unit id="dns.cache.empty_suffix">
+        <segment><source>No entries for {suffix} or the names under it.</source></segment>
+      </unit>
+      <unit id="dns.cache.previous">
+        <segment><source>Previous</source></segment>
+      </unit>
+      <unit id="dns.cache.next">
+        <segment><source>Next</source></segment>
+      </unit>
+      <unit id="dns.cache.page">
+        <segment><source>Page {page}</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

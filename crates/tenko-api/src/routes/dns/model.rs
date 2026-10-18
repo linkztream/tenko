@@ -900,6 +900,52 @@ pub struct CacheFlushParams {
     pub suffix: Option<String>,
 }
 
+// cache-browse: the listing of a node's cache.
+/// The query of `GET /nodes/{id}/dns/cache`.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct DnsCacheParams {
+    /// Only the names equal to this name or under it (`example.test` finds
+    /// `www.example.test`, not `badexample.test`).
+    pub suffix: Option<String>,
+    /// Only one view: its identifier, or `default` for the entries asked outside any view.
+    pub view: Option<String>,
+    /// Entries per page, 1 to 1000; 200 by default.
+    pub limit: Option<u32>,
+    /// The cursor of the next page.
+    pub cursor: Option<String>,
+}
+
+/// One entry of a node's DNS cache: the answer to one question in one view.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DnsCacheEntry {
+    /// The name asked.
+    pub name: String,
+    /// The type asked.
+    #[serde(rename = "type")]
+    pub rtype: Rtype,
+    /// The view the entry belongs to; absent for the entries asked outside any view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<ViewId>,
+    /// The RCODE of the cached answer: 0 (NOERROR, with records or NODATA) or 3 (NXDOMAIN).
+    pub rcode: u16,
+    /// Seconds the entry stays fresh; 0 once it is stale.
+    pub ttl: u32,
+    /// Expired but within the stale window: it answers only when the upstreams fail
+    /// (RFC 8767).
+    pub stale: bool,
+    /// Answers from the entry since it was stored.
+    pub hits: u32,
+    /// Asked with the DO bit: the entry holds the signatures.
+    pub dnssec_ok: bool,
+    /// Asked with the CD bit.
+    pub checking_disabled: bool,
+    /// The records of the answer section, in the order received; empty for a negative
+    /// answer.
+    pub records: Vec<RecordData>,
+}
+// cache-browse: end.
+
 /// The query of `GET /nodes/{id}/dns/log`.
 #[derive(Debug, Clone, Default, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]

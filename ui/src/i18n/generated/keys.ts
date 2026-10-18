@@ -1315,6 +1315,39 @@ export type MessageKey =
   | "dns.batch.mode"
   | "dns.batch.pending_tag"
   | "dns.batch.review"
+  | "dns.cache.col.data"
+  | "dns.cache.col.hits"
+  | "dns.cache.col.name"
+  | "dns.cache.col.stale"
+  | "dns.cache.col.ttl"
+  | "dns.cache.col.type"
+  | "dns.cache.col.view"
+  | "dns.cache.empty"
+  | "dns.cache.empty_suffix"
+  | "dns.cache.flush"
+  | "dns.cache.flush_body"
+  | "dns.cache.flush_cancel"
+  | "dns.cache.flush_confirm"
+  | "dns.cache.flush_failed"
+  | "dns.cache.flush_title"
+  | "dns.cache.flushed"
+  | "dns.cache.lede"
+  | "dns.cache.next"
+  | "dns.cache.page"
+  | "dns.cache.previous"
+  | "dns.cache.reload"
+  | "dns.cache.show"
+  | "dns.cache.stale"
+  | "dns.cache.stale_hint"
+  | "dns.cache.suffix"
+  | "dns.cache.suffix_invalid"
+  | "dns.cache.suffix_placeholder"
+  | "dns.cache.title"
+  | "dns.cache.ttl_h"
+  | "dns.cache.ttl_min"
+  | "dns.cache.ttl_none"
+  | "dns.cache.ttl_s"
+  | "dns.cache.view_default"
   | "dns.check.caa"
   | "dns.check.empty"
   | "dns.check.ipv4"
@@ -5460,6 +5493,15 @@ export interface MessageArgs {
   "dns.batch.count": { changes: string | number; count: number };
   "dns.batch.diff_summary": { count: number };
   "dns.batch.drop": { name: string | number; type: string | number };
+  "dns.cache.empty_suffix": { suffix: string | number };
+  "dns.cache.flush": { suffix: string | number };
+  "dns.cache.flush_body": { suffix: string | number };
+  "dns.cache.flush_title": { suffix: string | number };
+  "dns.cache.flushed": { suffix: string | number };
+  "dns.cache.page": { page: string | number };
+  "dns.cache.ttl_h": { value: string | number };
+  "dns.cache.ttl_min": { value: string | number };
+  "dns.cache.ttl_s": { value: string | number };
   "dns.fwd.check.address": { entry: string | number };
   "dns.fwd.check.path": { entry: string | number };
   "dns.fwd.check.path_transport": { entry: string | number };
@@ -7529,6 +7571,39 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.batch.mode",
   "dns.batch.pending_tag",
   "dns.batch.review",
+  "dns.cache.col.data",
+  "dns.cache.col.hits",
+  "dns.cache.col.name",
+  "dns.cache.col.stale",
+  "dns.cache.col.ttl",
+  "dns.cache.col.type",
+  "dns.cache.col.view",
+  "dns.cache.empty",
+  "dns.cache.empty_suffix",
+  "dns.cache.flush",
+  "dns.cache.flush_body",
+  "dns.cache.flush_cancel",
+  "dns.cache.flush_confirm",
+  "dns.cache.flush_failed",
+  "dns.cache.flush_title",
+  "dns.cache.flushed",
+  "dns.cache.lede",
+  "dns.cache.next",
+  "dns.cache.page",
+  "dns.cache.previous",
+  "dns.cache.reload",
+  "dns.cache.show",
+  "dns.cache.stale",
+  "dns.cache.stale_hint",
+  "dns.cache.suffix",
+  "dns.cache.suffix_invalid",
+  "dns.cache.suffix_placeholder",
+  "dns.cache.title",
+  "dns.cache.ttl_h",
+  "dns.cache.ttl_min",
+  "dns.cache.ttl_none",
+  "dns.cache.ttl_s",
+  "dns.cache.view_default",
   "dns.check.caa",
   "dns.check.empty",
   "dns.check.ipv4",

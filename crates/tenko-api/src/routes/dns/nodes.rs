@@ -1,4 +1,5 @@
-//! `GET /nodes/{id}/dns`, `POST /nodes/{id}/dns/cache/flush`, `GET /nodes/{id}/dns/log`,
+//! `GET /nodes/{id}/dns`, `POST /nodes/{id}/dns/cache/flush`, `GET /nodes/{id}/dns/cache`,
+//! `GET /nodes/{id}/dns/log`,
 //! `POST /nodes/{id}/dns/log/stop` and `/start`: the `dns` role of a node (`docs/dns.md`
 //! section 8, `docs/dns-resolver.md`).
 //!
@@ -16,6 +17,10 @@
 //! that may update the node: for any other principal the lines that carry an address (a
 //! log with `pseudonymise = false`) come without a client, and a filter by address is
 //! refused with 403; pseudonyms are shown to every reader of the log.
+//!
+//! The cache holds the names the clients asked, so a page of it read through the API
+//! (`dns.cache.list`) is audited as `dns.cache.read` with the filters and the cursor range,
+//! as a page of the log is.
 
 use std::sync::{Arc, OnceLock};
 
@@ -39,15 +44,18 @@ use tenko_core::{
 use tenko_dns::{
     querylog::{LogFigures, LogLine, keys::is_pseudonym},
     status::{
-        self, CacheFlushArgs, CommandResult, DnsNode, DnsStatus, LogReadArgs, Outcome, Output,
+        self, CacheFlushArgs, CacheListArgs, CommandResult, DnsNode, DnsStatus, LogReadArgs,
+        Outcome, Output,
     },
 };
 use tenko_store::WriteBatch;
 
+// cache-browse: the listing of a node's cache.
 use super::{
     BlockedCountItem, CacheFlushParams, DnsCommandAccepted, DnsNodeStatus, ListenerItem,
     QueryLogLine, QueryLogParams, QueryLogState, QueryLogStatus, UdpWorkerItem, Zones, parse_node,
 };
+use super::{DnsCacheEntry, DnsCacheParams};
 use crate::{
     dto::Page,
     extract::Ctx,
@@ -533,6 +541,144 @@ fn log_read_audit(
     }
     draft
 }
+
+// cache-browse: the listing of a node's cache.
+#[utoipa::path(
+    get,
+    path = "/nodes/{id}/dns/cache",
+    tag = "dns",
+    operation_id = "list_node_dns_cache",
+    summary = "List what a node's DNS cache holds",
+    description = "Scope: `dns.read`. Issues the node command `dns.cache.list`: a page of the                    entries of the node's cache in the canonical order of their names, then by                    type and view, with the cursor of the next page; each entry has its name,                    type, view, RCODE, the seconds it stays fresh, the stale flag, its hits and                    the records of a positive answer. `suffix` keeps the names at or below it,                    `view` one view (`default` for the entries asked outside any view). The                    entries reveal the names the clients asked, so the read is recorded in the                    node's commands and audited as `dns.cache.read` with the filters and the                    cursor range. A node without a cache answers an empty page.",
+    params(("id" = u64, Path, description = "Node id"), DnsCacheParams),
+    responses(
+        (status = 200, description = "A page of cache entries in canonical name order", body = Page<DnsCacheEntry>),
+        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The node does not run the dns role (`dns.node.not_dns`)", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(super) async fn list_node_dns_cache(
+    State(app): State<AppState>,
+    Ctx(cx): Ctx,
+    slot: Slot,
+    registry: Registry,
+    zones: Zones,
+    Path(id): Path<String>,
+    Query(params): Query<DnsCacheParams>,
+) -> Result<Response, ApiError> {
+    use tenko_dns::cache::{DEFAULT_LIST, ListCursor, MAX_LIST, ViewFilter};
+    let node = parse_node(&id)?;
+    app.authorize(&cx.principal, Action::Read, &ObjectRef::node(node))?;
+    app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::Zone))?;
+    let limit = params
+        .limit
+        .unwrap_or(u32::try_from(DEFAULT_LIST).unwrap_or(200));
+    if !(1..=u32::try_from(MAX_LIST).unwrap_or(1_000)).contains(&limit) {
+        return Err(invalid("limit", "limit must be between 1 and 1000"));
+    }
+    let suffix = params.suffix.filter(|suffix| !suffix.trim().is_empty());
+    if let Some(suffix) = &suffix
+        && tenko_core::dns::DnsName::new(suffix).is_err()
+    {
+        return Err(invalid(
+            "suffix",
+            format!("suffix: `{suffix}` is not a DNS name"),
+        ));
+    }
+    let view = params.view.filter(|view| !view.trim().is_empty());
+    if view
+        .as_deref()
+        .is_some_and(|view| ViewFilter::parse(view).is_none())
+    {
+        return Err(invalid(
+            "view",
+            "view must be `default` or a view's identifier",
+        ));
+    }
+    if params
+        .cursor
+        .as_deref()
+        .is_some_and(|cursor| ListCursor::parse(cursor).is_none())
+    {
+        return Err(invalid("cursor", "the cursor is not valid"));
+    }
+    let role = local_role(&app, slot, registry, node).await?;
+    let args = CacheListArgs {
+        suffix,
+        view,
+        limit,
+        cursor: params.cursor,
+    };
+    let encoded = to_cbor(&args)?.to_vec();
+    let result = execute(role, status::CACHE_LIST, encoded.clone()).await;
+    let audit = match &result.output {
+        Output::Cache(page) => Some(cache_read_audit(
+            node,
+            &args,
+            page.entries.len(),
+            page.next.as_ref().map(ListCursor::encode).as_deref(),
+        )),
+        _ => None,
+    };
+    record(
+        zones,
+        &cx,
+        node,
+        status::CACHE_LIST,
+        encoded,
+        &result,
+        audit,
+    )
+    .await?;
+    let Output::Cache(page) = result.output else {
+        return Err(command_failed(status::CACHE_LIST, &result));
+    };
+    let revision = app.store.status().revision;
+    Ok(Json(Page::new(
+        page.entries.into_iter().map(cache_entry_dto).collect(),
+        page.next.as_ref().map(ListCursor::encode),
+        revision,
+    ))
+    .into_response())
+}
+
+fn cache_entry_dto(entry: tenko_dns::cache::CachedEntry) -> DnsCacheEntry {
+    DnsCacheEntry {
+        name: entry.name.to_string(),
+        rtype: entry.rtype,
+        view: entry.view,
+        rcode: u16::from(entry.rcode),
+        ttl: entry.ttl,
+        stale: entry.stale,
+        hits: entry.hits,
+        dnssec_ok: entry.dnssec_ok,
+        checking_disabled: entry.checking_disabled,
+        records: entry.records,
+    }
+}
+
+/// The audit record of a page of the cache: the filters, the cursor range and the entries.
+fn cache_read_audit(
+    node: NodeId,
+    args: &CacheListArgs,
+    entries: usize,
+    next: Option<&str>,
+) -> AuditDraft {
+    let mut draft = AuditDraft::success(audit::CACHE_READ, vec![ObjectRef::node(node)])
+        .with_context("from_cursor", args.cursor.as_deref().unwrap_or("first"))
+        .with_context("to_cursor", next.unwrap_or("end"))
+        .with_context("entries", entries.to_string());
+    for (key, value) in [("suffix", &args.suffix), ("view", &args.view)] {
+        if let Some(value) = value {
+            draft = draft.with_context(format!("filter.{key}"), value.clone());
+        }
+    }
+    draft
+}
+// cache-browse: end.
 
 /// Runs `dns.log.stop` or `dns.log.start` and records it with its audit record.
 async fn switch_log(
