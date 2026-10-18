@@ -1,11 +1,12 @@
 //! Tests of the local node: the report and the commands.
 
+use crate::log::QueryLogSink as _;
 use std::net::{Ipv4Addr, SocketAddr};
 
 use super::*;
 use crate::{
     catalog::{Catalog, CatalogHandle},
-    querylog::{LogSettings, LogWriter},
+    querylog::{ClientField, LogSettings, LogWriter},
     server::{Hooks, ServerConfig},
     transport::udp::UdpSettings,
 };
@@ -89,6 +90,7 @@ async fn the_commands_answer_in_place() {
     let log = node.execute(LOG_READ, &[]);
     assert_eq!(log.outcome, Outcome::Rejected);
     assert!(log.detail.contains("off"), "{}", log.detail);
+    assert_eq!(node.execute(LOG_STOP, &[]).outcome, Outcome::Rejected);
     let unknown = node.execute("scan.run", &[]);
     assert_eq!(unknown.outcome, Outcome::Rejected);
     node.take_server().expect("the server").stop().await;
@@ -98,11 +100,10 @@ async fn the_commands_answer_in_place() {
 async fn the_log_is_read_through_the_command() {
     let dir = std::env::temp_dir().join(format!("tenko-status-{}", uuid::Uuid::now_v7()));
     let writer = LogWriter::start(LogSettings {
-        dir: dir.clone(),
         days: 1,
         size_mb: 16,
-        sample: 1,
-        pseudonymise: false,
+        client: ClientField::Address,
+        ..LogSettings::new(dir.clone())
     })
     .expect("log");
     let qname = tenko_core::dns::DnsName::new("www.example.test")
@@ -132,7 +133,7 @@ async fn the_log_is_read_through_the_command() {
     let args = tenko_core::codec::to_cbor(&LogReadArgs {
         cursor: None,
         limit: 10,
-        qname: None,
+        ..LogReadArgs::default()
     })
     .expect("args");
     let read = node.execute(LOG_READ, &args);
@@ -144,8 +145,47 @@ async fn the_log_is_read_through_the_command() {
     assert_eq!(page.lines[0].qname, "www.example.test");
     assert_eq!(page.lines[0].rcode, 3);
     assert_eq!(page.lines[0].transport, QueryTransport::Tcp);
+    assert_eq!(page.lines[0].client.as_deref(), Some("127.0.0.1"));
     let bad = node.execute(LOG_READ, b"not cbor");
     assert_eq!(bad.outcome, Outcome::Rejected);
+    let filtered = |args: LogReadArgs| {
+        node.execute(LOG_READ, &tenko_core::codec::to_cbor(&args).expect("args"))
+    };
+    let unknown_client = filtered(LogReadArgs {
+        limit: 10,
+        client: Some("somebody".to_owned()),
+        ..LogReadArgs::default()
+    });
+    assert_eq!(unknown_client.outcome, Outcome::Rejected);
+    assert!(
+        unknown_client.detail.contains("client"),
+        "{}",
+        unknown_client.detail
+    );
+    let Output::Log(other) = filtered(LogReadArgs {
+        limit: 10,
+        rcode: Some(0),
+        ..LogReadArgs::default()
+    })
+    .output
+    else {
+        panic!("a page");
+    };
+    assert_eq!(other.lines, Vec::new());
+
+    let stop = node.execute(LOG_STOP, &[]);
+    assert_eq!(stop.outcome, Outcome::Done, "{}", stop.detail);
+    assert!(dir.join(crate::querylog::STOPPED_MARKER).exists());
+    let stats = node.execute(STATS, &[]);
+    assert!(
+        stats.detail.contains("query log (stopped)"),
+        "{}",
+        stats.detail
+    );
+    assert!(node.status().log.expect("log figures").stopped);
+    let start = node.execute(LOG_START, &[]);
+    assert_eq!(start.outcome, Outcome::Done, "{}", start.detail);
+    assert!(!node.status().log.expect("log figures").stopped);
     node.take_server().expect("the server").stop().await;
     let _ = std::fs::remove_dir_all(dir);
 }

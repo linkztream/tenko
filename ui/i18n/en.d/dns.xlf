@@ -29,6 +29,9 @@
       <unit id="dns.nav.keys">
         <segment><source>TSIG keys</source></segment>
       </unit>
+      <unit id="dns.nav.log">
+        <segment><source>Query log</source></segment>
+      </unit>
       <unit id="dns.state.not_built_title">
         <notes><note category="description">Shown when the server answers the DNS routes with 501 (not implemented).</note></notes>
         <segment><source>The DNS service is not available yet.</source></segment>
@@ -881,6 +884,190 @@
       </unit>
       <unit id="jobs.step.dns_import_apply">
         <segment><source>Write the records</source></segment>
+      </unit>
+      <unit id="dns.log.title">
+        <notes><note category="description">Title of the query log page of a DNS node.</note></notes>
+        <segment><source>Query log</source></segment>
+      </unit>
+      <unit id="dns.log.sub">
+        <segment><source>The last queries a node answered</source></segment>
+      </unit>
+      <unit id="dns.log.node_label">
+        <notes><note category="description">Label of the choice of the node whose query log is shown.</note></notes>
+        <segment><source>Node</source></segment>
+      </unit>
+      <unit id="dns.log.node">
+        <segment><source>Node {id}</source></segment>
+      </unit>
+      <unit id="dns.log.no_node">
+        <segment><source>This server is not a node of a cluster yet, so there is no query log to read.</source></segment>
+      </unit>
+      <unit id="dns.log.refresh">
+        <segment><source>Refresh</source></segment>
+      </unit>
+      <unit id="dns.log.stop">
+        <notes><note category="description">Button of the kill switch: the node logs no query until it is started again.</note></notes>
+        <segment><source>Stop logging</source></segment>
+      </unit>
+      <unit id="dns.log.start">
+        <segment><source>Start logging</source></segment>
+      </unit>
+      <unit id="dns.log.stopped_toast">
+        <segment><source>The query log is stopped</source></segment>
+      </unit>
+      <unit id="dns.log.started_toast">
+        <segment><source>The query log is started</source></segment>
+      </unit>
+      <unit id="dns.log.switch_failed">
+        <segment><source>The query log could not be switched</source></segment>
+      </unit>
+      <unit id="dns.log.stopped_title">
+        <segment><source>Logging is stopped.</source></segment>
+      </unit>
+      <unit id="dns.log.stopped_body">
+        <segment><source>The node logs no query until an administrator starts the log again, also after a restart. The queries below were logged before.</source></segment>
+      </unit>
+      <unit id="dns.log.not_dns_title">
+        <segment><source>This node does not answer DNS queries.</source></segment>
+      </unit>
+      <unit id="dns.log.not_dns_body">
+        <segment><source>The DNS role does not run on this node, so it keeps no query log.</source></segment>
+      </unit>
+      <unit id="dns.log.off_title">
+        <segment><source>The query log is off</source></segment>
+      </unit>
+      <unit id="dns.log.off_body">
+        <segment><source>The node logs no queries. The security profile decides whether the log is on (off in the Home profile), and the section [dns.log] of the node's configuration file can turn it on or off.</source></segment>
+      </unit>
+      <unit id="dns.log.off_link">
+        <segment><source>Open the security settings</source></segment>
+      </unit>
+      <unit id="dns.log.figures">
+        <notes><note category="description">The settings and counters of a node's query log. {client} is one of the dns.log.client_mode texts.</note></notes>
+        <segment><source>Clients: {client}. {sample, plural, one {Every query is logged} other {One query in # is logged}} and kept {days, plural, one {# day} other {# days}}; {written, number} written and {dropped, number} dropped since the node started.</source></segment>
+      </unit>
+      <unit id="dns.log.client_mode.pseudonym">
+        <segment><source>pseudonymised, a new pseudonym every day</source></segment>
+      </unit>
+      <unit id="dns.log.client_mode.address">
+        <segment><source>logged with their address</source></segment>
+      </unit>
+      <unit id="dns.log.client_mode.hidden">
+        <segment><source>not logged</source></segment>
+      </unit>
+      <unit id="dns.log.client_none">
+        <notes><note category="description">The client column when the log keeps no client or the address is withheld from the person.</note></notes>
+        <segment><source>Not shown</source></segment>
+      </unit>
+      <unit id="dns.log.pseudonym_hint">
+        <segment><source>A keyed hash of the address: the same client has the same pseudonym for one day.</source></segment>
+      </unit>
+      <unit id="dns.log.table">
+        <segment><source>Logged queries, newest first</source></segment>
+      </unit>
+      <unit id="dns.log.col.time">
+        <segment><source>Time</source></segment>
+      </unit>
+      <unit id="dns.log.col.client">
+        <segment><source>Client</source></segment>
+      </unit>
+      <unit id="dns.log.col.transport">
+        <segment><source>Transport</source></segment>
+      </unit>
+      <unit id="dns.log.col.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="dns.log.col.type">
+        <segment><source>Type</source></segment>
+      </unit>
+      <unit id="dns.log.col.rcode">
+        <notes><note category="description">Column of the response code (NOERROR, NXDOMAIN and so on).</note></notes>
+        <segment><source>Answer</source></segment>
+      </unit>
+      <unit id="dns.log.col.latency">
+        <segment><source>Latency</source></segment>
+      </unit>
+      <unit id="dns.log.col.flags">
+        <segment><source>Notes</source></segment>
+      </unit>
+      <unit id="dns.log.transport.udp">
+        <segment><source>UDP</source></segment>
+      </unit>
+      <unit id="dns.log.transport.tcp">
+        <segment><source>TCP</source></segment>
+      </unit>
+      <unit id="dns.log.transport.dot">
+        <segment><source>DNS over TLS</source></segment>
+      </unit>
+      <unit id="dns.log.transport.doh">
+        <segment><source>DNS over HTTPS</source></segment>
+      </unit>
+      <unit id="dns.log.latency">
+        <notes><note category="description">Time from the query to its answer in milliseconds; {ms} is formatted already.</note></notes>
+        <segment><source>{ms} ms</source></segment>
+      </unit>
+      <unit id="dns.log.cached">
+        <segment><source>From the cache</source></segment>
+      </unit>
+      <unit id="dns.log.blocked">
+        <segment><source>Blocked</source></segment>
+      </unit>
+      <unit id="dns.log.filter.qname">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="dns.log.filter.qname_placeholder">
+        <segment><source>example.test</source></segment>
+      </unit>
+      <unit id="dns.log.filter.qname_invalid">
+        <segment><source>Enter a domain name.</source></segment>
+      </unit>
+      <unit id="dns.log.filter.client">
+        <segment><source>Client</source></segment>
+      </unit>
+      <unit id="dns.log.filter.client_placeholder">
+        <segment><source>A pseudonym or an address</source></segment>
+      </unit>
+      <unit id="dns.log.filter.client_invalid">
+        <segment><source>Enter a pseudonym (p: and hexadecimal digits) or an IP address.</source></segment>
+      </unit>
+      <unit id="dns.log.filter.rcode">
+        <segment><source>Answer</source></segment>
+      </unit>
+      <unit id="dns.log.filter.rcode_any">
+        <segment><source>Any</source></segment>
+      </unit>
+      <unit id="dns.log.filter.from">
+        <segment><source>From</source></segment>
+      </unit>
+      <unit id="dns.log.filter.until">
+        <segment><source>Until</source></segment>
+      </unit>
+      <unit id="dns.log.filter.until_invalid">
+        <segment><source>The end is before the start.</source></segment>
+      </unit>
+      <unit id="dns.log.filter.apply">
+        <segment><source>Show</source></segment>
+      </unit>
+      <unit id="dns.log.filter.reset">
+        <segment><source>Clear the filters</source></segment>
+      </unit>
+      <unit id="dns.log.empty">
+        <segment><source>No query is logged yet.</source></segment>
+      </unit>
+      <unit id="dns.log.empty_filtered">
+        <segment><source>No logged query matches the filters.</source></segment>
+      </unit>
+      <unit id="dns.log.partial">
+        <segment><source>This page holds what one read of the log found; older queries may still match. Go on with Older.</source></segment>
+      </unit>
+      <unit id="dns.log.newer">
+        <segment><source>Newer</source></segment>
+      </unit>
+      <unit id="dns.log.older">
+        <segment><source>Older</source></segment>
+      </unit>
+      <unit id="dns.log.page">
+        <segment><source>Page {page}</source></segment>
       </unit>
       <unit id="errors.dns.zone.not_found">
         <segment><source>The zone does not exist (any more).</source></segment>

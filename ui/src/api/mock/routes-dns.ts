@@ -5,7 +5,10 @@
 // reads the inventory, `dns.write` for operators and administrators, `dns.keys` for
 // administrators. While the DNS module is switched off every route answers 404
 // `sys.route_not_found`, as the server does. `dnsStubs` answers every DNS operation with 501,
-// what the server answers until WP4.2 lands, for the tests of that state.
+// what the server answers until WP4.2 lands, for the tests of that state. The DNS role of node 1
+// (WP5.4): its status with the query log, the log read with its filters and cursor (audited as
+// `dns.log.read`; addresses only for administrators, who may update the node), and the kill
+// switch; the log itself is dns-log-model.ts.
 import { http, type HttpHandler } from "msw";
 import { encodeImportReport } from "../../dns/api";
 import type { ObjectRef } from "../types";
@@ -34,6 +37,7 @@ import {
   type DnsContext,
   type DnsState,
 } from "./dns-model";
+import { DnsLogFailure, logStatus, readLog, seedDnsLog, switchLog, type DnsLogState } from "./dns-log-model";
 import { createJob } from "./job-store";
 import { created, noContent, notImplemented, ok, Problem, Reply } from "./reply";
 import { mswPath, paginate, route, wholePage } from "./route";
@@ -50,10 +54,17 @@ const context: DnsContext = {
 };
 
 let state: DnsState = seedDns(context);
+let logState: DnsLogState = seedDnsLog();
 
 onMockReset(() => {
   state = seedDns(context);
+  logState = seedDnsLog();
 });
+
+/** The query log of the mock's DNS node, for tests that arrange or inspect it. */
+export function dnsLogState(): DnsLogState {
+  return logState;
+}
 
 /** The DNS state of the mock, for tests that arrange or inspect it. */
 export function dnsState(): DnsState {
@@ -80,7 +91,9 @@ function guard<T>(scope: Scope, run: () => T): T {
   try {
     return run();
   } catch (err) {
-    if (err instanceof DnsFailure) throw new Problem(err.code, { status: err.status, params: err.params, detail: err.message });
+    if (err instanceof DnsFailure || err instanceof DnsLogFailure) {
+      throw new Problem(err.code, { status: err.status, params: err.params, detail: err.message });
+    }
     throw err;
   }
 }
@@ -265,11 +278,84 @@ const keys = [
 ];
 
 /** The happy paths of the DNS area; the operations nobody calls yet stay with their 501 stubs. */
-export const dnsRoutes: HttpHandler[] = [...zones, ...records, ...acls, ...keys];
+// ---------------------------------------------------------------------------------
+// The DNS role of node 1 and its query log
+
+/** The node runs the role: node 1, the mock's own; any other is unknown. */
+function dnsNode(id: string): void {
+  if (id !== "1") throw new Problem("cluster.node.not_found", { status: 404, detail: `no node ${id}`, params: { node: id } });
+}
+
+const nodeRef = (id: string): ObjectRef => ({ kind: "node", id });
+
+const node = [
+  route("get", "/api/v1/nodes/{id}/dns", (ctx) =>
+    guard("dns.read", () => {
+      dnsNode(ctx.params.id);
+      const status: Record<string, unknown> = {
+        node: 1,
+        serving: true,
+        revision: db.revision,
+        lag: 0,
+        zones: state.zones.length,
+        rrsets: 0,
+        listeners: [
+          { address: "192.0.2.53:53", transport: "udp", workers: 2 },
+          { address: "192.0.2.53:53", transport: "tcp", workers: 0 },
+        ],
+        cache_entries: 0,
+        started: "2026-10-17T11:58:00Z",
+      };
+      const log = logStatus(logState);
+      if (log) status.query_log = log;
+      return ok(status as never);
+    }),
+  ),
+  route("get", "/api/v1/nodes/{id}/dns/log", (ctx) =>
+    guard("dns.read", () => {
+      dnsNode(ctx.params.id);
+      const query = {
+        cursor: ctx.query("cursor"),
+        limit: ctx.query("limit"),
+        qname: ctx.query("qname"),
+        client: ctx.query("client"),
+        rcode: ctx.query("rcode"),
+        from: ctx.query("from"),
+        until: ctx.query("until"),
+      };
+      const page = readLog(logState, query, isAdmin(requireSession().user), db.revision);
+      const context: Record<string, string> = {
+        from_cursor: query.cursor ?? "newest",
+        to_cursor: page.next_cursor ?? "end",
+        lines: String(page.items.length),
+      };
+      for (const key of ["qname", "client", "rcode", "from", "until"] as const) {
+        const value = query[key];
+        if (value) context[`filter.${key}`] = value;
+      }
+      appendAudit({ action: "dns.log.read", objects: [nodeRef(ctx.params.id)], context });
+      return ok(page as never);
+    }),
+  ),
+  ...(["stop", "start"] as const).map((verb) =>
+    route("post", `/api/v1/nodes/{id}/dns/log/${verb}`, (ctx) =>
+      guard("dns.write", () => {
+        dnsNode(ctx.params.id);
+        // The server asks for the right to update the node, which only administrators hold.
+        if (!isAdmin(requireSession().user)) throw new Problem("auth.forbidden", { detail: "this needs the right to update the node" });
+        switchLog(logState, verb === "stop");
+        appendAudit({ action: `dns.log.${verb}`, objects: [nodeRef(ctx.params.id)] });
+        return new Reply(202, { command_id: randomId() }) as never;
+      }),
+    ),
+  ),
+];
+
+export const dnsRoutes: HttpHandler[] = [...zones, ...records, ...acls, ...keys, ...node];
 
 /** Every DNS operation answering 501, as the server does until WP4.2 lands (for `server.use`). */
 export const dnsStubs: HttpHandler[] = apiOperations
-  .filter((operation) => operation.path.startsWith("/api/v1/dns/"))
+  .filter((operation) => operation.path.startsWith("/api/v1/dns/") || /^\/api\/v1\/nodes\/\{id\}\/dns/.test(operation.path))
   .map((operation) =>
     http[operation.method](mswPath(operation.path), () => notImplemented(operation.method.toUpperCase(), operation.path).toResponse()),
   );

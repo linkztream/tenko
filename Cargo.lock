@@ -3379,6 +3379,7 @@ dependencies = [
  "hyper-util",
  "ipnet",
  "proptest",
+ "prost",
  "rcgen",
  "rustls",
  "rustls-native-certs",

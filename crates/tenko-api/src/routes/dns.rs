@@ -62,6 +62,8 @@
 //! | `GET /nodes/{id}/dns` | `dns.read` | Get the DNS role of a node |
 //! | `POST /nodes/{id}/dns/cache/flush` | `dns.write` | Flush a node's DNS cache |
 //! | `GET /nodes/{id}/dns/log` | `dns.read` | Read a node's DNS query log |
+//! | `POST /nodes/{id}/dns/log/stop` | `dns.write` | Stop a node's DNS query log |
+//! | `POST /nodes/{id}/dns/log/start` | `dns.write` | Start a node's DNS query log again |
 //!
 //! # Authorization
 //!
@@ -113,9 +115,10 @@ pub use model::{
     DnsNodeStatus, DnssecKeyItem, DnssecStatus, DryRunParams, ExportParams, ForwarderCreate,
     ForwarderItem, ForwarderPatch, ImportLoss, ImportTypeCount, KeyCreate, KeyCreated, KeyItem,
     ListCreate, ListItem, ListPatch, ListVersionItem, ListenerItem, OriginCount, PrimaryState,
-    QueryLogLine, QueryLogParams, RecordBatch, RecordBatchResult, RecordChange, RecordDiff,
-    RecordFilters, RecordOp, RolloverRequest, RrSetItem, TransferStatus, UdpWorkerItem, ViewCreate,
-    ViewItem, ViewPatch, ZoneCreate, ZoneFileImport, ZoneFileImportReport, ZoneItem, ZonePatch,
+    QueryLogLine, QueryLogParams, QueryLogState, QueryLogStatus, RecordBatch, RecordBatchResult,
+    RecordChange, RecordDiff, RecordFilters, RecordOp, RolloverRequest, RrSetItem, TransferStatus,
+    UdpWorkerItem, ViewCreate, ViewItem, ViewPatch, ZoneCreate, ZoneFileImport,
+    ZoneFileImportReport, ZoneItem, ZonePatch,
 };
 
 use super::not_implemented;
@@ -281,6 +284,8 @@ fn node_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(nodes::get_node_dns_status))
         .routes(routes!(nodes::flush_node_dns_cache))
         .routes(routes!(nodes::read_node_dns_log))
+        .routes(routes!(nodes::stop_node_dns_log))
+        .routes(routes!(nodes::start_node_dns_log))
 }
 
 #[utoipa::path(

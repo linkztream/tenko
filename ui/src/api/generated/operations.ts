@@ -176,6 +176,8 @@ export const apiOperations = [
   { id: "get_node_dns_status", method: "get", path: "/api/v1/nodes/{id}/dns", tags: ["dns"], summary: "Get the DNS role of a node" },
   { id: "flush_node_dns_cache", method: "post", path: "/api/v1/nodes/{id}/dns/cache/flush", tags: ["dns"], summary: "Flush a node's DNS cache" },
   { id: "read_node_dns_log", method: "get", path: "/api/v1/nodes/{id}/dns/log", tags: ["dns"], summary: "Read a node's DNS query log" },
+  { id: "start_node_dns_log", method: "post", path: "/api/v1/nodes/{id}/dns/log/start", tags: ["dns"], summary: "Start a node's DNS query log again" },
+  { id: "stop_node_dns_log", method: "post", path: "/api/v1/nodes/{id}/dns/log/stop", tags: ["dns"], summary: "Stop a node's DNS query log" },
   { id: "get_scan_config", method: "get", path: "/api/v1/nodes/{id}/scan-config", tags: ["scans"], summary: "Get a probe's scan configuration" },
   { id: "update_scan_config", method: "put", path: "/api/v1/nodes/{id}/scan-config", tags: ["scans"], summary: "Replace a probe's scan configuration" },
   { id: "resume_node_scans", method: "post", path: "/api/v1/nodes/{id}/scan/resume", tags: ["scans"], summary: "Resume a probe's scans" },

@@ -2,8 +2,9 @@
 //! the per-shard ring buffers to a local file, never through the store.
 //!
 //! The query path hands each entry to a [`QueryLogSink`], which must not block: a full
-//! buffer drops the entry and counts it (`tenko_dns_log_dropped_total`). WP5.4 implements
-//! the ring, JSON lines, dnstap, rotation and pseudonymisation; [`NullLog`] discards.
+//! buffer drops the entry and counts it (`tenko_dns_log_dropped_total`).
+//! [`crate::querylog::FileLog`] is the sink of the role: the ring, JSON lines and dnstap,
+//! rotation, retention and pseudonymisation; [`NullLog`] discards.
 
 use std::net::IpAddr;
 

@@ -1113,42 +1113,103 @@ pub enum DnsLogFormat {
     /// One JSON object per line.
     #[default]
     Jsonl,
-    /// dnstap frame streams (not written yet: WP5.4).
+    /// dnstap protobuf messages in Frame Streams files.
     Dnstap,
 }
 
-/// `[dns.log]`: the query log of this node (plan section 2.9, TGL-15), off by default.
+/// `[dns.log] client`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DnsLogClient {
+    /// The client is logged: as a pseudonym, or as its address with `pseudonymise = false`.
+    #[default]
+    Logged,
+    /// No client field at all.
+    Hidden,
+}
+
+/// `[dns.log]`: the query log of this node (plan section 2.9, TGL-15).
+///
+/// `enabled` and `days` follow the security profile when they are not set (TGL-15, see
+/// [`DnsLogSection::effective`]): Home off and 7 days, Standard and Hardened on and 30
+/// days, Lab on and 7 days. Pseudonymisation is on in every profile.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DnsLogSection {
-    /// Log queries (default false). Turning it off again is the kill switch.
-    pub enabled: bool,
+    /// Log queries. Not set: the profile's default (TGL-15). `false` is the kill switch
+    /// across restarts; the node commands `dns.log.stop` and `dns.log.start` switch a
+    /// running log.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     /// The directory of the log files (default `<data_dir>/dns/querylog`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
-    /// `jsonl` (default); `dnstap` is refused until it is written (WP5.4).
+    /// `jsonl` (default) or `dnstap`.
     pub format: DnsLogFormat,
-    /// Days a log file is kept, 1 to 365 (default 7).
-    pub days: u32,
+    /// Days a log file is kept, 1 to 365. Not set: the profile's default (TGL-15).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub days: Option<u32>,
     /// MiB the log files may take, 1 to 102,400 (default 256).
     pub size_mb: u64,
     /// Log one query in N, 1 to 1,000,000 (default 1: every query).
     pub sample: u32,
     /// Replace client addresses with a keyed hash whose key changes every day (default
-    /// true).
+    /// true in every profile).
     pub pseudonymise: bool,
+    /// `logged` (default) or `hidden`: no client field at all.
+    pub client: DnsLogClient,
 }
 
 impl Default for DnsLogSection {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: None,
             path: None,
             format: DnsLogFormat::Jsonl,
-            days: 7,
+            days: None,
             size_mb: 256,
             sample: 1,
             pseudonymise: true,
+            client: DnsLogClient::Logged,
+        }
+    }
+}
+
+/// The query log settings a profile leaves to the keys that are not set (TGL-15).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DnsLogEffective {
+    /// The log is on.
+    pub enabled: bool,
+    /// Days a log file is kept.
+    pub days: u32,
+}
+
+impl DnsLogSection {
+    /// The defaults of TGL-15 for a profile: Home off (opt-in) with 7 days, Standard and
+    /// Hardened on with 30 days, Lab on with 7 days.
+    pub const fn profile_default(profile: Profile) -> DnsLogEffective {
+        match profile {
+            Profile::Home => DnsLogEffective {
+                enabled: false,
+                days: 7,
+            },
+            Profile::Standard | Profile::Hardened => DnsLogEffective {
+                enabled: true,
+                days: 30,
+            },
+            Profile::Lab => DnsLogEffective {
+                enabled: true,
+                days: 7,
+            },
+        }
+    }
+
+    /// `enabled` and `days` under `profile`: the keys that are set win.
+    pub fn effective(&self, profile: Profile) -> DnsLogEffective {
+        let default = Self::profile_default(profile);
+        DnsLogEffective {
+            enabled: self.enabled.unwrap_or(default.enabled),
+            days: self.days.unwrap_or(default.days),
         }
     }
 }
@@ -1278,11 +1339,7 @@ impl DnsSection {
             "dns.forward_retries must be between 0 and 5",
         )?;
         check(
-            self.log.format == DnsLogFormat::Jsonl,
-            "dns.log.format = \"dnstap\" is not available yet; use \"jsonl\"",
-        )?;
-        check(
-            (1..=365).contains(&self.log.days),
+            self.log.days.is_none_or(|days| (1..=365).contains(&days)),
             "dns.log.days must be between 1 and 365",
         )?;
         check(
@@ -2948,6 +3005,57 @@ retired = [\"tenko_kek_old\"]
         .expect("parses");
         let resolved = loaded.config.resolve().expect("valid under Lab");
         assert_eq!(resolved.tls, TlsSpec::Plain);
+    }
+
+    #[test]
+    fn the_query_log_follows_the_profile_unless_set() {
+        let defaults = DnsLogSection::default();
+        let pairs = [
+            (Profile::Home, false, 7),
+            (Profile::Standard, true, 30),
+            (Profile::Hardened, true, 30),
+            (Profile::Lab, true, 7),
+        ];
+        for (profile, enabled, days) in pairs {
+            assert_eq!(
+                defaults.effective(profile),
+                DnsLogEffective { enabled, days },
+                "{profile:?}"
+            );
+        }
+        assert!(defaults.pseudonymise, "pseudonymised in every profile");
+        let loaded = from_text(
+            "data_dir = \"/d\"
+[dns.log]
+enabled = false
+days = 90
+format = \"dnstap\"
+             client = \"hidden\"
+",
+            &[],
+        )
+        .expect("parses");
+        let log = &loaded.config.dns.log;
+        assert_eq!(
+            log.effective(Profile::Standard),
+            DnsLogEffective {
+                enabled: false,
+                days: 90
+            }
+        );
+        assert_eq!(log.format, DnsLogFormat::Dnstap);
+        assert_eq!(log.client, DnsLogClient::Hidden);
+        loaded.config.resolve().expect("valid");
+        let wrong = from_text(
+            "data_dir = \"/d\"
+[dns.log]
+days = 400
+",
+            &[],
+        )
+        .expect("parses");
+        let error = wrong.config.resolve().expect_err("invalid");
+        assert!(error.message.contains("dns.log.days"), "{error}");
     }
 
     #[test]

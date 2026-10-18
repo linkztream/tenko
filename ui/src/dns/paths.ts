@@ -12,4 +12,5 @@ export const dnsPaths = {
   zoneImport: (id: string) => `/dns/import/${seg(id)}`,
   acls: () => "/dns/acls",
   keys: () => "/dns/keys",
+  log: () => "/dns/log",
 } as const;

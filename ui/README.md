@@ -84,9 +84,10 @@ ui/
                         settings and history tabs, the zone file import and export, access lists
                         and TSIG keys; api.ts is its only API module (types.ts holds the types
                         without the client, shared with the mock service), model.ts the pure name,
-                        record and access list helpers, paths.ts its links. Views, forwarders and
-                        block lists show a page that says they come later. The DNS records block
-                        of the host and address pages is hosts/DnsRecords.tsx
+                        record and access list helpers, paths.ts its links. log/ is the query log
+                        page of a node (WP5.4) with its own api.ts and model.ts. Views, forwarders
+                        and block lists show a page that says they come later. The DNS records
+                        block of the host and address pages is hosts/DnsRecords.tsx
 ```
 
 Every area folder owns a `routes.ts` that exports `routes: AppRoute[]`; `src/app/router.ts`
@@ -312,6 +313,7 @@ Page roots in this version:
 | `/scans`, `/scans/:id` | `page-scans`, `page-scan` |
 | `/dns`, `/dns/zones/:id/:tab?`, `/dns/import/:id` | `page-dns`, `page-dns-zone` (`data-id`), `page-dns-import` (`data-id`) |
 | `/dns/acls`, `/dns/keys` (administrators, scope `dns.keys`) | `page-dns-acls`, `page-dns-keys` |
+| `/dns/log` | `page-dns-log` |
 | Every other path under `/dns` (views, forwarders, block lists: later slices) | `page-dns-later` with `dns-coming` |
 | `/discovery`, `/discovery/:id` | `page-discovery` (with `proposal-panel`) |
 | `/discovery/observations`, `/discovery/observations/:subject` | `page-discovery-observations`, `page-discovery-subject` |
@@ -369,12 +371,13 @@ The hooks of the WP2.9 views beyond the generic ones:
 | Partition links | `cluster-banner-link` (the banner's link to the queue), `no-quorum-show-queue` (the same in `dialog-no-quorum`) |
 | Command palette | `dialog-palette`, `palette-item` (`data-key` the command id) |
 | Cancel of a form or plan dialog | `form-cancel`, `plan-cancel` |
-| DNS area (every page) | `dns-nav` with `dns-nav-link` (`data-key` `zones`, `acls`, `keys`); `dns-not-built` (the API answers 501), `dns-off` with `dns-modules-link` (the module is switched off) |
+| DNS area (every page) | `dns-nav` with `dns-nav-link` (`data-key` `zones`, `acls`, `keys`, `log`); `dns-not-built` (the API answers 501), `dns-off` with `dns-modules-link` (the module is switched off) |
 | Zone list | `grid-dns-zones` (rows keyed by the zone name), `filter-input`, `dns-zone-create`, `dns-zones-empty`; per row `zone-kind` (`data-kind`), `zone-reverse`, `zone-not-served`, `zone-origins` (`data-key` the origins present, comma-separated); `dialog-zone-form` with `field-name`, `field-kind`, `field-serial`, `field-source`, `field-soa.mname`, `field-soa.rname`, `field-name_servers`, `field-soa.ttl`, `field-description`, `form-submit`, `form-cancel`; `dialog-zone-delete` with `confirm-ok` |
 | Zone page | `zone-name`, `zone-header-serial` (`data-key` the serial), `dns-zone-import`, `dns-zone-export`, `dns-zone-delete`, `zone-tab-records`, `zone-tab-settings`, `zone-tab-history`; `zone-records` with `grid-dns-records` (one row per record, `data-key` `<relative name>/<type>/<index>`), `filter-input`, `filter-type`, `filter-origin`, `dns-rrset-add`, `dns-batch-toggle`, `rrset-origin` (`data-kind`), `rrset-taken-over`, `rrset-pending`, `dns-records-empty`; row actions `add`, `remove`, `delete`, `takeover`; the batch bar `dns-batch` (`data-count`) with `batch-item` (`data-index`, `data-key` `<name>/<type>`), `batch-item-drop`, `dns-batch-discard`, `dns-batch-review`; `dialog-rrset-form` with `field-name`, `field-type`, `field-ttl`, `field-data`; `dialog-rrset-delete`, `dialog-take-over`; `dialog-batch-diff` with `plan-summary` (`data-count`), `plan-change` (`data-kind` `add`, `change` or `delete`, `data-key` `<name>/<type>`), `plan-confirm`, `plan-cancel` |
 | Zone settings and history | `zone-settings` with `field-soa.mname`, `field-soa.rname`, `field-soa.refresh`, `field-soa.retry`, `field-soa.expire`, `field-soa.minimum`, `field-soa.ttl`, `field-name_servers`, `field-serial`, `field-description`, `form-submit`; `zone-history` with `zone-serial`, `history-entry` (`data-kind` the audit action, `data-key` the sequence number), `zone-history-refused` |
 | Zone file import | `import-steps` with `import-step` (`data-key` `upload`, `preview`, `apply` or `done`), `import-upload`, `import-dropzone`, `import-choose`, `import-file-input`, `import-file` (`data-key` the file name), `field-zone_file`, `field-replace`, `import-preview`; `import-preview-report` with `import-fact` (`data-key` `added`, `replaced` or `removed`, `data-count`), `import-types` with `import-type` (`data-key` the type, `data-count`), `import-losses` with `import-loss` (`data-index`, `data-code`) or `import-no-losses`, `import-back`, `import-apply`; `import-result` (`data-state` `done` or `failed` once finished) with `import-serial` (`data-key`), `import-open-job`, `import-again`, `import-open-zone` |
 | Access lists and TSIG keys | `grid-dns-acls` (rows keyed by the list name) with `acl-entry`, `dns-acl-create`, `dns-acls-empty`, `dialog-acl-form` with `field-name`, `field-entries`, `field-description`, `dialog-acl-delete`; `grid-dns-keys` (rows keyed by the key name), `dns-key-create`, `dns-keys-empty`, `dialog-key-form` with `field-mode-generate`, `field-mode-import`, `field-name`, `field-algorithm`, `field-secret`, `field-description`; `dialog-key-created` with `key-secret`, `key-copy`, `key-stored`, `key-done`; `dialog-key-delete` |
+| Query log (`/dns/log`) | `field-node`; `dns-log-figures` (`data-state` `on` or `stopped`, `data-client` `pseudonym`, `address` or `hidden`, `data-written`, `data-dropped`); `dns-log-filters` with `field-qname`, `field-client`, `field-rcode`, `field-from`, `field-until`, `field-error` (`data-field`), `form-submit`, `dns-log-reset`; `dns-log-table` with `dns-log-row` (`data-index`, `data-key` the query name, `data-rcode`; cells by `data-col` `time`, `client`, `transport`, `name`, `type`, `rcode`, `latency`, `flags`), `dns-log-client` (`data-kind` `pseudonym` or `address`), `dns-log-cached`, `dns-log-blocked`; `dns-log-empty` (`data-filtered`), `dns-log-partial`, `dns-log-paging` (`data-page`) with `dns-log-newer` and `dns-log-older`; `dns-log-refresh`, `dns-log-stop`, `dns-log-start` (administrators), `dns-log-stopped`; `dns-log-off` with `dns-log-settings-link`, `dns-log-not-dns`, `dns-log-no-node` |
 | DNS records of a host or an address | `host-dns` with `host-dns-row` (`data-key` the address), `host-dns-record` (`data-kind` `forward` or `reverse`, `data-key` `<type> <data>`), `host-dns-zone`, `host-dns-empty`, `host-dns-none` (`data-kind`) |
 
 A new view follows the same pattern: a page root id, `grid-<id>` for each grid, the generic

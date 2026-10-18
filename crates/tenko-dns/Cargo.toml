@@ -50,6 +50,8 @@ zeroize = { workspace = true }
 hickory-proto = { workspace = true }
 # The DoH client of tests/tls*.rs (HTTP/2 and HTTP/1.1 over a rustls client).
 hyper = { version = "1.12.0", features = ["client", "http1", "http2"] }
+# An independent protobuf decoder for the dnstap test (already built through tonic).
+prost = { workspace = true }
 proptest = { workspace = true }
 # The certificates of the in-test DoT and DoH upstreams and the test CA and leaves of tests/tls*.rs.
 rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "crypto", "pem"] }

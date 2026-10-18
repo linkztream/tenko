@@ -1435,6 +1435,65 @@ export type MessageKey =
   | "dns.kind.rpz"
   | "dns.kind.secondary"
   | "dns.kind.stub"
+  | "dns.log.blocked"
+  | "dns.log.cached"
+  | "dns.log.client_mode.address"
+  | "dns.log.client_mode.hidden"
+  | "dns.log.client_mode.pseudonym"
+  | "dns.log.client_none"
+  | "dns.log.col.client"
+  | "dns.log.col.flags"
+  | "dns.log.col.latency"
+  | "dns.log.col.name"
+  | "dns.log.col.rcode"
+  | "dns.log.col.time"
+  | "dns.log.col.transport"
+  | "dns.log.col.type"
+  | "dns.log.empty"
+  | "dns.log.empty_filtered"
+  | "dns.log.figures"
+  | "dns.log.filter.apply"
+  | "dns.log.filter.client"
+  | "dns.log.filter.client_invalid"
+  | "dns.log.filter.client_placeholder"
+  | "dns.log.filter.from"
+  | "dns.log.filter.qname"
+  | "dns.log.filter.qname_invalid"
+  | "dns.log.filter.qname_placeholder"
+  | "dns.log.filter.rcode"
+  | "dns.log.filter.rcode_any"
+  | "dns.log.filter.reset"
+  | "dns.log.filter.until"
+  | "dns.log.filter.until_invalid"
+  | "dns.log.latency"
+  | "dns.log.newer"
+  | "dns.log.no_node"
+  | "dns.log.node"
+  | "dns.log.node_label"
+  | "dns.log.not_dns_body"
+  | "dns.log.not_dns_title"
+  | "dns.log.off_body"
+  | "dns.log.off_link"
+  | "dns.log.off_title"
+  | "dns.log.older"
+  | "dns.log.page"
+  | "dns.log.partial"
+  | "dns.log.pseudonym_hint"
+  | "dns.log.refresh"
+  | "dns.log.start"
+  | "dns.log.started_toast"
+  | "dns.log.stop"
+  | "dns.log.stopped_body"
+  | "dns.log.stopped_title"
+  | "dns.log.stopped_toast"
+  | "dns.log.sub"
+  | "dns.log.switch_failed"
+  | "dns.log.table"
+  | "dns.log.title"
+  | "dns.log.transport.doh"
+  | "dns.log.transport.dot"
+  | "dns.log.transport.tcp"
+  | "dns.log.transport.udp"
   | "dns.loss.directive"
   | "dns.loss.origin"
   | "dns.loss.outside"
@@ -1443,6 +1502,7 @@ export type MessageKey =
   | "dns.nav.acls"
   | "dns.nav.keys"
   | "dns.nav.label"
+  | "dns.nav.log"
   | "dns.nav.zones"
   | "dns.op.add"
   | "dns.op.delete"
@@ -4998,6 +5058,10 @@ export interface MessageArgs {
   "dns.key.created_body": { name: string | number };
   "dns.key.delete_title": { name: string | number };
   "dns.key.deleted": { name: string | number };
+  "dns.log.figures": { client: string | number; days: number; dropped: number; sample: number; written: number };
+  "dns.log.latency": { ms: string | number };
+  "dns.log.node": { id: string | number };
+  "dns.log.page": { page: string | number };
   "dns.record.line_error": { line: string | number; message: string | number };
   "dns.records.label": { zone: string | number };
   "dns.rrset.add_records_title": { name: string | number; type: string | number };
@@ -7090,6 +7154,65 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.kind.rpz",
   "dns.kind.secondary",
   "dns.kind.stub",
+  "dns.log.blocked",
+  "dns.log.cached",
+  "dns.log.client_mode.address",
+  "dns.log.client_mode.hidden",
+  "dns.log.client_mode.pseudonym",
+  "dns.log.client_none",
+  "dns.log.col.client",
+  "dns.log.col.flags",
+  "dns.log.col.latency",
+  "dns.log.col.name",
+  "dns.log.col.rcode",
+  "dns.log.col.time",
+  "dns.log.col.transport",
+  "dns.log.col.type",
+  "dns.log.empty",
+  "dns.log.empty_filtered",
+  "dns.log.figures",
+  "dns.log.filter.apply",
+  "dns.log.filter.client",
+  "dns.log.filter.client_invalid",
+  "dns.log.filter.client_placeholder",
+  "dns.log.filter.from",
+  "dns.log.filter.qname",
+  "dns.log.filter.qname_invalid",
+  "dns.log.filter.qname_placeholder",
+  "dns.log.filter.rcode",
+  "dns.log.filter.rcode_any",
+  "dns.log.filter.reset",
+  "dns.log.filter.until",
+  "dns.log.filter.until_invalid",
+  "dns.log.latency",
+  "dns.log.newer",
+  "dns.log.no_node",
+  "dns.log.node",
+  "dns.log.node_label",
+  "dns.log.not_dns_body",
+  "dns.log.not_dns_title",
+  "dns.log.off_body",
+  "dns.log.off_link",
+  "dns.log.off_title",
+  "dns.log.older",
+  "dns.log.page",
+  "dns.log.partial",
+  "dns.log.pseudonym_hint",
+  "dns.log.refresh",
+  "dns.log.start",
+  "dns.log.started_toast",
+  "dns.log.stop",
+  "dns.log.stopped_body",
+  "dns.log.stopped_title",
+  "dns.log.stopped_toast",
+  "dns.log.sub",
+  "dns.log.switch_failed",
+  "dns.log.table",
+  "dns.log.title",
+  "dns.log.transport.doh",
+  "dns.log.transport.dot",
+  "dns.log.transport.tcp",
+  "dns.log.transport.udp",
   "dns.loss.directive",
   "dns.loss.origin",
   "dns.loss.outside",
@@ -7098,6 +7221,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.nav.acls",
   "dns.nav.keys",
   "dns.nav.label",
+  "dns.nav.log",
   "dns.nav.zones",
   "dns.op.add",
   "dns.op.delete",

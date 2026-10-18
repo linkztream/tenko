@@ -1,13 +1,14 @@
 //! The report `dns.status` and the local command handlers of the `dns` role (plan sections
 //! 2.9 and 2.10, `docs/node-sync.md` section 5).
 //!
-//! A node's DNS role answers three commands and one report:
+//! A node's DNS role answers five commands and one report:
 //!
 //! | Kind | Arguments (CBOR) | What the role does |
 //! |---|---|---|
 //! | `dns.cache.flush` | [`CacheFlushArgs`] (optional; none flushes all) | Empties the cache, or the entries at or below a name suffix; `done` with the count removed |
 //! | `dns.stats` | none | Answers `done` with the counters of the workers, the forwarder and the query log in its detail |
-//! | `dns.log.read` | [`LogReadArgs`] | Answers `done` with a page of the local query log, newest first, and the cursor of the next page; `rejected` when the log is off |
+//! | `dns.log.read` | [`LogReadArgs`] | Answers `done` with a page of the local query log, newest first, filtered, and the cursor of the next page; `rejected` when the log is off or a filter cannot be applied |
+//! | `dns.log.stop`, `dns.log.start` | none | The kill switch: the log takes no entry until it is started again (kept across a restart); `rejected` when the log is off |
 //! | `dns.status` (report) | | [`DnsStatus`]: serving, the revision held and the lag, zones, RRsets, listeners, the cache's entries and hits, the problems of stub zones and recursion lists, the start |
 //!
 //! In Phase 2 the role runs in the controller's own process, so [`LocalNode`] executes a
@@ -31,8 +32,7 @@ use tenko_store::WriteBatch;
 use crate::{
     catalog::CatalogHandle,
     forward::{ForwardStats, Forwarder},
-    log::QueryLogSink,
-    querylog::{self, FileLog, LogPage},
+    querylog::{self, FileLog, LogFigures, LogFilter, LogPage},
     server::Server,
     store_feed::FeedProgress,
     transport::WorkerLayout,
@@ -45,6 +45,10 @@ pub const CACHE_FLUSH: &str = "dns.cache.flush";
 pub const STATS: &str = "dns.stats";
 /// Read a page of the node's query log.
 pub const LOG_READ: &str = "dns.log.read";
+/// Stop the node's query log (the kill switch).
+pub const LOG_STOP: &str = "dns.log.stop";
+/// Start the node's query log again.
+pub const LOG_START: &str = "dns.log.start";
 /// The name of the role's report.
 pub const STATUS: &str = "dns.status";
 
@@ -67,9 +71,34 @@ pub struct LogReadArgs {
     pub cursor: Option<String>,
     /// Lines, 1 to [`MAX_LOG_PAGE`].
     pub limit: u32,
-    /// Query names starting with this text.
+    /// Query names equal to this name or under it.
     #[serde(default)]
     pub qname: Option<String>,
+    /// A client: its pseudonym or its address.
+    #[serde(default)]
+    pub client: Option<String>,
+    /// The RCODE answered.
+    #[serde(default)]
+    pub rcode: Option<u16>,
+    /// Queries that arrived at or after this time.
+    #[serde(default)]
+    pub from: Option<Timestamp>,
+    /// Queries that arrived at or before this time.
+    #[serde(default)]
+    pub until: Option<Timestamp>,
+}
+
+impl LogReadArgs {
+    /// The reader's filter.
+    pub fn filter(&self) -> LogFilter {
+        LogFilter {
+            qname: self.qname.clone(),
+            client: self.client.clone(),
+            rcode: self.rcode,
+            from: self.from,
+            until: self.until,
+        }
+    }
 }
 
 /// One listener of the role.
@@ -122,6 +151,8 @@ pub struct DnsStatus {
     pub started: Timestamp,
     /// The workers and the TCP side, while the role serves.
     pub layout: Option<WorkerLayout>,
+    /// The query log, when it is on.
+    pub log: Option<LogFigures>,
 }
 
 /// The counters `dns.stats` reports.
@@ -131,8 +162,8 @@ pub struct DnsStats {
     pub layout: Option<WorkerLayout>,
     /// The forwarder, when it has upstreams.
     pub forward: Option<ForwardStats>,
-    /// Query log lines written and dropped, when the log is on.
-    pub log: Option<(u64, u64)>,
+    /// The query log's counters and state, when the log is on.
+    pub log: Option<LogFigures>,
 }
 
 impl DnsStats {
@@ -170,8 +201,14 @@ impl DnsStats {
                 forward.prefetched
             ));
         }
-        if let Some((written, dropped)) = self.log {
-            parts.push(format!("query log: {written} written, {dropped} dropped"));
+        if let Some(log) = &self.log {
+            parts.push(format!(
+                "query log{}: {} written, {} dropped, {} failed write(s)",
+                if log.stopped { " (stopped)" } else { "" },
+                log.written,
+                log.dropped,
+                log.write_errors
+            ));
         }
         parts.join("; ")
     }
@@ -303,10 +340,33 @@ impl LocalNode {
         DnsStats {
             layout: self.layout(),
             forward: self.forwarder.as_ref().map(|forwarder| forwarder.stats()),
-            log: self
-                .log
-                .as_ref()
-                .map(|(log, _)| (log.written(), log.dropped())),
+            log: self.log.as_ref().map(|(log, _)| log.figures()),
+        }
+    }
+
+    fn switch_log(&self, stopped: bool) -> CommandResult {
+        let Some((log, _)) = &self.log else {
+            return CommandResult::rejected("the query log is off on this node");
+        };
+        let was = log.is_stopped();
+        match log.set_stopped(stopped) {
+            Ok(()) => CommandResult::done(
+                match (was, stopped) {
+                    (false, true) => "the query log is stopped",
+                    (true, true) => "the query log was stopped already",
+                    (true, false) => "the query log is started again",
+                    (false, false) => "the query log was running already",
+                },
+                Output::None,
+            ),
+            Err(error) => CommandResult {
+                outcome: Outcome::Failed,
+                detail: format!(
+                    "the query log is {} until the node restarts, but its marker file could                      not be changed: {error}",
+                    if stopped { "stopped" } else { "started" }
+                ),
+                output: Output::None,
+            },
         }
     }
 
@@ -360,12 +420,19 @@ impl LocalNode {
             Err(error) => return CommandResult::rejected(format!("the arguments: {error}")),
         };
         let limit = usize::try_from(args.limit.clamp(1, MAX_LOG_PAGE)).unwrap_or(100);
-        match querylog::read(dir, args.cursor.as_deref(), limit, args.qname.as_deref()) {
+        let filter = args.filter();
+        if let Err(error) = filter.validate() {
+            return CommandResult::rejected(error.to_string());
+        }
+        match querylog::read(dir, args.cursor.as_deref(), limit, &filter) {
             Ok(page) => CommandResult::done(
                 format!("{} line(s) read", page.lines.len()),
                 Output::Log(page),
             ),
             Err(querylog::ReadError::Cursor) => CommandResult::rejected("the cursor is not valid"),
+            Err(error @ querylog::ReadError::Filter(_)) => {
+                CommandResult::rejected(error.to_string())
+            }
             Err(error) => CommandResult {
                 outcome: Outcome::Failed,
                 detail: error.to_string(),
@@ -463,6 +530,7 @@ impl DnsNode for LocalNode {
             problems,
             started: self.started,
             layout,
+            log: self.log.as_ref().map(|(log, _)| log.figures()),
         }
     }
 
@@ -474,6 +542,8 @@ impl DnsNode for LocalNode {
                 CommandResult::done(stats.detail(), Output::Stats(stats))
             }
             LOG_READ => self.read_log(args),
+            LOG_STOP => self.switch_log(true),
+            LOG_START => self.switch_log(false),
             other => CommandResult::rejected(format!("`{other}` is not a command of the dns role")),
         }
     }

@@ -139,6 +139,8 @@ async fn keys_rollovers_and_nodes_are_checked_on_their_objects() {
         ("GET", "/nodes/1001/dns"),
         ("POST", "/nodes/1001/dns/cache/flush"),
         ("GET", "/nodes/1001/dns/log"),
+        ("POST", "/nodes/1001/dns/log/stop"),
+        ("POST", "/nodes/1001/dns/log/start"),
     ] {
         send(&router, method, path)
             .await
@@ -156,6 +158,11 @@ async fn keys_rollovers_and_nodes_are_checked_on_their_objects() {
             (Action::Execute, ObjectKind::Zone),
             (Action::Read, ObjectKind::Node),
             (Action::Read, ObjectKind::Zone),
+            (Action::Update, ObjectKind::Node),
+            (Action::Update, ObjectKind::Node),
+            (Action::Execute, ObjectKind::Zone),
+            (Action::Update, ObjectKind::Node),
+            (Action::Execute, ObjectKind::Zone),
         ]
     );
 }

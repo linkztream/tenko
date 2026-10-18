@@ -24,6 +24,7 @@ const TABS: readonly Tab[] = [
   },
   { id: "acls", href: dnsPaths.acls(), label: "dns.nav.acls", match: (p) => p.startsWith("/dns/acls"), shown: () => true },
   { id: "keys", href: dnsPaths.keys(), label: "dns.nav.keys", match: (p) => p.startsWith("/dns/keys"), shown: mayKeys },
+  { id: "log", href: dnsPaths.log(), label: "dns.nav.log", match: (p) => p.startsWith("/dns/log"), shown: () => true },
 ];
 
 export function DnsNav() {

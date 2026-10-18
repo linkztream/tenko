@@ -1,0 +1,395 @@
+// The query log of a DNS node (/dns/log, WP5.4): the last queries of the node, newest first,
+// with time, client, transport, name, type, RCODE and latency; filters by name (the name and
+// the names under it), client, RCODE and time; older pages through the cursor of the node
+// command `dns.log.read`. The client is what the node logged: a pseudonym (the default in
+// every profile), nothing, or the address, which the server sends only to principals that may
+// update the node. Every read is audited by the server. Administrators stop and start the log
+// (the kill switch). A node whose log is off shows an empty state that says where it is set.
+import { A } from "@solidjs/router";
+import { createMemo, createResource, createSignal, For, Match, Show, Switch } from "solid-js";
+import { ApiError, errorMessage } from "../../api/problem";
+import { paths } from "../../app/paths";
+import { isAdmin } from "../../auth/session";
+import { Icon } from "../../components/Icon";
+import { ErrorNotice, Notice } from "../../components/Notice";
+import { PageHead } from "../../components/PageHead";
+import { toast } from "../../components/toast";
+import { formatDateTime, formatNumber, t } from "../../i18n";
+import { DnsNav } from "../DnsNav";
+import { DnsProblem, unavailable } from "../Parts";
+import { logNodes, nodeDns, readLog, switchLog, type QueryLogLine, type QueryLogStatus } from "./api";
+import { checkFilters, clientKind, filtered, NO_FILTERS, PAGE_SIZE, RCODES, rcodeName, toQuery, type FilterProblem, type LogFilters } from "./model";
+import "../dns.css";
+import "./log.css";
+
+const TIME: Intl.DateTimeFormatOptions = { dateStyle: "short", timeStyle: "medium" };
+
+function notDns(err: unknown): boolean {
+  return err instanceof ApiError && err.code === "dns.node.not_dns";
+}
+
+function Figures(props: { log: QueryLogStatus }) {
+  return (
+    <p
+      class="dns-log-figures muted"
+      data-testid="dns-log-figures"
+      data-state={props.log.state}
+      data-client={props.log.client}
+      data-written={props.log.written}
+      data-dropped={props.log.dropped}
+    >
+      {t("dns.log.figures", {
+        client: t(`dns.log.client_mode.${props.log.client === "address" || props.log.client === "hidden" ? props.log.client : "pseudonym"}`),
+        sample: props.log.sample,
+        days: props.log.days,
+        written: props.log.written,
+        dropped: props.log.dropped,
+      })}
+    </p>
+  );
+}
+
+function Client(props: { line: QueryLogLine }) {
+  const kind = () => clientKind(props.line);
+  return (
+    <Show when={kind() !== "hidden"} fallback={<span class="muted">{t("dns.log.client_none")}</span>}>
+      <span class="mono" data-testid="dns-log-client" data-kind={kind()} title={kind() === "pseudonym" ? t("dns.log.pseudonym_hint") : undefined}>
+        {props.line.client}
+      </span>
+    </Show>
+  );
+}
+
+function Lines(props: { lines: QueryLogLine[] }) {
+  return (
+    <div class="table-wrap">
+      <table class="plain dns-log-table" data-testid="dns-log-table">
+        <caption class="sr-only">{t("dns.log.table")}</caption>
+        <thead>
+          <tr>
+            <th scope="col">{t("dns.log.col.time")}</th>
+            <th scope="col">{t("dns.log.col.client")}</th>
+            <th scope="col">{t("dns.log.col.transport")}</th>
+            <th scope="col">{t("dns.log.col.name")}</th>
+            <th scope="col">{t("dns.log.col.type")}</th>
+            <th scope="col">{t("dns.log.col.rcode")}</th>
+            <th scope="col" class="r">
+              {t("dns.log.col.latency")}
+            </th>
+            <th scope="col">{t("dns.log.col.flags")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <For each={props.lines}>
+            {(line, index) => (
+              <tr data-testid="dns-log-row" data-index={index()} data-key={line.qname} data-rcode={line.rcode}>
+                <td data-col="time" class="nowrap">
+                  {formatDateTime(line.at, TIME)}
+                </td>
+                <td data-col="client">
+                  <Client line={line} />
+                </td>
+                <td data-col="transport">{t(`dns.log.transport.${line.transport}`)}</td>
+                <td data-col="name" class="mono">
+                  {line.qname}
+                </td>
+                <td data-col="type" class="mono">
+                  {line.type}
+                </td>
+                <td data-col="rcode" class="mono">
+                  <span class={line.rcode === 0 ? undefined : "dns-log-bad"}>{rcodeName(line.rcode)}</span>
+                </td>
+                <td data-col="latency" class="r nowrap">
+                  {t("dns.log.latency", { ms: formatNumber(line.duration_micros / 1000, { maximumFractionDigits: 2 }) })}
+                </td>
+                <td data-col="flags">
+                  <Show when={line.cached}>
+                    <span class="tag" data-testid="dns-log-cached">
+                      {t("dns.log.cached")}
+                    </span>
+                  </Show>
+                  <Show when={line.blocked}>
+                    <span class="tag conflict" data-testid="dns-log-blocked">
+                      {t("dns.log.blocked")}
+                    </span>
+                  </Show>
+                </td>
+              </tr>
+            )}
+          </For>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export default function LogPage() {
+  const [nodes] = createResource(() => logNodes());
+  const [chosen, setChosen] = createSignal<number>();
+  const node = createMemo(() => chosen() ?? nodes.latest?.[0]);
+  const [status, { refetch: refetchStatus }] = createResource(node, (id) => nodeDns(id));
+  const log = () => (status.error ? undefined : status.latest?.query_log ?? undefined);
+
+  // The form as typed, and the filters of the pages shown.
+  const [draft, setDraft] = createSignal<LogFilters>({ ...NO_FILTERS });
+  const [applied, setApplied] = createSignal<LogFilters>({ ...NO_FILTERS });
+  const [problems, setProblems] = createSignal<FilterProblem[]>([]);
+  // The cursors of the pages from the newest to the one shown (undefined: the newest page).
+  const [cursors, setCursors] = createSignal<(string | undefined)[]>([undefined]);
+  const [tick, setTick] = createSignal(0);
+  const [busy, setBusy] = createSignal(false);
+
+  const request = createMemo(() => {
+    const id = node();
+    if (id === undefined || !log()) return undefined;
+    const stack = cursors();
+    return { id, query: toQuery(applied(), stack[stack.length - 1]), tick: tick() };
+  });
+  const [page] = createResource(request, (r) => readLog(r.id, r.query));
+
+  const field = (name: keyof LogFilters) => (event: { currentTarget: { value: string } }) => setDraft({ ...draft(), [name]: event.currentTarget.value });
+
+  const apply = (event: Event) => {
+    event.preventDefault();
+    const found = checkFilters(draft());
+    setProblems(found);
+    if (found.length > 0) return;
+    setApplied({ ...draft() });
+    setCursors([undefined]);
+    setTick(tick() + 1);
+  };
+  const reset = () => {
+    setDraft({ ...NO_FILTERS });
+    setApplied({ ...NO_FILTERS });
+    setProblems([]);
+    setCursors([undefined]);
+  };
+  const older = () => {
+    const next = page.latest?.next;
+    if (next) setCursors([...cursors(), next]);
+  };
+  const newer = () => setCursors(cursors().slice(0, -1));
+  const refresh = () => {
+    void refetchStatus();
+    setCursors([undefined]);
+    setTick(tick() + 1);
+  };
+
+  const toggle = async (stop: boolean) => {
+    const id = node();
+    if (id === undefined || busy()) return;
+    setBusy(true);
+    try {
+      await switchLog(id, stop);
+      toast({ kind: "ok", title: stop ? t("dns.log.stopped_toast") : t("dns.log.started_toast") });
+      void refetchStatus();
+    } catch (err) {
+      toast({ kind: "bad", title: t("dns.log.switch_failed"), body: errorMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const problem = (name: FilterProblem) => problems().includes(name);
+  const short = () => {
+    const current = page.latest;
+    return !!current && !!current.next && current.items.length < PAGE_SIZE;
+  };
+
+  return (
+    <div class="page dns-page" data-testid="page-dns-log">
+      <DnsNav />
+      <PageHead
+        title={t("dns.log.title")}
+        sub={t("dns.log.sub")}
+        actions={
+          <>
+            <Show when={log()}>
+              <button type="button" class="btn" data-testid="dns-log-refresh" onClick={refresh}>
+                <Icon name="refresh" />
+                {t("dns.log.refresh")}
+              </button>
+            </Show>
+            <Show when={isAdmin() && log()}>
+              {(current) => (
+                <Show
+                  when={current().state === "on"}
+                  fallback={
+                    <button type="button" class="btn primary" data-testid="dns-log-start" disabled={busy()} onClick={() => void toggle(false)}>
+                      {t("dns.log.start")}
+                    </button>
+                  }
+                >
+                  <button type="button" class="btn" data-testid="dns-log-stop" disabled={busy()} onClick={() => void toggle(true)}>
+                    {t("dns.log.stop")}
+                  </button>
+                </Show>
+              )}
+            </Show>
+          </>
+        }
+      />
+      <div class="page-body dns-log-body">
+        <Show when={nodes.error}>
+          <ErrorNotice error={nodes.error} />
+        </Show>
+        <Show when={nodes.latest && nodes.latest.length === 0}>
+          <Notice kind="info" role="status" testid="dns-log-no-node">
+            {t("dns.log.no_node")}
+          </Notice>
+        </Show>
+        <Show when={(nodes.latest?.length ?? 0) > 0}>
+          <div class="dns-log-node">
+            <label for="dns-log-node">{t("dns.log.node_label")}</label>
+            <select id="dns-log-node" class="select" data-testid="field-node" value={String(node() ?? "")} onChange={(e) => setChosen(Number(e.currentTarget.value))}>
+              <For each={nodes.latest ?? []}>{(id) => <option value={String(id)}>{t("dns.log.node", { id })}</option>}</For>
+            </select>
+          </div>
+        </Show>
+        <Switch>
+          <Match when={status.error && unavailable(status.error)}>
+            <DnsProblem error={status.error} />
+          </Match>
+          <Match when={status.error && notDns(status.error)}>
+            <Notice kind="info" role="status" title={t("dns.log.not_dns_title")} testid="dns-log-not-dns">
+              {t("dns.log.not_dns_body")}
+            </Notice>
+          </Match>
+          <Match when={status.error}>
+            <ErrorNotice error={status.error} />
+          </Match>
+          <Match when={status.latest && !status.latest.query_log}>
+            <div class="empty" data-testid="dns-log-off">
+              <h2>{t("dns.log.off_title")}</h2>
+              <p>{t("dns.log.off_body")}</p>
+              <A class="btn" href={paths.settings("security")} data-testid="dns-log-settings-link">
+                {t("dns.log.off_link")}
+              </A>
+            </div>
+          </Match>
+          <Match when={log()}>
+            {(current) => (
+              <>
+                <Show when={current().state === "stopped"}>
+                  <Notice kind="warn" role="status" title={t("dns.log.stopped_title")} testid="dns-log-stopped">
+                    {t("dns.log.stopped_body")}
+                  </Notice>
+                </Show>
+                <Figures log={current()} />
+                <form class="dns-log-filters" data-testid="dns-log-filters" onSubmit={apply} novalidate>
+                  <div class="field">
+                    <label for="dns-log-qname">{t("dns.log.filter.qname")}</label>
+                    <input
+                      id="dns-log-qname"
+                      class="input mono"
+                      value={draft().qname}
+                      placeholder={t("dns.log.filter.qname_placeholder")}
+                      spellcheck={false}
+                      autocomplete="off"
+                      aria-invalid={problem("qname") ? "true" : undefined}
+                      data-testid="field-qname"
+                      onInput={field("qname")}
+                    />
+                    <Show when={problem("qname")}>
+                      <span class="help bad" data-testid="field-error" data-field="qname">
+                        {t("dns.log.filter.qname_invalid")}
+                      </span>
+                    </Show>
+                  </div>
+                  <div class="field">
+                    <label for="dns-log-client">{t("dns.log.filter.client")}</label>
+                    <input
+                      id="dns-log-client"
+                      class="input mono"
+                      value={draft().client}
+                      placeholder={t("dns.log.filter.client_placeholder")}
+                      spellcheck={false}
+                      autocomplete="off"
+                      aria-invalid={problem("client") ? "true" : undefined}
+                      data-testid="field-client"
+                      onInput={field("client")}
+                    />
+                    <Show when={problem("client")}>
+                      <span class="help bad" data-testid="field-error" data-field="client">
+                        {t("dns.log.filter.client_invalid")}
+                      </span>
+                    </Show>
+                  </div>
+                  <div class="field">
+                    <label for="dns-log-rcode">{t("dns.log.filter.rcode")}</label>
+                    <select id="dns-log-rcode" class="select" value={draft().rcode} data-testid="field-rcode" onChange={field("rcode")}>
+                      <option value="">{t("dns.log.filter.rcode_any")}</option>
+                      <For each={RCODES}>{([code, name]) => <option value={String(code)}>{name}</option>}</For>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="dns-log-from">{t("dns.log.filter.from")}</label>
+                    <input id="dns-log-from" type="datetime-local" class="input" value={draft().from} data-testid="field-from" onInput={field("from")} />
+                  </div>
+                  <div class="field">
+                    <label for="dns-log-until">{t("dns.log.filter.until")}</label>
+                    <input
+                      id="dns-log-until"
+                      type="datetime-local"
+                      class="input"
+                      value={draft().until}
+                      aria-invalid={problem("until") ? "true" : undefined}
+                      data-testid="field-until"
+                      onInput={field("until")}
+                    />
+                    <Show when={problem("until")}>
+                      <span class="help bad" data-testid="field-error" data-field="until">
+                        {t("dns.log.filter.until_invalid")}
+                      </span>
+                    </Show>
+                  </div>
+                  <div class="dns-log-filter-actions">
+                    <button type="submit" class="btn primary" data-testid="form-submit">
+                      {t("dns.log.filter.apply")}
+                    </button>
+                    <Show when={filtered(applied()) || filtered(draft())}>
+                      <button type="button" class="btn" data-testid="dns-log-reset" onClick={reset}>
+                        {t("dns.log.filter.reset")}
+                      </button>
+                    </Show>
+                  </div>
+                </form>
+                <Show when={page.error}>
+                  <ErrorNotice error={page.error} />
+                </Show>
+                <Show when={!page.error && page.latest}>
+                  {(current) => (
+                    <Show
+                      when={current().items.length > 0}
+                      fallback={
+                        <div class="empty" data-testid="dns-log-empty" data-filtered={filtered(applied()) ? "true" : "false"}>
+                          <h3>{filtered(applied()) ? t("dns.log.empty_filtered") : t("dns.log.empty")}</h3>
+                        </div>
+                      }
+                    >
+                      <Lines lines={current().items} />
+                    </Show>
+                  )}
+                </Show>
+                <Show when={short()}>
+                  <p class="muted" data-testid="dns-log-partial">
+                    {t("dns.log.partial")}
+                  </p>
+                </Show>
+                <div class="dns-log-paging" data-testid="dns-log-paging" data-page={cursors().length}>
+                  <button type="button" class="btn" data-testid="dns-log-newer" disabled={cursors().length <= 1 || page.loading} onClick={newer}>
+                    {t("dns.log.newer")}
+                  </button>
+                  <span class="muted">{t("dns.log.page", { page: cursors().length })}</span>
+                  <button type="button" class="btn" data-testid="dns-log-older" disabled={!page.latest?.next || page.loading} onClick={older}>
+                    {t("dns.log.older")}
+                  </button>
+                </div>
+              </>
+            )}
+          </Match>
+        </Switch>
+      </div>
+    </div>
+  );
+}

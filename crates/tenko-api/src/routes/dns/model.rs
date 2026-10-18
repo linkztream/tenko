@@ -730,6 +730,43 @@ pub struct DnsNodeStatus {
     /// TCP connections refused by the per-node or per-client cap since the start.
     #[serde(default)]
     pub tcp_refused: u64,
+    /// The node's query log; absent while it is off (`[dns.log]`, TGL-15).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_log: Option<QueryLogStatus>,
+}
+
+/// The query log of a node's DNS role: its settings and its counters since the start.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct QueryLogStatus {
+    /// `on`, or `stopped` by the node command `dns.log.stop` (the kill switch).
+    pub state: QueryLogState,
+    /// `jsonl` or `dnstap`.
+    pub format: String,
+    /// What the log keeps of the client: `pseudonym`, `address` or `hidden`.
+    pub client: String,
+    /// One query in `sample` is logged.
+    pub sample: u32,
+    /// Days a file is kept.
+    pub days: u32,
+    /// MiB the files may take.
+    pub size_mb: u64,
+    /// Entries written since the role started.
+    pub written: u64,
+    /// Entries dropped since the role started: a full buffer or a failed write
+    /// (`tenko_dns_log_dropped_total`).
+    pub dropped: u64,
+    /// Batches that could not be written since the role started.
+    pub write_errors: u64,
+}
+
+/// The state of a node's query log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryLogState {
+    /// Queries are logged.
+    On,
+    /// The kill switch is set: nothing is logged until `dns.log.start`.
+    Stopped,
 }
 
 /// One UDP worker of a node's DNS role and its counters.
@@ -767,8 +804,11 @@ pub struct DnsCommandAccepted {
 pub struct QueryLogLine {
     /// When the query arrived.
     pub at: Timestamp,
-    /// The client, pseudonymised or hidden per the settings (TGL-15).
-    pub client: String,
+    /// The client: its pseudonym (`p:` and hexadecimal digits), or its address when the log
+    /// keeps addresses and the principal may update the node. Absent when the log keeps no
+    /// client (`client = "hidden"`) or the address is withheld from the principal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
     /// The transport.
     pub transport: QueryTransport,
     /// The query name.
@@ -807,6 +847,15 @@ pub struct QueryLogParams {
     pub cursor: Option<String>,
     /// Lines per page, 1 to 1000; 100 by default.
     pub limit: Option<u32>,
-    /// Query names starting with this text.
+    /// Query names equal to this name or under it (`example.test` finds
+    /// `www.example.test`, not `badexample.test`).
     pub qname: Option<String>,
+    /// A client: its pseudonym, or its address (which needs the right to update the node).
+    pub client: Option<String>,
+    /// The RCODE answered (0 to 4095).
+    pub rcode: Option<u16>,
+    /// Queries that arrived at or after this time (RFC 3339).
+    pub from: Option<Timestamp>,
+    /// Queries that arrived at or before this time (RFC 3339).
+    pub until: Option<Timestamp>,
 }

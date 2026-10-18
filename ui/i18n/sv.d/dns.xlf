@@ -29,6 +29,9 @@
       <unit id="dns.nav.keys">
         <segment><source>TSIG keys</source><target>TSIG-nycklar</target></segment>
       </unit>
+      <unit id="dns.nav.log">
+        <segment><source>Query log</source><target>Frågelogg</target></segment>
+      </unit>
       <unit id="dns.state.not_built_title">
         <notes><note category="description">Shown when the server answers the DNS routes with 501 (not implemented).</note></notes>
         <segment><source>The DNS service is not available yet.</source><target>DNS-tjänsten är inte tillgänglig än.</target></segment>
@@ -881,6 +884,190 @@
       </unit>
       <unit id="jobs.step.dns_import_apply">
         <segment><source>Write the records</source><target>Skriv posterna</target></segment>
+      </unit>
+      <unit id="dns.log.title">
+        <notes><note category="description">Title of the query log page of a DNS node.</note></notes>
+        <segment><source>Query log</source><target>Frågelogg</target></segment>
+      </unit>
+      <unit id="dns.log.sub">
+        <segment><source>The last queries a node answered</source><target>De senaste frågorna en nod besvarade</target></segment>
+      </unit>
+      <unit id="dns.log.node_label">
+        <notes><note category="description">Label of the choice of the node whose query log is shown.</note></notes>
+        <segment><source>Node</source><target>Nod</target></segment>
+      </unit>
+      <unit id="dns.log.node">
+        <segment><source>Node {id}</source><target>Nod {id}</target></segment>
+      </unit>
+      <unit id="dns.log.no_node">
+        <segment><source>This server is not a node of a cluster yet, so there is no query log to read.</source><target>Servern är ännu inte en nod i ett kluster, så det finns ingen frågelogg att läsa.</target></segment>
+      </unit>
+      <unit id="dns.log.refresh">
+        <segment><source>Refresh</source><target>Uppdatera</target></segment>
+      </unit>
+      <unit id="dns.log.stop">
+        <notes><note category="description">Button of the kill switch: the node logs no query until it is started again.</note></notes>
+        <segment><source>Stop logging</source><target>Stoppa loggningen</target></segment>
+      </unit>
+      <unit id="dns.log.start">
+        <segment><source>Start logging</source><target>Starta loggningen</target></segment>
+      </unit>
+      <unit id="dns.log.stopped_toast">
+        <segment><source>The query log is stopped</source><target>Frågeloggen är stoppad</target></segment>
+      </unit>
+      <unit id="dns.log.started_toast">
+        <segment><source>The query log is started</source><target>Frågeloggen är startad</target></segment>
+      </unit>
+      <unit id="dns.log.switch_failed">
+        <segment><source>The query log could not be switched</source><target>Frågeloggen kunde inte slås om</target></segment>
+      </unit>
+      <unit id="dns.log.stopped_title">
+        <segment><source>Logging is stopped.</source><target>Loggningen är stoppad.</target></segment>
+      </unit>
+      <unit id="dns.log.stopped_body">
+        <segment><source>The node logs no query until an administrator starts the log again, also after a restart. The queries below were logged before.</source><target>Noden loggar inga frågor förrän en administratör startar loggen igen, även efter en omstart. Frågorna nedan loggades tidigare.</target></segment>
+      </unit>
+      <unit id="dns.log.not_dns_title">
+        <segment><source>This node does not answer DNS queries.</source><target>Noden besvarar inte DNS-frågor.</target></segment>
+      </unit>
+      <unit id="dns.log.not_dns_body">
+        <segment><source>The DNS role does not run on this node, so it keeps no query log.</source><target>DNS-rollen körs inte på noden, så den har ingen frågelogg.</target></segment>
+      </unit>
+      <unit id="dns.log.off_title">
+        <segment><source>The query log is off</source><target>Frågeloggen är avstängd</target></segment>
+      </unit>
+      <unit id="dns.log.off_body">
+        <segment><source>The node logs no queries. The security profile decides whether the log is on (off in the Home profile), and the section [dns.log] of the node's configuration file can turn it on or off.</source><target>Noden loggar inga frågor. Säkerhetsprofilen avgör om loggen är på (av i profilen Hem), och avsnittet [dns.log] i nodens konfigurationsfil kan slå på eller av den.</target></segment>
+      </unit>
+      <unit id="dns.log.off_link">
+        <segment><source>Open the security settings</source><target>Öppna säkerhetsinställningarna</target></segment>
+      </unit>
+      <unit id="dns.log.figures">
+        <notes><note category="description">The settings and counters of a node's query log. {client} is one of the dns.log.client_mode texts.</note></notes>
+        <segment><source>Clients: {client}. {sample, plural, one {Every query is logged} other {One query in # is logged}} and kept {days, plural, one {# day} other {# days}}; {written, number} written and {dropped, number} dropped since the node started.</source><target>Klienter: {client}. {sample, plural, one {Varje fråga loggas} other {En fråga av # loggas}} och sparas {days, plural, one {# dag} other {# dagar}}; {written, number} skrivna och {dropped, number} bortfallna sedan noden startade.</target></segment>
+      </unit>
+      <unit id="dns.log.client_mode.pseudonym">
+        <segment><source>pseudonymised, a new pseudonym every day</source><target>pseudonymiserade, en ny pseudonym varje dygn</target></segment>
+      </unit>
+      <unit id="dns.log.client_mode.address">
+        <segment><source>logged with their address</source><target>loggade med sin adress</target></segment>
+      </unit>
+      <unit id="dns.log.client_mode.hidden">
+        <segment><source>not logged</source><target>loggas inte</target></segment>
+      </unit>
+      <unit id="dns.log.client_none">
+        <notes><note category="description">The client column when the log keeps no client or the address is withheld from the person.</note></notes>
+        <segment><source>Not shown</source><target>Visas inte</target></segment>
+      </unit>
+      <unit id="dns.log.pseudonym_hint">
+        <segment><source>A keyed hash of the address: the same client has the same pseudonym for one day.</source><target>En nyckelbaserad hash av adressen: samma klient har samma pseudonym under ett dygn.</target></segment>
+      </unit>
+      <unit id="dns.log.table">
+        <segment><source>Logged queries, newest first</source><target>Loggade frågor, nyaste först</target></segment>
+      </unit>
+      <unit id="dns.log.col.time">
+        <segment><source>Time</source><target>Tid</target></segment>
+      </unit>
+      <unit id="dns.log.col.client">
+        <segment><source>Client</source><target>Klient</target></segment>
+      </unit>
+      <unit id="dns.log.col.transport">
+        <segment><source>Transport</source><target>Transport</target></segment>
+      </unit>
+      <unit id="dns.log.col.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dns.log.col.type">
+        <segment><source>Type</source><target>Typ</target></segment>
+      </unit>
+      <unit id="dns.log.col.rcode">
+        <notes><note category="description">Column of the response code (NOERROR, NXDOMAIN and so on).</note></notes>
+        <segment><source>Answer</source><target>Svar</target></segment>
+      </unit>
+      <unit id="dns.log.col.latency">
+        <segment><source>Latency</source><target>Svarstid</target></segment>
+      </unit>
+      <unit id="dns.log.col.flags">
+        <segment><source>Notes</source><target>Noteringar</target></segment>
+      </unit>
+      <unit id="dns.log.transport.udp">
+        <segment><source>UDP</source><target>UDP</target></segment>
+      </unit>
+      <unit id="dns.log.transport.tcp">
+        <segment><source>TCP</source><target>TCP</target></segment>
+      </unit>
+      <unit id="dns.log.transport.dot">
+        <segment><source>DNS over TLS</source><target>DNS över TLS</target></segment>
+      </unit>
+      <unit id="dns.log.transport.doh">
+        <segment><source>DNS over HTTPS</source><target>DNS över HTTPS</target></segment>
+      </unit>
+      <unit id="dns.log.latency">
+        <notes><note category="description">Time from the query to its answer in milliseconds; {ms} is formatted already.</note></notes>
+        <segment><source>{ms} ms</source><target>{ms} ms</target></segment>
+      </unit>
+      <unit id="dns.log.cached">
+        <segment><source>From the cache</source><target>Från cachen</target></segment>
+      </unit>
+      <unit id="dns.log.blocked">
+        <segment><source>Blocked</source><target>Blockerad</target></segment>
+      </unit>
+      <unit id="dns.log.filter.qname">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dns.log.filter.qname_placeholder">
+        <segment><source>example.test</source><target>example.test</target></segment>
+      </unit>
+      <unit id="dns.log.filter.qname_invalid">
+        <segment><source>Enter a domain name.</source><target>Ange ett domännamn.</target></segment>
+      </unit>
+      <unit id="dns.log.filter.client">
+        <segment><source>Client</source><target>Klient</target></segment>
+      </unit>
+      <unit id="dns.log.filter.client_placeholder">
+        <segment><source>A pseudonym or an address</source><target>En pseudonym eller en adress</target></segment>
+      </unit>
+      <unit id="dns.log.filter.client_invalid">
+        <segment><source>Enter a pseudonym (p: and hexadecimal digits) or an IP address.</source><target>Ange en pseudonym (p: och hexadecimala siffror) eller en IP-adress.</target></segment>
+      </unit>
+      <unit id="dns.log.filter.rcode">
+        <segment><source>Answer</source><target>Svar</target></segment>
+      </unit>
+      <unit id="dns.log.filter.rcode_any">
+        <segment><source>Any</source><target>Alla</target></segment>
+      </unit>
+      <unit id="dns.log.filter.from">
+        <segment><source>From</source><target>Från</target></segment>
+      </unit>
+      <unit id="dns.log.filter.until">
+        <segment><source>Until</source><target>Till</target></segment>
+      </unit>
+      <unit id="dns.log.filter.until_invalid">
+        <segment><source>The end is before the start.</source><target>Slutet ligger före början.</target></segment>
+      </unit>
+      <unit id="dns.log.filter.apply">
+        <segment><source>Show</source><target>Visa</target></segment>
+      </unit>
+      <unit id="dns.log.filter.reset">
+        <segment><source>Clear the filters</source><target>Rensa filtren</target></segment>
+      </unit>
+      <unit id="dns.log.empty">
+        <segment><source>No query is logged yet.</source><target>Ingen fråga är loggad ännu.</target></segment>
+      </unit>
+      <unit id="dns.log.empty_filtered">
+        <segment><source>No logged query matches the filters.</source><target>Ingen loggad fråga matchar filtren.</target></segment>
+      </unit>
+      <unit id="dns.log.partial">
+        <segment><source>This page holds what one read of the log found; older queries may still match. Go on with Older.</source><target>Sidan innehåller det som en läsning av loggen hittade; äldre frågor kan fortfarande matcha. Fortsätt med Äldre.</target></segment>
+      </unit>
+      <unit id="dns.log.newer">
+        <segment><source>Newer</source><target>Nyare</target></segment>
+      </unit>
+      <unit id="dns.log.older">
+        <segment><source>Older</source><target>Äldre</target></segment>
+      </unit>
+      <unit id="dns.log.page">
+        <segment><source>Page {page}</source><target>Sida {page}</target></segment>
       </unit>
       <unit id="errors.dns.zone.not_found">
         <segment><source>The zone does not exist (any more).</source><target>Zonen finns inte (längre).</target></segment>

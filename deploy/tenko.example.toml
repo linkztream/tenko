@@ -427,21 +427,27 @@ idle_secs = 10
 udp_size = 1232
 
 [dns.log]
-# The query log of this node: JSON lines in local files, never in the store. Off by
-# default; turning it off is the kill switch. GET /api/v1/nodes/{id}/dns/log reads it.
-enabled = false
+# The query log of this node: local files, never in the store; GET /api/v1/nodes/{id}/dns/log
+# reads it, and every read is audited. Not set, enabled and days follow the security
+# profile (TGL-15): Home off and 7 days, Standard and Hardened on and 30 days, Lab on and
+# 7 days. enabled = false is the kill switch across restarts; the node commands
+# dns.log.stop and dns.log.start (POST /api/v1/nodes/{id}/dns/log/stop, .../start) switch a
+# running log.
+# enabled = true
 # The directory of the log files. Not set: dns/querylog/ in the data directory.
 # path = "/var/log/tenko-dns"
-# "jsonl"; "dnstap" is refused until it is written.
+# "jsonl" (JSON lines) or "dnstap" (Frame Streams files for dnstap tools).
 format = "jsonl"
 # Files are removed after this many days (1 to 365), and the oldest first when the files
 # take more than size_mb MiB (1 to 102400).
-days = 7
+# days = 30
 size_mb = 256
 # Log one query in N (1 to 1000000; 1 logs every query).
 sample = 1
 # Replace client addresses with a keyed hash whose key changes every day (GDPR, TGL-15).
 pseudonymise = true
+# "logged" or "hidden": with "hidden" no client field is written at all.
+client = "logged"
 
 [dns.tls]
 # DNS over TLS (RFC 7858) and DNS over HTTPS (RFC 8484) for the clients of this node,

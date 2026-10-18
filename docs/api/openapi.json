@@ -14117,7 +14117,7 @@
           "dns"
         ],
         "summary": "Read a node's DNS query log",
-        "description": "Scope: `dns.read`. Issues the node command `dns.log.read`: a page of the node's query log, newest first, with the cursor of the next page. The read is recorded in the node's commands. 409 when the node's query log is off.",
+        "description": "Scope: `dns.read`. Issues the node command `dns.log.read`: a page of the node's query log, newest first, with the cursor of the next page, filtered by name (the name and the names under it), client (a pseudonym, or an address, which needs the right to update the node), RCODE and time. A read looks at 64 MiB of log files at most, so a narrow filter may answer a short page with a cursor to go on from. The read is recorded in the node's commands and audited as `dns.log.read` with the cursor range and the filters. Addresses are returned only to principals that may update the node. 409 when the node's query log is off.",
         "operationId": "read_node_dns_log",
         "parameters": [
           {
@@ -14154,10 +14154,48 @@
           {
             "name": "qname",
             "in": "query",
-            "description": "Query names starting with this text.",
+            "description": "Query names equal to this name or under it (`example.test` finds\n`www.example.test`, not `badexample.test`).",
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "client",
+            "in": "query",
+            "description": "A client: its pseudonym, or its address (which needs the right to update the node).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rcode",
+            "in": "query",
+            "description": "The RCODE answered (0 to 4095).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Queries that arrived at or after this time (RFC 3339).",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Timestamp"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "description": "Queries that arrived at or before this time (RFC 3339).",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Timestamp"
             }
           }
         ],
@@ -14193,7 +14231,177 @@
             }
           },
           "403": {
-            "description": "The principal lacks the scope `dns.read`",
+            "description": "The principal lacks the scope `dns.read`, or filters by address without the right to update the node",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node (`cluster.node.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The node does not run the dns role or its log is off (`dns.node.not_dns`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/dns/log/start": {
+      "post": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Start a node's DNS query log again",
+        "description": "Scope: `dns.write`. Issues the node command `dns.log.start`: the node logs queries again after `dns.log.stop`. Recorded in the node's commands and audited as `dns.log.start`. 409 when the node's query log is off in its settings.",
+        "operationId": "start_node_dns_log",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The command is recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsCommandAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.write`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node (`cluster.node.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The node does not run the dns role or its log is off (`dns.node.not_dns`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/dns/log/stop": {
+      "post": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Stop a node's DNS query log",
+        "description": "Scope: `dns.write`. Issues the node command `dns.log.stop`, the kill switch: the node logs no query until the log is started again, also after a restart. The files already written stay until their retention removes them. Recorded in the node's commands and audited as `dns.log.stop`. 409 when the node's query log is off in its settings.",
+        "operationId": "stop_node_dns_log",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The command is recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsCommandAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.write`",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -31452,6 +31660,17 @@
             },
             "description": "What keeps the resolver side from working as configured: stub zones whose name\nservers could not be learnt, views whose recursion access list does not exist."
           },
+          "query_log": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QueryLogStatus",
+                "description": "The node's query log; absent while it is off (`[dns.log]`, TGL-15)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "revision": {
             "$ref": "#/components/schemas/Revision",
             "description": "The store revision the index holds."
@@ -43399,7 +43618,6 @@
               "description": "One line of a node's query log.",
               "required": [
                 "at",
-                "client",
                 "transport",
                 "qname",
                 "type",
@@ -43428,8 +43646,11 @@
                   "description": "Answered from the cache."
                 },
                 "client": {
-                  "type": "string",
-                  "description": "The client, pseudonymised or hidden per the settings (TGL-15)."
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The client: its pseudonym (`p:` and hexadecimal digits), or its address when the log\nkeeps addresses and the principal may update the node. Absent when the log keeps no\nclient (`client = \"hidden\"`) or the address is withheld from the principal."
                 },
                 "duration_micros": {
                   "type": "integer",
@@ -46950,7 +47171,6 @@
         "description": "One line of a node's query log.",
         "required": [
           "at",
-          "client",
           "transport",
           "qname",
           "type",
@@ -46979,8 +47199,11 @@
             "description": "Answered from the cache."
           },
           "client": {
-            "type": "string",
-            "description": "The client, pseudonymised or hidden per the settings (TGL-15)."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client: its pseudonym (`p:` and hexadecimal digits), or its address when the log\nkeeps addresses and the principal may update the node. Absent when the log keeps no\nclient (`client = \"hidden\"`) or the address is withheld from the principal."
           },
           "duration_micros": {
             "type": "integer",
@@ -47016,6 +47239,79 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "QueryLogState": {
+        "type": "string",
+        "description": "The state of a node's query log.",
+        "enum": [
+          "on",
+          "stopped"
+        ]
+      },
+      "QueryLogStatus": {
+        "type": "object",
+        "description": "The query log of a node's DNS role: its settings and its counters since the start.",
+        "required": [
+          "state",
+          "format",
+          "client",
+          "sample",
+          "days",
+          "size_mb",
+          "written",
+          "dropped",
+          "write_errors"
+        ],
+        "properties": {
+          "client": {
+            "type": "string",
+            "description": "What the log keeps of the client: `pseudonym`, `address` or `hidden`."
+          },
+          "days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Days a file is kept.",
+            "minimum": 0
+          },
+          "dropped": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Entries dropped since the role started: a full buffer or a failed write\n(`tenko_dns_log_dropped_total`).",
+            "minimum": 0
+          },
+          "format": {
+            "type": "string",
+            "description": "`jsonl` or `dnstap`."
+          },
+          "sample": {
+            "type": "integer",
+            "format": "int32",
+            "description": "One query in `sample` is logged.",
+            "minimum": 0
+          },
+          "size_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "MiB the files may take.",
+            "minimum": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/QueryLogState",
+            "description": "`on`, or `stopped` by the node command `dns.log.stop` (the kill switch)."
+          },
+          "write_errors": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Batches that could not be written since the role started.",
+            "minimum": 0
+          },
+          "written": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Entries written since the role started.",
+            "minimum": 0
           }
         }
       },

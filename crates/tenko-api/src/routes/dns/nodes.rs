@@ -1,5 +1,6 @@
-//! `GET /nodes/{id}/dns`, `POST /nodes/{id}/dns/cache/flush`, `GET /nodes/{id}/dns/log`:
-//! the `dns` role of a node (`docs/dns.md` section 8).
+//! `GET /nodes/{id}/dns`, `POST /nodes/{id}/dns/cache/flush`, `GET /nodes/{id}/dns/log`,
+//! `POST /nodes/{id}/dns/log/stop` and `/start`: the `dns` role of a node (`docs/dns.md`
+//! section 8, `docs/dns-querylog.md`).
 //!
 //! In Phase 2 the role runs in the controller's own process (plan section 2.10), so the
 //! routes answer for that one node: the status is the role's report `dns.status`, and the
@@ -8,6 +9,13 @@
 //! in the state it reached, through an inline job, so that Phase 5 adds the remote path
 //! (the command stream to a `dns` node) without changing the routes. Any other node, and
 //! this node without the role, answers 409 `dns.node.not_dns`.
+//!
+//! The query log holds personal data (P2-Q7, TGL-15). Every page read through the API is
+//! audited as `dns.log.read` with the principal, the cursor range and the filters, in the
+//! same write as the command row. A client address leaves the node only for a principal
+//! that may update the node: for any other principal the lines that carry an address (a
+//! log with `pseudonymise = false`) come without a client, and a filter by address is
+//! refused with 403; pseudonyms are shown to every reader of the log.
 
 use std::sync::{Arc, OnceLock};
 
@@ -23,13 +31,13 @@ use tenko_cluster::{
     registry::NodeRegistry,
 };
 use tenko_core::{
-    Action, CodedError, NodeId, ObjectKind, ObjectRef, RequestCtx,
-    audit::AuditDraft,
+    Action, CodedError, NodeId, ObjectKind, ObjectRef, RequestCtx, Timestamp,
+    audit::{AuditAction, AuditDraft},
     codec::to_cbor,
     dns::{audit, codes as dns_codes},
 };
 use tenko_dns::{
-    querylog::LogLine,
+    querylog::{LogFigures, LogLine, keys::is_pseudonym},
     status::{
         self, CacheFlushArgs, CommandResult, DnsNode, DnsStatus, LogReadArgs, Outcome, Output,
     },
@@ -38,7 +46,7 @@ use tenko_store::WriteBatch;
 
 use super::{
     CacheFlushParams, DnsCommandAccepted, DnsNodeStatus, ListenerItem, QueryLogLine,
-    QueryLogParams, UdpWorkerItem, Zones, parse_node,
+    QueryLogParams, QueryLogState, QueryLogStatus, UdpWorkerItem, Zones, parse_node,
 };
 use crate::{
     dto::Page,
@@ -46,6 +54,14 @@ use crate::{
     problem::{ApiError, ProblemDetails},
     state::AppState,
 };
+
+/// A page of a node's query log was read (personal data, P2-Q7). Belongs in
+/// `tenko_core::dns::audit` with the other actions of the module.
+pub const LOG_READ_AUDIT: AuditAction = AuditAction::from_static("dns.log.read");
+/// A node's query log was stopped (the kill switch).
+pub const LOG_STOP_AUDIT: AuditAction = AuditAction::from_static("dns.log.stop");
+/// A node's query log was started again.
+pub const LOG_START_AUDIT: AuditAction = AuditAction::from_static("dns.log.start");
 
 /// The `dns` role of this process, filled in by `tenko serve` once the role has started
 /// (the API starts first); empty on a node without the role.
@@ -237,13 +253,36 @@ fn status_dto(status: DnsStatus) -> DnsNodeStatus {
         cache_stale: status.cache_stale,
         problems: status.problems,
         started: Some(status.started),
+        query_log: status.log.map(log_status_dto),
     }
 }
 
-fn line_dto(line: LogLine) -> QueryLogLine {
+fn log_status_dto(log: LogFigures) -> QueryLogStatus {
+    QueryLogStatus {
+        state: if log.stopped {
+            QueryLogState::Stopped
+        } else {
+            QueryLogState::On
+        },
+        format: log.format.as_str().to_owned(),
+        client: log.client.as_str().to_owned(),
+        sample: log.sample,
+        days: log.days,
+        size_mb: log.size_mb,
+        written: log.written,
+        dropped: log.dropped,
+        write_errors: log.write_errors,
+    }
+}
+
+/// The DTO of a line; an address is kept only when `addresses` (the principal may update
+/// the node).
+fn line_dto(line: LogLine, addresses: bool) -> QueryLogLine {
     QueryLogLine {
         at: line.at,
-        client: line.client,
+        client: line
+            .client
+            .filter(|client| addresses || is_pseudonym(client)),
         transport: line.transport,
         qname: line.qname,
         rtype: line.rtype,
@@ -365,6 +404,13 @@ pub(super) async fn flush_node_dns_cache(
         .into_response())
 }
 
+fn invalid(field: &str, detail: impl Into<String>) -> ApiError {
+    ApiError::from_coded_error(
+        CodedError::new(tenko_core::error::codes::INVALID_VALUE, 400, detail.into())
+            .with_param("field", field.to_owned()),
+    )
+}
+
 #[utoipa::path(
     get,
     path = "/nodes/{id}/dns/log",
@@ -372,14 +418,20 @@ pub(super) async fn flush_node_dns_cache(
     operation_id = "read_node_dns_log",
     summary = "Read a node's DNS query log",
     description = "Scope: `dns.read`. Issues the node command `dns.log.read`: a page of the \
-                   node's query log, newest first, with the cursor of the next page. The read \
-                   is recorded in the node's commands. 409 when the node's query log is off.",
+                   node's query log, newest first, with the cursor of the next page, filtered \
+                   by name (the name and the names under it), client (a pseudonym, or an \
+                   address, which needs the right to update the node), RCODE and time. A read \
+                   looks at 64 MiB of log files at most, so a narrow filter may answer a short \
+                   page with a cursor to go on from. The read is recorded in the node's \
+                   commands and audited as `dns.log.read` with the cursor range and the \
+                   filters. Addresses are returned only to principals that may update the \
+                   node. 409 when the node's query log is off.",
     params(("id" = u64, Path, description = "Node id"), QueryLogParams),
     responses(
         (status = 200, description = "A page of log lines, newest first", body = Page<QueryLogLine>),
         (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `dns.read`, or filters by address without the right to update the node", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The node does not run the dns role or its log is off (`dns.node.not_dns`)", body = ProblemDetails, content_type = "application/problem+json")
     )
@@ -398,32 +450,186 @@ pub(super) async fn read_node_dns_log(
     app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::Zone))?;
     let limit = params.limit.unwrap_or(100);
     if !(1..=status::MAX_LOG_PAGE).contains(&limit) {
-        return Err(ApiError::from_coded_error(
-            CodedError::new(
-                tenko_core::error::codes::INVALID_VALUE,
-                400,
-                "limit must be between 1 and 1000",
-            )
-            .with_param("field", "limit"),
-        ));
+        return Err(invalid("limit", "limit must be between 1 and 1000"));
     }
-    let role = local_role(&app, slot, registry, node).await?;
-    let args = to_cbor(&LogReadArgs {
+    if params.rcode.is_some_and(|rcode| rcode > 4_095) {
+        return Err(invalid("rcode", "rcode must be between 0 and 4095"));
+    }
+    let args = LogReadArgs {
         cursor: params.cursor,
         limit,
-        qname: params.qname,
-    })?
-    .to_vec();
-    let result = execute(role, status::LOG_READ, args.clone()).await;
-    record(zones, &cx, node, status::LOG_READ, args, &result, None).await?;
+        qname: params.qname.filter(|name| !name.trim().is_empty()),
+        client: params.client.filter(|client| !client.trim().is_empty()),
+        rcode: params.rcode,
+        from: params.from,
+        until: params.until,
+    };
+    let filter = args.filter();
+    if let Err(error) = filter.validate() {
+        let detail = error.to_string();
+        let field = if detail.contains("client") {
+            "client"
+        } else {
+            "until"
+        };
+        return Err(invalid(field, detail));
+    }
+    let addresses = app
+        .authorize(&cx.principal, Action::Update, &ObjectRef::node(node))
+        .is_ok();
+    if filter.names_an_address() && !addresses {
+        app.authorize(&cx.principal, Action::Update, &ObjectRef::node(node))?;
+    }
+    let role = local_role(&app, slot, registry, node).await?;
+    let encoded = to_cbor(&args)?.to_vec();
+    let result = execute(role, status::LOG_READ, encoded.clone()).await;
+    let audit = match &result.output {
+        Output::Log(page) => Some(log_read_audit(
+            node,
+            &args,
+            page.lines.len(),
+            page.next.as_deref(),
+        )),
+        _ => None,
+    };
+    record(zones, &cx, node, status::LOG_READ, encoded, &result, audit).await?;
     let Output::Log(page) = result.output else {
         return Err(command_failed(status::LOG_READ, &result));
     };
     let revision = app.store.status().revision;
     Ok(Json(Page::new(
-        page.lines.into_iter().map(line_dto).collect(),
+        page.lines
+            .into_iter()
+            .map(|line| line_dto(line, addresses))
+            .collect(),
         page.next,
         revision,
     ))
     .into_response())
+}
+
+/// The audit record of a page read: the cursor range, the lines and the filters.
+fn log_read_audit(
+    node: NodeId,
+    args: &LogReadArgs,
+    lines: usize,
+    next: Option<&str>,
+) -> AuditDraft {
+    let mut draft = AuditDraft::success(LOG_READ_AUDIT, vec![ObjectRef::node(node)])
+        .with_context("from_cursor", args.cursor.as_deref().unwrap_or("newest"))
+        .with_context("to_cursor", next.unwrap_or("end"))
+        .with_context("lines", lines.to_string());
+    let filters = [
+        ("qname", args.qname.clone()),
+        ("client", args.client.clone()),
+        ("rcode", args.rcode.map(|rcode| rcode.to_string())),
+        ("from", args.from.map(Timestamp::to_rfc3339)),
+        ("until", args.until.map(Timestamp::to_rfc3339)),
+    ];
+    for (key, value) in filters {
+        if let Some(value) = value {
+            draft = draft.with_context(format!("filter.{key}"), value);
+        }
+    }
+    draft
+}
+
+/// Runs `dns.log.stop` or `dns.log.start` and records it with its audit record.
+async fn switch_log(
+    app: &AppState,
+    cx: &RequestCtx,
+    slot: Slot,
+    registry: Registry,
+    zones: Zones,
+    id: &str,
+    stop: bool,
+) -> Result<Response, ApiError> {
+    let node = parse_node(id)?;
+    app.authorize(&cx.principal, Action::Update, &ObjectRef::node(node))?;
+    app.authorize(&cx.principal, Action::Execute, &anywhere(ObjectKind::Zone))?;
+    let role = local_role(app, slot, registry, node).await?;
+    let (kind, action) = if stop {
+        (status::LOG_STOP, LOG_STOP_AUDIT)
+    } else {
+        (status::LOG_START, LOG_START_AUDIT)
+    };
+    let result = execute(role, kind, Vec::new()).await;
+    let audit = (result.outcome == Outcome::Done).then(|| {
+        AuditDraft::success(action, vec![ObjectRef::node(node)])
+            .with_context("detail", result.detail.clone())
+    });
+    let record = record(zones, cx, node, kind, Vec::new(), &result, audit).await?;
+    if result.outcome != Outcome::Done {
+        return Err(command_failed(kind, &result));
+    }
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(DnsCommandAccepted {
+            command_id: record.id,
+        }),
+    )
+        .into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/nodes/{id}/dns/log/stop",
+    tag = "dns",
+    operation_id = "stop_node_dns_log",
+    summary = "Stop a node's DNS query log",
+    description = "Scope: `dns.write`. Issues the node command `dns.log.stop`, the kill \
+                   switch: the node logs no query until the log is started again, also after a \
+                   restart. The files already written stay until their retention removes \
+                   them. Recorded in the node's commands and audited as `dns.log.stop`. 409 \
+                   when the node's query log is off in its settings.",
+    params(("id" = u64, Path, description = "Node id")),
+    responses(
+        (status = 202, description = "The command is recorded", body = DnsCommandAccepted),
+        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The node does not run the dns role or its log is off (`dns.node.not_dns`)", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(super) async fn stop_node_dns_log(
+    State(app): State<AppState>,
+    Ctx(cx): Ctx,
+    slot: Slot,
+    registry: Registry,
+    zones: Zones,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    switch_log(&app, &cx, slot, registry, zones, &id, true).await
+}
+
+#[utoipa::path(
+    post,
+    path = "/nodes/{id}/dns/log/start",
+    tag = "dns",
+    operation_id = "start_node_dns_log",
+    summary = "Start a node's DNS query log again",
+    description = "Scope: `dns.write`. Issues the node command `dns.log.start`: the node logs \
+                   queries again after `dns.log.stop`. Recorded in the node's commands and \
+                   audited as `dns.log.start`. 409 when the node's query log is off in its \
+                   settings.",
+    params(("id" = u64, Path, description = "Node id")),
+    responses(
+        (status = 202, description = "The command is recorded", body = DnsCommandAccepted),
+        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The node does not run the dns role or its log is off (`dns.node.not_dns`)", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(super) async fn start_node_dns_log(
+    State(app): State<AppState>,
+    Ctx(cx): Ctx,
+    slot: Slot,
+    registry: Registry,
+    zones: Zones,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    switch_log(&app, &cx, slot, registry, zones, &id, false).await
 }

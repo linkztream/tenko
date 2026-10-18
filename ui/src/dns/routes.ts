@@ -15,5 +15,6 @@ export const routes: AppRoute[] = [
   { path: "/dns/import/:id", component: lazy(withPacks(["dns", "jobs"], () => import("./ImportWizard"))), title: "dns.import.title" },
   { path: "/dns/acls", component: lazy(withPacks(GRID, () => import("./AclsPage"))), title: "dns.acls.title" },
   { path: "/dns/keys", component: lazy(withPacks(GRID, () => import("./KeysPage"))), access: "admin", title: "dns.keys.title" },
+  { path: "/dns/log", component: lazy(withPacks(["dns"], () => import("./log/LogPage"))), title: "dns.log.title" },
   { path: "/dns/*rest", component: lazy(withPacks(["dns"], () => import("./DnsPage"))), title: "dns.title" },
 ];

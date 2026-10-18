@@ -271,7 +271,9 @@ fn the_dns_role_serves_zones_forwards_and_survives_a_restart() {
     let log_deadline = Instant::now() + Duration::from_secs(3);
     let log = loop {
         let log = api
-            .get(&format!("/nodes/{node_id}/dns/log?limit=50&qname=www"))
+            .get(&format!(
+                "/nodes/{node_id}/dns/log?limit=50&qname=www.example.test"
+            ))
             .expect(200);
         let lines = log["items"].as_array().map_or(0, Vec::len);
         if lines >= 2 || Instant::now() > log_deadline {
@@ -283,6 +285,30 @@ fn the_dns_role_serves_zones_forwards_and_survives_a_restart() {
     assert!(lines.len() >= 2, "{log}");
     assert_eq!(lines[0]["qname"], "www.example.test", "{log}");
     assert_eq!(lines[0]["client"], "127.0.0.1", "{log}");
+    // WP5.4: the filters, the audit record of every read, the kill switch.
+    let by_client = api
+        .get(&format!(
+            "/nodes/{node_id}/dns/log?limit=5&client=127.0.0.1&rcode=0"
+        ))
+        .expect(200);
+    assert!(
+        !by_client["items"].as_array().expect("lines").is_empty(),
+        "{by_client}"
+    );
+    let audited = api.get("/audit?action=dns.log.read&limit=10").expect(200);
+    assert!(
+        audited["items"].as_array().expect("records").len() >= 2,
+        "{audited}"
+    );
+    api.post(&format!("/nodes/{node_id}/dns/log/stop"), &json!({}))
+        .expect(202);
+    let report = api.get(&format!("/nodes/{node_id}/dns")).expect(200);
+    assert_eq!(report["query_log"]["state"], "stopped", "{report}");
+    api.post(&format!("/nodes/{node_id}/dns/log/start"), &json!({}))
+        .expect(202);
+    let report = api.get(&format!("/nodes/{node_id}/dns")).expect(200);
+    assert_eq!(report["query_log"]["state"], "on", "{report}");
+    assert_eq!(report["query_log"]["client"], "address", "{report}");
 
     // 1,000 records in one batch, answered within one second of the commit.
     let changes: Vec<Value> = (0..1_000)

@@ -557,7 +557,7 @@ fn behind_the_proxy_plain_dns_and_http_answer_with_the_client_address() {
     let deadline = Instant::now() + Duration::from_secs(5);
     let clients = loop {
         let log = api
-            .get(&format!("/nodes/{node_id}/dns/log?limit=50&qname=www"))
+            .get(&format!("/nodes/{node_id}/dns/log?limit=50&qname={WWW}"))
             .expect(200);
         let clients: Vec<String> = log["items"]
             .as_array()

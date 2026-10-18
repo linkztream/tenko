@@ -7,7 +7,8 @@
 //! 2. The role's derived index joins the store (`tenko_dns::store_feed`), which builds the
 //!    first image of the `dns` tables from a local read; the catalog (index, views,
 //!    forwarding rules) is built from it, aside from the async threads.
-//! 3. The query log writer starts when `[dns.log] enabled`, and the forwarder (WP5.1) with
+//! 3. The query log writer starts when `[dns.log] enabled` (or, unset, the security
+//!    profile: TGL-15) says so, and the forwarder (WP5.1) with
 //!    the default upstreams of `[dns] forwarders`, the cache of `[dns.cache]` sized for the
 //!    profile in force, and the recursion policy: the profile's default and the prefixes
 //!    IPAM knows, which a follower keeps current from the store.
@@ -36,7 +37,7 @@ use tenko_dns::{
     forward::{ForwardSettings, Forwarder, RecursionDefault, RecursionPolicy},
     log::QueryLogSink,
     pool::UpstreamSpec,
-    querylog::{LogSettings, LogWriter},
+    querylog::{ClientField, LogFormat, LogSettings, LogWriter},
     respond::ForwardSink,
     server::{Hooks, Server, ServerConfig},
     status::{DnsNode, LocalNode},
@@ -49,7 +50,10 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::StartError;
-use crate::config::{DnsCookies, DnsSection, DnsSocketMode, DnsUpstreamTransport, Resolved};
+use crate::config::{
+    DnsCookies, DnsLogClient, DnsLogFormat, DnsSection, DnsSocketMode, DnsUpstreamTransport,
+    Resolved,
+};
 
 /// How long the role may take to stop its tasks.
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -381,17 +385,46 @@ fn note_wildcard(listen: &[SocketAddr]) {
     }
 }
 
-/// The query log writer, when `[dns.log] enabled`.
-fn start_log(section: &DnsSection, resolved: &Resolved) -> Result<Option<LogWriter>, StartError> {
-    if !section.log.enabled {
+/// The security profile the query log's defaults follow (TGL-15): the stored profile
+/// after setup, else the bootstrap profile of the file.
+async fn log_profile(resolved: &Resolved, store: &dyn Store) -> Profile {
+    let stored = match store.read(ReadConsistency::Local).await {
+        Ok(view) => view
+            .get_typed(&SETTINGS, &())
+            .ok()
+            .flatten()
+            .map(|(settings, _)| settings.profile),
+        Err(_) => None,
+    };
+    stored.unwrap_or(resolved.config.profile.name)
+}
+
+/// The query log writer, when `[dns.log]` or the profile turns it on.
+fn start_log(
+    section: &DnsSection,
+    resolved: &Resolved,
+    profile: Profile,
+) -> Result<Option<LogWriter>, StartError> {
+    let effective = section.log.effective(profile);
+    if !effective.enabled {
         return Ok(None);
     }
     let settings = LogSettings {
         dir: section.log_dir(&resolved.data_dir),
-        days: section.log.days,
+        format: match section.log.format {
+            DnsLogFormat::Jsonl => LogFormat::Jsonl,
+            DnsLogFormat::Dnstap => LogFormat::Dnstap,
+        },
+        days: effective.days,
         size_mb: section.log.size_mb,
         sample: section.log.sample,
-        pseudonymise: section.log.pseudonymise,
+        client: match (section.log.client, section.log.pseudonymise) {
+            (DnsLogClient::Hidden, _) => ClientField::Hidden,
+            (DnsLogClient::Logged, true) => ClientField::Pseudonym,
+            (DnsLogClient::Logged, false) => ClientField::Address,
+        },
+        identity: format!("node-{}", resolved.node_id),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
     };
     let dir = settings.dir.clone();
     LogWriter::start(settings).map(Some).map_err(|io| {
@@ -436,7 +469,21 @@ fn describe(
     let forwarding = format!("{upstreams}, {cache}");
     let logging = log.map_or_else(
         || "query log off".to_owned(),
-        |writer| format!("query log in {}", writer.dir().display()),
+        |writer| {
+            let figures = writer.sink().figures();
+            format!(
+                "query log in {} ({}, client {}, {} day(s){})",
+                writer.dir().display(),
+                figures.format.as_str(),
+                figures.client.as_str(),
+                figures.days,
+                if figures.stopped {
+                    ", stopped by dns.log.stop"
+                } else {
+                    ""
+                }
+            )
+        },
     );
     let announce = format!(
         "dns role answering on {udp} (UDP and TCP), {} zone(s) at revision {revision}, \
@@ -491,6 +538,8 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         tenko_dns::tls::register(metrics);
     }
     tenko_dns::metrics::register(metrics);
+    tenko_dns::querylog::register_metrics(metrics);
+    let log_profile = log_profile(resolved, store.as_ref()).await;
     let feed_store = Arc::clone(&store);
     let mut feed = tokio::task::spawn_blocking(move || store_feed::register(feed_store))
         .await
@@ -506,7 +555,7 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
     let (profile, prefixes) = recursion_inputs(store.as_ref(), bootstrap)
         .await
         .map_err(|store| error("start.dns.feed", store.to_string()))?;
-    let log = start_log(section, resolved)?;
+    let log = start_log(section, resolved, log_profile)?;
     let sink: Option<Arc<dyn QueryLogSink>> = log
         .as_ref()
         .map(|writer| writer.sink() as Arc<dyn QueryLogSink>);
