@@ -474,10 +474,10 @@ impl MetricsSection {
     }
 }
 
-/// `[dns]`: the `dns` role of this node (plan section 2.10, WP4.3): its listeners, its
-/// workers, the plain forwarder and the query log. The zones and records live in the
-/// store; this section only says how this node serves them. Read when the node runs the
-/// `dns` role and the DNS module is on.
+/// `[dns]`: the `dns` role of this node (plan section 2.10, WP4.3, WP5.1): its listeners,
+/// its workers, the default forwarder, the cache and the query log. The zones, records and
+/// forwarding rules live in the store; this section only says how this node serves them.
+/// Read when the node runs the `dns` role and the DNS module is on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DnsSection {
@@ -496,16 +496,25 @@ pub struct DnsSection {
     pub tcp: DnsTcpSection,
     /// EDNS.
     pub edns: DnsEdnsSection,
-    /// The upstreams of the plain forwarder for names outside the zones: addresses
-    /// (`"192.0.2.1"`, `"192.0.2.1:5353"`) or tables `{ address, port, transport }` with
-    /// `transport = "udp"` (default, TCP when an answer is truncated) or `"tcp"`. Empty (the
-    /// default): names outside the zones are refused.
+    /// The default forwarder for names outside the zones that no forwarding rule of the
+    /// store covers (a root rule `.` in the store wins over it): addresses (`"192.0.2.1"`,
+    /// `"192.0.2.1:5353"`) or tables `{ address, port, transport, tls_name, path }` with
+    /// `transport = "udp"` (default, TCP when an answer is truncated), `"tcp"`, `"dot"`
+    /// (DNS over TLS, port 853) or `"doh"` (DNS over HTTPS, port 443, `path` default
+    /// `/dns-query`); DoT and DoH need `tls_name`, the name in the upstream's certificate.
+    /// Empty (the default): only the rules and stub zones of the store forward.
     #[serde(deserialize_with = "forwarders_or_list")]
     pub forwarders: Vec<DnsForwarder>,
     /// Milliseconds an upstream has for one attempt, 100 to 30,000 (default 2,000).
     pub forward_timeout_ms: u64,
-    /// Attempts after the first, 0 to 5 (default 2); each goes to the next upstream.
+    /// Attempts after the first, 0 to 5 (default 2); each goes to another upstream.
     pub forward_retries: u8,
+    /// A PEM file with the CA certificates DoT and DoH upstreams are checked against,
+    /// instead of the system's root certificates (default: the system's).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_ca: Option<PathBuf>,
+    /// The cache of the forwarder.
+    pub cache: DnsCacheSection,
     /// The query log of this node.
     pub log: DnsLogSection,
 }
@@ -522,8 +531,76 @@ impl Default for DnsSection {
             forwarders: Vec::new(),
             forward_timeout_ms: 2_000,
             forward_retries: 2,
+            upstream_ca: None,
+            cache: DnsCacheSection::default(),
             log: DnsLogSection::default(),
         }
+    }
+}
+
+/// `[dns.cache]`: the cache of the forwarder (plan section 2.8, DNS-23), per node and per
+/// view. The sizes are read at start; the defaults follow the security profile in force
+/// when the role starts (TGL-15 style).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DnsCacheSection {
+    /// Keep a cache (default true).
+    pub enabled: bool,
+    /// Entries at most, 1 to 10,000,000 (default 10,000 under the Home profile, 100,000
+    /// under the others).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entries: Option<usize>,
+    /// Octets of keys, answers and bookkeeping at most, 65,536 to 16 GiB (default 16 MiB
+    /// under the Home profile, 128 MiB under the others).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_bytes: Option<usize>,
+    /// Seconds an expired entry may still answer while the upstreams fail (RFC 8767), 0 to
+    /// 604,800 (default 86,400; 0 turns serve-stale off).
+    pub stale_secs: u64,
+    /// Milliseconds a client waits for an upstream before it gets a stale answer, 100 to
+    /// 30,000 (default 1,800).
+    pub stale_answer_ms: u64,
+    /// The longest lifetime of a positive entry in seconds, 1 to 604,800 (default 86,400).
+    pub max_ttl_secs: u32,
+    /// The longest lifetime of a negative entry in seconds, 0 to 86,400 (default 3,600; 0
+    /// keeps no negative entries).
+    pub negative_ttl_secs: u32,
+    /// Ask again for popular entries before they expire (default true).
+    pub prefetch: bool,
+}
+
+impl Default for DnsCacheSection {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            entries: None,
+            max_bytes: None,
+            stale_secs: 86_400,
+            stale_answer_ms: 1_800,
+            max_ttl_secs: 86_400,
+            negative_ttl_secs: 3_600,
+            prefetch: true,
+        }
+    }
+}
+
+impl DnsCacheSection {
+    /// The entry bound under `profile`.
+    pub fn entries_for(&self, profile: Profile) -> usize {
+        self.entries.unwrap_or(if profile == Profile::Home {
+            10_000
+        } else {
+            100_000
+        })
+    }
+
+    /// The octet bound under `profile`.
+    pub fn max_bytes_for(&self, profile: Profile) -> usize {
+        self.max_bytes.unwrap_or(if profile == Profile::Home {
+            16 * 1024 * 1024
+        } else {
+            128 * 1024 * 1024
+        })
     }
 }
 
@@ -611,7 +688,7 @@ impl Default for DnsEdnsSection {
     }
 }
 
-/// The transport to an upstream of the plain forwarder.
+/// The transport to an upstream of the default forwarder.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DnsUpstreamTransport {
@@ -620,30 +697,87 @@ pub enum DnsUpstreamTransport {
     Udp,
     /// TCP only.
     Tcp,
+    /// DNS over TLS (RFC 7858).
+    Dot,
+    /// DNS over HTTPS (RFC 8484).
+    Doh,
 }
 
-/// One upstream of the plain forwarder.
+impl DnsUpstreamTransport {
+    /// The default port.
+    pub const fn default_port(self) -> u16 {
+        match self {
+            DnsUpstreamTransport::Udp | DnsUpstreamTransport::Tcp => 53,
+            DnsUpstreamTransport::Dot => 853,
+            DnsUpstreamTransport::Doh => 443,
+        }
+    }
+}
+
+/// One upstream of the default forwarder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DnsForwarder {
     /// The upstream's IP address.
     pub address: IpAddr,
-    /// Its port (default 53).
-    #[serde(default = "dns_port")]
-    pub port: u16,
-    /// `udp` (default) or `tcp`.
+    /// Its port (default 53, 853 for DoT, 443 for DoH).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    /// `udp` (default), `tcp`, `dot` or `doh`.
     #[serde(default)]
     pub transport: DnsUpstreamTransport,
-}
-
-const fn dns_port() -> u16 {
-    53
+    /// The name in the upstream's certificate (DoT and DoH).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_name: Option<String>,
+    /// The URL path of a DoH upstream (default `/dns-query`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 impl DnsForwarder {
     /// The upstream's socket address.
     pub fn socket_addr(&self) -> SocketAddr {
-        SocketAddr::new(self.address, self.port)
+        SocketAddr::new(
+            self.address,
+            self.port.unwrap_or(self.transport.default_port()),
+        )
+    }
+
+    fn check(&self) -> Result<(), String> {
+        if self.port == Some(0) {
+            return Err("a port must be between 1 and 65535".to_owned());
+        }
+        let encrypted = matches!(
+            self.transport,
+            DnsUpstreamTransport::Dot | DnsUpstreamTransport::Doh
+        );
+        if encrypted
+            && self
+                .tls_name
+                .as_deref()
+                .is_none_or(|name| name.trim().is_empty())
+        {
+            return Err(format!(
+                "{} needs tls_name, the name in its certificate",
+                self.address
+            ));
+        }
+        if !encrypted && self.tls_name.is_some() {
+            return Err(format!(
+                "{}: tls_name is for DoT and DoH upstreams",
+                self.address
+            ));
+        }
+        match (&self.path, self.transport) {
+            (Some(path), DnsUpstreamTransport::Doh) if !path.starts_with('/') => {
+                Err(format!("{}: a DoH path starts with `/`", self.address))
+            }
+            (
+                Some(_),
+                DnsUpstreamTransport::Udp | DnsUpstreamTransport::Tcp | DnsUpstreamTransport::Dot,
+            ) => Err(format!("{}: only a DoH upstream has a path", self.address)),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -655,8 +789,10 @@ impl std::str::FromStr for DnsForwarder {
         if let Ok(address) = text.parse::<IpAddr>() {
             return Ok(Self {
                 address,
-                port: 53,
+                port: None,
                 transport: DnsUpstreamTransport::Udp,
+                tls_name: None,
+                path: None,
             });
         }
         let addr: SocketAddr = text.parse().map_err(|_| {
@@ -667,8 +803,10 @@ impl std::str::FromStr for DnsForwarder {
         })?;
         Ok(Self {
             address: addr.ip(),
-            port: addr.port(),
+            port: Some(addr.port()),
             transport: DnsUpstreamTransport::Udp,
+            tls_name: None,
+            path: None,
         })
     }
 }
@@ -838,9 +976,38 @@ impl DnsSection {
             self.forwarders.len() <= 16,
             "dns.forwarders holds at most 16 upstreams",
         )?;
+        for upstream in &self.forwarders {
+            upstream
+                .check()
+                .map_err(|problem| ConfigError::invalid(format!("dns.forwarders: {problem}")))?;
+        }
+        if let Some(entries) = self.cache.entries {
+            check(
+                (1..=10_000_000).contains(&entries),
+                "dns.cache.entries must be between 1 and 10000000",
+            )?;
+        }
+        if let Some(bytes) = self.cache.max_bytes {
+            check(
+                (65_536..=16 * 1024 * 1024 * 1024).contains(&bytes),
+                "dns.cache.max_bytes must be between 65536 and 17179869184",
+            )?;
+        }
         check(
-            self.forwarders.iter().all(|upstream| upstream.port != 0),
-            "dns.forwarders: a port must be between 1 and 65535",
+            self.cache.stale_secs <= 604_800,
+            "dns.cache.stale_secs must be between 0 and 604800",
+        )?;
+        check(
+            (100..=30_000).contains(&self.cache.stale_answer_ms),
+            "dns.cache.stale_answer_ms must be between 100 and 30000",
+        )?;
+        check(
+            (1..=604_800).contains(&self.cache.max_ttl_secs),
+            "dns.cache.max_ttl_secs must be between 1 and 604800",
+        )?;
+        check(
+            self.cache.negative_ttl_secs <= 86_400,
+            "dns.cache.negative_ttl_secs must be between 0 and 86400",
         )?;
         check(
             (100..=30_000).contains(&self.forward_timeout_ms),

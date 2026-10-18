@@ -16,9 +16,17 @@ bytes = { workspace = true }
 # `zonefile` adds the zone file scanner (`domain::zonefile::inplace`) for the import; it
 # brings no crate the workspace does not already build (`bytes`, `serde`).
 domain = { workspace = true, features = ["zonefile"] }
+# DoH upstreams (WP5.1): HTTP/2 over the rustls stream; both crates are already in the
+# graph through hyper and tonic.
+h2 = "0.4.20"
+http = "1.5.0"
 ipnet = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# DoT and DoH upstreams (WP5.1): rustls with aws-lc-rs and the system roots, as the rest
+# of the process.
+rustls = { workspace = true }
+rustls-native-certs = "0.8.4"
 socket2 = { workspace = true }
 tenko-core = { workspace = true }
 tenko-jobs = { workspace = true }
@@ -26,6 +34,7 @@ tenko-store = { workspace = true }
 tenko-vault = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "logging", "tls12"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
@@ -34,6 +43,8 @@ zeroize = { workspace = true }
 [dev-dependencies]
 hickory-proto = { workspace = true }
 proptest = { workspace = true }
+# The certificates of the in-test DoT and DoH upstreams.
+rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "crypto", "pem"] }
 stats_alloc = { workspace = true }
 tenko-core = { workspace = true, features = ["testing"] }
 tenko-jobs = { workspace = true, features = ["testing"] }

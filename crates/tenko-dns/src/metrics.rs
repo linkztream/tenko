@@ -5,7 +5,7 @@
 
 use tenko_core::{
     dns::QueryTransport,
-    metrics::{CounterVec, Desc, HistogramVec, Registry},
+    metrics::{Counter, CounterVec, Desc, Gauge, HistogramVec, Registry},
 };
 
 /// Query latency buckets in microseconds: 50 µs to 2 s.
@@ -38,31 +38,37 @@ pub const QUERY_DURATION: Desc = Desc::histogram(
 )
 .labels(&["proto"]);
 
-/// Answers from the cache.
-pub const CACHE_HITS: Desc = Desc::counter("tenko_dns_cache_hits", "DNS answers from the cache");
+/// Answers from the cache, by view (`default`, `named`).
+pub const CACHE_HITS: Desc =
+    Desc::counter("tenko_dns_cache_hits", "DNS answers from the cache").labels(&["view"]);
 
-/// Queries the cache could not answer.
+/// Forwarded queries the cache could not answer, by view.
 pub const CACHE_MISSES: Desc = Desc::counter(
     "tenko_dns_cache_misses",
     "DNS queries the cache could not answer",
-);
+)
+.labels(&["view"]);
 
-/// Stale answers served while the upstreams failed (RFC 8767).
+/// Stale answers served while the upstreams failed or were slow (RFC 8767).
 pub const CACHE_STALE: Desc = Desc::counter(
     "tenko_dns_cache_stale",
     "Stale DNS answers served while upstreams failed",
 );
 
-/// Queries sent to upstreams, by upstream and outcome (`ok`, `timeout`, `error`).
+/// Entries in the cache.
+pub const CACHE_ENTRIES: Desc = Desc::gauge("tenko_dns_cache_entries", "Entries in the DNS cache");
+
+/// Exchanges with upstreams, by rule, upstream, transport and outcome (`ok`, `servfail`,
+/// `timeout`, `unreachable`, `malformed`); read from the pool ([`crate::pool`]).
 pub const UPSTREAM_QUERIES: Desc = Desc::counter(
     "tenko_dns_upstream_queries",
     "DNS queries sent to upstream resolvers",
 )
-.labels(&["upstream", "outcome"]);
+.labels(&["rule", "upstream", "transport", "outcome"]);
 
-/// Round-trip time to upstreams.
-pub const UPSTREAM_DURATION: Desc = Desc::histogram(
-    "tenko_dns_upstream_duration_seconds",
+/// Round-trip time of answered exchanges, by upstream.
+pub const UPSTREAM_RTT: Desc = Desc::histogram(
+    "tenko_dns_upstream_rtt_seconds",
     "Round-trip time of DNS queries to upstream resolvers",
     LATENCY_BUCKETS_US,
     1_000_000,
@@ -100,14 +106,15 @@ pub const LOG_DROPPED: Desc =
     Desc::counter("tenko_dns_log_dropped", "DNS query log entries dropped");
 
 /// Every family of the engine, for registration and the contracts document.
-pub const ALL: [&Desc; 13] = [
+pub const ALL: [&Desc; 14] = [
     &QUERIES,
     &QUERY_DURATION,
     &CACHE_HITS,
     &CACHE_MISSES,
     &CACHE_STALE,
+    &CACHE_ENTRIES,
     &UPSTREAM_QUERIES,
-    &UPSTREAM_DURATION,
+    &UPSTREAM_RTT,
     &RRL_DROPPED,
     &BLOCKED,
     &ZONE_SERIAL,
@@ -123,6 +130,26 @@ pub static QUERY_COUNTER: CounterVec = CounterVec::new(QUERIES);
 /// The latency histogram of the engine: [`QUERY_DURATION`] by transport, in microseconds.
 /// Sealed by [`seal`].
 pub static QUERY_LATENCY: HistogramVec = HistogramVec::new(QUERY_DURATION);
+
+/// [`CACHE_HITS`] by view, in the order of [`VIEWS`].
+pub static CACHE_HIT_COUNTER: CounterVec =
+    CounterVec::fixed(CACHE_HITS, &[&["default"], &["named"]]);
+
+/// [`CACHE_MISSES`] by view, in the order of [`VIEWS`].
+pub static CACHE_MISS_COUNTER: CounterVec =
+    CounterVec::fixed(CACHE_MISSES, &[&["default"], &["named"]]);
+
+/// [`CACHE_STALE`].
+pub static CACHE_STALE_COUNTER: Counter = Counter::new(CACHE_STALE);
+
+/// [`CACHE_ENTRIES`], set by the cache as it changes.
+pub static CACHE_ENTRY_GAUGE: Gauge = Gauge::new(CACHE_ENTRIES);
+
+/// The series index of a view in the cache counters: 1 for a view of the table, 0 for the
+/// implicit default view.
+pub fn view_index(named: bool) -> u16 {
+    u16::from(named)
+}
 
 /// The `proto` label values, in the order of [`proto_index`].
 pub const PROTOS: [&str; 4] = ["udp", "tcp", "dot", "doh"];
@@ -191,14 +218,26 @@ pub fn seal() {
     let protos: Vec<[&str; 1]> = PROTOS.iter().map(|proto| [*proto]).collect();
     let series: Vec<&[&str]> = protos.iter().map(|row| &row[..]).collect();
     QUERY_LATENCY.seal(&series);
+    // The fixed families seal at their first use; using them once here keeps that
+    // allocation off the query path.
+    CACHE_HIT_COUNTER.add(0, 0);
+    CACHE_MISS_COUNTER.add(0, 0);
+    CACHE_STALE_COUNTER.add(0);
 }
 
 /// Seals the engine's families and registers them with `registry` (the role start step of
-/// WP4.3 calls it with the process registry).
+/// WP4.3 calls it with the process registry): the queries and their latency, the cache
+/// (WP5.1) and the upstreams of the pool.
 pub fn register(registry: &Registry) {
     seal();
     registry.register(&QUERY_COUNTER);
     registry.register(&QUERY_LATENCY);
+    registry.register(&CACHE_HIT_COUNTER);
+    registry.register(&CACHE_MISS_COUNTER);
+    registry.register(&CACHE_STALE_COUNTER);
+    registry.register(&CACHE_ENTRY_GAUGE);
+    registry.register(&crate::pool::UPSTREAM_QUERY_FAMILY);
+    registry.register(&crate::pool::UPSTREAM_RTT_FAMILY);
 }
 
 #[cfg(test)]

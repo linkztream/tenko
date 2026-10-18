@@ -51,7 +51,7 @@ engine is measured against.
 | `scripts/run-loopback.sh` | M16 and M22: the load generator against a server on loopback |
 | `scripts/run-dnsperf.sh` | M17: dnsperf from another host |
 | `scripts/run-flamethrower.sh` | M17: flamethrower from another host (UDP, TCP, DoT, DoH) |
-| `scripts/run-m24-cache.sh` | M24: skeleton that documents the cache run until the resolver exists |
+| `scripts/run-m24-cache.sh` | M24: the resolver's cache (`tenko serve` forwarding to the engine's example server) in a 1 M-name mixed run at two cache bounds, and serve-stale under an upstream cut |
 | `scripts/server-cpu.sh` | CPU seconds and RSS of a server pid on a Linux host, for the runs where the harness cannot sample the server |
 | `scripts/lib.sh` | Shared helpers: machine line, musl linkage check, readiness probe |
 | `data/` | Generated zone and query files (git-ignored) |

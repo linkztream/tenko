@@ -10,7 +10,8 @@
 //! Every operation is declared with its request and answer types so that the OpenAPI
 //! document, the typed client of the UI and the mock server have them. The zones, records,
 //! zone files, the zone journal, access lists and TSIG keys are built (WP4.2, files
-//! `dns/zones.rs`, `dns/records.rs`, `dns/acls.rs`, `dns/keys.rs`) on the zone service
+//! `dns/zones.rs`, `dns/records.rs`, `dns/acls.rs`, `dns/keys.rs`), and the forwarding
+//! rules (WP5.1, `dns/forwarders.rs`), on the zone service
 //! (`tenko_dns::zone`), which the server adds as the request extension
 //! `Arc<ZoneService>`. Until its package builds it, any other operation checks the
 //! caller's scope and answers `501` with `sys.not_implemented`. The routes belong to the
@@ -72,6 +73,7 @@
 //! well. The DNS kinds are global-only for grants in Phase 2.
 
 mod acls;
+mod forwarders;
 mod keys;
 mod model;
 mod nodes;
@@ -94,7 +96,7 @@ use tenko_auth::authz::anywhere;
 use tenko_core::Revision;
 use tenko_core::{
     Action, CodedError, NodeId, ObjectKind, ObjectRef,
-    dns::{BlockListId, DnsName, ForwardRuleId, ViewId, ZoneId},
+    dns::{BlockListId, DnsName, ViewId, ZoneId},
     error::codes,
 };
 use tenko_dns::zone::ZoneService;
@@ -107,13 +109,13 @@ pub use nodes::DnsNodeSlot;
 pub use zones::{JournalItem, JournalParams};
 
 pub use model::{
-    AclCreate, AclItem, AclPatch, DnsCommandAccepted, DnsJobStarted, DnsNodeStatus, DnssecKeyItem,
-    DnssecStatus, DryRunParams, ExportParams, ForwarderCreate, ForwarderItem, ForwarderPatch,
-    ImportLoss, ImportTypeCount, KeyCreate, KeyCreated, KeyItem, ListCreate, ListItem, ListPatch,
-    ListVersionItem, ListenerItem, OriginCount, PrimaryState, QueryLogLine, QueryLogParams,
-    RecordBatch, RecordBatchResult, RecordChange, RecordDiff, RecordFilters, RecordOp,
-    RolloverRequest, RrSetItem, TransferStatus, UdpWorkerItem, ViewCreate, ViewItem, ViewPatch,
-    ZoneCreate, ZoneFileImport, ZoneFileImportReport, ZoneItem, ZonePatch,
+    AclCreate, AclItem, AclPatch, CacheFlushParams, DnsCommandAccepted, DnsJobStarted,
+    DnsNodeStatus, DnssecKeyItem, DnssecStatus, DryRunParams, ExportParams, ForwarderCreate,
+    ForwarderItem, ForwarderPatch, ImportLoss, ImportTypeCount, KeyCreate, KeyCreated, KeyItem,
+    ListCreate, ListItem, ListPatch, ListVersionItem, ListenerItem, OriginCount, PrimaryState,
+    QueryLogLine, QueryLogParams, RecordBatch, RecordBatchResult, RecordChange, RecordDiff,
+    RecordFilters, RecordOp, RolloverRequest, RrSetItem, TransferStatus, UdpWorkerItem, ViewCreate,
+    ViewItem, ViewPatch, ZoneCreate, ZoneFileImport, ZoneFileImportReport, ZoneItem, ZonePatch,
 };
 
 use super::not_implemented;
@@ -246,11 +248,14 @@ fn view_and_forwarder_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list_dns_views, create_dns_view))
         .routes(routes!(get_dns_view, update_dns_view, delete_dns_view))
-        .routes(routes!(list_dns_forwarders, create_dns_forwarder))
         .routes(routes!(
-            get_dns_forwarder,
-            update_dns_forwarder,
-            delete_dns_forwarder
+            forwarders::list_dns_forwarders,
+            forwarders::create_dns_forwarder
+        ))
+        .routes(routes!(
+            forwarders::get_dns_forwarder,
+            forwarders::update_dns_forwarder,
+            forwarders::delete_dns_forwarder
         ))
 }
 
@@ -538,154 +543,6 @@ async fn delete_dns_view(
         &ObjectRef::from(parse_id::<ViewId>(&id)?),
     )?;
     Err(not_implemented("DELETE", "/dns/views/{id}"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dns/forwarders",
-    tag = "dns",
-    operation_id = "list_dns_forwarders",
-    summary = "List forwarding rules",
-    description = "Scope: `dns.read`.",
-    params(PageParams),
-    responses(
-        (status = 200, description = "A page of rules by suffix", body = Page<ForwarderItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dns_forwarders(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DnsForwarder),
-    )?;
-    Err(not_implemented("GET", "/dns/forwarders"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dns/forwarders",
-    tag = "dns",
-    operation_id = "create_dns_forwarder",
-    summary = "Create a forwarding rule",
-    description = "Scope: `dns.write`.",
-    request_body(content = ForwarderCreate, content_type = "application/json"),
-    responses(
-        (status = 201, description = "The rule", body = ForwarderItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the rule is invalid (`dns.forwarder.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn create_dns_forwarder(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Create,
-        &anywhere(ObjectKind::DnsForwarder),
-    )?;
-    Err(not_implemented("POST", "/dns/forwarders"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dns/forwarders/{id}",
-    tag = "dns",
-    operation_id = "get_dns_forwarder",
-    summary = "Get a forwarding rule",
-    description = "Scope: `dns.read`.",
-    params(("id" = String, Path, description = "Forwarding rule identifier (UUID)")),
-    responses(
-        (status = 200, description = "The rule with its `ETag`", body = ForwarderItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such rule (`dns.forwarder.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dns_forwarder(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &ObjectRef::from(parse_id::<ForwardRuleId>(&id)?),
-    )?;
-    Err(not_implemented("GET", "/dns/forwarders/{id}"))
-}
-
-#[utoipa::path(
-    patch,
-    path = "/dns/forwarders/{id}",
-    tag = "dns",
-    operation_id = "update_dns_forwarder",
-    summary = "Change a forwarding rule",
-    description = "Scope: `dns.write`.",
-    params(("id" = String, Path, description = "Forwarding rule identifier (UUID)")),
-    request_body(content = ForwarderPatch, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The changed rule", body = ForwarderItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such rule (`dns.forwarder.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 412, description = "The rule changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn update_dns_forwarder(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Update,
-        &ObjectRef::from(parse_id::<ForwardRuleId>(&id)?),
-    )?;
-    Err(not_implemented("PATCH", "/dns/forwarders/{id}"))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/dns/forwarders/{id}",
-    tag = "dns",
-    operation_id = "delete_dns_forwarder",
-    summary = "Delete a forwarding rule",
-    description = "Scope: `dns.write`.",
-    params(("id" = String, Path, description = "Forwarding rule identifier (UUID)")),
-    responses(
-        (status = 204, description = "The rule is gone"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such rule (`dns.forwarder.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn delete_dns_forwarder(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Delete,
-        &ObjectRef::from(parse_id::<ForwardRuleId>(&id)?),
-    )?;
-    Err(not_implemented("DELETE", "/dns/forwarders/{id}"))
 }
 
 #[utoipa::path(

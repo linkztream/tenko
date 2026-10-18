@@ -3,31 +3,36 @@
 //! allocator, and `Codec::parse`, `Codec::build` and `Index::lookup` must not allocate once
 //! their buffers have capacity; nor must the whole path of a query through the responder,
 //! the authoritative resolver, the production index and the codec, with metrics and
-//! cookies on. The first test proves that the counter sees an allocation, so a pass means
-//! something.
+//! cookies on; nor must a query the forwarder's cache answers (WP5.1), in a view whose
+//! recursion access list allows the client, nor one the recursion check refuses. The first
+//! test proves that the counter sees an allocation, so a pass means something.
 //!
 //! The allocator counts every thread of the process, so the file has one test that runs
 //! the measured sections one after another: no other test of the binary runs beside them.
 
-use std::{alloc::System, hint::black_box, net::Ipv4Addr, time::Instant};
+use std::{alloc::System, hint::black_box, net::Ipv4Addr, sync::Arc, time::Instant};
 
 use stats_alloc::{INSTRUMENTED_SYSTEM, Region, StatsAlloc};
 use tenko_core::{
     Revision,
     dns::{
-        DnsName, Origin, QueryTransport, Rdata, RecordData, RrSet, ScopeName, SoaDefaults, Zone,
-        ZoneId, ZoneKind,
+        Acl, AclEntry, AclId, DnsName, ForwardTransport, MatchRule, Origin, QueryTransport, Rdata,
+        RecordData, RrSet, ScopeName, SoaDefaults, View, ViewId, Zone, ZoneId, ZoneKind,
     },
     ipam::Stamp,
     principal::{Principal, SystemComponent},
 };
 use tenko_dns::{
     AnswerBuf, Codec, DnsData, DomainCodec, Index, Lookup, MemIndex, NameBuf, Request,
-    authoritative::Authoritative,
+    authoritative::{Authoritative, Settings},
+    cache::CacheKey,
     catalog::{Catalog, CatalogHandle},
     codec::{Owner, Section},
     cookie::CookieSecret,
+    forward::{ForwardSettings, Forwarder, RecursionDefault, RecursionPolicy},
     index::DefaultScopes,
+    pool::UpstreamSpec,
+    respond::ForwardSink,
     respond::{Clock, Conn, Reply, Responder, Scratch},
     wire::{self, MAX_MESSAGE_LEN, TsigRecord},
 };
@@ -443,6 +448,132 @@ fn the_full_query_path_does_not_allocate() {
     );
 }
 
+/// An upstream's answer to `www.example.org` A: one record, TTL 300.
+fn upstream_answer() -> Vec<u8> {
+    let mut answer = Vec::new();
+    wire::write_query(&mut answer, 0, "www.example.org", 1, None);
+    answer[2] = 0x81;
+    answer[3] = 0x80;
+    answer[7] = 1;
+    answer.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 1, 44, 0, 4, 192, 0, 2, 80]);
+    answer
+}
+
+#[allow(clippy::too_many_lines, reason = "one setup and one measured loop")]
+fn the_cache_hit_path_does_not_allocate() {
+    let acl = Acl {
+        id: AclId::generate(),
+        name: "clients".to_owned(),
+        entries: vec![AclEntry::Prefix {
+            prefix: "192.0.2.0/24".parse().expect("prefix"),
+            deny: false,
+        }],
+        description: None,
+    };
+    let view = View {
+        id: ViewId::generate(),
+        name: "clients".to_owned(),
+        rules: vec![MatchRule::ClientSubnet {
+            prefixes: vec!["192.0.2.0/24".parse().expect("prefix")],
+        }],
+        scope_map: Vec::new(),
+        order: 1,
+        recursion: Some(acl.id),
+        description: None,
+    };
+    let mut image = full_image();
+    image.acls.insert(acl.id, acl);
+    image.views.insert(view.id, view.clone());
+    let catalog = CatalogHandle::new(Catalog::build(&image));
+    // The forwarder's tasks go to a runtime that is not driven while the path is measured.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let stop = tokio_util::sync::CancellationToken::new();
+    let (forwarder, _task) = runtime.block_on(async {
+        Forwarder::start(
+            ForwardSettings {
+                upstreams: vec![UpstreamSpec {
+                    address: "192.0.2.1:53".parse().expect("address"),
+                    transport: ForwardTransport::Plain,
+                    tcp_only: false,
+                    tls_name: None,
+                    path: None,
+                }],
+                ..ForwardSettings::default()
+            },
+            catalog.clone(),
+            None,
+            Arc::new(RecursionPolicy::new(RecursionDefault::KnownPrefixes)),
+            stop.clone(),
+        )
+    });
+    let cache = forwarder.cache().expect("a cache");
+    let key = CacheKey::new(
+        Some(view.id),
+        b"\x03www\x07example\x03org\x00",
+        1,
+        1,
+        false,
+        false,
+    );
+    assert!(cache.insert(&key, &upstream_answer(), Instant::now(), None));
+    let responder = Responder::new(
+        Authoritative::new(catalog).with_settings(Settings {
+            recursion_available: true,
+            default_forwarder: true,
+            ..Settings::default()
+        }),
+        CookieSecret::with_secret([5; 16]),
+    )
+    .with_metrics(true)
+    .with_forwarder(Arc::clone(&forwarder) as Arc<dyn ForwardSink>);
+    let mut hits = Vec::new();
+    for (id, name) in [(1, "www.example.org"), (2, "WWW.Example.ORG")] {
+        let mut query = Vec::new();
+        wire::write_query(&mut query, id, name, 1, Some(1232));
+        query[2] |= 0x01;
+        hits.push(query);
+    }
+    let mut with_cookie = hits[0].clone();
+    let len = with_cookie.len();
+    with_cookie[len - 2..].copy_from_slice(&12u16.to_be_bytes());
+    with_cookie.extend_from_slice(&[0, 10, 0, 8, 1, 2, 3, 4, 5, 6, 7, 8]);
+    hits.push(with_cookie);
+    let inside = Conn {
+        client: "192.0.2.77:40000".parse().expect("client"),
+        local: "192.0.2.53:53".parse().expect("local"),
+        transport: QueryTransport::Udp,
+    };
+    // Outside the view and outside the prefixes IPAM knows: refused on the query path.
+    let outside = Conn {
+        client: "198.51.100.9:40000".parse().expect("client"),
+        ..inside
+    };
+    let mut scratch = Scratch::new();
+    let clock = Clock::now();
+    let (allocations, reallocations, bytes) = measure(500, || {
+        for query in &hits {
+            let reply = responder.respond(query, &inside, &clock, Instant::now(), &mut scratch);
+            assert_eq!(reply, Reply::Send, "a cache hit");
+            assert_eq!(scratch.out[3] & 0x0f, 0);
+            black_box(&scratch.out);
+        }
+        let reply = responder.respond(&hits[0], &outside, &clock, Instant::now(), &mut scratch);
+        assert_eq!(reply, Reply::Send, "refused");
+        assert_eq!(scratch.out[3] & 0x0f, 5);
+        black_box(&scratch.out);
+    });
+    assert_eq!(
+        (allocations, reallocations, bytes),
+        (0, 0, 0),
+        "the cache hit path allocated"
+    );
+    assert!(forwarder.stats().hits >= 1_500);
+    stop.cancel();
+}
+
 #[test]
 fn the_query_path_allocates_nothing() {
     // First: a pass of the checks below means something.
@@ -451,4 +582,5 @@ fn the_query_path_allocates_nothing() {
     truncation_and_formerr_do_not_allocate();
     index_lookups_do_not_allocate();
     the_full_query_path_does_not_allocate();
+    the_cache_hit_path_does_not_allocate();
 }

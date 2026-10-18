@@ -1,5 +1,5 @@
 //! `tenko dns ...`: the DNS endpoints of the public API (`/api/v1/dns/...`): zones, records,
-//! zone file import and export, access lists and TSIG keys.
+//! zone file import and export, access lists, TSIG keys and forwarding rules.
 //!
 //! # Names
 //!
@@ -81,6 +81,108 @@ pub enum DnsCommand {
         #[command(subcommand)]
         action: KeyCommand,
     },
+    /// Forwarding rules: list, create, show, change, delete.
+    Forwarder {
+        /// The `forwarder` subcommand to run.
+        #[command(subcommand)]
+        action: ForwarderCommand,
+    },
+}
+
+/// Subcommands of `tenko dns forwarder`.
+#[derive(Debug, Clone, Subcommand)]
+pub enum ForwarderCommand {
+    /// List the forwarding rules.
+    List(ListArgs),
+    /// Create a forwarding rule.
+    Create(ForwarderCreateArgs),
+    /// Show one forwarding rule (its identifier or its suffix).
+    Get(NamedArgs),
+    /// Change a forwarding rule.
+    Update(ForwarderUpdateArgs),
+    /// Delete a forwarding rule (its identifier or its suffix).
+    Delete(NamedArgs),
+}
+
+/// How the upstreams of a rule are reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum TransportArg {
+    /// UDP, TCP when an answer is truncated (port 53).
+    Plain,
+    /// DNS over TLS (port 853).
+    Dot,
+    /// DNS over HTTPS (port 443).
+    Doh,
+}
+
+impl TransportArg {
+    const fn api(self) -> &'static str {
+        match self {
+            Self::Plain => "plain",
+            Self::Dot => "dot",
+            Self::Doh => "doh",
+        }
+    }
+}
+
+/// Arguments of `tenko dns forwarder create`.
+#[derive(Debug, Clone, Args)]
+pub struct ForwarderCreateArgs {
+    /// Connection options.
+    #[command(flatten)]
+    pub client: ClientOpts,
+    /// The names the rule covers (`example.test`), or `.` for the default forwarder.
+    #[arg(value_name = "SUFFIX")]
+    pub suffix: String,
+    /// An upstream: an address with an optional port (`192.0.2.1`, `192.0.2.1:5353`,
+    /// `[2001:db8::1]:853`) and, for DoH, an optional path (`192.0.2.1:443/dns-query`).
+    /// Repeat for more, up to 16.
+    #[arg(long = "upstream", value_name = "UPSTREAM", required = true)]
+    pub upstreams: Vec<String>,
+    /// How the upstreams are reached; plain when absent.
+    #[arg(long, value_enum)]
+    pub transport: Option<TransportArg>,
+    /// The name in the upstreams' certificates (DoT and DoH).
+    #[arg(long, value_name = "NAME")]
+    pub tls_name: Option<String>,
+    /// The view the rule applies in (its identifier); every view when absent.
+    #[arg(long, value_name = "VIEW")]
+    pub view: Option<String>,
+    /// Free text.
+    #[arg(long, value_name = "TEXT")]
+    pub description: Option<String>,
+}
+
+/// Arguments of `tenko dns forwarder update`.
+#[derive(Debug, Clone, Args)]
+pub struct ForwarderUpdateArgs {
+    /// Connection options.
+    #[command(flatten)]
+    pub client: ClientOpts,
+    /// The rule: its identifier or its suffix.
+    #[arg(value_name = "RULE")]
+    pub rule: String,
+    /// A new suffix.
+    #[arg(long, value_name = "SUFFIX")]
+    pub suffix: Option<String>,
+    /// The new upstreams, replacing all of them; as for `create`.
+    #[arg(long = "upstream", value_name = "UPSTREAM")]
+    pub upstreams: Vec<String>,
+    /// The transport.
+    #[arg(long, value_enum)]
+    pub transport: Option<TransportArg>,
+    /// The certificate name; an empty text clears it.
+    #[arg(long, value_name = "NAME")]
+    pub tls_name: Option<String>,
+    /// The view the rule applies in.
+    #[arg(long, value_name = "VIEW", conflicts_with = "all_views")]
+    pub view: Option<String>,
+    /// Apply the rule in every view.
+    #[arg(long)]
+    pub all_views: bool,
+    /// Free text; an empty text clears it.
+    #[arg(long, value_name = "TEXT")]
+    pub description: Option<String>,
 }
 
 /// Subcommands of `tenko dns zone`.
@@ -172,6 +274,12 @@ impl DnsCommand {
                 KeyCommand::Create(a) => &a.client,
                 KeyCommand::Get(a) | KeyCommand::Delete(a) => &a.client,
             },
+            Self::Forwarder { action } => match action {
+                ForwarderCommand::List(a) => &a.client,
+                ForwarderCommand::Create(a) => &a.client,
+                ForwarderCommand::Get(a) | ForwarderCommand::Delete(a) => &a.client,
+                ForwarderCommand::Update(a) => &a.client,
+            },
         }
     }
 
@@ -206,6 +314,13 @@ impl DnsCommand {
                 KeyCommand::Create(_) => "dns key create",
                 KeyCommand::Get(_) => "dns key get",
                 KeyCommand::Delete(_) => "dns key delete",
+            },
+            Self::Forwarder { action } => match action {
+                ForwarderCommand::List(_) => "dns forwarder list",
+                ForwarderCommand::Create(_) => "dns forwarder create",
+                ForwarderCommand::Get(_) => "dns forwarder get",
+                ForwarderCommand::Update(_) => "dns forwarder update",
+                ForwarderCommand::Delete(_) => "dns forwarder delete",
             },
         }
     }
@@ -593,6 +708,13 @@ pub async fn run(command: &DnsCommand) -> Result<Output, Failure> {
             KeyCommand::Create(args) => key_create(&target, args).await,
             KeyCommand::Get(args) => key_get(&target, args).await,
             KeyCommand::Delete(args) => key_delete(&target, args).await,
+        },
+        DnsCommand::Forwarder { action } => match action {
+            ForwarderCommand::List(_) => forwarder_list(&target).await,
+            ForwarderCommand::Create(args) => forwarder_create(&target, args).await,
+            ForwarderCommand::Get(args) => forwarder_get(&target, args).await,
+            ForwarderCommand::Update(args) => forwarder_update(&target, args).await,
+            ForwarderCommand::Delete(args) => forwarder_delete(&target, args).await,
         },
     }
 }
@@ -1739,6 +1861,260 @@ async fn acl_delete(target: &Target, args: &NamedArgs) -> Result<Output, Failure
 }
 
 // ---------------------------------------------------------------------------------------
+// Forwarding rules
+
+/// An upstream as the API takes it, from `ADDRESS[:PORT][/PATH]`.
+fn parse_upstream(text: &str) -> Result<Value, Failure> {
+    let text = text.trim();
+    let bad = || {
+        usage(format!(
+            "`{text}` is not an upstream: an address with an optional port and path, such as \
+             192.0.2.1, 192.0.2.1:853, [2001:db8::1]:443/dns-query"
+        ))
+    };
+    if let Ok(address) = text.parse::<IpAddr>() {
+        return Ok(json!({ "address": address.to_string() }));
+    }
+    // The path starts at the first `/` after the address (and its port).
+    let (head, path) = if let Some(rest) = text.strip_prefix('[') {
+        let close = rest.find(']').ok_or_else(bad)?;
+        let after = &rest[close + 1..];
+        match after.find('/') {
+            Some(slash) => (&text[..close + 2 + slash], Some(&after[slash..])),
+            None => (text, None),
+        }
+    } else {
+        match text.find('/') {
+            Some(slash) => (&text[..slash], Some(&text[slash..])),
+            None => (text, None),
+        }
+    };
+    let mut upstream = Map::new();
+    if let Ok(address) = head.parse::<IpAddr>() {
+        upstream.insert("address".to_owned(), json!(address.to_string()));
+    } else {
+        let socket: std::net::SocketAddr = head.parse().map_err(|_| bad())?;
+        upstream.insert("address".to_owned(), json!(socket.ip().to_string()));
+        upstream.insert("port".to_owned(), json!(socket.port()));
+    }
+    if let Some(path) = path {
+        upstream.insert("path".to_owned(), json!(path));
+    }
+    Ok(Value::Object(upstream))
+}
+
+fn parse_upstreams(upstreams: &[String]) -> Result<Vec<Value>, Failure> {
+    upstreams.iter().map(|text| parse_upstream(text)).collect()
+}
+
+/// An upstream of a rule as the commands print it.
+fn present_upstream(upstream: &Value) -> String {
+    let address = text(upstream, &["address"]);
+    let mut out = match upstream.get("port").and_then(Value::as_u64) {
+        Some(port) if address.contains(':') => format!("[{address}]:{port}"),
+        Some(port) => format!("{address}:{port}"),
+        None => address.to_owned(),
+    };
+    out.push_str(text(upstream, &["path"]));
+    out
+}
+
+fn upstreams_of(rule: &Value) -> Vec<String> {
+    rule.get("upstreams")
+        .and_then(Value::as_array)
+        .map(|list| list.iter().map(present_upstream).collect())
+        .unwrap_or_default()
+}
+
+/// The rule `reference` names: its identifier, or its suffix when one rule has it.
+async fn resolve_rule(client: &Client, reference: &str) -> Result<Value, Failure> {
+    if Uuid::parse_str(reference).is_ok() {
+        return Ok(client.get(&format!("/dns/forwarders/{reference}")).await?);
+    }
+    let wanted = canonical(reference);
+    let rules = list_all(client, "/dns/forwarders", &[]).await?;
+    let mut found: Vec<Value> = rules
+        .into_iter()
+        .filter(|rule| text(rule, &["suffix"]) == wanted)
+        .collect();
+    match found.len() {
+        0 => Err(not_found(
+            "dns.forwarder.not_found",
+            "forwarding rule",
+            reference,
+        )),
+        1 => Ok(found.remove(0)),
+        _ => Err(usage(format!(
+            "{} rules cover {wanted} (in different views): give the identifier",
+            found.len()
+        ))),
+    }
+}
+
+fn describe_rule(rule: &Value) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "suffix       {}", text(rule, &["suffix"]));
+    let _ = writeln!(out, "id           {}", text(rule, &["id"]));
+    let transport = text(rule, &["transport"]);
+    let _ = writeln!(
+        out,
+        "transport    {}",
+        if transport.is_empty() {
+            "plain"
+        } else {
+            transport
+        }
+    );
+    let tls_name = text(rule, &["tls_name"]);
+    if !tls_name.is_empty() {
+        let _ = writeln!(out, "tls name     {tls_name}");
+    }
+    let view = text(rule, &["view"]);
+    let _ = writeln!(
+        out,
+        "view         {}",
+        if view.is_empty() { "all" } else { view }
+    );
+    let description = text(rule, &["description"]);
+    if !description.is_empty() {
+        let _ = writeln!(out, "description  {description}");
+    }
+    let _ = writeln!(out, "revision     {}", number(rule, &["revision"]));
+    for (index, upstream) in upstreams_of(rule).iter().enumerate() {
+        let _ = writeln!(out, "upstream {:<2}  {upstream}", index + 1);
+    }
+    out
+}
+
+async fn forwarder_list(target: &Target) -> Result<Output, Failure> {
+    let client = target.connect().await?;
+    let items = list_all(&client, "/dns/forwarders", &[]).await?;
+    if target.json {
+        return Ok(Output::json(&json!({ "items": items })));
+    }
+    let rows: Vec<Vec<String>> = items
+        .iter()
+        .map(|rule| {
+            let view = text(rule, &["view"]);
+            vec![
+                text(rule, &["suffix"]).to_owned(),
+                text(rule, &["transport"]).to_owned(),
+                upstreams_of(rule).join(" "),
+                if view.is_empty() {
+                    "all".to_owned()
+                } else {
+                    view.to_owned()
+                },
+                text(rule, &["id"]).to_owned(),
+            ]
+        })
+        .collect();
+    Ok(Output::text(table(
+        &["SUFFIX", "TRANSPORT", "UPSTREAMS", "VIEW", "ID"],
+        &rows,
+    )))
+}
+
+async fn forwarder_create(target: &Target, args: &ForwarderCreateArgs) -> Result<Output, Failure> {
+    let upstreams = parse_upstreams(&args.upstreams)?;
+    let client = target.connect().await?;
+    let mut body = json!({
+        "suffix": canonical(&args.suffix),
+        "upstreams": upstreams,
+        "transport": args.transport.unwrap_or(TransportArg::Plain).api(),
+    });
+    if let Some(tls_name) = &args.tls_name {
+        body["tls_name"] = json!(tls_name);
+    }
+    if let Some(view) = &args.view {
+        body["view"] = json!(view);
+    }
+    if let Some(description) = &args.description {
+        body["description"] = json!(description);
+    }
+    let answer: Value = client.post("/dns/forwarders", &body, Some(&key())).await?;
+    if target.json {
+        return Ok(Output::json(&answer));
+    }
+    Ok(Output::text(format!(
+        "created forwarding rule {} ({})\n",
+        text(&answer, &["suffix"]),
+        text(&answer, &["id"]),
+    )))
+}
+
+async fn forwarder_get(target: &Target, args: &NamedArgs) -> Result<Output, Failure> {
+    let client = target.connect().await?;
+    let rule = resolve_rule(&client, &args.name).await?;
+    if target.json {
+        return Ok(Output::json(&rule));
+    }
+    Ok(Output::text(describe_rule(&rule)))
+}
+
+async fn forwarder_update(target: &Target, args: &ForwarderUpdateArgs) -> Result<Output, Failure> {
+    let mut body = Map::new();
+    if let Some(suffix) = &args.suffix {
+        body.insert("suffix".to_owned(), json!(canonical(suffix)));
+    }
+    if !args.upstreams.is_empty() {
+        body.insert(
+            "upstreams".to_owned(),
+            json!(parse_upstreams(&args.upstreams)?),
+        );
+    }
+    if let Some(transport) = args.transport {
+        body.insert("transport".to_owned(), json!(transport.api()));
+    }
+    if let Some(tls_name) = &args.tls_name {
+        body.insert("tls_name".to_owned(), json!(tls_name));
+    }
+    if let Some(view) = &args.view {
+        body.insert("view".to_owned(), json!(view));
+    }
+    if args.all_views {
+        body.insert("all_views".to_owned(), json!(true));
+    }
+    if let Some(description) = &args.description {
+        body.insert("description".to_owned(), json!(description));
+    }
+    if body.is_empty() {
+        return Err(usage(
+            "nothing to change: give --suffix, --upstream, --transport, --tls-name, --view, \
+             --all-views or --description",
+        ));
+    }
+    let client = target.connect().await?;
+    let rule = resolve_rule(&client, &args.rule).await?;
+    let path = format!("/dns/forwarders/{}", text(&rule, &["id"]));
+    let answer: Value = client.patch(&path, &Value::Object(body), None).await?;
+    if target.json {
+        return Ok(Output::json(&answer));
+    }
+    Ok(Output::text(format!(
+        "updated forwarding rule {} at revision {}\n",
+        text(&answer, &["suffix"]),
+        number(&answer, &["revision"]),
+    )))
+}
+
+async fn forwarder_delete(target: &Target, args: &NamedArgs) -> Result<Output, Failure> {
+    let client = target.connect().await?;
+    let rule = resolve_rule(&client, &args.name).await?;
+    client
+        .delete(&format!("/dns/forwarders/{}", text(&rule, &["id"])), None)
+        .await?;
+    if target.json {
+        return Ok(Output::json(&json!({ "deleted": text(&rule, &["id"]) })));
+    }
+    Ok(Output::text(format!(
+        "deleted forwarding rule {} ({})\n",
+        text(&rule, &["suffix"]),
+        text(&rule, &["id"]),
+    )))
+}
+
+// ---------------------------------------------------------------------------------------
 // TSIG keys
 
 fn describe_key(key: &Value) -> String {
@@ -1898,6 +2274,30 @@ mod tests {
                 "dns key create",
             ),
             (&["key", "delete", "k1"], "dns key delete"),
+            (&["forwarder", "list"], "dns forwarder list"),
+            (
+                &[
+                    "forwarder",
+                    "create",
+                    ".",
+                    "--upstream",
+                    "192.0.2.1:853",
+                    "--transport",
+                    "dot",
+                    "--tls-name",
+                    "resolver.example.test",
+                ],
+                "dns forwarder create",
+            ),
+            (&["forwarder", "get", "example.test"], "dns forwarder get"),
+            (
+                &["forwarder", "update", "example.test", "--all-views"],
+                "dns forwarder update",
+            ),
+            (
+                &["forwarder", "delete", "example.test"],
+                "dns forwarder delete",
+            ),
         ];
         for (args, name) in cases {
             let command = parse(args).unwrap_or_else(|error| panic!("{args:?}: {error}"));
@@ -1911,6 +2311,23 @@ mod tests {
         assert!(parse(&["zone", "update", "z", "--serial", "weekly"]).is_err());
         assert!(parse(&["key", "create", "k", "--algorithm", "md5"]).is_err());
         assert!(parse(&["acl", "create", "x"]).is_err());
+        assert!(parse(&["forwarder", "create", "example.test"]).is_err());
+        assert!(
+            parse(&[
+                "forwarder",
+                "create",
+                "x",
+                "--upstream",
+                "192.0.2.1",
+                "--transport",
+                "tls"
+            ])
+            .is_err()
+        );
+        assert!(
+            parse(&["forwarder", "update", "x", "--view", "v", "--all-views"]).is_err(),
+            "a view and every view at once"
+        );
         let DnsCommand::Zone {
             action: ZoneCommand::Update(args),
         } = parse(&["zone", "update", "z", "--serial", "date-counter"]).expect("valid")
@@ -2158,6 +2575,41 @@ mod tests {
         assert_eq!(
             mailbox_name("hostmaster.example.test"),
             "hostmaster.example.test"
+        );
+    }
+
+    #[test]
+    fn upstreams_are_parsed_and_printed() {
+        let cases: &[(&str, Value)] = &[
+            ("192.0.2.1", json!({ "address": "192.0.2.1" })),
+            (
+                "192.0.2.1:853",
+                json!({ "address": "192.0.2.1", "port": 853 }),
+            ),
+            ("2001:db8::1", json!({ "address": "2001:db8::1" })),
+            (
+                "[2001:db8::1]:443/dns-query",
+                json!({ "address": "2001:db8::1", "port": 443, "path": "/dns-query" }),
+            ),
+            (
+                "192.0.2.1/custom/path",
+                json!({ "address": "192.0.2.1", "path": "/custom/path" }),
+            ),
+        ];
+        for (text, want) in cases {
+            let got = parse_upstream(text).unwrap_or_else(|_| panic!("{text}"));
+            assert_eq!(&got, want, "{text}");
+        }
+        for bad in ["resolver.example.test", "192.0.2.1:99999", "[2001:db8::1"] {
+            assert!(parse_upstream(bad).is_err(), "{bad}");
+        }
+        assert_eq!(
+            present_upstream(&json!({ "address": "2001:db8::1", "port": 443, "path": "/q" })),
+            "[2001:db8::1]:443/q"
+        );
+        assert_eq!(
+            present_upstream(&json!({ "address": "192.0.2.1" })),
+            "192.0.2.1"
         );
     }
 }

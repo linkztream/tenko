@@ -353,12 +353,24 @@ fn views_validate_their_rules_and_weights() {
             weight: 100,
         }],
         order: 10,
+        recursion: None,
         description: None,
     };
     view.validate().expect("valid");
     let json = serde_json::to_value(&view).expect("json");
     assert_eq!(json["rules"][0]["test"], "client_subnet");
+    assert_eq!(
+        serde_json::from_value::<View>(json.clone()).expect("json"),
+        view
+    );
+    assert!(
+        json.get("recursion").is_none(),
+        "no recursion list, no field"
+    );
+    view.recursion = Some(AclId::generate());
+    let json = serde_json::to_value(&view).expect("json");
     assert_eq!(serde_json::from_value::<View>(json).expect("json"), view);
+    view.recursion = None;
     assert!(MatchRule::minute_in_window(1400, 1320, 360));
     assert!(MatchRule::minute_in_window(100, 1320, 360));
     assert!(!MatchRule::minute_in_window(700, 1320, 360));

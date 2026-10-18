@@ -12,8 +12,10 @@
 //!    sent a cookie without a valid server cookie gets BADCOOKIE; otherwise every query with
 //!    a cookie is answered with the client cookie and a fresh server cookie.
 //! 4. The [`Resolver`] answers into the [`AnswerBuf`], drops the query, or hands it to the
-//!    forwarder ([`Reply::Forward`]: the transport passes it to the [`ForwardSink`]; with no
-//!    sink the answer is SERVFAIL).
+//!    forwarder. A query for the forwarder first passes the sink's [`ForwardSink::intake`]
+//!    on the query path: the recursion access list refuses it, the cache answers it into
+//!    the output buffer, or it goes on ([`Reply::Forward`]: the transport passes a copy to
+//!    the [`ForwardSink`]; with no sink the answer is SERVFAIL).
 //! 5. The codec writes the answer within the limit of the transport (the requester's EDNS
 //!    size up to the server's, 1232 unless set, 512 without EDNS, 65,535 on TCP) with the
 //!    truncation rules; an answer it cannot write becomes SERVFAIL.
@@ -167,15 +169,70 @@ pub struct ForwardQuery {
     pub view: Option<ViewId>,
     /// The rule; `None` for the default forwarder.
     pub rule: Option<ForwardRuleId>,
+    /// The cookie option of the answer (the client cookie and a fresh server cookie), when
+    /// the client sent a cookie and cookies are on.
+    pub cookie: Option<[u8; 24]>,
     /// Where the answer goes.
     pub reply: ReplyPath,
 }
 
+/// A query the resolver sends to the forwarder, as [`ForwardSink::intake`] sees it on the
+/// query path.
+#[derive(Debug, Clone, Copy)]
+pub struct IntakeQuery<'a> {
+    /// The query's octets.
+    pub message: &'a [u8],
+    /// The parsed query.
+    pub request: &'a Request,
+    /// The client.
+    pub client: SocketAddr,
+    /// The transport.
+    pub transport: QueryTransport,
+    /// The view that matched.
+    pub view: Option<ViewId>,
+    /// The forwarding rule; `None` for the default forwarder.
+    pub rule: Option<ForwardRuleId>,
+    /// The largest answer the client takes.
+    pub max_len: usize,
+    /// The server's EDNS UDP size, for the OPT record of an answer.
+    pub udp_size: u16,
+    /// The cookie option of the answer, when the client sent a cookie.
+    pub cookie: Option<[u8; 24]>,
+    /// When the query arrived.
+    pub now: Instant,
+}
+
+/// What the forwarder decided on the query path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Intake {
+    /// Hand the query over ([`ForwardSink::submit`]).
+    Forward,
+    /// Answer REFUSED with this extended error (RFC 8914): recursion is not allowed for the
+    /// client, or no upstream covers the name.
+    Refuse {
+        /// The extended error code.
+        ede: u16,
+    },
+    /// The answer is in the output buffer (from the cache).
+    Answered {
+        /// Its RCODE.
+        rcode: u16,
+    },
+}
+
 /// The forwarder's intake (WP4.3, WP5.1): it runs the upstream exchange off the query path
-/// and answers the client through the reply path. `submit` must not block.
+/// and answers the client through the reply path. `submit` must not block; `intake` runs
+/// on the query path and must not allocate or block.
 pub trait ForwardSink: Send + Sync {
     /// Takes one query.
     fn submit(&self, query: ForwardQuery);
+
+    /// Decides on a query before it is copied: refuse it, answer it into `out` (cleared by
+    /// the sink when it writes), or forward it. The default forwards every query.
+    fn intake(&self, query: &IntakeQuery<'_>, out: &mut Vec<u8>) -> Intake {
+        let _ = (query, out);
+        Intake::Forward
+    }
 }
 
 /// The query path of every transport.
@@ -270,6 +327,10 @@ impl<R: Resolver> Responder<R> {
     }
 
     /// Answers one query; see the module documentation for the steps.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one query from parse to answer reads better whole"
+    )]
     pub fn respond(
         &self,
         message: &[u8],
@@ -290,7 +351,7 @@ impl<R: Resolver> Responder<R> {
                 if !wire::write_formerr(message, out) {
                     return Reply::Drop;
                 }
-                self.finish(conn, None, None, rcode::FORMERR, clock, now);
+                self.finish(conn, None, None, rcode::FORMERR, false, clock, now);
                 return Reply::Send;
             }
         };
@@ -326,60 +387,158 @@ impl<R: Resolver> Responder<R> {
             match self.resolver.resolve(&context, answer) {
                 Resolution::Answered { view: matched } => view = matched,
                 Resolution::Drop => return Reply::Drop,
-                Resolution::Forward { view, rule } if self.forward.is_some() => {
-                    return Reply::Forward { view, rule };
-                }
-                Resolution::Forward { view: matched, .. } => {
+                Resolution::Forward {
+                    view: matched,
+                    rule,
+                } => {
                     view = matched;
-                    answer.clear();
-                    answer.rcode = rcode::SERVFAIL;
+                    let Some(sink) = &self.forward else {
+                        answer.clear();
+                        answer.rcode = rcode::SERVFAIL;
+                        return self.build(
+                            conn,
+                            request,
+                            view,
+                            &query,
+                            max_len,
+                            cookie.as_ref(),
+                            clock,
+                            now,
+                            answer,
+                            out,
+                        );
+                    };
+                    let intake = IntakeQuery {
+                        message,
+                        request,
+                        client: conn.client,
+                        transport: conn.transport,
+                        view,
+                        rule,
+                        max_len,
+                        udp_size: self.udp_size,
+                        cookie: cookie.as_ref().map(|cookie| {
+                            self.cookies.answer_option(cookie, client, clock.unix_secs)
+                        }),
+                        now,
+                    };
+                    match sink.intake(&intake, out) {
+                        Intake::Forward => return Reply::Forward { view, rule },
+                        Intake::Answered { rcode } => {
+                            self.finish(conn, Some(request), view, rcode, true, clock, now);
+                            return Reply::Send;
+                        }
+                        Intake::Refuse { ede } => {
+                            let recursion = answer.recursion_available;
+                            answer.clear();
+                            answer.recursion_available = recursion;
+                            answer.rcode = rcode::REFUSED;
+                            let _ = answer.set_extended_error(ede, "");
+                        }
+                    }
                 }
             }
         }
-        if let Some(cookie) = &cookie {
+        self.build(
+            conn,
+            request,
+            view,
+            &query,
+            max_len,
+            cookie.as_ref(),
+            clock,
+            now,
+            answer,
+            out,
+        )
+    }
+
+    /// Writes the answer in `answer` (with the cookie) into `out`, counts and logs it.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the parts of one query the build needs"
+    )]
+    fn build(
+        &self,
+        conn: &Conn,
+        request: &Request,
+        view: Option<ViewId>,
+        query: &<DomainCodec as Codec>::Query<'_>,
+        max_len: usize,
+        cookie: Option<&crate::codec::Cookie>,
+        clock: &Clock,
+        now: Instant,
+        answer: &mut AnswerBuf,
+        out: &mut Vec<u8>,
+    ) -> Reply {
+        let client = conn.client.ip();
+        if let Some(cookie) = cookie {
             let option = self.cookies.answer_option(cookie, client, clock.unix_secs);
             let _ = answer.set_cookie(&option);
         }
         if self
             .codec
-            .build(&query, request, answer, max_len, out)
+            .build(query, request, answer, max_len, out)
             .is_err()
         {
             answer.clear();
             answer.rcode = rcode::SERVFAIL;
             if self
                 .codec
-                .build(&query, request, answer, max_len, out)
+                .build(query, request, answer, max_len, out)
                 .is_err()
             {
                 return Reply::Drop;
             }
         }
-        self.finish(conn, Some(request), view, answer.rcode, clock, now);
+        self.finish(conn, Some(request), view, answer.rcode, false, clock, now);
         Reply::Send
     }
 
     /// Hands a query the resolver sent to the forwarder (after [`Reply::Forward`]).
-    /// Allocates the copy of the query: the forwarder runs off the query path.
+    /// Allocates the copy of the query: the forwarder runs off the query path. The cookie
+    /// option of the answer is computed here, from the query's client cookie.
     pub fn forward(&self, message: &[u8], conn: &Conn, reply: Reply, path: ReplyPath) {
         if let (Some(sink), Reply::Forward { view, rule }) = (&self.forward, reply) {
+            let cookie = if self.cookie_mode == CookieMode::Off {
+                None
+            } else {
+                let mut request = Request::default();
+                self.codec
+                    .parse(message, &mut request)
+                    .ok()
+                    .and_then(|_| request.edns.and_then(|edns| edns.cookie))
+                    .map(|cookie| {
+                        let unix = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        self.cookies.answer_option(&cookie, conn.client.ip(), unix)
+                    })
+            };
             sink.submit(ForwardQuery {
                 message: message.to_vec(),
                 client: conn.client,
                 transport: conn.transport,
                 view,
                 rule,
+                cookie,
                 reply: path,
             });
         }
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the parts of one query the count needs"
+    )]
     fn finish(
         &self,
         conn: &Conn,
         request: Option<&Request>,
         view: Option<ViewId>,
         rcode: u16,
+        cached: bool,
         clock: &Clock,
         now: Instant,
     ) {
@@ -401,7 +560,7 @@ impl<R: Resolver> Responder<R> {
                 rcode,
                 view,
                 blocked: None,
-                cached: false,
+                cached,
                 duration_micros: u32::try_from(micros).unwrap_or(u32::MAX),
             });
         }

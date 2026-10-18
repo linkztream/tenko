@@ -492,13 +492,16 @@ pub struct ForwarderPatch {
     /// How they are reached.
     #[serde(default)]
     pub transport: Option<ForwardTransport>,
-    /// The certificate name.
+    /// The certificate name; an empty string clears it.
     #[serde(default)]
     pub tls_name: Option<String>,
-    /// The view.
+    /// The view the rule applies in.
     #[serde(default)]
     pub view: Option<ViewId>,
-    /// Free text.
+    /// Apply the rule in every view (clears `view`).
+    #[serde(default)]
+    pub all_views: bool,
+    /// Free text; an empty string clears it.
     #[serde(default)]
     pub description: Option<String>,
 }
@@ -691,6 +694,26 @@ pub struct DnsNodeStatus {
     pub listeners: Vec<ListenerItem>,
     /// Entries in the cache.
     pub cache_entries: u64,
+    /// Octets the cache accounts for (keys, answers, bookkeeping), a lower bound of its
+    /// memory.
+    #[serde(default)]
+    pub cache_bytes: u64,
+    /// Answers from the cache since the role started.
+    #[serde(default)]
+    pub cache_hits: u64,
+    /// Forwarded queries the cache could not answer since the role started.
+    #[serde(default)]
+    pub cache_misses: u64,
+    /// The share of forwarded queries the cache answered, 0 to 1; absent before the first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_hit_ratio: Option<f64>,
+    /// Stale answers (RFC 8767) since the role started.
+    #[serde(default)]
+    pub cache_stale: u64,
+    /// What keeps the resolver side from working as configured: stub zones whose name
+    /// servers could not be learnt, views whose recursion access list does not exist.
+    #[serde(default)]
+    pub problems: Vec<String>,
     /// When the role started.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started: Option<Timestamp>,
@@ -765,6 +788,15 @@ pub struct QueryLogLine {
     pub cached: bool,
     /// Microseconds from arrival to answer.
     pub duration_micros: u32,
+}
+
+/// The query of `POST /nodes/{id}/dns/cache/flush`.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct CacheFlushParams {
+    /// Flush only the names at or below this suffix (`example.test`); everything when
+    /// absent.
+    pub suffix: Option<String>,
 }
 
 /// The query of `GET /nodes/{id}/dns/log`.

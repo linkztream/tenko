@@ -317,6 +317,7 @@ data volume protects nothing.
   health checks on `/api/v1/health/ready`, cookie stickiness), with `smoke.sh` for failover
   and a partition. Its README has the commands; `docs/cluster.md` section 12.10 says what
   the lab covers.
+- `compose/lab-dns/`: the DNS lab, BIND 9 as the plain, DoT and DoH upstream of one node, with `smoke.sh` for the cache and serve-stale (its README).
 
 The image is distroless and static (no shell, no curl, no C library: the binary is the
 static musl build). Its `HEALTHCHECK` runs `tenko health`, which

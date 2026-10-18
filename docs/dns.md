@@ -1,6 +1,6 @@
 # DNS: zones, records, zone files, keys, the dns role, the forwarder and the engine
 
-This page describes how Tenko DDI holds DNS data and answers for it: zones and their kinds, RRsets and the rules they keep, batch changes with a dry run, zone file import and export, SOA serials and the journal that zone transfers read, access lists and TSIG keys, the `dns` role that serves the zones, the plain forwarder for names outside them, and the engine underneath. It is for an operator who manages zones through the API, the command line or the web UI and runs a node that answers DNS, and for a developer who builds on the zone service or the engine. It describes the zone service `tenko_dns::zone`, the role (`tenko_dns::store_feed`, `forward`, `querylog`, `status` and `tenko serve`), the engine (`crates/tenko-dns`), the model `tenko_core::dns` and the `/dns` and `/nodes/{id}/dns` routes of `tenko-api`; where this page and the code differ, the code is right. The requirements are DNS-01, DNS-07, DNS-09, DNS-11, DNS-24 and MIG-15 in [REQUIREMENTS.md](REQUIREMENTS.md); the decisions are in [ADR 0017](adr/0017-dns-data-model-and-serving-path.md) and section 2 of the [Phase 2 plan](plans/phase-2-plan.md). The contracts every Phase 2 package shares (tables, routes, codes, audit actions) are listed in [dns-contracts.md](dns-contracts.md). Views, forwarders, block lists, transfers, dynamic updates and DNSSEC get their sections when their packages land.
+This page describes how Tenko DDI holds DNS data and answers for it: zones and their kinds, RRsets and the rules they keep, batch changes with a dry run, zone file import and export, SOA serials and the journal that zone transfers read, access lists and TSIG keys, the `dns` role that serves the zones, the forwarder for names outside them (in [dns-resolver.md](dns-resolver.md)), and the engine underneath. It is for an operator who manages zones through the API, the command line or the web UI and runs a node that answers DNS, and for a developer who builds on the zone service or the engine. It describes the zone service `tenko_dns::zone`, the role (`tenko_dns::store_feed`, `forward`, `querylog`, `status` and `tenko serve`), the engine (`crates/tenko-dns`), the model `tenko_core::dns` and the `/dns` and `/nodes/{id}/dns` routes of `tenko-api`; where this page and the code differ, the code is right. The requirements are DNS-01, DNS-07, DNS-09, DNS-11, DNS-24 and MIG-15 in [REQUIREMENTS.md](REQUIREMENTS.md); the decisions are in [ADR 0017](adr/0017-dns-data-model-and-serving-path.md) and section 2 of the [Phase 2 plan](plans/phase-2-plan.md). The contracts every Phase 2 package shares (tables, routes, codes, audit actions) are listed in [dns-contracts.md](dns-contracts.md). Views, forwarders, block lists, transfers, dynamic updates and DNSSEC get their sections when their packages land.
 
 Terms used below: an **RRset** is the records of one owner name and type in one scope of a zone. A **scope** is one version of a zone's data that views choose (DNS-20); every zone has the scope `default`. The **apex** is the zone's own name. An RRset's **origin** says who owns it: `manual` (API, UI, zone file), `ipam` (the DNS actuator of IPAM), `dynamic` (RFC 2136), `dhcp` and `ad`.
 
@@ -14,7 +14,7 @@ Contents:
 6. [Access lists and TSIG keys](#6-access-lists-and-tsig-keys)
 7. [Reverse zones and the IPAM link](#7-reverse-zones-and-the-ipam-link)
 8. [The dns role](#8-the-dns-role)
-9. [The plain forwarder](#9-the-plain-forwarder)
+9. [The forwarder](#9-the-forwarder)
 12. [The engine](#12-the-engine)
 
 Sections 10 and 11 are kept for the packages that write them (transfers, dynamic updates and views); the resolver side gets its own page with Slice 5.
@@ -365,7 +365,7 @@ The role is the last start step of `tenko serve`, `dns` (step 14 of 14), after t
 
 1. The engine's metric families join the process registry (`tenko_dns_queries_total`, `tenko_dns_query_duration_seconds`).
 2. The role's derived index joins the store (below): the store builds the first image of the `dns` tables from a local read, and the catalog (the index, the views and the forwarding rules, section 12.3) is built from it off the async threads.
-3. The query log writer starts when `[dns.log] enabled` is set, and the plain forwarder (section 9).
+3. The query log writer starts when `[dns.log] enabled` is set, and the forwarder with its cache (section 9).
 4. The server binds every listen address for UDP and TCP, then starts its workers: the node answers only from a complete index. A listen address that cannot be bound (port 53 without the capability, or held by another DNS server) fails the start with `start.dns.bind`, and the process stops as for any other start step.
 5. The catalog's writer follows the store from then on.
 
@@ -395,7 +395,8 @@ The `[dns]` section of `tenko.toml` ([`deploy/tenko.example.toml`](../deploy/ten
 | `udp.recv_buffer`, `udp.send_buffer` | 8388608 | Socket buffers in octets; 0 keeps the system's |
 | `tcp.max_connections`, `tcp.per_client`, `tcp.idle_secs` | 1000, 10, 10 | The TCP limits of section 12.6 |
 | `edns.udp_size` | 1232 | The server's EDNS UDP size, 512 to 4096 |
-| `forwarders`, `forward_timeout_ms`, `forward_retries` | none, 2000, 2 | The plain forwarder (section 9) |
+| `forwarders`, `forward_timeout_ms`, `forward_retries`, `upstream_ca` | none, 2000, 2, none | The default forwarder and the upstreams' budget and CA ([dns-resolver.md](dns-resolver.md) section 4.5) |
+| `cache.*` | | The cache ([dns-resolver.md](dns-resolver.md) section 3) |
 | `log.enabled` | `false` | The query log of this node |
 | `log.path` | `<data_dir>/dns/querylog` | The directory of its files |
 | `log.format` | `jsonl` | JSON lines; `dnstap` is refused until it is written (WP5.4) |
@@ -403,7 +404,7 @@ The `[dns]` section of `tenko.toml` ([`deploy/tenko.example.toml`](../deploy/ten
 | `log.sample` | 1 | Log one query in N |
 | `log.pseudonymise` | `true` | Replace client addresses with a keyed hash whose key changes every day |
 
-The cache size of the resolver comes with the cache (WP5.1). The settings are read at start; a change needs a restart of the node.
+The settings are read at start; a change needs a restart of the node.
 
 ### Status
 
@@ -416,7 +417,8 @@ The cache size of the resolver comes with the cache (WP5.1). The settings are re
 | `zones`, `rrsets` | Zones served; RRsets in the bases of the index (an RRset changed since its zone's base was built counts once the base is rebuilt, section 12.3) |
 | `listeners` | Each address with its transport and, for UDP, its workers |
 | `socket_mode`, `udp_workers`, `tcp_open`, `tcp_refused` | The worker layout of section 12.8: per UDP worker its address, socket and counters (received, sent, dropped, forwarded, receive and send errors) |
-| `cache_entries` | 0 until the cache of WP5.1 |
+| `cache_entries`, `cache_bytes`, `cache_hits`, `cache_misses`, `cache_hit_ratio`, `cache_stale` | The cache ([dns-resolver.md](dns-resolver.md) section 3.6) |
+| `problems` | Stub zones whose name servers could not be learnt, views whose recursion access list does not exist |
 | `started` | When the role started |
 
 In Phase 2 only the controller that runs the role answers; another node answers 409 `dns.node.not_dns`, an unknown one 404 `cluster.node.not_found`. `GET /api/v1/system/status` lists `dns` among the node's `roles` while the role runs, and carries the warning `dns.role.not_serving` when the role has stopped answering or `dns.role.lagging` when its index is more than 1,000 revisions behind the store; the cluster page shows these warnings with the others.
@@ -427,9 +429,9 @@ The cache flush and the query log read are node commands (`docs/node-sync.md` se
 
 | Route | Kind | What it does |
 |---|---|---|
-| `POST /api/v1/nodes/{id}/dns/cache/flush` (scope `dns.write`) | `dns.cache.flush` | Answers 202 with the command id. The plain forwarder keeps no cache, so the command is done at once with a detail that says so; the flush is audited (`dns.cache.flush`) |
+| `POST /api/v1/nodes/{id}/dns/cache/flush?suffix=` (scope `dns.write`) | `dns.cache.flush` | Answers 202 with the command id: the cache is emptied, or the names at or below `suffix`, and the detail says how many entries went; the flush is audited (`dns.cache.flush`) |
 | `GET /api/v1/nodes/{id}/dns/log?cursor=&limit=&qname=` (scope `dns.read`) | `dns.log.read` | A page of the query log, newest first: up to `limit` lines (1 to 1,000, default 100) whose query name starts with `qname`, and the cursor of the next page. 409 `dns.node.not_dns` when the node's query log is off |
-| none | `dns.stats` | The counters of the workers, the forwarder and the query log in the command's detail, for the remote path of Phase 5 |
+| none | `dns.stats` | The counters of the workers, the forwarder and its cache, and the query log in the command's detail, for the remote path of Phase 5 |
 
 ### The query log
 
@@ -445,22 +447,9 @@ Per node and off by default (plan section 2.9, TGL-15), never written through th
 
 Binding port 53 needs `CAP_NET_BIND_SERVICE` on Linux (the systemd unit grants it), nothing on Windows, and in a container the capability or a published port. A resolver that already holds port 53 on the host (systemd-resolved's stub, dnsmasq, the Windows DNS server) must be moved off it, or the role listens on another address. [`deploy/README.md`](../deploy/README.md) has the steps for each platform and the firewall.
 
-## 9. The plain forwarder
+## 9. The forwarder
 
-The plain forwarder (owner decision P2-Q16) makes a node usable as the resolver of its clients from Slice 4: a query outside the zones the node serves goes to configured upstream resolvers, without a cache and without policy. The resolver of Slice 5 (WP5.1: cache, serve-stale, prefetch, DoT and DoH upstreams, 0x20, upstream health) replaces it behind the same `ForwardSink` and `Upstream` traits (`tenko_dns::forward`).
-
-**When a query is forwarded**: the name is outside every zone the node serves, the client set RD, and either a forwarding rule of the store covers the name (the longest suffix; a rule with DoT or DoH upstreams answers SERVFAIL until WP5.1) or `[dns] forwarders` lists upstreams (the default forwarder). Otherwise the answer is REFUSED with the extended error "Not Authoritative", as for a node without forwarders. With `forwarders` set the node sets RA in every answer.
-
-**How**:
-
-1. The query path copies the query once and hands it to the forwarder's queue (4,096 queries; a full queue drops the query, and the client retries). A dispatcher on the runtime runs up to 1,024 forwarded queries at a time.
-2. The upstream query is built anew: a random id, the client's question as it was sent (so the client gets its own spelling back), RD and CD copied, and an OPT record of 1,232 octets with the DO bit copied when the client sent EDNS. The client's options, its cookie among them, stay between the client and the node.
-3. Each attempt has `forward_timeout_ms` and goes to the next upstream: the first attempt of a query starts at the next upstream in turn (round robin), each retry moves on (`forward_retries` retries). An upstream with `transport = "udp"` is asked over UDP from a fresh socket with a random source port, and again over TCP when its answer is truncated; one with `transport = "tcp"` over TCP only. An answer counts when it carries the id, QR and the same question; anything else is ignored until the attempt's time is up.
-4. The answer goes back with the client's id and RA set. A UDP answer longer than the client's limit (512 octets without EDNS, else its size up to `edns.udp_size`) is cut to the header and the question with TC set, so that the client asks again over TCP, which the forwarder relays whole. When every attempt failed the client gets SERVFAIL.
-
-Forwarded answers are counted in `tenko_dns_queries_total` with the RCODE relayed and observed in `tenko_dns_query_duration_seconds` from the hand-over to the answer, and logged in the query log. `GET /api/v1/nodes/{id}/dns` counts the forwarded queries per worker (`forwarded`); `dns.stats` adds the forwarder's own counts (answered, failed, timed out, dropped).
-
-**Limits**: no cache (every query goes upstream), no DNSSEC validation (AD is never set), no 0x20 case randomisation, no upstream health memory beyond the round robin, no DoT or DoH upstreams; the per-upstream metric families (`tenko_dns_upstream_*`) come with WP5.1.
+Names outside the zones a node serves go to the forwarder of the resolver side: forwarding rules by longest suffix and view, stub zones, the default forwarder of `[dns] forwarders`, the recursion access list of each view, the cache with serve-stale and prefetch, and upstreams over plain DNS, DoT and DoH with health, round-trip choice, random source ports and 0x20. [dns-resolver.md](dns-resolver.md) describes all of it (sections 1 to 4). The plain forwarder of Slice 4 (P2-Q16) that stood here was replaced by it in WP5.1, behind the same `ForwardSink` and `Upstream` traits (`tenko_dns::forward`, `tenko_dns::upstream`).
 
 ## 12. The engine
 
@@ -478,7 +467,7 @@ How a query travels from a socket to its answer, how the workers use sockets on 
 | Count | `respond`, `metrics` | Queries by transport, view and RCODE; the latency from arrival to answer; the query log entry |
 | Send | the transport | `send_to`, or the TCP write when no pipelined query waits |
 
-Every transport calls the same `Responder`, so UDP and TCP answer alike; a query the resolver forwards is handed to the forwarder's intake (`ForwardSink`; the plain forwarder of [section 9](#9-the-plain-forwarder)), which answers the client later through the transport's reply path.
+Every transport calls the same `Responder`, so UDP and TCP answer alike; a query the resolver forwards is handed to the forwarder's intake (`ForwardSink`; the forwarder of [section 9](#9-the-forwarder), whose recursion check and cache hits run on the query path), which answers the client later through the transport's reply path.
 
 ### 12.2 Workers and sockets
 
@@ -548,13 +537,13 @@ The `[dns]` keys of the configuration (`deploy/tenko.example.toml`, [section 8](
 | `edns.udp_size` | `edns_udp_size` | 1232 | The server's EDNS UDP size, 512 to 4096 |
 | `cookies` | `cookies` | `on` | `on`, `required` or `off` (section 12.5) |
 
-The forwarder's keys (`forwarders`, `forward_timeout_ms`, `forward_retries`) are in [section 9](#9-the-plain-forwarder), the query log's (`[dns.log]`) in [section 8](#8-the-dns-role).
+The forwarder's keys (`forwarders`, `forward_timeout_ms`, `forward_retries`, `upstream_ca`, `[dns.cache]`) are in [dns-resolver.md](dns-resolver.md) section 4.5, the query log's (`[dns.log]`) in [section 8](#8-the-dns-role).
 
 The fixed limits: a CNAME and DNAME chain of eight steps; 8,192 records and 192 KiB of names and data per answer before the build (an answer over that is truncated); messages up to 65,535 octets. The metrics switch of M22 is not a configuration key: metrics are always on in a node, and only the example server can switch them off to measure their cost.
 
 ### 12.8 Metrics and the worker layout
 
-The engine counts `tenko_dns_queries_total{proto,view,rcode}` and observes `tenko_dns_query_duration_seconds{proto}` (50 µs to 2 s, from the arrival of a query to its answer) on the calling thread's shard of the registry (OPS-21); `metrics::register` seals and registers both at the role's start. `view` is `default` for the implicit default view and `named` for any configured view (per-view series come with view management, WP6.4); `rcode` is one of `noerror`, `formerr`, `servfail`, `nxdomain`, `notimp`, `refused`, `notauth`, `badvers`, `badcookie` or `other`. Dropped queries are not counted there; a forwarded query is counted when the forwarder answers it, with the RCODE it relayed (SERVFAIL when every upstream failed), and its latency runs from the hand-over to the answer ([section 9](#9-the-plain-forwarder)).
+The engine counts `tenko_dns_queries_total{proto,view,rcode}` and observes `tenko_dns_query_duration_seconds{proto}` (50 µs to 2 s, from the arrival of a query to its answer) on the calling thread's shard of the registry (OPS-21); `metrics::register` seals and registers both at the role's start. `view` is `default` for the implicit default view and `named` for any configured view (per-view series come with view management, WP6.4); `rcode` is one of `noerror`, `formerr`, `servfail`, `nxdomain`, `notimp`, `refused`, `notauth`, `badvers`, `badcookie` or `other`. Dropped queries are not counted there; a forwarded query is counted when the forwarder answers it, with the RCODE it relayed (SERVFAIL when every upstream failed), and its latency runs from the hand-over to the answer ([section 9](#9-the-forwarder)); a cache hit is counted as any answer of the query path.
 
 `Server::layout` reports the socket mode, the workers per address and, per UDP worker, its address, its socket and its counters (received, sent, dropped, forwarded, receive and send errors), and the TCP listeners with the open connections and the refused ones. `GET /api/v1/nodes/{id}/dns` shows it (`socket_mode`, `udp_workers`, `tcp_open`, `tcp_refused`; [section 8](#8-the-dns-role)); uneven `received` counts across `reuseport` workers are the flow-hash effect of section 12.2.
 

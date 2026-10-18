@@ -7,8 +7,10 @@
 //! 2. The role's derived index joins the store (`tenko_dns::store_feed`), which builds the
 //!    first image of the `dns` tables from a local read; the catalog (index, views,
 //!    forwarding rules) is built from it, aside from the async threads.
-//! 3. The query log writer starts when `[dns.log] enabled`, and the plain forwarder
-//!    (P2-Q16) with the upstreams of `[dns] forwarders`.
+//! 3. The query log writer starts when `[dns.log] enabled`, and the forwarder (WP5.1) with
+//!    the default upstreams of `[dns] forwarders`, the cache of `[dns.cache]` sized for the
+//!    profile in force, and the recursion policy: the profile's default and the prefixes
+//!    IPAM knows, which a follower keeps current from the store.
 //! 4. The server binds every listen address for UDP and TCP and starts its workers: only now
 //!    does the node answer, from a complete index.
 //! 5. The writer of the catalog follows the feed: deltas in revision order, a reset after a
@@ -20,13 +22,17 @@
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use tenko_core::{Role, metrics::Registry};
+use futures::StreamExt as _;
+use tenko_auth::{model::SETTINGS, settings::Profile};
+use tenko_core::{Role, dns::ForwardTransport, metrics::Registry};
 use tenko_dns::{
     authoritative::{Authoritative, Settings},
+    cache::CacheSettings,
     catalog,
     cookie::CookieMode,
-    forward::{ForwardSettings, PlainForwarder, PlainUpstream},
+    forward::{ForwardSettings, Forwarder, RecursionDefault, RecursionPolicy},
     log::QueryLogSink,
+    pool::UpstreamSpec,
     querylog::{LogSettings, LogWriter},
     respond::ForwardSink,
     server::{Hooks, Server, ServerConfig},
@@ -34,7 +40,7 @@ use tenko_dns::{
     store_feed,
     transport::{SocketMode, tcp::TcpSettings, udp::UdpSettings},
 };
-use tenko_store::Store;
+use tenko_store::{KeyRange, ReadConsistency, ReadViewExt as _, Store, WatchFilter};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -106,15 +112,137 @@ fn server_config(section: &DnsSection, listen: Vec<SocketAddr>) -> ServerConfig 
     }
 }
 
-fn upstreams(section: &DnsSection) -> Vec<PlainUpstream> {
+fn upstreams(section: &DnsSection) -> Vec<UpstreamSpec> {
     section
         .forwarders
         .iter()
-        .map(|upstream| match upstream.transport {
-            DnsUpstreamTransport::Udp => PlainUpstream::udp(upstream.socket_addr()),
-            DnsUpstreamTransport::Tcp => PlainUpstream::tcp(upstream.socket_addr()),
+        .map(|upstream| UpstreamSpec {
+            address: upstream.socket_addr(),
+            transport: match upstream.transport {
+                DnsUpstreamTransport::Udp | DnsUpstreamTransport::Tcp => ForwardTransport::Plain,
+                DnsUpstreamTransport::Dot => ForwardTransport::Dot,
+                DnsUpstreamTransport::Doh => ForwardTransport::Doh,
+            },
+            tcp_only: upstream.transport == DnsUpstreamTransport::Tcp,
+            tls_name: upstream.tls_name.clone(),
+            path: upstream.path.clone(),
         })
         .collect()
+}
+
+/// Who may recurse in a view without a recursion access list, by profile (TGL-22).
+fn recursion_default(profile: Profile) -> RecursionDefault {
+    match profile {
+        Profile::Hardened => RecursionDefault::Nobody,
+        Profile::Lab => RecursionDefault::Anyone,
+        _ => RecursionDefault::KnownPrefixes,
+    }
+}
+
+/// The settings of the forwarder from `[dns]` under `profile`.
+fn forward_settings(
+    section: &DnsSection,
+    profile: Profile,
+    upstream_ca: Option<Vec<u8>>,
+) -> ForwardSettings {
+    let cache = &section.cache;
+    ForwardSettings {
+        upstreams: upstreams(section),
+        timeout: Duration::from_millis(section.forward_timeout_ms),
+        retries: section.forward_retries,
+        udp_size: section.edns.udp_size,
+        metrics: true,
+        cache: cache.enabled.then(|| CacheSettings {
+            entries: cache.entries_for(profile),
+            max_bytes: cache.max_bytes_for(profile),
+            stale: Duration::from_secs(cache.stale_secs),
+            max_ttl: cache.max_ttl_secs,
+            negative_ttl: cache.negative_ttl_secs,
+            prefetch: cache.prefetch,
+        }),
+        stale_budget: Duration::from_millis(cache.stale_answer_ms),
+        upstream_ca,
+    }
+}
+
+/// The CA file of `[dns] upstream_ca`, read at start.
+fn upstream_ca(section: &DnsSection) -> Result<Option<Vec<u8>>, StartError> {
+    section
+        .upstream_ca
+        .as_ref()
+        .map(|path| {
+            std::fs::read(path).map_err(|io| {
+                error(
+                    "config.invalid",
+                    format!("dns.upstream_ca {}: {io}", path.display()),
+                )
+            })
+        })
+        .transpose()
+}
+
+/// The profile in force and the prefixes IPAM knows, read from the store.
+async fn recursion_inputs(
+    store: &dyn Store,
+    bootstrap: Profile,
+) -> Result<(Profile, Vec<ipnet::IpNet>), tenko_store::StoreError> {
+    let view = store.read(ReadConsistency::Local).await?;
+    let profile = view
+        .get_typed(&SETTINGS, &())?
+        .map_or(bootstrap, |(settings, _)| settings.profile);
+    let prefixes = view
+        .scan_typed(
+            &tenko_ipam::tables::PREFIXES,
+            KeyRange::all(),
+            usize::MAX,
+            false,
+        )?
+        .into_iter()
+        .map(|(_, prefix, _)| prefix.cidr)
+        .collect();
+    Ok((profile, prefixes))
+}
+
+/// Keeps the recursion policy current: the profile (it changes at setup) and the prefixes
+/// IPAM knows, read again after every change of either table, until `stop`.
+async fn follow_recursion(
+    store: Arc<dyn Store>,
+    bootstrap: Profile,
+    policy: Arc<RecursionPolicy>,
+    stop: CancellationToken,
+) {
+    let filter = || {
+        WatchFilter::tables([
+            SETTINGS.name().clone(),
+            tenko_ipam::tables::PREFIXES.name().clone(),
+        ])
+    };
+    let mut stream = store.watch(None, filter()).ok();
+    loop {
+        let alive = tokio::select! {
+            () = stop.cancelled() => return,
+            alive = async {
+                if let Some(stream) = &mut stream {
+                    matches!(stream.next().await, Some(Ok(_)))
+                } else {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    false
+                }
+            } => alive,
+        };
+        if !alive {
+            stream = store.watch(None, filter()).ok();
+        }
+        match recursion_inputs(store.as_ref(), bootstrap).await {
+            Ok((profile, prefixes)) => {
+                policy.set_default(recursion_default(profile));
+                policy.set_prefixes(prefixes);
+            }
+            Err(error) => {
+                tracing::warn!(%error, "the recursion policy could not be read from the store");
+            }
+        }
+    }
 }
 
 /// Logs the limit of a wildcard listen address (no `IP_PKTINFO`, `docs/dns.md` section 12).
@@ -153,7 +281,7 @@ fn start_log(section: &DnsSection, resolved: &Resolved) -> Result<Option<LogWrit
 fn describe(
     handle: &catalog::CatalogHandle,
     server: &Server,
-    forwarder: &PlainForwarder,
+    forwarder: &Forwarder,
     log: Option<&LogWriter>,
 ) -> (String, String) {
     let catalog = handle.load();
@@ -167,11 +295,20 @@ fn describe(
         .join(", ");
     let workers = server.config().udp.workers;
     let mode = server.config().udp.mode.as_str();
-    let forwarding = if forwarder.upstreams().is_empty() {
-        "no forwarder (names outside the zones are refused)".to_owned()
+    let rules = catalog.forward_rules().count() + catalog.stub_zones().count();
+    let upstreams = if forwarder.upstreams().is_empty() {
+        format!("{rules} forwarding rule(s) and stub zone(s), no default forwarder")
     } else {
-        format!("forwarding to {} upstream(s)", forwarder.upstreams().len())
+        format!(
+            "forwarding to {} default upstream(s) and {rules} rule(s) and stub zone(s)",
+            forwarder.upstreams().len()
+        )
     };
+    let cache = forwarder.cache().map_or_else(
+        || "no cache".to_owned(),
+        |cache| format!("cache of {} entries", cache.settings().entries),
+    );
+    let forwarding = format!("{upstreams}, {cache}");
     let logging = log.map_or_else(
         || "query log off".to_owned(),
         |writer| format!("query log in {}", writer.dir().display()),
@@ -206,6 +343,10 @@ fn mib(bytes: usize) -> f64 {
 ///
 /// `start.dns.feed` when the store cannot be read, `start.dns.log` when the query log
 /// directory cannot be created, `start.dns.bind` when a listen address cannot be bound.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the start steps in their order, each a few lines"
+)]
 pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartError> {
     let Parts {
         resolved,
@@ -218,7 +359,8 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         .map_err(|problem| error("config.invalid", problem.to_string()))?;
     note_wildcard(&listen);
     tenko_dns::metrics::register(metrics);
-    let mut feed = tokio::task::spawn_blocking(move || store_feed::register(store))
+    let feed_store = Arc::clone(&store);
+    let mut feed = tokio::task::spawn_blocking(move || store_feed::register(feed_store))
         .await
         .map_err(|join| error("start.dns.panic", join.to_string()))?
         .map_err(|store| error("start.dns.feed", store.to_string()))?;
@@ -227,27 +369,35 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         .await
         .map_err(|feed| error("start.dns.feed", feed.to_string()))?;
     let stop = CancellationToken::new();
+    let upstream_ca = upstream_ca(section)?;
+    let bootstrap = resolved.config.profile.name;
+    let (profile, prefixes) = recursion_inputs(store.as_ref(), bootstrap)
+        .await
+        .map_err(|store| error("start.dns.feed", store.to_string()))?;
     let log = start_log(section, resolved)?;
     let sink: Option<Arc<dyn QueryLogSink>> = log
         .as_ref()
         .map(|writer| writer.sink() as Arc<dyn QueryLogSink>);
-    let upstreams = upstreams(section);
-    let default_forwarder = !upstreams.is_empty();
-    let (forwarder, forward_task) = PlainForwarder::start(
-        ForwardSettings {
-            upstreams,
-            timeout: Duration::from_millis(section.forward_timeout_ms),
-            retries: section.forward_retries,
-            udp_size: section.edns.udp_size,
-            metrics: true,
-        },
+    let recursion = Arc::new(RecursionPolicy::new(recursion_default(profile)));
+    recursion.set_prefixes(prefixes);
+    let (forwarder, forward_task) = Forwarder::start(
+        forward_settings(section, profile, upstream_ca),
         handle.clone(),
         sink.clone(),
+        Arc::clone(&recursion),
         stop.child_token(),
     );
+    let recursion_task = tokio::spawn(follow_recursion(
+        Arc::clone(&store),
+        bootstrap,
+        recursion,
+        stop.child_token(),
+    ));
+    // Every name outside the zones goes to the forwarder, which refuses it when no rule,
+    // stub zone or default upstream covers it, or the client may not recurse.
     let resolver = Authoritative::new(handle.clone()).with_settings(Settings {
-        recursion_available: default_forwarder,
-        default_forwarder,
+        recursion_available: true,
+        default_forwarder: true,
         ..Settings::default()
     });
     let config = server_config(section, listen);
@@ -261,6 +411,7 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         Err(io) => {
             stop.cancel();
             let _ = forward_task.await;
+            let _ = recursion_task.await;
             if let Some(log) = log {
                 let _ = tokio::task::spawn_blocking(move || log.stop()).await;
             }
@@ -295,7 +446,7 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         DnsRole {
             node,
             stop,
-            tasks: vec![follower, forward_task],
+            tasks: vec![follower, forward_task, recursion_task],
             log,
             announce,
         },

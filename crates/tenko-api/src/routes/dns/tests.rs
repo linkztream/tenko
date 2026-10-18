@@ -1,7 +1,8 @@
 //! Route tests of the DNS operations that stay 501 until their package: each checks the
 //! scope of its action on the right object before it answers, and refuses a malformed path
-//! first. The built operations (zones, records, access lists, keys) have their tests in
-//! `tests/dns_zones.rs`, `tests/dns_records.rs` and `tests/dns_keys.rs`; here they only
+//! first. The built operations (zones, records, access lists, keys, forwarding rules) have
+//! their tests in `tests/dns_zones.rs`, `tests/dns_records.rs`, `tests/dns_keys.rs` and
+//! `tests/dns_forwarders.rs`; here they only
 //! show that a path, then the scope, is checked before the zone service is needed.
 
 use std::sync::Arc;
@@ -92,7 +93,7 @@ async fn a_reader_reads_and_is_refused_writes() {
     send(&router, "GET", "/dns/views")
         .await
         .assert_problem(501, "sys.not_implemented");
-    send(&router, "POST", "/dns/forwarders")
+    send(&router, "DELETE", &format!("/dns/forwarders/{ZONE}"))
         .await
         .assert_problem(403, "auth.forbidden");
     // A built route checks the scope before it needs the zone service.
@@ -114,7 +115,7 @@ async fn a_reader_reads_and_is_refused_writes() {
         kinds,
         [
             (Action::Read, ObjectKind::DnsView),
-            (Action::Create, ObjectKind::DnsForwarder),
+            (Action::Delete, ObjectKind::DnsForwarder),
             (Action::Delete, ObjectKind::Zone),
             (Action::Read, ObjectKind::Zone),
             (Action::Delete, ObjectKind::DnsView),

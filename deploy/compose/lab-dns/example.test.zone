@@ -1,0 +1,15 @@
+; The zone of the DNS lab (documentation names and addresses: example.test, RFC 5737).
+; Every TTL is 5 seconds, so that smoke.sh sees an entry expire, and serve-stale answer,
+; within seconds. The SOA's last field, the negative TTL (RFC 2308), is 5 seconds as well.
+$TTL 5
+@       IN SOA  ns.example.test. hostmaster.example.test. (
+                1       ; serial
+                3600    ; refresh
+                600     ; retry
+                86400   ; expire
+                5 )     ; negative caching TTL
+        IN NS   ns.example.test.
+ns      IN A    203.0.113.2
+bind    IN A    203.0.113.2
+www     IN A    192.0.2.10
+api     IN A    192.0.2.11

@@ -970,13 +970,13 @@ export interface paths {
         };
         /**
          * List forwarding rules
-         * @description Scope: `dns.read`.
+         * @description Scope: `dns.read`. Forwarding rules by suffix (the root rule `.`, the default forwarder, first).
          */
         get: operations["list_dns_forwarders"];
         put?: never;
         /**
          * Create a forwarding rule
-         * @description Scope: `dns.write`.
+         * @description Scope: `dns.write`. One rule per suffix and view; DoT and DoH upstreams need `tls_name`, the name in their certificates.
          */
         post: operations["create_dns_forwarder"];
         delete?: never;
@@ -1008,7 +1008,7 @@ export interface paths {
         head?: never;
         /**
          * Change a forwarding rule
-         * @description Scope: `dns.write`.
+         * @description Scope: `dns.write`. An empty `tls_name` or `description` clears it; `all_views` makes the rule apply in every view.
          */
         patch: operations["update_dns_forwarder"];
         trace?: never;
@@ -2221,7 +2221,7 @@ export interface paths {
         put?: never;
         /**
          * Flush a node's DNS cache
-         * @description Scope: `dns.write`. Issues the node command `dns.cache.flush`. The plain forwarder of Phase 2 keeps no cache, so the command is done at once with a detail that says so; it is recorded in the node's commands and audited.
+         * @description Scope: `dns.write`. Issues the node command `dns.cache.flush`: the node's cache is emptied, or only the names at or below `suffix`; the detail says how many entries went. The command is recorded in the node's commands and audited.
          */
         post: operations["flush_node_dns_cache"];
         delete?: never;
@@ -5664,9 +5664,35 @@ export interface components {
         DnsNodeStatus: {
             /**
              * Format: int64
+             * @description Octets the cache accounts for (keys, answers, bookkeeping), a lower bound of its
+             *     memory.
+             */
+            cache_bytes?: number;
+            /**
+             * Format: int64
              * @description Entries in the cache.
              */
             cache_entries: number;
+            /**
+             * Format: double
+             * @description The share of forwarded queries the cache answered, 0 to 1; absent before the first.
+             */
+            cache_hit_ratio?: number | null;
+            /**
+             * Format: int64
+             * @description Answers from the cache since the role started.
+             */
+            cache_hits?: number;
+            /**
+             * Format: int64
+             * @description Forwarded queries the cache could not answer since the role started.
+             */
+            cache_misses?: number;
+            /**
+             * Format: int64
+             * @description Stale answers (RFC 8767) since the role started.
+             */
+            cache_stale?: number;
             /**
              * Format: int64
              * @description Octets the bases of the index hold, a lower bound of its memory (the arrays and the
@@ -5682,6 +5708,11 @@ export interface components {
             listeners: components["schemas"]["ListenerItem"][];
             /** @description The node. */
             node: components["schemas"]["NodeId"];
+            /**
+             * @description What keeps the resolver side from working as configured: stub zones whose name
+             *     servers could not be learnt, views whose recursion access list does not exist.
+             */
+            problems?: string[];
             /** @description The store revision the index holds. */
             revision: components["schemas"]["Revision"];
             /**
@@ -6206,10 +6237,12 @@ export interface components {
         };
         /** @description `PATCH /dns/forwarders/{id}`. */
         ForwarderPatch: {
-            /** @description Free text. */
+            /** @description Apply the rule in every view (clears `view`). */
+            all_views?: boolean;
+            /** @description Free text; an empty string clears it. */
             description?: string | null;
             suffix?: components["schemas"]["DnsName"] | null;
-            /** @description The certificate name. */
+            /** @description The certificate name; an empty string clears it. */
             tls_name?: string | null;
             transport?: components["schemas"]["ForwardTransport"] | null;
             /** @description The upstreams. */
@@ -15045,6 +15078,7 @@ export interface components {
              * @description The position among the views, lower first.
              */
             order: number;
+            recursion?: components["schemas"]["AclId"] | null;
             /** @description The tests; none matches every query. */
             rules?: components["schemas"]["MatchRule"][];
             /** @description The scopes this view sees per zone; a zone not listed is seen in its default scope. */
@@ -20304,7 +20338,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_ForwarderItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -20324,15 +20358,6 @@ export interface operations {
             };
             /** @description The principal lacks the scope `dns.read` */
             403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -20364,7 +20389,7 @@ export interface operations {
                     "application/json": components["schemas"]["ForwarderItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the rule is invalid (`dns.forwarder.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the rule is invalid (`dns.forwarder.invalid`, parameters `field` and `reason`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -20384,15 +20409,6 @@ export interface operations {
             };
             /** @description The principal lacks the scope `dns.write` */
             403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -20423,7 +20439,7 @@ export interface operations {
                     "application/json": components["schemas"]["ForwarderItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -20459,21 +20475,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     delete_dns_forwarder: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Forwarding rule identifier (UUID) */
                 id: string;
@@ -20489,79 +20499,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description No valid session or token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description The principal lacks the scope `dns.write` */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description No such rule (`dns.forwarder.not_found`) */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-        };
-    };
-    update_dns_forwarder: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Forwarding rule identifier (UUID) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ForwarderPatch"];
-            };
-        };
-        responses: {
-            /** @description The changed rule */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ForwarderItem"];
-                };
-            };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -20606,8 +20544,74 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+        };
+    };
+    update_dns_forwarder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Forwarding rule identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForwarderPatch"];
+            };
+        };
+        responses: {
+            /** @description The changed rule */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForwarderItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the rule is invalid (`dns.forwarder.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such rule (`dns.forwarder.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The rule changed since it was read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26416,7 +26420,13 @@ export interface operations {
     };
     flush_node_dns_cache: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Flush only the names at or below this suffix (`example.test`); everything when
+                 *     absent.
+                 */
+                suffix?: string;
+            };
             header?: never;
             path: {
                 /** @description Node id */

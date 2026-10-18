@@ -358,17 +358,52 @@ workers = 0
 # "required" answers a UDP query that has a client cookie but no valid server cookie with
 # BADCOOKIE (spoofed sources get no amplified answer); "off" ignores cookies.
 cookies = "on"
-# Upstream resolvers of the plain forwarder for names outside the zones, tried in turn with
-# a timeout and retries; no cache, no policy (the resolver of Slice 5 replaces it). Empty:
-# names outside the zones are refused. An entry is an address ("192.0.2.1",
-# "192.0.2.1:5353") or a table { address = "2001:db8::1", port = 53, transport = "tcp" };
-# transport "udp" (the default) falls back to TCP when an answer is truncated.
-# Environment: TENKO_DNS__FORWARDERS=192.0.2.1,192.0.2.2
+# The default forwarder (docs/dns-resolver.md): the upstream resolvers for names outside the
+# zones that no forwarding rule of the store covers. A root rule "." in the store
+# (`tenko dns forwarder create . --upstream ...`) wins over this list. Empty: only the rules
+# and stub zones of the store forward; other names are refused. Who may recurse at all is
+# the recursion access list of the client's view, or the profile's default (Home and
+# Standard: the prefixes IPAM knows and loopback; Hardened: nobody; Lab: everyone).
+# An entry is an address ("192.0.2.1", "192.0.2.1:5353") or a table
+#   { address = "2001:db8::1", port = 53, transport = "tcp" }
+#   { address = "192.0.2.1", transport = "dot", tls_name = "resolver.example.test" }
+#   { address = "192.0.2.1", transport = "doh", tls_name = "resolver.example.test",
+#     path = "/dns-query" }
+# transport "udp" (the default) falls back to TCP when an answer is truncated; "dot" is DNS
+# over TLS (port 853), "doh" DNS over HTTPS (port 443); both need tls_name, the name in the
+# upstream's certificate. No upstream is built in: choose the resolvers your network uses.
+# Environment: TENKO_DNS__FORWARDERS=192.0.2.1,192.0.2.2 (plain upstreams only)
 forwarders = []
 # Milliseconds an upstream has for one attempt (100 to 30000).
 forward_timeout_ms = 2000
-# Attempts after the first (0 to 5); each goes to the next upstream.
+# Attempts after the first (0 to 5); each goes to another upstream.
 forward_retries = 2
+# A PEM file with the CA certificates DoT and DoH upstreams are checked against, instead of
+# the system's root certificates. Not set: the system's roots.
+# upstream_ca = "/etc/tenko/upstream-ca.pem"
+
+[dns.cache]
+# The forwarder's cache, per node and per view (docs/dns-resolver.md section 3). Read at
+# start; the sizes follow the profile in force when the role starts.
+enabled = true
+# Entries at most (1 to 10000000). Not set: 10000 under the Home profile, 100000 under the
+# others.
+# entries = 100000
+# Octets of keys, answers and bookkeeping at most (65536 to 17179869184). Not set: 16 MiB
+# under the Home profile, 128 MiB under the others.
+# max_bytes = 134217728
+# Seconds an expired entry may still answer while the upstreams fail (RFC 8767; 0 to
+# 604800, 0 turns serve-stale off). A stale answer carries a TTL of 30 seconds.
+stale_secs = 86400
+# Milliseconds a client waits for an upstream before it gets a stale answer (100 to 30000).
+stale_answer_ms = 1800
+# The longest lifetime of a positive entry in seconds (1 to 604800).
+max_ttl_secs = 86400
+# The longest lifetime of a negative entry (NXDOMAIN, NODATA) in seconds (0 to 86400; 0
+# keeps none). A negative entry lives for the smaller of its SOA's TTL and MINIMUM.
+negative_ttl_secs = 3600
+# Ask again for entries asked more than once before they expire (at a tenth of their TTL).
+prefetch = true
 
 [dns.udp]
 # "auto": a socket per worker with SO_REUSEPORT on Linux, one shared socket elsewhere;

@@ -5867,7 +5867,7 @@
           "dns"
         ],
         "summary": "List forwarding rules",
-        "description": "Scope: `dns.read`.",
+        "description": "Scope: `dns.read`. Forwarding rules by suffix (the root rule `.`, the default forwarder, first).",
         "operationId": "list_dns_forwarders",
         "parameters": [
           {
@@ -5914,7 +5914,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5942,16 +5942,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -5960,7 +5950,7 @@
           "dns"
         ],
         "summary": "Create a forwarding rule",
-        "description": "Scope: `dns.write`.",
+        "description": "Scope: `dns.write`. One rule per suffix and view; DoT and DoH upstreams need `tls_name`, the name in their certificates.",
         "operationId": "create_dns_forwarder",
         "requestBody": {
           "content": {
@@ -5984,7 +5974,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the rule is invalid (`dns.forwarder.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the rule is invalid (`dns.forwarder.invalid`, parameters `field` and `reason`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6005,16 +5995,6 @@
           },
           "403": {
             "description": "The principal lacks the scope `dns.write`",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6057,7 +6037,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6095,16 +6075,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -6124,6 +6094,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -6131,98 +6113,7 @@
             "description": "The rule is gone"
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No valid session or token",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The principal lacks the scope `dns.write`",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "No such rule (`dns.forwarder.not_found`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "tags": [
-          "dns"
-        ],
-        "summary": "Change a forwarding rule",
-        "description": "Scope: `dns.write`.",
-        "operationId": "update_dns_forwarder",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Forwarding rule identifier (UUID)",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ForwarderPatch"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "The changed rule",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ForwarderItem"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6270,9 +6161,102 @@
                 }
               }
             }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Change a forwarding rule",
+        "description": "Scope: `dns.write`. An empty `tls_name` or `description` clears it; `all_views` makes the rule apply in every view.",
+        "operationId": "update_dns_forwarder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Forwarding rule identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForwarderPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The changed rule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForwarderItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the rule is invalid (`dns.forwarder.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.write`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such rule (`dns.forwarder.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The rule changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14039,7 +14023,7 @@
           "dns"
         ],
         "summary": "Flush a node's DNS cache",
-        "description": "Scope: `dns.write`. Issues the node command `dns.cache.flush`. The plain forwarder of Phase 2 keeps no cache, so the command is done at once with a detail that says so; it is recorded in the node's commands and audited.",
+        "description": "Scope: `dns.write`. Issues the node command `dns.cache.flush`: the node's cache is emptied, or only the names at or below `suffix`; the detail says how many entries went. The command is recorded in the node's commands and audited.",
         "operationId": "flush_node_dns_cache",
         "parameters": [
           {
@@ -14051,6 +14035,15 @@
               "type": "integer",
               "format": "int64",
               "minimum": 0
+            }
+          },
+          {
+            "name": "suffix",
+            "in": "query",
+            "description": "Flush only the names at or below this suffix (`example.test`); everything when\nabsent.",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -31391,10 +31384,42 @@
           "cache_entries"
         ],
         "properties": {
+          "cache_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Octets the cache accounts for (keys, answers, bookkeeping), a lower bound of its\nmemory.",
+            "minimum": 0
+          },
           "cache_entries": {
             "type": "integer",
             "format": "int64",
             "description": "Entries in the cache.",
+            "minimum": 0
+          },
+          "cache_hit_ratio": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The share of forwarded queries the cache answered, 0 to 1; absent before the first."
+          },
+          "cache_hits": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Answers from the cache since the role started.",
+            "minimum": 0
+          },
+          "cache_misses": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Forwarded queries the cache could not answer since the role started.",
+            "minimum": 0
+          },
+          "cache_stale": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Stale answers (RFC 8767) since the role started.",
             "minimum": 0
           },
           "index_bytes": {
@@ -31419,6 +31444,13 @@
           "node": {
             "$ref": "#/components/schemas/NodeId",
             "description": "The node."
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What keeps the resolver side from working as configured: stub zones whose name\nservers could not be learnt, views whose recursion access list does not exist."
           },
           "revision": {
             "$ref": "#/components/schemas/Revision",
@@ -32771,12 +32803,16 @@
         "type": "object",
         "description": "`PATCH /dns/forwarders/{id}`.",
         "properties": {
+          "all_views": {
+            "type": "boolean",
+            "description": "Apply the rule in every view (clears `view`)."
+          },
           "description": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Free text."
+            "description": "Free text; an empty string clears it."
           },
           "suffix": {
             "oneOf": [
@@ -32794,7 +32830,7 @@
               "string",
               "null"
             ],
-            "description": "The certificate name."
+            "description": "The certificate name; an empty string clears it."
           },
           "transport": {
             "oneOf": [
@@ -32821,7 +32857,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/ViewId",
-                "description": "The view."
+                "description": "The view the rule applies in."
               },
               {
                 "type": "null"
@@ -55504,6 +55540,17 @@
             "format": "int32",
             "description": "The position among the views, lower first.",
             "minimum": 0
+          },
+          "recursion": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AclId",
+                "description": "The access list that decides which clients of this view may recurse (DNS-02,\nTGL-22): names outside the zones go to the forwarder only for the clients it allows.\nAbsent: the profile's default (Home and Standard: the prefixes IPAM knows and\nloopback; Hardened: no client; Lab: every client)."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "rules": {
             "type": "array",

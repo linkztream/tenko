@@ -11,7 +11,7 @@
 //! | [`feed`] | [`ZoneFeed`]: an image at a revision, then deltas | [`MemFeed`] |
 //! | [`index`] | [`Index`]: lookup with closest encloser, wildcards, cuts, CNAME chains | [`MemIndex`] |
 //! | [`resolver`] | [`Resolver`]: the one lookup path of every transport | (WP4.1, WP4.3) |
-//! | [`upstream`] | [`Upstream`]: one exchange with one resolver | (WP4.3, WP5.1) |
+//! | [`upstream`] | [`Upstream`]: one exchange with one resolver | plain, DoT and DoH (WP5.1) |
 //! | [`policy`] | [`PolicyEngine`]: RPZ and block lists | [`policy::NoPolicy`] |
 //! | [`rate`] | [`RateLimiter`]: RRL and per-client limits | [`rate::Unlimited`] |
 //! | [`log`] | [`QueryLogSink`]: the non-blocking query log | [`log::NullLog`] |
@@ -47,6 +47,12 @@ pub mod tree;
 pub mod upstream;
 pub mod wire;
 pub mod zone;
+
+// The resolver side (WP5.1).
+pub mod cache;
+pub mod forwarders;
+pub mod outbound;
+pub mod pool;
 
 pub use codec::{AnswerBuf, Codec, CodecError, DomainCodec, Request};
 pub use feed::{DnsData, MemFeed, ZoneFeed};

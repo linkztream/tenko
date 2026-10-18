@@ -7,6 +7,11 @@
 //! catalog for each query without a lock (`arc-swap`), and the one writer
 //! ([`follow`]) applies the feed's deltas in revision order and stores each new catalog,
 //! or builds a new one from a reset and swaps it whole (M1).
+//!
+//! Beside the tables the lookup reads, the catalog keeps the rows the resolver side reads
+//! at the same revision (WP5.1): the forwarding rules, the views (their recursion access
+//! list), the access lists and the stub zones (`ZoneKind::Stub`, whose name servers the
+//! forwarder learns from the zone's `source`).
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -19,8 +24,8 @@ use ipnet::IpNet;
 use tenko_core::{
     Revision,
     dns::{
-        ForwardRule, ForwardRuleId, MatchRule, QueryTransport, Rtype, ScopeName, View, ViewId,
-        ZoneId,
+        Acl, AclId, ForwardRule, ForwardRuleId, MatchRule, QueryTransport, Rtype, ScopeName, View,
+        ViewId, Zone, ZoneId, ZoneKind,
     },
 };
 use tokio_util::sync::CancellationToken;
@@ -297,6 +302,17 @@ pub struct Catalog {
     forwarders: ForwardTable,
     view_rows: BTreeMap<ViewId, View>,
     forward_rows: BTreeMap<ForwardRuleId, ForwardRule>,
+    stub_rows: BTreeMap<ZoneId, Zone>,
+    acl_rows: BTreeMap<AclId, Acl>,
+}
+
+/// The stub zones of a set of zone rows.
+fn stubs<'a>(zones: impl IntoIterator<Item = (&'a ZoneId, &'a Zone)>) -> BTreeMap<ZoneId, Zone> {
+    zones
+        .into_iter()
+        .filter(|(_, zone)| zone.kind == ZoneKind::Stub)
+        .map(|(id, zone)| (*id, zone.clone()))
+        .collect()
 }
 
 impl Catalog {
@@ -308,6 +324,8 @@ impl Catalog {
             forwarders: ForwardTable::build(data.forwarders.values()),
             view_rows: data.views.clone(),
             forward_rows: data.forwarders.clone(),
+            stub_rows: stubs(&data.zones),
+            acl_rows: data.acls.clone(),
         }
     }
 
@@ -324,6 +342,8 @@ impl Catalog {
             forwarders: self.forwarders.clone(),
             view_rows: self.view_rows.clone(),
             forward_rows: self.forward_rows.clone(),
+            stub_rows: self.stub_rows.clone(),
+            acl_rows: self.acl_rows.clone(),
         };
         let (mut views, mut forwarders) = (false, false);
         for change in &delta.changes {
@@ -340,6 +360,20 @@ impl Catalog {
                     match rule {
                         Some(rule) => next.forward_rows.insert(*id, rule.clone()),
                         None => next.forward_rows.remove(id),
+                    };
+                }
+                Change::Zone(id, zone) => match zone {
+                    Some(zone) if zone.kind == ZoneKind::Stub => {
+                        next.stub_rows.insert(*id, zone.clone());
+                    }
+                    _ => {
+                        next.stub_rows.remove(id);
+                    }
+                },
+                Change::Acl(id, acl) => {
+                    match acl {
+                        Some(acl) => next.acl_rows.insert(*id, acl.clone()),
+                        None => next.acl_rows.remove(id),
                     };
                 }
                 _ => {}
@@ -377,6 +411,36 @@ impl Catalog {
     /// A forwarding rule by id (the forwarder reads its upstreams).
     pub fn forward_rule(&self, id: ForwardRuleId) -> Option<&ForwardRule> {
         self.forward_rows.get(&id)
+    }
+
+    /// The zones of kind stub, in id order.
+    pub fn stub_zones(&self) -> impl Iterator<Item = &Zone> {
+        self.stub_rows.values()
+    }
+
+    /// A stub zone by id.
+    pub fn stub_zone(&self, id: ZoneId) -> Option<&Zone> {
+        self.stub_rows.get(&id)
+    }
+
+    /// An access list by id.
+    pub fn acl(&self, id: AclId) -> Option<&Acl> {
+        self.acl_rows.get(&id)
+    }
+
+    /// A view row by id (its recursion access list).
+    pub fn view(&self, id: ViewId) -> Option<&View> {
+        self.view_rows.get(&id)
+    }
+
+    /// The view rows, in id order.
+    pub fn view_rows(&self) -> impl Iterator<Item = &View> {
+        self.view_rows.values()
+    }
+
+    /// The forwarding rules, in id order.
+    pub fn forward_rules(&self) -> impl Iterator<Item = &ForwardRule> {
+        self.forward_rows.values()
     }
 }
 
@@ -475,4 +539,120 @@ async fn rebuild(data: DnsData) -> Result<Catalog, FeedError> {
     tokio::task::spawn_blocking(move || Catalog::build(&data))
         .await
         .map_err(|error| FeedError::Source(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use tenko_core::{
+        dns::{AclEntry, DnsName, PrimaryServer, SecondarySource, SoaDefaults, ZoneScope},
+        ipam::Stamp,
+        principal::{Principal, SystemComponent},
+    };
+
+    use super::*;
+
+    fn stamp() -> Stamp {
+        Stamp::new(
+            "2026-10-17T12:00:00Z".parse().expect("time"),
+            Principal::system(SystemComponent::Dns),
+        )
+    }
+
+    fn zone(name: &str, kind: ZoneKind) -> Zone {
+        let source = (kind != ZoneKind::Primary).then(|| SecondarySource {
+            primaries: vec![PrimaryServer {
+                address: "192.0.2.53".parse().expect("address"),
+                port: 53,
+                key: None,
+                xot: false,
+                tls_name: None,
+            }],
+        });
+        Zone {
+            id: ZoneId::generate(),
+            name: DnsName::new(name).expect("name"),
+            kind,
+            tenant: None,
+            scopes: vec![ZoneScope::default_scope()],
+            serial: tenko_core::dns::SerialPolicy::default(),
+            soa: SoaDefaults::new(
+                DnsName::new("ns1.example.test").expect("name"),
+                DnsName::new("hostmaster.example.test").expect("name"),
+            ),
+            transfer: tenko_core::dns::TransferPolicy::default(),
+            update: tenko_core::dns::UpdatePolicy::default(),
+            dnssec: tenko_core::dns::DnssecPolicy::default(),
+            source,
+            reverse_of: None,
+            description: None,
+            created: stamp(),
+            updated: stamp(),
+        }
+    }
+
+    fn acl(prefix: &str) -> Acl {
+        Acl {
+            id: AclId::generate(),
+            name: "clients".to_owned(),
+            entries: vec![AclEntry::Prefix {
+                prefix: prefix.parse().expect("prefix"),
+                deny: false,
+            }],
+            description: None,
+        }
+    }
+
+    fn delta(from: u64, changes: Vec<Change>) -> Delta {
+        Delta {
+            from: Revision(from),
+            to: Revision(from + 1),
+            changes,
+        }
+    }
+
+    #[test]
+    fn stub_zones_and_access_lists_follow_the_feed() {
+        let primary = zone("example.test", ZoneKind::Primary);
+        let stub = zone("stub.example.net", ZoneKind::Stub);
+        let list = acl("192.0.2.0/24");
+        let mut data = DnsData::at(Revision(1));
+        data.zones.insert(primary.id, primary.clone());
+        data.zones.insert(stub.id, stub.clone());
+        data.acls.insert(list.id, list.clone());
+        let catalog = Catalog::build(&data);
+        assert_eq!(catalog.stub_zones().count(), 1);
+        assert_eq!(catalog.stub_zone(stub.id), Some(&stub));
+        assert_eq!(catalog.stub_zone(primary.id), None);
+        assert_eq!(catalog.acl(list.id), Some(&list));
+
+        // The stub zone becomes a primary, a second list arrives, the first one goes.
+        let mut changed = stub.clone();
+        changed.kind = ZoneKind::Primary;
+        changed.source = None;
+        let second = acl("198.51.100.0/24");
+        let next = catalog
+            .apply(&delta(
+                1,
+                vec![
+                    Change::Zone(stub.id, Some(changed)),
+                    Change::Acl(list.id, None),
+                    Change::Acl(second.id, Some(second.clone())),
+                ],
+            ))
+            .expect("delta");
+        assert_eq!(next.stub_zones().count(), 0);
+        assert_eq!(next.acl(list.id), None);
+        assert_eq!(next.acl(second.id), Some(&second));
+
+        // A new stub zone, then its removal.
+        let other = zone("other.example.net", ZoneKind::Stub);
+        let next = next
+            .apply(&delta(2, vec![Change::Zone(other.id, Some(other.clone()))]))
+            .expect("delta");
+        assert_eq!(next.stub_zone(other.id), Some(&other));
+        let next = next
+            .apply(&delta(3, vec![Change::Zone(other.id, None)]))
+            .expect("delta");
+        assert_eq!(next.stub_zones().count(), 0);
+    }
 }

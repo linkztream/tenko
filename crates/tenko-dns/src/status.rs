@@ -5,10 +5,10 @@
 //!
 //! | Kind | Arguments (CBOR) | What the role does |
 //! |---|---|---|
-//! | `dns.cache.flush` | none | Empties the cache. The plain forwarder of Slice 4 keeps no cache, so it answers `done` with a detail that says so (the cache comes with WP5.1) |
+//! | `dns.cache.flush` | [`CacheFlushArgs`] (optional; none flushes all) | Empties the cache, or the entries at or below a name suffix; `done` with the count removed |
 //! | `dns.stats` | none | Answers `done` with the counters of the workers, the forwarder and the query log in its detail |
 //! | `dns.log.read` | [`LogReadArgs`] | Answers `done` with a page of the local query log, newest first, and the cursor of the next page; `rejected` when the log is off |
-//! | `dns.status` (report) | | [`DnsStatus`]: serving, the revision held and the lag, zones, RRsets, listeners, cache entries, the start |
+//! | `dns.status` (report) | | [`DnsStatus`]: serving, the revision held and the lag, zones, RRsets, listeners, the cache's entries and hits, the problems of stub zones and recursion lists, the start |
 //!
 //! In Phase 2 the role runs in the controller's own process, so [`LocalNode`] executes a
 //! command in place and the API records it as a row of `cluster.node_commands` in the state
@@ -22,12 +22,15 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tenko_core::{NodeId, ObjectRef, RequestCtx, Revision, Timestamp, dns::QueryTransport};
+use tenko_core::{
+    NodeId, ObjectRef, RequestCtx, Revision, Timestamp,
+    dns::{DnsName, QueryTransport},
+};
 use tenko_store::WriteBatch;
 
 use crate::{
     catalog::CatalogHandle,
-    forward::{ForwardStats, PlainForwarder},
+    forward::{ForwardStats, Forwarder},
     log::QueryLogSink,
     querylog::{self, FileLog, LogPage},
     server::Server,
@@ -47,6 +50,14 @@ pub const STATUS: &str = "dns.status";
 
 /// Lines a page of the query log holds at most.
 pub const MAX_LOG_PAGE: u32 = 1_000;
+
+/// The arguments of `dns.cache.flush`; empty arguments flush everything.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CacheFlushArgs {
+    /// Only the names at or below this suffix.
+    #[serde(default)]
+    pub suffix: Option<String>,
+}
 
 /// The arguments of `dns.log.read`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,8 +104,20 @@ pub struct DnsStatus {
     pub index_bytes: u64,
     /// The listeners.
     pub listeners: Vec<Listener>,
-    /// Entries in the cache (none until the cache of WP5.1).
+    /// Entries in the cache.
     pub cache_entries: u64,
+    /// Octets the cache accounts for (keys, answers, bookkeeping), a lower bound of its
+    /// memory.
+    pub cache_bytes: u64,
+    /// Answers from the cache since the role started.
+    pub cache_hits: u64,
+    /// Forwarded queries the cache could not answer since the role started.
+    pub cache_misses: u64,
+    /// Stale answers since the role started.
+    pub cache_stale: u64,
+    /// What keeps the resolver side from working as configured: stub zones whose name
+    /// servers could not be learnt, views whose recursion access list does not exist.
+    pub problems: Vec<String>,
     /// When the role started.
     pub started: Timestamp,
     /// The workers and the TCP side, while the role serves.
@@ -134,8 +157,17 @@ impl DnsStats {
         }
         if let Some(forward) = &self.forward {
             parts.push(format!(
-                "forwarder: {} answered, {} failed, {} timed out, {} dropped",
-                forward.answered, forward.failed, forward.timeouts, forward.dropped
+                "forwarder: {} answered, {} failed, {} timed out, {} dropped, {} refused; \
+                 cache: {} hit(s), {} miss(es), {} stale, {} prefetched",
+                forward.answered,
+                forward.failed,
+                forward.timeouts,
+                forward.dropped,
+                forward.refused,
+                forward.hits,
+                forward.misses,
+                forward.stale,
+                forward.prefetched
             ));
         }
         if let Some((written, dropped)) = self.log {
@@ -216,7 +248,7 @@ pub struct LocalNode {
     catalog: CatalogHandle,
     progress: FeedProgress,
     server: Mutex<Option<Server>>,
-    forwarder: Option<Arc<PlainForwarder>>,
+    forwarder: Option<Arc<Forwarder>>,
     log: Option<(Arc<FileLog>, PathBuf)>,
 }
 
@@ -235,7 +267,7 @@ impl LocalNode {
         node: NodeId,
         server: Server,
         progress: FeedProgress,
-        forwarder: Option<Arc<PlainForwarder>>,
+        forwarder: Option<Arc<Forwarder>>,
         log: Option<(Arc<FileLog>, PathBuf)>,
     ) -> Self {
         Self {
@@ -275,6 +307,47 @@ impl LocalNode {
                 .log
                 .as_ref()
                 .map(|(log, _)| (log.written(), log.dropped())),
+        }
+    }
+
+    /// The forwarder, when the role has one.
+    pub fn forwarder(&self) -> Option<&Arc<Forwarder>> {
+        self.forwarder.as_ref()
+    }
+
+    fn flush(&self, args: &[u8]) -> CommandResult {
+        let args: CacheFlushArgs = if args.is_empty() {
+            CacheFlushArgs::default()
+        } else {
+            match tenko_core::codec::from_cbor(args) {
+                Ok(args) => args,
+                Err(error) => return CommandResult::rejected(format!("the arguments: {error}")),
+            }
+        };
+        let suffix = match args.suffix.as_deref().map(DnsName::new) {
+            None => None,
+            Some(Ok(suffix)) => Some(suffix),
+            Some(Err(error)) => {
+                return CommandResult::rejected(format!("the suffix: {error}"));
+            }
+        };
+        let flushed = self
+            .forwarder
+            .as_ref()
+            .and_then(|forwarder| forwarder.flush(suffix.as_ref()));
+        match (flushed, &suffix) {
+            (None, _) => CommandResult::done("this node keeps no cache", Output::None),
+            (Some(flushed), None) => CommandResult::done(
+                format!("{} cache entr(ies) removed", flushed.entries),
+                Output::None,
+            ),
+            (Some(flushed), Some(suffix)) => CommandResult::done(
+                format!(
+                    "{} cache entr(ies) at or below {suffix} removed",
+                    flushed.entries
+                ),
+                Output::None,
+            ),
         }
     }
 
@@ -340,16 +413,42 @@ impl DnsNode for LocalNode {
             }
             None => false,
         };
+        let to_u64 = |value: usize| u64::try_from(value).unwrap_or(u64::MAX);
+        let cache = self
+            .forwarder
+            .as_ref()
+            .and_then(|forwarder| forwarder.cache())
+            .map(crate::cache::Cache::stats)
+            .unwrap_or_default();
+        let forward = self
+            .forwarder
+            .as_ref()
+            .map(|forwarder| forwarder.stats())
+            .unwrap_or_default();
+        let mut problems = Vec::new();
+        if let Some(forwarder) = &self.forwarder {
+            for stub in forwarder.stubs() {
+                if let Some(error) = stub.error {
+                    problems.push(format!("stub zone {}: {error}", stub.zone));
+                }
+            }
+            problems.extend(forwarder.recursion_problems());
+        }
         DnsStatus {
             node: self.node,
             serving,
             revision,
             lag: self.progress.lag(revision),
             zones: u32::try_from(stats.zones).unwrap_or(u32::MAX),
-            rrsets: u64::try_from(stats.base_rrsets).unwrap_or(u64::MAX),
-            index_bytes: u64::try_from(stats.base_bytes).unwrap_or(u64::MAX),
+            rrsets: to_u64(stats.base_rrsets),
+            index_bytes: to_u64(stats.base_bytes),
             listeners,
-            cache_entries: 0,
+            cache_entries: to_u64(cache.entries),
+            cache_bytes: to_u64(cache.bytes),
+            cache_hits: forward.hits,
+            cache_misses: forward.misses,
+            cache_stale: forward.stale,
+            problems,
             started: self.started,
             layout,
         }
@@ -357,11 +456,7 @@ impl DnsNode for LocalNode {
 
     fn execute(&self, kind: &str, args: &[u8]) -> CommandResult {
         match kind {
-            CACHE_FLUSH => CommandResult::done(
-                "nothing to flush: the plain forwarder keeps no cache (the cache comes with \
-                 the resolver of Slice 5)",
-                Output::None,
-            ),
+            CACHE_FLUSH => self.flush(args),
             STATS => {
                 let stats = self.stats();
                 CommandResult::done(stats.detail(), Output::Stats(stats))

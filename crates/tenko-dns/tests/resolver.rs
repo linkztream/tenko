@@ -201,6 +201,7 @@ fn fixture() -> Fixture {
             weight: 1,
         }],
         order: 1,
+        recursion: None,
         description: None,
     };
     let rule = ForwardRule {

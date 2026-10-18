@@ -30,13 +30,15 @@ use tenko_core::{
 };
 use tenko_dns::{
     querylog::LogLine,
-    status::{self, CommandResult, DnsNode, DnsStatus, LogReadArgs, Outcome, Output},
+    status::{
+        self, CacheFlushArgs, CommandResult, DnsNode, DnsStatus, LogReadArgs, Outcome, Output,
+    },
 };
 use tenko_store::WriteBatch;
 
 use super::{
-    DnsCommandAccepted, DnsNodeStatus, ListenerItem, QueryLogLine, QueryLogParams, UdpWorkerItem,
-    Zones, parse_node,
+    CacheFlushParams, DnsCommandAccepted, DnsNodeStatus, ListenerItem, QueryLogLine,
+    QueryLogParams, UdpWorkerItem, Zones, parse_node,
 };
 use crate::{
     dto::Page,
@@ -173,6 +175,13 @@ fn command_failed(kind: &str, result: &CommandResult) -> ApiError {
     ApiError::new(code, status, format!("{kind}: {}", result.detail))
 }
 
+/// The share of lookups that hit, when there were any.
+#[allow(clippy::cast_precision_loss, reason = "a ratio for people")]
+fn hit_ratio(hits: u64, misses: u64) -> Option<f64> {
+    let lookups = hits.saturating_add(misses);
+    (lookups > 0).then(|| hits as f64 / lookups as f64)
+}
+
 fn status_dto(status: DnsStatus) -> DnsNodeStatus {
     let count = |value: usize| u32::try_from(value).unwrap_or(u32::MAX);
     let layout = status.layout;
@@ -221,6 +230,12 @@ fn status_dto(status: DnsStatus) -> DnsNodeStatus {
             })
             .collect(),
         cache_entries: status.cache_entries,
+        cache_bytes: status.cache_bytes,
+        cache_hits: status.cache_hits,
+        cache_misses: status.cache_misses,
+        cache_hit_ratio: hit_ratio(status.cache_hits, status.cache_misses),
+        cache_stale: status.cache_stale,
+        problems: status.problems,
         started: Some(status.started),
     }
 }
@@ -280,10 +295,11 @@ pub(super) async fn get_node_dns_status(
     tag = "dns",
     operation_id = "flush_node_dns_cache",
     summary = "Flush a node's DNS cache",
-    description = "Scope: `dns.write`. Issues the node command `dns.cache.flush`. The plain \
-                   forwarder of Phase 2 keeps no cache, so the command is done at once with a \
-                   detail that says so; it is recorded in the node's commands and audited.",
-    params(("id" = u64, Path, description = "Node id")),
+    description = "Scope: `dns.write`. Issues the node command `dns.cache.flush`: the node's \
+                   cache is emptied, or only the names at or below `suffix`; the detail says \
+                   how many entries went. The command is recorded in the node's commands and \
+                   audited.",
+    params(("id" = u64, Path, description = "Node id"), CacheFlushParams),
     responses(
         (status = 202, description = "The command is recorded", body = DnsCommandAccepted),
         (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
@@ -300,12 +316,31 @@ pub(super) async fn flush_node_dns_cache(
     registry: Registry,
     zones: Zones,
     Path(id): Path<String>,
+    Query(params): Query<CacheFlushParams>,
 ) -> Result<Response, ApiError> {
     let node = parse_node(&id)?;
     app.authorize(&cx.principal, Action::Update, &ObjectRef::node(node))?;
     app.authorize(&cx.principal, Action::Execute, &anywhere(ObjectKind::Zone))?;
+    if let Some(suffix) = &params.suffix
+        && tenko_core::dns::DnsName::new(suffix).is_err()
+    {
+        return Err(ApiError::new(
+            "sys.invalid_value",
+            400,
+            format!("suffix: `{suffix}` is not a DNS name"),
+        )
+        .with_param("field", "suffix"));
+    }
     let role = local_role(&app, slot, registry, node).await?;
-    let result = execute(role, status::CACHE_FLUSH, Vec::new()).await;
+    let args = if params.suffix.is_some() {
+        to_cbor(&CacheFlushArgs {
+            suffix: params.suffix,
+        })?
+        .to_vec()
+    } else {
+        Vec::new()
+    };
+    let result = execute(role, status::CACHE_FLUSH, args.clone()).await;
     let draft = AuditDraft::success(audit::CACHE_FLUSH, vec![ObjectRef::node(node)])
         .with_context("detail", result.detail.clone());
     let record = record(
@@ -313,7 +348,7 @@ pub(super) async fn flush_node_dns_cache(
         &cx,
         node,
         status::CACHE_FLUSH,
-        Vec::new(),
+        args,
         &result,
         Some(draft),
     )

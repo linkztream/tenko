@@ -4,11 +4,15 @@
 //! - A zone and its records created through the API are answered over UDP and TCP on a
 //!   loopback port, with the SOA in NXDOMAIN and NODATA answers (RFC 2308).
 //! - A client asking for a name outside the zones gets the answer of an upstream through
-//!   the plain forwarder (P2-Q16), with RA set; the upstream is a UDP responder in the test.
+//!   the forwarder, with RA set; the upstream is a UDP responder in the test.
 //! - `GET /nodes/{id}/dns` reports the role; the cache flush and the query log read are node
 //!   commands executed in place; `GET /system/status` lists the role.
 //! - A batch of 1,000 records is answered within one second of its commit.
 //! - After a restart the node answers its zones again, from the store.
+//! - The resolver side (WP5.1): a forwarding rule created through the API routes its names
+//!   to its own upstream; the second answer comes from the cache (the upstream is not asked
+//!   again and the status counts the hit); a flush by suffix empties it; and a client that is
+//!   not on loopback is refused until IPAM knows a prefix that holds its address.
 
 mod serve_support;
 
@@ -35,6 +39,11 @@ const NXDOMAIN: u8 = 3;
 
 /// An upstream resolver in the test: answers every A query with 203.0.113.9.
 fn upstream() -> (SocketAddr, Arc<AtomicUsize>) {
+    upstream_answering([203, 0, 113, 9])
+}
+
+/// An upstream resolver in the test that answers every A query with `address`.
+fn upstream_answering(answer_address: [u8; 4]) -> (SocketAddr, Arc<AtomicUsize>) {
     let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind the upstream");
     let address = socket.local_addr().expect("address");
     let seen = Arc::new(AtomicUsize::new(0));
@@ -51,7 +60,8 @@ fn upstream() -> (SocketAddr, Arc<AtomicUsize>) {
             answer.extend_from_slice(&query[..2]);
             answer.extend_from_slice(&[0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0]);
             answer.extend_from_slice(&query[wire::HEADER_LEN..end]);
-            answer.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 203, 0, 113, 9]);
+            answer.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4]);
+            answer.extend_from_slice(&answer_address);
             let _ = socket.send_to(&answer, from);
         }
     });
@@ -67,7 +77,12 @@ fn query(id: u16, name: &str, qtype: u16) -> Vec<u8> {
 }
 
 fn udp(server: SocketAddr, name: &str, qtype: u16) -> Vec<u8> {
-    let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind a client");
+    udp_from(Ipv4Addr::LOCALHOST, server, name, qtype)
+}
+
+/// A UDP query from a socket bound to `local`.
+fn udp_from(local: Ipv4Addr, server: SocketAddr, name: &str, qtype: u16) -> Vec<u8> {
+    let socket = UdpSocket::bind((local, 0)).expect("bind a client");
     socket
         .set_read_timeout(Some(Duration::from_secs(3)))
         .expect("timeout");
@@ -224,7 +239,9 @@ fn the_dns_role_serves_zones_forwards_and_survives_a_restart() {
     assert_eq!(report["serving"], true, "{report}");
     assert_eq!(report["zones"], 1, "{report}");
     assert_eq!(report["lag"], 0, "{report}");
-    assert_eq!(report["cache_entries"], 0, "{report}");
+    // The TCP query for the outside name was answered from the cache.
+    assert_eq!(report["cache_entries"], 1, "{report}");
+    assert!(report["cache_hits"].as_u64().unwrap_or(0) >= 1, "{report}");
     assert!(report["index_bytes"].as_u64().unwrap_or(0) > 0, "{report}");
     let workers = report["udp_workers"].as_array().expect("the UDP workers");
     assert_eq!(workers.len(), 2, "{report}");
@@ -249,6 +266,8 @@ fn the_dns_role_serves_zones_forwards_and_survives_a_restart() {
         .post(&format!("/nodes/{node_id}/dns/cache/flush"), &json!({}))
         .expect(202);
     assert!(flushed["command_id"].is_string(), "{flushed}");
+    let report = api.get(&format!("/nodes/{node_id}/dns")).expect(200);
+    assert_eq!(report["cache_entries"], 0, "{report}");
     let log_deadline = Instant::now() + Duration::from_secs(3);
     let log = loop {
         let log = api
@@ -320,4 +339,165 @@ fn the_dns_role_serves_zones_forwards_and_survives_a_restart() {
         visible.as_millis(),
         began.elapsed().as_secs()
     );
+}
+
+/// This host's IPv4 address towards the documentation range, when it has one that is not
+/// loopback (no packet is sent: a UDP socket only picks its route).
+fn host_address() -> Option<Ipv4Addr> {
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9)).ok()?;
+    match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(address) if !address.is_loopback() && !address.is_unspecified() => {
+            Some(address)
+        }
+        _ => None,
+    }
+}
+
+/// Asks until `done` holds for the answer or `within` passes; returns the last answer.
+fn until(
+    within: Duration,
+    mut ask: impl FnMut() -> Vec<u8>,
+    done: impl Fn(&[u8]) -> bool,
+) -> Vec<u8> {
+    let deadline = Instant::now() + within;
+    loop {
+        let answer = ask();
+        if done(&answer) || Instant::now() > deadline {
+            return answer;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "one scenario, read top to bottom")]
+fn the_forwarder_follows_rules_caches_flushes_and_refuses_strangers() {
+    let (default_upstream, _) = upstream();
+    let (rule_upstream, asked) = upstream_answering([203, 0, 113, 20]);
+    let port = free_port();
+    let dns: SocketAddr = (Ipv4Addr::LOCALHOST, port).into();
+    let host = host_address();
+    let mut listen = vec![format!("\"{dns}\"")];
+    if let Some(host) = host {
+        listen.push(format!("\"{host}:{port}\""));
+    }
+    let mut node = Node::new()
+        .with_args(&["--roles", "controller,dns"])
+        .with_config(&format!(
+            "[dns]\nlisten = [{}]\nworkers = 1\nforwarders = [\"{default_upstream}\"]\n\
+             forward_timeout_ms = 1000\n",
+            listen.join(", ")
+        ));
+    let mut server = node.start();
+    server
+        .wait_stdout_line(Duration::from_secs(5), |line| {
+            line.starts_with("dns role answering on")
+        })
+        .unwrap_or_else(|| panic!("no dns line\n{}", server.diagnostics()));
+    let token = wait_for_setup_token(&server);
+    let mut api = Api::new(&node);
+    api.setup(&token);
+
+    // A rule for example.net sends its names to its own upstream.
+    let rule = api
+        .post(
+            "/dns/forwarders",
+            &json!({
+                "suffix": "example.net",
+                "upstreams": [{"address": "127.0.0.1", "port": rule_upstream.port()}],
+                "description": "the test's second upstream",
+            }),
+        )
+        .expect(201);
+    assert_eq!(rule["transport"], "plain", "{rule}");
+    let rules = api.get("/dns/forwarders").expect(200);
+    assert_eq!(rules["items"].as_array().map_or(0, Vec::len), 1, "{rules}");
+    let first = until(
+        Duration::from_secs(3),
+        || udp(dns, "www.example.net", TYPE_A),
+        |answer| holds(answer, [203, 0, 113, 20]),
+    );
+    assert!(
+        holds(&first, [203, 0, 113, 20]),
+        "the rule's upstream answers"
+    );
+    assert!(holds(
+        &udp(dns, "www.example.org", TYPE_A),
+        [203, 0, 113, 9]
+    ));
+
+    // The second answer comes from the cache: the upstream is not asked again.
+    let before = asked.load(Ordering::Relaxed);
+    let second = udp(dns, "www.example.net", TYPE_A);
+    assert!(holds(&second, [203, 0, 113, 20]));
+    assert_eq!(
+        asked.load(Ordering::Relaxed),
+        before,
+        "answered from the cache"
+    );
+    let node_id = api.get("/system/status").expect(200)["node"]["id"]
+        .as_u64()
+        .expect("a node id");
+    let report = api.get(&format!("/nodes/{node_id}/dns")).expect(200);
+    assert!(report["cache_hits"].as_u64().unwrap_or(0) >= 1, "{report}");
+    assert!(
+        report["cache_entries"].as_u64().unwrap_or(0) >= 2,
+        "{report}"
+    );
+    assert!(report["cache_hit_ratio"].as_f64().is_some(), "{report}");
+
+    // A flush by suffix: example.net goes, example.org stays.
+    api.post(
+        &format!("/nodes/{node_id}/dns/cache/flush?suffix=example.net"),
+        &json!({}),
+    )
+    .expect(202);
+    api.post(
+        &format!("/nodes/{node_id}/dns/cache/flush?suffix=not..a..name"),
+        &json!({}),
+    )
+    .expect(400);
+    let report = api.get(&format!("/nodes/{node_id}/dns")).expect(200);
+    assert_eq!(report["cache_entries"], 1, "{report}");
+    let third = udp(dns, "www.example.net", TYPE_A);
+    assert!(holds(&third, [203, 0, 113, 20]));
+    assert_eq!(
+        asked.load(Ordering::Relaxed),
+        before + 1,
+        "asked again after the flush"
+    );
+
+    // The rule's deletion sends example.net to the default upstream.
+    let id = rule["id"].as_str().expect("a rule id");
+    api.delete(&format!("/dns/forwarders/{id}"), None)
+        .expect(204);
+    let fresh = until(
+        Duration::from_secs(3),
+        || udp(dns, "new.example.net", TYPE_A),
+        |answer| holds(answer, [203, 0, 113, 9]),
+    );
+    assert!(holds(&fresh, [203, 0, 113, 9]), "the default forwarder");
+
+    // A client that is not on loopback may recurse once IPAM knows its prefix (Home profile).
+    if let Some(host) = host {
+        let at: SocketAddr = (host, port).into();
+        let refused = udp_from(host, at, "www.example.org", TYPE_A);
+        assert_eq!(header(&refused).rcode, 5, "REFUSED for a stranger");
+        let network = u32::from(host) & 0xffff_ff00;
+        api.post(
+            "/prefixes",
+            &json!({ "cidr": format!("{}/24", Ipv4Addr::from(network)) }),
+        )
+        .expect(201);
+        let allowed = until(
+            Duration::from_secs(3),
+            || udp_from(host, at, "www.example.org", TYPE_A),
+            |answer| header(answer).rcode == NOERROR,
+        );
+        assert_eq!(header(&allowed).rcode, NOERROR, "IPAM knows the prefix now");
+    } else {
+        eprintln!("acceptance_dns: no address but loopback; the recursion check is not run");
+    }
+    server.stop().assert_graceful_shutdown();
 }

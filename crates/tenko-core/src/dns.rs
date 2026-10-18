@@ -1085,6 +1085,12 @@ pub struct View {
     pub scope_map: Vec<ScopeWeight>,
     /// The position among the views, lower first.
     pub order: u32,
+    /// The access list that decides which clients of this view may recurse (DNS-02,
+    /// TGL-22): names outside the zones go to the forwarder only for the clients it allows.
+    /// Absent: the profile's default (Home and Standard: the prefixes IPAM knows and
+    /// loopback; Hardened: no client; Lab: every client).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recursion: Option<AclId>,
     /// Free text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,

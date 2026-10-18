@@ -116,10 +116,16 @@ The `dns` role, while it runs on the node ([dns.md](dns.md) sections 8 and 12.8)
 
 | Name | Type | Labels | Meaning |
 |---|---|---|---|
-| `tenko_dns_queries_total` | counter | `proto`, `view`, `rcode` | Queries answered, by transport (`udp`, `tcp`, `dot`, `doh`), view (`default` or `named`) and RCODE (`noerror`, `formerr`, `servfail`, `nxdomain`, `notimp`, `refused`, `notauth`, `badvers`, `badcookie`, `other`); a query the plain forwarder answers is counted with the RCODE it relayed |
+| `tenko_dns_queries_total` | counter | `proto`, `view`, `rcode` | Queries answered, by transport (`udp`, `tcp`, `dot`, `doh`), view (`default` or `named`) and RCODE (`noerror`, `formerr`, `servfail`, `nxdomain`, `notimp`, `refused`, `notauth`, `badvers`, `badcookie`, `other`); a query the forwarder answers is counted with the RCODE it relayed, a cache hit as any answer of the query path |
 | `tenko_dns_query_duration_seconds` | histogram | `proto` | Time from a query's arrival to its answer (for a forwarded query, from the hand-over to the forwarder). Buckets from 50 µs to 2 s: 0.00005, 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2 |
+| `tenko_dns_cache_hits_total` | counter | `view` | Forwarded queries the cache answered on the query path, by view (`default` or `named`) ([dns-resolver.md](dns-resolver.md) section 3) |
+| `tenko_dns_cache_misses_total` | counter | `view` | Forwarded queries the cache could not answer (no entry, or an expired one) |
+| `tenko_dns_cache_stale_total` | counter | | Stale answers (RFC 8767): an expired entry answered while the upstreams failed or were slower than `stale_answer_ms` |
+| `tenko_dns_cache_entries` | gauge | | Entries in the cache |
+| `tenko_dns_upstream_queries_total` | counter | `rule`, `upstream`, `transport`, `outcome` | Exchanges with upstream resolvers, by forwarding rule (its suffix, `default` for `[dns] forwarders`, `stub:<zone>` and `stub-source:<zone>` for stub zones), upstream (`address:port`), transport (`plain`, `dot`, `doh`) and outcome (`ok`, `servfail`, `timeout`, `unreachable`, `malformed`); a series appears with the first exchange ([dns-resolver.md](dns-resolver.md) section 4) |
+| `tenko_dns_upstream_rtt_seconds` | histogram | `upstream` | Round-trip time of the answered exchanges with an upstream, over every rule that names it; the buckets of `tenko_dns_query_duration_seconds` |
 
-The other families of the DNS module (`tenko_dns_cache_*`, `tenko_dns_upstream_*`, `tenko_dns_rrl_dropped_total`, `tenko_dns_blocked_total`, `tenko_dns_zone_serial`, `tenko_dns_signing_*`, `tenko_dns_log_dropped_total`; [dns-contracts.md](dns-contracts.md) section 7) are declared and registered by the packages that count them. The health of the role is in `GET /api/v1/nodes/{id}/dns` and in the warnings of `GET /api/v1/system/status`: `dns.role.not_serving` (the role stopped answering) and `dns.role.lagging` (its index is more than 1,000 revisions behind the store).
+The other families of the DNS module (`tenko_dns_rrl_dropped_total`, `tenko_dns_blocked_total`, `tenko_dns_zone_serial`, `tenko_dns_signing_*`, `tenko_dns_log_dropped_total`; [dns-contracts.md](dns-contracts.md) section 7) are declared and registered by the packages that count them. The health of the role is in `GET /api/v1/nodes/{id}/dns` and in the warnings of `GET /api/v1/system/status`: `dns.role.not_serving` (the role stopped answering) and `dns.role.lagging` (its index is more than 1,000 revisions behind the store).
 
 Every controller reports its own values: in a cluster, scrape each controller. The Raft lag of every member and the leader services in state `running` come from the leader.
 
