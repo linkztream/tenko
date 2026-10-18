@@ -12,9 +12,9 @@
 // current, stale or unsupported).
 //
 // While the cluster's sample has `dns` (a controller runs the `dns` role) the DNS tiles follow:
-// `metrics-tile-dns-queries` (with `metrics-dns-log-dropped` while the query log drops
-// entries), `-dns-cache` (the hit ratio in percent), `-dns-answers` (the NOERROR share, and
-// `metrics-dns-rcode` per RCODE with `data-rcode` and `data-rate`), `-dns-blocked` (the top
+// `metrics-tile-dns-queries` (with `metrics-dns-log-dropped`, always present: `data-state` dropping
+// or idle, hidden while idle so the tile keeps its height), `-dns-cache` (the hit ratio in percent),
+// `-dns-answers` (the NOERROR share, and `metrics-dns-rcode` per RCODE with `data-rcode` and `data-rate`), `-dns-blocked` (the top
 // three lists as `metrics-dns-list` with `data-list` and `data-rate`), `-dns-upstreams`, and
 // `-dns-encrypted` while the role serves DoT or DoH.
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -52,6 +52,8 @@ function Tile(props: {
   unit?: string;
   series: readonly (number | null)[];
   hint: string;
+  /** `list` for a tile with a list under the hint, `grows` for one whose height follows its content. */
+  shape?: "list" | "grows";
   children?: JSX.Element;
 }) {
   const values = () =>
@@ -60,7 +62,7 @@ function Tile(props: {
       "unit",
     );
   return (
-    <section class="card tile metrics-tile" data-testid={`metrics-tile-${props.name}`} data-value={props.value ?? undefined}>
+    <section class={`card tile metrics-tile${props.shape ? ` metrics-tile-${props.shape}` : ""}`} data-testid={`metrics-tile-${props.name}`} data-value={props.value ?? undefined}>
       <h3>{props.title}</h3>
       <div class="tile-value">
         <Si value={props.value ?? null} />
@@ -150,6 +152,7 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
         />
         <Tile
           name="raft"
+          shape="grows"
           title={t("metrics.tile.raft")}
           value={value("raft")}
           series={series("raft")}
@@ -219,6 +222,7 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
             <>
               <Tile
                 name="dns-queries"
+                shape="list"
                 title={t("metrics.dns.queries")}
                 value={value("dns-queries")}
                 unit={t("metrics.unit.per_second")}
@@ -229,11 +233,9 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                     : t("metrics.dns.queries_idle")
                 }
               >
-                <Show when={d().log_dropped_per_second > 0}>
-                  <p class="metrics-warn" data-testid="metrics-dns-log-dropped">
-                    {t("metrics.dns.log_dropped", { rate: decimal(d().log_dropped_per_second) })}
-                  </p>
-                </Show>
+                <p class="metrics-warn" data-testid="metrics-dns-log-dropped" data-state={d().log_dropped_per_second > 0 ? "dropping" : "idle"}>
+                  {d().log_dropped_per_second > 0 ? t("metrics.dns.log_dropped", { rate: decimal(d().log_dropped_per_second) }) : ""}
+                </p>
               </Tile>
               <Tile
                 name="dns-cache"
@@ -243,8 +245,8 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 series={series("dns-cache")}
                 hint={t("metrics.dns.cache_hint", { entries: si(d().cache.entries, locale()), stale: decimal(d().cache.stale_per_second) })}
               />
-              <Tile name="dns-answers" title={t("metrics.dns.answers")} value={value("dns-answers")} unit={t("metrics.unit.percent")} series={series("dns-answers")} hint={t("metrics.dns.answers_hint")}>
-                <ul class="metrics-rows">
+              <Tile name="dns-answers" shape="list" title={t("metrics.dns.answers")} value={value("dns-answers")} unit={t("metrics.unit.percent")} series={series("dns-answers")} hint={t("metrics.dns.answers_hint")}>
+                <ul class="metrics-rows metrics-rows-5">
                   <For each={RCODES}>
                     {(rcode) => (
                       <li data-testid="metrics-dns-rcode" data-rcode={rcode} data-rate={d().rcodes[rcode]}>
@@ -257,13 +259,14 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
               </Tile>
               <Tile
                 name="dns-blocked"
+                shape="list"
                 title={t("metrics.dns.blocked")}
                 value={value("dns-blocked")}
                 unit={t("metrics.unit.per_second")}
                 series={series("dns-blocked")}
                 hint={d().blocked.length > 0 ? t("metrics.dns.blocked_hint", { lists: d().blocked.length }) : t("metrics.dns.blocked_none")}
               >
-                <ul class="metrics-rows">
+                <ul class="metrics-rows metrics-rows-3">
                   <For each={topLists(d())}>
                     {(list) => (
                       <li data-testid="metrics-dns-list" data-list={list.list} data-rate={list.per_second}>

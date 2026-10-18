@@ -265,7 +265,8 @@ describe("DNS tiles", () => {
     expect(tile("dns-queries").textContent).toContain("1.3K");
     expect(tile("dns-queries").textContent).toContain("p50 0.3 ms, p99 18 ms");
     expect(screen.getByTestId("metrics-sparkline-dns-queries").dataset.points).toBe("3");
-    expect(screen.queryByTestId("metrics-dns-log-dropped")).toBeNull();
+    expect(screen.getByTestId("metrics-dns-log-dropped").dataset.state).toBe("idle");
+    expect(screen.getByTestId("metrics-dns-log-dropped").textContent).toBe("");
     expect(tile("dns-cache").dataset.value).toBe("82");
     expect(tile("dns-cache").textContent).toContain("8.4K entries, 1.5 stale answers per second");
     expect(tile("dns-answers").dataset.value).toBe("80");
@@ -314,6 +315,7 @@ describe("DNS tiles", () => {
     send(FakeSource.last(), snapshot([idle], idle));
     await waitFor(() => expect(tile("dns-queries").dataset.value).toBe("0"));
     expect(tile("dns-queries").textContent).toContain("No queries in the last second");
+    expect(screen.getByTestId("metrics-dns-log-dropped").dataset.state).toBe("dropping");
     expect(screen.getByTestId("metrics-dns-log-dropped").textContent).toBe("3.5 query log entries dropped per second");
     expect(tile("dns-cache").dataset.value).toBeUndefined();
     expect(tile("dns-answers").dataset.value).toBeUndefined();

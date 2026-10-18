@@ -2,14 +2,37 @@
 .dash-metrics { display: grid; gap: var(--sp-4); }
 .dash-metrics > h2 { font-size: var(--fs-14); display: flex; align-items: baseline; gap: var(--sp-4); flex-wrap: wrap; }
 .dash-metrics > h2 .aside { font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); }
+/* A stable shape: a tile never changes height from one sample to the next, so the grid below
+   does not move. The card has a fixed block size with room for its fullest content: border,
+   padding, the title, the value with its unit, the sparkline (drawn even without history), a
+   hint of two lines, and on the list tiles (queries with the warning, answers with five RCODE
+   rows, blocked with three list rows) the largest list. Overflow is cut as a guard. The Raft
+   tile keeps the simple height as a minimum and grows with its controllers, which is real. */
+.metrics-tile {
+  --m-line: calc(var(--fs-12) * var(--lh-ui));
+  --m-base: calc(2px + 2 * var(--sp-5) + var(--fs-12) * var(--lh-tight) + var(--fs-24) * var(--lh-tight) + 28px + 2 * var(--m-line) + 3 * var(--sp-3));
+  --m-list: calc(var(--m-base) + var(--sp-3) + 5 * var(--m-line) + 4 * var(--sp-1));
+  block-size: var(--m-base);
+  overflow: hidden;
+  align-content: start;
+}
+.metrics-tile.metrics-tile-list { block-size: var(--m-list); }
+.metrics-tile.metrics-tile-grows { block-size: auto; min-block-size: var(--m-base); overflow: visible; }
+.metrics-tile .tile-value { min-block-size: calc(var(--fs-24) * var(--lh-tight)); font-variant-numeric: tabular-nums; }
+.metrics-tile .sparkline { inline-size: 100%; block-size: 28px; }
+.metrics-tile > p.muted { min-block-size: calc(2 * var(--fs-12) * var(--lh-ui)); overflow: hidden; }
 .metrics-tile h3 { font-size: var(--fs-12); font-weight: var(--fw-medium); color: var(--ink-3); }
 .metrics-unit { margin-inline-start: var(--sp-2); font-size: var(--fs-14); font-weight: var(--fw-regular); color: var(--ink-3); }
-.metrics-raft { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); font-size: var(--fs-12); }
-.metrics-raft li { display: flex; align-items: baseline; gap: var(--sp-4); flex-wrap: wrap; min-width: 0; }
-.metrics-raft li .lag { margin-inline-start: auto; color: var(--ink-3); }
+.metrics-raft { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); font-size: var(--fs-12); min-block-size: calc(var(--fs-12) * var(--lh-ui)); }
+.metrics-raft li { display: flex; align-items: baseline; gap: var(--sp-4); min-width: 0; min-block-size: calc(var(--fs-12) * var(--lh-ui)); }
+.metrics-raft li > :nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metrics-raft li .lag { margin-inline-start: auto; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .metrics-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); font-size: var(--fs-12); }
+.metrics-rows-3 { min-block-size: calc(3 * var(--fs-12) * var(--lh-ui) + 2 * var(--sp-1)); align-content: start; }
+.metrics-rows-5 { min-block-size: calc(5 * var(--fs-12) * var(--lh-ui) + 4 * var(--sp-1)); align-content: start; }
 .metrics-rows li { display: flex; align-items: baseline; gap: var(--sp-4); min-width: 0; }
 .metrics-rows li > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.metrics-rows li .rate { margin-inline-start: auto; color: var(--ink-3); white-space: nowrap; }
-.metrics-warn { font-size: var(--fs-12); color: var(--warn-ink); }
+.metrics-rows li .rate { margin-inline-start: auto; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.metrics-warn { font-size: var(--fs-12); color: var(--warn-ink); min-block-size: calc(var(--fs-12) * var(--lh-ui)); }
+.metrics-warn[data-state="idle"] { visibility: hidden; }
 .metrics-raft li[data-state="stale"], .metrics-raft li[data-state="unsupported"] { color: var(--ink-3); }

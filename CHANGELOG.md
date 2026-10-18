@@ -202,6 +202,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - The UniFi connector reads the LLDP port id `local Port 7`, which a UniFi switch reports for its own port, as the port index 7, so a link to a managed neighbour names the port instead of carrying the text.
 - A node refuses a configuration message whose bytes declare a length far beyond what the message holds with `node.config.payload`, instead of trying to reserve that much memory and stopping; the same holds for every byte value Tenko reads from CBOR, such as keys, MAC addresses and DUIDs.
 - The breached-password check no longer runs on a PIN under the PIN preset: every short numeric code is in the corpus, so the first-run wizard's generated PIN always failed; the checklist now says the check does not apply (`not_applicable`).
+- The live metrics tiles of the start page keep a fixed height: the value, the sparkline, a two-line hint, the warning line and the list rows have reserved room and digits are tabular, so the grid below no longer moves when a sample changes.
 
 ### Security
 
