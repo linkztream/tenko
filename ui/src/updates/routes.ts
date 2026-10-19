@@ -7,7 +7,7 @@ import { UPDATES_PATH } from "./paths";
 export const routes: AppRoute[] = [
   {
     path: UPDATES_PATH,
-    component: lazy(withPacks(["updates", "jobs"], () => import("./UpdatesPage"))),
+    component: lazy(withPacks(["settings", "updates", "jobs"], () => import("./UpdatesPage"))),
     access: "admin",
     title: "updates.title",
   },
