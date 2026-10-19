@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The wizard: the standard WixUI dialogs (welcome, licence, ready, progress, finish, and the
+  maintenance pages) around one Tenko dialog that edits the same TENKO_* properties as the
+  msiexec command line, so the two paths cannot drift.
+
+    WelcomeDlg -> LicenseAgreementDlg -> TenkoSettingsDlg -> VerifyReadyDlg -> ExitDialog
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <UI Id="TenkoUI">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+      <Property Id="WixUI_Mode" Value="Custom" />
+
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="TenkoOpenBrowser" Order="1"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed AND TENKO_START = &quot;1&quot;" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999" />
+
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="LicenseAgreementDlg" Condition="NOT Installed" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Condition="Installed AND PATCH" />
+
+      <Publish Dialog="LicenseAgreementDlg" Control="Print" Event="DoAction" Value="WixUIPrintEula_X64" />
+      <Publish Dialog="LicenseAgreementDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" />
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="TenkoSettingsDlg" Condition="LicenseAccepted = &quot;1&quot;" />
+
+      <Publish Dialog="TenkoSettingsDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg" />
+      <!-- The controls edit UI_* copies that go back to the properties on Next: a radio
+           button group needs a default in the property table, which TENKO_ROLES cannot have
+           (the command line and the remembered value come first), and a check box shows any
+           value as checked, while TENKO_START and TENKO_FIREWALL are 1 or 0. -->
+      <Publish Dialog="TenkoSettingsDlg" Control="Next" Property="TENKO_ROLES" Value="[UI_ROLES]" Order="0" Condition="UI_ROLES" />
+      <Publish Dialog="TenkoSettingsDlg" Control="Next" Property="TENKO_START" Value="1" Order="1" Condition="UI_START" />
+      <Publish Dialog="TenkoSettingsDlg" Control="Next" Property="TENKO_START" Value="0" Order="2" Condition="NOT UI_START" />
+      <Publish Dialog="TenkoSettingsDlg" Control="Next" Property="TENKO_FIREWALL" Value="1" Order="3" Condition="UI_FIREWALL" />
+      <Publish Dialog="TenkoSettingsDlg" Control="Next" Property="TENKO_FIREWALL" Value="0" Order="4" Condition="NOT UI_FIREWALL" />
+      <Publish Dialog="TenkoSettingsDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="10" />
+
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="TenkoSettingsDlg" Order="1" Condition="NOT Installed" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="2" Condition="Installed AND NOT PATCH" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2" Condition="Installed AND PATCH" />
+
+      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg" />
+
+      <Dialog Id="TenkoSettingsDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="{\WixUI_Font_Title}Tenko settings" />
+        <Control Id="Description" Type="Text" X="25" Y="22" Width="280" Height="20" Transparent="yes" NoPrefix="yes"
+                 Text="The first questions. The administrator, the language and the rest are set in the browser afterwards." />
+
+        <Control Id="RolesLabel" Type="Text" X="20" Y="52" Width="330" Height="10" NoPrefix="yes" Text="&amp;Roles of this server:" />
+        <Control Id="Roles" Type="RadioButtonGroup" X="25" Y="63" Width="330" Height="28" Property="UI_ROLES">
+          <RadioButtonGroup Property="UI_ROLES">
+            <RadioButton Value="controller" X="0" Y="0" Width="330" Height="13" Text="Controller: the web UI, the API and IPAM" />
+            <RadioButton Value="controller,dns" X="0" Y="14" Width="330" Height="13" Text="Controller and DNS server" />
+          </RadioButtonGroup>
+        </Control>
+
+        <Control Id="ProfileLabel" Type="Text" X="20" Y="98" Width="100" Height="10" NoPrefix="yes" Text="Security &amp;profile:" />
+        <Control Id="Profile" Type="ComboBox" X="125" Y="95" Width="230" Height="16" Property="TENKO_PROFILE" ComboList="yes">
+          <ComboBox Property="TENKO_PROFILE">
+            <ListItem Value="home" Text="Home" />
+            <ListItem Value="standard" Text="Standard" />
+            <ListItem Value="hardened" Text="Hardened" />
+            <ListItem Value="lab" Text="Lab (test networks only)" />
+          </ComboBox>
+        </Control>
+
+        <Control Id="HostNameLabel" Type="Text" X="20" Y="118" Width="100" Height="10" NoPrefix="yes" Text="&amp;Host name:" />
+        <Control Id="HostName" Type="Edit" X="125" Y="115" Width="230" Height="16" Property="TENKO_HOSTNAME" Text="{253}" />
+        <Control Id="HostNameHint" Type="Text" X="125" Y="132" Width="230" Height="10" NoPrefix="yes"
+                 Text="The certificate's name until setup; empty: localhost." />
+
+        <Control Id="DataDirLabel" Type="Text" X="20" Y="148" Width="100" Height="10" NoPrefix="yes" Text="&amp;Data directory:" />
+        <Control Id="DataDir" Type="Edit" X="125" Y="145" Width="230" Height="16" Property="TENKO_DATA_DIR" Text="{260}" />
+
+        <Control Id="DnsAddressLabel" Type="Text" X="20" Y="168" Width="100" Height="10" NoPrefix="yes" Text="D&amp;NS address:"
+                 HideCondition="NOT (UI_ROLES &gt;&lt; &quot;dns&quot;)" ShowCondition="UI_ROLES &gt;&lt; &quot;dns&quot;" />
+        <Control Id="DnsAddress" Type="Edit" X="125" Y="165" Width="230" Height="16" Property="TENKO_DNS_ADDRESS" Text="{200}"
+                 HideCondition="NOT (UI_ROLES &gt;&lt; &quot;dns&quot;)" ShowCondition="UI_ROLES &gt;&lt; &quot;dns&quot;" />
+        <Control Id="DnsAddressHint" Type="Text" X="125" Y="182" Width="230" Height="10" NoPrefix="yes"
+                 Text="IP addresses, comma-separated; empty: every address."
+                 HideCondition="NOT (UI_ROLES &gt;&lt; &quot;dns&quot;)" ShowCondition="UI_ROLES &gt;&lt; &quot;dns&quot;" />
+
+        <Control Id="Start" Type="CheckBox" X="20" Y="198" Width="160" Height="12" Property="UI_START" CheckBoxValue="1"
+                 Text="&amp;Start the service" />
+        <Control Id="Firewall" Type="CheckBox" X="185" Y="198" Width="170" Height="12" Property="UI_FIREWALL" CheckBoxValue="1"
+                 Text="Open the &amp;firewall ports" />
+        <Control Id="Reconfigure" Type="CheckBox" X="20" Y="214" Width="335" Height="12" Property="TENKO_RECONFIGURE" CheckBoxValue="1"
+                 Text="Replace the existing tenko.toml with these answers"
+                 HideCondition="NOT TENKO_CONFIG_EXISTS" ShowCondition="TENKO_CONFIG_EXISTS" />
+
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)"
+                 DisableCondition="NOT TENKO_DATA_DIR" EnableCondition="TENKO_DATA_DIR" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+    </UI>
+
+    <!-- The UI_* copies start from the properties (after their defaults). -->
+    <Property Id="UI_ROLES" Value="controller" />
+    <SetProperty Id="UI_ROLES" Value="[TENKO_ROLES]" Before="CostInitialize" Sequence="ui" Condition="TENKO_ROLES" />
+    <SetProperty Id="UI_START" Value="1" Before="CostInitialize" Sequence="ui" Condition="TENKO_START = &quot;1&quot;" />
+    <SetProperty Id="UI_FIREWALL" Value="1" Before="CostInitialize" Sequence="ui" Condition="TENKO_FIREWALL = &quot;1&quot;" />
+
+    <!-- The last page: where to go next. -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT"
+              Value="Finish the setup in a browser at https://localhost:8443 (Start menu: Open Tenko). It asks for the one-time setup token: Start menu, Tenko setup token, prints it (or run tenko setup token --config %ProgramData%\Tenko\tenko.toml in an administrator shell). The browser warns about the certificate until the root of Tenko's own CA is installed." />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Open Tenko in the browser" />
+    <Property Id="WixShellExecTarget" Value="https://localhost:8443/" />
+    <CustomAction Id="TenkoOpenBrowser" BinaryRef="Wix4UtilCA_X64" DllEntry="WixShellExec" Impersonate="yes" Return="ignore" />
+
+    <UIRef Id="WixUI_Common" />
+    <UIRef Id="WixUI_ErrorProgressText" />
+  </Fragment>
+</Wix>

@@ -4,6 +4,259 @@
 Service Control Manager (SCM). The configuration file is the same `tenko.toml` as for
 `tenko serve`; `deploy/tenko.example.toml` documents every key.
 
+The MSI installer (next section) is the one-command install: it puts `tenko.exe` in place,
+writes the configuration and runs the same `tenko service` commands. The sections after it
+describe those commands for an installation by hand.
+
+## MSI installer
+
+`tenko-<version>-windows-x86_64.msi` is attached to every release. It installs per machine on
+x64 Windows and leaves a running service and a browser setup to finish.
+
+### Unattended
+
+In an elevated prompt, with the MSI next to the prompt:
+
+```
+msiexec /i tenko-0.2.0-windows-x86_64.msi /qn /l*v tenko-install.log TENKO_ROLES=controller,dns TENKO_PROFILE=home TENKO_HOSTNAME=ddi.example.test TENKO_DNS_ADDRESS=192.0.2.53 TENKO_DNS_PORT=53 TENKO_DATA_DIR=C:\ProgramData\Tenko\data TENKO_START=1 TENKO_FIREWALL=1
+```
+
+Every property is optional; the line above spells out the defaults except the host name and
+the DNS address. A value with spaces goes in double quotes (`TENKO_DATA_DIR="D:\Tenko data"`).
+`msiexec` returns 0 on success and 1603 on a failure; `/l*v` writes the log that says why,
+including the output of every `tenko` command the installer ran.
+
+| Property | Default | Meaning |
+|---|---|---|
+| `TENKO_ROLES` | `controller` | `controller` or `controller,dns` (any `roles` value of `tenko.toml` works) |
+| `TENKO_MODULES` | not set | The modules, for example `ipam,dns`; not set lets the browser setup ask |
+| `TENKO_PROFILE` | `home` | The security profile until setup: `home`, `standard`, `hardened` or `lab` |
+| `TENKO_HOSTNAME` | not set | The certificate's name until setup stores the host name (`[tls] host_name`); `localhost` is added as an extra name. Not set: `localhost` |
+| `TENKO_DNS_ADDRESS` | not set | With the dns role: the IP addresses DNS answers on, comma-separated. Not set: every address (`0.0.0.0` and `::`) |
+| `TENKO_DNS_PORT` | `53` | With the dns role: the DNS port, also of the firewall rules |
+| `TENKO_DATA_DIR` | `%ProgramData%\Tenko\data` | The data directory |
+| `TENKO_START` | `1` | `1` starts the service at the end of the install, `0` leaves it stopped |
+| `TENKO_FIREWALL` | `1` | `1` adds the firewall rules below, `0` adds none |
+| `TENKO_RECONFIGURE` | not set | `1` replaces an existing `tenko.toml` with one written from the properties |
+| `TENKO_PURGE` | not set | On removal: `1` also deletes the data directory, `tenko.toml` and the remembered properties |
+
+There is no property for the administrator or a password: a password on a command line ends
+up in logs. Setup finishes in the browser with the one-time setup token, or with
+`tenko setup` afterwards (`deploy/README.md`, "First-run setup"); the UI language is asked
+there as well.
+
+The installer remembers the properties of an installation under
+`HKLM\SOFTWARE\Tenko\Installer`. An upgrade, a repair and the removal use them again, a
+property on the command line wins over the remembered value, and an uninstall keeps them
+with the configuration and the data (so a later install picks them up); `TENKO_PURGE=1`
+removes them.
+
+On a host with Hyper-V's Default Switch, Internet Connection Sharing answers DNS on that
+switch's address, and a DNS listener on every address may not start: set
+`TENKO_DNS_ADDRESS` to the server's own addresses.
+
+### The wizard
+
+Double-click the MSI. After the licence page, one dialog asks the same questions as the
+properties: the roles (two buttons), the security profile, the host name, the data
+directory, the DNS address (only with the dns role), whether to start the service and
+whether to open the firewall. When a `tenko.toml` exists already, a box offers to replace it
+(`TENKO_RECONFIGURE`). The last page names the URL and where the setup token is, and can open
+the browser. Properties on the command line (`msiexec /i tenko.msi TENKO_ROLES=controller,dns`)
+fill in the dialog.
+
+### What it installs
+
+| Path | What |
+|---|---|
+| `C:\Program Files\Tenko\tenko.exe` | The binary, the one that ran `service install`. Put it on `PATH` yourself if you want `tenko` in every prompt. |
+| `C:\Program Files\Tenko\setup-token.cmd` | Prints the setup token in an elevated console |
+| `%ProgramData%\Tenko\tenko.toml` | The configuration, written by `tenko config init` from the properties; kept on upgrade, repair and uninstall |
+| `%ProgramData%\Tenko\data` | The data directory (`TENKO_DATA_DIR`), set up by `tenko service install`, with the service in `updates\<version>\tenko.exe` behind the junction `updates\current` |
+| Start menu, Tenko DDI | "Open Tenko" (`https://localhost:8443/`) and "Tenko setup token" |
+| The service `tenko` | Registered by `tenko service install --config %ProgramData%\Tenko\tenko.toml`: automatic start, the account `NT SERVICE\tenko`, the failure actions and the Event Log source, as under "Install" below |
+
+`%ProgramData%\Tenko` gets its own access control list: SYSTEM and Administrators have full
+control and Users may read, instead of the ProgramData default that lets every user create
+files. The installer also grants `NT SERVICE\tenko` read access to `tenko.toml`. The data
+directory gets the stricter list of `tenko service install` (the service account,
+Administrators and SYSTEM only).
+
+Everything that touches the service runs as SYSTEM in the installer and is the binary's own
+command: `tenko config init`, `tenko service install`, `tenko service start`, and on upgrade
+`tenko service stop`, `tenko upgrade check` and `tenko upgrade layout`. An install where a
+service named `tenko` exists already (registered by hand) is refused before anything
+changes: remove that service with `tenko service uninstall` first; its configuration and data
+directory stay and the installer uses them (`TENKO_DATA_DIR` must then name the same
+directory as `data_dir` of the kept file).
+
+`tenko config init` writes a short file that holds only the keys from the properties; check
+it, or the file you keep, with `tenko config check --config %ProgramData%\Tenko\tenko.toml`.
+The command also works by hand (`tenko config init --help`).
+
+### Firewall
+
+With `TENKO_FIREWALL=1` the installer adds inbound rules for all profiles, and removes them
+with the product:
+
+| Rule | Port |
+|---|---|
+| Tenko DDI web UI and API (TCP 8443) | TCP 8443 |
+| Tenko DDI DNS (UDP) | UDP `TENKO_DNS_PORT`, with the dns role |
+| Tenko DDI DNS (TCP) | TCP `TENKO_DNS_PORT`, with the dns role |
+
+Narrow them to your networks in Windows Defender Firewall if the server is reachable from
+networks that should not manage it.
+
+### First-run setup
+
+Open "Open Tenko" in the Start menu, or `https://<host name>:8443` from another machine. The
+browser warns about the certificate until the root of Tenko's internal CA is installed
+(`tenko ca-root`, `deploy/README.md` "TLS"). Setup asks for the one-time setup token: "Tenko
+setup token" in the Start menu prints it after a UAC prompt, or run, in an elevated prompt,
+
+```
+"C:\Program Files\Tenko\tenko.exe" setup token --config C:\ProgramData\Tenko\tenko.toml
+```
+
+### Upgrade
+
+Run the MSI of the new release like the first one: `msiexec /i tenko-0.3.0-windows-x86_64.msi
+/qn /l*v tenko-upgrade.log`, or double-click it. No properties are needed; the remembered ones
+apply. The upgrade
+
+1. stops the service (`tenko service stop`),
+2. replaces `tenko.exe` in `C:\Program Files\Tenko`,
+3. checks the data directory with the new binary (`tenko upgrade check`); any answer other
+   than 0 (nothing to do) or 10 (a migration is needed and its dry run passed) aborts the
+   upgrade, rolls the files back and starts the old version again. The reason is in the
+   log, in the output of `upgrade check`; the wizard shows a generic error and the log path,
+4. switches the version layout to the new binary (`tenko upgrade layout`: `previous` names
+   the old version, `current` the new one),
+5. starts the service, which migrates the data format at its first start
+   ([docs/upgrades.md](../../docs/upgrades.md), section 3.2), and removes the old product
+   entry.
+
+The configuration is not touched unless `TENKO_RECONFIGURE=1` is given. Back up the data
+directory first as under "Upgrades" below; the installer does not.
+
+Updates installed from the web UI keep working after an MSI install, because the service runs
+the version layout and not the file in Program Files. After such an update, `C:\Program
+Files\Tenko\tenko.exe` is older than the running version; that is harmless, since the layout
+only ever moves forward: an MSI of a version that is not newer than the one in
+`updates\current` replaces the file in Program Files and leaves the running version alone. An
+MSI older than the installed MSI is refused (uninstall first). If the new version does not
+start after an upgrade, the installer fails and rolls its files back, but `updates\current`
+already names the new version: switch back by hand as under "Upgrades" below.
+
+### Repair, uninstall and purge
+
+`msiexec /fa tenko-0.2.0-windows-x86_64.msi` repairs the files; add `TENKO_RECONFIGURE=1` (with
+the properties) to rewrite `tenko.toml`, then restart the service.
+
+```
+msiexec /x tenko-0.2.0-windows-x86_64.msi /qn
+msiexec /x tenko-0.2.0-windows-x86_64.msi /qn TENKO_PURGE=1
+```
+
+Uninstall (also from Settings, Apps) stops and unregisters the service, removes the files,
+the shortcuts and the firewall rules, and keeps `tenko.toml`, the data directory and the
+remembered properties, so a later install continues where this one stopped. `TENKO_PURGE=1`
+also deletes the data directory (only when it holds `updates\`, so a mistyped path deletes
+nothing else), `tenko.toml` and the remembered properties. The keys of the vault are in the
+data directory: a purged installation cannot be recovered without a backup.
+
+### Signing and SmartScreen
+
+The MSI and `tenko.exe` are not signed today. That was a decision (2026-10-19): an
+Authenticode certificate costs a yearly fee plus a hardware token, and Azure Artifact Signing
+is offered to organisations only, which a single-maintainer project is not yet. The release
+workflow signs both as soon as a certificate is configured (below), so a certificate later is a
+configuration change, not a code change.
+
+What an unsigned MSI means in practice:
+
+- A browser may warn that the file is not commonly downloaded; keep it.
+- Windows SmartScreen shows "Windows protected your PC" when you open it. Click "More
+  info", check that the file name is the one you downloaded, then "Run anyway". The UAC
+  prompt shows "Publisher: Unknown".
+- A file downloaded with a browser carries the mark of the web, which is what makes
+  SmartScreen look at it; `Unblock-File .\tenko-0.2.0-windows-x86_64.msi` removes the mark
+  once you have checked the file.
+
+Check the file before you run it, against the `SHA256SUMS` of the same release, which lists
+the MSI next to the binaries ([docs/upgrades.md](../../docs/upgrades.md), section 6.5):
+
+```
+Get-FileHash .\tenko-0.2.0-windows-x86_64.msi -Algorithm SHA256
+Select-String tenko-0.2.0-windows-x86_64.msi .\SHA256SUMS
+```
+
+The two digests must be equal. A checksum from the same release page shows that the download
+is whole; only a signature shows who made it.
+
+When a certificate exists, configure the repository and nothing else:
+
+| Setting | Kind | Value |
+|---|---|---|
+| `WINDOWS_SIGNING_CERT_PFX` | secret | The code-signing certificate with its private key, as a PFX file in base64 (`[Convert]::ToBase64String([IO.File]::ReadAllBytes('cert.pfx'))`) |
+| `WINDOWS_SIGNING_PASSWORD` | secret | The PFX password |
+| `WINDOWS_SIGNING_TIMESTAMP_URL` | variable, optional | An RFC 3161 time-stamp server; default `http://timestamp.digicert.com` |
+
+`deploy/windows/sign.ps1` then signs `tenko.exe` in the build job, before it is uploaded (so
+the release binary, the binary in the MSI and the binary that UI updates install are the
+same signed file), and the MSI in the `msi` job, each with SHA-256, a time stamp and a
+`signtool verify`. Without the secrets each step leaves the notice "is not signed" in the job
+log and the release goes on unsigned. A certificate that lives on a hardware token (every OV
+and EV certificate issued since June 2023) cannot be exported as a PFX: sign with a cloud
+signing service then. Azure Artifact Signing (formerly Trusted Signing) fits the same two
+places, with `azure/login` and `azure/trusted-signing-action` in place of `sign.ps1`; the
+workflow names them in a comment.
+
+### Build and test the MSI
+
+`build-msi.ps1` builds the MSI with the WiX toolset v5, which the repository pins as a .NET
+local tool (`.config/dotnet-tools.json`; it needs the .NET SDK 8 or newer). It takes a release
+binary, checks that it reports the version, and runs WiX's validation:
+
+```
+cd ui; npm ci; npm run build; cd ..
+cargo build -p tenko --release --locked
+pwsh -File deploy\windows\build-msi.ps1 -Binary target\release\tenko.exe -Version 0.2.0 -Out dist
+```
+
+The sources are in `deploy/windows/wix/`: `Package.wxs` (the files, the properties, the
+custom actions and their order) and `TenkoUI.wxs` (the wizard). The licence page is the
+repository's `LICENSE`, converted at build time. The `UpgradeCode` in `Package.wxs` must never
+change: it is what makes a newer MSI an upgrade of an older one.
+
+To look at the files without installing, extract them (no elevation needed):
+
+```
+msiexec /a dist\tenko-0.2.0-windows-x86_64.msi /qn TARGETDIR=C:\Temp\tenko-msi
+```
+
+`msi-smoke.ps1` installs, upgrades, uninstalls and purges the MSI for real: a silent install
+with the dns role on port 15353 and a data directory of its own, the service running,
+`tenko health --live`, the setup token, the firewall rules, a silent upgrade to a second
+package of a higher version, the service running again with the configuration and the data
+kept, a silent uninstall that keeps both, an install over the kept data, and the purge. The
+release workflow runs it on `windows-latest` before the MSI is published. On a machine of
+your own, run it only on a throw-away VM without Tenko, in an elevated PowerShell 7:
+
+```
+pwsh -File deploy\windows\build-msi.ps1 -Binary target\release\tenko.exe -Version 0.2.0 -Out dist
+pwsh -File deploy\windows\build-msi.ps1 -Binary target\release\tenko.exe -Version 0.2.0 -MsiVersion 0.2.1 -Out upgrade-test
+pwsh -File deploy\windows\msi-smoke.ps1 -Msi dist\tenko-0.2.0-windows-x86_64.msi -UpgradeMsi upgrade-test\tenko-0.2.0-windows-x86_64.msi
+```
+
+It refuses to run where Tenko is installed or a `tenko` service or `%ProgramData%\Tenko\tenko.toml`
+exists. Each step prints a line that starts with `==>`; a failure prints the tail of the
+installer log and of `tenko.log`, uninstalls with `TENKO_PURGE=1` (unless `-Keep`) and exits
+with status 1.
+
+## The service by hand
+
 ```
 tenko service install --config C:\ProgramData\Tenko\tenko.toml
 tenko service start

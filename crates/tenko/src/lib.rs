@@ -29,6 +29,8 @@ pub mod backup;
 pub mod client;
 pub mod cluster;
 pub mod config;
+// WP6.7: `tenko config init`, used by the Windows MSI.
+pub mod config_init;
 pub mod exit;
 pub mod kek;
 pub mod logging;
@@ -197,6 +199,9 @@ pub enum RolesCommand {
 pub enum ConfigCommand {
     /// Validate the configuration and print the effective settings (no secrets).
     Check(ConfigCheckArgs),
+    // WP6.7: `tenko config init`.
+    /// Write a short configuration file from flags (installers use it).
+    Init(config_init::InitArgs),
 }
 
 /// Arguments of `tenko config check`.
@@ -223,6 +228,10 @@ impl Command {
             Command::Config {
                 action: ConfigCommand::Check(_),
             } => "config check",
+            // WP6.7: `tenko config init`.
+            Command::Config {
+                action: ConfigCommand::Init(_),
+            } => "config init",
             Command::Kek {
                 action: kek::KekCommand::Rotate(_),
             } => "kek rotate",
@@ -273,6 +282,10 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
         Command::Config {
             action: ConfigCommand::Check(args),
         } => config_check(args, out, err),
+        // WP6.7: `tenko config init`.
+        Command::Config {
+            action: ConfigCommand::Init(args),
+        } => config_init::command(args, out, err),
         Command::Kek {
             action: kek::KekCommand::Rotate(args),
         } => kek::rotate(args, out, err),
@@ -581,7 +594,7 @@ mod tests {
 
     #[test]
     fn command_names_match_the_command_line() {
-        let cases: [(&[&str], &str); 38] = [
+        let cases: [(&[&str], &str); 39] = [
             (&["audit", "export"], "audit export"),
             (&["audit", "export", "--from", "7"], "audit export"),
             (
@@ -612,6 +625,11 @@ mod tests {
             (&["openapi"], "openapi"),
             (&["serve", "--data-dir", "d"], "serve"),
             (&["config", "check"], "config check"),
+            // WP6.7: `tenko config init`.
+            (
+                &["config", "init", "--out", "t.toml", "--data-dir", "d"],
+                "config init",
+            ),
             (&["roles", "list"], "roles list"),
             (&["setup", "--admin", "a", "--host-name", "h"], "setup"),
             (&["setup", "token"], "setup token"),

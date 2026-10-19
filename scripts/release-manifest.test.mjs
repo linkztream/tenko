@@ -21,6 +21,7 @@ import {
   formatChecksums,
   formatManifest,
   hashFile,
+  installerOf,
   mergeManifest,
 } from "./release-manifest.mjs";
 
@@ -442,6 +443,80 @@ describe("mergeManifest", () => {
     // Replacing an entry keeps the count.
     assert.equal(mergeManifest(manifest(many(1000)), release("1.5.0")).releases.length, 1000);
     assert.throws(() => mergeManifest(manifest(many(1001)), release("1.5.0")), ManifestError);
+  });
+});
+
+// WP6.7: installer packages ------------------------------------------------------------
+
+describe("installerOf", () => {
+  test("recognises the installer packages of the version", () => {
+    assert.deepEqual(installerOf("tenko-0.2.0-windows-x86_64.msi", "0.2.0"), { kind: "msi", platform: "windows-x86_64" });
+    assert.deepEqual(installerOf("tenko-0.2.0-rc.1-windows-x86_64.msi", "0.2.0-rc.1"), { kind: "msi", platform: "windows-x86_64" });
+  });
+
+  test("refuses everything else", () => {
+    for (const name of [
+      "tenko-0.2.0-windows-x86_64.exe",
+      "tenko-0.2.0-windows-x86_64",
+      "tenko-0.2.0-windows-x86_64.zip",
+      "tenko-0.1.0-windows-x86_64.msi",
+      "tenko-0.2.0-windows.msi",
+      "tenko-0.2.0-Windows-x86_64.msi",
+      "tenko-0.2.0-.msi",
+      "tenko-0.2.0-windows-x86_64.constructor",
+    ]) {
+      assert.equal(installerOf(name, "0.2.0"), null, name);
+    }
+  });
+
+  test("lists installers apart from the assets and in SHA256SUMS", async () => {
+    await withTempDir(async (dir) => {
+      writeFiles(dir, {
+        "tenko-0.2.0-linux-x86_64": "linux binary",
+        "tenko-0.2.0-windows-x86_64.exe": "windows binary",
+        "tenko-0.2.0-windows-x86_64.msi": "windows installer",
+      });
+      const { release, ignored } = await buildRelease({ version: "0.2.0", changelogText: CHANGELOG, assetsDir: dir, baseUrl: BASE_URL });
+      assert.deepEqual(ignored, []);
+      assert.deepEqual(
+        release.assets.map((a) => a.platform),
+        ["linux-x86_64", "windows-x86_64"],
+      );
+      assert.deepEqual(release.installers, [
+        {
+          kind: "msi",
+          platform: "windows-x86_64",
+          name: "tenko-0.2.0-windows-x86_64.msi",
+          url: `${BASE_URL}/tenko-0.2.0-windows-x86_64.msi`,
+          sha256: sha256("windows installer"),
+          size: Buffer.byteLength("windows installer"),
+        },
+      ]);
+      assert.deepEqual(Object.keys(release).slice(-2), ["assets", "installers"]);
+      const sums = formatChecksums(release).trimEnd().split("\n");
+      assert.deepEqual(
+        sums.map((line) => line.split("  ")[1]),
+        ["tenko-0.2.0-linux-x86_64", "tenko-0.2.0-windows-x86_64.exe", "tenko-0.2.0-windows-x86_64.msi"],
+      );
+    });
+  });
+
+  test("a release without installers has no installers key", async () => {
+    await withTempDir(async (dir) => {
+      writeFiles(dir, { "tenko-0.2.0-linux-x86_64": "x" });
+      const { release } = await buildRelease({ version: "0.2.0", changelogText: CHANGELOG, assetsDir: dir, baseUrl: BASE_URL });
+      assert.ok(!("installers" in release));
+    });
+  });
+
+  test("an installer alone is not a release", async () => {
+    await withTempDir(async (dir) => {
+      writeFiles(dir, { "tenko-0.2.0-windows-x86_64.msi": "x" });
+      await assert.rejects(
+        buildRelease({ version: "0.2.0", changelogText: CHANGELOG, assetsDir: dir, baseUrl: BASE_URL }),
+        /no release asset/,
+      );
+    });
   });
 });
 

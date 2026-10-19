@@ -11,6 +11,9 @@
 #               file runs on every distribution; the job fails when it is not static;
 #   4. smoke    runs the Linux binary in a Debian 12 and a RHEL 9 compatible container
 #               (version, config check, a real start and a stop with SIGTERM);
+#      msi      (WP6.7) builds the Windows MSI from the Windows binary, signs it when a
+#               certificate is configured, and installs, upgrades and removes it on the
+#               runner (deploy/windows/msi-smoke.ps1);
 #   5. image    builds and pushes the container image to ghcr.io (amd64 only; `latest` moves
 #               for stable releases only, S3-Q9);
 #   6. publish  builds releases.json and SHA256SUMS (scripts/release-manifest.mjs), takes the
@@ -25,8 +28,11 @@
 # failed after the release was created, delete that release (not the tag) and re-run.
 # The workflow_dispatch trigger builds an existing tag by hand; it never creates a tag.
 #
-# Not yet here: signing of the binaries and of releases.json. It arrives with its own
-# requirement; the two places for it are marked SIGNING below.
+# Not yet here: signing of the Linux binary and of releases.json. It arrives with its own
+# requirement; the places for it are marked SIGNING below. (WP6.7) The Windows binary and the
+# MSI are signed with Authenticode when the secrets WINDOWS_SIGNING_CERT_PFX (the PFX file,
+# base64) and WINDOWS_SIGNING_PASSWORD exist, and ship unsigned with a notice in the job log
+# otherwise (deploy/windows/sign.ps1, deploy/windows/README.md "Signing").
 
 # The Linux jobs run on GitHub's hosted runners (ubuntu-latest) unless the repository variable
 # LINUX_RUNNER names the label of a self-hosted runner (.github/runner/README.md); the Windows
@@ -214,8 +220,24 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           cp "target/${TARGET}/release/tenko${EXE}" "dist/tenko-${VERSION}-${PLATFORM}${EXE}"
-          # SIGNING (later): sign dist/tenko-${VERSION}-${PLATFORM}${EXE} here (Authenticode
-          # on Windows, a detached signature on Linux) and upload the signature next to it.
+          # SIGNING (later): sign dist/tenko-${VERSION}-${PLATFORM} here on Linux (a detached
+          # signature) and upload the signature next to it. Windows: the next step.
+      # WP6.7: Authenticode signature of the Windows binary, before it is uploaded, so that the
+      # release asset, the binary in the MSI and the binary that in-app updates install are one
+      # file. Without the secrets the step leaves a notice and the binary unsigned.
+      #
+      # The alternative to a PFX certificate is Azure Artifact Signing (formerly Trusted
+      # Signing): azure/login with OIDC and the action azure/trusted-signing-action in place of
+      # sign.ps1, here and in the msi job. It needs an Azure subscription and, today, an
+      # organisation as the subscriber.
+      - name: Sign the Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SIGNING_CERT_PFX: ${{ secrets.WINDOWS_SIGNING_CERT_PFX }}
+          SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+          SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
+        run: ./deploy/windows/sign.ps1 -File "dist/tenko-$env:VERSION-$env:PLATFORM.exe"
       - uses: actions/upload-artifact@v5
         with:
           name: binary-${{ matrix.platform }}
@@ -326,6 +348,58 @@ jobs:
             "$SMOKE_IMAGE" sh /smoke/smoke.sh
 
   # -------------------------------------------------------------------------------------
+  # WP6.7: the Windows MSI (deploy/windows/README.md, "MSI installer").
+  msi:
+    name: MSI (windows-x86_64)
+    needs: [verify, build]
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      # The runner image has the .NET SDK; the WiX version comes from .config/dotnet-tools.json.
+      - uses: actions/download-artifact@v5
+        with:
+          name: binary-windows-x86_64
+          path: bin
+      - name: Build the MSI
+        run: ./deploy/windows/build-msi.ps1 -Binary "bin/tenko-$env:VERSION-windows-x86_64.exe" -Version $env:VERSION -Out dist
+      - name: Sign the MSI
+        env:
+          SIGNING_CERT_PFX: ${{ secrets.WINDOWS_SIGNING_CERT_PFX }}
+          SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+          SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
+        run: ./deploy/windows/sign.ps1 -File "dist/tenko-$env:VERSION-windows-x86_64.msi"
+      - name: Build the upgrade test package
+        # The same binary as a higher MSI version (patch + 1), for the upgrade step of the
+        # smoke test only; it is never published.
+        run: |
+          if ($env:VERSION -notmatch '^(\d+)\.(\d+)\.(\d+)') { throw "unexpected version $env:VERSION" }
+          $next = "$($Matches[1]).$($Matches[2]).$([int]$Matches[3] + 1)"
+          ./deploy/windows/build-msi.ps1 -Binary "bin/tenko-$env:VERSION-windows-x86_64.exe" -Version $env:VERSION -MsiVersion $next -Out upgrade-test
+      - name: Smoke test the MSI
+        # Install, upgrade, uninstall and purge on the runner, which runs elevated. The package
+        # under test is the one that is published.
+        run: ./deploy/windows/msi-smoke.ps1 -Msi "dist/tenko-$env:VERSION-windows-x86_64.msi" -UpgradeMsi "upgrade-test/tenko-$env:VERSION-windows-x86_64.msi" -LogDir $env:RUNNER_TEMP
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: msi-smoke-logs
+          path: ${{ runner.temp }}/msi-smoke-*.log
+          retention-days: 7
+      - uses: actions/upload-artifact@v5
+        with:
+          name: installer-windows-x86_64
+          path: dist/tenko-${{ needs.verify.outputs.version }}-windows-x86_64.msi
+          if-no-files-found: error
+          retention-days: 1
+
+  # -------------------------------------------------------------------------------------
   image:
     name: Container image
     # After the binaries and their smoke runs: nothing is pushed, and `latest` does not move,
@@ -370,7 +444,8 @@ jobs:
   # -------------------------------------------------------------------------------------
   publish:
     name: Publish the release
-    needs: [verify, build, smoke-linux, image]
+    # WP6.7: msi in needs.
+    needs: [verify, build, smoke-linux, image, msi]
     runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: write
@@ -390,6 +465,11 @@ jobs:
           pattern: binary-*
           path: dist
           merge-multiple: true
+      # WP6.7: the MSI; release-manifest.mjs lists it under `installers` and in SHA256SUMS.
+      - uses: actions/download-artifact@v5
+        with:
+          name: installer-windows-x86_64
+          path: dist
       - name: Data-directory format
         # The format number of this version, from the Linux binary that is being released
         # (a matrix job cannot hand one leg's output on reliably).

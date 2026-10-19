@@ -1,0 +1,314 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Tenko DDI MSI (WiX v5). Built by deploy/windows/build-msi.ps1, documented in
+  deploy/windows/README.md ("MSI installer").
+
+  The package installs tenko.exe and leaves everything else to the binary itself, in deferred
+  custom actions that run as SYSTEM after the files are in place:
+
+    tenko config init       writes %ProgramData%\Tenko\tenko.toml from the TENKO_* properties
+                            (kept when it exists, replaced with TENKO_RECONFIGURE=1)
+    tenko service install   registers the service exactly as by hand (the version layout,
+                            the data-directory permissions, the Event Log source)
+    tenko service start     TENKO_START=1
+    tenko upgrade check     on a major upgrade, with the service stopped; any answer other
+                            than 0 or 10 aborts and rolls the upgrade back
+    tenko upgrade layout    on a major upgrade: the new version becomes updates\current
+    tenko service uninstall on removal; the configuration, the data and the remembered
+                            answers stay unless TENKO_PURGE=1
+
+  The unattended path and the wizard set the same properties; the wizard only shows them.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package Name="Tenko DDI"
+           Manufacturer="Tenko DDI"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="42FA4EAD-A92F-4C10-AECA-308BCD904904"
+           Scope="perMachine"
+           Compressed="yes"
+           Language="1033">
+
+    <SummaryInformation Description="Tenko DDI $(var.Version): DNS, DHCP and IPAM" />
+
+    <!-- The new version is installed first and the old one removed afterwards, so the
+         service is stopped only for the time it takes to copy one file and check the data
+         directory. Builds of the same version (a release candidate and its release, the
+         smoke test's second package) upgrade each other. -->
+    <MajorUpgrade Schedule="afterInstallExecute"
+                  AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of [ProductName] is already installed. Uninstall it first; the configuration and the data directory stay." />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPCOMMENTS" Value="DNS, DHCP and IPAM in one service" />
+
+    <!-- ===================================================================================
+         Properties. Each one can be given on the msiexec command line; the wizard edits the
+         same ones. The values of an installation are remembered in the registry, so an
+         upgrade, a repair and the removal see them again; a value on the command line wins
+         over the remembered one, and a default applies when neither exists.
+         =================================================================================== -->
+    <Property Id="TENKO_ROLES" Secure="yes">
+      <RegistrySearch Id="FindRoles" Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="Roles" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="TENKO_MODULES" Secure="yes">
+      <RegistrySearch Id="FindModules" Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="Modules" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="TENKO_PROFILE" Secure="yes">
+      <RegistrySearch Id="FindProfile" Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="Profile" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="TENKO_HOSTNAME" Secure="yes">
+      <RegistrySearch Id="FindHostName" Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="HostName" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="TENKO_DNS_ADDRESS" Secure="yes">
+      <RegistrySearch Id="FindDnsAddress" Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="DnsAddress" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="TENKO_DNS_PORT" Secure="yes">
+      <RegistrySearch Id="FindDnsPort" Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="DnsPort" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="TENKO_DATA_DIR" Secure="yes">
+      <RegistrySearch Id="FindDataDir" Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="DataDir" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="TENKO_START" Secure="yes">
+      <RegistrySearch Id="FindStart" Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="Start" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="TENKO_FIREWALL" Secure="yes">
+      <RegistrySearch Id="FindFirewall" Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="Firewall" Type="raw" Bitness="always64" />
+    </Property>
+    <!-- Not remembered: they apply to the run that names them. -->
+    <Property Id="TENKO_RECONFIGURE" Secure="yes" />
+    <Property Id="TENKO_PURGE" Secure="yes" />
+
+    <!-- Whether a configuration file exists already (the wizard then offers to replace it). -->
+    <Property Id="TENKO_CONFIG_EXISTS">
+      <DirectorySearch Id="FindConfigDir" Path="[CommonAppDataFolder]Tenko" Depth="0">
+        <FileSearch Id="FindConfigFile" Name="tenko.toml" />
+      </DirectorySearch>
+    </Property>
+
+    <!-- A service named tenko that this package did not install (registered by hand). A
+         fresh install refuses it: registering would fail, and the rollback of that step
+         would remove the existing service. -->
+    <Property Id="TENKO_EXISTING_SERVICE">
+      <RegistrySearch Id="FindExistingService" Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\tenko" Name="ImagePath" Type="raw" Bitness="always64" />
+    </Property>
+    <Launch Condition="Installed OR WIX_UPGRADE_DETECTED OR NOT TENKO_EXISTING_SERVICE"
+            Message="A Windows service named tenko exists already, registered without this installer. Remove it in an elevated prompt with: tenko service uninstall (the configuration and the data directory stay), then run this installer again." />
+
+    <!-- Command line before the registry: save before AppSearch, restore after it. -->
+    <SetProperty Action="SaveRoles" Id="CMDLINE_ROLES" Value="[TENKO_ROLES]" Before="AppSearch" Sequence="both" Condition="TENKO_ROLES" />
+    <SetProperty Action="SaveModules" Id="CMDLINE_MODULES" Value="[TENKO_MODULES]" Before="AppSearch" Sequence="both" Condition="TENKO_MODULES" />
+    <SetProperty Action="SaveProfile" Id="CMDLINE_PROFILE" Value="[TENKO_PROFILE]" Before="AppSearch" Sequence="both" Condition="TENKO_PROFILE" />
+    <SetProperty Action="SaveHostName" Id="CMDLINE_HOSTNAME" Value="[TENKO_HOSTNAME]" Before="AppSearch" Sequence="both" Condition="TENKO_HOSTNAME" />
+    <SetProperty Action="SaveDnsAddress" Id="CMDLINE_DNS_ADDRESS" Value="[TENKO_DNS_ADDRESS]" Before="AppSearch" Sequence="both" Condition="TENKO_DNS_ADDRESS" />
+    <SetProperty Action="SaveDnsPort" Id="CMDLINE_DNS_PORT" Value="[TENKO_DNS_PORT]" Before="AppSearch" Sequence="both" Condition="TENKO_DNS_PORT" />
+    <SetProperty Action="SaveDataDir" Id="CMDLINE_DATA_DIR" Value="[TENKO_DATA_DIR]" Before="AppSearch" Sequence="both" Condition="TENKO_DATA_DIR" />
+    <SetProperty Action="SaveStart" Id="CMDLINE_START" Value="[TENKO_START]" Before="AppSearch" Sequence="both" Condition="TENKO_START" />
+    <SetProperty Action="SaveFirewall" Id="CMDLINE_FIREWALL" Value="[TENKO_FIREWALL]" Before="AppSearch" Sequence="both" Condition="TENKO_FIREWALL" />
+
+    <SetProperty Action="RestoreRoles" Id="TENKO_ROLES" Value="[CMDLINE_ROLES]" After="AppSearch" Sequence="both" Condition="CMDLINE_ROLES" />
+    <SetProperty Action="RestoreModules" Id="TENKO_MODULES" Value="[CMDLINE_MODULES]" After="AppSearch" Sequence="both" Condition="CMDLINE_MODULES" />
+    <SetProperty Action="RestoreProfile" Id="TENKO_PROFILE" Value="[CMDLINE_PROFILE]" After="AppSearch" Sequence="both" Condition="CMDLINE_PROFILE" />
+    <SetProperty Action="RestoreHostName" Id="TENKO_HOSTNAME" Value="[CMDLINE_HOSTNAME]" After="AppSearch" Sequence="both" Condition="CMDLINE_HOSTNAME" />
+    <SetProperty Action="RestoreDnsAddress" Id="TENKO_DNS_ADDRESS" Value="[CMDLINE_DNS_ADDRESS]" After="AppSearch" Sequence="both" Condition="CMDLINE_DNS_ADDRESS" />
+    <SetProperty Action="RestoreDnsPort" Id="TENKO_DNS_PORT" Value="[CMDLINE_DNS_PORT]" After="AppSearch" Sequence="both" Condition="CMDLINE_DNS_PORT" />
+    <SetProperty Action="RestoreDataDir" Id="TENKO_DATA_DIR" Value="[CMDLINE_DATA_DIR]" After="AppSearch" Sequence="both" Condition="CMDLINE_DATA_DIR" />
+    <SetProperty Action="RestoreStart" Id="TENKO_START" Value="[CMDLINE_START]" After="AppSearch" Sequence="both" Condition="CMDLINE_START" />
+    <SetProperty Action="RestoreFirewall" Id="TENKO_FIREWALL" Value="[CMDLINE_FIREWALL]" After="AppSearch" Sequence="both" Condition="CMDLINE_FIREWALL" />
+
+    <SetProperty Action="DefaultRoles" Id="TENKO_ROLES" Value="controller" Before="LaunchConditions" Sequence="both" Condition="NOT TENKO_ROLES" />
+    <SetProperty Action="DefaultProfile" Id="TENKO_PROFILE" Value="home" Before="LaunchConditions" Sequence="both" Condition="NOT TENKO_PROFILE" />
+    <SetProperty Action="DefaultDnsPort" Id="TENKO_DNS_PORT" Value="53" Before="LaunchConditions" Sequence="both" Condition="NOT TENKO_DNS_PORT" />
+    <SetProperty Action="DefaultDataDir" Id="TENKO_DATA_DIR" Value="[CommonAppDataFolder]Tenko\data" Before="LaunchConditions" Sequence="both" Condition="NOT TENKO_DATA_DIR" />
+    <SetProperty Action="DefaultStart" Id="TENKO_START" Value="1" Before="LaunchConditions" Sequence="both" Condition="NOT TENKO_START" />
+    <SetProperty Action="DefaultFirewall" Id="TENKO_FIREWALL" Value="1" Before="LaunchConditions" Sequence="both" Condition="NOT TENKO_FIREWALL" />
+
+    <!-- ===================================================================================
+         Files and folders
+         =================================================================================== -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Tenko" />
+    </StandardDirectory>
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="CONFIGFOLDER" Name="Tenko" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="TenkoMenuFolder" Name="Tenko DDI" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Tenko DDI" Level="1" AllowAbsent="no">
+      <Component Id="TenkoExe" Directory="INSTALLFOLDER">
+        <File Id="TenkoExe" Name="tenko.exe" Source="$(var.Binary)" KeyPath="yes" />
+      </Component>
+      <Component Id="SetupTokenScript" Directory="INSTALLFOLDER">
+        <File Id="SetupTokenCmd" Name="setup-token.cmd" Source="$(sys.SOURCEFILEDIR)setup-token.cmd" KeyPath="yes" />
+      </Component>
+
+      <!-- %ProgramData%\Tenko holds tenko.toml and, by default, the data directory. Its
+           permissions replace the inherited ones of ProgramData, where every user may create
+           files: SYSTEM and Administrators have full control, Users may read. The data
+           directory gets its own, stricter list from `tenko service install`. -->
+      <Component Id="ConfigFolder" Directory="CONFIGFOLDER">
+        <CreateFolder>
+          <PermissionEx Sddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" />
+        </CreateFolder>
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="ConfigFolder" Value="[CONFIGFOLDER]" Type="string" KeyPath="yes" />
+      </Component>
+
+      <!-- The remembered properties. They stay after an uninstall, like the configuration
+           and the data directory they describe, so that an install later picks them up
+           again; TENKO_PURGE=1 removes them with the rest. -->
+      <Component Id="Remembered" Directory="INSTALLFOLDER" Permanent="yes">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Tenko\Installer">
+          <RegistryValue Name="Version" Value="[ProductVersion]" Type="string" KeyPath="yes" />
+          <RegistryValue Name="Roles" Value="[TENKO_ROLES]" Type="string" />
+          <RegistryValue Name="Modules" Value="[TENKO_MODULES]" Type="string" />
+          <RegistryValue Name="Profile" Value="[TENKO_PROFILE]" Type="string" />
+          <RegistryValue Name="HostName" Value="[TENKO_HOSTNAME]" Type="string" />
+          <RegistryValue Name="DnsAddress" Value="[TENKO_DNS_ADDRESS]" Type="string" />
+          <RegistryValue Name="DnsPort" Value="[TENKO_DNS_PORT]" Type="string" />
+          <RegistryValue Name="DataDir" Value="[TENKO_DATA_DIR]" Type="string" />
+          <RegistryValue Name="Start" Value="[TENKO_START]" Type="string" />
+          <RegistryValue Name="Firewall" Value="[TENKO_FIREWALL]" Type="string" />
+        </RegistryKey>
+      </Component>
+
+      <!-- Start menu: the web UI, and the setup token printed in an elevated console. -->
+      <Component Id="StartMenu" Directory="TenkoMenuFolder">
+        <util:InternetShortcut Id="OpenTenko" Directory="TenkoMenuFolder" Name="Open Tenko" Target="https://localhost:8443/" Type="url" />
+        <Shortcut Id="SetupTokenShortcut" Name="Tenko setup token" Description="Print the one-time setup token of the Tenko service"
+                  Target="[INSTALLFOLDER]setup-token.cmd" WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveMenuFolder" On="uninstall" />
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="StartMenu" Value="1" Type="integer" KeyPath="yes" />
+      </Component>
+
+      <!-- Firewall rules (TENKO_FIREWALL=1): the web UI and API on TCP 8443 always, DNS on
+           TCP and UDP with the dns role. Removed with the product. -->
+      <Component Id="FirewallApi" Directory="INSTALLFOLDER" Condition="TENKO_FIREWALL = &quot;1&quot;" Transitive="yes">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="FirewallApi" Value="1" Type="integer" KeyPath="yes" />
+        <fw:FirewallException Id="FirewallApiTcp" Name="Tenko DDI web UI and API (TCP 8443)" Description="Tenko DDI: the web UI and the API"
+                              Port="8443" Protocol="tcp" Scope="any" Profile="all" />
+      </Component>
+      <Component Id="FirewallDns" Directory="INSTALLFOLDER" Transitive="yes"
+                 Condition="TENKO_FIREWALL = &quot;1&quot; AND (TENKO_ROLES &gt;&lt; &quot;dns&quot; OR TENKO_ROLES = &quot;all&quot;)">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="FirewallDns" Value="1" Type="integer" KeyPath="yes" />
+        <fw:FirewallException Id="FirewallDnsUdp" Name="Tenko DDI DNS (UDP)" Description="Tenko DDI: the dns role"
+                              Port="[TENKO_DNS_PORT]" Protocol="udp" Scope="any" Profile="all" />
+        <fw:FirewallException Id="FirewallDnsTcp" Name="Tenko DDI DNS (TCP)" Description="Tenko DDI: the dns role"
+                              Port="[TENKO_DNS_PORT]" Protocol="tcp" Scope="any" Profile="all" />
+      </Component>
+    </Feature>
+
+    <!-- ===================================================================================
+         Custom actions. Each runs a command line through WixQuietExec (no console window,
+         the output goes to the installer log), deferred and as SYSTEM. The command line is
+         the property of the same name, set just before the action.
+         =================================================================================== -->
+    <Property Id="TENKO_CONFIG_MODE" Value="--if-missing" />
+    <SetProperty Id="TENKO_CONFIG_MODE" Value="--force" Before="SetTenkoConfigInit" Sequence="execute" Condition="TENKO_RECONFIGURE = &quot;1&quot;" />
+
+    <!-- The command line of `config init` is built in two parts: a custom action's target
+         holds at most 255 characters. A trailing "." keeps a data directory typed with a
+         trailing backslash from escaping the closing quote; `tenko config init` makes the
+         path absolute, which drops it. -->
+    <SetProperty Id="TENKO_CONFIG_ARGS1" Before="SetTenkoConfigInit" Sequence="execute"
+                 Value='--out "[CONFIGFOLDER]tenko.toml" --data-dir "[TENKO_DATA_DIR]." --roles "[TENKO_ROLES]" --modules "[TENKO_MODULES]"' />
+    <SetProperty Id="TENKO_CONFIG_ARGS2" Before="SetTenkoConfigInit" Sequence="execute"
+                 Value='--profile "[TENKO_PROFILE]" --host-name "[TENKO_HOSTNAME]" --dns-address "[TENKO_DNS_ADDRESS]" --dns-port "[TENKO_DNS_PORT]"' />
+    <SetProperty Id="TenkoConfigInit" Before="TenkoConfigInit" Sequence="execute"
+                 Value='"[#TenkoExe]" config init [TENKO_CONFIG_ARGS1] [TENKO_CONFIG_ARGS2] [TENKO_CONFIG_MODE]' />
+    <!-- `upgrade check` answers 0 (nothing to do) or 10 (a migration is needed and its dry
+         run passed) when it is safe to go on; cmd turns 10 into 0 and keeps every other
+         status, so the action fails on 11 (refused) and 1 (could not check). -->
+    <SetProperty Id="TenkoUpgradeCheck" Before="TenkoUpgradeCheck" Sequence="execute"
+                 Value='"[System64Folder]cmd.exe" /d /s /c ""[#TenkoExe]" upgrade check --config "[CONFIGFOLDER]tenko.toml" &amp; if errorlevel 11 (exit 11) else if errorlevel 10 (exit 0)"' />
+    <SetProperty Id="TenkoUpgradeLayout" Before="TenkoUpgradeLayout" Sequence="execute"
+                 Value='"[#TenkoExe]" upgrade layout --config "[CONFIGFOLDER]tenko.toml"' />
+    <SetProperty Id="TenkoServiceInstall" Before="TenkoServiceInstall" Sequence="execute"
+                 Value='"[#TenkoExe]" service install --config "[CONFIGFOLDER]tenko.toml"' />
+    <SetProperty Id="TenkoServiceInstallRollback" Before="TenkoServiceInstallRollback" Sequence="execute"
+                 Value='"[#TenkoExe]" service uninstall' />
+    <SetProperty Id="TenkoGrantConfig" Before="TenkoGrantConfig" Sequence="execute"
+                 Value='"[System64Folder]icacls.exe" "[CONFIGFOLDER]tenko.toml" /grant "NT SERVICE\tenko:(R)"' />
+    <SetProperty Id="TenkoServiceStart" Before="TenkoServiceStart" Sequence="execute"
+                 Value='"[#TenkoExe]" service start' />
+    <SetProperty Id="TenkoServiceStop" Before="TenkoServiceStop" Sequence="execute"
+                 Value='"[#TenkoExe]" service stop' />
+    <SetProperty Id="TenkoServiceStopRollback" Before="TenkoServiceStopRollback" Sequence="execute"
+                 Value='"[#TenkoExe]" service start' />
+    <SetProperty Id="TenkoServiceUninstall" Before="TenkoServiceUninstall" Sequence="execute"
+                 Value='"[#TenkoExe]" service uninstall' />
+    <!-- Removes the data directory only when it looks like one (it has updates\, which
+         `tenko service install` creates), then the configuration file. -->
+    <SetProperty Id="TenkoPurge" Before="TenkoPurge" Sequence="execute"
+                 Value='"[System64Folder]cmd.exe" /d /s /c "(if exist "[TENKO_DATA_DIR]\updates\" rmdir /s /q "[TENKO_DATA_DIR]") &amp; if exist "[CONFIGFOLDER]tenko.toml" del /f /q "[CONFIGFOLDER]tenko.toml""' />
+    <SetProperty Id="TenkoPurgeRegistry" Before="TenkoPurgeRegistry" Sequence="execute"
+                 Value='"[System64Folder]reg.exe" delete "HKLM\SOFTWARE\Tenko" /f /reg:64' />
+
+    <CustomAction Id="TenkoConfigInit" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="TenkoUpgradeCheck" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="TenkoUpgradeLayout" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="TenkoServiceInstallRollback" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="TenkoServiceInstall" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
+    <!-- Belt and braces: Users may read the folder already. Ignored when it fails, so a
+         repair after the service was removed by hand still completes. -->
+    <CustomAction Id="TenkoGrantConfig" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore" />
+    <CustomAction Id="TenkoServiceStart" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="TenkoServiceStop" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="TenkoServiceStopRollback" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="rollback" Impersonate="no" Return="ignore" />
+    <!-- Removal never fails on the service: one that was removed by hand is not an error. -->
+    <CustomAction Id="TenkoServiceUninstall" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore" />
+    <CustomAction Id="TenkoPurgeRegistry" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore" />
+    <CustomAction Id="TenkoPurge" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <InstallExecuteSequence>
+      <!-- Before the files: stop the service on an upgrade (the old tenko.exe still runs the
+           command), unregister it and purge on a removal. -->
+      <Custom Action="TenkoServiceStopRollback" Before="TenkoServiceStop"
+              Condition="WIX_UPGRADE_DETECTED AND NOT (REMOVE ~= &quot;ALL&quot;) AND TENKO_START = &quot;1&quot;" />
+      <Custom Action="TenkoServiceStop" Before="StopServices"
+              Condition="WIX_UPGRADE_DETECTED AND NOT (REMOVE ~= &quot;ALL&quot;)" />
+      <Custom Action="TenkoServiceUninstall" After="TenkoServiceStop"
+              Condition="REMOVE ~= &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="TenkoPurge" After="TenkoServiceUninstall"
+              Condition="REMOVE ~= &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND TENKO_PURGE = &quot;1&quot;" />
+      <Custom Action="TenkoPurgeRegistry" After="TenkoPurge"
+              Condition="REMOVE ~= &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND TENKO_PURGE = &quot;1&quot;" />
+
+      <!-- After the files. -->
+      <Custom Action="TenkoConfigInit" After="InstallFiles"
+              Condition="NOT (REMOVE ~= &quot;ALL&quot;)" />
+      <Custom Action="TenkoUpgradeCheck" After="TenkoConfigInit"
+              Condition="WIX_UPGRADE_DETECTED AND NOT (REMOVE ~= &quot;ALL&quot;)" />
+      <Custom Action="TenkoUpgradeLayout" After="TenkoUpgradeCheck"
+              Condition="WIX_UPGRADE_DETECTED AND NOT (REMOVE ~= &quot;ALL&quot;)" />
+      <Custom Action="TenkoServiceInstallRollback" After="TenkoUpgradeLayout"
+              Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
+      <Custom Action="TenkoServiceInstall" After="TenkoServiceInstallRollback"
+              Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
+      <Custom Action="TenkoGrantConfig" After="TenkoServiceInstall"
+              Condition="NOT (REMOVE ~= &quot;ALL&quot;)" />
+      <Custom Action="TenkoServiceStart" After="TenkoGrantConfig"
+              Condition="NOT Installed AND TENKO_START = &quot;1&quot;" />
+    </InstallExecuteSequence>
+
+    <UI>
+      <ProgressText Action="TenkoServiceStop" Message="Stopping the Tenko service" />
+      <ProgressText Action="TenkoServiceUninstall" Message="Removing the Tenko service" />
+      <ProgressText Action="TenkoPurge" Message="Removing the configuration and the data directory" />
+      <ProgressText Action="TenkoConfigInit" Message="Writing the configuration" />
+      <ProgressText Action="TenkoUpgradeCheck" Message="Checking the data directory with the new version" />
+      <ProgressText Action="TenkoUpgradeLayout" Message="Switching the service to the new version" />
+      <ProgressText Action="TenkoServiceInstall" Message="Registering the Tenko service" />
+      <ProgressText Action="TenkoServiceStart" Message="Starting the Tenko service" />
+    </UI>
+
+    <!-- The wizard (TenkoUI.wxs) and its licence page. -->
+    <UIRef Id="TenkoUI" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+  </Package>
+</Wix>

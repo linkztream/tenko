@@ -12,10 +12,18 @@
 // SHA-256 and size; other files are ignored with a note. The releases of --previous are kept
 // (an entry for the same version is replaced), newest first. Node's standard library only.
 //
+// WP6.7: installer packages. A file named `tenko-<version>-<platform>.<ext>`, where <ext> is a
+// key of INSTALLER_KINDS (today `msi`), becomes an entry of the release's `installers` with
+// the same fields as an asset plus `kind`, and a line of SHA256SUMS. Installers are not
+// assets: an installation that updates itself downloads the binary of its platform from
+// `assets` and never an installer, and readers of schema 1 ignore the unknown key. A release
+// without installers has no `installers` key.
+//
 // Manifest schema 1:
 //   { "schema": 1, "project": "tenko", "releases": [ { "version", "date", "notes", "security",
 //     "requires_action", "action"?, "format"?, "image"?, "assets": [ { "platform", "name",
-//     "url", "sha256", "size" } ] } ] }
+//     "url", "sha256", "size" } ], "installers"?: [ { "kind", "platform", "name", "url",
+//     "sha256", "size" } ] } ] }
 //
 // Exit codes: 0 success, 1 the inputs are wrong (no such changelog section, no assets, ...),
 // 2 bad command line.
@@ -62,6 +70,33 @@ export function assetPlatform(name, version) {
   if (rest.endsWith(".exe")) rest = rest.slice(0, -".exe".length);
   return PLATFORM.test(rest) ? rest : null;
 }
+
+// WP6.7: installer packages ------------------------------------------------------------
+
+/** The installer kinds by file extension (without the dot). */
+export const INSTALLER_KINDS = new Map([["msi", "msi"]]);
+
+/**
+ * The kind and platform of an installer package of this version, or null when the file is
+ * not one. A name is `tenko-<version>-<platform>.<ext>` with <ext> a key of INSTALLER_KINDS,
+ * for example `tenko-0.2.0-windows-x86_64.msi`.
+ *
+ * @param {string} name file name
+ * @param {string} version
+ * @returns {{ kind: string, platform: string } | null}
+ */
+export function installerOf(name, version) {
+  const prefix = `tenko-${version}-`;
+  if (!name.startsWith(prefix)) return null;
+  const rest = name.slice(prefix.length);
+  const dot = rest.lastIndexOf(".");
+  if (dot < 0) return null;
+  const kind = INSTALLER_KINDS.get(rest.slice(dot + 1));
+  const platform = rest.slice(0, dot);
+  return kind !== undefined && PLATFORM.test(platform) ? { kind, platform } : null;
+}
+
+// ---------------------------------------------------------------------------------------
 
 /**
  * SHA-256 and size of a file, read as a stream.
@@ -112,6 +147,17 @@ export function assetUrl(baseUrl, name) {
  * @property {number} [format]
  * @property {string} [image]
  * @property {Asset[]} assets
+ * @property {Installer[]} [installers] WP6.7: installer packages, absent when there are none
+ */
+
+/**
+ * @typedef {object} Installer WP6.7: an installer package; the fields of an asset plus its kind
+ * @property {string} kind for example `msi`
+ * @property {string} platform
+ * @property {string} name
+ * @property {string} url
+ * @property {string} sha256
+ * @property {number} size
  */
 
 /**
@@ -159,8 +205,17 @@ export async function buildRelease({ version, changelogText, assetsDir, baseUrl,
   const assets = [];
   /** @type {string[]} */
   const ignored = [];
+  /** @type {Installer[]} */
+  const installers = [];
   for (const entry of entries) {
     const platform = entry.isFile() ? assetPlatform(entry.name, version) : null;
+    // WP6.7: installer packages.
+    const installer = entry.isFile() && platform === null ? installerOf(entry.name, version) : null;
+    if (installer !== null) {
+      const { sha256, size } = await hashFile(path.join(assetsDir, entry.name));
+      installers.push({ ...installer, name: entry.name, url: assetUrl(baseUrl, entry.name), sha256, size });
+      continue;
+    }
     if (platform === null) {
       ignored.push(entry.name);
       continue;
@@ -190,6 +245,8 @@ export async function buildRelease({ version, changelogText, assetsDir, baseUrl,
     ...(format === undefined ? {} : { format }),
     ...(image === undefined ? {} : { image }),
     assets,
+    // WP6.7: installer packages, sorted by name like SHA256SUMS.
+    ...(installers.length === 0 ? {} : { installers }),
   };
   return { release, ignored };
 }
@@ -245,8 +302,8 @@ export function formatManifest(manifest) {
  * @returns {string}
  */
 export function formatChecksums(release) {
-  return release.assets
-    .slice()
+  // WP6.7: the installer packages are listed with the binaries.
+  return [...release.assets, ...(release.installers ?? [])]
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     .map((a) => `${a.sha256}  ${a.name}\n`)
     .join("");
@@ -259,7 +316,8 @@ const USAGE = `Usage: node scripts/release-manifest.mjs --version <X.Y.Z> --asse
 
 Options:
   --version <v>      the release, without a leading v (required)
-  --assets <dir>     directory with the files tenko-<version>-<os>-<arch>[.exe] (required)
+  --assets <dir>     directory with the files tenko-<version>-<os>-<arch>[.exe] and the
+                     installer packages tenko-<version>-<os>-<arch>.msi (required)
   --base-url <url>   where the assets are downloadable from; the URL of an asset is
                      <base-url>/<file name> (required)
   --changelog <file> the changelog (default CHANGELOG.md)
@@ -344,10 +402,13 @@ export async function main(argv) {
     await writeFile(sumsFile, formatChecksums(release));
 
     for (const name of ignored) process.stdout.write(`ignored ${name}: not a release asset of ${release.version}\n`);
+    // WP6.7: installers count in the summary and in the checksums.
+    const installerCount = release.installers?.length ?? 0;
+    const checksums = release.assets.length + installerCount;
     process.stdout.write(
-      `${outFile}: release ${release.version}, ${release.assets.length} asset${release.assets.length === 1 ? "" : "s"}, ${manifest.releases.length} release${manifest.releases.length === 1 ? "" : "s"} in the manifest\n`,
+      `${outFile}: release ${release.version}, ${release.assets.length} asset${release.assets.length === 1 ? "" : "s"}${installerCount === 0 ? "" : `, ${installerCount} installer${installerCount === 1 ? "" : "s"}`}, ${manifest.releases.length} release${manifest.releases.length === 1 ? "" : "s"} in the manifest\n`,
     );
-    process.stdout.write(`${sumsFile}: ${release.assets.length} checksum${release.assets.length === 1 ? "" : "s"}\n`);
+    process.stdout.write(`${sumsFile}: ${checksums} checksum${checksums === 1 ? "" : "s"}\n`);
     return 0;
   } catch (error) {
     if (error instanceof UsageError) {

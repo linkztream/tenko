@@ -25,6 +25,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - Server-sent events, so the UI follows changes made elsewhere without reloading.
 - The web UI, embedded in the binary, in English and Swedish, with a first-run setup wizard.
 - The Windows service (`tenko service`) and a hardened systemd unit.
+- A Windows installer (`tenko-<version>-windows-x86_64.msi`): an unattended install with `msiexec` properties or a wizard with the same questions, the service registered and started, upgrades in place with a data-directory check first, an uninstall that keeps the configuration and the data, and `tenko config init`, which writes a short `tenko.toml` from flags.
 - The container image, with a health check and Compose examples.
 - A data-directory format version with migrations at start-up, and `tenko upgrade check`, a dry run against a copy of the data directory (exit codes 0, 10 and 11).
 - An in-app update notice with release notes, a what's-new page after an upgrade, and installation from the UI on single native nodes with an automatic switch back (security profile toggle TGL-23).

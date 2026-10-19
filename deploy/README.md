@@ -17,6 +17,7 @@ without `controller` runs the probe role only, and exits with status 2 when it n
 | `compose/controller.example.yml` | The controller on a bridge network, key from a Docker secret |
 | `compose/macvlan.example.yml` | The same on a macvlan network, for the later DHCP role |
 | `windows/` | The Windows service, see [windows/README.md](windows/README.md) |
+| `windows/wix/`, `windows/build-msi.ps1` | The Windows MSI installer, see [windows/README.md](windows/README.md#msi-installer) |
 
 ## Build
 

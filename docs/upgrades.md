@@ -944,6 +944,7 @@ start on those distributions is never published.
 |---|---|---|
 | Linux binary | `tenko-<version>-linux-x86_64` | Static, built for musl |
 | Windows binary | `tenko-<version>-windows-x86_64.exe` | |
+| Windows installer | `tenko-<version>-windows-x86_64.msi` | Built, smoke-tested and (with a certificate) signed by the job `msi`; `deploy/windows/README.md` |
 | Container image | `ghcr.io/linkztream/tenko:<version>` | The tag `latest` moves only for releases without a pre-release part |
 | Checksums | `SHA256SUMS` | `sha256sum` format, one line per binary of this release |
 | Manifest | `releases.json` | Section 6.3 |
@@ -1023,6 +1024,13 @@ An asset:
 | `size` | number | Bytes; from 1 to 512 MiB |
 | `signature` | string | Reserved for signed releases (API-19); not checked yet |
 
+A release may also have `installers`: packages that install the product, today the Windows
+MSI. An installer has the fields of an asset plus `kind` (`msi`); its file is named
+`tenko-<version>-<platform>.<kind>` and is listed in `SHA256SUMS` like the binaries.
+Installers are kept apart from `assets` because an installation that updates itself
+downloads the binary of its platform and never an installer, and a reader of schema 1 ignores
+the key. A release without installers has no `installers` key.
+
 ### 6.4 The changelog rule
 
 `CHANGELOG.md` follows Keep a Changelog 1.1.0 with Semantic Versioning, plus one addition:
@@ -1064,7 +1072,9 @@ publisher is who it claims to be; that is what signing is for (section 6.6).
 ### 6.6 Signing
 
 Releases are not signed yet. Signing (Sigstore for the binaries and the image, Authenticode
-for the Windows binary) and an SBOM arrive with API-19. The manifest field `signature` is
+for the Windows binary) and an SBOM arrive with API-19. The release workflow already signs
+the Windows binary and the MSI with Authenticode once a certificate is configured
+(`deploy/windows/README.md`, "Signing and SmartScreen"); until then they ship unsigned. The manifest field `signature` is
 reserved for it. The build feature `release-signatures` already wires the check into the
 install job and is off. With the feature on, every install is refused with
 `update.signature_unverified` until signing exists, so a release build must not enable it
@@ -1232,6 +1242,19 @@ Keep `/srv/backup/tenko-20261009` until the new version has run for as long as y
 trust it. The staged file `/usr/local/bin/tenko-0.2.0` can be deleted.
 
 ### 7.4 Windows service
+
+**With the MSI.** An installation from the MSI upgrades with the MSI of the new release:
+`msiexec /i tenko-0.3.0-windows-x86_64.msi /qn /l*v tenko-upgrade.log` in an elevated prompt,
+after the backup of step 3 below. The installer does steps 2, 4, 5 and 6 itself: it stops
+the service, replaces `C:\Program Files\Tenko\tenko.exe`, runs `tenko upgrade check` with the
+new binary and aborts the upgrade (rolling the old files back and starting the old version)
+on any answer other than 0 or 10, runs `tenko upgrade layout`, and starts the service, which
+migrates the data format at its first start (section 3.2). The configuration and the data
+directory stay, and the layout stays consistent, so updates from the UI (section 8) keep
+working after an MSI upgrade and an MSI upgrade keeps working after an update from the UI:
+the layout only moves forward. Verify with step 7. The details, and what to do when the new
+version does not start, are in `deploy/windows/README.md`, "MSI installer". The steps below
+are the path for a service installed by hand.
 
 Run the commands in an elevated PowerShell. The service is `tenko`, the data directory is
 `C:\ProgramData\Tenko` and the configuration is `C:\ProgramData\Tenko\tenko.toml`.
