@@ -20,6 +20,7 @@
 //! | [`jobs`] | the inline job of every change and the job runner stand-in |
 //! | [`views`] | views, their positions and the scope rule (WP6.4) |
 //! | [`secondary`] | secondary and catalog zones: transfers in as a leader service (WP6.1) |
+//! | [`signing`] | the signing state, the writes of a signing pass, the rollover's start (WP6.3) |
 //!
 //! # Zones
 //!
@@ -49,6 +50,8 @@ pub mod secondary;
 pub mod serial;
 // WP6.4: views and the scope rule.
 pub mod views;
+// WP6.3: the signer's entry points and the writes of a signing pass.
+pub mod signing;
 pub mod zonefile;
 
 #[cfg(test)]
@@ -199,13 +202,15 @@ pub struct ZoneWritten {
     pub job: Option<tenko_core::JobId>,
 }
 
-const ORIGINS: [Origin; 6] = [
+const ORIGINS: [Origin; 7] = [
     Origin::Manual,
     Origin::Ipam,
     Origin::Dynamic,
     Origin::Dhcp,
     Origin::Ad,
     Origin::Transfer,
+    // WP6.3: the signer's rows.
+    Origin::Dnssec,
 ];
 
 fn origin_index(origin: Origin) -> u8 {
@@ -216,6 +221,8 @@ fn origin_index(origin: Origin) -> u8 {
         Origin::Dhcp => 3,
         Origin::Ad => 4,
         Origin::Transfer => 5,
+        // WP6.3: the signer's rows.
+        Origin::Dnssec => 6,
     }
 }
 
@@ -1068,7 +1075,7 @@ pub struct RrSetFilter {
     pub name: Option<String>,
     /// One type.
     pub rtype: Option<Rtype>,
-    /// One origin.
+    /// One origin; without it the rows of the signer (`dnssec`) are left out.
     pub origin: Option<Origin>,
 }
 
@@ -1084,6 +1091,10 @@ impl RrSetFilter {
     }
 
     fn matches(&self, zone: &Zone, rrset: &RrSet) -> bool {
+        // WP6.3: the signer's rows show only when asked for (`?origin=dnssec`).
+        if self.origin.is_none() && rrset.origin == Origin::Dnssec {
+            return false;
+        }
         if self.rtype.is_some_and(|rtype| rtype != rrset.rtype)
             || self.origin.is_some_and(|origin| origin != rrset.origin)
         {

@@ -13,13 +13,14 @@
 // WP5.2, not in the document yet, so a plain msw handler), both as jobs, and the cache figures
 // and problems of the node status; the service is dns-resolver-model.ts. The views (WP6.4): the
 // five view routes on dns-views-model.ts, and the view side of the in-use rules on the zone
-// change, the zone deletion and the access list deletion.
-// and problems of the node status; the service is dns-resolver-model.ts. The zone transfers
-// (WP6.1): the state of a zone (`GET .../transfer`) and "Transfer now" (`POST`, secondary zones
-// only) are answered here, with a state per zone kept beside the DNS state.
+// change, the zone deletion and the access list deletion. The zone transfers (WP6.1): the state
+// of a zone (`GET .../transfer`) and "Transfer now" (`POST`, secondary zones only) are answered
+// here, with a state per zone kept beside the DNS state.
+// DNSSEC (WP6.3): the signing state of a zone and the key rollover, kept in this file.
 import { http, type HttpHandler } from "msw";
 import { encodeImportReport, type TransferStatus } from "../../dns/api";
 import type { ObjectRef } from "../types";
+import type { components } from "../generated/schema";
 import { apiOperations } from "../generated/operations";
 import { appendAudit, principalNow } from "./audit-store";
 import { requireSession } from "./auth";
@@ -198,6 +199,12 @@ const zones = [
       const zone = updateZone(state, context, ctx.params.id, body as Record<string, unknown>, ctx.ifMatch());
       // The catalog flag is not part of the shared model yet; the mock keeps what the PATCH says.
       if (typeof (body as Record<string, unknown>).catalog === "boolean") zone.catalog = (body as { catalog: boolean }).catalog;
+      // WP6.3: the signing policy, which the signer acts on at once here.
+      const policy = (body as { dnssec?: components["schemas"]["DnssecPolicy"] | null }).dnssec;
+      if (policy) {
+        zone.dnssec = { ...zone.dnssec, ...policy };
+        syncDnssec(zone);
+      }
       write("dns.zone.update", [zoneRef(zone.id)], "dns.zone.serial", ["dns.zones", "dns.rrsets"]);
       return ok(zone, etag(zone.revision)) as never;
     });
@@ -646,6 +653,173 @@ const lists = [
 ];
 
 // ---------------------------------------------------------------------------------
+// WP6.3: DNSSEC. The signing state of each zone lives here: a PATCH with a `dnssec` policy
+// signs the zone at once (a KSK and a ZSK, or a CSK, with made-up keys and the DS of the
+// key-signing key) or unsigns it (the keys retire); a rollover answers its job, which has
+// already run: the new key signs and the old one is removed.
+
+type DnssecKeyItem = components["schemas"]["DnssecKeyItem"];
+type DnssecStatusItem = components["schemas"]["DnssecStatus"];
+type KeyRoleItem = components["schemas"]["KeyRole"];
+
+interface MockDnssec {
+  keys: DnssecKeyItem[];
+  signed_serial: number | null;
+  last_signed: string | null;
+  rollover_job: string | null;
+}
+
+let dnssecZones = new Map<string, MockDnssec>();
+onMockReset(() => {
+  dnssecZones = new Map();
+});
+
+/** The DNSSEC state of the mock's zones, for tests that arrange or inspect it. */
+export function dnssecState(): Map<string, MockDnssec> {
+  return dnssecZones;
+}
+
+function hex(bytes: Uint8Array): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function mockKey(role: KeyRoleItem, algorithm: components["schemas"]["DnssecAlgorithm"], taken: number[]): DnssecKeyItem {
+  let tag: number;
+  do {
+    const [a = 0, b = 0] = randomBytes(2);
+    tag = (a << 8) | b;
+  } while (taken.includes(tag));
+  const now = new Date(context.now()).toISOString();
+  return {
+    id: randomId(),
+    role,
+    algorithm,
+    key_tag: tag,
+    state: "active",
+    dnskey: {
+      type: "DNSKEY",
+      flags: role === "zsk" ? 256 : 257,
+      protocol: 3,
+      algorithm: algorithm === "ed25519" ? 15 : 13,
+      public_key: hex(randomBytes(algorithm === "ed25519" ? 32 : 64)),
+    },
+    published: now,
+    activated: now,
+  };
+}
+
+/** Signs or unsigns a zone after its policy changed. */
+function syncDnssec(zone: { id: string; soa_serial: number; dnssec?: components["schemas"]["DnssecPolicy"] | null }): void {
+  const entry = dnssecZones.get(zone.id) ?? { keys: [], signed_serial: null, last_signed: null, rollover_job: null };
+  const policy = zone.dnssec ?? {};
+  const now = new Date(context.now()).toISOString();
+  if (policy.mode === "online") {
+    const roles: KeyRoleItem[] = policy.csk ? ["csk"] : ["ksk", "zsk"];
+    for (const role of roles) {
+      if (entry.keys.some((key) => key.role === role && key.state === "active")) continue;
+      const retired = entry.keys.find((key) => key.role === role && key.state === "retired");
+      if (retired) {
+        retired.state = "active";
+        retired.activated = now;
+        retired.retired = null;
+      } else {
+        entry.keys.push(mockKey(role, policy.algorithm ?? "ecdsa_p256_sha256", entry.keys.map((key) => key.key_tag)));
+      }
+    }
+    entry.signed_serial = zone.soa_serial;
+    entry.last_signed = now;
+  } else {
+    for (const key of entry.keys) {
+      if (key.state === "active" || key.state === "published") {
+        key.state = "retired";
+        key.retired = now;
+      }
+    }
+    entry.signed_serial = null;
+    entry.rollover_job = null;
+  }
+  dnssecZones.set(zone.id, entry);
+}
+
+function dnssecStatus(id: string): DnssecStatusItem {
+  const zone = findZone(state, id);
+  const entry = dnssecZones.get(id);
+  const mode = zone.dnssec?.mode ?? "off";
+  const keys = entry?.keys ?? [];
+  const day = 86_400_000;
+  const signed = entry?.last_signed ? Date.parse(entry.last_signed) : null;
+  return {
+    zone: id,
+    mode,
+    keys,
+    ds:
+      mode === "online"
+        ? keys
+            .filter((key) => key.role !== "zsk" && (key.state === "active" || key.state === "published"))
+            .map((key) => ({ type: "DS" as const, key_tag: key.key_tag, algorithm: key.algorithm === "ed25519" ? 15 : 13, digest_type: 2, digest: hex(randomBytesFor(key.key_tag)) }))
+        : [],
+    signed_serial: entry?.signed_serial ?? null,
+    last_signed: entry?.last_signed ?? null,
+    expires: signed !== null && mode === "online" ? new Date(signed + 14 * day).toISOString() : null,
+    next_resign: signed !== null && mode === "online" ? new Date(signed + 7 * day).toISOString() : null,
+    rollover_job: entry?.rollover_job ?? null,
+    findings: [],
+  };
+}
+
+/** A stable made-up digest for a key tag: the same DS on every read. */
+function randomBytesFor(tag: number): Uint8Array {
+  const out = new Uint8Array(32);
+  let seed = tag * 2654435761;
+  for (let i = 0; i < out.length; i++) {
+    seed = (seed * 1103515245 + 12345) >>> 0;
+    out[i] = seed >>> 24;
+  }
+  return out;
+}
+
+const dnssec = [
+  route("get", "/api/v1/dns/zones/{id}/dnssec", (ctx) => guard("dns.read", () => ok(dnssecStatus(ctx.params.id)))),
+  route("post", "/api/v1/dns/zones/{id}/dnssec/rollover", async (ctx) => {
+    const body = (await ctx.body()) as { role?: KeyRoleItem };
+    return guard("dns.keys", () => {
+      const zone = findZone(state, ctx.params.id);
+      const role = body.role ?? "zsk";
+      const entry = dnssecZones.get(zone.id);
+      if (zone.dnssec?.mode !== "online" || !entry) {
+        throw new Problem("dns.dnssec.not_online", { status: 409, params: { zone: zone.name, mode: zone.dnssec?.mode ?? "off" }, detail: `zone ${zone.name}: the zone is not signed online` });
+      }
+      if (entry.rollover_job) {
+        throw new Problem("dns.dnssec.rollover_running", { status: 409, params: { zone: zone.name, job: entry.rollover_job }, detail: `a key rollover of zone ${zone.name} runs` });
+      }
+      if (Boolean(zone.dnssec.csk) !== (role === "csk")) {
+        throw new Problem("dns.zone.invalid", { status: 400, params: { field: "role", reason: "the zone does not use this role" }, detail: "role: the zone does not use this role" });
+      }
+      const old = entry.keys.find((key) => key.role === role && key.state === "active");
+      const fresh = mockKey(role, old?.algorithm ?? zone.dnssec.algorithm ?? "ecdsa_p256_sha256", entry.keys.map((key) => key.key_tag));
+      if (old) {
+        old.state = "removed";
+        old.retired = new Date(context.now()).toISOString();
+      }
+      entry.keys.push(fresh);
+      entry.last_signed = new Date(context.now()).toISOString();
+      const steps = [
+        { kind: "dns.dnssec.publish", automatic: true },
+        { kind: "dns.dnssec.wait", automatic: true },
+        ...(role === "zsk" ? [] : [{ kind: "dns.dnssec.parent", automatic: true }]),
+        { kind: "dns.dnssec.activate", automatic: true },
+        { kind: "dns.dnssec.wait", automatic: true },
+        { kind: "dns.dnssec.retire", automatic: true },
+      ];
+      const jobId = createJob({ kind: "dns.dnssec.rollover", title: "dns.job.dnssec_rollover", targets: [zoneRef(zone.id)], timeoutSecs: 86_400, preview: false, steps });
+      write("dns.key.rollover", [zoneRef(zone.id)], "dns.zone.changed", ["dns.sign_state", "dns.rrsets"], { zone: zone.name, role, job: jobId });
+      return new Reply(202, { job_id: jobId }, { Location: `/api/v1/jobs/${jobId}` }) as never;
+    });
+  }),
+];
+
+
+// ---------------------------------------------------------------------------------
 // Views (WP6.4)
 
 const viewRef = (id: string): ObjectRef => ({ kind: "dns_view", id });
@@ -684,7 +858,7 @@ const viewRoutes = [
   ),
 ];
 
-export const dnsRoutes: HttpHandler[] = [...zones, ...transfer, ...records, ...acls, ...keys, ...forwarders, ...lists, ...node, ...viewRoutes];
+export const dnsRoutes: HttpHandler[] = [...zones, ...transfer, ...records, ...acls, ...keys, ...forwarders, ...lists, ...node, ...viewRoutes, ...dnssec];
 
 /** Every DNS operation answering 501, as the server does until WP4.2 lands (for `server.use`). */
 export const dnsStubs: HttpHandler[] = apiOperations

@@ -2173,6 +2173,197 @@
       <unit id="dns.transfer.unavailable">
         <segment><source>The transfer state is not available on this server.</source><target>Överföringsstatus finns inte på den här servern.</target></segment>
       </unit>
+      <unit id="dns.zone.tab.dnssec">
+        <segment><source>DNSSEC</source><target>DNSSEC</target></segment>
+      </unit>
+      <unit id="dns.origin.dnssec">
+        <notes><note category="description">Origin of an RRset: written by the DNSSEC signer (DNSKEY, NSEC, NSEC3, RRSIG).</note></notes>
+        <segment><source>DNSSEC signer</source><target>DNSSEC-signeraren</target></segment>
+      </unit>
+      <unit id="hosts.dns.origin.dnssec">
+        <segment><source>dnssec</source><target>dnssec</target></segment>
+      </unit>
+      <unit id="dns.job.dnssec_rollover">
+        <notes><note category="description">Title of the job that rolls a DNSSEC key.</note></notes>
+        <segment><source>DNSSEC key rollover</source><target>Nyckelbyte för DNSSEC</target></segment>
+      </unit>
+      <unit id="dns.dnssec.parent_ds">
+        <notes><note category="description">Manual step of a KSK or CSK rollover.</note></notes>
+        <segment><source>Put the new DS records of {zone} at the parent zone and confirm once the parent serves them: {ds}</source><target>Lägg in de nya DS-posterna för {zone} i föräldrazonen och bekräfta när föräldern serverar dem: {ds}</target></segment>
+      </unit>
+      <unit id="dns.dnssec.parent_ds_undo">
+        <segment><source>Remove the new DS records from the parent zone again.</source><target>Ta bort de nya DS-posterna från föräldrazonen igen.</target></segment>
+      </unit>
+      <unit id="dns.dnssec.status">
+        <notes><note category="description">Heading of the state card of the DNSSEC tab.</note></notes>
+        <segment><source>Signing state</source><target>Signeringsläge</target></segment>
+      </unit>
+      <unit id="dns.dnssec.policy">
+        <notes><note category="description">Heading of the form that switches signing on and off.</note></notes>
+        <segment><source>Signing</source><target>Signering</target></segment>
+      </unit>
+      <unit id="dns.dnssec.mode_label">
+        <segment><source>Mode</source><target>Läge</target></segment>
+      </unit>
+      <unit id="dns.dnssec.mode.off">
+        <segment><source>Not signed</source><target>Osignerad</target></segment>
+      </unit>
+      <unit id="dns.dnssec.mode.online">
+        <segment><source>Signed by Tenko</source><target>Signeras av Tenko</target></segment>
+      </unit>
+      <unit id="dns.dnssec.mode.imported">
+        <segment><source>Imported, already signed</source><target>Importerad, redan signerad</target></segment>
+      </unit>
+      <unit id="dns.dnssec.mode_help.off">
+        <segment><source>The zone is served without DNSSEC records.</source><target>Zonen serveras utan DNSSEC-poster.</target></segment>
+      </unit>
+      <unit id="dns.dnssec.mode_help.online">
+        <segment><source>Tenko signs the zone on the controllers with keys kept in the vault and signs every change again. Put the DS records at the parent zone to complete the chain of trust.</source><target>Tenko signerar zonen på kontrollerna med nycklar i valvet och signerar om varje ändring. Lägg in DS-posterna i föräldrazonen för att slutföra förtroendekedjan.</target></segment>
+      </unit>
+      <unit id="dns.dnssec.mode_help.imported">
+        <segment><source>The zone's own signatures are served as imported. Tenko does not sign them again and warns 7 days before they expire.</source><target>Zonens egna signaturer serveras som de importerades. Tenko signerar dem inte om och varnar 7 dagar innan de går ut.</target></segment>
+      </unit>
+      <unit id="dns.dnssec.algorithm_label">
+        <segment><source>Algorithm</source><target>Algoritm</target></segment>
+      </unit>
+      <unit id="dns.dnssec.algorithm.ecdsa_p256_sha256">
+        <segment><source>ECDSA P-256 with SHA-256 (13)</source><target>ECDSA P-256 med SHA-256 (13)</target></segment>
+      </unit>
+      <unit id="dns.dnssec.algorithm.ed25519">
+        <segment><source>Ed25519 (15)</source><target>Ed25519 (15)</target></segment>
+      </unit>
+      <unit id="dns.dnssec.nsec3">
+        <segment><source>Deny with NSEC3 (hashed names, no extra iterations, no salt)</source><target>Neka med NSEC3 (hashade namn, inga extra iterationer, inget salt)</target></segment>
+      </unit>
+      <unit id="dns.dnssec.csk">
+        <segment><source>One combined key (CSK) instead of a KSK and a ZSK</source><target>En kombinerad nyckel (CSK) i stället för en KSK och en ZSK</target></segment>
+      </unit>
+      <unit id="dns.dnssec.save">
+        <segment><source>Save</source><target>Spara</target></segment>
+      </unit>
+      <unit id="dns.dnssec.saved">
+        <segment><source>Signing settings saved</source><target>Signeringsinställningarna har sparats</target></segment>
+      </unit>
+      <unit id="dns.dnssec.ds">
+        <segment><source>DS records for the parent zone</source><target>DS-poster för föräldrazonen</target></segment>
+      </unit>
+      <unit id="dns.dnssec.ds_help">
+        <segment><source>Add these records at the parent zone (the registrar or whoever runs the parent) so that validating resolvers trust the zone.</source><target>Lägg in dessa poster i föräldrazonen (hos registraren eller den som driver föräldern) så att validerande resolvrar litar på zonen.</target></segment>
+      </unit>
+      <unit id="dns.dnssec.ds_none">
+        <segment><source>The zone has no key-signing key yet.</source><target>Zonen har ingen nyckelsigneringsnyckel än.</target></segment>
+      </unit>
+      <unit id="dns.dnssec.ds_copy">
+        <segment><source>Copy</source><target>Kopiera</target></segment>
+      </unit>
+      <unit id="dns.dnssec.ds_copied">
+        <segment><source>DS records copied</source><target>DS-posterna har kopierats</target></segment>
+      </unit>
+      <unit id="dns.dnssec.ds_copy_blocked">
+        <segment><source>The browser did not allow copying; select the lines and copy them by hand</source><target>Webbläsaren tillät inte kopiering; markera raderna och kopiera dem för hand</target></segment>
+      </unit>
+      <unit id="dns.dnssec.keys">
+        <segment><source>Keys</source><target>Nycklar</target></segment>
+      </unit>
+      <unit id="dns.dnssec.keys_none">
+        <segment><source>The zone has no keys.</source><target>Zonen har inga nycklar.</target></segment>
+      </unit>
+      <unit id="dns.dnssec.key.role">
+        <segment><source>Role</source><target>Roll</target></segment>
+      </unit>
+      <unit id="dns.dnssec.key.tag">
+        <segment><source>Key tag</source><target>Nyckeltagg</target></segment>
+      </unit>
+      <unit id="dns.dnssec.key.state">
+        <segment><source>State</source><target>Tillstånd</target></segment>
+      </unit>
+      <unit id="dns.dnssec.key.published">
+        <segment><source>Published</source><target>Publicerad</target></segment>
+      </unit>
+      <unit id="dns.dnssec.key.activated">
+        <segment><source>Signing since</source><target>Signerar sedan</target></segment>
+      </unit>
+      <unit id="dns.dnssec.key.retired">
+        <segment><source>Retired</source><target>Avställd</target></segment>
+      </unit>
+      <unit id="dns.dnssec.role.ksk">
+        <segment><source>KSK</source><target>KSK</target></segment>
+      </unit>
+      <unit id="dns.dnssec.role.zsk">
+        <segment><source>ZSK</source><target>ZSK</target></segment>
+      </unit>
+      <unit id="dns.dnssec.role.csk">
+        <segment><source>CSK</source><target>CSK</target></segment>
+      </unit>
+      <unit id="dns.dnssec.state.generated">
+        <segment><source>Generated</source><target>Genererad</target></segment>
+      </unit>
+      <unit id="dns.dnssec.state.published">
+        <segment><source>Published</source><target>Publicerad</target></segment>
+      </unit>
+      <unit id="dns.dnssec.state.active">
+        <segment><source>Active</source><target>Aktiv</target></segment>
+      </unit>
+      <unit id="dns.dnssec.state.retired">
+        <segment><source>Retired</source><target>Avställd</target></segment>
+      </unit>
+      <unit id="dns.dnssec.state.removed">
+        <segment><source>Removed</source><target>Borttagen</target></segment>
+      </unit>
+      <unit id="dns.dnssec.signed_serial">
+        <segment><source>Serial signed</source><target>Signerat serienummer</target></segment>
+      </unit>
+      <unit id="dns.dnssec.last_signed">
+        <segment><source>Last signed</source><target>Senast signerad</target></segment>
+      </unit>
+      <unit id="dns.dnssec.expires">
+        <segment><source>Earliest expiry</source><target>Tidigaste utgång</target></segment>
+      </unit>
+      <unit id="dns.dnssec.next_resign">
+        <segment><source>Next re-signing</source><target>Nästa omsignering</target></segment>
+      </unit>
+      <unit id="dns.dnssec.rollover">
+        <segment><source>Key rollover</source><target>Nyckelbyte</target></segment>
+      </unit>
+      <unit id="dns.dnssec.rollover_help">
+        <segment><source>A ZSK rollover runs by itself. A KSK or CSK rollover waits for you to put the new DS records at the parent zone.</source><target>Ett ZSK-byte sköter sig självt. Ett KSK- eller CSK-byte väntar på att du lägger in de nya DS-posterna i föräldrazonen.</target></segment>
+      </unit>
+      <unit id="dns.dnssec.roll.zsk">
+        <segment><source>Roll the ZSK</source><target>Byt ZSK</target></segment>
+      </unit>
+      <unit id="dns.dnssec.roll.ksk">
+        <segment><source>Roll the KSK</source><target>Byt KSK</target></segment>
+      </unit>
+      <unit id="dns.dnssec.roll.csk">
+        <segment><source>Roll the CSK</source><target>Byt CSK</target></segment>
+      </unit>
+      <unit id="dns.dnssec.rollover_started">
+        <segment><source>Key rollover started</source><target>Nyckelbytet har startat</target></segment>
+      </unit>
+      <unit id="dns.dnssec.rollover_failed">
+        <segment><source>The key rollover could not start</source><target>Nyckelbytet kunde inte starta</target></segment>
+      </unit>
+      <unit id="dns.dnssec.rollover_running">
+        <segment><source>A key rollover is running.</source><target>Ett nyckelbyte pågår.</target></segment>
+      </unit>
+      <unit id="dns.dnssec.rollover_open_job">
+        <segment><source>Open the job</source><target>Öppna jobbet</target></segment>
+      </unit>
+      <unit id="dns.dnssec.finding.clock_skew">
+        <segment><source>The controller's clock went back</source><target>Kontrollerns klocka har gått bakåt</target></segment>
+      </unit>
+      <unit id="dns.dnssec.finding.expiring">
+        <segment><source>Signatures expire soon</source><target>Signaturerna går snart ut</target></segment>
+      </unit>
+      <unit id="dns.dnssec.finding.resign_overdue">
+        <segment><source>Signatures are not renewed in time</source><target>Signaturerna förnyas inte i tid</target></segment>
+      </unit>
+      <unit id="dns.dnssec.finding.expired">
+        <segment><source>A signature has expired</source><target>En signatur har gått ut</target></segment>
+      </unit>
+      <unit id="dns.dnssec.finding.other">
+        <segment><source>DNSSEC warning</source><target>DNSSEC-varning</target></segment>
+      </unit>
     </group>
   </file>
 </xliff>

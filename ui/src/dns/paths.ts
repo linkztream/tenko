@@ -4,7 +4,7 @@
 import { seg } from "../app/paths";
 
 /** The tabs of the zone page. */
-export type ZoneTab = "records" | "settings" | "history";
+export type ZoneTab = "records" | "settings" | "history" | "dnssec";
 
 export const dnsPaths = {
   zones: (q?: string) => (q ? `/dns?q=${encodeURIComponent(q)}` : "/dns"),

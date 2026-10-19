@@ -202,6 +202,30 @@ pub trait Index: Send + Sync {
     /// for negative answers of signed zones. `None` when the zone has no NSEC chain.
     fn covering_nsec<'a>(&'a self, zone: &ZoneView<'_>, name: &[u8]) -> Option<RrSetView<'a>>;
 
+    // WP6.3: what the answers of signed zones need beyond `covering_nsec`.
+
+    /// The RRset of `rtype` at exactly `owner` (lowercase wire form) in the zone and scope
+    /// of `zone`, below a cut too: the RRSIGs of an RRset, the NSEC of a name, the
+    /// NSEC3PARAM of the apex. `None` by default.
+    fn rrset_at<'a>(
+        &'a self,
+        zone: &ZoneView<'_>,
+        owner: &[u8],
+        rtype: Rtype,
+    ) -> Option<RrSetView<'a>> {
+        let _ = (zone, owner, rtype);
+        None
+    }
+
+    /// The NSEC3 RRset whose owner matches or covers the hashed owner name `hashed`
+    /// (lowercase wire form, the base32hex label and the apex) in hash order, the last one
+    /// covering the names before the first (RFC 5155, section 7.2). `None` when the zone has
+    /// no NSEC3 chain, and by default.
+    fn covering_nsec3<'a>(&'a self, zone: &ZoneView<'_>, hashed: &[u8]) -> Option<RrSetView<'a>> {
+        let _ = (zone, hashed);
+        None
+    }
+
     /// Follows CNAMEs from `qname` inside the index: each CNAME RRset goes into `chain` and
     /// the lookup continues at its target, up to [`MAX_CHAIN`] steps or a loop. Returns
     /// the lookup of the last name; a target outside the zones ends the chain with
@@ -365,6 +389,20 @@ impl MemIndex {
         })
     }
 
+    // WP6.3: a DS query at the apex of a zone is answered by its parent when the index
+    // holds the parent (RFC 4035, section 3.1.4.1).
+    fn zone_for(&self, qname: &[u8], qtype: Rtype) -> Option<(ZoneId, &ZoneEntry)> {
+        let found = self.zone_of(qname)?;
+        if qtype == Rtype::DS
+            && &found.1.apex[..] == qname
+            && name::label_count(qname) > 0
+            && let Some(parent) = self.zone_of(name::suffix(qname, 1))
+        {
+            return Some(parent);
+        }
+        Some(found)
+    }
+
     fn scope_data<'a>(
         entry: &'a ZoneEntry,
         scope: &ScopeName,
@@ -394,7 +432,7 @@ impl Index for MemIndex {
     }
 
     fn lookup<'a>(&'a self, scopes: &dyn ScopeOf, qname: &[u8], qtype: Rtype) -> Lookup<'a> {
-        let Some((id, entry)) = self.zone_of(qname) else {
+        let Some((id, entry)) = self.zone_for(qname, qtype) else {
             return Lookup::NotAuthoritative;
         };
         let Some((scope, data)) = Self::scope_data(entry, scopes.scope_of(id)) else {
@@ -498,5 +536,33 @@ impl Index for MemIndex {
             .range(..=key)
             .rev()
             .find_map(|(_, owner)| data.nodes.get(owner).and_then(|node| node.get(Rtype::NSEC)))
+    }
+
+    // WP6.3: the RRset at a name and the NSEC3 chain.
+    fn rrset_at<'a>(
+        &'a self,
+        zone: &ZoneView<'_>,
+        owner: &[u8],
+        rtype: Rtype,
+    ) -> Option<RrSetView<'a>> {
+        let entry = self.zones.get(&zone.id)?;
+        let (_, data) = Self::scope_data(entry, zone.scope)?;
+        data.nodes.get(owner)?.get(rtype)
+    }
+
+    fn covering_nsec3<'a>(&'a self, zone: &ZoneView<'_>, hashed: &[u8]) -> Option<RrSetView<'a>> {
+        let entry = self.zones.get(&zone.id)?;
+        let (_, data) = Self::scope_data(entry, zone.scope)?;
+        let key = canonical_key(hashed);
+        let nsec3 = |owner: &[u8]| {
+            data.nodes
+                .get(owner)
+                .and_then(|node| node.get(Rtype::NSEC3))
+        };
+        data.canonical
+            .range(..=key)
+            .rev()
+            .find_map(|(_, owner)| nsec3(owner))
+            .or_else(|| data.canonical.values().rev().find_map(|owner| nsec3(owner)))
     }
 }

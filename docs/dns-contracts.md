@@ -30,7 +30,7 @@ All in the namespace `dns` of the replicated store; the constants are `tenko_cor
 | `dns.lists` | `BlockListId` | `BlockList` | WP5.2 | yes |
 | `dns.list_versions` | (`BlockListId`, version) | `ListVersion` | the list service (WP5.2) | yes |
 | `dns.journal` | (`ZoneId`, `ScopeName`, `Revision`) | `JournalEntry` | the zone service, bounded by entries and days | yes |
-| `dns.sign_state` | `ZoneId` | `SignState` with `DnssecKeyMeta` (private keys are vault secrets, purpose `dnssec`) | the signing service (WP6.3) | no (controllers only) |
+| `dns.sign_state` | `ZoneId` | `SignState` with `DnssecKeyMeta` (private keys are vault secrets, purpose `dns.dnssec`; the role purpose of node sync is `dnssec`); WP6.3 adds `signed_revision`, `expires` and `rollover_job` | the signer `dns.signer` and the rollover job (WP6.3) | no (controllers only) |
 
 Keys of owner names sort by labels from the root down with the octet 0x01 between labels, so a name and everything below it are one key range (`DnsName::subtree_prefix`).
 
@@ -43,12 +43,13 @@ Keys of owner names sort by labels from the root down with the octet 0x01 betwee
 | `DnsName` | Canonical lowercase name without the trailing dot, `.` for the root; labels of `a-z`, `0-9`, `-`, `_`, `/` (RFC 2317) and a leftmost `*` |
 | `ScopeName`, `Rtype` | A zone scope (`default` always exists); a record type, printed as its mnemonic or `TYPEnnn` |
 | `Rdata`, `RecordData` | The stored uncompressed wire form of a record's data; its typed view of A, AAAA, CNAME, DNAME, MX, NS, PTR, SOA, SRV, TXT, CAA, DS, DNSKEY, RRSIG, NSEC, NSEC3, NSEC3PARAM, TLSA, SVCB, HTTPS and RFC 3597 data for every other type |
-| `RrSet`, `RrSetKey` | The records of one owner and type in one scope, with `origin` (`manual`, `ipam`, `dynamic`, `dhcp`, `ad`, and `transfer` for what zone transfers write, read-only to every other writer, WP6.1) and the TSIG key of a dynamic update |
+| `RrSet`, `RrSetKey` | The records of one owner and type in one scope, with `origin` (`manual`, `ipam`, `dynamic`, `dhcp`, `ad`, and `transfer` for what zone transfers write, read-only to every other writer, WP6.1; WP6.3 adds `dnssec`, the rows of the signer, which no other writer changes) and the TSIG key of a dynamic update |
 | `Zone` | Name, `ZoneKind` (primary, secondary, stub, forward, rpz), tenant, scopes, `SerialPolicy`, `SoaDefaults`, `TransferPolicy`, `UpdatePolicy`, `DnssecPolicy`, `SecondarySource`, `reverse_of`, `catalog` (RFC 9432, WP6.1: on a secondary zone its members become secondary zones; on a primary zone Tenko writes the members, the primary zones of its tenant with `transfer.allow`; one primary catalog zone per tenant) |
 | `View`, `MatchRule`, `ScopeWeight` | Views with the six tests of DNS-20 and the weighted scopes per zone |
 | `ForwardRule`, `Upstream` | Forwarding by longest suffix, plain, DoT or DoH |
 | `Acl`, `AclEntry` | Access lists of prefixes, keys and `any`, first match decides |
-| `KeyMeta`, `DnssecKeyMeta`, `SignState` | TSIG key metadata; DNSSEC keys and the signing state |
+| `KeyMeta`, `DnssecKeyMeta`, `SignState` | TSIG key metadata; DNSSEC keys and the signing state (WP6.3: `signed_revision`, the store revision whose changes the signed data includes; `expires`, the earliest signature expiry; `rollover_job`, the rollover that runs) |
+| `DnssecPolicy` | A zone's signing: `mode` (off, online, imported), `algorithm` (13 default, 15), `denial` (NSEC, NSEC3 with iterations and salt), `signature_validity_days`, `resign_before_days`; WP6.3 adds `csk` (one combined key) and `zsk_rollover_days` (the schedule). See `docs/dnssec.md` |
 | `BlockList`, `ListVersion` | Block lists and their compiled versions |
 | `JournalEntry` | One serial step of a zone scope, for IXFR |
 
@@ -77,8 +78,8 @@ The object kinds of authorization and audit are `zone` (records authorize as the
 | `POST /api/v1/dns/zones/{id}/records/batch` | `change_dns_records` | `dns.write` | Change RRsets of a zone in one batch |
 | `POST /api/v1/dns/zones/{id}/records/import` | `import_dns_zone_file` | `dns.write` | Import a zone file into a zone |
 | `GET /api/v1/dns/zones/{id}/records/export` | `export_dns_zone_file` | `dns.read` | Export a zone as a zone file |
-| `GET /api/v1/dns/zones/{id}/dnssec` | `get_dns_zone_dnssec` | `dns.read` | Get the signing state and keys of a zone |
-| `POST /api/v1/dns/zones/{id}/dnssec/rollover` | `start_dns_key_rollover` | `dns.keys` | Start a DNSSEC key rollover |
+| `GET /api/v1/dns/zones/{id}/dnssec` | `get_dns_zone_dnssec` | `dns.read` | Get the signing state and keys of a zone: `DnssecStatus` with the keys, the DS records, the serial last signed, the expiry, `next_resign`, `rollover_job` and `findings` (WP6.3) |
+| `POST /api/v1/dns/zones/{id}/dnssec/rollover` | `start_dns_key_rollover` | `dns.keys` | Start a DNSSEC key rollover: 202 with the job `dns.dnssec.rollover`; 409 `dns.dnssec.not_online`, `dns.dnssec.rollover_running` (WP6.3) |
 | `GET /api/v1/dns/zones/{id}/transfer` | `get_dns_zone_transfer` | `dns.read` | Get the transfer state of a zone |
 | `POST /api/v1/dns/zones/{id}/transfer` | `trigger_dns_zone_transfer` | `dns.write` | Transfer a secondary zone now |
 | `GET /api/v1/dns/views` | `list_dns_views` | `dns.read` | List DNS views |
@@ -144,6 +145,9 @@ The node routes sit beside the node's other routes, as the scan configuration of
 | `dns.zone.secondary` | 409 | The records come from zone transfers and are read-only: a secondary zone, the members of a primary catalog zone (WP6.1) |
 | `dns.transfer.failed` | — | A transfer in failed (no answer, a malformed or incomplete answer, the store refused it); the last error of a primary in the transfer state |
 | `dns.transfer.tsig` | — | The answer of a primary failed TSIG verification, or its key cannot be read; the last error of a primary in the transfer state |
+| `dns.dnssec.not_online` | 409 | The zone is not signed online, so its keys cannot roll (`zone`, `mode`) (WP6.3) |
+| `dns.dnssec.rollover_running` | 409 | A key rollover of the zone runs (`zone`, `job`) (WP6.3) |
+| `dns.dnssec.signing_failed` | 500 | A key is missing from the vault or does not load; the signer's error (`zone`, `reason`) (WP6.3) |
 
 ## 6. Audit actions
 
@@ -163,6 +167,7 @@ The node routes sit beside the node's other routes, as the scan configuration of
 | `dns.cache.read` | A page of a node's cache read (the names clients asked, personal data like the query log) |
 | `dns.log.read`, `dns.log.stop`, `dns.log.start` | A page of a node's query log read (personal data); the log stopped or started again (the kill switch) |
 | `dns.zone.transfer_out`, `dns.zone.transfer_in` | A zone transferred out to a client (the client, the key, the kind, the serials; refusals at most once a minute per client); a transfer in written, a catalog zone's members written, an expired copy removed (WP6.1) |
+| `dns.dnssec.enable`, `dns.dnssec.disable`, `dns.dnssec.key_create`, `dns.dnssec.key_state`, `dns.dnssec.rollover` | The signer started to sign a zone or removed its rows; a DNSSEC key generated; a key's state changed; a step of a rollover (WP6.3). The request of a rollover is `dns.key.rollover` |
 
 The system component of the DNS services' own writes is `dns`.
 

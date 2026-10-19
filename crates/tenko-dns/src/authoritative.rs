@@ -451,11 +451,13 @@ fn push_target_addresses(
     }
 }
 
-/// The SOA of a negative answer, with the TTL of RFC 2308, section 5.
-fn push_negative_soa(answer: &mut AnswerBuf, soa: Option<RrSetView<'_>>) {
-    let Some(soa) = soa else {
-        return;
-    };
+/// The SOA of a negative answer, with the TTL of RFC 2308, section 5; the SOA and the TTL
+/// when it was written.
+fn push_negative_soa<'a>(
+    answer: &mut AnswerBuf,
+    soa: Option<RrSetView<'a>>,
+) -> Option<(RrSetView<'a>, u32)> {
+    let soa = soa?;
     let minimum = soa
         .rdata
         .first()
@@ -464,24 +466,29 @@ fn push_negative_soa(answer: &mut AnswerBuf, soa: Option<RrSetView<'_>>) {
         .map_or(soa.ttl, |tail| {
             u32::from_be_bytes([tail[0], tail[1], tail[2], tail[3]])
         });
+    let ttl = soa.ttl.min(minimum);
     push_set(
         answer,
         Section::Authority,
         Owner::Name(soa.owner),
         &soa,
-        soa.ttl.min(minimum),
-    );
+        ttl,
+    )
+    .then_some((soa, ttl))
 }
 
-/// A referral: the NS RRset of the cut (and its DS for DNSSEC clients), the in-domain glue
-/// as required additional records, then the other glue inside the parent zone.
-fn push_referral(
-    index: &ZoneIndex,
+/// A referral: the NS RRset of the cut (and for DNSSEC clients its signed DS, or the proof
+/// that it has none, after the proofs of the walk), the in-domain glue as required
+/// additional records, then the other glue inside the parent zone.
+#[allow(clippy::too_many_arguments, reason = "the parts of one referral")]
+fn push_referral<'a>(
+    index: &'a ZoneIndex,
     scopes: &ViewScopes<'_>,
-    zone: &ZoneView<'_>,
-    ns: &RrSetView<'_>,
-    ds: Option<RrSetView<'_>>,
+    zone: &ZoneView<'a>,
+    ns: &RrSetView<'a>,
+    ds: Option<RrSetView<'a>>,
     dnssec_ok: bool,
+    proofs: &mut Proofs<'a>,
     answer: &mut AnswerBuf,
 ) {
     if !push_set(
@@ -493,17 +500,33 @@ fn push_referral(
     ) {
         return;
     }
-    if dnssec_ok
-        && let Some(ds) = ds
-        && !push_set(
-            answer,
-            Section::Authority,
-            Owner::Name(ds.owner),
-            &ds,
-            ds.ttl,
-        )
-    {
-        return;
+    if dnssec_ok {
+        // WP6.3: the signed DS, or the proof that the cut has none.
+        match ds {
+            Some(ds) => {
+                if !push_set(
+                    answer,
+                    Section::Authority,
+                    Owner::Name(ds.owner),
+                    &ds,
+                    ds.ttl,
+                ) || !push_rrsigs(
+                    index,
+                    zone,
+                    answer,
+                    Section::Authority,
+                    Owner::Name(ds.owner),
+                    &ds,
+                    ds.ttl,
+                ) {
+                    return;
+                }
+            }
+            None => proofs.push(*zone, ProofKind::NoDs, ns.owner, &[]),
+        }
+        if !proofs.write(index, answer) {
+            return;
+        }
     }
     for required in [true, false] {
         for rdata in ns.rdata {
@@ -550,7 +573,8 @@ fn served(kind: ZoneKind) -> bool {
     reason = "one walk with one arm per kind of lookup reads better whole"
 )]
 /// Answers from the index: the chain of CNAMEs and DNAMEs from the question name, then the
-/// answer, the referral or the negative answer at its end.
+/// answer, the referral or the negative answer at its end. With `dnssec_ok` the RRsets
+/// carry their RRSIGs and the authority section the NSEC or NSEC3 proofs (WP6.3).
 fn walk<'a>(
     index: &'a ZoneIndex,
     scopes: &ViewScopes<'_>,
@@ -563,6 +587,8 @@ fn walk<'a>(
     let mut synth = NameBuf::root();
     let mut hops = 0;
     let mut apex: &'a [u8] = &[0];
+    // WP6.3: the proofs gathered on the way, written once the answer section is complete.
+    let mut proofs = Proofs::default();
     loop {
         let name = match at {
             At::Qname => qname,
@@ -592,7 +618,7 @@ fn walk<'a>(
             answer.authoritative = true;
         }
         let mut current = at;
-        for (_, cname, _) in chain.steps() {
+        for (zone, cname, wildcard) in chain.steps() {
             if !push_set(
                 answer,
                 Section::Answer,
@@ -602,6 +628,27 @@ fn walk<'a>(
             ) {
                 return done(ResponseKind::Answer, apex);
             }
+            if dnssec_ok {
+                if !push_rrsigs(
+                    index,
+                    &zone,
+                    answer,
+                    Section::Answer,
+                    owner(current, &synth),
+                    &cname,
+                    cname.ttl,
+                ) {
+                    return done(ResponseKind::Answer, apex);
+                }
+                if let Some(wildcard) = wildcard {
+                    proofs.push(
+                        zone,
+                        ProofKind::Wildcard,
+                        at_name(current, qname, &synth),
+                        wildcard,
+                    );
+                }
+            }
             let Some(target) = cname.rdata.first() else {
                 return done(ResponseKind::Answer, apex);
             };
@@ -609,46 +656,119 @@ fn walk<'a>(
             hops += 1;
         }
         if chain.exhausted || hops > MAX_CHAIN {
+            proofs.write(index, answer);
             return done(ResponseKind::Answer, apex);
         }
+        let current_name = at_name(current, qname, &synth);
         match lookup {
             Lookup::NotAuthoritative | Lookup::Cname { .. } => {
+                proofs.write(index, answer);
                 return done(ResponseKind::Answer, apex);
             }
-            Lookup::Answer { rrset, .. } => {
+            Lookup::Answer {
+                zone,
+                rrset,
+                wildcard,
+            } => {
                 if push_set(
                     answer,
                     Section::Answer,
                     owner(current, &synth),
                     &rrset,
                     rrset.ttl,
-                ) {
-                    push_target_addresses(index, scopes, &rrset, answer);
+                ) && (!dnssec_ok
+                    || push_rrsigs(
+                        index,
+                        &zone,
+                        answer,
+                        Section::Answer,
+                        owner(current, &synth),
+                        &rrset,
+                        rrset.ttl,
+                    ))
+                {
+                    if dnssec_ok && let Some(wildcard) = wildcard {
+                        proofs.push(zone, ProofKind::Wildcard, current_name, wildcard);
+                    }
+                    if proofs.write(index, answer) {
+                        push_target_addresses(index, scopes, &rrset, answer);
+                    }
                 }
                 return done(ResponseKind::Answer, apex);
             }
-            Lookup::NoData { soa, .. } => {
-                push_negative_soa(answer, soa);
+            Lookup::NoData {
+                zone,
+                soa,
+                wildcard,
+            } => {
+                let negative = push_negative_soa(answer, soa);
+                if dnssec_ok {
+                    if let Some((soa, ttl)) = negative
+                        && !push_rrsigs(
+                            index,
+                            &zone,
+                            answer,
+                            Section::Authority,
+                            Owner::Name(soa.owner),
+                            &soa,
+                            ttl,
+                        )
+                    {
+                        return done(ResponseKind::NoData, apex);
+                    }
+                    match wildcard {
+                        Some(wildcard) => {
+                            proofs.push(zone, ProofKind::WildcardNoData, current_name, wildcard);
+                        }
+                        None => proofs.push(zone, ProofKind::NoData, current_name, &[]),
+                    }
+                    proofs.write(index, answer);
+                }
                 return done(ResponseKind::NoData, apex);
             }
-            Lookup::NxDomain { soa, .. } => {
+            Lookup::NxDomain {
+                zone,
+                soa,
+                closest_encloser,
+            } => {
                 answer.rcode = rcode::NXDOMAIN;
-                push_negative_soa(answer, soa);
+                let negative = push_negative_soa(answer, soa);
+                if dnssec_ok {
+                    if let Some((soa, ttl)) = negative
+                        && !push_rrsigs(
+                            index,
+                            &zone,
+                            answer,
+                            Section::Authority,
+                            Owner::Name(soa.owner),
+                            &soa,
+                            ttl,
+                        )
+                    {
+                        return done(ResponseKind::NxDomain, apex);
+                    }
+                    proofs.push(zone, ProofKind::NxDomain, current_name, closest_encloser);
+                    proofs.write(index, answer);
+                }
                 return done(ResponseKind::NxDomain, apex);
             }
             Lookup::Delegation { zone, ns, ds } => {
                 if hops == 0 {
                     answer.authoritative = false;
                 }
-                push_referral(index, scopes, &zone, &ns, ds, dnssec_ok, answer);
+                push_referral(
+                    index,
+                    scopes,
+                    &zone,
+                    &ns,
+                    ds,
+                    dnssec_ok,
+                    &mut proofs,
+                    answer,
+                );
                 return done(ResponseKind::Referral, apex);
             }
-            Lookup::Dname { dname, .. } => {
-                let current_name = match current {
-                    At::Qname => qname,
-                    At::Index(name) => name,
-                    At::Synth => synth.as_wire(),
-                };
+            Lookup::Dname { zone, dname } => {
                 let Some(target) = dname.rdata.first() else {
                     return done(ResponseKind::Answer, apex);
                 };
@@ -658,7 +778,17 @@ fn walk<'a>(
                     Owner::Name(dname.owner),
                     &dname,
                     dname.ttl,
-                ) {
+                ) || (dnssec_ok
+                    && !push_rrsigs(
+                        index,
+                        &zone,
+                        answer,
+                        Section::Answer,
+                        Owner::Name(dname.owner),
+                        &dname,
+                        dname.ttl,
+                    ))
+                {
                     return done(ResponseKind::Answer, apex);
                 }
                 let mut next = NameBuf::root();
@@ -682,12 +812,22 @@ fn walk<'a>(
                 }
                 hops += 1;
                 if hops > MAX_CHAIN {
+                    proofs.write(index, answer);
                     return done(ResponseKind::Answer, apex);
                 }
                 synth = next;
                 at = At::Synth;
             }
         }
+    }
+}
+
+/// The wire name of a point of the walk.
+fn at_name<'b>(at: At<'b>, qname: &'b [u8], synth: &'b NameBuf) -> &'b [u8] {
+    match at {
+        At::Qname => qname,
+        At::Index(name) => name,
+        At::Synth => synth.as_wire(),
     }
 }
 
@@ -705,4 +845,264 @@ fn zone_of<'a>(lookup: &Lookup<'a>) -> Option<ZoneView<'a>> {
         | Lookup::NoData { zone, .. }
         | Lookup::NxDomain { zone, .. } => Some(zone),
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// WP6.3: the DNSSEC records of answers to clients that set DO (RFC 4035, section 3.1;
+// RFC 5155, section 7.2). Nothing changes without DO; the AD bit is never set here; the
+// records go through the same buffer and truncation rules as the rest, and nothing
+// allocates: names are hashed and composed in fixed buffers.
+
+/// The RRSIGs at `index_owner` that cover the RRset `set`, with `ttl`, under `owner`.
+/// `false` when the buffer is full (an answer or authority record that does not fit
+/// truncates the answer).
+fn push_rrsigs(
+    index: &ZoneIndex,
+    zone: &ZoneView<'_>,
+    answer: &mut AnswerBuf,
+    section: Section,
+    owner: Owner<'_>,
+    set: &RrSetView<'_>,
+    ttl: u32,
+) -> bool {
+    let Some(sigs) = index.rrset_at(zone, set.owner, Rtype::RRSIG) else {
+        return true;
+    };
+    for rdata in sigs.rdata {
+        let bytes = rdata.as_bytes();
+        if bytes.len() < 2 || u16::from_be_bytes([bytes[0], bytes[1]]) != set.rtype.0 {
+            continue;
+        }
+        if answer
+            .push(section, owner, Rtype::RRSIG.0, ttl, bytes)
+            .is_err()
+        {
+            if section != Section::Additional {
+                answer.truncated = true;
+            }
+            return false;
+        }
+    }
+    true
+}
+
+/// A denial RRset (NSEC or NSEC3) and its RRSIGs in the authority section.
+fn push_denial(
+    index: &ZoneIndex,
+    zone: &ZoneView<'_>,
+    set: &RrSetView<'_>,
+    answer: &mut AnswerBuf,
+) -> bool {
+    push_set(
+        answer,
+        Section::Authority,
+        Owner::Name(set.owner),
+        set,
+        set.ttl,
+    ) && push_rrsigs(
+        index,
+        zone,
+        answer,
+        Section::Authority,
+        Owner::Name(set.owner),
+        set,
+        set.ttl,
+    )
+}
+
+/// What a proof shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProofKind {
+    /// An answer synthesized from the wildcard: the name itself does not exist.
+    Wildcard,
+    /// The name exists (or is an empty non-terminal) without the type.
+    NoData,
+    /// The name matched the wildcard, which lacks the type.
+    WildcardNoData,
+    /// The name does not exist, nor does the wildcard at its closest encloser.
+    NxDomain,
+    /// The delegation at the name has no DS.
+    NoDs,
+}
+
+/// One proof to write: the zone, what it shows, the name (copied, it may be a name of the
+/// walk's buffer) and the wildcard owner or the closest encloser from the index.
+#[derive(Debug, Clone)]
+struct Proof<'a> {
+    zone: ZoneView<'a>,
+    kind: ProofKind,
+    name: NameBuf,
+    other: &'a [u8],
+}
+
+/// The proofs of one answer, at most one per step of the walk.
+#[derive(Debug, Default)]
+struct Proofs<'a> {
+    items: [Option<Proof<'a>>; MAX_CHAIN + 2],
+    len: usize,
+}
+
+/// A hashed owner name: the base32hex label of the NSEC3 hash and the apex.
+struct Hashed {
+    buf: [u8; MAX_NAME_LEN],
+    len: usize,
+}
+
+impl Hashed {
+    fn as_wire(&self) -> &[u8] {
+        &self.buf[..self.len]
+    }
+}
+
+/// The NSEC3 parameters of a zone from its NSEC3PARAM: the iterations and the salt.
+fn nsec3_params<'a>(index: &'a ZoneIndex, zone: &ZoneView<'_>) -> Option<(u16, &'a [u8])> {
+    let param = index.rrset_at(zone, zone.apex, Rtype::NSEC3PARAM)?;
+    let data = param.rdata.first()?.as_bytes();
+    let iterations = u16::from_be_bytes([*data.get(2)?, *data.get(3)?]);
+    let salt_len = usize::from(*data.get(4)?);
+    Some((iterations, data.get(5..5 + salt_len)?))
+}
+
+/// The hashed owner of `name` in the zone at `apex`.
+fn hashed(name: &[u8], apex: &[u8], params: (u16, &[u8])) -> Option<Hashed> {
+    let hash = crate::dnssec::chain::nsec3_hash(name, params.1, params.0);
+    let label = crate::dnssec::chain::base32hex(&hash);
+    let len = 1 + label.len() + apex.len();
+    if len > MAX_NAME_LEN {
+        return None;
+    }
+    let mut buf = [0u8; MAX_NAME_LEN];
+    buf[0] = u8::try_from(label.len()).ok()?;
+    buf[1..=label.len()].copy_from_slice(&label);
+    buf[1 + label.len()..len].copy_from_slice(apex);
+    Some(Hashed { buf, len })
+}
+
+impl<'a> Proofs<'a> {
+    fn push(&mut self, zone: ZoneView<'a>, kind: ProofKind, name: &[u8], other: &'a [u8]) {
+        if self.len == self.items.len() {
+            return;
+        }
+        let Ok(name) = NameBuf::from_wire(name) else {
+            return;
+        };
+        self.items[self.len] = Some(Proof {
+            zone,
+            kind,
+            name,
+            other,
+        });
+        self.len += 1;
+    }
+
+    /// Writes every proof into the authority section; `false` when the buffer is full.
+    fn write(&self, index: &'a ZoneIndex, answer: &mut AnswerBuf) -> bool {
+        // The denial records already written, by owner, so a record that proves two
+        // things goes in once.
+        let mut written: [&[u8]; 3 * (MAX_CHAIN + 2)] = [&[]; 3 * (MAX_CHAIN + 2)];
+        let mut count = 0;
+        for proof in self.items[..self.len].iter().flatten() {
+            let mut sets: [Option<RrSetView<'a>>; 3] = [None; 3];
+            match nsec3_params(index, &proof.zone) {
+                Some(params) => nsec3_proof(index, proof, params, &mut sets),
+                None => nsec_proof(index, proof, &mut sets),
+            }
+            for set in sets.iter().flatten() {
+                if written[..count].contains(&set.owner) {
+                    continue;
+                }
+                if !push_denial(index, &proof.zone, set, answer) {
+                    return false;
+                }
+                if count < written.len() {
+                    written[count] = set.owner;
+                    count += 1;
+                }
+            }
+        }
+        true
+    }
+}
+
+/// The NSEC records of a proof (RFC 4035, section 3.1.3).
+fn nsec_proof<'a>(index: &'a ZoneIndex, proof: &Proof<'a>, sets: &mut [Option<RrSetView<'a>>; 3]) {
+    let zone = &proof.zone;
+    let name = proof.name.as_wire();
+    match proof.kind {
+        // The NSEC at or before the name: the one at the name for NODATA, the one that
+        // covers an empty non-terminal or a name that does not exist.
+        ProofKind::NoData | ProofKind::Wildcard => sets[0] = index.covering_nsec(zone, name),
+        ProofKind::WildcardNoData => {
+            sets[0] = index.covering_nsec(zone, name);
+            sets[1] = index.rrset_at(zone, proof.other, Rtype::NSEC);
+        }
+        ProofKind::NxDomain => {
+            sets[0] = index.covering_nsec(zone, name);
+            let mut buf = [0u8; MAX_NAME_LEN];
+            if let Some(wildcard) = wildcard_name(proof.other, &mut buf) {
+                sets[1] = index.covering_nsec(zone, wildcard);
+            }
+        }
+        ProofKind::NoDs => sets[0] = index.rrset_at(zone, name, Rtype::NSEC),
+    }
+}
+
+/// The NSEC3 records of a proof (RFC 5155, section 7.2): the closest encloser's, the one
+/// covering the next closer name, and the wildcard's.
+fn nsec3_proof<'a>(
+    index: &'a ZoneIndex,
+    proof: &Proof<'a>,
+    params: (u16, &[u8]),
+    sets: &mut [Option<RrSetView<'a>>; 3],
+) {
+    let zone = &proof.zone;
+    let name = proof.name.as_wire();
+    let cover = |target: &[u8]| {
+        hashed(target, zone.apex, params)
+            .and_then(|hashed| index.covering_nsec3(zone, hashed.as_wire()))
+    };
+    match proof.kind {
+        ProofKind::NoData | ProofKind::NoDs => sets[0] = cover(name),
+        ProofKind::Wildcard => {
+            // The closest encloser is the wildcard's parent; the next closer name is one
+            // label longer than it.
+            let encloser = name::suffix(proof.other, 1);
+            sets[0] = cover(next_closer(name, encloser));
+        }
+        ProofKind::WildcardNoData => {
+            let encloser = name::suffix(proof.other, 1);
+            sets[0] = cover(encloser);
+            sets[1] = cover(next_closer(name, encloser));
+            sets[2] = cover(proof.other);
+        }
+        ProofKind::NxDomain => {
+            let encloser = proof.other;
+            sets[0] = cover(encloser);
+            sets[1] = cover(next_closer(name, encloser));
+            let mut buf = [0u8; MAX_NAME_LEN];
+            if let Some(wildcard) = wildcard_name(encloser, &mut buf) {
+                sets[2] = cover(wildcard);
+            }
+        }
+    }
+}
+
+/// The ancestor of `name` one label below `encloser`.
+fn next_closer<'b>(name: &'b [u8], encloser: &[u8]) -> &'b [u8] {
+    let skip = name::label_count(name)
+        .saturating_sub(name::label_count(encloser))
+        .saturating_sub(1);
+    name::suffix(name, skip)
+}
+
+/// `*.` and `encloser` in `buf`.
+fn wildcard_name<'b>(encloser: &[u8], buf: &'b mut [u8; MAX_NAME_LEN]) -> Option<&'b [u8]> {
+    let len = encloser.len() + 2;
+    if len > MAX_NAME_LEN {
+        return None;
+    }
+    buf[0] = 1;
+    buf[1] = b'*';
+    buf[2..len].copy_from_slice(encloser);
+    Some(&buf[..len])
 }

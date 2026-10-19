@@ -880,3 +880,25 @@ impl DnsRole {
         }
     }
 }
+
+// WP6.3: the DNSSEC signer.
+
+/// Starts the DNSSEC signer on the controllers (ADR 0018): the leader-only service
+/// `dns.signer`, whose timer re-signs zones before their signatures expire, and the step
+/// handlers of the rollover job `dns.dnssec.rollover`.
+pub(crate) fn start_signer(
+    zones: &Arc<tenko_dns::zone::ZoneService>,
+    vault: &Arc<tenko_vault::StoreVault>,
+    engine: &mut tenko_jobs::JobEngine,
+    leaders: &super::leader::LeaderRegistry,
+) {
+    let signer = tenko_dns::dnssec::Signer::new(
+        Arc::clone(zones),
+        Arc::clone(vault) as Arc<dyn tenko_vault::Vault>,
+        tenko_dns::dnssec::SignerConfig::default(),
+    );
+    for handler in tenko_dns::dnssec::rollover::step_handlers(&signer) {
+        engine.register(handler);
+    }
+    leaders.register(signer.leader_service());
+}

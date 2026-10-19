@@ -396,6 +396,7 @@ async fn system_status(
     backup: Option<Extension<Arc<dyn super::backup::BackupService>>>,
     format: Option<Extension<DataFormatSource>>,
     dns: Option<Extension<super::dns::DnsNodeSlot>>,
+    zones: Option<Extension<Arc<tenko_dns::zone::ZoneService>>>,
     Ctx(ctx): Ctx,
 ) -> Result<Json<SystemStatus>, ApiError> {
     state.authorize(&ctx.principal, Action::Read, &system_object())?;
@@ -418,6 +419,19 @@ async fn system_status(
         && let Some(role) = slot.status()
     {
         status.warnings.extend(dns_role_warnings(&role));
+    }
+    // WP6.3: the clock and expiry findings of signed zones (OPS-09), each naming its zone.
+    if let Some(Extension(zones)) = zones
+        && let Ok(view) = zones.view(None).await
+        && let Ok(findings) = tenko_dns::dnssec::health::all(view.as_ref(), ctx.now)
+    {
+        status
+            .warnings
+            .extend(findings.into_iter().map(|finding| StatusWarning {
+                code: finding.code.to_owned(),
+                detail: finding.detail,
+                params: finding.params,
+            }));
     }
     Ok(Json(status))
 }

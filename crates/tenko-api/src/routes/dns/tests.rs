@@ -10,7 +10,7 @@ use std::sync::Arc;
 use axum::{
     Router,
     body::{Body, to_bytes},
-    http::{Request, header},
+    http::{Request, StatusCode, header},
 };
 use serde_json::Value;
 use tenko_core::{Action, Authorizer, ObjectKind};
@@ -74,12 +74,10 @@ fn with_policy(read: bool, write: bool) -> (Router, Arc<Policy>) {
 #[tokio::test]
 async fn an_allowed_call_reaches_the_stub() {
     let (router, policy) = with_policy(true, true);
+    // WP6.3: the DNSSEC state is built; without the zone service it answers 409 after the
+    // scope check.
     let reply = send(&router, "GET", &format!("/dns/zones/{ZONE}/dnssec")).await;
-    reply.assert_problem(501, "sys.not_implemented");
-    assert_eq!(
-        reply.body["params"]["path"],
-        "/api/v1/dns/zones/{id}/dnssec"
-    );
+    reply.assert_problem(409, "dns.module.disabled");
     let asked = policy.asked();
     assert_eq!(asked.len(), 1);
     assert_eq!(asked[0].0, Action::Read);
@@ -127,13 +125,16 @@ async fn a_reader_reads_and_is_refused_writes() {
 #[tokio::test]
 async fn keys_rollovers_and_nodes_are_checked_on_their_objects() {
     let (router, policy) = with_policy(true, true);
-    send(
-        &router,
-        "POST",
-        &format!("/dns/zones/{ZONE}/dnssec/rollover"),
-    )
-    .await
-    .assert_problem(501, "sys.not_implemented");
+    // WP6.3: the rollover is built; with its body it is checked on the DNSSEC keys and,
+    // without the zone service, answers 409.
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("{API_BASE}/dns/zones/{ZONE}/dnssec/rollover"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"role":"zsk"}"#))
+        .expect("request");
+    let response = router.clone().oneshot(request).await.expect("response");
+    assert_eq!(response.status(), StatusCode::CONFLICT);
     // A node this server neither is nor knows: the dns role is not here.
     for (method, path) in [
         ("GET", "/nodes/1001/dns"),

@@ -1,6 +1,6 @@
 // One zone (/dns/zones/:id/:tab?): its name, kind and serving state and the serial it serves,
-// the actions (import a zone file, export one, delete the zone) and three tabs: the records,
-// the settings (SOA, apex NS, serial policy) and the history. The zone follows the `dns`
+// the actions (import a zone file, export one, delete the zone) and four tabs: the records,
+// the settings (SOA, apex NS, serial policy), the history and DNSSEC (WP6.3). The zone follows the `dns`
 // topic; a 501 of the API (WP4.2 not landed) or the module switched off shows the notice.
 import { A, useNavigate, useParams } from "@solidjs/router";
 import { createSignal, For, Match, Show, Switch } from "solid-js";
@@ -18,11 +18,12 @@ import { DnsProblem, downloadText, unavailable, ZoneChips } from "./Parts";
 import { dnsPaths, type ZoneTab } from "./paths";
 import { RecordsTab } from "./RecordsTab";
 import { DeleteZoneDialog } from "./ZoneDialogs";
+import { DnssecTab } from "./dnssec/DnssecTab";
 import { HistoryTab, SettingsTab } from "./ZoneSettings";
 import { errorMessage } from "../api/problem";
 import "./dns.css";
 
-const TABS: readonly ZoneTab[] = ["records", "settings", "history"];
+const TABS: readonly ZoneTab[] = ["records", "settings", "history", "dnssec"];
 
 export default function ZonePage() {
   const params = useParams<{ id: string; tab?: string }>();
@@ -144,6 +145,15 @@ export default function ZonePage() {
               </Match>
               <Match when={tab() === "history"}>
                 <HistoryTab zone={z()} />
+              </Match>
+              <Match when={tab() === "dnssec"}>
+                <DnssecTab
+                  zone={z()}
+                  onSaved={(next) => {
+                    setSaved(next);
+                    query.refetch();
+                  }}
+                />
               </Match>
             </Switch>
             <Show when={deleting()}>

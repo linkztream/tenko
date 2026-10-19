@@ -270,6 +270,22 @@ pub(crate) fn plan(
         {
             return Err(super::secondary::read_only(zone));
         }
+        // WP6.3: the rows of the signer, and the types it owns in a zone signed online,
+        // are refused for every writer, `take_over` or not.
+        if let Some(reason) = crate::dnssec::refused_change(
+            zone,
+            change.rtype,
+            existing.as_ref().map(|rrset| rrset.origin),
+        ) {
+            return Err(ZoneError::new(
+                codes::RECORD_ORIGIN,
+                409,
+                format!("{} {}: {reason}", change.name, change.rtype),
+            )
+            .param("name", change.name.as_str())
+            .param("type", change.rtype.to_string())
+            .param("origin", "dnssec"));
+        }
         if let Some(existing) = &existing
             && existing.origin != change.origin
         {
@@ -558,6 +574,8 @@ pub fn origin_name(origin: Origin) -> &'static str {
         Origin::Dhcp => "dhcp",
         Origin::Ad => "ad",
         Origin::Transfer => "transfer",
+        // WP6.3: the signer's rows.
+        Origin::Dnssec => "dnssec",
     }
 }
 

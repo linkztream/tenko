@@ -1345,6 +1345,9 @@ async fn start(
             Arc::clone(&list_staging),
             lists::PERIOD,
         )));
+        // WP6.3: the DNSSEC signer (`dns.signer`, ADR 0018) with its re-sign timer, and the
+        // steps of the rollover job.
+        dns::start_signer(zones, &vault, &mut engine, &leaders);
     }
     // WP6.1: transfers in for secondary and catalog zones (`dns.transfer`) and NOTIFY out
     // (`dns.notify`) on the leader.

@@ -1,0 +1,5 @@
+/* The DNSSEC tab of the zone page (WP6.3): the mode choice and the DS lines to copy. */
+.dnssec-modes { border: 0; padding: 0; margin: 0; }
+.dnssec-modes legend { font-size: var(--fs-12); color: var(--ink-3); margin-block-end: var(--sp-2); }
+.dnssec-modes label { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.dns-ds-lines { margin: 0; padding: var(--sp-4); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-3); overflow-x: auto; white-space: pre; font-size: var(--fs-12); }

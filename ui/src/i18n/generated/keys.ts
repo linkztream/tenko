@@ -1376,6 +1376,64 @@ export type MessageKey =
   | "dns.coming.body"
   | "dns.coming.title"
   | "dns.coming.zones"
+  | "dns.dnssec.algorithm.ecdsa_p256_sha256"
+  | "dns.dnssec.algorithm.ed25519"
+  | "dns.dnssec.algorithm_label"
+  | "dns.dnssec.csk"
+  | "dns.dnssec.ds"
+  | "dns.dnssec.ds_copied"
+  | "dns.dnssec.ds_copy"
+  | "dns.dnssec.ds_copy_blocked"
+  | "dns.dnssec.ds_help"
+  | "dns.dnssec.ds_none"
+  | "dns.dnssec.expires"
+  | "dns.dnssec.finding.clock_skew"
+  | "dns.dnssec.finding.expired"
+  | "dns.dnssec.finding.expiring"
+  | "dns.dnssec.finding.other"
+  | "dns.dnssec.finding.resign_overdue"
+  | "dns.dnssec.key.activated"
+  | "dns.dnssec.key.published"
+  | "dns.dnssec.key.retired"
+  | "dns.dnssec.key.role"
+  | "dns.dnssec.key.state"
+  | "dns.dnssec.key.tag"
+  | "dns.dnssec.keys"
+  | "dns.dnssec.keys_none"
+  | "dns.dnssec.last_signed"
+  | "dns.dnssec.mode.imported"
+  | "dns.dnssec.mode.off"
+  | "dns.dnssec.mode.online"
+  | "dns.dnssec.mode_help.imported"
+  | "dns.dnssec.mode_help.off"
+  | "dns.dnssec.mode_help.online"
+  | "dns.dnssec.mode_label"
+  | "dns.dnssec.next_resign"
+  | "dns.dnssec.nsec3"
+  | "dns.dnssec.parent_ds"
+  | "dns.dnssec.parent_ds_undo"
+  | "dns.dnssec.policy"
+  | "dns.dnssec.role.csk"
+  | "dns.dnssec.role.ksk"
+  | "dns.dnssec.role.zsk"
+  | "dns.dnssec.roll.csk"
+  | "dns.dnssec.roll.ksk"
+  | "dns.dnssec.roll.zsk"
+  | "dns.dnssec.rollover"
+  | "dns.dnssec.rollover_failed"
+  | "dns.dnssec.rollover_help"
+  | "dns.dnssec.rollover_open_job"
+  | "dns.dnssec.rollover_running"
+  | "dns.dnssec.rollover_started"
+  | "dns.dnssec.save"
+  | "dns.dnssec.saved"
+  | "dns.dnssec.signed_serial"
+  | "dns.dnssec.state.active"
+  | "dns.dnssec.state.generated"
+  | "dns.dnssec.state.published"
+  | "dns.dnssec.state.removed"
+  | "dns.dnssec.state.retired"
+  | "dns.dnssec.status"
   | "dns.do.add_records"
   | "dns.do.delete"
   | "dns.do.delete_rrset"
@@ -1498,6 +1556,7 @@ export type MessageKey =
   | "dns.import.upload.replace_help"
   | "dns.import.upload.title"
   | "dns.import.upload.too_large"
+  | "dns.job.dnssec_rollover"
   | "dns.key.col.algorithm"
   | "dns.key.col.created"
   | "dns.key.col.name"
@@ -1720,6 +1779,7 @@ export type MessageKey =
   | "dns.op.set"
   | "dns.origin.ad"
   | "dns.origin.dhcp"
+  | "dns.origin.dnssec"
   | "dns.origin.dynamic"
   | "dns.origin.ipam"
   | "dns.origin.manual"
@@ -1959,6 +2019,7 @@ export type MessageKey =
   | "dns.zone.serial"
   | "dns.zone.stub"
   | "dns.zone.stub_hint"
+  | "dns.zone.tab.dnssec"
   | "dns.zone.tab.history"
   | "dns.zone.tab.records"
   | "dns.zone.tab.settings"
@@ -2424,6 +2485,7 @@ export type MessageKey =
   | "hosts.dns.no_zone"
   | "hosts.dns.origin.ad"
   | "hosts.dns.origin.dhcp"
+  | "hosts.dns.origin.dnssec"
   | "hosts.dns.origin.dynamic"
   | "hosts.dns.origin.ipam"
   | "hosts.dns.origin.manual"
@@ -5504,6 +5566,7 @@ export interface MessageArgs {
   "dns.cache.ttl_h": { value: string | number };
   "dns.cache.ttl_min": { value: string | number };
   "dns.cache.ttl_s": { value: string | number };
+  "dns.dnssec.parent_ds": { ds: string | number; zone: string | number };
   "dns.fwd.check.address": { entry: string | number };
   "dns.fwd.check.path": { entry: string | number };
   "dns.fwd.check.path_transport": { entry: string | number };
@@ -7635,6 +7698,64 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.coming.body",
   "dns.coming.title",
   "dns.coming.zones",
+  "dns.dnssec.algorithm.ecdsa_p256_sha256",
+  "dns.dnssec.algorithm.ed25519",
+  "dns.dnssec.algorithm_label",
+  "dns.dnssec.csk",
+  "dns.dnssec.ds",
+  "dns.dnssec.ds_copied",
+  "dns.dnssec.ds_copy",
+  "dns.dnssec.ds_copy_blocked",
+  "dns.dnssec.ds_help",
+  "dns.dnssec.ds_none",
+  "dns.dnssec.expires",
+  "dns.dnssec.finding.clock_skew",
+  "dns.dnssec.finding.expired",
+  "dns.dnssec.finding.expiring",
+  "dns.dnssec.finding.other",
+  "dns.dnssec.finding.resign_overdue",
+  "dns.dnssec.key.activated",
+  "dns.dnssec.key.published",
+  "dns.dnssec.key.retired",
+  "dns.dnssec.key.role",
+  "dns.dnssec.key.state",
+  "dns.dnssec.key.tag",
+  "dns.dnssec.keys",
+  "dns.dnssec.keys_none",
+  "dns.dnssec.last_signed",
+  "dns.dnssec.mode.imported",
+  "dns.dnssec.mode.off",
+  "dns.dnssec.mode.online",
+  "dns.dnssec.mode_help.imported",
+  "dns.dnssec.mode_help.off",
+  "dns.dnssec.mode_help.online",
+  "dns.dnssec.mode_label",
+  "dns.dnssec.next_resign",
+  "dns.dnssec.nsec3",
+  "dns.dnssec.parent_ds",
+  "dns.dnssec.parent_ds_undo",
+  "dns.dnssec.policy",
+  "dns.dnssec.role.csk",
+  "dns.dnssec.role.ksk",
+  "dns.dnssec.role.zsk",
+  "dns.dnssec.roll.csk",
+  "dns.dnssec.roll.ksk",
+  "dns.dnssec.roll.zsk",
+  "dns.dnssec.rollover",
+  "dns.dnssec.rollover_failed",
+  "dns.dnssec.rollover_help",
+  "dns.dnssec.rollover_open_job",
+  "dns.dnssec.rollover_running",
+  "dns.dnssec.rollover_started",
+  "dns.dnssec.save",
+  "dns.dnssec.saved",
+  "dns.dnssec.signed_serial",
+  "dns.dnssec.state.active",
+  "dns.dnssec.state.generated",
+  "dns.dnssec.state.published",
+  "dns.dnssec.state.removed",
+  "dns.dnssec.state.retired",
+  "dns.dnssec.status",
   "dns.do.add_records",
   "dns.do.delete",
   "dns.do.delete_rrset",
@@ -7757,6 +7878,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.import.upload.replace_help",
   "dns.import.upload.title",
   "dns.import.upload.too_large",
+  "dns.job.dnssec_rollover",
   "dns.key.col.algorithm",
   "dns.key.col.created",
   "dns.key.col.name",
@@ -7979,6 +8101,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.op.set",
   "dns.origin.ad",
   "dns.origin.dhcp",
+  "dns.origin.dnssec",
   "dns.origin.dynamic",
   "dns.origin.ipam",
   "dns.origin.manual",
@@ -8218,6 +8341,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.zone.serial",
   "dns.zone.stub",
   "dns.zone.stub_hint",
+  "dns.zone.tab.dnssec",
   "dns.zone.tab.history",
   "dns.zone.tab.records",
   "dns.zone.tab.settings",
@@ -8683,6 +8807,7 @@ export const messageKeys: readonly MessageKey[] = [
   "hosts.dns.no_zone",
   "hosts.dns.origin.ad",
   "hosts.dns.origin.dhcp",
+  "hosts.dns.origin.dnssec",
   "hosts.dns.origin.dynamic",
   "hosts.dns.origin.ipam",
   "hosts.dns.origin.manual",

@@ -260,7 +260,10 @@ fn client_subnet_views_on_one_zone_answer_from_their_scopes() {
 }
 
 #[test]
-#[allow(clippy::too_many_lines, reason = "one scenario per test kind, read top to bottom")]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one scenario per test kind, read top to bottom"
+)]
 fn the_transport_interface_qtype_qname_and_time_rules_select() {
     let (zone, image) = split_zone();
     let dot = view(

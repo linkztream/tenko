@@ -26,7 +26,7 @@ use utoipa::ToSchema;
 use crate::{
     Coded, CodedError,
     error::FieldError,
-    id::{PrefixId, Revision, TenantId},
+    id::{JobId, PrefixId, Revision, TenantId},
     ipam::Stamp,
     object::{ObjectKind, ObjectRef},
     secret::SecretRef,
@@ -168,8 +168,18 @@ pub mod codes {
     /// unsigned message). Params: `zone`, `server`, `reason`.
     pub const TRANSFER_TSIG: &str = "dns.transfer.tsig";
 
+    // WP6.3: DNSSEC.
+    /// The zone is not signed online, so its keys cannot roll (409). Params: `zone`,
+    /// `mode`.
+    pub const DNSSEC_NOT_ONLINE: &str = "dns.dnssec.not_online";
+    /// A key rollover of the zone runs already (409). Params: `zone`, `job`.
+    pub const DNSSEC_ROLLOVER_RUNNING: &str = "dns.dnssec.rollover_running";
+    /// The zone could not be signed: a key is missing from the vault or does not load
+    /// (500). Params: `zone`, `reason`.
+    pub const DNSSEC_SIGNING_FAILED: &str = "dns.dnssec.signing_failed";
+
     /// Every code of the namespace, for the contracts document and its test.
-    pub const ALL: [&str; 25] = [
+    pub const ALL: [&str; 28] = [
         ZONE_NOT_FOUND,
         ZONE_EXISTS,
         ZONE_INVALID,
@@ -196,6 +206,9 @@ pub mod codes {
         ZONE_SECONDARY,
         TRANSFER_FAILED,
         TRANSFER_TSIG,
+        DNSSEC_NOT_ONLINE,
+        DNSSEC_ROLLOVER_RUNNING,
+        DNSSEC_SIGNING_FAILED,
     ];
 }
 
@@ -693,6 +706,13 @@ pub struct DnssecPolicy {
     /// How long before the expiry a signature is renewed, in days.
     #[serde(default = "default_resign")]
     pub resign_before_days: u16,
+    // WP6.3: the combined signing key and the rollover schedule.
+    /// One combined signing key (CSK) instead of a KSK and a ZSK.
+    #[serde(default)]
+    pub csk: bool,
+    /// Days between scheduled ZSK rollovers; none rolls only when asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zsk_rollover_days: Option<u16>,
 }
 
 const fn default_validity() -> u16 {
@@ -710,6 +730,8 @@ impl Default for DnssecPolicy {
             denial: Denial::Nsec,
             signature_validity_days: default_validity(),
             resign_before_days: default_resign(),
+            csk: false,
+            zsk_rollover_days: None,
         }
     }
 }
@@ -909,13 +931,18 @@ pub enum Origin {
     /// A zone transfer in (WP6.1): the records of a secondary zone, and the members Tenko
     /// writes into a primary catalog zone; read-only for every other writer.
     Transfer,
+    // WP6.3: the rows of the signer.
+    /// The DNSSEC signer (DNSKEY, CDS, CDNSKEY, NSEC, NSEC3, NSEC3PARAM, RRSIG): written
+    /// only by the signing service, refused for every other writer.
+    Dnssec,
 }
 
 impl Origin {
     /// Whether a writer of this origin may replace an RRset of `existing` origin in a zone
     /// with `policy`. A person (manual) may replace anything; the reconciler restores an
     /// `ipam` RRset that a person changed. The actuator touches `ipam` RRsets only. Dynamic
-    /// updates, DHCP and AD replace `ipam` RRsets only when the zone policy allows.
+    /// updates, DHCP and AD replace `ipam` RRsets only when the zone policy allows. The
+    /// signer replaces only its own rows, and no other writer replaces them.
     pub fn may_replace(self, existing: Origin, policy: &UpdatePolicy) -> bool {
         // WP6.1: what a transfer wrote only a transfer replaces, and it replaces anything.
         if self == Origin::Transfer {
@@ -925,11 +952,15 @@ impl Origin {
             return false;
         }
         match self {
-            Origin::Manual | Origin::Transfer => true,
+            Origin::Manual | Origin::Transfer => existing != Origin::Dnssec,
             Origin::Ipam => existing == Origin::Ipam,
-            Origin::Dynamic | Origin::Dhcp | Origin::Ad => {
-                existing != Origin::Ipam || policy.may_replace_ipam
-            }
+            Origin::Dynamic | Origin::Dhcp | Origin::Ad => match existing {
+                Origin::Ipam => policy.may_replace_ipam,
+                Origin::Dnssec => false,
+                _ => true,
+            },
+            // WP6.3: the signer owns its rows only.
+            Origin::Dnssec => existing == Origin::Dnssec,
         }
     }
 }
@@ -1520,6 +1551,17 @@ pub struct SignState {
     /// When the next re-signing is due.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_resign: Option<Timestamp>,
+    // WP6.3: where the signer stands and what runs.
+    /// The store revision whose changes the signed data includes: the signer watches the
+    /// store from here after a restart or a change of leader.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed_revision: Option<Revision>,
+    /// When the earliest signature of the zone expires (online and imported zones).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires: Option<Timestamp>,
+    /// The key rollover that runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rollover_job: Option<JobId>,
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1888,8 +1930,20 @@ pub mod audit {
     /// A page of a node's cache was read (the names clients asked, personal data, P2-Q7).
     pub const CACHE_READ: AuditAction = AuditAction::from_static("dns.cache.read");
 
+    // WP6.3: the state changes of the signer and of rollovers.
+    /// The signer started to sign a zone (its keys generated or taken up again).
+    pub const DNSSEC_ENABLE: AuditAction = AuditAction::from_static("dns.dnssec.enable");
+    /// The signer removed the rows it generated (the zone is unsigned or imported).
+    pub const DNSSEC_DISABLE: AuditAction = AuditAction::from_static("dns.dnssec.disable");
+    /// A DNSSEC key was generated, its private key in the vault.
+    pub const DNSSEC_KEY_CREATE: AuditAction = AuditAction::from_static("dns.dnssec.key_create");
+    /// A DNSSEC key changed its state (published, active, retired, removed).
+    pub const DNSSEC_KEY_STATE: AuditAction = AuditAction::from_static("dns.dnssec.key_state");
+    /// A step of a key rollover ran (started, waiting, finished).
+    pub const DNSSEC_ROLLOVER: AuditAction = AuditAction::from_static("dns.dnssec.rollover");
+
     /// Every action of the module, for the contracts document and its test.
-    pub const ALL: [&AuditAction; 35] = [
+    pub const ALL: [&AuditAction; 40] = [
         &ZONE_CREATE,
         &ZONE_UPDATE,
         &ZONE_DELETE,
@@ -1926,6 +1980,11 @@ pub mod audit {
         &ZONE_TRANSFER_IN,
         // cache-browse: the listing of a node's cache.
         &CACHE_READ,
+        &DNSSEC_ENABLE,
+        &DNSSEC_DISABLE,
+        &DNSSEC_KEY_CREATE,
+        &DNSSEC_KEY_STATE,
+        &DNSSEC_ROLLOVER,
     ];
 }
 

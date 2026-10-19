@@ -731,10 +731,17 @@ fn nested_zone_answers_for_its_own_names_and_wins_the_ds() {
         &child,
         "sub.example.test",
     );
-    // The longest apex wins: the NS of the parent at the child apex is not a referral
-    // and the DS the parent holds is not visible; both indexes answer NoData from the
-    // child zone.
-    expect_nodata(pair.lookup("sub.example.test", Rtype::DS), &child, None);
+    // The longest apex wins: the NS of the parent at the child apex is not a referral.
+    // WP6.3: the DS at the child apex is the parent's (RFC 4035, section 3.1.4.1), so
+    // both indexes answer it from the parent zone.
+    expect_answer(
+        pair.lookup("sub.example.test", Rtype::DS),
+        &parent,
+        "sub.example.test",
+        Rtype::DS,
+        &[ds()],
+        None,
+    );
     expect_nodata(pair.lookup("sub.example.test", Rtype::A), &child, None);
     // Records the parent holds below its own cut are shadowed by the child zone.
     expect_nxdomain(

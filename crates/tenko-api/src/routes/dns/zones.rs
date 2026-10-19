@@ -17,6 +17,7 @@ use tenko_core::{
     dns::{JournalEntry, ScopeName, Zone, ZoneId},
 };
 use tenko_dns::zone::{NewZone, ZoneChange, ZoneRow, ZoneService, journal};
+use tenko_store::ReadViewExt as _;
 use utoipa::{IntoParams, ToSchema};
 
 use super::{OriginCount, ZoneCreate, ZoneItem, ZonePatch, Zones, parse_id, with_etag};
@@ -121,6 +122,19 @@ pub(super) async fn create_dns_zone(
 ) -> Result<Response, ApiError> {
     app.authorize(&cx.principal, Action::Create, &anywhere(ObjectKind::Zone))?;
     let service = zones.get()?;
+    // WP6.3: without a policy in the request, the signing default of the profile (TGL-13).
+    let dnssec = if let Some(policy) = body.dnssec {
+        policy
+    } else {
+        let view = service.view(None).await?;
+        let hardened = view
+            .as_ref()
+            .get_typed(&tenko_auth::model::SETTINGS, &())?
+            .is_some_and(|(settings, _)| {
+                settings.profile == tenko_auth::settings::Profile::Hardened
+            });
+        tenko_dns::dnssec::profile_default(hardened, &body.name, body.kind)
+    };
     let written = service
         .create(
             &cx,
@@ -134,7 +148,7 @@ pub(super) async fn create_dns_zone(
                 name_servers: body.name_servers,
                 transfer: body.transfer.unwrap_or_default(),
                 update: body.update.unwrap_or_default(),
-                dnssec: body.dnssec.unwrap_or_default(),
+                dnssec,
                 source: body.source,
                 description: body.description,
                 reverse_of: None,

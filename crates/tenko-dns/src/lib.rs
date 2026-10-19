@@ -61,6 +61,8 @@ pub mod lists;
 // WP6.1: zone transfers, NOTIFY and TSIG on the wire.
 pub mod tsig;
 pub mod xfr;
+// WP6.3: DNSSEC signing on the controllers.
+pub mod dnssec;
 
 pub use codec::{AnswerBuf, Codec, CodecError, DomainCodec, Request};
 pub use feed::{DnsData, MemFeed, ZoneFeed};

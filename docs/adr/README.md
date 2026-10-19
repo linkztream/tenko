@@ -70,3 +70,4 @@ The date is the date the ADR was written or last changed status.
 | [0015](0015-scoped-authorization.md) | Scoped authorization, service accounts and scoped tokens | Accepted | 2026-10-11 |
 | [0016](0016-backup-and-restore.md) | Backup and restore | Accepted | 2026-10-11 |
 | [0017](0017-dns-data-model-and-serving-path.md) | DNS data model and serving path | Proposed | 2026-10-17 |
+| [0018](0018-dnssec-key-handling-and-signing.md) | DNSSEC key handling and signing | Proposed | 2026-10-18 |

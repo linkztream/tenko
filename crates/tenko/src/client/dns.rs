@@ -63,6 +63,9 @@ pub use transfer::{TransferArgs, TransferCommand};
 // cache-browse: `tenko dns cache`, a child module so that it shares the record presentation.
 #[path = "dns_cache.rs"]
 mod cache;
+// WP6.3: `tenko dns dnssec`.
+#[path = "dns_dnssec.rs"]
+pub mod dnssec;
 
 /// Subcommands of `tenko dns`.
 #[derive(Debug, Clone, Subcommand)]
@@ -126,6 +129,13 @@ pub enum DnsCommand {
         /// The `cache` subcommand to run.
         #[command(subcommand)]
         action: cache::CacheCommand,
+    },
+    // WP6.3: DNSSEC.
+    /// DNSSEC: status, enable, disable, rollover.
+    Dnssec {
+        /// The `dnssec` subcommand to run.
+        #[command(subcommand)]
+        action: dnssec::DnssecCommand,
     },
 }
 
@@ -551,6 +561,7 @@ impl DnsCommand {
             Self::Transfer { action } => action.client(),
             // cache-browse: `tenko dns cache`.
             Self::Cache { action } => action.client(),
+            Self::Dnssec { action } => action.client(),
         }
     }
 
@@ -610,6 +621,7 @@ impl DnsCommand {
             },
             // cache-browse: `tenko dns cache`.
             Self::Cache { action } => action.name(),
+            Self::Dnssec { action } => action.name(),
         }
     }
 }
@@ -1025,6 +1037,7 @@ pub async fn run(command: &DnsCommand) -> Result<Output, Failure> {
         DnsCommand::Transfer { action } => transfer::run(&target, action).await,
         // cache-browse: `tenko dns cache`.
         DnsCommand::Cache { action } => cache::run(&target, action).await,
+        DnsCommand::Dnssec { action } => dnssec::run(&target, action).await,
     }
 }
 

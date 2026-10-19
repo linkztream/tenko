@@ -79,6 +79,8 @@
 //! well. The DNS kinds are global-only for grants in Phase 2.
 
 mod acls;
+// WP6.3: the DNSSEC routes.
+mod dnssec;
 mod forwarders;
 mod keys;
 mod lists;
@@ -98,18 +100,13 @@ use std::sync::Arc;
 
 use axum::{
     Json,
-    extract::{DefaultBodyLimit, FromRequestParts, Path, State},
+    extract::{DefaultBodyLimit, FromRequestParts},
     http::{HeaderValue, StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
-use tenko_auth::authz::anywhere;
 use tenko_core::Revision;
-use tenko_core::{
-    Action, CodedError, NodeId, ObjectKind, ObjectRef,
-    dns::{DnsName, ZoneId},
-    error::codes,
-};
+use tenko_core::{CodedError, NodeId, dns::DnsName, error::codes};
 use tenko_dns::zone::ZoneService;
 use utoipa_axum::{
     router::{OpenApiRouter, UtoipaMethodRouterExt},
@@ -124,21 +121,16 @@ pub use model::{DnsCacheEntry, DnsCacheParams};
 
 pub use model::{
     AclCreate, AclItem, AclPatch, BlockedCountItem, CacheFlushParams, DnsCommandAccepted,
-    DnsJobStarted, DnsNodeStatus, DnssecKeyItem, DnssecStatus, DryRunParams, ExportParams,
-    ForwarderCreate, ForwarderItem, ForwarderPatch, ImportLoss, ImportTypeCount, KeyCreate,
-    KeyCreated, KeyItem, ListCreate, ListItem, ListPatch, ListVersionItem, ListenerItem,
+    DnsJobStarted, DnsNodeStatus, DnssecFinding, DnssecKeyItem, DnssecStatus, DryRunParams,
+    ExportParams, ForwarderCreate, ForwarderItem, ForwarderPatch, ImportLoss, ImportTypeCount,
+    KeyCreate, KeyCreated, KeyItem, ListCreate, ListItem, ListPatch, ListVersionItem, ListenerItem,
     OriginCount, PrimaryState, QueryLogLine, QueryLogParams, QueryLogState, QueryLogStatus,
     RecordBatch, RecordBatchResult, RecordChange, RecordDiff, RecordFilters, RecordOp,
     RolloverRequest, RrSetItem, TransferStatus, UdpWorkerItem, ViewCreate, ViewItem, ViewPatch,
     ZoneCreate, ZoneFileImport, ZoneFileImportReport, ZoneItem, ZonePatch,
 };
 
-use super::not_implemented;
-use crate::{
-    extract::Ctx,
-    problem::{ApiError, ProblemDetails},
-    state::AppState,
-};
+use crate::{problem::ApiError, state::AppState};
 
 /// A 400 `sys.invalid_request` for a malformed path segment.
 fn invalid(field: &str, detail: &str) -> ApiError {
@@ -239,8 +231,9 @@ fn zone_routes() -> OpenApiRouter<AppState> {
             zones::delete_dns_zone
         ))
         .routes(routes!(zones::list_dns_zone_journal))
-        .routes(routes!(get_dns_zone_dnssec))
-        .routes(routes!(start_dns_key_rollover))
+        // WP6.3: the DNSSEC routes.
+        .routes(routes!(dnssec::get_dns_zone_dnssec))
+        .routes(routes!(dnssec::start_dns_key_rollover))
         // WP6.1: the transfer state and a refresh now.
         .routes(routes!(
             transfer::get_dns_zone_transfer,
@@ -312,67 +305,3 @@ fn node_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(nodes::stop_node_dns_log))
         .routes(routes!(nodes::start_node_dns_log))
 }
-
-#[utoipa::path(
-    get,
-    path = "/dns/zones/{id}/dnssec",
-    tag = "dns",
-    operation_id = "get_dns_zone_dnssec",
-    summary = "Get the signing state and keys of a zone",
-    description = "Scope: `dns.read`.",
-    params(("id" = String, Path, description = "Zone identifier (UUID)")),
-    responses(
-        (status = 200, description = "The signing state, the keys without private parts and the DS records", body = DnssecStatus),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dns_zone_dnssec(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &ObjectRef::from(parse_id::<ZoneId>(&id)?),
-    )?;
-    Err(not_implemented("GET", "/dns/zones/{id}/dnssec"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dns/zones/{id}/dnssec/rollover",
-    tag = "dns",
-    operation_id = "start_dns_key_rollover",
-    summary = "Start a DNSSEC key rollover",
-    description = "Scope: `dns.keys`.",
-    params(("id" = String, Path, description = "Zone identifier (UUID)")),
-    request_body(content = RolloverRequest, content_type = "application/json"),
-    responses(
-        (status = 202, description = "The rollover job", body = DnsJobStarted),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.keys`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The zone is not signed online", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn start_dns_key_rollover(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    parse_id::<ZoneId>(&id)?;
-    app.authorize(
-        &cx.principal,
-        Action::Execute,
-        &anywhere(ObjectKind::DnsKey),
-    )?;
-    Err(not_implemented("POST", "/dns/zones/{id}/dnssec/rollover"))
-}
-

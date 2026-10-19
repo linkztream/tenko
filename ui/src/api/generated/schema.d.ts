@@ -1266,7 +1266,7 @@ export interface paths {
         };
         /**
          * Get the signing state and keys of a zone
-         * @description Scope: `dns.read`.
+         * @description Scope: `dns.read`. The keys without private parts, the DS records for the parent, the serial last signed, the earliest signature expiry, the rollover that runs and the health findings (OPS-09). A zone that was never signed answers its mode and no keys.
          */
         get: operations["get_dns_zone_dnssec"];
         put?: never;
@@ -1288,7 +1288,7 @@ export interface paths {
         put?: never;
         /**
          * Start a DNSSEC key rollover
-         * @description Scope: `dns.keys`.
+         * @description Scope: `dns.keys`. Starts the job `dns.dnssec.rollover` for the role: a ZSK rolls by pre-publication (publish, wait the DNSKEY TTL, sign with the new key, wait the largest TTL, retire the old one), a KSK or CSK by double KSK with CDS and CDNSKEY (publish beside the old key, wait, a person confirms the new DS at the parent, the new key takes over, wait, retire). Audited as `dns.key.rollover`; every step as `dns.dnssec.rollover`.
          */
         post: operations["start_dns_key_rollover"];
         delete?: never;
@@ -5912,6 +5912,13 @@ export interface components {
          * @enum {string}
          */
         DnssecAlgorithm: "ecdsa_p256_sha256" | "ed25519";
+        /** @description A health finding of a signed zone. */
+        DnssecFinding: {
+            /** @description The code. */
+            code: string;
+            /** @description What is wrong, in English. */
+            detail: string;
+        };
         /** @description A DNSSEC key without its private part. */
         DnssecKeyItem: {
             activated?: components["schemas"]["Timestamp"] | null;
@@ -5942,6 +5949,8 @@ export interface components {
         DnssecPolicy: {
             /** @description The algorithm of new keys. */
             algorithm?: components["schemas"]["DnssecAlgorithm"];
+            /** @description One combined signing key (CSK) instead of a KSK and a ZSK. */
+            csk?: boolean;
             /** @description NSEC or NSEC3. */
             denial?: components["schemas"]["Denial"];
             /** @description Off, online or imported. */
@@ -5956,17 +5965,29 @@ export interface components {
              * @description How long a signature is valid, in days.
              */
             signature_validity_days?: number;
+            /**
+             * Format: int32
+             * @description Days between scheduled ZSK rollovers; none rolls only when asked.
+             */
+            zsk_rollover_days?: number | null;
         };
         /** @description `GET /dns/zones/{id}/dnssec`. */
         DnssecStatus: {
             /** @description The DS records for the parent (and the CDS published during a rollover). */
             ds: components["schemas"]["RecordData"][];
             expires?: components["schemas"]["Timestamp"] | null;
+            /**
+             * @description The health findings of the zone (OPS-09): `dns.dnssec.clock_skew`,
+             *     `dns.dnssec.expiring`, `dns.dnssec.resign_overdue`, `dns.dnssec.expired`.
+             */
+            findings: components["schemas"]["DnssecFinding"][];
             /** @description The keys. */
             keys: components["schemas"]["DnssecKeyItem"][];
             last_signed?: components["schemas"]["Timestamp"] | null;
             /** @description Off, online or imported. */
             mode: components["schemas"]["DnssecMode"];
+            next_resign?: components["schemas"]["Timestamp"] | null;
+            rollover_job?: components["schemas"]["JobId"] | null;
             /**
              * Format: int32
              * @description The serial last signed.
@@ -9593,7 +9614,7 @@ export interface components {
          * @description Who owns an RRset (plan section 2.5, P2-Q12).
          * @enum {string}
          */
-        Origin: "manual" | "ipam" | "dynamic" | "dhcp" | "ad" | "transfer";
+        Origin: "manual" | "ipam" | "dynamic" | "dhcp" | "ad" | "transfer" | "dnssec";
         /** @description How many RRsets of a zone one origin owns. */
         OriginCount: {
             /** @description The origin. */
@@ -22476,15 +22497,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     start_dns_key_rollover: {
@@ -22503,7 +22515,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The rollover job */
+            /** @description The rollover job; follow it at the `Location` */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -22512,7 +22524,7 @@ export interface operations {
                     "application/json": components["schemas"]["DnsJobStarted"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed, or the zone does not use the role (`dns.zone.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22548,17 +22560,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The zone is not signed online */
+            /** @description The zone is not signed online (`dns.dnssec.not_online`) or a rollover runs (`dns.dnssec.rollover_running`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };

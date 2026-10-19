@@ -8013,7 +8013,7 @@
           "dns"
         ],
         "summary": "Get the signing state and keys of a zone",
-        "description": "Scope: `dns.read`.",
+        "description": "Scope: `dns.read`. The keys without private parts, the DS records for the parent, the serial last signed, the earliest signature expiry, the rollover that runs and the health findings (OPS-09). A zone that was never signed answers its mode and no keys.",
         "operationId": "get_dns_zone_dnssec",
         "parameters": [
           {
@@ -8076,16 +8076,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       }
@@ -8096,7 +8086,7 @@
           "dns"
         ],
         "summary": "Start a DNSSEC key rollover",
-        "description": "Scope: `dns.keys`.",
+        "description": "Scope: `dns.keys`. Starts the job `dns.dnssec.rollover` for the role: a ZSK rolls by pre-publication (publish, wait the DNSKEY TTL, sign with the new key, wait the largest TTL, retire the old one), a KSK or CSK by double KSK with CDS and CDNSKEY (publish beside the old key, wait, a person confirms the new DS at the parent, the new key takes over, wait, retire). Audited as `dns.key.rollover`; every step as `dns.dnssec.rollover`.",
         "operationId": "start_dns_key_rollover",
         "parameters": [
           {
@@ -8121,7 +8111,7 @@
         },
         "responses": {
           "202": {
-            "description": "The rollover job",
+            "description": "The rollover job; follow it at the `Location`",
             "content": {
               "application/json": {
                 "schema": {
@@ -8131,7 +8121,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed, or the zone does not use the role (`dns.zone.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8171,17 +8161,7 @@
             }
           },
           "409": {
-            "description": "The zone is not signed online",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+            "description": "The zone is not signed online (`dns.dnssec.not_online`) or a rollover runs (`dns.dnssec.rollover_running`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -32076,6 +32056,24 @@
           "ed25519"
         ]
       },
+      "DnssecFinding": {
+        "type": "object",
+        "description": "A health finding of a signed zone.",
+        "required": [
+          "code",
+          "detail"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The code."
+          },
+          "detail": {
+            "type": "string",
+            "description": "What is wrong, in English."
+          }
+        }
+      },
       "DnssecKeyItem": {
         "type": "object",
         "description": "A DNSSEC key without its private part.",
@@ -32166,6 +32164,10 @@
             "$ref": "#/components/schemas/DnssecAlgorithm",
             "description": "The algorithm of new keys."
           },
+          "csk": {
+            "type": "boolean",
+            "description": "One combined signing key (CSK) instead of a KSK and a ZSK."
+          },
           "denial": {
             "$ref": "#/components/schemas/Denial",
             "description": "NSEC or NSEC3."
@@ -32185,6 +32187,15 @@
             "format": "int32",
             "description": "How long a signature is valid, in days.",
             "minimum": 0
+          },
+          "zsk_rollover_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Days between scheduled ZSK rollovers; none rolls only when asked.",
+            "minimum": 0
           }
         }
       },
@@ -32195,7 +32206,8 @@
           "zone",
           "mode",
           "keys",
-          "ds"
+          "ds",
+          "findings"
         ],
         "properties": {
           "ds": {
@@ -32215,6 +32227,13 @@
                 "type": "null"
               }
             ]
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DnssecFinding"
+            },
+            "description": "The health findings of the zone (OPS-09): `dns.dnssec.clock_skew`,\n`dns.dnssec.expiring`, `dns.dnssec.resign_overdue`, `dns.dnssec.expired`."
           },
           "keys": {
             "type": "array",
@@ -32237,6 +32256,28 @@
           "mode": {
             "$ref": "#/components/schemas/DnssecMode",
             "description": "Off, online or imported."
+          },
+          "next_resign": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the signer renews signatures next (for an imported zone, when it reads their\nexpiry again)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rollover_job": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobId",
+                "description": "The key rollover that runs; follow it with `GET /jobs/{id}`."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "signed_serial": {
             "type": [
@@ -41941,7 +41982,8 @@
           "dynamic",
           "dhcp",
           "ad",
-          "transfer"
+          "transfer",
+          "dnssec"
         ]
       },
       "OriginCount": {

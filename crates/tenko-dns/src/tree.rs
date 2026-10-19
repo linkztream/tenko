@@ -244,6 +244,8 @@ struct Base {
     rdata: Vec<Rdata>,
     slots: Box<[u32]>,
     nsec: Vec<u32>,
+    // WP6.3: the NSEC3 owners in canonical order, which is hash order.
+    nsec3: Vec<u32>,
 }
 
 /// A node of either layer.
@@ -344,6 +346,7 @@ impl Base {
                 .sum::<usize>()
             + self.slots.len() * size_of::<u32>()
             + self.nsec.capacity() * size_of::<u32>()
+            + self.nsec3.capacity() * size_of::<u32>()
     }
 
     fn empty() -> Self {
@@ -355,6 +358,7 @@ impl Base {
             rdata: Vec::new(),
             slots: Box::new([0; 2]),
             nsec: Vec::new(),
+            nsec3: Vec::new(),
         }
     }
 
@@ -440,6 +444,7 @@ impl Base {
             ),
             slots: vec![0; (count * 2).next_power_of_two().max(2)].into_boxed_slice(),
             nsec: Vec::new(),
+            nsec3: Vec::new(),
         };
         for (owner, node) in nodes {
             let index = base.nodes.len();
@@ -457,6 +462,10 @@ impl Base {
             if node.sets.iter().any(|set| set.rtype == Rtype::NSEC) {
                 base.nsec.push(to_u32(index));
             }
+            // WP6.3: the NSEC3 owners.
+            if node.sets.iter().any(|set| set.rtype == Rtype::NSEC3) {
+                base.nsec3.push(to_u32(index));
+            }
             base.nodes.push(BaseNode {
                 name: to_u32(base.names.len()),
                 sets: to_u32(set_start),
@@ -473,14 +482,19 @@ impl Base {
             }
             base.slots[slot] = to_u32(index + 1);
         }
+        // WP6.3: both lists of denial owners in canonical order.
         let mut nsec = std::mem::take(&mut base.nsec);
-        nsec.sort_by(|a, b| {
-            canonical_cmp(
-                base.name_of(&base.nodes[*a as usize]),
-                base.name_of(&base.nodes[*b as usize]),
-            )
-        });
+        let mut nsec3 = std::mem::take(&mut base.nsec3);
+        for list in [&mut nsec, &mut nsec3] {
+            list.sort_by(|a, b| {
+                canonical_cmp(
+                    base.name_of(&base.nodes[*a as usize]),
+                    base.name_of(&base.nodes[*b as usize]),
+                )
+            });
+        }
         base.nsec = nsec;
+        base.nsec3 = nsec3;
         base
     }
 }
@@ -497,6 +511,8 @@ struct Overlay {
     nodes: HashMap<Box<[u8]>, Option<OwnedNode>, Seeded>,
     /// NSEC owners by canonical key: `Some` adds an owner, `None` hides one of the base.
     nsec: BTreeMap<Vec<u8>, Option<Box<[u8]>>>,
+    // WP6.3: the NSEC3 owners the same way.
+    nsec3: BTreeMap<Vec<u8>, Option<Box<[u8]>>>,
 }
 
 impl Default for Seeded {
@@ -595,8 +611,10 @@ impl ScopeTree {
         let guard_before = before.is_some_and(|node| node.is_guard(is_apex));
         let mut node = before.map(NodeRef::to_owned).unwrap_or_default();
         let nsec_before = node.sets.iter().any(|set| set.rtype == Rtype::NSEC);
+        let hashed_before = node.sets.iter().any(|set| set.rtype == Rtype::NSEC3);
         node.put(rtype, value);
         let nsec_after = node.sets.iter().any(|set| set.rtype == Rtype::NSEC);
+        let hashed_after = node.sets.iter().any(|set| set.rtype == Rtype::NSEC3);
         let exists = node.exists();
         let guard_after = exists && NodeRef::Owned(owner, &node).is_guard(is_apex);
         self.guards = self.guards + usize::from(guard_after) - usize::from(guard_before);
@@ -605,6 +623,13 @@ impl ScopeTree {
             overlay
                 .nsec
                 .insert(canonical_key(owner), nsec_after.then(|| owner.into()));
+        }
+        // WP6.3: the NSEC3 owners.
+        if hashed_before != hashed_after {
+            let overlay = Arc::make_mut(&mut self.overlay);
+            overlay
+                .nsec3
+                .insert(canonical_key(owner), hashed_after.then(|| owner.into()));
         }
         self.write(owner, exists.then_some(node));
         if existed != exists && !is_apex {
@@ -646,45 +671,94 @@ impl ScopeTree {
 
     /// The NSEC RRset that covers or matches `name` in canonical order.
     fn covering_nsec(&self, name: &[u8]) -> Option<RrSetView<'_>> {
+        // WP6.3: the search is shared with NSEC3.
+        let owner = self.denial_owner(name, Rtype::NSEC)?;
+        self.node(owner)?.get(Rtype::NSEC)
+    }
+
+    // WP6.3: the NSEC3 chain, and the search shared by both chains.
+
+    /// The NSEC3 RRset whose owner matches or covers the hashed owner `name` in hash
+    /// order; the last one covers the names before the first.
+    fn covering_nsec3(&self, name: &[u8]) -> Option<RrSetView<'_>> {
+        let owner = self
+            .denial_owner(name, Rtype::NSEC3)
+            .or_else(|| self.last_denial_owner(Rtype::NSEC3))?;
+        self.node(owner)?.get(Rtype::NSEC3)
+    }
+
+    /// The owner list of the base and of the overlay of a denial type.
+    fn denial_lists(&self, rtype: Rtype) -> (&[u32], &DenialOwners) {
+        if rtype == Rtype::NSEC3 {
+            (&self.base.nsec3, &self.overlay.nsec3)
+        } else {
+            (&self.base.nsec, &self.overlay.nsec)
+        }
+    }
+
+    /// The denial owner of `rtype` at or before `name` in canonical order.
+    fn denial_owner(&self, name: &[u8], rtype: Rtype) -> Option<&[u8]> {
+        let (list, overlay_list) = self.denial_lists(rtype);
         let mut key = [0u8; MAX_NAME_LEN];
         let key_len = canonical_into(name, &mut key);
         let key = &key[..key_len];
         // The best owner of the overlay at or before the name.
-        let overlay = self
-            .overlay
-            .nsec
+        let overlay = overlay_list
             .range::<[u8], _>((Bound::Unbounded, Bound::Included(key)))
             .rev()
             .find_map(|(_, owner)| owner.as_deref());
         // The best owner of the base that the overlay does not override.
         let base = &self.base;
-        let mut upper = base.nsec.partition_point(|index| {
+        let mut upper = list.partition_point(|index| {
             canonical_cmp(base.name_of(&base.nodes[*index as usize]), name) != Ordering::Greater
         });
         let mut base_owner = None;
         let mut scratch = [0u8; MAX_NAME_LEN];
         while upper > 0 {
-            let owner = base.name_of(&base.nodes[base.nsec[upper - 1] as usize]);
+            let owner = base.name_of(&base.nodes[list[upper - 1] as usize]);
             let len = canonical_into(owner, &mut scratch);
-            if !self.overlay.nsec.contains_key(&scratch[..len]) {
+            if !overlay_list.contains_key(&scratch[..len]) {
                 base_owner = Some(owner);
                 break;
             }
             upper -= 1;
         }
-        let owner = match (overlay, base_owner) {
-            (Some(a), Some(b)) => {
-                if canonical_cmp(a, b) == Ordering::Less {
-                    b
-                } else {
-                    a
-                }
-            }
-            (Some(a), None) => a,
-            (None, Some(b)) => b,
-            (None, None) => return None,
-        };
-        self.node(owner)?.get(Rtype::NSEC)
+        later(overlay, base_owner)
+    }
+
+    /// The last denial owner of `rtype` in canonical order.
+    fn last_denial_owner(&self, rtype: Rtype) -> Option<&[u8]> {
+        let (list, overlay_list) = self.denial_lists(rtype);
+        let overlay = overlay_list
+            .values()
+            .rev()
+            .find_map(|owner| owner.as_deref());
+        let base = &self.base;
+        let mut scratch = [0u8; MAX_NAME_LEN];
+        let base_owner = list.iter().rev().find_map(|index| {
+            let owner = base.name_of(&base.nodes[*index as usize]);
+            let len = canonical_into(owner, &mut scratch);
+            (!overlay_list.contains_key(&scratch[..len])).then_some(owner)
+        });
+        later(overlay, base_owner)
+    }
+}
+
+// WP6.3: the overlay's owners of one denial type, and the later of two owners.
+
+/// Denial owners of the overlay by canonical key: `Some` adds one, `None` hides one of the
+/// base.
+type DenialOwners = BTreeMap<Vec<u8>, Option<Box<[u8]>>>;
+
+/// The later of two optional owners in canonical order.
+fn later<'a>(a: Option<&'a [u8]>, b: Option<&'a [u8]>) -> Option<&'a [u8]> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(if canonical_cmp(a, b) == Ordering::Less {
+            b
+        } else {
+            a
+        }),
+        (a, b) => a.or(b),
     }
 }
 
@@ -1003,6 +1077,20 @@ impl ZoneIndex {
     }
 
     /// The zone with the longest apex that encloses `qname`.
+    // WP6.3: a DS query at the apex of a zone is answered by its parent when the index
+    // holds the parent (RFC 4035, section 3.1.4.1).
+    fn zone_for(&self, qname: &[u8], qtype: Rtype) -> Option<&ZoneEntry> {
+        let found = self.zone_of(qname)?;
+        if qtype == Rtype::DS
+            && &found.apex[..] == qname
+            && name::label_count(qname) > 0
+            && let Some(parent) = self.zone_of(name::suffix(qname, 1))
+        {
+            return Some(parent);
+        }
+        Some(found)
+    }
+
     fn zone_of(&self, qname: &[u8]) -> Option<&ZoneEntry> {
         let labels = name::label_count(qname);
         if self.apexes.is_empty() || labels < self.min_labels {
@@ -1148,7 +1236,7 @@ impl Index for ZoneIndex {
     }
 
     fn lookup<'a>(&'a self, scopes: &dyn ScopeOf, qname: &[u8], qtype: Rtype) -> Lookup<'a> {
-        let Some(entry) = self.zone_of(qname) else {
+        let Some(entry) = self.zone_for(qname, qtype) else {
             return Lookup::NotAuthoritative;
         };
         let Some((scope, tree)) = entry.scope(scopes.scope_of(entry.id)) else {
@@ -1210,6 +1298,22 @@ impl Index for ZoneIndex {
     fn covering_nsec<'a>(&'a self, zone: &ZoneView<'_>, name: &[u8]) -> Option<RrSetView<'a>> {
         let (_, tree) = self.entry(zone.id)?.scope(zone.scope)?;
         tree.covering_nsec(name)
+    }
+
+    // WP6.3: the RRset at a name and the NSEC3 chain.
+    fn rrset_at<'a>(
+        &'a self,
+        zone: &ZoneView<'_>,
+        owner: &[u8],
+        rtype: Rtype,
+    ) -> Option<RrSetView<'a>> {
+        let (_, tree) = self.entry(zone.id)?.scope(zone.scope)?;
+        tree.node(owner)?.get(rtype)
+    }
+
+    fn covering_nsec3<'a>(&'a self, zone: &ZoneView<'_>, hashed: &[u8]) -> Option<RrSetView<'a>> {
+        let (_, tree) = self.entry(zone.id)?.scope(zone.scope)?;
+        tree.covering_nsec3(hashed)
     }
 }
 

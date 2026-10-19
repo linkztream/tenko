@@ -359,6 +359,26 @@ pub struct DnssecStatus {
     /// When the earliest signature expires.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires: Option<Timestamp>,
+    // WP6.3: the timer, the rollover and the findings.
+    /// When the signer renews signatures next (for an imported zone, when it reads their
+    /// expiry again).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_resign: Option<Timestamp>,
+    /// The key rollover that runs; follow it with `GET /jobs/{id}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rollover_job: Option<JobId>,
+    /// The health findings of the zone (OPS-09): `dns.dnssec.clock_skew`,
+    /// `dns.dnssec.expiring`, `dns.dnssec.resign_overdue`, `dns.dnssec.expired`.
+    pub findings: Vec<DnssecFinding>,
+}
+
+/// A health finding of a signed zone.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DnssecFinding {
+    /// The code.
+    pub code: String,
+    /// What is wrong, in English.
+    pub detail: String,
 }
 
 /// `POST /dns/zones/{id}/dnssec/rollover`.

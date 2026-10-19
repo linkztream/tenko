@@ -2,7 +2,7 @@
 
 The measurement harness of Phase 2 (DNS) of the Tenko DDI project: a load generator for any DNS
 server, a generator for the zone files and query files of the Phase 2 data sets, a report
-renderer, and the procedure scripts of the measurements M16, M17, M18, M19, M22, M24 and M25
+renderer, and the procedure scripts of the measurements M16, M17, M18, M19, M20, M22, M24 and M25
 (`docs/plans/phase-2-plan.md`, sections 2.10 and 6, work package WP4.6). It contains no server
 code: the target is the Tenko engine, the Spike B responder, BIND, NSD or anything else that
 answers DNS.
@@ -53,6 +53,7 @@ engine is measured against.
 | `scripts/run-flamethrower.sh` | M17: flamethrower from another host (UDP, TCP, DoT, DoH) |
 | `scripts/run-m24-cache.sh` | M24: the resolver's cache (`tenko serve` forwarding to the engine's example server) in a 1 M-name mixed run at two cache bounds, and serve-stale under an upstream cut |
 | `scripts/run-m19-xfr.sh` | M19: a 100-record change on a 100,000-record Tenko zone reaching BIND 9 by NOTIFY and IXFR on the compose DNS lab (`deploy/compose/lab-dns`), the latency and the size of the delta |
+| `scripts/run-m20-sign.sh` | M20: DNSSEC signing through `tenko serve`: a 1 M-record zone signed in one full pass with ECDSA P-256 and Ed25519, NSEC and NSEC3, and a 100-record change signed again |
 | `scripts/run-m25-lists.sh` | M25: the block list compiler and matcher (the engine's example `lists_bench`) on a generated list of 1 M names: compile time, the size of the version, the time per lookup and per label |
 | `scripts/server-cpu.sh` | CPU seconds and RSS of a server pid on a Linux host, for the runs where the harness cannot sample the server |
 | `scripts/lib.sh` | Shared helpers: machine line, musl linkage check, readiness probe |
@@ -233,6 +234,15 @@ as the secondary. The script keeps the lab of the smoke's transfer round, import
 records and times each from the commit to BIND's answer for the last changed name, with the
 NOTIFY's arrival and the transfer's size from BIND's log (threshold: within 5 s, the delta only).
 Run as root on a Linux Docker host. Write-up: `results/2026-10-18-m19-xfr.md`.
+
+### M20: DNSSEC signing time and re-sign rate (`scripts/run-m20-sign.sh`)
+
+Not a harness run: one `tenko serve` node per case (the static musl binary on Linux, the release
+build on Windows), the `zonegen` zone of a million A records imported, then `tenko dns dnssec
+enable` with the case's algorithm and denial, timed until the status shows a signed serial
+(threshold: 300 s), and five imports of 100 new names, each timed until the serial of the
+signer's following pass (threshold: 1 s). A call the API resets is retried up to five times and
+noted in the log. Write-up: `results/2026-10-18-m20-signing.md`.
 
 ## Caveats
 

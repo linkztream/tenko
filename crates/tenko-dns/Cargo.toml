@@ -20,7 +20,7 @@ domain = { workspace = true, features = ["zonefile"] }
 # tenko-api and tenko-cluster already build.
 flate2 = "1.1.10"
 # The store's change streams (WP6.1: the transfer path, NOTIFY out and the secondary
-# service follow the zones); already in the graph through tenko-store.
+# service follow the zones; WP6.3: the signer); already in the graph through tenko-store.
 futures = { workspace = true }
 # DoH upstreams (WP5.1): HTTP/2 over the rustls stream; both crates are already in the
 # graph through hyper and tonic.

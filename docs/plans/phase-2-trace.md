@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs --phase 2`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --phase 2 --check`
 
-29 Phase 2 requirements; 9 named by at least one test, 20 not; 0 named by no test, measurement or document.
+29 Phase 2 requirements; 11 named by at least one test, 18 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -23,7 +23,7 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 | DNS-09 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/dns/transfer.rs`<br>`crates/tenko-core/src/dns.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>and 7 more |
 | DNS-10 | Should | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-11 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/zone/keys.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>and 4 more |
-| DNS-12 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 1 more |
+| DNS-12 | Must | `crates/tenko/tests/acceptance_dnssec.rs` | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 2 more |
 | DNS-14 | Must | `crates/tenko/tests/acceptance_dns_tls.rs` | - | `crates/tenko-dns/src/tls/mod.rs`<br>`crates/tenko/src/config.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dns-resolver.md`<br>and 1 more |
 | DNS-15 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/upstream.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 3 more |
 | DNS-17 | Must | - | - | `crates/tenko-dns/src/rate.rs`<br>`crates/tenko/src/config.rs`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/dns-resolver.md`<br>and 1 more |
@@ -39,7 +39,7 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 | DNS-27 | Should | - | - | `docs/ARCHITECTURE.md`<br>`docs/adr/0001-implementation-language.md`<br>`docs/adr/0009-dns-wire-format-and-udp-io.md`<br>`docs/plans/phase-2-plan.md` |
 | MIG-15 | Must | `crates/tenko/tests/dns_cli.rs` | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/dns/records.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/zone/export.rs`<br>`crates/tenko-dns/src/zone/import.rs`<br>and 10 more |
 | OPS-06 | Must | - | - | `docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 1 more |
-| OPS-09 | Should | - | - | `docs/MIGRATION.md`<br>`docs/plans/phase-2-plan.md` |
+| OPS-09 | Should | `crates/tenko/tests/acceptance_dnssec.rs` | - | `crates/tenko-api/src/routes/dns/model.rs`<br>`crates/tenko-dns/src/dnssec/health.rs`<br>`crates/tenko-dns/src/dnssec/mod.rs`<br>`docs/MIGRATION.md`<br>`docs/adr/0018-dnssec-key-handling-and-signing.md`<br>and 2 more |
 | OPS-25 | Must | `crates/tenko/tests/upgrade_modules.rs` | - | `crates/tenko-api/src/dto/system.rs`<br>`crates/tenko-api/src/lib.rs`<br>`crates/tenko-api/src/modules.rs`<br>`crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/mod.rs`<br>and 14 more |
 | OPS-28 | Must | `ui/e2e/nodes.spec.ts` | `bench/phase1-node-sync/results/2026-10-11-m15-config-sync.md` | `crates/tenko-api/src/routes/scans.rs`<br>`crates/tenko-cluster/src/buffer.rs`<br>`crates/tenko-cluster/src/client.rs`<br>`crates/tenko-cluster/src/lib.rs`<br>`crates/tenko-cluster/src/node_sync/mod.rs`<br>and 19 more |
 
@@ -53,7 +53,7 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 | E16 | Fuzz targets for the wire format, the zone file parser and TSIG run in the weekly fuzz smoke | API-14, API-15 | - |
 | E17 | Every IPAM address with a DNS name has its A or AAAA and PTR records in Tenko zones, reverse zones exist for the managed prefixes including an RFC 2317 delegation, and the five-device move lab of Phase 1 (E8) runs with the DNS step automatic | DNS-22, IPAM-19, IPAM-13 | `crates/tenko/tests/acceptance_move.rs`<br>`crates/tenko/tests/acceptance_move.rs::e17_a_deleted_ipam_record_is_restored_and_a_taken_over_one_is_proposed`<br>`crates/tenko/tests/acceptance_move.rs::e17_the_dns_step_is_automatic_when_the_zone_is_in_tenko`<br>`crates/tenko/tests/acceptance_reverse.rs` |
 | E18 | An RFC 2136 update signed with TSIG from `nsupdate` is applied through the store and answered from the index, refused without the key or outside the ACL, and answered SERVFAIL when the store refuses the write (the no-quorum path, exercised with the store's test hook on one node) | DNS-11, TGL-09 | - |
-| E19 | A zone signed by Tenko (NSEC and NSEC3) validates in an external validator, a ZSK rollover completes without a validation failure, and CDS and CDNSKEY are published for the KSK | DNS-12, OPS-09 | - |
+| E19 | A zone signed by Tenko (NSEC and NSEC3) validates in an external validator, a ZSK rollover completes without a validation failure, and CDS and CDNSKEY are published for the KSK | DNS-12, OPS-09 | `crates/tenko/tests/acceptance_dnssec.rs` |
 | E20 | DoT and DoH are served with the certificate of the configured TLS mode and answer `kdig`; RRL slows a reflection pattern; ANY answers are minimal; a TXT over 255 bytes round-trips split | DNS-14, DNS-17, DNS-18, DNS-24, TGL-11 | `crates/tenko/tests/acceptance_dns_tls.rs` |
 | E21 | Idle RSS below 100 MB with all Phase 1 roles plus `dns` serving the home zones and a 10,000-entry cache, on the musl binary, one node; metrics overhead on the query path below 2 percent | OPS-15, OPS-21 | - |
 
@@ -71,7 +71,6 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 - DNS-09 (Must)
 - DNS-10 (Should)
 - DNS-11 (Must)
-- DNS-12 (Must)
 - DNS-15 (Must)
 - DNS-17 (Must)
 - DNS-18 (Must)
@@ -80,7 +79,6 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 - DNS-26 (Should)
 - DNS-27 (Should)
 - OPS-06 (Must)
-- OPS-09 (Should)
 
 ### No test, measurement or document
 
