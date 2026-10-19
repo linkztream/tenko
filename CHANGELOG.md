@@ -184,6 +184,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - The systemd unit reads the key-encryption key with the `systemd_credential` provider instead of as a plain key file, so the warnings about a plain key file are gone, and it creates `/var/log/tenko` for the log file.
 - While a start migrates the data directory, `tenko serve` asks systemd for more time, so a long migration no longer hits the start timeout of the unit.
 - The Linux release binary is statically linked (musl) and runs on any distribution; every release is started once in Debian 12 and in a RHEL 9 compatible container before it is published.
+- The Linux release binary allocates memory with jemalloc instead of musl's own allocator: zone imports and DNSSEC signing run about three times faster, NSEC3 signing of a million records finishes in under two minutes, and the idle memory is unchanged. Building it from source now also needs `make`.
 - The container image and the Compose examples publish the cluster port 8444.
 - `tls = insecure` on a connector is accepted under the Lab profile only: elsewhere it is refused (`connect.tls.insecure_refused`), and an instance stored with it before the profile changed is shown degraded and is not called until its TLS settings change.
 - In a controller cluster the connectors are polled on schedule by the leader only; every controller still runs the plugins, their health checks and the runs a person asks for.

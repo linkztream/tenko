@@ -53,6 +53,7 @@ engine is measured against.
 | `scripts/run-flamethrower.sh` | M17: flamethrower from another host (UDP, TCP, DoT, DoH) |
 | `scripts/run-m24-cache.sh` | M24: the resolver's cache (`tenko serve` forwarding to the engine's example server) in a 1 M-name mixed run at two cache bounds, and serve-stale under an upstream cut |
 | `scripts/run-m19-xfr.sh` | M19: a 100-record change on a 100,000-record Tenko zone reaching BIND 9 by NOTIFY and IXFR on the compose DNS lab (`deploy/compose/lab-dns`), the latency and the size of the delta |
+| `scripts/run-m18-load.sh` | M18: the zonegen data set imported into a new node, the time until the role serves the last name, a restart with the load from the store, and the RSS against an empty node |
 | `scripts/run-m20-sign.sh` | M20: DNSSEC signing through `tenko serve`: a 1 M-record zone signed in one full pass with ECDSA P-256 and Ed25519, NSEC and NSEC3, and a 100-record change signed again |
 | `scripts/run-m25-lists.sh` | M25: the block list compiler and matcher (the engine's example `lists_bench`) on a generated list of 1 M names: compile time, the size of the version, the time per lookup and per label |
 | `scripts/server-cpu.sh` | CPU seconds and RSS of a server pid on a Linux host, for the runs where the harness cannot sample the server |
@@ -242,7 +243,17 @@ build on Windows), the `zonegen` zone of a million A records imported, then `ten
 enable` with the case's algorithm and denial, timed until the status shows a signed serial
 (threshold: 300 s), and five imports of 100 new names, each timed until the serial of the
 signer's following pass (threshold: 1 s). A call the API resets is retried up to five times and
-noted in the log. Write-up: `results/2026-10-18-m20-signing.md`.
+noted in the log. Write-ups: `results/2026-10-18-m20-signing.md`, and for the musl binary with
+jemalloc `results/2026-10-19-m20-signing.md`.
+
+### M18: zone load (`scripts/run-m18-load.sh`)
+
+Not a harness run either: one `tenko serve --roles controller,dns` node, the four zonegen zones
+created and imported with `tenko dns import --replace`, the time until the role answers the last
+host name (asked over TCP once a second), then a restart that reads the `store` and `dns` start
+steps and the index's own size, and an empty node for the baseline RSS. Threshold: 60 s.
+Write-ups: `results/2026-10-17-m18-zone-load.md` (the procedure by hand, 1 M and 6 M) and
+`results/2026-10-19-m18-zone-load.md` (1 M, the allocators of the musl binary).
 
 ## Caveats
 

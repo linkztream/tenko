@@ -1,0 +1,10 @@
+# The options of jemalloc, the global allocator of the static musl binary
+# (`crates/tenko/src/main.rs`), compiled into it by `tikv-jemalloc-sys`. One background thread
+# returns freed pages to the kernel at once (no decay), so memory freed after a burst
+# (start-up, an import) does not stay resident on idle threads (OPS-15); one arena and a
+# smaller thread cache keep the idle memory at the level of musl's own allocator. Measured in
+# bench/phase1-server/results/2026-10-19-m9-idle-rss.md and
+# bench/phase2-dns/results/2026-10-19-m18-zone-load.md. An environment variable of the same
+# name overrides this for an experiment; other builds ignore it.
+[env]
+JEMALLOC_SYS_WITH_MALLOC_CONF = "background_thread:true,max_background_threads:1,dirty_decay_ms:0,muzzy_decay_ms:0,narenas:1,tcache_max:1024"

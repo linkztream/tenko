@@ -165,8 +165,10 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - name: Install the musl C compiler
-        # musl-tools provides musl-gcc, which the C code of aws-lc-sys and ring is built with
-        # for the musl target. Nothing else is needed (no cmake, perl or clang).
+        # musl-tools provides musl-gcc, which the C code of aws-lc-sys, ring and jemalloc (the
+        # allocator of the musl binary) is built with for the musl target; jemalloc's build
+        # also runs make, which the runner image has. Nothing else is needed (no cmake, perl
+        # or clang).
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update

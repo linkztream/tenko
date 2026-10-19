@@ -76,6 +76,8 @@ Options (the Windows parameter names are the same with a leading dash and CamelC
 | `--outdir` / `-OutDir` | `results/raw` | CSV, summary and redacted server log |
 | `--kek` / `-KekProvider` | `platform` | `platform` (DPAPI, `systemd-creds`) or `file` |
 | `--keep-data` / `-KeepData` | off | keep the work directory |
+| `--roles` (sh only) | `controller` | the roles to run, for example `controller,probe,dns` (every Phase 1 role and the dns role, as in `results/2026-10-19-m9-idle-rss.md`) |
+| `--dns-port` (sh only) | 15353 | loopback port of the dns role when `--roles` names it (port 53 needs privileges) |
 
 Keep the work directory on a fast disk. The default (the OS temp directory) is not on the
 repository drive: the fsync probe of the server warns on rotating disks (OPS-19), and the

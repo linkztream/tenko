@@ -96,10 +96,11 @@ RUN npm run build
 
 # Stage 2: the tenko binary, static for musl as in .github/workflows/release.yml.
 FROM rust:1-slim-bookworm AS builder
-# musl-tools provides musl-gcc, which the C code of aws-lc-sys and ring is built with for
-# the musl target. Nothing else is needed (no cmake, perl or clang).
+# musl-tools provides musl-gcc, which the C code of aws-lc-sys, ring and jemalloc (the
+# allocator of the musl binary) is built with for the musl target; jemalloc's build runs
+# make. Nothing else is needed (no cmake, perl or clang).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends musl-tools \
+    && apt-get install -y --no-install-recommends make musl-tools \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 # rust-toolchain.toml selects the toolchain, which is not the one of the base image: install

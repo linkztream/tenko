@@ -99,6 +99,8 @@ DNS clients do not balance load themselves (CON-04), so replication between `dns
 - **Linux:** systemd unit, capabilities instead of root, seccomp, non-root user (OPS-13).
 - **Containers:** Docker bridge NAT breaks DHCP broadcast and DNS source addresses. Macvlan or host networking is required, and the deployment files document it with examples (OPS-14).
 
+The Linux binary is linked statically against musl so that one file runs on any distribution, and it carries jemalloc as its allocator (decided 2026-10-19). musl's own malloc serialises the small allocations of the store's write path across threads, which made zone imports and DNSSEC signing about three times slower than with jemalloc (M18, M20). glibc's allocator is no alternative: it keeps the start-up peak and fails the idle-memory target (OPS-15), and so does mimalloc, which holds freed memory on idle threads. jemalloc runs with options compiled in at build time (one background thread that purges freed pages at once, one arena), with which the idle memory with every role is the same as with musl's malloc. Windows uses the system allocator. The measurements and the build are in `deploy/README.md`.
+
 ## Data plane independence
 
 The data plane never depends on the control plane (OPS-02). This is the central availability property of the design.

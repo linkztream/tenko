@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# M9 (OPS-15) on Linux: idle memory of `tenko serve --roles controller`.
+# M9 (OPS-15) on Linux: idle memory of `tenko serve` (default `--roles controller`).
 #
 # Starts a fresh single-node controller, completes first-run setup and logs in with the CLI,
 # creates a small IPAM data set with `tenko prefix create`, leaves the server idle, samples
@@ -13,6 +13,10 @@
 #   m9-idle-rss.sh --binary PATH [--port 18444] [--prefixes 200] [--idle-secs 600]
 #                  [--interval-secs 30] [--workdir DIR] [--outdir DIR]
 #                  [--kek platform|file] [--keep-data]
+#                  [--roles controller[,probe][,dns]] [--dns-port 15353]
+#
+# With the dns role the node answers on 127.0.0.1:<dns-port> (the default port 53 needs
+# privileges); every other `[dns]` key keeps its default.
 #
 # Put the work directory on a fast disk (default: a new directory under /tmp).
 #
@@ -33,6 +37,8 @@ WORKDIR=""
 OUTDIR=""
 KEK=platform
 KEEP=0
+ROLES=controller
+DNS_PORT=15353
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -45,7 +51,9 @@ while [ $# -gt 0 ]; do
     --outdir) OUTDIR="$2"; shift 2 ;;
     --kek) KEK="$2"; shift 2 ;;
     --keep-data) KEEP=1; shift ;;
-    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    --roles) ROLES="$2"; shift 2 ;;
+    --dns-port) DNS_PORT="$2"; shift 2 ;;
+    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -123,11 +131,12 @@ note "binary: $BINARY ($(awk -v s="$(stat -c %s "$BINARY")" 'BEGIN { printf "%.1
 [ "$LINKAGE" = static ] || note "WARNING: a dynamically linked binary; the shipped Linux binary is the static musl build"
 note "work dir: $WORKDIR; filesystem: $(df -PT "$WORKDIR" | awk 'NR == 2 { print $2 }')"
 note "kek provider: $KEK"
+note "roles: $ROLES"
 
 # ---- configuration ------------------------------------------------------------------------
 {
   echo "data_dir = \"$DATA\""
-  echo 'roles = "controller"'
+  echo "roles = \"$ROLES\""
   echo
   echo '[server]'
   echo "listen = [\"127.0.0.1:$PORT\"]"
@@ -140,6 +149,13 @@ note "kek provider: $KEK"
     echo 'provider = "file"'
     echo "path = \"$WORKDIR/kek.key\""
   fi
+  case ",$ROLES," in
+    *,dns,*)
+      echo
+      echo '[dns]'
+      echo "listen = [\"127.0.0.1:$DNS_PORT\"]"
+      ;;
+  esac
 } > "$CFG"
 
 # Throwaway administrator PIN for this run (Home profile: digits only). Never printed.
@@ -147,7 +163,7 @@ new_pin() { shuf -i 0-9 -n 6 | tr -d '\n'; }
 PIN=$(new_pin)
 
 # ---- start --------------------------------------------------------------------------------
-"$BINARY" serve --roles controller --config "$CFG" > "$OUTLOG" 2> "$ERRLOG" &
+"$BINARY" serve --roles "$ROLES" --config "$CFG" > "$OUTLOG" 2> "$ERRLOG" &
 SERVER_PID=$!
 START=$(date +%s.%N)
 note "server pid $SERVER_PID"

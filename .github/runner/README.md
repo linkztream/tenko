@@ -15,7 +15,7 @@ A self-hosted runner has no minute budget and keeps its caches warm between runs
 
 | Need | Used by | Provided by |
 |---|---|---|
-| C and C++ toolchain, `pkg-config`, `cmake` | `aws-lc-sys`, `libfuzzer-sys` | `build-essential`, `pkg-config`, `cmake` |
+| C and C++ toolchain, `make`, `pkg-config`, `cmake` | `aws-lc-sys`, `libfuzzer-sys`, `tikv-jemalloc-sys` (the allocator of the musl binary) | `build-essential`, `pkg-config`, `cmake` |
 | `musl-tools` | the static Linux binary of the `Release` workflow | apt |
 | Docker with the compose and buildx plugins | the macvlan smoke, the compose lab, the container image, the release smoke | Docker's apt repository |
 | A `dummy` network link inside the container | the macvlan smoke (`deploy/compose/smoke-macvlan.sh`) | the `dummy` module loaded on the Proxmox host |

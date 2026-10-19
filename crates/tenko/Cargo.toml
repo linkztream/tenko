@@ -87,6 +87,14 @@ tracing-layer-win-eventlog = "1.0.1"
 # `sd_notify` readiness and stop notifications for `Type=notify` units (OPS-13).
 sd-notify = "0.5.0"
 
+[target.'cfg(all(target_os = "linux", target_env = "musl"))'.dependencies]
+# The global allocator of the static musl binary that ships (`main.rs`): musl's own malloc
+# serialises the store's write path (M18, M20). MIT or Apache-2.0 (jemalloc itself is
+# BSD-2-Clause); `tikv-jemalloc-sys` builds jemalloc with its `configure` and `make`, the
+# FFI lives inside the crate. Its options are fixed at build time: `JEMALLOC_SYS_WITH_MALLOC_CONF`
+# in `.cargo/config.toml`.
+tikv-jemallocator = "0.7.0"
+
 [dev-dependencies]
 # The DoH client of tests/acceptance_dns_tls.rs: HTTP/2 over rustls (versions and features
 # of tenko-dns and tenko-api).

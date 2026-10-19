@@ -28,10 +28,25 @@ cargo build --release --locked -p tenko        # Windows: target\release\tenko.e
 
 On Linux, build the static musl binary that the releases ship, which lands in
 `target/x86_64-unknown-linux-musl/release/tenko`. It needs the target
-(`rustup target add x86_64-unknown-linux-musl`) and `musl-gcc` (the `musl-tools` package on
-Debian and Ubuntu). A glibc build of the same source is not a supported binary: its
+(`rustup target add x86_64-unknown-linux-musl`), `musl-gcc` (the `musl-tools` package on
+Debian and Ubuntu) and `make`. A glibc build of the same source is not a supported binary: its
 allocator keeps the start-up peak and its idle memory fails OPS-15
 ([bench/phase1-server/results/2026-10-16-m9-linux-memory.md](../bench/phase1-server/results/2026-10-16-m9-linux-memory.md)).
+
+The musl binary uses jemalloc as its allocator instead of musl's own malloc, which serialises
+the many small allocations of the replicated store's write path across threads: a zone import
+and a DNSSEC signing pass ran about three times slower than with jemalloc, and NSEC3 signing
+of a million records missed its 5 minutes. jemalloc is built from source by the
+`tikv-jemalloc-sys` crate (hence `make`), only for this target; Windows and glibc builds keep
+the system allocator. Its options are compiled in from `.cargo/config.toml`
+(`JEMALLOC_SYS_WITH_MALLOC_CONF`): one background thread purges freed pages at once and one
+arena serves all threads, so the idle memory stays at the level of musl's malloc. Run cargo
+inside the repository (it reads `.cargo/config.toml` from the current directory upward), or
+the options are not applied. mimalloc was tried first and fails OPS-15: it
+keeps freed memory on idle threads and asks for huge pages. The figures:
+[M9](../bench/phase1-server/results/2026-10-19-m9-idle-rss.md),
+[M18](../bench/phase2-dns/results/2026-10-19-m18-zone-load.md),
+[M20](../bench/phase2-dns/results/2026-10-19-m20-signing.md).
 
 The build script of `tenko-api` embeds `ui/dist` into the binary. A release build refuses
 the placeholder page; for Rust-only development set `TENKO_UI_STUB=1` and build without
