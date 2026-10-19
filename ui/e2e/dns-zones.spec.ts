@@ -2,6 +2,7 @@
 // batch with the dry run and its diff before apply, take over an RRset that IPAM keeps, edit the
 // SOA and NS on the settings tab, delete the zone; a viewer; Swedish; and what the pages show
 // against the real server while it answers the DNS routes with 501 (until WP4.2 lands).
+// WP6.2 adds the dynamic update section of the settings tab.
 //
 // EVERY SCENARIO BUT THE LAST FAKES THE DNS ROUTES (support/dns-mock.ts, which says why): the
 // views are proven against the declared contract with the mock service; the rest of the API
@@ -163,6 +164,29 @@ test("sets an access list and a NOTIFY target on the settings tab and finds them
   await expect(again.getByTestId("field-notify.0.address")).toHaveValue("192.0.2.54");
   await expect(again.getByTestId("field-notify.0.port")).toHaveValue("5353");
   await expect(again.getByTestId("field-notify.0.key")).toHaveValue("xfr.example.test");
+});
+
+// WP6.2: the dynamic update section of a primary zone.
+test("sets who may update a zone, with TSIG and the IPAM rule, on the settings tab", async ({ page, signedIn }) => {
+  void signedIn;
+  const fake = await FakeDns.install(page);
+  const internal = fake.state.acls.find((a) => a.name === "internal")?.id ?? "";
+  await page.goto(`/dns/zones/${fake.zone("example.test")?.id}/settings`);
+  const form = page.getByTestId("zone-settings");
+  const update = form.getByTestId("zone-update");
+  await expect(form.getByTestId("field-name_servers")).toHaveValue("ns1.example.test");
+  await expect(update.getByTestId("update-allow-none")).toContainText("nobody may update this zone");
+  await expect(update.getByTestId("field-update.require_tsig")).toBeChecked();
+  await update.getByTestId("field-update-allow-add").selectOption(internal);
+  await expect(update.getByTestId("update-allow")).toHaveText(["internal"]);
+  await update.getByTestId("field-update.may_replace_ipam").check();
+  await form.getByTestId("form-submit").click();
+  await expect(page.getByTestId("toast").first()).toBeVisible();
+  const patches = fake.sent.filter((s) => s.method === "PATCH");
+  expect(patches).toHaveLength(1);
+  expect(patches[0]?.body).toMatchObject({ update: { allowed: [internal], require_tsig: true, may_replace_ipam: true } });
+  expect(patches[0]?.body).not.toHaveProperty("transfer");
+  await expect(update.getByTestId("update-allow")).toHaveText(["internal"]);
 });
 
 test("offers a viewer the zones to read and nothing to change", async ({ page, api, signedIn }) => {

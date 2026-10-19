@@ -5,7 +5,8 @@ DNS over HTTPS, on one Docker host: the upstream transports, the cache, the nega
 and serve-stale of the resolver of [docs/dns.md](../../../docs/dns.md) (WP5.1) against a real
 server, for the check of deliverable 6 of the plan and for trying things by hand. A fourth
 round, `xfr` (WP6.1), has BIND and Tenko transfer zones to each other, with TSIG, NOTIFY,
-IXFR, XoT and catalog zones. It is a
+IXFR, XoT and catalog zones, and a fifth, `update` (WP6.2), changes a zone of Tenko with
+`nsupdate`. It is a
 lab, not a deployment example: `smoke.sh` generates the certificate for one run, the Lab
 profile makes the resolver open to every client, and every name and address is a
 documentation value (`203.0.113.0/24`, `example.test`).
@@ -86,8 +87,8 @@ volume, network, work directory), also when a step fails, after printing the log
 service and the last `tenko.toml`.
 
 Settings: `IMAGE`, `BIND_IMAGE` (the BIND image, for the server and for `dig`), `ROUNDS`
-(default `plain dot doh xfr`; the serve-stale steps run after `doh`, the transfer rows in
-`xfr`), `WAIT_SECS` (300), `KEEP`. The lab network is fixed at `203.0.113.0/24`, so two labs, or this one and a
+(default `plain dot doh xfr update`; the serve-stale steps run after `doh`, the transfer rows in
+`xfr`, the update rows in `update`), `WAIT_SECS` (300), `KEEP`. The lab network is fixed at `203.0.113.0/24`, so two labs, or this one and a
 leftover of an earlier run, cannot run at the same time unless `COMPOSE_PROJECT_NAME`
 differs and the network of the other is gone.
 
@@ -121,6 +122,42 @@ The round prints one `PASS` or `FAIL` line per row and fails the smoke when a ro
 | `in.status` | The transfer state of the API shows a successful transfer | `GET /dns/zones/{id}/transfer` of `inxot.example.test` has a `serial`, a `last_success` for the primary and no `last_error` |
 
 The measurement M19 (a change of 100 records on a zone of 100,000 records reaches BIND within 5 seconds, and only the change is transferred) runs on the same lab: `bench/phase2-dns/scripts/run-m19-xfr.sh` starts the smoke with `KEEP=1` and reads `LAB_DIR/session.env` (below). Its results are in `bench/phase2-dns/results/2026-10-18-m19-xfr.md`.
+
+## The update round (WP6.2)
+
+The round `update` checks the dynamic updates of [docs/dns.md](../../../docs/dns.md) section 13 with BIND's `nsupdate` from the `client` container against a zone of Tenko. It needs what the round `xfr` needs (`curl` and `python3` on the host, a host that reaches the lab network). After the round `xfr` it uses the node and the session that round set up; alone (`ROUNDS=update`) it starts Tenko with the configuration of the round `xfr` and runs the first-run setup itself.
+
+What it sets up, through the API:
+
+- **The key.** A TSIG key `update.example.test` (`hmac-sha256`), generated for the run and imported into Tenko (`POST /dns/keys` with the secret); `nsupdate -y` signs with it.
+- **The access list.** `lab-updaters` with one entry, the key. It names no address on purpose: under the Lab profile an unsigned update from an address a list allows would pass (TGL-09), so a list of keys only is what makes the unsigned update below a refusal.
+- **The zone.** The primary zone `dyn.example.test` with `update.allowed` naming the list, `require_tsig` and `may_replace_ipam` off.
+- **IPAM.** The prefix `192.0.2.0/24` and the address `192.0.2.90` with the DNS name `cam.dyn.example.test`, written into the zone by the actuator (`POST /proposals/reconcile`), so an RRset of origin `ipam` is there.
+
+The round prints one `PASS` or `FAIL` line per row and fails the smoke when a row fails. Every check of an answer asks Tenko once, right after `nsupdate` returned: Tenko answers an update only once its index holds the change, so there is nothing to wait for.
+
+| Row | What is checked | How |
+|---|---|---|
+| `upd.add` | A signed update adds a record | `nsupdate -y` adds `host1.dyn.example.test A 192.0.2.81`; the next `dig` answers it (retried for 15 s only until the update path knows the new key and zone) |
+| `upd.prereq` | A prerequisite that fails stops the update | `prereq nxdomain host1...` with an add: `nsupdate` reports YXDOMAIN, and the address is unchanged |
+| `upd.replace` | Prerequisite, delete and add in one update | `prereq yxrrset host1... A`, `update delete host1... A`, `update add host1... 192.0.2.82`: `dig` answers only the new address |
+| `upd.tcp` | An update over TCP | `nsupdate -v` adds `host2.dyn.example.test A 192.0.2.83` |
+| `upd.delete` | Deleting a name | `update delete host1.dyn.example.test`: `dig` answers NXDOMAIN |
+| `upd.unsigned` | No key, no update | An unsigned `nsupdate` is answered REFUSED and nothing is added |
+| `upd.badsig` | A wrong secret | `nsupdate -y` with the key's name and another secret: NOTAUTH (BADSIG), nothing is added |
+| `upd.origin` | What the update wrote | The records of the zone through the API: `host2` has the origin `dynamic` and the key's name |
+| `upd.ipam` | The origin rule | Deleting `cam.dyn.example.test A`, which IPAM manages, is REFUSED and the address stays |
+
+With `KEEP=1` the work directory's `session.env` also holds `upd_key`, `upd_secret`, `upd_acl` and `upd_zone` for hand tests:
+
+```sh
+. "$LAB_DIR/session.env"
+printf 'server 203.0.113.3 5300\nzone dyn.example.test\nupdate add printer.dyn.example.test 60 IN A 192.0.2.30\nsend\n' |
+  docker compose exec -T client nsupdate -y "hmac-sha256:$upd_key:$upd_secret"
+docker compose exec client dig @203.0.113.3 -p 5300 printer.dyn.example.test
+```
+
+The measurement M21 (the update rate end to end) does not run on the lab: `bench/phase2-dns/scripts/run-m21-update.sh` starts a node of its own and drives it with the load generator of `tenko-dns` (`examples/update_load.rs`); its results are in `bench/phase2-dns/results/2026-10-19-m21-update.md`.
 
 ## Keeping the lab for hand tests
 

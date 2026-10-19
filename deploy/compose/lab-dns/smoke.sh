@@ -25,6 +25,10 @@
 #      secondary of Tenko's zones (AXFR with TSIG, dig -y, NOTIFY and IXFR, XoT, the catalog
 #      zone) and Tenko as the secondary of BIND's (the same, plus the read-only rule and
 #      the transfer state of the API);
+#   5c. the round update (WP6.2): nsupdate from the client container changes a zone of
+#      Tenko with TSIG (add, prerequisites, replace, TCP, delete) and dig sees each change at
+#      once; an update without the key, one with a wrong secret and one of an address IPAM
+#      manages are refused; one PASS or FAIL line per row (README.md lists them);
 #   6. tears everything down (containers, volumes, network, work directory), also when a
 #      step fails, after printing the logs of every service. KEEP=1 leaves the lab running.
 #
@@ -43,8 +47,9 @@
 #   IMAGE           an existing Tenko image to test; default: build tenko:lab
 #   BIND_IMAGE      the BIND image, for the server and for dig (default
 #                   internetsystemsconsortium/bind9:9.20)
-#   ROUNDS          the rounds to run, in order (default "plain dot doh xfr"); the
-#                   serve-stale steps run after the round doh, the transfer rows in xfr
+#   ROUNDS          the rounds to run, in order (default "plain dot doh xfr update"); the
+#                   serve-stale steps run after the round doh, the transfer rows in xfr,
+#                   the update rows in update (alone, it sets Tenko up itself)
 #   WAIT_SECS       how long to wait for Tenko to become healthy (default 300)
 #   KEEP            1: do not tear the lab down at the end, also after a failure
 #                   (README.md says how to later)
@@ -59,7 +64,7 @@ export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-tenkodnslab}"
 if [[ -n "${BIND_IMAGE:-}" ]]; then
   export BIND_IMAGE
 fi
-rounds="${ROUNDS:-plain dot doh xfr}"
+rounds="${ROUNDS:-plain dot doh xfr update}"
 wait_secs="${WAIT_SECS:-300}"
 keep="${KEEP:-0}"
 network="${COMPOSE_PROJECT_NAME}_lab"
@@ -74,6 +79,8 @@ stale_limit_ms=3000
 # The round xfr: Tenko's DoT and XoT port, the TSIG key of the run, the API.
 xot_port=8530
 xfr_key=xfr.example.test
+# The round update (WP6.2): the TSIG key of nsupdate.
+upd_key=update.example.test
 api_base="http://$tenko_ip:8443"
 
 built_here=0
@@ -303,6 +310,7 @@ chmod 0444 "$work/secrets/kek"
 # The TSIG key of the zone transfers (round xfr), for BIND's configuration and Tenko's API;
 # the primary zone files of BIND, writable for nsupdate (named runs as the user bind).
 xfr_secret="$(head -c 32 /dev/urandom | base64)"
+upd_secret="$(head -c 32 /dev/urandom | base64)"
 mkdir -p "$work/bind" "$work/zones"
 printf 'key "%s" { algorithm hmac-sha256; secret "%s"; };\n' "$xfr_key" "$xfr_secret" >"$work/bind/keys.conf"
 chmod 0444 "$work/bind/keys.conf"
@@ -559,7 +567,7 @@ transfer_state_ok() {
 }
 
 xfr() {
-  local token setup out_id xot_id member_id in_id inxot_id catalog_id bulk changes
+  local out_id xot_id member_id in_id inxot_id catalog_id bulk changes
   step "round xfr: zone transfers with BIND both ways (TSIG, NOTIFY, IXFR, XoT, catalog zones)"
   write_config xfr
   compose up -d --no-build --force-recreate tenko
@@ -572,16 +580,7 @@ xfr() {
   ok "xfr: up" "tenko answers on $tenko_ip:$dns_port, DoT and XoT on $xot_port"
 
   # First-run setup through the API under the Lab profile; the session cookie signs in.
-  token="$(compose exec -T tenko /usr/local/bin/tenko setup token --data-dir /var/lib/tenko | tr -d '\r\n')"
-  [[ -n "$token" ]] || fail "xfr: no setup token"
-  local password
-  # The Lab profile's password policy is a PIN of digits.
-  password="$(od -An -N4 -tu4 /dev/urandom | tr -dc '0-9')"
-  setup="{\"setup_token\": \"$token\", \"profile\": \"lab\", \"admin\": {\"name\": \"labadmin\", \"display_name\": \"Lab Admin\", \"password\": \"$password\"}, \"host_name\": \"tenko.example.test\", \"language\": \"en\"}"
-  cookie="$(curl -sS -D - -o "$work/api.out" -H "Origin: $api_base" -H "Content-Type: application/json" \
-    --data "$setup" "$api_base/api/v1/setup" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(tenko_session=[^;]*\).*/\1/p' | head -n 1)"
-  [[ -n "$cookie" ]] || fail "xfr: the setup did not sign in: $(cat "$work/api.out")"
-  ok "xfr: setup" "Tenko is set up under the Lab profile"
+  lab_setup xfr
 
   api POST /dns/keys "{\"name\": \"$xfr_key\", \"secret\": \"$xfr_secret\"}" >/dev/null ||
     fail "xfr: the TSIG key could not be imported ($api_status: $(cat "$work/api.out"))"
@@ -648,9 +647,138 @@ update delete m1.zones.catalog.bind.test PTR" || fail "xfr: nsupdate of BIND's c
   ((rows_failed == 0)) || fail "xfr: $rows_failed row(s) failed"
 }
 
+
+# ---------------------------------------------------------------------------------------
+# The round update (WP6.2): RFC 2136 dynamic updates of a zone of Tenko from nsupdate in the
+# client container, with TSIG, prerequisites, over UDP and TCP, and the refusals.
+
+# nsupdate_tenko <commands> [<nsupdate options>...]: one update of Tenko's zone
+# dyn.example.test from the client container; prints what nsupdate said.
+nsupdate_tenko() {
+  local commands="$1"
+  shift
+  printf 'server %s %s\nzone dyn.example.test\n%s\nsend\n' "$tenko_ip" "$dns_port" "$commands" |
+    compose exec -T client nsupdate "$@" 2>&1
+}
+signed_update() { nsupdate_tenko "$1" -y "hmac-sha256:$upd_key:$upd_secret" "${@:2}"; }
+# The answer of Tenko for <name> right after an update was answered: no retry, since Tenko
+# answers NOERROR only once its index holds the change.
+tenko_now() { short_at "$tenko_ip" "$dns_port" "$1" "${2:-A}"; }
+rcode_at_tenko() { dig_client "@$tenko_ip" -p "$dns_port" +time=2 +tries=1 "$1" A | rcode_of; }
+
+update_add_ok() {
+  signed_update "update add host1.dyn.example.test 60 IN A 192.0.2.81" >/dev/null &&
+    [[ "$(tenko_now host1.dyn.example.test)" == 192.0.2.81 ]]
+}
+update_prereq_ok() {
+  local out
+  out="$(signed_update "prereq nxdomain host1.dyn.example.test
+update add host1.dyn.example.test 60 IN A 192.0.2.99" || true)"
+  grep -q "YXDOMAIN" <<<"$out" && [[ "$(tenko_now host1.dyn.example.test)" == 192.0.2.81 ]]
+}
+update_replace_ok() {
+  signed_update "prereq yxrrset host1.dyn.example.test A
+update delete host1.dyn.example.test A
+update add host1.dyn.example.test 60 IN A 192.0.2.82" >/dev/null &&
+    [[ "$(tenko_now host1.dyn.example.test)" == 192.0.2.82 ]]
+}
+update_tcp_ok() {
+  signed_update "update add host2.dyn.example.test 60 IN A 192.0.2.83" -v >/dev/null &&
+    [[ "$(tenko_now host2.dyn.example.test)" == 192.0.2.83 ]]
+}
+update_delete_ok() {
+  signed_update "update delete host1.dyn.example.test" >/dev/null &&
+    [[ "$(rcode_at_tenko host1.dyn.example.test)" == NXDOMAIN ]]
+}
+update_unsigned_refused() {
+  local out
+  out="$(nsupdate_tenko "update add host3.dyn.example.test 60 IN A 192.0.2.84" || true)"
+  grep -q "REFUSED" <<<"$out" && [[ -z "$(tenko_now host3.dyn.example.test)" ]]
+}
+update_badsig_refused() {
+  local out
+  out="$(nsupdate_tenko "update add host3.dyn.example.test 60 IN A 192.0.2.84" -y "hmac-sha256:$upd_key:$(head -c 32 /dev/urandom | base64)" || true)"
+  grep -Eqi "NOTAUTH|BADSIG|tsig" <<<"$out" && [[ -z "$(tenko_now host3.dyn.example.test)" ]]
+}
+update_origin_ok() {
+  api GET "/dns/zones/$1/records" >/dev/null &&
+    python3 -c "import json,sys; d=json.load(open('$work/api.out')); s=[r for r in d['items'] if r['name']=='host2.dyn.example.test' and r['type']=='A']; sys.exit(0 if s and s[0]['origin']=='dynamic' and s[0].get('key')=='$upd_key' else 1)"
+}
+update_ipam_refused() {
+  local out
+  out="$(signed_update "update delete cam.dyn.example.test A" || true)"
+  grep -q "REFUSED" <<<"$out" && [[ "$(tenko_now cam.dyn.example.test)" == 192.0.2.90 ]]
+}
+
+# lab_setup <round>: the first-run setup through the API under the Lab profile, once per
+# run; the session cookie signs the later requests in.
+lab_setup() {
+  [[ -n "$cookie" ]] && return 0
+  local token password setup
+  token="$(compose exec -T tenko /usr/local/bin/tenko setup token --data-dir /var/lib/tenko | tr -d '\r\n')"
+  [[ -n "$token" ]] || fail "$1: no setup token"
+  # The Lab profile's password policy is a PIN of digits.
+  password="$(od -An -N4 -tu4 /dev/urandom | tr -dc '0-9')"
+  setup="{\"setup_token\": \"$token\", \"profile\": \"lab\", \"admin\": {\"name\": \"labadmin\", \"display_name\": \"Lab Admin\", \"password\": \"$password\"}, \"host_name\": \"tenko.example.test\", \"language\": \"en\"}"
+  cookie="$(curl -sS -D - -o "$work/api.out" -H "Origin: $api_base" -H "Content-Type: application/json" \
+    --data "$setup" "$api_base/api/v1/setup" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(tenko_session=[^;]*\).*/\1/p' | head -n 1)"
+  [[ -n "$cookie" ]] || fail "$1: the setup did not sign in: $(cat "$work/api.out")"
+  ok "$1: setup" "Tenko is set up under the Lab profile"
+}
+
+update() {
+  local zone_id
+  step "round update: RFC 2136 updates from nsupdate (TSIG, prerequisites, UDP and TCP, refusals)"
+  if [[ -z "$cookie" ]]; then
+    write_config xfr
+    compose up -d --no-build --force-recreate tenko
+    retry "$wait_secs" "tenko to become healthy" healthy tenko
+    retry 60 "Tenko to answer api.example.test" tenko_answers
+    lab_setup update
+  fi
+  api POST /dns/keys "{\"name\": \"$upd_key\", \"secret\": \"$upd_secret\"}" >/dev/null ||
+    fail "update: the TSIG key could not be imported ($api_status: $(cat "$work/api.out"))"
+  # A list with the key only: under the Lab profile an unsigned update from an address a
+  # list allows would pass, so the list names no address.
+  api POST /dns/acls "{\"name\": \"lab-updaters\", \"entries\": [{\"kind\": \"key\", \"name\": \"$upd_key\"}]}" >/dev/null ||
+    fail "update: the access list could not be created ($api_status: $(cat "$work/api.out"))"
+  upd_acl="$(field "d['id']" <"$work/api.out")"
+  api POST /dns/zones "{\"name\": \"dyn.example.test\", \"kind\": \"primary\", \"serial\": \"counter\", \"soa\": $(soa_json), \"name_servers\": [\"ns.example.test\"], \"update\": {\"allowed\": [\"$upd_acl\"], \"require_tsig\": true, \"may_replace_ipam\": false}}" >/dev/null ||
+    fail "update: the zone could not be created ($api_status: $(cat "$work/api.out"))"
+  zone_id="$(field "d['id']" <"$work/api.out")"
+  # An address IPAM manages in the zone, written by the actuator (origin ipam).
+  api POST /prefixes '{"cidr": "192.0.2.0/24"}' >/dev/null || true
+  api POST /addresses '{"ip": "192.0.2.90", "dns_name": "cam.dyn.example.test"}' >/dev/null ||
+    fail "update: the address could not be created ($api_status: $(cat "$work/api.out"))"
+  api POST /proposals/reconcile '{}' >/dev/null || fail "update: the reconcile did not run ($api_status)"
+  printf 'upd_key=%q\nupd_secret=%q\nupd_acl=%q\nupd_zone=%q\n' "$upd_key" "$upd_secret" "$upd_acl" "$zone_id" >>"$work/session.env"
+  chmod 0600 "$work/session.env"
+
+  # The first update waits until the update path knows the new key and zone.
+  row upd.add "nsupdate -y adds host1.dyn.example.test; the next query is answered with it" within 15 update_add_ok
+  row upd.prereq "a prerequisite that fails (prereq nxdomain) answers YXDOMAIN and changes nothing" update_prereq_ok
+  row upd.replace "prereq yxrrset, delete and add in one update replace the address" update_replace_ok
+  row upd.tcp "nsupdate -v adds host2.dyn.example.test over TCP" update_tcp_ok
+  row upd.delete "update delete removes the name: NXDOMAIN at once" update_delete_ok
+  row upd.unsigned "an update without the key is refused (REFUSED)" update_unsigned_refused
+  row upd.badsig "an update signed with a wrong secret is refused (NOTAUTH, BADSIG)" update_badsig_refused
+  row upd.origin "the RRset carries the origin dynamic and the key's name (API)" update_origin_ok "$zone_id"
+  if within 30 tenko_has cam.dyn.example.test 192.0.2.90; then
+    row upd.ipam "an update of the address IPAM manages is refused (REFUSED, origin ipam)" update_ipam_refused
+  else
+    row upd.ipam "IPAM did not write cam.dyn.example.test" false
+  fi
+  ((rows_failed == 0)) || fail "update: $rows_failed row(s) failed"
+}
+
 for transport in $rounds; do
   if [[ "$transport" == xfr ]]; then
     xfr
+    continue
+  fi
+  # WP6.2: the dynamic updates.
+  if [[ "$transport" == update ]]; then
+    update
     continue
   fi
   round "$transport"

@@ -1748,6 +1748,11 @@ impl Inner {
         let started = Instant::now();
         let deadline = started + self.config.write_timeout;
         let leader_deadline = started + self.config.leader_wait;
+        // WP6.2: the test hook that refuses writes on one node.
+        #[cfg(feature = "test-hooks")]
+        if crate::test_hooks::writes_refused() {
+            return Err(StoreError::NoQuorum);
+        }
         loop {
             self.check_running()?;
             let leader = self.leader();

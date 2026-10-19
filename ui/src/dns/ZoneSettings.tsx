@@ -7,6 +7,8 @@
 // servers from the primary, so they are shown and never sent. History: the serial served now,
 // the last change, and the newest audit records of the zone for those who read the audit log
 // (until a journal route exists, the lead's decision for WP4.5).
+// WP6.2 adds the dynamic updates of a primary zone: the access lists that may update it, TSIG,
+// whether updates may replace what IPAM manages, and the profile's rule beside them.
 import { A } from "@solidjs/router";
 import { createEffect, createMemo, createResource, createSignal, For, Index, onCleanup, onMount, Show, untrack } from "solid-js";
 import { ApiError, errorMessage } from "../api/problem";
@@ -42,6 +44,7 @@ import { canonical, hasSource, parseTtl, splitList, targetName, validName } from
 import { parseUpstream, upstreamText } from "./forwarders/model";
 import { describedBy, Field, fieldErrors } from "./Parts";
 import { paths } from "../app/paths";
+import { session } from "../auth/session";
 
 const SOA_NUMBERS = ["refresh", "retry", "expire", "minimum", "ttl"] as const;
 type SoaNumber = (typeof SOA_NUMBERS)[number];
@@ -631,6 +634,144 @@ function TransferState(props: { zone: Zone }) {
   );
 }
 
+// ---------------------------------------------------------------------------------
+// WP6.2: dynamic updates (RFC 2136). Who may update a primary zone: the access lists of
+// `update.allowed` (none means nobody), whether a TSIG key is required, and whether updates may
+// replace the records IPAM manages; the profile's rule (TGL-09) is explained beside them.
+
+type UpdatePolicy = NonNullable<ZonePatch["update"]>;
+
+/** The update policy as the form edits it, every default filled in. */
+function updatePolicyOf(policy: UpdatePolicy | null | undefined) {
+  return {
+    allowed: [...(policy?.allowed ?? [])],
+    require_tsig: policy?.require_tsig ?? true,
+    may_replace_ipam: policy?.may_replace_ipam ?? false,
+  };
+}
+
+/** The update part of the settings form, with the part of the PATCH that changed. */
+function createUpdateDraft(zone: Zone) {
+  let policy0 = updatePolicyOf(zone.update);
+  const [allowed, setAllowed] = createSignal<string[]>(policy0.allowed);
+  const [requireTsig, setRequireTsig] = createSignal(policy0.require_tsig);
+  const [mayReplaceIpam, setMayReplaceIpam] = createSignal(policy0.may_replace_ipam);
+  const fill = (patch: ZonePatch) => {
+    const now = updatePolicyOf({ allowed: allowed(), require_tsig: requireTsig(), may_replace_ipam: mayReplaceIpam() });
+    if (JSON.stringify(now) !== JSON.stringify(policy0)) patch.update = now;
+  };
+  return {
+    allowed,
+    addAllowed: (id: string) => setAllowed((ids) => (ids.includes(id) ? ids : [...ids, id])),
+    removeAllowed: (id: string) => setAllowed((ids) => ids.filter((x) => x !== id)),
+    requireTsig,
+    setRequireTsig,
+    mayReplaceIpam,
+    setMayReplaceIpam,
+    fill,
+    rebase: (saved: Zone) => {
+      policy0 = updatePolicyOf(saved.update);
+    },
+  };
+}
+
+type UpdateDraft = ReturnType<typeof createUpdateDraft>;
+
+/** The profile in force, as TGL-09 names it. */
+function profileInForce(): "home" | "standard" | "hardened" | "lab" {
+  const p = session()?.profile;
+  return p === "standard" || p === "hardened" || p === "lab" ? p : "home";
+}
+
+/** The update section of a primary zone. */
+function UpdateSection(props: { draft: UpdateDraft; disabled: boolean }) {
+  const [acls] = createResource(() => listAcls().then((all) => all.items).catch((): Acl[] => []));
+  const known = (): Acl[] => (acls.state === "ready" ? acls() ?? [] : []);
+  const nameOf = (id: string) => known().find((a) => a.id === id)?.name ?? id;
+  const free = () => known().filter((a) => !props.draft.allowed().includes(a.id));
+  const profile = profileInForce;
+  const profileName = () => t(`profile.${profile()}.name`);
+  // Hardened and Lab hold their rule for the signature whatever the zone says (TGL-09).
+  const signatureHelp = () => {
+    const p = profile();
+    const rule = p === "hardened" ? t("dns.update.require_tsig_hardened", { profile: profileName() }) : p === "lab" ? t("dns.update.require_tsig_lab", { profile: profileName() }) : "";
+    return rule ? `${t("dns.update.require_tsig_help")} ${rule}` : t("dns.update.require_tsig_help");
+  };
+  return (
+    <section class="page-section" aria-labelledby="dns-update-title" data-testid="zone-update" data-key={profile()}>
+      <h2 id="dns-update-title">{t("dns.update.title")}</h2>
+      <p>{t("dns.update.body")}</p>
+      <div class="field" role="group" aria-labelledby="dns-update-allow-label" data-testid="update-allow-list">
+        <span id="dns-update-allow-label" class="label">
+          {t("dns.update.allow")}
+        </span>
+        <Show
+          when={props.draft.allowed().length > 0}
+          fallback={
+            <p class="muted" data-testid="update-allow-none">
+              {t("dns.update.allow_none")} {t(`dns.update.default_${profile()}`, { profile: profileName() })}
+            </p>
+          }
+        >
+          <ul class="dns-draft" aria-label={t("dns.update.allow")}>
+            <For each={props.draft.allowed()}>
+              {(id) => (
+                <li data-testid="update-allow" data-key={id}>
+                  <span>{nameOf(id)}</span>
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    aria-label={t("dns.update.allow_remove", { name: nameOf(id) })}
+                    data-testid="update-allow-remove"
+                    disabled={props.disabled}
+                    onClick={() => props.draft.removeAllowed(id)}
+                  >
+                    <Icon name="x" size="xs" />
+                  </button>
+                </li>
+              )}
+            </For>
+          </ul>
+        </Show>
+        <select
+          class="select"
+          aria-label={t("dns.update.allow_add")}
+          aria-describedby="dns-f-update-allow-help"
+          value=""
+          disabled={props.disabled || free().length === 0}
+          data-testid="field-update-allow-add"
+          onChange={(e) => {
+            if (e.currentTarget.value) props.draft.addAllowed(e.currentTarget.value);
+            e.currentTarget.value = "";
+          }}
+        >
+          <option value="">{t("dns.update.allow_add")}</option>
+          <For each={free()}>{(a) => <option value={a.id}>{a.name}</option>}</For>
+        </select>
+        <span class="help" id="dns-f-update-allow-help">
+          {t("dns.update.allow_help")}
+        </span>
+      </div>
+      <Check
+        id="update.require_tsig"
+        label={t("dns.update.require_tsig")}
+        help={signatureHelp()}
+        checked={props.draft.requireTsig()}
+        disabled={props.disabled}
+        onChange={props.draft.setRequireTsig}
+      />
+      <Check
+        id="update.may_replace_ipam"
+        label={t("dns.update.may_replace_ipam")}
+        help={t("dns.update.may_replace_ipam_help")}
+        checked={props.draft.mayReplaceIpam()}
+        disabled={props.disabled}
+        onChange={props.draft.setMayReplaceIpam}
+      />
+    </section>
+  );
+}
+
 export function SettingsTab(props: { zone: Zone; onSaved: (zone: Zone) => void }) {
   const zone = untrack(() => props.zone);
   const readOnly = () => !mayWriteDns();
@@ -640,6 +781,9 @@ export function SettingsTab(props: { zone: Zone; onSaved: (zone: Zone) => void }
   const transferable = zone.kind !== "stub" && zone.kind !== "forward";
   const textSource = hasSource(zone.kind) && !secondary;
   const draft = createTransferDraft(zone);
+  // WP6.2: dynamic updates, for a primary zone.
+  const updatable = zone.kind === "primary";
+  const updateDraft = createUpdateDraft(zone);
   const [mname, setMname] = createSignal(zone.soa.mname);
   const [rname, setRname] = createSignal(zone.soa.rname);
   const [numbers, setNumbers] = createSignal<Record<SoaNumber, string>>({
@@ -697,8 +841,10 @@ export function SettingsTab(props: { zone: Zone; onSaved: (zone: Zone) => void }
       const patch: ZonePatch = secondary ? { description: text } : { soa, serial: policy(), description: text };
       if (textSource && servers && source() !== sourceBefore) patch.source = { primaries: servers };
       draft.fill(patch, secondary, transferable);
+      if (updatable) updateDraft.fill(patch);
       let saved = await updateZone(props.zone, patch);
       draft.rebase(saved);
+      updateDraft.rebase(saved);
       const before = (apexNs.latest?.records ?? []).map((r) => (r.type === "NS" ? r.host : "")).sort().join(",");
       if (!secondary && [...hosts].sort().join(",") !== before) {
         const result = await changeRecords(
@@ -800,6 +946,9 @@ export function SettingsTab(props: { zone: Zone; onSaved: (zone: Zone) => void }
       </section>
       <Show when={transferable}>
         <TransferSection zone={props.zone} draft={draft} errors={errors()} disabled={readOnly()} />
+      </Show>
+      <Show when={updatable}>
+        <UpdateSection draft={updateDraft} disabled={readOnly()} />
       </Show>
       <ErrorNotice error={error()} />
       <Show when={!readOnly()}>

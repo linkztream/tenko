@@ -138,7 +138,7 @@ The node routes sit beside the node's other routes, as the scan configuration of
 | `dns.acl.not_found`, `dns.acl.in_use` | 404, 409 | Access lists |
 | `dns.key.not_found`, `dns.key.exists` | 404, 409 | TSIG keys |
 | `dns.list.not_found`, `dns.list.invalid` | 404, 400 | Block lists |
-| `dns.update.refused` | 403 | A dynamic update was refused (key, ACL, prerequisite) |
+| `dns.update.refused` | 403 | A dynamic update was refused (key, ACL, prerequisite). WP6.2: carried by the audit record `dns.update.refuse` of a refusal by the policy, the TSIG key or an origin rule; on the wire the client gets REFUSED with the reason in the extended error (a failed prerequisite answers its own RCODE and is not audited) |
 | `dns.transfer.refused` | 403 | A zone transfer was refused (ACL, key); also the last error of a primary that refused a transfer in |
 | `dns.node.not_dns` | 409 | The node does not run the `dns` role |
 | `dns.module.disabled` | 409 | The DNS module is switched off (for the role and the services; the routes answer 404) |
@@ -158,7 +158,7 @@ The node routes sit beside the node's other routes, as the scan configuration of
 | `dns.zone.create`, `dns.zone.update`, `dns.zone.delete`, `dns.zone.export` | Zones; a zone file export (MIG-15) |
 | `dns.record.change`, `dns.record.import`, `dns.record.actuate` | RRsets changed by the API or UI, imported from a zone file, changed by the actuator of IPAM |
 | `dns.key.create`, `dns.key.delete`, `dns.key.rollover` | TSIG keys; DNSSEC rollovers |
-| `dns.update.apply`, `dns.update.refuse` | Dynamic updates (RFC 2136) |
+| `dns.update.apply`, `dns.update.refuse` | Dynamic updates (RFC 2136): an update that changed the zone, in the commit of the change (the client, the key, the zone, the counts of prerequisites and updates, the records added and removed, the RRsets changed, the serial; never the data); a refusal (the client, the key, the zone, the code `dns.update.refused`, the reason; at most once a minute per client) (WP6.2) |
 | `dns.view.create`, `dns.view.update`, `dns.view.delete` | Views |
 | `dns.forwarder.create`, `dns.forwarder.update`, `dns.forwarder.delete` | Forwarding rules |
 | `dns.acl.create`, `dns.acl.update`, `dns.acl.delete` | Access lists |
@@ -194,6 +194,8 @@ The system component of the DNS services' own writes is `dns`.
 | `tenko_dns_log_dropped` | counter | |
 | `tenko_dns_xfr` | counter | `kind` (`axfr_out`, `ixfr_out`, `axfr_in`, `ixfr_in`, `notify_out`, `notify_in`), `outcome` (`ok`, `current`, `refused`, `failed`) |
 | `tenko_dns_xfr_bytes` | counter | `direction` (`out`, `in`) |
+| `tenko_dns_updates` | counter | `outcome` (`ok`, `prerequisite`, `refused`, `notauth`, `formerr`, `failed`) (WP6.2; registered by the role, `tenko_dns::update::register_metrics`) |
+| `tenko_dns_update_duration_seconds` | histogram (1 ms to 5 s) | (WP6.2: from the arrival of an update to its answer) |
 
 ## 8. Node sync
 
@@ -213,8 +215,9 @@ Declared for Phase 5 and consumed by no node in Phase 2 (plan section 2.10): `Su
 | `PolicyEngine` | RPZ and block list verdicts with the extended error | `NoPolicy` |
 | `RateLimiter` | RRL and per-client limits | `Unlimited` |
 | `QueryLogSink` | The non-blocking query log, counting drops | `NullLog` |
+| `UpdateSink` (WP6.2) | Takes an UPDATE (opcode 5) off the query path: the responder answers it `Reply::Forward`, `Responder::forward` hands it over with the transport's reply path (`server::Hooks::updates`); `submit` must not block. The path verifies TSIG, checks the policy (`tenko_dns::update::policy`, the zone's `UpdatePolicy` under the profile in force, TGL-09), tests the prerequisites against the `Index`, and commits the updates of one zone as one change set through the zone service with `Origin::Dynamic` and the key's name (`RrSet::key`); NOERROR only once the index holds the commit (2 s, then SERVFAIL "Not Ready"), SERVFAIL when the store refuses. On the single node the change set is a function call; `Dns.Update` of a remote node is Phase 5 | `tenko_dns::update::UpdatePath` |
 
-The tests that hold the contracts: `crates/tenko-dns/tests/alloc.rs` (no allocation in parse, build and lookup, after proving the counter sees one), `tests/differential.rs` (the same requests and octets from both codecs over 18 answers), `tests/index.rs` (the reference index and feed), `crates/tenko-core/tests/dns_model.rs` (properties of the model) and the fuzz target `dns_codec`.
+The tests that hold the contracts: `crates/tenko-dns/tests/alloc.rs` (no allocation in parse, build and lookup, after proving the counter sees one), `tests/differential.rs` (the same requests and octets from both codecs over 18 answers), `tests/index.rs` (the reference index and feed), `crates/tenko-core/tests/dns_model.rs` (properties of the model) and the fuzz target `dns_codec`; for the update path `tests/update.rs` and the fuzz target `dns_tsig`.
 
 ## 10. Data format
 

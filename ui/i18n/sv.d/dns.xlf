@@ -2173,6 +2173,60 @@
       <unit id="dns.transfer.unavailable">
         <segment><source>The transfer state is not available on this server.</source><target>Överföringsstatus finns inte på den här servern.</target></segment>
       </unit>
+      <unit id="dns.update.title">
+        <notes><note category="description">Heading of the dynamic update section on the settings tab of a primary zone (WP6.2).</note></notes>
+        <segment><source>Dynamic updates</source><target>Dynamiska uppdateringar</target></segment>
+      </unit>
+      <unit id="dns.update.body">
+        <segment><source>Clients such as nsupdate, DHCP servers and Windows hosts change the records of this zone with RFC 2136 updates. Each update is checked against these settings and written as one change; the records it writes carry the origin dynamic and the name of its key.</source><target>Klienter som nsupdate, DHCP-servrar och Windows-datorer ändrar posterna i den här zonen med RFC 2136-uppdateringar. Varje uppdatering kontrolleras mot de här inställningarna och skrivs som en ändring; posterna den skriver får ursprunget dynamic och namnet på sin nyckel.</target></segment>
+      </unit>
+      <unit id="dns.update.allow">
+        <segment><source>Access lists that may update</source><target>Åtkomstlistor som får uppdatera</target></segment>
+      </unit>
+      <unit id="dns.update.allow_none">
+        <segment><source>No access list is chosen: nobody may update this zone.</source><target>Ingen åtkomstlista är vald: ingen får uppdatera den här zonen.</target></segment>
+      </unit>
+      <unit id="dns.update.allow_add">
+        <notes><note category="description">Label of the select that adds an access list to the update policy, and its first option.</note></notes>
+        <segment><source>Add an access list</source><target>Lägg till en åtkomstlista</target></segment>
+      </unit>
+      <unit id="dns.update.allow_remove">
+        <segment><source>Remove the access list {name}</source><target>Ta bort åtkomstlistan {name}</target></segment>
+      </unit>
+      <unit id="dns.update.allow_help">
+        <segment><source>The first matching entry of a list decides. An entry that names a TSIG key lets the clients that sign with that key update.</source><target>Den första matchande posten i en lista avgör. En post som anger en TSIG-nyckel låter klienter som signerar med den nyckeln uppdatera.</target></segment>
+      </unit>
+      <unit id="dns.update.default_home">
+        <notes><note category="description">The profile's rule while the zone names no access list; {profile} is the profile's name.</note></notes>
+        <segment><source>The profile {profile} allows no dynamic updates until a zone names access lists here.</source><target>Profilen {profile} tillåter inga dynamiska uppdateringar förrän en zon anger åtkomstlistor här.</target></segment>
+      </unit>
+      <unit id="dns.update.default_standard">
+        <segment><source>Under the profile {profile} an update needs a TSIG key that a list names, unless you switch that off below.</source><target>Med profilen {profile} behöver en uppdatering en TSIG-nyckel som en lista anger, om du inte stänger av det nedan.</target></segment>
+      </unit>
+      <unit id="dns.update.default_hardened">
+        <segment><source>Under the profile {profile} an update always needs a TSIG key that a list names; unsigned updates are refused.</source><target>Med profilen {profile} behöver en uppdatering alltid en TSIG-nyckel som en lista anger; osignerade uppdateringar nekas.</target></segment>
+      </unit>
+      <unit id="dns.update.default_lab">
+        <segment><source>Under the profile {profile} unsigned updates from the addresses the lists allow are taken.</source><target>Med profilen {profile} tas osignerade uppdateringar emot från de adresser som listorna tillåter.</target></segment>
+      </unit>
+      <unit id="dns.update.require_tsig">
+        <segment><source>Require a TSIG key for updates</source><target>Kräv en TSIG-nyckel för uppdateringar</target></segment>
+      </unit>
+      <unit id="dns.update.require_tsig_help">
+        <segment><source>An update without a valid TSIG signature from a key the lists name is refused.</source><target>En uppdatering utan giltig TSIG-signatur från en nyckel som listorna anger nekas.</target></segment>
+      </unit>
+      <unit id="dns.update.require_tsig_hardened">
+        <segment><source>The profile {profile} requires the key whatever this setting says.</source><target>Profilen {profile} kräver nyckeln oavsett vad den här inställningen säger.</target></segment>
+      </unit>
+      <unit id="dns.update.require_tsig_lab">
+        <segment><source>The profile {profile} takes unsigned updates from the lists whatever this setting says.</source><target>Profilen {profile} tar emot osignerade uppdateringar från listorna oavsett vad den här inställningen säger.</target></segment>
+      </unit>
+      <unit id="dns.update.may_replace_ipam">
+        <segment><source>Updates may replace records that IPAM manages</source><target>Uppdateringar får ersätta poster som IPAM hanterar</target></segment>
+      </unit>
+      <unit id="dns.update.may_replace_ipam_help">
+        <segment><source>Off: an update that would change a record of the origin ipam is refused, so that IPAM stays the source of its names.</source><target>Av: en uppdatering som skulle ändra en post med ursprunget ipam nekas, så att IPAM förblir källan för sina namn.</target></segment>
+      </unit>
       <unit id="dns.zone.tab.dnssec">
         <segment><source>DNSSEC</source><target>DNSSEC</target></segment>
       </unit>

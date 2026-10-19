@@ -12,6 +12,9 @@ publish = false
 testing = ["dep:arc-swap"]
 # The production store (`tenko_store::raft::RaftStore`): openraft over redb (WP1.1).
 raft = ["dep:openraft", "dep:redb", "dep:sha2", "dep:tracing"]
+# WP6.2: the test hooks of the store (`tenko_store::test_hooks`), for the acceptance tests
+# through the binary; never in a release build.
+test-hooks = []
 
 [dependencies]
 arc-swap = { workspace = true, optional = true }

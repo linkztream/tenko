@@ -199,6 +199,9 @@ const zones = [
       const zone = updateZone(state, context, ctx.params.id, body as Record<string, unknown>, ctx.ifMatch());
       // The catalog flag is not part of the shared model yet; the mock keeps what the PATCH says.
       if (typeof (body as Record<string, unknown>).catalog === "boolean") zone.catalog = (body as { catalog: boolean }).catalog;
+      // WP6.2: the update policy, kept as the PATCH says (the shared model leaves it out).
+      const update = (body as { update?: components["schemas"]["DnsUpdatePolicy"] | null }).update;
+      if (update) (zone as { update?: components["schemas"]["DnsUpdatePolicy"] }).update = update;
       // WP6.3: the signing policy, which the signer acts on at once here.
       const policy = (body as { dnssec?: components["schemas"]["DnssecPolicy"] | null }).dnssec;
       if (policy) {

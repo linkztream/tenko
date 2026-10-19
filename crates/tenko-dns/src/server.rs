@@ -99,6 +99,9 @@ pub struct Hooks {
     // WP6.1: zone transfers out and NOTIFY in.
     /// The transfer path; without one, AXFR and IXFR are refused and NOTIFY is NOTIMP.
     pub transfers: Option<Arc<dyn crate::xfr::TransferSink>>,
+    // WP6.2: dynamic updates.
+    /// The update path; without one, an UPDATE is answered NOTIMP.
+    pub updates: Option<Arc<dyn crate::update::UpdateSink>>,
 }
 
 impl std::fmt::Debug for Hooks {
@@ -109,6 +112,7 @@ impl std::fmt::Debug for Hooks {
             .field("cookies", &self.cookies.is_some())
             .field("certificates", &self.certificates.is_some())
             .field("transfers", &self.transfers.is_some())
+            .field("updates", &self.updates.is_some())
             .finish()
     }
 }
@@ -190,6 +194,10 @@ impl Server {
         }
         if let Some(transfers) = hooks.transfers {
             responder = responder.with_transfers(transfers);
+        }
+        // WP6.2: the update path.
+        if let Some(updates) = hooks.updates {
+            responder = responder.with_updates(updates);
         }
         let responder = Arc::new(responder);
         // Bind everything first: a failure leaves nothing running.

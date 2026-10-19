@@ -22,6 +22,8 @@ import = []
 # Signature verification of release files (API-19). Off until the release signing of API-19
 # exists: with it on, every install refuses a release whose signature cannot be checked.
 release-signatures = []
+# WP6.2: the store's test hooks (a write refused on one node, E18) for the acceptance tests.
+test-hooks = ["tenko-store/test-hooks"]
 
 [dependencies]
 anyhow = { workspace = true }

@@ -1894,6 +1894,23 @@ export type MessageKey =
   | "dns.transfer.xot"
   | "dns.transfer.xot_help"
   | "dns.transfer.xot_short"
+  | "dns.update.allow"
+  | "dns.update.allow_add"
+  | "dns.update.allow_help"
+  | "dns.update.allow_none"
+  | "dns.update.allow_remove"
+  | "dns.update.body"
+  | "dns.update.default_hardened"
+  | "dns.update.default_home"
+  | "dns.update.default_lab"
+  | "dns.update.default_standard"
+  | "dns.update.may_replace_ipam"
+  | "dns.update.may_replace_ipam_help"
+  | "dns.update.require_tsig"
+  | "dns.update.require_tsig_hardened"
+  | "dns.update.require_tsig_help"
+  | "dns.update.require_tsig_lab"
+  | "dns.update.title"
   | "dns.view.action.down"
   | "dns.view.action.up"
   | "dns.view.check.address"
@@ -5629,6 +5646,13 @@ export interface MessageArgs {
   "dns.transfer.notify_remove": { n: string | number };
   "dns.transfer.primary_remove": { n: string | number };
   "dns.transfer.queued": { name: string | number };
+  "dns.update.allow_remove": { name: string | number };
+  "dns.update.default_hardened": { profile: string | number };
+  "dns.update.default_home": { profile: string | number };
+  "dns.update.default_lab": { profile: string | number };
+  "dns.update.default_standard": { profile: string | number };
+  "dns.update.require_tsig_hardened": { profile: string | number };
+  "dns.update.require_tsig_lab": { profile: string | number };
   "dns.view.check.address": { entry: string | number; n: string | number };
   "dns.view.check.name": { entry: string | number; n: string | number };
   "dns.view.check.no_scope": { scope: string | number; zone: string | number };
@@ -8216,6 +8240,23 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.transfer.xot",
   "dns.transfer.xot_help",
   "dns.transfer.xot_short",
+  "dns.update.allow",
+  "dns.update.allow_add",
+  "dns.update.allow_help",
+  "dns.update.allow_none",
+  "dns.update.allow_remove",
+  "dns.update.body",
+  "dns.update.default_hardened",
+  "dns.update.default_home",
+  "dns.update.default_lab",
+  "dns.update.default_standard",
+  "dns.update.may_replace_ipam",
+  "dns.update.may_replace_ipam_help",
+  "dns.update.require_tsig",
+  "dns.update.require_tsig_hardened",
+  "dns.update.require_tsig_help",
+  "dns.update.require_tsig_lab",
+  "dns.update.title",
   "dns.view.action.down",
   "dns.view.action.up",
   "dns.view.check.address",

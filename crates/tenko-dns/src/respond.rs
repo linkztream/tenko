@@ -248,6 +248,8 @@ pub struct Responder<R> {
     udp_size: u16,
     // WP6.1: zone transfers, NOTIFY and signed SOA queries.
     transfers: Option<Arc<dyn crate::xfr::TransferSink>>,
+    // WP6.2: dynamic updates.
+    updates: Option<Arc<dyn crate::update::UpdateSink>>,
 }
 
 impl<R> std::fmt::Debug for Responder<R> {
@@ -275,6 +277,7 @@ impl<R: Resolver> Responder<R> {
             metrics: true,
             udp_size: SERVER_UDP_PAYLOAD,
             transfers: None,
+            updates: None,
         }
     }
 
@@ -328,6 +331,16 @@ impl<R: Resolver> Responder<R> {
         self
     }
 
+    // WP6.2: the update path.
+    /// The same responder with the update path: an UPDATE (opcode 5) goes to it off the
+    /// query path ([`Reply::Forward`], then [`Responder::forward`]) instead of the
+    /// resolver, which answers NOTIMP without one.
+    #[must_use]
+    pub fn with_updates(mut self, updates: Arc<dyn crate::update::UpdateSink>) -> Self {
+        self.updates = Some(updates);
+        self
+    }
+
     /// The transfer path, for the stream transports: the message's answer as a stream of
     /// messages when the path takes it.
     pub fn transfer_stream(
@@ -369,6 +382,14 @@ impl<R: Resolver> Responder<R> {
             answer,
             out,
         } = scratch;
+        // WP6.2: an UPDATE leaves the query path; the path answers it through the reply
+        // path of the transport.
+        if self.updates.is_some() && crate::update::message::is_update(message) {
+            return Reply::Forward {
+                view: None,
+                rule: None,
+            };
+        }
         // WP6.1: NOTIFY, IXFR (the SOA only) and signed SOA queries over UDP.
         if conn.transport == QueryTransport::Udp
             && let Some(transfers) = &self.transfers
@@ -535,6 +556,18 @@ impl<R: Resolver> Responder<R> {
     /// Allocates the copy of the query: the forwarder runs off the query path. The cookie
     /// option of the answer is computed here, from the query's client cookie.
     pub fn forward(&self, message: &[u8], conn: &Conn, reply: Reply, path: ReplyPath) {
+        // WP6.2: an UPDATE goes to the update path.
+        if let Some(updates) = &self.updates
+            && crate::update::message::is_update(message)
+        {
+            updates.submit(crate::update::UpdateQuery {
+                message: message.to_vec(),
+                conn: *conn,
+                reply: path,
+                at: Instant::now(),
+            });
+            return;
+        }
         if let (Some(sink), Reply::Forward { view, rule }) = (&self.forward, reply) {
             let cookie = if self.cookie_mode == CookieMode::Off {
                 None

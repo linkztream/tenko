@@ -160,6 +160,14 @@ pub(crate) fn transfer_services(
     }
 }
 
+// WP6.2: the directory is shared with the update path.
+/// The transfer path, the task that keeps its directory current, and the directory.
+type TransferPath = (
+    Arc<dyn tenko_dns::xfr::TransferSink>,
+    JoinHandle<()>,
+    Arc<tenko_dns::xfr::Directory>,
+);
+
 /// The transfer path of the role's listeners: the directory of zones and keys kept current
 /// from the store, the index for AXFR, the journal for IXFR, NOTIFY to the secondary
 /// service; and the task that keeps the directory current.
@@ -168,7 +176,7 @@ fn transfer_path(
     handle: &catalog::CatalogHandle,
     store: &Arc<dyn Store>,
     stop: CancellationToken,
-) -> Option<(Arc<dyn tenko_dns::xfr::TransferSink>, JoinHandle<()>)> {
+) -> Option<TransferPath> {
     use tenko_dns::xfr::{self, out::XfrOut};
     let Transfers {
         zones,
@@ -180,12 +188,16 @@ fn transfer_path(
     let task = tokio::spawn(Arc::clone(&directory).follow(Arc::clone(zones), stop));
     let path = XfrOut::new(
         handle.clone(),
-        directory,
+        Arc::clone(&directory),
         Arc::new(xfr::StoreJournal::new(Arc::clone(store))),
         Arc::new(xfr::StoreAudit::new(Arc::clone(store))),
         Some(Arc::new(secondaries.clone()) as Arc<dyn xfr::NotifyHandler>),
     );
-    Some((Arc::new(path) as Arc<dyn xfr::TransferSink>, task))
+    Some((
+        Arc::new(path) as Arc<dyn xfr::TransferSink>,
+        task,
+        directory,
+    ))
 }
 
 fn error(code: &str, message: impl Into<String>) -> StartError {
@@ -363,6 +375,18 @@ fn recursion_default(profile: Profile) -> RecursionDefault {
     }
 }
 
+// WP6.2: the profile of the update policy (TGL-09).
+/// The update policy's profile for the installation's profile.
+fn update_profile_of(profile: Profile) -> tenko_dns::update::policy::UpdateProfile {
+    use tenko_dns::update::policy::UpdateProfile;
+    match profile {
+        Profile::Home => UpdateProfile::Home,
+        Profile::Standard => UpdateProfile::Standard,
+        Profile::Hardened => UpdateProfile::Hardened,
+        Profile::Lab => UpdateProfile::Lab,
+    }
+}
+
 /// The settings of the forwarder from `[dns]` under `profile`.
 fn forward_settings(
     section: &DnsSection,
@@ -433,6 +457,8 @@ async fn follow_recursion(
     store: Arc<dyn Store>,
     bootstrap: Profile,
     policy: Arc<RecursionPolicy>,
+    // WP6.2: the profile of the update policy.
+    update_profile: Arc<tenko_dns::update::policy::ProfileCell>,
     stop: CancellationToken,
 ) {
     let filter = || {
@@ -460,6 +486,7 @@ async fn follow_recursion(
         match recursion_inputs(store.as_ref(), bootstrap).await {
             Ok((profile, prefixes)) => {
                 policy.set_default(recursion_default(profile));
+                update_profile.set(update_profile_of(profile));
                 policy.set_prefixes(prefixes);
             }
             Err(error) => {
@@ -708,6 +735,8 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
     metrics.register(&tenko_dns::policy::counters::BLOCKED_FAMILY);
     tenko_dns::rate::limiter::register_metrics(metrics);
     tenko_dns::xfr::register_metrics(metrics);
+    // WP6.2: the update families.
+    tenko_dns::update::register_metrics(metrics);
     let log_profile = log_profile(resolved, store.as_ref()).await;
     let feed_store = Arc::clone(&store);
     let mut feed = tokio::task::spawn_blocking(move || store_feed::register(feed_store))
@@ -729,6 +758,10 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         .as_ref()
         .map(|writer| writer.sink() as Arc<dyn QueryLogSink>);
     let recursion = Arc::new(RecursionPolicy::new(recursion_default(profile)));
+    // WP6.2: the profile the update policy follows, kept current with the recursion's.
+    let update_profile = Arc::new(tenko_dns::update::policy::ProfileCell::new(
+        update_profile_of(profile),
+    ));
     recursion.set_prefixes(prefixes);
     let (forwarder, forward_task) = Forwarder::start(
         forward_settings(section, profile, upstream_ca),
@@ -742,6 +775,7 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         Arc::clone(&store),
         bootstrap,
         recursion,
+        Arc::clone(&update_profile),
         stop.child_token(),
     ));
     // The policy decides on every name outside the zones and on every forwarded answer.
@@ -776,12 +810,29 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         encrypted_line = Some(encrypted.describe);
     }
     let transfer_path = transfer_path(transfers.as_ref(), &handle, &store, stop.child_token());
+    // WP6.2: the update path, with the zone service, the keys of the transfer path's
+    // directory and the policy under the profile in force (TGL-09).
+    let update_path =
+        transfer_path
+            .as_ref()
+            .zip(transfers.as_ref())
+            .map(|((_, _, directory), transfers)| {
+                Arc::new(tenko_dns::update::UpdatePath::new(
+                    handle.clone(),
+                    Arc::clone(directory),
+                    Arc::clone(&transfers.zones),
+                    Arc::clone(&update_profile),
+                    Arc::new(tenko_dns::xfr::StoreAudit::new(Arc::clone(&store))),
+                    stop.child_token(),
+                )) as Arc<dyn tenko_dns::update::UpdateSink>
+            });
     let hooks = Hooks {
         log: log_sink,
         forward: Some(Arc::new(sink) as Arc<dyn ForwardSink>),
         cookies: None,
         certificates,
-        transfers: transfer_path.as_ref().map(|(path, _)| Arc::clone(path)),
+        transfers: transfer_path.as_ref().map(|(path, _, _)| Arc::clone(path)),
+        updates: update_path,
     };
     let server = match Server::start(config, handle.clone(), resolver, hooks).await {
         Ok(server) => server,
@@ -832,7 +883,7 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
             stop,
             tasks: [follower, forward_task, recursion_task]
                 .into_iter()
-                .chain(transfer_path.map(|(_, task)| task))
+                .chain(transfer_path.map(|(_, task, _)| task))
                 .collect(),
             log,
             watchers,

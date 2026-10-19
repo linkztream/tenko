@@ -2,7 +2,7 @@
 
 The measurement harness of Phase 2 (DNS) of the Tenko DDI project: a load generator for any DNS
 server, a generator for the zone files and query files of the Phase 2 data sets, a report
-renderer, and the procedure scripts of the measurements M16, M17, M18, M19, M20, M22, M24 and M25
+renderer, and the procedure scripts of the measurements M16, M17, M18, M19, M20, M21, M22, M24 and M25
 (`docs/plans/phase-2-plan.md`, sections 2.10 and 6, work package WP4.6). It contains no server
 code: the target is the Tenko engine, the Spike B responder, BIND, NSD or anything else that
 answers DNS.
@@ -55,6 +55,7 @@ engine is measured against.
 | `scripts/run-m19-xfr.sh` | M19: a 100-record change on a 100,000-record Tenko zone reaching BIND 9 by NOTIFY and IXFR on the compose DNS lab (`deploy/compose/lab-dns`), the latency and the size of the delta |
 | `scripts/run-m18-load.sh` | M18: the zonegen data set imported into a new node, the time until the role serves the last name, a restart with the load from the store, and the RSS against an empty node |
 | `scripts/run-m20-sign.sh` | M20: DNSSEC signing through `tenko serve`: a 1 M-record zone signed in one full pass with ECDSA P-256 and Ed25519, NSEC and NSEC3, and a 100-record change signed again |
+| `scripts/run-m21-update.sh` | M21: TSIG-signed RFC 2136 updates at a fixed rate against one node (`tenko serve --roles controller,dns`, set up through the API with curl), driven by the example `update_load` of `tenko-dns`; the latency from send to answer, every answer's RCODE and TSIG checked |
 | `scripts/run-m25-lists.sh` | M25: the block list compiler and matcher (the engine's example `lists_bench`) on a generated list of 1 M names: compile time, the size of the version, the time per lookup and per label |
 | `scripts/server-cpu.sh` | CPU seconds and RSS of a server pid on a Linux host, for the runs where the harness cannot sample the server |
 | `scripts/lib.sh` | Shared helpers: machine line, musl linkage check, readiness probe |

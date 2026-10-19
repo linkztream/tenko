@@ -185,6 +185,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "dns_tsig"
+path = "fuzz_targets/dns_tsig.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "dns_zonefile"
 path = "fuzz_targets/dns_zonefile.rs"
 test = false

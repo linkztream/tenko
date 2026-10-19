@@ -46,6 +46,9 @@ pub mod mem;
 pub mod raft;
 #[cfg(feature = "testing")]
 pub mod testing;
+// WP6.2: a store that refuses writes on one node, for the acceptance tests.
+#[cfg(any(test, feature = "test-hooks"))]
+pub mod test_hooks;
 
 pub use api::{
     AnchorResolver, Change, ChangeSet, ChangeStream, CoalescerConfig, Committed, DerivedIndex,

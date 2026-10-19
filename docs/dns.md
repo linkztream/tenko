@@ -1,7 +1,6 @@
 # DNS: zones, records, zone files, keys, the dns role, the forwarder and the engine
 
-This page describes how Tenko DDI holds DNS data and answers for it: zones and their kinds, RRsets and the rules they keep, batch changes with a dry run, zone file import and export, SOA serials and the journal that zone transfers read, access lists and TSIG keys, the `dns` role that serves the zones, the forwarder for names outside them (in [dns-resolver.md](dns-resolver.md)), and the engine underneath. It is for an operator who manages zones through the API, the command line or the web UI and runs a node that answers DNS, and for a developer who builds on the zone service or the engine. It describes the zone service `tenko_dns::zone`, the role (`tenko_dns::store_feed`, `forward`, `querylog`, `status` and `tenko serve`), the engine (`crates/tenko-dns`), the model `tenko_core::dns` and the `/dns` and `/nodes/{id}/dns` routes of `tenko-api`; where this page and the code differ, the code is right. The requirements are DNS-01, DNS-07, DNS-09, DNS-11, DNS-19, DNS-24, TGL-10 and MIG-15 in [REQUIREMENTS.md](REQUIREMENTS.md); the decisions are in [ADR 0017](adr/0017-dns-data-model-and-serving-path.md) and section 2 of the [Phase 2 plan](plans/phase-2-plan.md). The contracts every Phase 2 package shares (tables, routes, codes, audit actions) are listed in [dns-contracts.md](dns-contracts.md). Views, block lists, dynamic updates and DNSSEC get their sections when their packages land.
-This page describes how Tenko DDI holds DNS data and answers for it: zones and their kinds, RRsets and the rules they keep, batch changes with a dry run, zone file import and export, SOA serials and the journal that zone transfers read, access lists and TSIG keys, the `dns` role that serves the zones, the forwarder for names outside them (in [dns-resolver.md](dns-resolver.md)), and the engine underneath. It is for an operator who manages zones through the API, the command line or the web UI and runs a node that answers DNS, and for a developer who builds on the zone service or the engine. It describes the zone service `tenko_dns::zone`, the role (`tenko_dns::store_feed`, `forward`, `querylog`, `status` and `tenko serve`), the engine (`crates/tenko-dns`), the model `tenko_core::dns` and the `/dns` and `/nodes/{id}/dns` routes of `tenko-api`; where this page and the code differ, the code is right. The requirements are DNS-01, DNS-07, DNS-09, DNS-11, DNS-20, DNS-24 and MIG-15 in [REQUIREMENTS.md](REQUIREMENTS.md); the decisions are in [ADR 0017](adr/0017-dns-data-model-and-serving-path.md) and section 2 of the [Phase 2 plan](plans/phase-2-plan.md). The contracts every Phase 2 package shares (tables, routes, codes, audit actions) are listed in [dns-contracts.md](dns-contracts.md). Views have section 11; transfers, dynamic updates and DNSSEC get their sections when their packages land.
+This page describes how Tenko DDI holds DNS data and answers for it: zones and their kinds, RRsets and the rules they keep, batch changes with a dry run, zone file import and export, SOA serials and the journal that zone transfers read, access lists and TSIG keys, the `dns` role that serves the zones, the forwarder for names outside them (in [dns-resolver.md](dns-resolver.md)), and the engine underneath. It is for an operator who manages zones through the API, the command line or the web UI and runs a node that answers DNS, and for a developer who builds on the zone service or the engine. It describes the zone service `tenko_dns::zone`, the role (`tenko_dns::store_feed`, `forward`, `querylog`, `status` and `tenko serve`), the engine (`crates/tenko-dns`), the model `tenko_core::dns` and the `/dns` and `/nodes/{id}/dns` routes of `tenko-api`; where this page and the code differ, the code is right. The requirements are DNS-01, DNS-07, DNS-09, DNS-11, DNS-19, DNS-20, DNS-24, TGL-09, TGL-10 and MIG-15 in [REQUIREMENTS.md](REQUIREMENTS.md); the decisions are in [ADR 0017](adr/0017-dns-data-model-and-serving-path.md) and section 2 of the [Phase 2 plan](plans/phase-2-plan.md). The contracts every Phase 2 package shares (tables, routes, codes, audit actions) are listed in [dns-contracts.md](dns-contracts.md). Views have section 11, zone transfers section 10, dynamic updates section 13; DNSSEC has its own page, [dnssec.md](dnssec.md).
 
 Terms used below: an **RRset** is the records of one owner name and type in one scope of a zone. A **scope** is one version of a zone's data that views choose (DNS-20); every zone has the scope `default`. The **apex** is the zone's own name. An RRset's **origin** says who owns it: `manual` (API, UI, zone file), `ipam` (the DNS actuator of IPAM), `dynamic` (RFC 2136), `transfer` (zone transfers, section 10), `dhcp` and `ad`.
 
@@ -17,13 +16,11 @@ Contents:
 8. [The dns role](#8-the-dns-role)
 9. [The forwarder](#9-the-forwarder)
 10. [Zone transfers and NOTIFY](#10-zone-transfers-and-notify)
-12. [The engine](#12-the-engine)
-
-Section 11 is kept for the package that writes it (views); the resolver side has its own page, [dns-resolver.md](dns-resolver.md).
 11. [Views, scopes and weights](#11-views-scopes-and-weights)
 12. [The engine](#12-the-engine)
+13. [Dynamic updates](#13-dynamic-updates)
 
-Section 10 is kept for the package that writes it (transfers and dynamic updates); the resolver side has its own page, [dns-resolver.md](dns-resolver.md).
+The resolver side has its own page, [dns-resolver.md](dns-resolver.md).
 
 All routes are under `/api/v1` and exist only while the DNS module runs (OPS-25); otherwise they answer 404 `sys.route_not_found`. Reads need the scope `dns.read`, changes `dns.write`, everything on keys `dns.keys` (section 6). Every change is committed with its audit record in one write, and every change of the DNS data appears on the event topic `dns`.
 
@@ -915,3 +912,142 @@ M18 (`2026-10-17-m18-zone-load.md`): the index holds 926 MiB for 7.2 M RRsets (1
 - A delta copies the overlay of each scope it touches, and folding an overlay into a new base is linear in the scope's size; very large zones with a high rate of dynamic updates (M21) may need an incremental base later. The same work slows a large zone file import into a serving node: at 7.2 M RRsets the import takes 49 percent longer on Windows and 85 percent longer with the musl allocator than without the role (M18). An incremental base, or a bulk path that builds a zone's base once when an import replaces it, would remove that.
 - The role builds its index from one image of all its rows: at start the image and the index are both in memory (3.7 GiB and 0.9 GiB at 7.2 M RRsets), and the allocator keeps part of the image after it is freed (the node's RSS after a start with 7.2 M RRsets is 1.7 GiB above an empty node on Windows, 2.3 GiB with musl). Building the index from the store's rows in pages would lower that peak.
 - `SO_REUSEPORT` spreads by flow hash: a load generator with few sockets reaches only some workers (section 12.2).
+
+## 13. Dynamic updates
+
+Clients change the records of a primary zone with RFC 2136 updates: `nsupdate`, a DHCP server's DDNS, a Windows host that registers its name (DNS-11, TGL-09). Each update is checked by the `dns` role (TSIG, the access lists, the prerequisites), written as one change set through the zone service with the origin `dynamic`, and answered once the index the role answers from holds it (plan sections 2.4 and 2.5). The engine never writes zone data itself: on the single node of Phase 2 the change set is a function call into the zone service of the controller's process; in Phase 5 a `dns` node without a controller sends the same change set over the cluster channel (`Dns.Update`, ADR 0017) and nothing else changes. The code is `tenko_dns::update`: `message` (the message), `policy` (who may update), `prereq` (the prerequisites) and `apply` (the change set).
+
+### 13.1 The message
+
+An UPDATE is a message with opcode 5 over UDP or TCP on the `[dns] listen` ports (also over DoT and DoH, which carry the same messages). The listeners hand it to the update path before the resolver sees it, off the query path: an ordinary query pays one comparison of its opcode and allocates nothing more (section 12.9). The four sections are the zone (one record of type SOA naming the zone, class IN), the prerequisites, the updates and the additional records (OPT and TSIG; anything else is ignored). The format rules of RFC 2136 sections 2.4, 3.2 and 3.4.1 apply:
+
+| Answer | When |
+|---|---|
+| FORMERR | The zone section is not one SOA question; a prerequisite has a TTL other than 0, data where its class allows none, or a class the RFC does not allow; an update adds a meta type (ANY, AXFR, IXFR, OPT, TSIG and the rest of 128 to 255), or deletes with a TTL other than 0 or with data where class ANY allows none; the TSIG record is not the last record; octets follow the last record; a TSIG MAC is shorter than half the hash or 10 octets |
+| NOTZONE | A name of a prerequisite or an update is outside the zone of the zone section |
+| NOTAUTH | The class is not IN; the zone is not a zone of this node; the TSIG does not verify (with the TSIG error, section 13.2) |
+| NOTIMP | A node whose role runs without the zone service (no update path): the resolver answers every opcode but QUERY so |
+
+The answer carries the zone section of the request, an OPT record with an extended error (RFC 8914) that says why when the request carried EDNS, and a TSIG record signed in the MAC chain when the request was signed.
+
+### 13.2 Who may update: the policy and the profile defaults
+
+A zone's `update` policy (the `DnsUpdatePolicy` of the API):
+
+| Field | Default | Meaning |
+|---|---|---|
+| `allowed` | none | The access lists (section 6) whose clients may update the zone. None means nobody |
+| `require_tsig` | `true` | An update must be signed with a key that an allowing `key` entry of the lists names |
+| `may_replace_ipam` | `false` | An update may change an RRset whose origin is `ipam` (section 13.4) |
+
+An update is checked in this order, and the first failure answers:
+
+1. TSIG, when the message carries a TSIG record: the key must be known and the MAC and the time must verify, in the order of section 10.2; BADKEY, BADSIG and BADTIME answer NOTAUTH with the TSIG error (a BADTIME answer is signed and carries the server's time).
+2. The zone must be a primary zone this node serves; another name is NOTAUTH, a secondary zone REFUSED ("send updates to its primary"; Tenko does not forward updates).
+3. An access list of `allowed` must allow the client by its address and its key (the first matching entry of a list decides). Without one the answer is REFUSED.
+4. Where a signature is required, the key must be one that an allowing `key` entry names; an unsigned update or one with another key is REFUSED.
+
+REFUSED carries the extended error 18 (Prohibited) with the reason, and is audited as `dns.update.refuse` with the code `dns.update.refused` (section 13.7). Whether a signature is required follows the zone's `require_tsig` under the security profile in force (TGL-09):
+
+| Profile | A zone without `allowed` | The signature |
+|---|---|---|
+| Home | No external update at all | As the zone says (`require_tsig`, on by default) |
+| Standard | No update | As the zone says: TSIG by default |
+| Hardened | No update | Always: an unsigned update is refused even when the zone switched `require_tsig` off. GSS-TSIG for AD zones is Phase 4 |
+| Lab | No update | Never required: an unsigned update from an address the lists allow passes; a list that names only keys still asks for its key |
+
+A zone overrides the default by naming access lists in `allowed` (every profile), and in Home and Standard by switching `require_tsig` off; Hardened and Lab hold their rule for the signature whatever the zone says. The settings tab of a primary zone in the web UI has the section "Dynamic updates" with the access lists, the two switches and the profile's rule beside them. TGL-09 concerns updates from external clients; the DDNS path of Tenko DHCP (Phase 3) is internal (DHCP-13).
+
+```
+PATCH /api/v1/dns/zones/{id}
+{"update": {"allowed": ["0190d1c2-..."], "require_tsig": true, "may_replace_ipam": false}}
+```
+
+### 13.3 Prerequisites
+
+The prerequisites of RFC 2136 section 3.2 are tested in order against the zone in the scope the client's view chooses (DNS-20), as for its queries:
+
+| Prerequisite | Record | Fails with |
+|---|---|---|
+| RRset exists (value independent) | class ANY, the type, no data | NXRRSET |
+| RRset exists (value dependent) | the zone's class, the records | NXRRSET |
+| RRset does not exist | class NONE, the type | YXRRSET |
+| Name is in use | class ANY, type ANY | NXDOMAIN |
+| Name is not in use | class NONE, type ANY | YXDOMAIN |
+
+The records of a value-dependent prerequisite with one name and type form one temporary RRset, compared with the zone's in canonical form (names lowercase, without duplicates, in any order). A name is in use when it owns at least one record; an empty non-terminal is not, and wildcards do not apply. The prerequisites are tested first against the index the node serves, so that a failing update costs no write, and again under the commit against the store with the changes of the updates before it in the same write (section 13.5), with the RRsets they read expected unchanged by the write. A failing prerequisite answers its RCODE with the extended error naming the name, and changes nothing.
+
+### 13.4 The change set and the origin rules
+
+The update section runs in order (RFC 2136 section 3.4.2):
+
+- **Add** (the zone's class): the record joins its RRset, and the RRset takes the update's TTL. A CNAME or DNAME replaces the one record of its set. A CNAME is ignored at a name that holds other data, and other data at a name that holds a CNAME (RRSIG and NSEC aside). An SOA is ignored: Tenko writes the SOA from the zone settings and moves the serial itself.
+- **Delete an RRset** (class ANY, a type): the SOA and the NS set at the apex are kept.
+- **Delete a name** (class ANY, type ANY): every RRset of the name; at the apex the SOA and the NS set stay, and the signer's rows (origin `dnssec`) follow the change by themselves.
+- **Delete a record** (class NONE): the record leaves its RRset, and an RRset left empty is deleted; the SOA and the last NS record of the apex are kept.
+
+An update that changes nothing (a deletion of what is not there) is answered NOERROR and writes nothing. Every RRset an update changes carries the origin `dynamic` and, in `key`, the name of the TSIG key that signed it (none for an unsigned update in the Lab profile); an update that adds a record to an RRset of origin `manual` makes the whole RRset `dynamic`, since the RRset is the unit of ownership. The origin rules of plan section 2.5:
+
+| Existing origin | An update |
+|---|---|
+| `manual`, `dynamic`, `dhcp`, `ad` | May change it |
+| `ipam` | Only when the zone's `may_replace_ipam` allows it; otherwise the update is REFUSED with `dns.update.refused` and the extended error names the first such RRset ("host.example.test A belongs to IPAM; ...") |
+| `transfer`, `dnssec` | Never: REFUSED |
+
+In a zone signed online (WP6.3, [dnssec.md](dnssec.md)) the types the signer writes (DNSKEY, RRSIG, NSEC, NSEC3, NSEC3PARAM, CDS, CDNSKEY) are refused as well, and every accepted change is signed again by the signer like any other change of the zone. The result is checked with the rules of the model (section 3): an RRset of at most 4,096 records, a CNAME alone at its name, the apex with its SOA and NS. A rule that the result breaks fails the update mid-way: SERVFAIL with the rule in the extended error, and nothing of the update is written (RFC 2136 section 3.4.2.7).
+
+### 13.5 The answer path
+
+The updates of one zone are serialised: one task per zone takes what waits for the zone, up to 256 updates, plans them in order against one view of the store (each sees the changes of those before it, and each is all or nothing) and commits them as one change set through the zone service: the changes, one serial step per scope by the zone's serial policy, one journal entry per scope (so IXFR and NOTIFY carry the change, section 10), and one `dns.update.apply` audit record per update that changed something. A burst therefore costs one commit, not one per update (risk R52). Then:
+
+- **NOERROR** only once the index the node answers from holds the commit, so that a client's next query, or the prerequisites of its next update, see the change. The wait is at most 2 seconds; an update still not served then is answered SERVFAIL with the extended error 14 (Not Ready), and the node logs it. The change is committed and is served shortly after.
+- **SERVFAIL** when the store refuses the write: no quorum (OPS-26), a refused batch. The extended error names the store's code (`the store refused the write (sys.store.no_quorum)`), nothing is written, and the client retries as RFC 2136 clients do. The health view says why the store refuses. More than 4,096 updates waiting for one zone are answered SERVFAIL as well.
+
+The metrics:
+
+| Metric | Labels | What |
+|---|---|---|
+| `tenko_dns_updates_total` | `outcome`: `ok`, `prerequisite`, `refused`, `notauth`, `formerr`, `failed` | Updates by the outcome of their answer |
+| `tenko_dns_update_duration_seconds` | | From the arrival of an update to its answer (1 ms to 5 s buckets) |
+
+### 13.6 TSIG keys for clients, and `nsupdate`
+
+A client signs with a TSIG key of section 6: the same name, algorithm and secret on both sides. Create the key in Tenko (`tenko dns key create update.example.test` prints the secret once) or import the client's secret (`POST /dns/keys` with `secret`), and name it in an access list of the zone's `update.allowed`:
+
+```
+tenko dns key create update.example.test
+tenko dns acl create updaters --entry key:update.example.test
+```
+
+Then, with the list in the zone's update policy (API or web UI), from the client (the commands on standard input):
+
+```
+nsupdate -y hmac-sha256:update.example.test:<secret in base64>
+> server 192.0.2.53 53
+> zone example.test
+> prereq nxdomain printer.example.test
+> update add printer.example.test 300 IN A 192.0.2.30
+> send
+```
+
+`nsupdate -k` with a key file works the same; `-v` sends over TCP. A failure prints the RCODE (`update failed: REFUSED`, `YXDOMAIN`, ...); with EDNS the reason is in the extended error of the answer. The records written are listed in the zone's records with the origin `dynamic` and the key's name.
+
+### 13.7 Audit
+
+| Audit action | When |
+|---|---|
+| `dns.update.apply` | An update changed the zone: the client, the key, the zone, the counts of prerequisites and updates, the records added and removed, the RRsets changed, and the serial; never the data. Written in the same commit as the change |
+| `dns.update.refuse` | An update was refused (the policy, the TSIG key, an origin rule): the client, the key, the zone, the code `dns.update.refused` and the reason; at most once a minute per client, so that a scan cannot fill the audit log |
+
+### 13.8 The lab and M21
+
+The round `update` of [`deploy/compose/lab-dns`](../deploy/compose/lab-dns/README.md) runs `nsupdate` from the lab's client container against a Tenko zone: add, a failing prerequisite, replace, TCP and delete, each seen by `dig` at once; and the refusals without the key, with a wrong secret and of an address IPAM manages. The measurement M21 (1,000 updates per second sustained for 60 seconds, the p99 from the send of an update to its answer under 250 ms) is `bench/phase2-dns/scripts/run-m21-update.sh` with the load generator `crates/tenko-dns/examples/update_load.rs`; the results are in `bench/phase2-dns/results/`.
+
+### 13.9 Limits
+
+- Updates are accepted for primary zones only; Tenko does not forward an update for a secondary zone to its primary (RFC 2136 section 6), it refuses it.
+- GSS-TSIG (the signature of Windows hosts in AD zones, RFC 3007 with RFC 3645) is Phase 4; until then a Windows host updates a zone in Tenko only with a TSIG key or, in the Lab profile, unsigned.
+- An update of the SOA is ignored rather than applied: the SOA follows the zone settings.
+- The prerequisites of an update read the RRsets of its names as the store holds them under the commit, and the write expects those RRsets unchanged; an RRset of another type that a concurrent write of the API creates at a name that should not be in use, in the same moment, is not caught by that expectation.
+- The `dns` role serves updates when it runs in the controller's process (Phase 2); the `Dns.Update` message of a remote node is Phase 5.
+- No per-client rate limit applies to updates beyond the queue of 4,096 per zone; a storm from one client is bounded by its access list and its key.

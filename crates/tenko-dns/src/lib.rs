@@ -63,6 +63,8 @@ pub mod tsig;
 pub mod xfr;
 // WP6.3: DNSSEC signing on the controllers.
 pub mod dnssec;
+// WP6.2: dynamic updates (RFC 2136).
+pub mod update;
 
 pub use codec::{AnswerBuf, Codec, CodecError, DomainCodec, Request};
 pub use feed::{DnsData, MemFeed, ZoneFeed};
