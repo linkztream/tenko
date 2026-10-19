@@ -1,23 +1,124 @@
 # Proxmox VE container scripts
 
 Scripts that create an LXC container on a Proxmox VE host and set it up for one purpose, in
-one command. Today there is one: `ct/tenko-ci-runner.sh`, the self-hosted GitHub Actions
-runner for the Linux jobs of this repository ([../../.github/runner/README.md](../../.github/runner/README.md)
-is its runbook). The runner container is not a Tenko installation; that one is described by
-hand in [../README.md](../README.md), section "LXC".
+one command. There are two: `ct/tenko.sh`, a Tenko DDI node (section "The Tenko container"
+below), and `ct/tenko-ci-runner.sh`, the self-hosted GitHub Actions runner for the Linux
+jobs of this repository ([../../.github/runner/README.md](../../.github/runner/README.md) is
+its runbook), which is a build machine, not a Tenko installation.
 
-Everything that runs on the hypervisor is in this directory; nothing is fetched from
-anywhere else. The only tools used on the host are the ones Proxmox VE ships (`pct`,
-`pveam`, `pvesm`, `pvesh`, `whiptail`, `curl`).
+Everything that runs on the hypervisor is in this directory and in `../install.sh`, which
+the Tenko script pushes into its container. The only tools used on the host are the ones
+Proxmox VE ships (`pct`, `pveam`, `pvesm`, `pvesh`, `whiptail`, `curl`).
 
 | Path | What it is |
 |---|---|
+| `ct/tenko.sh` | The Tenko container's host-side script: its defaults, hooks, final lines and `--update` |
+| `install/tenko-install.sh` | The Tenko container side: runs `../install.sh` unattended with the answers |
 | `ct/tenko-ci-runner.sh` | The runner's host-side script: its defaults, hooks and final lines |
 | `install/tenko-ci-runner-install.sh` | The runner's container-side install; also runs by hand |
 | `lib/host.sh` | The generic host flow: settings and dialogs, template, `pct create`, wait, push and run, update mode, dry run |
 | `lib/container.sh` | The generic container-side helpers of the install scripts |
 | `lib/common.sh` | Messages, the quiet/verbose switch, the runner release lookup |
 | `test/` | The checks; `bash deploy/proxmox/test/run.sh` runs them all |
+
+## The Tenko container
+
+`ct/tenko.sh` creates a container and installs a Tenko node in it with
+[`../install.sh`](../README.md#install-in-one-command), unattended, from the answers given
+on the host.
+
+**What it creates.** An unprivileged Ubuntu 24.04 container (the newest
+`ubuntu-24.04-standard` template, downloaded when missing) with 2 cores, 2 GiB memory,
+512 MiB swap, an 8 GB root disk, one bridged NIC (`eth0` on `vmbr0`, DHCP, or `--ip` and
+`--gw`), start on boot, the tag `tenko`, and `features: nesting=1`: the systemd 255 of
+Ubuntu 24.04 and the unit's sandbox (`PrivateTmp=`, `ProtectSystem=`, its own mount
+namespace) need nesting in an unprivileged container; `keyctl` is not needed. The node
+idles at about 85 MiB; give the container more memory and cores for zones of a few hundred
+thousand records, DNSSEC signing of large zones and big imports, and put the root disk on
+SSD or NVMe storage (OPS-19). In it, `install/tenko-install.sh` runs `install.sh --yes` with
+the answers: the binary, the account, `/etc/tenko`, the key-encryption key, the unit, the
+start and, with an administrator, first-run setup. Inside an unprivileged container the
+installer turns systemd-resolved's stub listener off when the dns role answers on every
+address, and chooses the plain key file when the key cannot be sealed or does not reach the
+service there (deploy/README.md, "The key-encryption key on each kind of host").
+
+**Port 53.** The unit's `AmbientCapabilities=CAP_NET_BIND_SERVICE` works in an unprivileged
+container: the capability counts in the container's user namespace, which owns its network
+namespace, so the dns role binds port 53 on the container's addresses without a change of
+`net.ipv4.ip_unprivileged_port_start`; the dns role has run this way in an unprivileged
+Proxmox container. When the unit fails with status 226/NAMESPACE or 218/CAPABILITIES in a
+container without nesting, ../README.md, "LXC", has the drop-in that relaxes only the
+failing options.
+
+**Running it**, as root on the Proxmox host. While the repository is private, copy the
+binary to the host (a release asset or your musl build) and give it with `--binary`; it is
+pushed into the container with `pct push`:
+
+```bash
+# From a checkout of the repository on the host:
+bash deploy/proxmox/ct/tenko.sh --binary /root/tenko-0.2.0-linux-x86_64
+
+# The same, unattended, with a static address and first-run setup (Home: a PIN):
+read -rs TENKO_ADMIN_PASSWORD && export TENKO_ADMIN_PASSWORD     # type the PIN
+bash deploy/proxmox/ct/tenko.sh --yes --binary /root/tenko-0.2.0-linux-x86_64 \
+  --ip 192.0.2.60/24 --gw 192.0.2.1 --admin admin --storage local-lvm
+
+# In one command, without a checkout: GITHUB_TOKEN is a fine-grained token that can read
+# the contents; it fetches the scripts and, without --binary, the release in the container.
+bash -c "$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" https://raw.githubusercontent.com/linkztream/tenko/main/deploy/proxmox/ct/tenko.sh)"
+
+# Once the repository is public, from the release asset (pinned to the scripts of its tag):
+bash -c "$(curl -fsSL https://github.com/linkztream/tenko/releases/latest/download/tenko-proxmox.sh)"
+```
+
+The dialog shows the container settings and the Tenko answers together; "Create" takes
+them, "Advanced" asks each one. With an administrator named, a password box asks for the
+password (or the PIN under Home); empty leaves setup to the browser. The last lines on the
+host are the container ID, its address, the URL and the setup token (or the
+administrator), and the commands to update and to snapshot. Snapshot the container before
+every upgrade: `pct snapshot <ctid> <name>`.
+
+| Option or variable | Default | Meaning |
+|---|---|---|
+| `--binary <file>` / `var_binary` | empty: download in the container | A binary on the host, pushed into the container |
+| `--ip`, `--gw` / `var_ip`, `var_gateway` | `dhcp` | The container's address |
+| `--ctid`, `--storage`, `--hostname` | the generic defaults below | The container's ID, root disk storage and host name (`tenko`) |
+| `--admin <name>` / `var_admin` | empty | First-run setup with this administrator; the password from `TENKO_ADMIN_PASSWORD` or a password box |
+| `--version` / `var_tenko_version` | `latest` | The release to download |
+| `--yes` / `var_unattended=yes` | | No dialogs |
+| `--dry-run` / `TENKO_DRY_RUN=1` | | Print the Proxmox commands instead of running them |
+| `--update <ctid>` | | The installer again in that container (below) |
+| `var_roles` | `controller,dns` | `install.sh --roles` |
+| `var_modules` | `wizard` | `--modules` |
+| `var_profile` | `home` | `--profile` |
+| `var_tenko_host` | the container's host name | `--host-name` |
+| `var_dns_address` | `all` | `--dns-address` |
+| `var_forwarders` | empty: the container's resolvers | `--forwarders` |
+| `var_language` | `en` | `--language` |
+| `var_kek` | `auto` | `--kek` |
+| `GITHUB_TOKEN` | empty | Fetches the scripts in the one-command form; without `--binary` it goes to the container on the install script's standard input for the download, and nowhere else |
+
+The generic settings of `lib/host.sh` (section "Settings") apply too, with the Tenko
+defaults `var_cpu=2`, `var_ram=2048`, `var_disk=8`, `var_tags=tenko`, `var_nesting=1`,
+`var_keyctl=0`. Without `--binary`, without a token and with a private repository the
+settings are refused before anything is created. The exit statuses are those of the
+runner script; 9 from the container means the node runs but setup failed.
+
+**Upgrade.** From the host, the installer again in the container, with a newer binary
+pushed or a newer release downloaded; it keeps the container's configuration, key and data
+and upgrades through the updates layout:
+
+```bash
+pct snapshot 120 before-0.3.0
+bash deploy/proxmox/ct/tenko.sh --update 120 --binary /root/tenko-0.3.0-linux-x86_64
+```
+
+Inside the container, the same script (the one-command form, or a checkout there) runs
+`install.sh` again instead of creating anything. Updates installed from the web UI work in
+the container as on any systemd host.
+
+**A virtual machine** needs no script here: create the VM, install Debian 12, Ubuntu 24.04
+or a RHEL 9 compatible in it, and run `install.sh` (../README.md, "Install in one command").
 
 ## What the runner script creates
 
@@ -250,17 +351,33 @@ matches its SHA-256, and Docker only from Docker's signed apt repository. More i
 ## Testing
 
 ```bash
-bash deploy/proxmox/test/run.sh     # as root in WSL or on Linux with Docker; --no-container skips (c)
+bash deploy/proxmox/test/run.sh     # as root in WSL or on Linux with Docker; --no-container skips (c), (e) to (g)
+TENKO_TEST_BINARY=<musl tenko> TENKO_TEST_NEWER=<the same, a higher version> \
+  TENKO_TEST_IMAGE_VERSION=<x.y.z> bash deploy/proxmox/test/run.sh
 ```
 
-(a) `bash -n` and shellcheck over every script; (b) the host flow under `TENKO_DRY_RUN=1
-var_unattended=yes` (`test/dry-run-test.sh`): the printed commands, the token and password
-in none of them, the by-hand lines without a token, an invalid setting refused, the
-one-command bootstrap against a loopback server; (c) the install script in a throwaway
-`ubuntu:24.04` container (`test/container-test.sh`, with `TENKO_INSTALL_TEST=1`, since that
-container has no systemd and no Docker daemon); (d) the parsers against the fixtures in
-`test/fixtures/` (`test/unit-test.sh`). The real end-to-end run is the one on the Proxmox
-host.
+(a) `bash -n` and shellcheck over every script and `../install.sh`; (b) the host flows of
+both ct scripts under `TENKO_DRY_RUN=1 var_unattended=yes` (`test/dry-run-test.sh`): the
+printed commands, the tokens and passwords in none of them, the by-hand lines without a
+token, invalid settings refused, the one-command bootstrap against a loopback server, and
+for `ct/tenko.sh` the container options, the pushed installer and binary, the answers
+passed to the install script, the download with a token and `--update`; (c) the runner's
+install script in a throwaway `ubuntu:24.04` container (`test/container-test.sh`, with
+`TENKO_INSTALL_TEST=1`, since that container has no systemd and no Docker daemon); (d) the
+parsers against the fixtures in `test/fixtures/` and the settings of `ct/tenko.sh`
+(`test/unit-test.sh`); (e)
+`test/install-sh-test.sh`: the parsers of `install.sh` always and, with a binary,
+`install.sh --no-start` in `ubuntu:24.04`, `debian:12-slim` and
+`rockylinux/rockylinux:9-minimal` with `tenko serve` started by hand until `tenko health`
+answers, the rerun, `--reconfigure`, `--uninstall` and `--purge`, the downloads against a
+loopback server (a wrong checksum refused, the token in no argument list), and with a newer
+binary the whole life in a systemd container: setup, the stub listener of systemd-resolved
+turned off and on again, the upgrade through the layout, the
+plain-key fallback and an installation made by hand; (f) `install/tenko-install.sh` in a
+throwaway container (`test/tenko-container-test.sh`); (g) the compose quick start
+(`test/quickstart-test.sh`) on a local image tagged as the published name. The CI job
+`deploy-scripts` runs `run.sh --no-container` on every push. The real end-to-end runs are
+the ones on the Proxmox host and on a VM.
 
 ## Writing another ct script
 
@@ -280,13 +397,18 @@ A `ct/` script is the runner script with other values; `lib/host.sh` does the re
    (prints the secrets, which reach the install script on standard input),
    `after_install` (sees `TENKO_INSTALL_RC`), `final_lines` (what the owner does next),
    and `update_script` (update mode inside the container); `TENKO_INSTALL_OK_CODES` lists
-   the install exit statuses that are not a failure (default `0`);
+   the install exit statuses that are not a failure (default `0`), and
+   `TENKO_PUSH_FILES` the extra files to push before the install script runs and to remove
+   after it, as `<host path>|<container path>` (`ct/tenko.sh` pushes `../install.sh` and a
+   binary given on the host);
 5. ends with `tenko_main "$@"`.
 
 Its install script sources `container.sh` as the runner's does, calls
 `tenko_container_init`, reads secrets with `tenko_read_secret`, fetches release assets with
 `tenko_verified_download`, adds apt repositories with `tenko_deb822_repo`, and reports with
-`msg_info`/`msg_ok`/`msg_warn`, quieting command output with `$STD`. A Tenko installer
-(`ct/tenko.sh` with `install/tenko-install.sh`) is that copy with other defaults (fewer
-cores, a smaller disk, no nesting needed) and an install that places the static binary and
-the unit of `deploy/systemd/`.
+`msg_info`/`msg_ok`/`msg_warn`, quieting command output with `$STD`. `ct/tenko.sh` with
+`install/tenko-install.sh` is such a copy: other defaults (fewer cores, a smaller disk), an
+extended bootstrap that also fetches `../install.sh`, `--update <ctid>` on the host, and an
+install script that only maps the answers to the flags of `install.sh`. Its variables are
+named `TENKO_INSTALL_*`: `tenko` reads `TENKO_ROLES`, `TENKO_KEK` and other names of its
+configuration keys from the environment, so an install script must not export them.

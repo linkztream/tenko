@@ -25,6 +25,7 @@ TENKO_E_NETWORK=7 TENKO_E_INSTALL=8 TENKO_E_POST_INSTALL=9
 TENKO_PHASE=1             # the exit code the error trap uses for the step that is running
 TENKO_CREATED_CTID=""     # set once pct create succeeded in this run
 TENKO_TMP_FILES=()        # removed on exit
+TENKO_PUSH_FILES=()       # extra files push_and_run pushes, "<host path>|<container path>"
 
 tenko_dry() { [[ "${TENKO_DRY_RUN:-0}" == "1" ]]; }
 tenko_unattended() { [[ "${var_unattended:-no}" == "yes" ]]; }
@@ -477,17 +478,25 @@ start_and_wait() {
 }
 
 # push_and_run: pushes lib/common.sh, lib/container.sh and install/<TENKO_INSTALL>.sh to
-# /root/, runs the install script with the settings of the install_env hook as KEY=value
-# arguments to env and the output of the install_stdin hook (the secrets) on its standard
-# input, and removes the files again. An exit status outside TENKO_INSTALL_OK_CODES fails
-# the run; the status is kept in TENKO_INSTALL_RC for the after_install hook.
+# /root/, and the extra files of TENKO_PUSH_FILES, runs the install script with the
+# settings of the install_env hook as KEY=value arguments to env and the output of the
+# install_stdin hook (the secrets) on its standard input, and removes the files again. An
+# exit status outside TENKO_INSTALL_OK_CODES fails the run; the status is kept in
+# TENKO_INSTALL_RC for the after_install hook.
 push_and_run() {
   TENKO_PHASE=$TENKO_E_INSTALL
-  local root="${TENKO_ROOT:-$(dirname "$TENKO_LIB_DIR")}" envs=() line f rc=0
+  local root="${TENKO_ROOT:-$(dirname "$TENKO_LIB_DIR")}" envs=() line f rc=0 extra=()
   local files=("${TENKO_LIB_DIR}/common.sh" "${TENKO_LIB_DIR}/container.sh" "${root}/install/${TENKO_INSTALL}.sh")
   for f in "${files[@]}"; do
     [[ -f "$f" ]] || die "$TENKO_E_INSTALL" "Missing ${f}"
     pve pct push "$var_ctid" "$f" "/root/${f##*/}" || die "$TENKO_E_INSTALL" "pct push of ${f##*/} failed"
+  done
+  # Extra files of the ct/ script, "<host path>|<container path>" (another installer, a
+  # binary given on the host).
+  for f in "${TENKO_PUSH_FILES[@]}"; do
+    [[ -f "${f%%|*}" ]] || die "$TENKO_E_INSTALL" "Missing ${f%%|*}"
+    pve pct push "$var_ctid" "${f%%|*}" "${f#*|}" || die "$TENKO_E_INSTALL" "pct push of ${f%%|*} failed"
+    extra+=("${f#*|}")
   done
   envs+=("TENKO_VERBOSE=${var_verbose}")
   if declare -F install_env >/dev/null; then
@@ -501,7 +510,7 @@ push_and_run() {
   else
     pve pct exec "$var_ctid" -- env "${envs[@]}" bash "/root/${TENKO_INSTALL}.sh" </dev/null || rc=$?
   fi
-  pve pct exec "$var_ctid" -- rm -f /root/common.sh /root/container.sh "/root/${TENKO_INSTALL}.sh" </dev/null ||
+  pve pct exec "$var_ctid" -- rm -f /root/common.sh /root/container.sh "/root/${TENKO_INSTALL}.sh" "${extra[@]}" </dev/null ||
     msg_warn "Could not remove the install files from /root/ in container ${var_ctid}"
   # shellcheck disable=SC2034 # Read by the after_install hook of the ct/ script.
   TENKO_INSTALL_RC="$rc"

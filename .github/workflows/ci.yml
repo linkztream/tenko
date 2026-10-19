@@ -451,6 +451,29 @@ jobs:
         # macvlan network over a dummy parent interface.
         run: sudo -E env "PATH=$PATH" deploy/compose/smoke-macvlan.sh
         timeout-minutes: 45
+      # WP6.6: deploy/install.sh on a host where systemd is PID 1: a fresh node (the key
+      # sealed where the service manager hands it to the service, a plain key file
+      # otherwise), the rerun that changes nothing, then --uninstall --purge. The controller
+      # role only, so that systemd-resolved of the runner keeps port 53.
+      - name: Installer on this host
+        run: |
+          set -euo pipefail
+          sudo bash deploy/install.sh --yes --uninstall --purge > /dev/null
+          sudo bash deploy/install.sh --yes --binary target/debug/tenko --roles controller \
+            --modules all --host-name tenko.example.test 2>&1 | tee "$RUNNER_TEMP/install.log" > /dev/null ||
+            { cat "$RUNNER_TEMP/install.log"; exit 1; }
+          cat "$RUNNER_TEMP/install.log"
+          grep -q 'The node is ready' "$RUNNER_TEMP/install.log"
+          sudo bash deploy/install.sh --yes --binary target/debug/tenko 2>&1 | tee "$RUNNER_TEMP/rerun.log" > /dev/null
+          grep -q 'nothing was changed' "$RUNNER_TEMP/rerun.log" || { cat "$RUNNER_TEMP/rerun.log"; exit 1; }
+          sudo bash deploy/install.sh --yes --uninstall --purge
+          {
+            echo "### install.sh"
+            echo
+            echo '```text'
+            grep -E 'key-encryption key|The node is ready' "$RUNNER_TEMP/install.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Remove the service install on a self-hosted runner
         # A hosted runner is thrown away; a self-hosted one would keep the unit, the
         # configuration and the binary of this run and start the next run from them.
@@ -523,6 +546,20 @@ jobs:
           path: fuzz/artifacts/
           if-no-files-found: ignore
           retention-days: 14
+
+  # WP6.6: the deploy scripts (deploy/install.sh, deploy/proxmox) on every push and pull
+  # request: bash -n and shellcheck, the host flows of the Proxmox scripts as dry runs, and
+  # the parser checks of both, without Proxmox and without the container tests
+  # (deploy/proxmox/README.md, Testing). Needs Docker for shellcheck, python3 and curl.
+  deploy-scripts:
+    name: Deploy scripts
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: deploy/proxmox/test/run.sh --no-container
+        run: bash deploy/proxmox/test/run.sh --no-container
 
   # Changelog rule (OPS-23). Every change to the product adds an entry under
   # "## [Unreleased]" in CHANGELOG.md, because that section becomes the release notes that

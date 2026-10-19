@@ -1241,6 +1241,17 @@ tenko health --url https://ddi.example.org:8443 --ca-file /var/lib/tenko/tls/ca-
 Keep `/srv/backup/tenko-20261009` until the new version has run for as long as you need to
 trust it. The staged file `/usr/local/bin/tenko-0.2.0` can be deleted.
 
+**The installer does steps 1, 2, 4, 5 and 6.** On a node installed with `deploy/install.sh`
+(deploy/README.md, "Install in one command"), running the same command again with a newer
+release, `--version 0.2.0` or `--binary tenko-0.2.0-linux-x86_64` is this procedure: it
+verifies a download against `SHA256SUMS`, stops the unit, runs `tenko upgrade check` with
+the new binary as the account `tenko` (0 and 10 go on; any other status starts the running
+version again, changes nothing and ends with status 8), installs the new binary as
+`/usr/local/bin/tenko` and starts the unit, whose `ExecStartPre=` switches the layout as in
+step 5, then waits for `tenko health`. It never touches the data directory, the key or
+`tenko.toml`, and the same version changes nothing. Step 3, the backup, and step 7 stay
+yours. In a Proxmox container `deploy/proxmox/ct/tenko.sh --update <ctid>` runs it there.
+
 ### 7.4 Windows service
 
 **With the MSI.** An installation from the MSI upgrades with the MSI of the new release:

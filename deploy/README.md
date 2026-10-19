@@ -16,8 +16,222 @@ without `controller` runs the probe role only, and exits with status 2 when it n
 | `Dockerfile` | Multi-stage build of the container image (build from the repository root) |
 | `compose/controller.example.yml` | The controller on a bridge network, key from a Docker secret |
 | `compose/macvlan.example.yml` | The same on a macvlan network, for the later DHCP role |
+| `install.sh` | The Linux installer: one command installs or upgrades a node (below) |
+| `compose/quickstart.example.yml` | The published image with the dns role, for the Docker quick start (below) |
+| `proxmox/` | Proxmox VE container scripts, the Tenko container among them, see [proxmox/README.md](proxmox/README.md) |
 | `windows/` | The Windows service, see [windows/README.md](windows/README.md) |
 | `windows/wix/`, `windows/build-msi.ps1` | The Windows MSI installer, see [windows/README.md](windows/README.md#msi-installer) |
+
+## Install in one command
+
+Three ways to a running node, each in one command, and the same command again upgrades it
+(OPS-01, OPS-13, OPS-14, OPS-23, OPS-24; the key-encryption key of IAM-15):
+
+- **A Linux machine** (a VM or a server with Debian 12, Ubuntu 24.04 or a RHEL 9
+  compatible, x86_64, systemd): `install.sh`.
+- **A Proxmox VE host**: `proxmox/ct/tenko.sh` creates an unprivileged container and runs
+  `install.sh` in it.
+- **Docker**: `compose/quickstart.example.yml` with the published image.
+
+A virtual machine needs no script of its own: install the distribution, then run
+`install.sh` in it as on any Linux machine.
+
+### A Linux machine
+
+While the repository is private, bring the binary along: copy the release asset
+`tenko-<version>-linux-x86_64` (or your own build, `target/x86_64-unknown-linux-musl/release/tenko`,
+see Build) and `install.sh` to the machine, then, as root:
+
+```
+bash install.sh --binary ./tenko-0.2.0-linux-x86_64
+```
+
+Downloaded from the release, the script fetches the binary itself and verifies it against
+the release's `SHA256SUMS`; for the private repository it needs a fine-grained token that
+can read the contents, which it sends to the GitHub API on curl's standard input only:
+
+```
+curl -fsSLO https://github.com/linkztream/tenko/releases/latest/download/install.sh
+bash install.sh                                   # public repository
+read -rs GITHUB_TOKEN && export GITHUB_TOKEN && bash install.sh   # private: paste the token
+```
+
+Run the file; piped into bash it still asks its questions on the terminal, but read it
+first. Without `--yes` it asks, with `whiptail` when installed and plain prompts otherwise:
+the roles, the modules, the security profile, the host name, the addresses and upstream
+resolvers of the dns role, the data directory, and an administrator for first-run setup
+(empty: setup in the browser with the setup token). On a rerun with an existing
+`/etc/tenko/tenko.toml` it asks nothing and keeps the file. Unattended, every answer is a
+flag:
+
+```
+printf '%s\n' "$ADMIN_PIN" | bash install.sh --yes --binary ./tenko-0.2.0-linux-x86_64 \
+  --roles controller,dns --host-name tenko.example.test --forwarders 192.0.2.1,192.0.2.2 \
+  --admin admin --password-stdin
+```
+
+Under the Home profile the first administrator signs in with a PIN (four or more digits,
+no simple pattern such as `1234`); the other profiles take a password.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--roles controller\|controller,dns` | `controller,dns` | The roles of the node |
+| `--modules wizard\|all\|<list>` | `wizard` | `ipam,dns,dhcp,discovery`; `wizard` leaves the choice to first-run setup |
+| `--profile home\|standard\|hardened\|lab` | `home` | The security profile ([../docs/SECURITY-PROFILES.md](../docs/SECURITY-PROFILES.md)) |
+| `--host-name <name>` | `hostname -f` | The name clients use: the certificate and the passkey ID; not an address |
+| `--dns-address all\|<addr>,...` | `all` | Where the dns role answers; port 53 unless given (`192.0.2.53`, `[2001:db8::53]:5353`) |
+| `--forwarders <addr>,...\|none` | the host's resolvers, loopback excluded | Upstream resolvers for names outside the zones |
+| `--data-dir <path>` | `/var/lib/tenko` | The data directory, on SSD or NVMe (OPS-19); another path gets a drop-in |
+| `--version latest\|<x.y.z>` | `latest` | The release to install |
+| `--language en\|sv` | `en` | The default UI language, with `--admin` |
+| `--admin <name>` | none | Complete first-run setup with this administrator |
+| `--password-stdin` | | The administrator's password or PIN from standard input (or `TENKO_ADMIN_PASSWORD`) |
+| `--binary <file>` | | Install this file instead of a download |
+| `--token <token>` | `GITHUB_TOKEN` | Token for the private repository (the variable keeps it out of the process list) |
+| `--repo <owner/name>` | `linkztream/tenko` | The GitHub repository |
+| `--release-url <url>` | | A directory with `SHA256SUMS` and the binary instead of GitHub (a mirror) |
+| `--kek auto\|sealed\|file` | `auto` | The key-encryption key, see below; `sealed` fails where sealing does not work |
+| `--keep-resolved-stub` | | Never turn off the stub listener of systemd-resolved |
+| `--reconfigure` | | Write `tenko.toml` again from the answers; the old file stays as `tenko.toml.<time>.bak` |
+| `--yes` | | No questions; the defaults for what no flag gives |
+| `--no-start` | | Everything except enabling and starting the service (containers without systemd) |
+| `--dry-run` | | Print every step, change nothing |
+| `--uninstall [--purge]` | | Remove the service and the binary; `--purge` also the data, `/etc/tenko` and the account |
+
+What it does, in this order:
+
+1. Checks the host: root, x86_64 (other architectures stop: there is no release binary for
+   them), the distribution (others get a warning), systemd as PID 1 and its version (250 or
+   later for encrypted credentials), `curl` when it downloads, `useradd`, and the ports:
+   8443/tcp, and 53 when the dns role is chosen. When systemd-resolved's stub listener
+   holds 127.0.0.53:53 and the dns role is to answer on every address, it asks (`--yes`
+   answers yes) to set `DNSStubListener=no` in `/etc/systemd/resolved.conf.d/tenko.conf`
+   and points `/etc/resolv.conf` at `/run/systemd/resolve/resolv.conf`, so the host keeps
+   resolving names; `--uninstall` puts both back. Any other program on port 53 stops it
+   with the program's name.
+2. Gets the binary: `--binary`, or the release asset `tenko-<version>-linux-x86_64`, kept
+   only when its SHA-256 is the one `SHA256SUMS` lists, and checked to report the version
+   asked for. The Linux asset is verified by `SHA256SUMS` only until a detached signature
+   exists (the SIGNING marks in the release workflow): a checksum from the same release
+   shows that the file is whole, not who published it.
+3. Installs it as `/usr/local/bin/tenko`, creates the account `tenko`, `/etc/tenko` (0750
+   root:tenko), the data directory (0700 tenko) and `/var/log/tenko`.
+4. Creates the key-encryption key (below), writes `/etc/tenko/tenko.toml` from the answers
+   (short, with the keys of `tenko.example.toml` it sets: `data_dir`, `roles`, `modules`,
+   `[profile]`, `[server] listen`, `[tls]` with the host name and `localhost` on the
+   certificate, `[dns] listen` and `forwarders`, and `[kek]` for a key file) and checks it
+   with `tenko config check`.
+5. Installs `systemd/tenko.service` unchanged (the script carries a copy; a test keeps the
+   two equal) with its drop-ins, enables and starts it, and waits until `tenko health`
+   reports the node ready.
+6. With `--admin`, completes first-run setup with `tenko setup`; otherwise it reads the
+   setup token. The closing lines name the URL, the CA root and its SHA-256, the setup
+   token or the administrator, the data directory, the key and how to back it up.
+
+**The key-encryption key on each kind of host.** The installer prefers the unit's sealed
+credential (section Linux: systemd): it encrypts a new key with `systemd-creds` into
+`/etc/tenko/kek.cred`, then proves with a transient unit, as the account `tenko` and in a
+sandbox, that the service manager hands it to a service, before the unit relies on it.
+Where either step fails it writes the key as a plain file and says why:
+
+| Host | Key |
+|---|---|
+| A VM or a server, systemd 250 or later | Sealed: `/etc/tenko/kek.cred`, host key (and TPM2 where present) |
+| An unprivileged LXC container (Proxmox) | A plain file where `systemd-creds` cannot seal there or the credential does not reach the service |
+| A Docker container with systemd (seen under WSL) | A plain file: `systemd-creds` seals, but the credential never reaches the service |
+| No systemd (`--no-start` in a container), systemd older than 250 | A plain file |
+| An installation made by hand without `/etc/tenko/kek.cred` | Kept as it is: `tenko.toml`'s `[kek]` decides, by default key generations in `<data_dir>/kek` |
+
+The plain file is `/etc/tenko/kek.key` (0640 root:tenko, 64 hexadecimal digits), outside
+the data directory, so a backup of the data does not carry it; `tenko.toml` names it in
+`[kek]` (`provider = "file"`), and the server warns at every start, by design. The unit
+stays as shipped: the drop-in `/etc/systemd/system/tenko.service.d/kek-file.conf` holds an
+empty `LoadCredentialEncrypted=` (which resets the unit's credential list) and
+`UnsetEnvironment=TENKO_KEK__PROVIDER TENKO_KEK__CREDENTIAL`, so that `tenko.toml` decides.
+A drop-in rather than an edited unit: a rerun replaces the unit with the released one and
+keeps the decision, and `systemctl cat tenko` shows both. When the first start of a fresh
+sealed key fails because the key did not arrive (status 243, or the `kek` step failing),
+the installer turns it into the plain file once and starts again; the server stopped at its
+first step and encrypted nothing. A key that exists is never replaced.
+
+**Seal a plain key later**, on a host where `systemd-creds` and credential delivery work,
+as root (the key keeps its identifier, so nothing is re-wrapped):
+
+```
+systemd-creds encrypt --name=tenko_kek /etc/tenko/kek.key /etc/tenko/kek.cred
+chmod 0600 /etc/tenko/kek.cred
+rm /etc/systemd/system/tenko.service.d/kek-file.conf
+# delete the [kek] section (provider = "file", path = ...) from /etc/tenko/tenko.toml
+systemctl daemon-reload && systemctl restart tenko
+journalctl -u tenko -n 50 | grep 'from a systemd credential'
+shred -u /etc/tenko/kek.key          # once the offline copy of the key is safe
+```
+
+**Run again: the upgrade.** With a newer binary (or `--version`, or a newer `latest`) the
+script stops the service, runs `tenko upgrade check` with the new binary on the stopped
+node as the account `tenko` (status 0 or 10 goes on; anything else starts the old version
+again and stops with status 8, nothing changed), installs the new binary as
+`/usr/local/bin/tenko` and starts the unit, whose `ExecStartPre=` (`tenko upgrade layout`)
+switches `updates/current` to it ([../docs/upgrades.md](../docs/upgrades.md) section 7.3).
+The data, the key and the configuration are not touched. The same version changes nothing
+and says so; a missing piece (the unit, the account) is put back. An older binary than the
+running one is kept aside: going back is a rollback (docs/upgrades.md section 7.6). Take a
+snapshot or a backup first, as for any upgrade.
+
+**Uninstall.** `bash install.sh --uninstall` stops and removes the unit, its drop-ins and
+`/usr/local/bin/tenko`, and keeps the data directory, `/etc/tenko` (the configuration and
+the key) and the account, so the same command installs it again with its data.
+`--uninstall --purge` also deletes those; without `--yes` it asks you to type `purge`.
+
+**Exit statuses** of `install.sh`: 0 done or nothing to change, 1 an unexpected failure, 2
+usage, 3 an unsupported host, 4 a port taken by another program, 5 the download or the
+checksum, 6 the configuration, 7 the service did not start or become ready, 8 the upgrade
+was refused, 9 first-run setup failed (the node runs), 10 cancelled at a question.
+
+### A Proxmox VE host
+
+On the host, as root, from a checkout (the binary copied to the host first):
+
+```
+bash deploy/proxmox/ct/tenko.sh --binary /root/tenko-0.2.0-linux-x86_64
+```
+
+It shows the container settings and the Tenko answers in one dialog ("Advanced" asks each),
+creates an unprivileged Ubuntu 24.04 container, pushes the binary and `install.sh` into it,
+runs the installer unattended and prints the container ID, its address, the URL and the
+setup token. `--update <ctid>` runs the installer again in that container, which upgrades
+it. [proxmox/README.md](proxmox/README.md), "The Tenko container", has the settings, the
+one-command form with a token and, once the repository is public, the release asset
+`tenko-proxmox.sh`.
+
+### Docker
+
+The published image `ghcr.io/linkztream/tenko:<version>` (amd64) with
+`compose/quickstart.example.yml`: the controller with the dns role, the state volume, ports
+8443 and 53 (UDP and TCP), the key-encryption key as a Docker secret. In an empty directory:
+
+```
+echo "$GHCR_TOKEN" | docker login ghcr.io -u <github user> --password-stdin   # while private
+cp <checkout>/deploy/compose/quickstart.example.yml compose.yml
+echo TENKO_VERSION=0.2.0 > .env
+umask 077 && mkdir -p secrets && openssl rand -hex 32 > secrets/tenko_kek
+sudo chown 65532:65532 secrets/tenko_kek && chmod 0400 secrets/tenko_kek
+docker compose up -d
+docker compose exec tenko tenko setup token
+```
+
+Then open `https://<host>:8443/` and enter the token. The login token is a classic personal
+access token with `read:packages`, or a fine-grained one that can read the package. Keep
+an offline copy of `secrets/tenko_kek`, and keep it off the data volume. When
+systemd-resolved runs on the Docker host, its 127.0.0.53:53 collides with port 53 published
+on every address: set `TENKO_DNS_BIND` in `.env` to the host's own address (the file's
+header explains it).
+
+**Upgrade.** Change `TENKO_VERSION` in `.env` and run `docker compose up -d`; the volume
+keeps the data, and the new version migrates it at its first start after copying the
+store aside (check first as in [../docs/upgrades.md](../docs/upgrades.md) section 7.5). The
+updates page of the web UI announces new versions and shows the pull command; it cannot
+install them in a container (`TENKO_UPDATES__CONTAINER=true`).
 
 ## Build
 
@@ -181,6 +395,9 @@ tenko prefix list
 
 ## Linux: systemd
 
+`install.sh` does all of this in one command, the key-encryption key and the upgrade included
+(section "Install in one command"); this section is what it does, by hand.
+
 `systemd/tenko.service` runs `tenko serve --config /etc/tenko/tenko.toml` as the
 unprivileged user `tenko`, `Type=notify` (the server sends `READY=1` once the API listens
 and `STOPPING=1` at shutdown), with the state in `/var/lib/tenko` (`StateDirectory=`,
@@ -296,6 +513,9 @@ disables the unit and removes the drop-ins it added; `KEEP=1` leaves everything 
 for inspection.
 
 ## Containers
+
+The quick start with the published image and the dns role is
+`compose/quickstart.example.yml` (section "Install in one command", Docker).
 
 The image runs `tenko serve` as the non-root user `nonroot` (65532) with no configuration
 file: the defaults plus `TENKO_*` variables, and `TENKO_DATA_DIR=/var/lib/tenko`. It
@@ -425,7 +645,9 @@ network; Docker Desktop does not give one.
 
 Tenko runs in a plain LXC container or a Proxmox VE container (an unprivileged one is the
 default there), installed from the Linux binary with the unit in `deploy/systemd` (see
-Linux: systemd above), not from the image. The cluster transport needs no special
+Linux: systemd above), not from the image. On Proxmox VE, `proxmox/ct/tenko.sh` creates the
+container and runs `install.sh` in it (section "Install in one command"), which also picks
+the key-encryption key that works there. The cluster transport needs no special
 capability. To check on a given host, from inside the container, in this order:
 
 - **API, store, cluster port.** These are ordinary TCP listeners and file I/O; they work in
@@ -487,9 +709,9 @@ capability. To check on a given host, from inside the container, in this order:
 Upgrades in LXC are binary upgrades with `tenko upgrade` as on any Linux host
 ([../docs/upgrades.md](../docs/upgrades.md)); take a snapshot of the container first.
 
-The Proxmox VE scripts in [proxmox/](proxmox/README.md) create the container of the
-self-hosted CI runner in one command; that container is a build machine, not a Tenko
-installation.
+The Proxmox VE scripts in [proxmox/](proxmox/README.md) create a Tenko container
+(`ct/tenko.sh`, section "Install in one command") and the container of the self-hosted CI
+runner (`ct/tenko-ci-runner.sh`), a build machine, not a Tenko installation.
 
 ### Smoke test of the macvlan example
 

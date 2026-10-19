@@ -153,6 +153,92 @@ out="$(env -u RUNNER_TOKEN -u GITHUB_TOKEN TMPDIR="$work" TENKO_SCRIPTS_URL="${u
 has "$out" "From a checkout on this host" "the message names the checkout way"
 has "$out" "In one command, with GITHUB_TOKEN" "the message names the one-command way"
 
+# ── ct/tenko.sh: the Tenko container ──────────────────────────────────────────────────────
+tenko_ct="${root}/ct/tenko.sh"
+fake_binary="${work}/tenko-0.0.1-linux-x86_64"
+printf 'not a real binary\n' >"$fake_binary"
+admin_password="admin-password-3e9f"
+release_token="release-token-for-the-test-6a0d"
+# tdry <env assignment>... -- <option>...: ct/tenko.sh in a dry run, unattended.
+tdry() {
+  local envs=()
+  while (($#)) && [[ "$1" != -- ]]; do envs+=("$1"); shift; done
+  shift
+  env -u GITHUB_TOKEN -u TENKO_ADMIN_PASSWORD TENKO_DRY_RUN=1 var_unattended=yes NO_COLOR=1 \
+    TENKO_LOG="${work}/tenko-host.log" "${envs[@]}" bash "$tenko_ct" "$@" </dev/null 2>&1
+}
+
+echo "== 6. ct/tenko.sh: a binary from the host, a static address, an administrator"
+rc=0
+out="$(tdry TENKO_ADMIN_PASSWORD="$admin_password" -- --binary "$fake_binary" --ip 192.0.2.60/24 --gw 192.0.2.1 --admin admin)" || rc=$?
+grep -E '^\[dry-run\] pct (create|push|exec)' <<<"$out" | sed 's/^/      /'
+((rc == 0)) && pass "exit 0" || fail "exit ${rc}: $(tail -n 5 <<<"$out")"
+create="$(grep -F '[dry-run] pct create ' <<<"$out")"
+for opt in "-hostname tenko" "-cores 2" "-memory 2048" "-swap 512" "-rootfs local-lvm:8" \
+  "-net0 name=eth0,bridge=vmbr0,ip=192.0.2.60/24,gw=192.0.2.1" "-unprivileged 1" "-features nesting=1" \
+  "-onboot 1" "-tags tenko" "-ostype ubuntu" "-description Tenko DDI"; do
+  has "$create" " ${opt}" "pct create has ${opt}"
+done
+lacks "$create" "keyctl" "no keyctl feature"
+lacks "$create" "-cpulimit" "no CPU limit"
+for f in common.sh container.sh tenko-install.sh; do
+  has "$out" "/${f} /root/${f}" "pct push ${f}"
+done
+has "$out" "/deploy/install.sh /root/install.sh" "pct push install.sh"
+has "$out" "[dry-run] pct push 100 ${fake_binary} /root/tenko-binary" "pct push of the binary given on the host"
+has "$out" "[dry-run] pct exec 100 -- env TENKO_VERBOSE=no TENKO_INSTALL_ROLES=controller,dns TENKO_INSTALL_MODULES=wizard TENKO_INSTALL_PROFILE=home TENKO_INSTALL_HOST_NAME=tenko TENKO_INSTALL_DNS_ADDRESS=all TENKO_INSTALL_VERSION=latest TENKO_INSTALL_LANGUAGE=en TENKO_INSTALL_KEK=auto TENKO_INSTALL_ADMIN=admin TENKO_INSTALL_BINARY=/root/tenko-binary bash /root/tenko-install.sh" \
+  "pct exec runs tenko-install.sh with the answers"
+has "$out" "(standard input: $((1 + ${#admin_password} + 1)) bytes, not shown)" "the password went to standard input (no token)"
+has "$out" "[dry-run] pct exec 100 -- rm -f /root/common.sh /root/container.sh /root/tenko-install.sh /root/install.sh /root/tenko-binary" \
+  "the pushed files are removed, the binary too"
+lacks "$out" "$admin_password" "the password appears nowhere in the output"
+lacks "$(cat "${work}/tenko-host.log" 2>/dev/null)" "$admin_password" "the password is not in the log"
+has "$out" "Web UI:        https://192.0.2.50:8443/" "final line: the URL"
+has "$out" "Administrator: admin" "final line: the administrator"
+has "$out" "--update 100" "final line: the update command"
+
+echo "== 7. ct/tenko.sh: a download in the container with a token"
+out="$(tdry GITHUB_TOKEN="$release_token" var_tenko_version=0.2.0 var_forwarders=192.0.2.1,192.0.2.2 var_roles=controller --)" || fail "exit $?"
+has "$out" "TENKO_INSTALL_ROLES=controller " "the roles"
+has "$out" "TENKO_INSTALL_VERSION=0.2.0 " "the version"
+has "$out" "TENKO_INSTALL_FORWARDERS=192.0.2.1,192.0.2.2 " "the forwarders"
+lacks "$out" "TENKO_INSTALL_BINARY=" "no binary pushed"
+lacks "$out" "/root/tenko-binary" "nothing pushed as the binary"
+has "$out" "(standard input: $((${#release_token} + 2)) bytes, not shown)" "the token went to standard input"
+lacks "$out" "$release_token" "the token appears nowhere in the output"
+has "$out" "Setup token:   pct exec 100 -- runuser -u tenko -- tenko setup token" "final line: how to read the setup token"
+
+echo "== 8. ct/tenko.sh: refusals"
+rc=0
+out="$(tdry var_roles=dns -- --binary "$fake_binary")" || rc=$?
+((rc == 2)) && pass "invalid roles: exit 2" || fail "invalid roles: exit ${rc}"
+has "$out" "var_roles: controller or controller,dns" "names the setting"
+lacks "$out" "pct create" "nothing created"
+rc=0
+out="$(tdry var_dns_address=tenko.example.test -- --binary "$fake_binary")" || rc=$?
+((rc == 2)) && has "$out" "var_dns_address:" "an address list with a name is refused" || fail "dns address: exit ${rc}"
+rc=0
+out="$(tdry -- --binary "${work}/missing")" || rc=$?
+((rc == 2)) && has "$out" "var_binary: no such file on this host" "a missing binary is refused" || fail "missing binary: exit ${rc}"
+rc=0
+out="$(tdry -- --ip 192.0.2.60/24)" || rc=$?
+((rc == 2)) && has "$out" "var_gateway: required with a static address" "--ip without --gw is refused" || fail "--ip alone: exit ${rc}"
+rc=0
+out="$(tdry -- --bogus x)" || rc=$?
+((rc == 2)) && has "$out" "Unknown option: --bogus" "an unknown option is refused" || fail "unknown option: exit ${rc}"
+
+echo "== 9. ct/tenko.sh --update: the installer again in an existing container"
+rc=0
+out="$(tdry -- --update 120 --binary "$fake_binary")" || rc=$?
+((rc == 0)) && pass "exit 0" || fail "exit ${rc}: $(tail -n 5 <<<"$out")"
+lacks "$out" "pct create" "nothing created"
+has "$out" "[dry-run] pct push 120 ${fake_binary} /root/tenko-binary" "the binary pushed"
+has "$out" "[dry-run] pct exec 120 -- env TENKO_VERBOSE=no TENKO_INSTALL_VERSION=latest TENKO_INSTALL_BINARY=/root/tenko-binary bash /root/tenko-install.sh" \
+  "only the version and the binary: the container keeps its configuration"
+rc=0
+out="$(tdry -- --update abc)" || rc=$?
+((rc == 2)) && pass "--update needs a container ID" || fail "--update abc: exit ${rc}"
+
 if ((failures > 0)); then
   echo "== dry run: ${failures} check(s) failed"
   exit 1

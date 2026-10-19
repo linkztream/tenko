@@ -1,0 +1,89 @@
+# Quick start: one Tenko DDI node in Docker, the controller with the dns role, from the
+# published image. Copy this file into an empty directory as compose.yml and adapt it;
+# deploy/README.md, "Install in one command", walks through it.
+#
+# 1. Log in to the registry while the repository is private (a classic personal access
+#    token with read:packages, or a fine-grained one that can read the package):
+#
+#      echo "$GHCR_TOKEN" | docker login ghcr.io -u <github user> --password-stdin
+#
+# 2. The version and the key-encryption key, once, in this directory:
+#
+#      echo TENKO_VERSION=0.2.0 > .env                # a release; pin it, do not use latest
+#      umask 077 && mkdir -p secrets
+#      openssl rand -hex 32 > secrets/tenko_kek
+#      sudo chown 65532:65532 secrets/tenko_kek       # the uid of the image's user
+#      chmod 0400 secrets/tenko_kek
+#
+#    secrets/tenko_kek is the key-encryption key of the vault. Keep an offline copy (a
+#    password manager): a data volume restored without its key cannot open its secrets.
+#    Keep it off the data volume; a key next to the data it protects protects nothing. The
+#    server warns about the file provider at every start, by design.
+#
+# 3. Start, then read the one-time setup token (it changes at every start until setup is
+#    complete) and open the URL:
+#
+#      docker compose up -d
+#      docker compose exec tenko tenko setup token
+#      https://<this host>:8443/
+#
+#    The browser warns about the certificate: it comes from Tenko's own CA. Install
+#    /var/lib/tenko/tls/ca-root.pem from the volume on admin clients
+#    (docker compose cp tenko:/var/lib/tenko/tls/ca-root.pem .).
+#
+# Upgrade: change TENKO_VERSION in .env and run `docker compose up -d`; the volume keeps the
+# data, and the new version migrates it at its first start after copying the store aside.
+# Check first with docs/upgrades.md section 7.5. The updates page of the web UI shows new
+# versions and the pull command; it cannot install them in a container.
+#
+# Port 53: Docker lets the unprivileged user of the image bind 53 inside the container. On
+# the host, systemd-resolved holds 127.0.0.53:53, which collides with a port published on
+# every address; set TENKO_DNS_BIND in .env to this host's own address (192.0.2.53 below is
+# an example) or turn the stub listener off (deploy/README.md, "DNS: the dns role and port
+# 53"). The addresses here are documentation addresses.
+
+name: tenko
+
+services:
+  tenko:
+    image: ghcr.io/linkztream/tenko:${TENKO_VERSION:?set TENKO_VERSION in .env, for example 0.2.0}
+    restart: unless-stopped
+    # The server finishes open requests, stops its jobs and makes the store durable.
+    stop_grace_period: 30s
+    ports:
+      - "8443:8443/tcp"
+      - "${TENKO_DNS_BIND:-0.0.0.0}:53:53/udp"
+      - "${TENKO_DNS_BIND:-0.0.0.0}:53:53/tcp"
+    environment:
+      TENKO_ROLES: controller,dns
+      # The key-encryption key comes from the Docker secret below, not from the data volume.
+      TENKO_KEK__PROVIDER: file
+      TENKO_KEK__PATH: /run/secrets/tenko_kek
+      # Tenko's internal CA issues the certificate; these names are on it until first-run
+      # setup stores the host name. localhost is for the image's health check.
+      TENKO_TLS__HOST_NAME: ${TENKO_HOST_NAME:-localhost}
+      TENKO_TLS__ALT_NAMES: localhost
+      # The bridge network of the container has no IPv6 unless Docker is set up for it.
+      TENKO_DNS__LISTEN: 0.0.0.0:53
+      # Upstream resolvers for names outside your zones; without them such names are refused.
+      # TENKO_DNS__FORWARDERS: 192.0.2.1,192.0.2.2
+    secrets:
+      - tenko_kek
+    volumes:
+      # The store fsyncs on every commit: the volume must be on SSD or NVMe (OPS-19).
+      - tenko-data:/var/lib/tenko
+    # The server writes to /var/lib/tenko only and needs no capability.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+secrets:
+  tenko_kek:
+    file: ./secrets/tenko_kek
+
+volumes:
+  tenko-data: {}

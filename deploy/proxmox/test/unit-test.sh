@@ -136,6 +136,51 @@ if declare -F tenko_pick_template >/dev/null; then
     abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl
 fi
 
+if [[ -f "${root}/ct/tenko.sh" ]] && declare -F tenko_valid_hostname >/dev/null; then
+  echo "== Tenko settings (ct/tenko.sh validate_settings)"
+  # The hook alone, taken out of the script (sourcing the script would run it).
+  # shellcheck source=/dev/null
+  source <(sed -n '/^validate_settings() {$/,/^}$/p' "${root}/ct/tenko.sh")
+  # shellcheck disable=SC2034 # Read by validate_settings.
+  tenko_defaults() {
+    var_roles=controller,dns var_modules=wizard var_profile=home var_tenko_host="" var_dns_address=all
+    var_forwarders="" var_tenko_version=latest var_language=en var_admin="" var_kek=auto
+    var_binary="${fixtures}/pveam-available.txt" TENKO_RELEASE_TOKEN="" TENKO_RELEASES_PUBLIC=0
+  }
+  # settings <assignment>...: the lines validate_settings prints for the defaults changed so.
+  settings() {
+    local a
+    tenko_defaults
+    for a in "$@"; do printf -v "${a%%=*}" '%s' "${a#*=}"; done
+    validate_settings | tr '\n' ' ' | sed 's/ $//'
+  }
+  expect "the defaults with a binary" "" "$(settings)"
+  expect "a token instead of a binary" "" "$(settings var_binary= TENKO_RELEASE_TOKEN=t)"
+  expect "a public release instead of a binary" "" "$(settings var_binary= TENKO_RELEASES_PUBLIC=1)"
+  expect "neither a binary nor a token" "var_binary: no release can be downloaded without a token: give the binary (--binary <file>) or GITHUB_TOKEN" \
+    "$(settings var_binary=)"
+  expect "a binary that is not there" "var_binary: no such file on this host: '/nonexistent'" "$(settings var_binary=/nonexistent)"
+  expect "roles controller" "" "$(settings var_roles=controller)"
+  expect "roles dns" "var_roles: controller or controller,dns, not 'dns'" "$(settings var_roles=dns)"
+  expect "modules ipam,dns" "" "$(settings var_modules=ipam,dns)"
+  expect "modules ipam,foo" "var_modules: wizard, all, or a list of ipam,dns,dhcp,discovery, not 'ipam,foo'" "$(settings var_modules=ipam,foo)"
+  expect "profile hardened" "" "$(settings var_profile=hardened)"
+  expect "profile strict" "var_profile: home, standard, hardened or lab, not 'strict'" "$(settings var_profile=strict)"
+  expect "a host name" "" "$(settings var_tenko_host=tenko.example.test)"
+  expect "an address as host name" "var_tenko_host: not a host name: '-tenko'" "$(settings var_tenko_host=-tenko)"
+  expect "dns addresses" "" "$(settings 'var_dns_address=192.0.2.53, [2001:db8::53]:53')"
+  expect "a name as dns address" "var_dns_address: all, or addresses separated by commas, not 'tenko.example.test'" \
+    "$(settings var_dns_address=tenko.example.test)"
+  expect "forwarders none" "" "$(settings var_forwarders=none)"
+  expect "forwarders" "" "$(settings var_forwarders=192.0.2.1,2001:db8::1)"
+  expect "a version with a v" "" "$(settings var_tenko_version=v0.3.0-rc.1)"
+  expect "a version" "var_tenko_version: latest or x.y.z, not '0.3'" "$(settings var_tenko_version=0.3)"
+  expect "language de" "var_language: en or sv, not 'de'" "$(settings var_language=de)"
+  expect "an administrator" "" "$(settings var_admin=admin)"
+  expect "an administrator with a space" "var_admin: a login name, not 'the admin'" "$(settings 'var_admin=the admin')"
+  expect "kek tpm" "var_kek: auto, sealed or file, not 'tpm'" "$(settings var_kek=tpm)"
+fi
+
 if ((failures > 0)); then
   echo "== unit checks: ${failures} failed"
   exit 1

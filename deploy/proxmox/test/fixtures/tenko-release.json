@@ -1,0 +1,71 @@
+{
+  "url": "https://api.github.com/repos/linkztream/tenko/releases/9000001",
+  "html_url": "https://github.com/linkztream/tenko/releases/tag/v0.0.1",
+  "id": 9000001,
+  "author": {
+    "login": "example-user",
+    "id": 1,
+    "url": "https://api.github.com/users/example-user",
+    "type": "User",
+    "site_admin": false
+  },
+  "tag_name": "v0.0.1",
+  "target_commitish": "main",
+  "name": "Tenko DDI 0.0.1",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+    {
+      "url": "https://api.github.com/repos/linkztream/tenko/releases/assets/101",
+      "id": 101,
+      "name": "SHA256SUMS",
+      "label": "",
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282,
+        "url": "https://api.github.com/users/github-actions%5Bbot%5D",
+        "type": "Bot",
+        "site_admin": false
+      },
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 260,
+      "browser_download_url": "https://github.com/linkztream/tenko/releases/download/v0.0.1/SHA256SUMS"
+    },
+    {
+      "url": "https://api.github.com/repos/linkztream/tenko/releases/assets/102",
+      "id": 102,
+      "name": "tenko-0.0.1-linux-x86_64",
+      "label": "",
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282,
+        "url": "https://api.github.com/users/github-actions%5Bbot%5D",
+        "type": "Bot",
+        "site_admin": false
+      },
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 142386264,
+      "browser_download_url": "https://github.com/linkztream/tenko/releases/download/v0.0.1/tenko-0.0.1-linux-x86_64"
+    },
+    {
+      "url": "https://api.github.com/repos/linkztream/tenko/releases/assets/103",
+      "id": 103,
+      "name": "tenko-0.0.1-windows-x86_64.exe",
+      "label": "",
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282,
+        "url": "https://api.github.com/users/github-actions%5Bbot%5D",
+        "type": "Bot",
+        "site_admin": false
+      },
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 98765432,
+      "browser_download_url": "https://github.com/linkztream/tenko/releases/download/v0.0.1/tenko-0.0.1-windows-x86_64.exe"
+    }
+  ],
+  "body": "### Added\n\n- An entry."
+}
