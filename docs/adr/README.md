@@ -71,3 +71,5 @@ The date is the date the ADR was written or last changed status.
 | [0016](0016-backup-and-restore.md) | Backup and restore | Accepted | 2026-10-11 |
 | [0017](0017-dns-data-model-and-serving-path.md) | DNS data model and serving path | Proposed | 2026-10-17 |
 | [0018](0018-dnssec-key-handling-and-signing.md) | DNSSEC key handling and signing | Proposed | 2026-10-18 |
+| [0019](0019-dhcp-data-model-and-lease-path.md) | DHCP data model and lease path | Proposed | 2026-10-21 |
+| [0020](0020-ddns-from-dhcp.md) | DDNS from DHCP | Proposed | 2026-10-21 |

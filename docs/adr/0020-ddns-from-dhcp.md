@@ -1,0 +1,36 @@
+# ADR 0020: DDNS from DHCP
+
+- Status: Proposed
+- Date: 2026-10-21
+
+## Context
+
+DHCP-13 asks for dynamic DNS from DHCP: option 81 (RFC 4702) and the DHCPv6 client FQDN option (RFC 4704), the DHCID record and name protection (RFC 4701, RFC 4703), updates on commit, expiry and release, PTR records, and "update for legacy clients" that send only a host name. The Phase 3 plan (section 2.9) and the owner's decision P3-Q6 of 2026-10-21 settled the shape: the update is an in-process change set with its own RRset origin `dhcp`, PTR records in the reverse zones, and defaults per profile in which Home always writes and Standard and Hardened only where the zone's policy allows it.
+
+ADR 0017 made the DNS engine serve from an index and never write, routed every change through the zone service as one change set with an origin per RRset, and named DHCP updates (Phase 3) as users of that path. `tenko_core::dns::Origin` already has the variant `Dhcp` ("Tenko DHCP (Phase 3)"), and `Origin::may_replace` already lets a DHCP writer replace an `ipam` RRset only where the zone's update policy allows. WP4.4 keeps reverse zones from IPAM; WP6.2 serialises updates per zone and answers after the index serves the revision. ADR 0019 made a lease a store row committed before the ACK. SECURITY-PROFILES.md says that TGL-09 (dynamic updates from external clients) does not govern the internal path from Tenko DHCP to Tenko DNS. What remained open: which names are written, who may write where, when the update runs relative to the lease commit, how conflicts between clients are resolved, how the result is recorded, and what of the Phase 5 path is built now.
+
+## Decision
+
+1. **The update is a change set through the zone service with `Origin::Dhcp`.** No RFC 2136 message is built and no TSIG key exists for this path. The A (or AAAA) RRset, the PTR RRset and the DHCID RRset written for a lease carry the existing origin `dhcp`; no new origin variant is added. In Phase 5 a `dhcp` node without a controller sends the same change set as the `Dns.Update` message of ADR 0017's design.
+2. **Origin rules.** A DHCP writer replaces a `dhcp` RRset only when the DHCID at the name matches the client (RFC 4703); an `ipam` RRset only where the zone's policy allows (`Origin::may_replace` as it stands); `manual`, `dynamic`, `transfer`, `dnssec` and `ad` RRsets never. A name that IPAM manages (a host's address with a DNS name under a Tenko zone) is skipped, because the DNS actuator already writes its records with the origin `ipam`.
+3. **Names.** The FQDN comes from option 81 (or the DHCPv6 client FQDN option), placed under the scope's forward zone: a name outside the zone is reduced to its first label under the zone, or refused when the scope's policy says so. A client without option 81 that sends option 12 gets its host name under the scope's zone (the update for legacy clients). A client with neither gets no name. Names are canonical lowercase `DnsName` values; a label outside the host-name rules is refused.
+4. **What the server writes.** Tenko writes the PTR record in the reverse zone it keeps for the address (WP4.4), and the A or AAAA record unless the client asked to write it itself and the scope's policy allows that (`client_may_update_a`, default off, since clients cannot write into Tenko zones without a key). The reply's option 81 carries the flags S, O and N that tell the client what was done. The DHCID is computed per RFC 4701 from the client identifier or `chaddr` (DHCPv4) or the DUID (DHCPv6) with SHA-256, and stands at the forward name; the TTL of the records is the scope's DDNS TTL or a third of the lease time.
+5. **When.** After the lease commit, never inside it: the DORA path enqueues the update and answers the client; a DDNS worker applies the change set, retries with a backoff while the store refuses, and records the outcome on the lease row (the names written, the DHCID, the last error). On release and on expiry the records are removed if their DHCID still matches. Updates for one zone are serialised and batched within a short window, as WP6.2 does for RFC 2136.
+6. **Who may update which zone.** A scope names its forward zone and whether PTR records are written; the zone carries a new field of its update policy, `dhcp`, that allows DHCP updates. Its default follows the profile: Home and Lab allow (Home always writes into the scope's zones), Standard and Hardened do not until the operator allows it per zone. Name protection (point 2) cannot be switched off under Hardened. The plan proposes a toggle row in SECURITY-PROFILES.md so the profile values are visible; TGL-09 stays the toggle for external clients.
+7. **Observability and audit.** `tenko_dhcp_ddns_total{outcome}` and `tenko_dhcp_ddns_queue` count and size the work; each change set is audited by the zone service with the principal `system:dhcp` and the lease's address, and lands in the zone's journal, so IXFR to secondaries carries it.
+
+## Consequences
+
+- One write path and one audit trail for every change to a zone: API, actuator, RFC 2136, transfers in, signing, and now DHCP.
+- The client is never kept waiting for DNS; a name may appear a moment after the ACK, and a failure shows on the lease and in the counters rather than in the DHCP answer.
+- Name clashes between clients are refused rather than resolved by the last writer, as RFC 4703 asks; a device that changes hands keeps its old name until its lease ends or an operator removes it.
+- Writing only into Tenko zones means that DDNS into Windows DNS or another server waits for CONN-13 and DNS-28 in Phase 4.
+- A signed zone (ADR 0018) is signed again after each DHCP change by the signer's incremental pass, which costs one serial step per batch.
+
+## Alternatives considered
+
+- **RFC 2136 messages from the DHCP role to the DNS role over the loopback with TSIG** (P3-Q6 option b). What an external server needs, and on one node a key to manage and a wire round trip for nothing. Rejected for the internal path; the external path is Phase 4.
+- **A new origin variant for DHCP-written records.** `Origin::Dhcp` already exists with exactly this meaning; a second variant would split one owner in two. Rejected.
+- **DDNS on for every zone in every profile** (P3-Q6 option i). Lets any client publish a name in any served zone under Hardened. Rejected.
+- **Updating inside the lease commit.** Makes every ACK wait for the zone service and couples DHCP availability to DNS. Rejected.
+- **Last writer wins on a name clash.** Simple, and lets one device take another's name. Rejected for the DHCID rule of RFC 4703.
