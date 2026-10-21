@@ -1,6 +1,12 @@
 //! DHCP service: DHCPv4 and DHCPv6, failover, relay agent handling, and dynamic DNS updates.
 //!
-//! Placeholder crate: the implementation lands in a later phase (see `docs/ROADMAP.md`).
+//! Today the crate holds the DHCPv4 wire codec ([`v4`]): a view over a received message
+//! with typed options (RFC 2131, RFC 2132 and the option RFCs the server needs) and a
+//! builder that writes a reply into a caller's buffer. Neither allocates. The server, the
+//! lease store and DHCPv6 land in later Phase 3 packages (see `docs/ROADMAP.md`);
+//! `docs/dhcp.md` section 1 describes the wire format.
+
+pub mod v4;
 
 /// Name of this crate as declared in its manifest.
 pub const CRATE_NAME: &str = "tenko-dhcp";

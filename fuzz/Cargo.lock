@@ -3155,6 +3155,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tenko-dhcp"
+version = "0.0.2"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "tenko-dns"
 version = "0.0.2"
 dependencies = [
@@ -3204,6 +3211,7 @@ dependencies = [
  "tenko-connect-proxmox",
  "tenko-connect-unifi",
  "tenko-core",
+ "tenko-dhcp",
  "tenko-dns",
  "tenko-scan",
  "tenko-store",

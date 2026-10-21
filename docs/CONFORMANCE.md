@@ -32,17 +32,17 @@ Area is one of DNS, DHCP or Other. Rows are sorted by RFC number.
 | 1918 | Address Allocation for Private Internets | Other | 1 | Planned | IPAM-01 | Overlapping private space handled with tenants and VRFs |
 | 1995 | Incremental Zone Transfer in DNS | DNS | 2 | Planned | DNS-09 | |
 | 1996 | A Mechanism for Prompt Notification of Zone Changes (DNS NOTIFY) | DNS | 2 | Planned | DNS-09 | |
-| 2131 | Dynamic Host Configuration Protocol | DHCP | 3 | Planned | DHCP-01 | |
-| 2132 | DHCP Options and BOOTP Vendor Extensions | DHCP | 3 | Planned | DHCP-02, DHCP-15 | Includes option 6 (DNS servers) and option 42 (NTP) |
+| 2131 | Dynamic Host Configuration Protocol | DHCP | 3 | Partial | DHCP-01 | Implemented: wire format (section 2 fixed header, section 3 magic cookie and message types, section 4.1 option areas, minimum size and reply limit, table 3 fields copied into a reply); the server and its state machine are Planned. Tests in `crates/tenko-dhcp/tests/` (`fixtures.rs`, `malformed.rs`, `alloc.rs`), fuzz target `dhcp_v4` |
+| 2132 | DHCP Options and BOOTP Vendor Extensions | DHCP | 3 | Partial | DHCP-02, DHCP-15 | Includes option 6 (DNS servers) and option 42 (NTP). Implemented: wire format, typed reads and writes of options 1, 3, 6, 12, 15, 26, 28, 42, 43, 50 to 61, 66 and 67 (sections 3 to 9), every other option as raw octets; option 52 overload read and written. Option inheritance and custom definitions are Planned. Tests in `crates/tenko-dhcp/tests/` |
 | 2136 | Dynamic Updates in the Domain Name System (DNS UPDATE) | DNS | 2 | Planned | DNS-11, CONN-13 | |
 | 2308 | Negative Caching of DNS Queries (DNS NCACHE) | DNS | 2 | Planned | DNS-02 | |
 | 2317 | Classless IN-ADDR.ARPA delegation | DNS | 2 | Planned | DNS-22 | Automatic reverse zones from IPAM for shared /24s |
 | 3004 | The User Class Option for DHCP | DHCP | 3 | Planned | DHCP-03 | |
 | 3011 | The IPv4 Subnet Selection Option for DHCP | DHCP | 3 | Planned | DHCP-04 | Option 118; scope selection before giaddr |
-| 3046 | DHCP Relay Agent Information Option | DHCP | 3 | Planned | DHCP-04 | Option 82, circuit-id and remote-id |
+| 3046 | DHCP Relay Agent Information Option | DHCP | 3 | Partial | DHCP-04 | Option 82, circuit-id and remote-id. Implemented: wire format, the sub-options read in order and by code (1, 2, 5, 6, 11, 12) and the option echoed unchanged in a reply (section 2.2). Scope selection by sub-option is Planned. Tests in `crates/tenko-dhcp/tests/fixtures.rs` and `options.rs` |
 | 3074 | DHC Load Balancing Algorithm | DHCP | 3 | Planned | DHCP-12 | Hash split between failover partners |
 | 3203 | DHCP reconfigure extension | DHCP | n/a | Deliberately skipped | CON-10 | FORCERENEW is not supported by clients in practice; move jobs wait for observation instead |
-| 3396 | Encoding Long Options in the Dynamic Host Configuration Protocol (DHCPv4) | DHCP | 3 | Planned | DHCP-02 | Options longer than 255 octets split and concatenated |
+| 3396 | Encoding Long Options in the Dynamic Host Configuration Protocol (DHCPv4) | DHCP | 3 | Implemented | DHCP-02 | Instances of one option joined in the order options field, file, sname (section 7); values above 255 octets written as consecutive instances, never into an earlier area. Tests in `crates/tenko-dhcp/tests/fixtures.rs` (the RFC 3397 split example) and `options.rs` |
 | 3412 | Message Processing and Dispatching for the Simple Network Management Protocol (SNMP) | Other | 1 | Partial | SCAN-05 | SNMPv3 messages as a client: requests out, responses and reports in. No agent, no notification receiver. Tests in `crates/tenko-scan/src/snmp/` |
 | 3414 | User-based Security Model (USM) for version 3 of the Simple Network Management Protocol (SNMPv3) | Other | 1 | Partial | SCAN-05 | Key localization, authentication, timeliness and engine discovery as a non-authoritative engine. SHA-1 (HMAC-SHA-1-96) is the only authentication protocol from this RFC; MD5 and DES are not supported. Tests in `crates/tenko-scan/src/snmp/`, including the key derivation of appendix A.3.2 |
 | 3416 | Version 2 of the Protocol Operations for the Simple Network Management Protocol (SNMP) | Other | 1 | Partial | SCAN-05 | GetRequest and GetBulkRequest are sent; Response and Report are read. No SetRequest, no notifications. Tests in `crates/tenko-scan/src/snmp/` |
@@ -60,7 +60,7 @@ Area is one of DNS, DHCP or Other. Rows are sorted by RFC number.
 | 4388 | Dynamic Host Configuration Protocol (DHCP) Leasequery | DHCP | 5 | Planned | DHCP-04 | For relays that rebuild their state from the server; no Phase 3 requirement asks for it |
 | 4578 | Dynamic Host Configuration Protocol (DHCP) Options for the Intel Preboot eXecution Environment (PXE) | DHCP | 3 | Planned | DHCP-05 | Option 93 client architecture |
 | 4701 | A DNS Resource Record (RR) for Encoding Dynamic Host Configuration Protocol (DHCP) Information (DHCID RR) | DHCP | 3 | Planned | DHCP-13 | |
-| 4702 | The Dynamic Host Configuration Protocol (DHCP) Client Fully Qualified Domain Name (FQDN) Option | DHCP | 3 | Planned | DHCP-13 | Option 81 |
+| 4702 | The Dynamic Host Configuration Protocol (DHCP) Client Fully Qualified Domain Name (FQDN) Option | DHCP | 3 | Partial | DHCP-13 | Option 81. Implemented: wire format, the flags S, O, E and N, both name encodings and partial names read; a server reply with RCODEs 255 in the encoding the flags give (sections 2 and 4). The DNS updates are Planned. Tests in `crates/tenko-dhcp/tests/` |
 | 4703 | Resolution of Fully Qualified Domain Name (FQDN) Conflicts among Dynamic Host Configuration Protocol (DHCP) Clients | DHCP | 3 | Planned | DHCP-13 | Name protection |
 | 4704 | The Dynamic Host Configuration Protocol for IPv6 (DHCPv6) Client Fully Qualified Domain Name (FQDN) Option | DHCP | 3 | Planned | DHCP-13 | |
 | 4795 | Link-local Multicast Name Resolution (LLMNR) | Other | 1 | Partial | SCAN-03 | Unicast reverse queries to known addresses, answers read from recorded responses in `crates/tenko-scan/tests/`. Tenko is not a responder and does not listen |

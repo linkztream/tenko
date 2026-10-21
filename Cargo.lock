@@ -3363,6 +3363,10 @@ dependencies = [
 [[package]]
 name = "tenko-dhcp"
 version = "0.0.2"
+dependencies = [
+ "stats_alloc",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "tenko-dns"

@@ -1,0 +1,56 @@
+# The DHCPACK the builder writes for inform.hex: ciaddr copied by the caller, and option
+# 121 (RFC 3442) with 31 routes, 272 octets, split into instances of 255 and 17 octets
+# (RFC 3396). The first six routes follow RFC 3442's example widths (0, 24, 25, 27, 28,
+# 30) on documentation addresses.
+#
+# op 2, htype 1, hlen 6, hops 0
+02 01 06 00
+# xid
+5e 11 0a 77
+# secs, flags
+00 00 00 00
+# ciaddr 203.0.113.20
+cb 00 71 14
+# yiaddr 0.0.0.0
+00 00 00 00
+# siaddr 0.0.0.0
+00 00 00 00
+# giaddr 0.0.0.0
+00 00 00 00
+# chaddr
+00 00 5e 00 53 04 00 00 00 00 00 00 00 00 00 00
+# sname: empty
+00*64
+# file: empty
+00*128
+# magic cookie
+63 82 53 63
+# option 53: DHCPACK
+35 01 05
+# option 54: server identifier
+36 04 c6 33 64 0a
+# option 1: subnet mask
+01 04 ff ff ff 00
+# option 121: classless static routes, first instance (255 octets)
+79 ff 00 c0 00 02 01 18 c6 33 64 c0 00 02 fe 19
+c6 33 64 80 c0 00 02 fe 1b cb 00 71 00 c0 00 02
+fe 1c cb 00 71 20 c0 00 02 fe 1e cb 00 71 40 c0
+00 02 fe 20 cb 00 71 64 c0 00 02 fe 20 cb 00 71
+65 c0 00 02 fe 20 cb 00 71 66 c0 00 02 fe 20 cb
+00 71 67 c0 00 02 fe 20 cb 00 71 68 c0 00 02 fe
+20 cb 00 71 69 c0 00 02 fe 20 cb 00 71 6a c0 00
+02 fe 20 cb 00 71 6b c0 00 02 fe 20 cb 00 71 6c
+c0 00 02 fe 20 cb 00 71 6d c0 00 02 fe 20 cb 00
+71 6e c0 00 02 fe 20 cb 00 71 6f c0 00 02 fe 20
+cb 00 71 70 c0 00 02 fe 20 cb 00 71 71 c0 00 02
+fe 20 cb 00 71 72 c0 00 02 fe 20 cb 00 71 73 c0
+00 02 fe 20 cb 00 71 74 c0 00 02 fe 20 cb 00 71
+75 c0 00 02 fe 20 cb 00 71 76 c0 00 02 fe 20 cb
+00 71 77 c0 00 02 fe 20 cb 00 71 78 c0 00 02 fe
+20 cb 00 71 79 c0 00 02 fe 20 cb 00 71 7a c0 00
+02
+# option 121: classless static routes, second instance
+79 13 fe 20 cb 00 71 7b c0 00 02 fe 20 cb 00 71
+7c c0 00 02 fe
+# end
+ff

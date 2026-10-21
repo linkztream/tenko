@@ -1,0 +1,47 @@
+# A DHCPDISCOVER of UEFI PXE firmware (RFC 4578), reconstructed by hand: broadcast flag,
+# maximum message size 1260, client architecture 7 (EFI x86-64), UNDI 3.16, machine
+# identifier type 0 with a GUID, vendor class PXEClient:Arch:00007:UNDI:003016.
+#
+# op 1, htype 1, hlen 6, hops 0
+01 01 06 00
+# xid
+0b ad f0 0d
+# secs, flags
+00 04 80 00
+# ciaddr 0.0.0.0
+00 00 00 00
+# yiaddr 0.0.0.0
+00 00 00 00
+# siaddr 0.0.0.0
+00 00 00 00
+# giaddr 0.0.0.0
+00 00 00 00
+# chaddr
+00 00 5e 00 53 05 00 00 00 00 00 00 00 00 00 00
+# sname: empty
+00*64
+# file: empty
+00*128
+# magic cookie
+63 82 53 63
+# option 53: DHCPDISCOVER
+35 01 01
+# option 57: maximum message size 1260
+39 02 04 ec
+# option 55: parameter request list
+37 23 01 02 03 04 05 06 0c 0d 0f 11 12 16 17 1c
+28 29 2a 2b 32 33 36 3a 3b 3c 42 43 61 80 81 82
+83 84 85 86 87
+# option 97: client machine identifier, type 0 and a GUID
+61 11 00 4c 4c 45 44 00 52 10 80 80 53 b3 c0 4f
+50 47 31
+# option 94: client network interface identifier, UNDI 3.16
+5e 03 01 03 10
+# option 93: client system architecture 7
+5d 02 00 07
+# option 60: vendor class identifier
+3c 20 50 58 45 43 6c 69 65 6e 74 3a 41 72 63 68
+3a 30 30 30 30 37 3a 55 4e 44 49 3a 30 30 33 30
+31 36
+# end
+ff

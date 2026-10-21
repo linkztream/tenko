@@ -1,0 +1,38 @@
+# RFC 3397, section 2, the example of a domain search list split into instances of nine
+# octets (RFC 3396), with the RFC's names moved to example.test: eng.example.test and
+# marketing.example.test, the second compressed against the first.
+#
+# op 2, htype 1, hlen 6, hops 0
+02 01 06 00
+# xid
+00 00 33 97
+# secs, flags
+00 00 00 00
+# ciaddr 0.0.0.0
+00 00 00 00
+# yiaddr 192.0.2.80
+c0 00 02 50
+# siaddr 0.0.0.0
+00 00 00 00
+# giaddr 0.0.0.0
+00 00 00 00
+# chaddr
+00 00 5e 00 53 02 00 00 00 00 00 00 00 00 00 00
+# sname: empty
+00*64
+# file: empty
+00*128
+# magic cookie
+63 82 53 63
+# option 53: DHCPACK
+35 01 05
+# option 119: domain search, part 1
+77 09 03 65 6e 67 07 65 78 61 6d
+# option 119: domain search, part 2
+77 09 70 6c 65 04 74 65 73 74 00
+# option 119: domain search, part 3
+77 09 09 6d 61 72 6b 65 74 69 6e
+# option 119: domain search, part 4
+77 03 67 c0 04
+# end
+ff

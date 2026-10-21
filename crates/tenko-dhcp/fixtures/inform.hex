@@ -1,0 +1,42 @@
+# A DHCPINFORM as a Windows client with a static address sends it, reconstructed by
+# hand: ciaddr 203.0.113.20, maximum message size 1500, vendor class MSFT 5.0; padded to
+# 300 octets.
+#
+# op 1, htype 1, hlen 6, hops 0
+01 01 06 00
+# xid
+5e 11 0a 77
+# secs, flags
+00 00 00 00
+# ciaddr 203.0.113.20
+cb 00 71 14
+# yiaddr 0.0.0.0
+00 00 00 00
+# siaddr 0.0.0.0
+00 00 00 00
+# giaddr 0.0.0.0
+00 00 00 00
+# chaddr
+00 00 5e 00 53 04 00 00 00 00 00 00 00 00 00 00
+# sname: empty
+00*64
+# file: empty
+00*128
+# magic cookie
+63 82 53 63
+# option 53: DHCPINFORM
+35 01 08
+# option 61: client identifier, type 1 and the MAC
+3d 07 01 00 00 5e 00 53 04
+# option 57: maximum message size 1500
+39 02 05 dc
+# option 12: host name "WS-02"
+0c 05 57 53 2d 30 32
+# option 60: vendor class identifier "MSFT 5.0"
+3c 08 4d 53 46 54 20 35 2e 30
+# option 55: parameter request list
+37 0d 01 0f 03 06 2c 2e 2f 1f 21 79 f9 2b fc
+# end
+ff
+# padding to 300 octets
+00*11

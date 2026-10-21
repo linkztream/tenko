@@ -1,0 +1,44 @@
+# A DHCPACK with overload 1 whose file field ends in an option that runs past the end of
+# the field: the options field and the first option in file stay readable.
+#
+# op 2, htype 1, hlen 6, hops 0
+02 01 06 00
+# xid
+de ad be ef
+# secs, flags
+00 00 00 00
+# ciaddr 0.0.0.0
+00 00 00 00
+# yiaddr 0.0.0.0
+00 00 00 00
+# siaddr 0.0.0.0
+00 00 00 00
+# giaddr 0.0.0.0
+00 00 00 00
+# chaddr
+00 00 5e 00 53 01 00 00 00 00 00 00 00 00 00 00
+# sname: empty
+00*64
+# file option 3: router
+03 04 c0 00 02 01
+# file option 43: vendor-specific, 118 octets with the length octet 121
+2b 79 41 41 41 41 41 41 41 41 41 41 41 41 41 41
+41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41
+41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41
+41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41
+41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41
+41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41
+41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41
+41 41 41 41 41 41 41 41
+# file: end
+ff
+# file: zero to the end of the field
+00
+# magic cookie
+63 82 53 63
+# option 53: DHCPACK
+35 01 05
+# option 52: overload: file carries options
+34 01 01
+# end
+ff

@@ -1,0 +1,42 @@
+# A DHCPDISCOVER as a Windows client sends it, reconstructed by hand: client identifier
+# type 1 with the MAC, maximum message size 1500, host name, vendor class MSFT 5.0 and the
+# Windows parameter request list; padded to 300 octets. Documentation MAC (RFC 7042).
+#
+# op 1, htype 1, hlen 6, hops 0
+01 01 06 00
+# xid
+39 03 f3 26
+# secs, flags
+00 00 00 00
+# ciaddr 0.0.0.0
+00 00 00 00
+# yiaddr 0.0.0.0
+00 00 00 00
+# siaddr 0.0.0.0
+00 00 00 00
+# giaddr 0.0.0.0
+00 00 00 00
+# chaddr
+00 00 5e 00 53 01 00 00 00 00 00 00 00 00 00 00
+# sname: empty
+00*64
+# file: empty
+00*128
+# magic cookie
+63 82 53 63
+# option 53: DHCPDISCOVER
+35 01 01
+# option 61: client identifier, type 1 (Ethernet) and the MAC
+3d 07 01 00 00 5e 00 53 01
+# option 57: maximum message size 1500
+39 02 05 dc
+# option 12: host name "WS-01"
+0c 05 57 53 2d 30 31
+# option 60: vendor class identifier "MSFT 5.0"
+3c 08 4d 53 46 54 20 35 2e 30
+# option 55: parameter request list
+37 0e 01 03 06 0f 1f 21 2b 2c 2e 2f 77 79 f9 fc
+# end
+ff
+# padding to 300 octets
+00*10

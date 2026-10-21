@@ -24,6 +24,8 @@ tenko-connect-proxmox = { path = "../crates/tenko-connect-proxmox" }
 tenko-connect-unifi = { path = "../crates/tenko-connect-unifi" }
 tenko-cluster = { path = "../crates/tenko-cluster" }
 tenko-core = { path = "../crates/tenko-core" }
+# The DHCPv4 wire codec of the `dhcp_v4` target.
+tenko-dhcp = { path = "../crates/tenko-dhcp" }
 tenko-dns = { path = "../crates/tenko-dns" }
 tenko-scan = { path = "../crates/tenko-scan" }
 # The read view of the `dns_zonefile` target.
@@ -208,6 +210,14 @@ bench = false
 [[bin]]
 name = "dns_tls_wire"
 path = "fuzz_targets/dns_tls_wire.rs"
+test = false
+doc = false
+bench = false
+
+# The DHCPv4 wire codec (WP7.1a).
+[[bin]]
+name = "dhcp_v4"
+path = "fuzz_targets/dhcp_v4.rs"
 test = false
 doc = false
 bench = false
